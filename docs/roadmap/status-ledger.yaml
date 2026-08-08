@@ -583,7 +583,7 @@ tickets:
     production_call_sites: []
     test_ids: [ast-007-fixture-index]
     benchmark_artifacts: []
-    evidence_hash: a24ce6548b7f7be7447035b4736c83b12e1d6d0944bb12bfdd14c2ce61037ba5
+    evidence_hash: 5050232cf2752e91073c38060cb0d05849467674f643ecc101fd519c58664a39
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: 7d4604313077895d53dca1a6ea5f1b23d226859e48a172c08f95613a1d44f020
+    evidence_hash: f18a4218b8b4cddb2ae9cc9e9e163fc97aba6321048aa096c02d4ce7bbc430af
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -754,13 +754,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 8bb6afd
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: [AST-011A]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [8bb6afd]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
         symbol: MLODLoader::loadP3DMLOD
@@ -768,7 +768,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: dc4a145379c094d4b3ef6efba504b6ce369726ab27f6f2a2f3c79a354c34ec62
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
