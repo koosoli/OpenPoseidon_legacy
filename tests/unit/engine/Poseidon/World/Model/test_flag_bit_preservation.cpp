@@ -166,3 +166,57 @@ TEST_CASE("The shipped P3D corpus is surveyed for unnamed flag bits", "[model][f
     REQUIRE(vertexBitsSeen == 0u);
     REQUIRE(faceBitsSeen == 0u);
 }
+
+// AST-018: named selections must carry weighted vertices, not just membership.
+TEST_CASE("MLOD named selections keep their source weight byte", "[model][selection][ast-018]")
+{
+    // The MLOD path read the weight byte only to decide "is this point in the
+    // selection", then dropped it. Anything soft arrived hard, and the original
+    // bytes could not be recovered without re-reading the file.
+    const char* candidates[] = {"p3d/animated_actor.p3d", "p3d/complex_vehicle.p3d",
+                               "p3d/multi_lod_vehicle.p3d", "p3d/crew_proxy.p3d"};
+    size_t modelsWithSelections = 0;
+    for (const char* candidate : candidates)
+    {
+        Poseidon::Model::Model model;
+        try { model = Poseidon::Asset::Formats::MLODLoader::load(GET_FIXTURE(candidate)); }
+        catch (const std::exception&) { continue; }
+        for (const auto& lod : model.lodLevels)
+            for (const auto& selection : lod.mesh.selections)
+            {
+                if (selection.vertexIndices.empty()) continue;
+                ++modelsWithSelections;
+                CAPTURE(candidate, selection.name);
+                // Parallel to vertexIndices, or the two cannot be read together.
+                REQUIRE(selection.sourceVertexWeights.size() == selection.vertexIndices.size());
+                // A dropped byte reads as zero, and zero means "not selected" --
+                // so a member with weight 0 is proof the byte was lost.
+                for (uint8_t weight : selection.sourceVertexWeights)
+                    REQUIRE(weight != 0);
+            }
+    }
+    // Guard against the test passing because nothing was examined.
+    REQUIRE(modelsWithSelections > 0);
+}
+
+TEST_CASE("The MLOD weight byte is preserved, not reinterpreted", "[model][selection][ast-018]")
+{
+    // vertexWeights is the linear 0-255 scale ShapeAdapter consumes. The MLOD
+    // byte is not known to be on that scale, so the loader must not populate it
+    // -- doing so would silently reweight every skinned MLOD model. This pins
+    // the deliberate emptiness so it reads as a decision rather than an
+    // oversight, and fails the day someone decodes it for real.
+    Poseidon::Model::Model model;
+    try { model = Poseidon::Asset::Formats::MLODLoader::load(GET_FIXTURE("p3d/animated_actor.p3d")); }
+    catch (const std::exception&) { SKIP("animated_actor fixture not readable"); }
+
+    size_t checked = 0;
+    for (const auto& lod : model.lodLevels)
+        for (const auto& selection : lod.mesh.selections)
+        {
+            if (selection.vertexIndices.empty()) continue;
+            ++checked;
+            REQUIRE(selection.vertexWeights.empty());
+        }
+    REQUIRE(checked > 0);
+}

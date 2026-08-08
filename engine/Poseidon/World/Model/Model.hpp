@@ -138,6 +138,22 @@ struct NamedSelection {
     std::string name;
     std::vector<uint32_t> vertexIndices;
     std::vector<uint8_t> vertexWeights;    // per-vertex weight (0-255), parallel to vertexIndices
+
+    // AST-018: the source's own weight byte, parallel to vertexIndices, carried
+    // undecoded.
+    //
+    // MLOD named selections store a weight per point and the loader was throwing
+    // it away, keeping only "is this point in the selection" -- so a soft
+    // selection arrived as a hard one and the original bytes were unrecoverable
+    // without re-reading the file.
+    //
+    // It is kept separate from vertexWeights on purpose. vertexWeights is a
+    // linear 0-255 weight and ShapeAdapter treats it as one; the MLOD byte is
+    // reportedly not that scale (0 means absent, and the remaining range is not
+    // known here to be linear or even in the same direction). Decoding it on a
+    // guess would silently reweight every skinned MLOD model, so the byte is
+    // preserved under a name that does not claim to be a weight yet.
+    std::vector<uint8_t> sourceVertexWeights;
     std::vector<uint32_t> triangleIndices;
     // ODOL pre-computed section mapping for animation Hide
     std::vector<uint32_t> faceSelectionOffsets; // byte offsets into face stream (_faceSel)

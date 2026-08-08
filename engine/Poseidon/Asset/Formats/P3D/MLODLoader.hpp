@@ -501,7 +501,14 @@ class MLODLoader
                 if (sel.pointWeights[pointIdx] > 0 && pointIdx < pointToVertices.size())
                 {
                     for (uint32_t vertIdx : pointToVertices[pointIdx])
+                    {
                         selection.vertexIndices.push_back(vertIdx);
+                        // AST-018: keep the source byte. It used to be read only
+                        // as a membership test, which turned every soft
+                        // selection into a hard one and discarded the rest.
+                        // Undecoded on purpose -- see NamedSelection.
+                        selection.sourceVertexWeights.push_back(sel.pointWeights[pointIdx]);
+                    }
                 }
             }
             size_t triIdx = 0;

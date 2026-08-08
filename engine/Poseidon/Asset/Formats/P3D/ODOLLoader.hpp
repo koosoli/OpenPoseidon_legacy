@@ -418,6 +418,11 @@ class ODOLLoader
             for (uint16_t idx : sel.vertexIndices)
                 selection.vertexIndices.push_back(static_cast<uint32_t>(idx));
             selection.vertexWeights = sel.vertexWeights;
+            // ODOL's array is already the linear 0-255 weight ShapeAdapter uses,
+            // so the raw and decoded views coincide here. Filled anyway so a
+            // consumer reading the source view is not told MLOD has weights and
+            // ODOL has none.
+            selection.sourceVertexWeights = sel.vertexWeights;
             selection.triangleIndices.reserve(sel.faceIndices.size());
             for (uint16_t idx : sel.faceIndices)
                 selection.triangleIndices.push_back(static_cast<uint32_t>(idx));

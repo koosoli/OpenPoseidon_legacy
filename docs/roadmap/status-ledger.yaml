@@ -1536,18 +1536,26 @@ tickets:
       - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
-    test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation]
+    test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
     known_failures:
       - >-
-        Two slices are done: typed LOD purposes, and the known/unknown flag-bit
-        split. Winding, normal orientation, tangent handedness, source origin and
-        centre-of-gravity relationship are still not stated anywhere;
-        LODLevel::sourceWinding remains a recorded assumption ending in
-        _ASSUMED, unconfirmed by any render. Weighted named selections, proxy
-        identity and section boundaries are unchanged.
+        Three slices are done: typed LOD purposes, the known/unknown flag-bit
+        split, and preservation of the MLOD named-selection weight byte. Winding,
+        normal orientation, tangent handedness, source origin and centre-of-mass
+        relationship are still not stated anywhere; LODLevel::sourceWinding
+        remains a recorded assumption ending in _ASSUMED, unconfirmed by any
+        render. Proxy identity and section boundaries are unchanged.
+      - >-
+        The MLOD selection weight byte is preserved but NOT decoded.
+        NamedSelection::vertexWeights -- the linear 0-255 scale ShapeAdapter
+        consumes -- is deliberately left empty on the MLOD path, so every MLOD
+        selection vertex still behaves as fully weighted exactly as before. The
+        byte's actual scale is not established: the BIS reference carries it
+        undecoded too, so there was no second implementation to check against.
+        Decoding it on a guess would silently reweight every skinned MLOD model.
       - >-
         VertexFlags::UserMask (0xFF0000) overlaps LightMask (0xF0000), so the
         per-vertex lighting bits are also inside the user range. That comes from
@@ -1590,6 +1598,13 @@ tickets:
       equality check would miss. The full engine suite runs 2405 cases with the
       same 6 pre-existing environment failures as before the change (dev-mode
       gate, and localisation data absent from packages/Remaster).
+
+      The named-selection weight fix is pinned from the fixtures rather than by
+      construction: real MLOD selections are loaded and every member's source
+      byte is required to be non-zero and parallel to the vertex index list,
+      with a guard that the test examined something. A second case pins the
+      deliberate emptiness of vertexWeights, so the non-decode reads as a
+      decision and fails the day someone decodes it for real.
 
       The flag-bit split is surveyed against the shipped corpus rather than left
       as an unused capability: all twelve P3D fixtures load and none carries a
