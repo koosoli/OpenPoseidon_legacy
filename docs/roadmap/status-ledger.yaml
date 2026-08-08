@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: a71a76e00a56576219f5e2f6ef934e691e6649677988e29b41f9d91496cedfdc
+    evidence_hash: 62100e37a4c137afa85f26b925ce4503248dac1bd381ea41d66b34f9d38aac3f
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -735,8 +735,15 @@ tickets:
       unrelated suite failures were confirmed pre-existing at HEAD (five need absent
       packages\Remaster game data, one is a stale --dev CLI assertion from commit
       2487647) and are untouched by this change.
+
+      Owner smoke test 2026-08-08 (docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md)
+      additionally confirmed no visible regression in existing SP3X content through
+      the shared code this ticket touched. It verifies non-regression only; it does
+      not review this ticket's own claims, none of which are visible in a running
+      game, so the review model is unchanged.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
       - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
       - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
       - docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
@@ -768,7 +775,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 97959b84ce0d09216addbb75868faac205e3a88bad9dc5216c09a59949ed59b4
+    evidence_hash: 4f1371fc72c6704f5b38d3c99a3640ea87437ad9ff75a4cac512db1993a7cf9e
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -801,8 +808,15 @@ tickets:
       the owner must make once a P3DM model reaches the screen. Material semantics
       are untouched: the RVMAT path is carried through as an opaque string and
       nothing interprets it.
+
+      Owner smoke test 2026-08-08 (docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md)
+      additionally confirmed no visible regression in existing SP3X content through
+      the shared code this ticket touched. It verifies non-regression only; it does
+      not review this ticket's own claims, none of which are visible in a running
+      game, so the review model is unchanged.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
       - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
       - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
       - engine/Poseidon/World/Model/Model.hpp
@@ -835,7 +849,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: 97959b84ce0d09216addbb75868faac205e3a88bad9dc5216c09a59949ed59b4
+    evidence_hash: 4f1371fc72c6704f5b38d3c99a3640ea87437ad9ff75a4cac512db1993a7cf9e
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -869,8 +883,15 @@ tickets:
       in vertex identity, which splits vertices that previously merged; SP3X leaves
       it zero and its meshes are unchanged, but the vertex-count effect on P3DM
       models has not been profiled.
+
+      Owner smoke test 2026-08-08 (docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md)
+      additionally confirmed no visible regression in existing SP3X content through
+      the shared code this ticket touched. It verifies non-regression only; it does
+      not review this ticket's own claims, none of which are visible in a running
+      game, so the review model is unchanged.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
       - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
       - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
       - engine/Poseidon/World/Model/Model.hpp
@@ -1058,7 +1079,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: 09453b0e509cfd63762d35a80ad1bab32bd7700cc46ed2c87c53fc682c4cb2c0
+    evidence_hash: 12dfe1939cfb100efc2e40db9caec51e924df69f7575d8b3919b21f579669a40
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1098,8 +1119,15 @@ tickets:
       retrieve bytes from it. The Python verifier mirrors the C++ rules rather than
       calling them, so it corroborates the corpus outcome but is not a binding
       check on the header; the Catch2 cases are what pin the behaviour.
+
+      Owner smoke test 2026-08-08 (docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md)
+      additionally confirmed no visible regression in existing SP3X content through
+      the shared code this ticket touched. It verifies non-regression only; it does
+      not review this ticket's own claims, none of which are visible in a running
+      game, so the review model is unchanged.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
       - engine/Poseidon/Asset/Addon/VirtualPath.hpp
       - engine/Poseidon/World/Model/ModelCache.cpp
       - scripts/verify_virtual_path_resolution.py
