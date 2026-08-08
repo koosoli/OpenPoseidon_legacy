@@ -1003,13 +1003,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: eca2330
+    verification_commit: a800dc4
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [eca2330]
+    implementation_commits: [eca2330, a800dc4]
     production_call_sites:
       - file: engine/Poseidon/Graphics/Textures/PAADecoder.cpp
         symbol: Poseidon::ReadPAAInfo
@@ -1017,7 +1017,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: 420298d509650016da83c16c17cbd0e382cee47049885d17d335811415155329
+    evidence_hash: a2fbe213ebc4a8b5d84dd94bef424618eee7f3b4e4f778fdb25b2795b155d843
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
