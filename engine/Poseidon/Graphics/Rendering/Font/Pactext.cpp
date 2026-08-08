@@ -1412,21 +1412,15 @@ int PacLevelMem::Init(QIStream& in, PacFormat sFormat)
         // what is actually an unsupported compression -- and sends anyone reading
         // the log looking for a corrupt file that is perfectly valid.
         //
-        // Masking here does not make such a texture load: decoding still needs the
-        // LZO path this build does not have. It makes the refusal say so.
-        const bool compressedMip = (w & 0x8000) != 0;
-        if (compressedMip)
+        // This function only reads headers and sizes the level -- it skips the
+        // payload rather than decoding it -- so the flag is masked off and the
+        // level is accepted. Decompression happens where the block data is
+        // actually consumed (PAADecoder's DXT path, via Foundation::Lzo1x).
+        if (w & 0x8000)
             w &= 0x7FFF;
 
         // get compressed data size
         int dSize = fgeti24(in);
-
-        if (compressedMip)
-        {
-            LOG_ERROR(Graphics, "Compressed PAA mip ({}x{}) is not supported by this build", w, h);
-            error = 1;
-            goto Error;
-        }
 
         if (w > 4096 || w < 2 || h > 4096 || h < 2)
         {

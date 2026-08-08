@@ -217,6 +217,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/P3D/MLOD/test_mlod_lod_dispatch.cpp
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
+    Foundation/Algorithms/test_lzo1x.cpp
 
     # PoseidonFormats C API tests
     Asset/Formats/test_poseidon_formats_capi.cpp

@@ -1,4 +1,5 @@
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <fstream>
@@ -523,6 +524,11 @@ DecodedImage DecodePAABuffer(const void* data, size_t size, bool isPaa)
     {
         mip.SeekLevel(in);
         int mw = fgetiw(in), mh = fgetiw(in);
+        // Bit 15 of the stored width marks LZO-compressed block data (AST-013).
+        // 98 of the 124 loose Arma 3 sample textures set it, so for Arma-generation
+        // content this is the normal case rather than an exception.
+        const bool compressed = (mw & 0x8000) != 0;
+        mw &= 0x7FFF;
         if (mw == 0 && mh == 0)
         {
             img.rgba.clear();
@@ -531,6 +537,24 @@ DecodedImage DecodePAABuffer(const void* data, size_t size, bool isPaa)
         int dSize = fgeti24(in);
         std::vector<uint8_t> dxtData(dSize);
         in.read(reinterpret_cast<char*>(dxtData.data()), dSize);
+        if (compressed)
+        {
+            const int    blockBytes = (format == PacDXT1) ? 8 : 16;
+            const size_t expected   = static_cast<size_t>((img.width + 3) / 4) *
+                                    static_cast<size_t>((img.height + 3) / 4) * blockBytes;
+            std::vector<uint8_t> inflated(expected);
+            const size_t         produced =
+                Foundation::Lzo1x::Decompress(dxtData.data(), dxtData.size(), inflated.data(), inflated.size());
+            // Require exactly the block count the dimensions imply. A short result
+            // means the stream was truncated or misread, and decoding a partly
+            // filled buffer renders garbage in the tail instead of failing.
+            if (produced != expected)
+            {
+                img.rgba.clear();
+                return img;
+            }
+            dxtData.swap(inflated);
+        }
         // The DXT decoders read blockBytes per 4x4 block across width*height; reject a
         // compressed payload too small to cover them rather than read past dxtData.
         int blockBytes = (format == PacDXT1) ? 8 : 16;

@@ -1021,18 +1021,22 @@ tickets:
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
-        PAA_COMPRESSED_MIP: UNSUPPORTED. A mip whose stored width has bit 15 set
-        holds compressed data needing an LZO decompressor this tree does not have
-        and vcpkg.json does not pull in. 98 of the 124 loose Arma 3 sample textures
-        and effectively all archived ones are affected, so this is the dominant
-        blocker for real texture decode -- it is the next ticket, not an edge case.
+        PAA_COMPRESSED_MIP decode is implemented for the modern decoder path only
+        (PAADecoder / PoseidonFormats). Pactext's own decode routines, which the
+        running game uses, still read block data raw -- correct today because no
+        OFP/CWA texture sets the compressed flag, but it must be wired there before
+        Arma content reaches the renderer.
       - >-
         PAA_SWIZ: CAPTURED, NOT APPLIED. The four bytes are preserved verbatim but
         no channel rearrangement is performed. Observed values across 1,146 archived
         textures include 0x00-0x09, which does not fit a plain channel-plus-invert
-        reading, and no local fixture settles it: applying a guessed mapping would
-        silently corrupt every normal map it touched. Resolving it needs either a
-        fixture with a known-correct decoded reference or the format documented.
+        reading. With LZO decode working it was possible to measure one case
+        directly: Minigun_NOHQ.paa (SWIZ 05040203) decodes to R empty, B constant,
+        and G+A holding the normal's x,y -- 100% of texels satisfy x^2+y^2 <= 1 for
+        G+A and no other pair, i.e. the DXT5nm layout. That fixes what ONE swizzle
+        means, not the byte encoding; generalising from a single sample is what the
+        plan forbids, so the mapping stays unapplied and this measurement is handed
+        to MAT-020/MAT-030.
       - >-
         PAA_FLAG: CAPTURED, NOT INTERPRETED. Values 1 (1,243 files) and 2 (102) are
         carried verbatim; alpha classification still comes from the existing decoded
@@ -1058,12 +1062,24 @@ tickets:
       Python parse on the dimensions of all 26 decodable files with 0 mismatches,
       while correctly flagging the other 98 as compressed.
 
+      LZO1X was written from the published format, not adapted from liblzo, so no
+      upstream licence attaches (CORE-007). Which compression PAA uses was
+      determined rather than assumed: the engine's existing LZSS decoder produced
+      nothing usable on these payloads (0 of 40 sampled mips), while LZO1X reads all
+      98 compressed mips in the sample corpus to exactly the byte count their DXT
+      dimensions require, and 124/124 sample textures then decode through the
+      shipped DLL with correct dimensions and non-empty pixels -- up from 26/124.
+      7 further Catch2 cases under [lzo] cover overlapping matches, a
+      back-reference before the output start, a too-small destination, truncated
+      input and the end-of-stream opcode.
+
       NOT checked: no channel data was validated against a reference image -- this
       ticket does not claim any decoded texture is correct, only that the container
       is read correctly. SWIZ and FLAG are captured, not acted on, so nothing here
       establishes what they mean. The compressed 98 were never decoded at all.
     supersedes: []
     evidence:
+      - engine/Poseidon/Foundation/Algorithms/Lzo1x.hpp
       - engine/Poseidon/Graphics/Textures/PAADecoder.hpp
       - engine/Poseidon/Graphics/Textures/PAADecoder.cpp
       - engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
