@@ -1079,14 +1079,14 @@ tickets:
     review_model: AUTOMATED_EVIDENCE
     scheduling_state: ACTIVE
     # VALIDATED, not INTEGRATED: revision 73 reaches the common Model IR through
-    # the production loader entry point and is byte-verified against the selected
-    # fixture, but only one static shape reads and nothing has been rendered.
+    # the production loader entry point and one real static Arma 3 rock now draws
+    # through WGPU, but material dependencies and most asset shapes remain open.
     status: VALIDATED
     outcome: ADAPTED
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: 4f5b988
+    verification_commit: ae3766f
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [AST-012A]
@@ -1097,9 +1097,10 @@ tickets:
       - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
         symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
     test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir,
-               ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path]
+               ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
+               ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 60556e6df318b79c59327823f3aa776c4db488509e2c9c1c5c8716049ccb10ba
+    evidence_hash: 2272cd947a0731839086d8c74e20c80701d171253a633aac310b279a434af2c1
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -1125,17 +1126,15 @@ tickets:
           Arma 3 model and returns geometry, pinned by test. It previously did
           not: P3DFormatDetector gated {7, 8} ahead of every reader
       - capability: ODOL73_RENDERED_THROUGH_WGPU
-        status: UNTESTED
+        status: VALIDATED
         denominator: >-
-          0 revision-73 models drawn through the WGPU backend. A --test-model
-          flag now loads one into a live mission world through the production
-          path and reports what it contains (the Arma 3 rock: 10 LODs, 2930
-          faces, 16.2 m bounding radius), but the placed object does not appear.
-          Isolated as object registration, not rendering: WGPU and GL33 both draw
-          nothing, the model placed exactly at the camera still leaves an empty
-          frame, and the shape reports lod 0 at resolution 1 with 2930 faces so
-          it is not LOD selection either. Wireframe renders exist but come from the CPU rasteriser
-          in ModelRenderer, which is what PoseidonTools and Studio both use
+          1 real revision-73 Arma 3 static model visibly drawn through WGPU:
+          rocks_f.pbo/stonesharp_big.p3d, with 10 LODs, 6,256 faces at visual
+          LOD 0 and a 9.141871 m bounding radius. The control CWA a3rock.p3d
+          also draws through the same --test-model lifecycle. The extracted Arma
+          3 P3D had no accompanying RVMAT/PAA dependencies, so this validates
+          scene inclusion and geometry submission only, not material or texture
+          resolution.
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
@@ -1172,11 +1171,11 @@ tickets:
         unconverted; their basis convention has not been verified against a
         render, so nothing downstream is given a tangent frame it could trust.
       - >-
-        Rendered only as wireframe, and only offline. PoseidonTools model render
-        draws Arma 3 rocks, signs and editor helpers correctly through the common
-        IR, which confirms positions and face indices form coherent solids. No
-        revision-73 model has been drawn in the game with textures, lighting or
-        materials, so nothing here is a claim about how one looks in a scene.
+        One real revision-73 rock is visibly rendered in the game through WGPU,
+        but only after extracting its P3D without RVMAT/PAA dependencies. The
+        resulting white geometry proves draw submission, not its authored
+        materials, texture resolution, alpha treatment, Super mapping, winding,
+        normal fidelity, section ranges or additional UV channels.
       - >-
         Correction to an earlier claim in this row: revision 73 was NOT on the
         runtime path when the reader landed. ModelCache consults
@@ -1218,9 +1217,12 @@ tickets:
       EmbeddedMaterial.cs, BinaryReaderEx.cs), and independently decoded in
       Python from the raw bytes before any C++ was changed.
 
-      NOT checked: no render, no second revision-73 model, no skinned or animated
-      model, no multi-section model, no multi-UV-set model. The narrow subset is
-      the claim; nothing broader has been tested.
+      The installed-game WGPU smoke now proves one CWA control and one real Arma
+      3 static rock draw through the same harness. The rock was extracted without
+      its material dependencies and therefore appears white. NOT checked: authored
+      material/texture resolution, alpha, winding, normal fidelity, section ranges,
+      multi-UV rendering, a second revision-73 model, or any skinned/animated
+      model. The narrow subset is the claim; nothing broader has been tested.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
@@ -1228,6 +1230,11 @@ tickets:
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
       - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
       - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
+      - docs/roadmap/evidence/compat-c1-odol73-wgpu-static-render-20260809.md
+      - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-20260809.log
+      - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-20260809.png
+      - docs/roadmap/evidence/compat-c1-wgpu-test-model-cwa-control-20260809.log
+      - docs/roadmap/evidence/compat-c1-wgpu-test-model-cwa-control-20260809.png
   - id: AST-013
     overlay: COMPAT-C1-EXEC-001
     is_example: false

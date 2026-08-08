@@ -125,10 +125,11 @@ def render(rows: list[tuple[str, dict[str, str], str, str]]) -> str:
         "",
         "## What no row here claims",
         "",
-        "No Arma-generation content has been rendered. Every row above describes reading,",
-        "translating or identifying source data; none describes drawing it. The winding",
-        "convention for P3DM geometry is recorded as an assumption and stays unverified",
-        "until a P3DM model reaches the screen.",
+        "No row claims broad Arma-generation compatibility. A rendered static ODOL 73",
+        "model proves only the explicitly stated fixture and limitations; material, texture,",
+        "alpha, winding, normal, section-range and additional-UV validation remain separate",
+        "claims. The winding convention for P3DM geometry stays unverified until a P3DM",
+        "model reaches the screen.",
         "",
     ]
     return "\n".join(lines)

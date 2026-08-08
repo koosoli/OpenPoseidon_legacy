@@ -1,0 +1,227 @@
+[2026-08-09 00:08:42.833] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    TaskPool initialised: 8 task threads (16 logical cores)
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Command-line parsing complete
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]      user_dir:  C:\Users\mail\AppData\Roaming\CWR/
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]      user_content_dir: C:\Users\mail\OneDrive\Documents\Cold War Assault/
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]      cache_dir: C:\Users\mail\AppData\Local\CWR/
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]      temp_dir:  C:\Users\mail\AppData\Local\Temp\cwr/
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Game starting: version 3.01-65e7e55-dev
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  Initializing configuration system...
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  Configuration system ready
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  Initializing game configuration (language, stringtables, config files)...
+[2026-08-09 00:08:42.841] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]    Language: English
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_ESCAPE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_1' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_2' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_3' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_4' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_5' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_6' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_7' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_8' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_9' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_0' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MINUS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_EQUALS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_BACKSPACE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_TAB' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_Q' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_W' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.856] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_E' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_R' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_T' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_Y' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_U' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_I' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_O' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_P' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LEFTBRACKET' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RIGHTBRACKET' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RETURN' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LCTRL' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_A' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_S' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_D' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_G' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_H' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_J' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_K' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_L' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_SEMICOLON' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_APOSTROPHE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_GRAVE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LSHIFT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_BACKSLASH' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_Z' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_X' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_C' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_V' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_B' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_N' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_M' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_COMMA' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_PERIOD' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_SLASH' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RSHIFT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_MULTIPLY' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LALT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_SPACE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_CAPSLOCK' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F1' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F2' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F3' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F4' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F5' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F6' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F7' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F8' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F9' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F10' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_NUMLOCKCLEAR' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_SCROLLLOCK' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_7' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_8' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_9' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_MINUS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_4' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_5' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_6' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_PLUS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_1' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_2' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_3' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_0' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_PERIOD' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_NONUSBACKSLASH' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F11' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F12' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F13' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F14' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_F15' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL2' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL6' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL4' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL5' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL3' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL7' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_EQUALS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_PREVIOUS_TRACK' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL8' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL9' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LANG3' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LANG2' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_STOP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LANG6' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LANG7' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_NEXT_TRACK' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_ENTER' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RCTRL' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MUTE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_PLAY_PAUSE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_STOP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_VOLUMEDOWN' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_VOLUMEUP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_HOME' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_COMMA' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_KP_DIVIDE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_PRINTSCREEN' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RALT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_PAUSE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_HOME' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_UP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_PAGEUP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LEFT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RIGHT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_END' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_DOWN' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_PAGEDOWN' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_INSERT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_DELETE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_LGUI' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_RGUI' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_APPLICATION' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_POWER' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_SLEEP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_WAKE' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_SEARCH' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_BOOKMARKS' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_REFRESH' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_STOP' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_FORWARD' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_AC_BACK' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_SELECT' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_MP_LOCKED' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.857] [app-1678] [[1;33mWARN[0m] [[1;34mCORE[0m]    [i18n] key 'STR_MP_UNLOCKED' not found in stringtable; callers will get empty string
+[2026-08-09 00:08:42.877] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  ParseResource: merged bin/resource-extra.cpp into Res
+[2026-08-09 00:08:42.877] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  Game configuration initialized successfully
+[2026-08-09 00:08:42.877] [app-1678] [[0;32mINFO[0m] [[0;33mCONFIG[0m]  Game configuration initialized (stringtables, modules, configs loaded)
+[2026-08-09 00:08:42.956] [app-1678] [[0;32mINFO[0m] [[0;35mMEMORY[0m]  Process memory: 16237 MB physical, soft=4096 MB hard=8192 MB (auto)
+[2026-08-09 00:08:43.031] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu: creating renderer WGPU (Rust / wgpu) (3441x1440), crate v0.1.0, build aadd51a84710-release
+[2026-08-09 00:08:43.031] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu instance flags: InstanceFlags(DEBUG | VALIDATION_INDIRECT_CALL)
+[2026-08-09 00:08:43.399] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu adapter: NVIDIA GeForce RTX 3070 (Vulkan, DiscreteGpu)
+[2026-08-09 00:08:43.399] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu capabilities: bc=true bindless=true partially_bound=true indirect_first_instance=true multi_draw_count=true vertex_writable_storage=true timestamps=true timestamps_in_passes=true
+[2026-08-09 00:08:43.644] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu MSAA enabled: 4x (WGR_MSAA)
+[2026-08-09 00:08:43.644] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu HDR path enabled (WGR_HDR)
+[2026-08-09 00:08:43.644] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu GPU-driven indirect draws enabled (WGR_INDIRECT)
+[2026-08-09 00:08:43.716] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu GPU-driven rendering enabled (WGR_GPU_DRIVEN); inert until a scene registers
+[2026-08-09 00:08:43.835] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: Hydro FFT ocean enabled: initial 512x512 cascade maps; live tiers 256/512/1024
+[2026-08-09 00:08:44.172] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: WTR-002 GPU timestamp instrumentation enabled
+[2026-08-09 00:08:44.172] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: GRS-A in-pass timestamps enabled; grass draw rows will report
+[2026-08-09 00:08:44.172] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu renderer created
+[2026-08-09 00:08:44.172] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu: gtao gate: enabled=true debugMode=0 radius=2 slices=3 steps=12
+[2026-08-09 00:08:44.172] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu: interior sky gate: enabled=true debug=false res=2048 extent=64 height=300 strength=1 floor=0.32 kernel=1 bias=0.25
+[2026-08-09 00:08:44.173] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  DebugOverlay: ImGui initialized on the engine overlay backend (press Ctrl+` / Ctrl+; to toggle)
+[2026-08-09 00:08:44.173] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Aspect: viewport=3441x1440 style=0 clamp=1 override=0 -> leftFOV=1.792 topFOV=0.750 uiX=[0.012..0.988] uiY=[0.000..1.000] world=[0.000..1.000]x[0.000..1.000]
+[2026-08-09 00:08:44.173] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu: VSync interval set to 1
+[2026-08-09 00:08:44.402] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    World initialized successfully
+[2026-08-09 00:08:44.403] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu: VSync interval set to 1
+[2026-08-09 00:08:44.839] [app-1678] [[0;32mINFO[0m] [[1;36mAUDIO[0m]   EFX extension: available
+[2026-08-09 00:08:44.840] [app-1678] [[0;32mINFO[0m] [[1;36mAUDIO[0m]   Init OK: OpenAL Soft
+[2026-08-09 00:08:44.840] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  FontSystem initialized (5 fonts in slot 0)
+[2026-08-09 00:08:44.842] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  ScenePreloader initialized (20 slot classes)
+[2026-08-09 00:08:44.842] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Mission smoke check: initialization complete, continuing into mission startup
+[2026-08-09 00:08:44.845] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Test mission: D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\dev-missions\devtest.abel -> C:/Users/mail/AppData/Local/Temp/cwr/mission-smoke/0c9267592d2b28cb/Missions/devtest.abel/mission.sqm
+[2026-08-09 00:08:44.889] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 0: 16384 voxels, mean vis 0.684, 27.1% enclosed,                      bbox 6.6x2.5x3.6 m
+[2026-08-09 00:08:44.905] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 1: 16384 voxels, mean vis 0.640, 24.9% enclosed,                      bbox 9.6x12.4x9.1 m
+[2026-08-09 00:08:44.922] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 2: 16384 voxels, mean vis 0.634, 26.3% enclosed,                      bbox 8.7x12.1x6.9 m
+[2026-08-09 00:08:44.937] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 3: 16384 voxels, mean vis 0.702, 20.9% enclosed,                      bbox 1.8x1.3x1.8 m
+[2026-08-09 00:08:44.965] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 4: 16384 voxels, mean vis 0.604, 35.9% enclosed,                      bbox 6.5x3.2x4.6 m
+[2026-08-09 00:08:44.965] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 5: 16384 voxels, mean vis 0.654, 29.8% enclosed,                      bbox 5.9x2.4x3.4 m
+[2026-08-09 00:08:45.169] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 6: 16384 voxels, mean vis 0.619, 33.5% enclosed,                      bbox 9.2x6.0x9.2 m
+[2026-08-09 00:08:45.169] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: [wgr] sky bake model 7: 16384 voxels, mean vis 0.492, 47.8% enclosed,                      bbox 30.9x10.4x34.0 m
+[2026-08-09 00:08:52.177] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Screenshot test mode: waiting for mission to enter gameplay...
+[2026-08-09 00:08:52.234] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Mission smoke check: mission runtime entered (devtest.abel)
+[2026-08-09 00:08:52.234] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Mission smoke check: deferring exit for requested screenshot
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model: placed C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\tmp\test-model-static-loader\a3-rocks\stonesharp_big.p3d at 3306.139 2.8280823 1580.9043 (lods=10 faces=6256)
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model: camera at 3312.16 2.8280823 1572.92 dir -0.60209376 0 0.79842544
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model: object pos 3306.139 2.8280823 1580.9043 bounding radius 9.141871
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 0 resolution 1 faces 6256
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 1 resolution 2 faces 3078
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 2 resolution 3 faces 1490
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 3 resolution 4 faces 756
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 4 resolution 5 faces 296
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 5 resolution 10000 faces 3024
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 6 resolution 1e+13 faces 726
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 7 resolution 4e+13 faces 376
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 8 resolution 6e+15 faces 732
+[2026-08-09 00:08:52.298] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    --test-model:   lod 9 resolution 11000 faces 756
+[2026-08-09 00:08:54.210] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu grass: no named grass textures on this legacy world; enabling all 190 terrain layers
+[2026-08-09 00:08:54.210] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu grass texture mask: 190 layer(s), 65536 / 65536 surface cells, 18896 renderable after geography, 19678 with forest relaxed (road/water/building always excluded) [data\more_anim.01.pac, abel\rwn.paa, abel\pb.paa, abel\s3.paa, abel\sh.paa, abel\rwr.paa, abel\mt.paa, abel\rwb.paa, abel\bah.paa, abel\p4.paa, abel\rw1.paa, abel\pi.paa, abel\rw2.paa, abel\rwe.paa, abel\rw3.paa, abel\rw4.paa, abel\rw5.paa, abel\tt.paa, abel\tv.paa, abel\bt.paa, abel\pipipish.pac, abel\pishpish.pac, abel\pishpipi.pac, abel\pipishsh.pac, abel\shshpipi.pac, abel\shshpish.pac, abel\shshpitt.pac, abel\pittpitt.pac, abel\pittpipi.pac, abel\pipishpi.pac, abel\shpishsh.pac, abel\shshshtt.pac, abel\shttshtt.pac, abel\shtttttt.pac, abel\ttttpitt.pac, abel\pittpish.pac, abel\pishshsh.pac, abel\pipipitt.pac, abel\shshshpi.pac, abel\shpitttt.pac, abel\ttttttsh.pac, abel\ttshshsh.pac, abel\pishtttt.pac, abel\ttttpipi.pac, abel\shpipipi.pac, abel\pipittsh.pac, abel\ttshtttt.pac, abel\ttttshtt.pac, abel\shttshsh.pac, abel\shshttsh.pac, abel\ttshshtt.pac, abel\shshtttt.pac, abel\shshttpi.pac, abel\ttpitttt.pac, abel\shpishpi.pac, abel\pipittpi.pac, abel\shttpitt.pac, abel\pittshsh.pac, abel\ttpittpi.pac, abel\pitttttt.pac, abel\pipitttt.pac, abel\pipishtt.pac, abel\pishpitt.pac, abel\ttpittsh.pac, abel\ttshttsh.pac, abel\tttttts3.pac, abel\tts3tttt.pac, abel\ttttshsh.pac, abel\tts3s3s3.pac, abel\s3s3tts3.pac, abel\pittshtt.pac, abel\shttpish.pac, abel\s3s3tttt.pac, abel\shttshpi.pac, abel\shpishtt.pac, abel\tttts3s3.pac, abel\shpittpi.pac, abel\tttts3tt.pac, abel\s3tts3s3.pac, abel\s3s3s3tt.pac, abel\s3tts3tt.pac, abel\s3tttttt.pac, abel\ttttttp4.pac, abel\ttp4ttp4.pac, abel\ttp4tttt.pac, abel\ttp4p4p4.pac, abel\p4p4ttp4.pac, abel\tts3tts3.pac, abel\ttttp4tt.pac, abel\p4ttp4p4.pac, abel\p4p4tttt.pac, abel\p4p4p4tt.pac, abel\p4tttttt.pac, abel\p4ttp4tt.pac, abel\ttshttpi.pac, abel\ttttttpb.pac, abel\ttpbttpb.pac, abel\ttpbtttt.pac, abel\ttttpbpb.pac, abel\pbpbtttt.pac, abel\shpipish.pac, abel\pbpbttpb.pac, abel\shttpipi.pac, abel\ttttpbtt.pac, abel\pbttpbtt.pac, abel\pbttpbpb.pac, abel\shpittsh.pac, abel\pbtttttt.pac, abel\shttttsh.pac, abel\pishshpi.pac, abel\shttttp4.pac, abel\ttttp4p4.pac, abel\ttttttbt.pac, abel\ttbtttbt.pac, abel\ttbttttt.pac, abel\ttttbttt.pac, abel\btttbttt.pac, abel\bttttttt.pac, abel\ttpbpbpb.pac, abel\pbpbpbtt.pac, abel\tttttttv.pac, abel\tttvtttv.pac, abel\tttvtttt.pac, abel\tttvtvtv.pac, abel\tvtvtttv.pac, abel\tttttvtv.pac, abel\tvtvtttt.pac, abel\tttttvtt.pac, abel\tvtttvtt.pac, abel\tvtttvtv.pac, abel\tvtvtvtt.pac, abel\tvtttttt.pac, abel\pitttttv.pac, abel\tttvttbt.pac, abel\tttvtvbt.pac, abel\tvbtbtbt.pac, abel\btbtttbt.pac, abel\s3tttts3.pac, abel\tvtvbttt.pac, abel\pishttsh.pac, abel\ttttpish.pac, abel\ttttshs3.pac, abel\shs3shtt.pac, abel\ttttttpi.pac, abel\ttpipipi.pac, abel\ttshpipi.pac, abel\ttpishpi.pac, abel\ttttttmt.pac, abel\ttmtttmt.pac, abel\ttmttttt.pac, abel\ttttmtmt.pac, abel\mtmtmttt.pac, abel\mttttttt.pac, abel\ttttmttt.pac, abel\mtttmttt.pac, abel\ttp4p4tt.pac, abel\ttttbtbt.pac, abel\btbttttt.pac, abel\ttshpish.pac, abel\mtmtttmt.pac, abel\mtttmtmt.pac, abel\mtmttttt.pac, abel\ttpishsh.pac, abel\ttttpis3.pac, abel\pis3pipi.pac, abel\s3s3pipi.pac, abel\s3s3pitt.pac, abel\ttbtttpi.pac, abel\ttpibtpi.pac, abel\btpibtbt.pac, abel\btbtpipi.pac, abel\pipibtpi.pac, abel\btpibtpi.pac, abel\btpipipi.pac, abel\ttttshpi.pac, abel\ttpipitt.pac, abel\shpipitt.pac, abel\btttbtbt.pac, abel\ttbtbtbt.pac, abel\ttpittbt.pac, abel\ttbtpipi.pac, abel\pipibtbt.pac, abel\pipipibt.pac, abel\pibtpipi.pac, abel\ttpipibt.pac, abel\pibtbtpi.pac, abel\pibtpibt.pac, abel\tttvshtt.pac, abel\tttvpitt.pac, abel\pittttpi.pac]
+[2026-08-09 00:08:54.210] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu terrain texture layers: [0:data\more_anim.01.pac, 1:abel\rwn.paa, 2:abel\pb.paa, 3:abel\s3.paa, 4:abel\sh.paa, 5:abel\rwr.paa, 6:abel\mt.paa, 7:abel\rwb.paa, 8:abel\bah.paa, 9:abel\p4.paa, 10:abel\rw1.paa, 11:abel\pi.paa, 12:abel\rw2.paa, 13:abel\rwe.paa, 14:abel\rw3.paa, 15:abel\rw4.paa, 16:abel\rw5.paa, 17:abel\tt.paa, 18:abel\tv.paa, 19:abel\bt.paa, 20:abel\pipipish.pac, 21:abel\pishpish.pac, 22:abel\pishpipi.pac, 23:abel\pipishsh.pac, 24:abel\shshpipi.pac, 25:abel\shshpish.pac, 26:abel\shshpitt.pac, 27:abel\pittpitt.pac, 28:abel\pittpipi.pac, 29:abel\pipishpi.pac, 30:abel\shpishsh.pac, 31:abel\shshshtt.pac, 32:abel\shttshtt.pac, 33:abel\shtttttt.pac, 34:abel\ttttpitt.pac, 35:abel\pittpish.pac, 36:abel\pishshsh.pac, 37:abel\pipipitt.pac, 38:abel\shshshpi.pac, 39:abel\shpitttt.pac, 40:abel\ttttttsh.pac, 41:abel\ttshshsh.pac, 42:abel\pishtttt.pac, 43:abel\ttttpipi.pac, 44:abel\shpipipi.pac, 45:abel\pipittsh.pac, 46:abel\ttshtttt.pac, 47:abel\ttttshtt.pac, 48:abel\shttshsh.pac, 49:abel\shshttsh.pac, 50:abel\ttshshtt.pac, 51:abel\shshtttt.pac, 52:abel\shshttpi.pac, 53:abel\ttpitttt.pac, 54:abel\shpishpi.pac, 55:abel\pipittpi.pac, 56:abel\shttpitt.pac, 57:abel\pittshsh.pac, 58:abel\ttpittpi.pac, 59:abel\pitttttt.pac, 60:abel\pipitttt.pac, 61:abel\pipishtt.pac, 62:abel\pishpitt.pac, 63:abel\ttpittsh.pac, 64:abel\ttshttsh.pac, 65:abel\tttttts3.pac, 66:abel\tts3tttt.pac, 67:abel\ttttshsh.pac, 68:abel\tts3s3s3.pac, 69:abel\s3s3tts3.pac, 70:abel\pittshtt.pac, 71:abel\shttpish.pac, 72:abel\s3s3tttt.pac, 73:abel\shttshpi.pac, 74:abel\shpishtt.pac, 75:abel\tttts3s3.pac, 76:abel\shpittpi.pac, 77:abel\tttts3tt.pac, 78:abel\s3tts3s3.pac, 79:abel\s3s3s3tt.pac, 80:abel\s3tts3tt.pac, 81:abel\s3tttttt.pac, 82:abel\ttttttp4.pac, 83:abel\ttp4ttp4.pac, 84:abel\ttp4tttt.pac, 85:abel\ttp4p4p4.pac, 86:abel\p4p4ttp4.pac, 87:abel\tts3tts3.pac, 88:abel\ttttp4tt.pac, 89:abel\p4ttp4p4.pac, 90:abel\p4p4tttt.pac, 91:abel\p4p4p4tt.pac, 92:abel\p4tttttt.pac, 93:abel\p4ttp4tt.pac, 94:abel\ttshttpi.pac, 95:abel\ttttttpb.pac, 96:abel\ttpbttpb.pac, 97:abel\ttpbtttt.pac, 98:abel\ttttpbpb.pac, 99:abel\pbpbtttt.pac, 100:abel\shpipish.pac, 101:abel\pbpbttpb.pac, 102:abel\shttpipi.pac, 103:abel\ttttpbtt.pac, 104:abel\pbttpbtt.pac, 105:abel\pbttpbpb.pac, 106:abel\shpittsh.pac, 107:abel\pbtttttt.pac, 108:abel\shttttsh.pac, 109:abel\pishshpi.pac, 110:abel\shttttp4.pac, 111:abel\ttttp4p4.pac, 112:abel\ttttttbt.pac, 113:abel\ttbtttbt.pac, 114:abel\ttbttttt.pac, 115:abel\ttttbttt.pac, 116:abel\btttbttt.pac, 117:abel\bttttttt.pac, 118:abel\ttpbpbpb.pac, 119:abel\pbpbpbtt.pac, 120:abel\tttttttv.pac, 121:abel\tttvtttv.pac, 122:abel\tttvtttt.pac, 123:abel\tttvtvtv.pac, 124:abel\tvtvtttv.pac, 125:abel\tttttvtv.pac, 126:abel\tvtvtttt.pac, 127:abel\tttttvtt.pac, 128:abel\tvtttvtt.pac, 129:abel\tvtttvtv.pac, 130:abel\tvtvtvtt.pac, 131:abel\tvtttttt.pac, 132:abel\pitttttv.pac, 133:abel\tttvttbt.pac, 134:abel\tttvtvbt.pac, 135:abel\tvbtbtbt.pac, 136:abel\btbtttbt.pac, 137:abel\s3tttts3.pac, 138:abel\tvtvbttt.pac, 139:abel\pishttsh.pac, 140:abel\ttttpish.pac, 141:abel\ttttshs3.pac, 142:abel\shs3shtt.pac, 143:abel\ttttttpi.pac, 144:abel\ttpipipi.pac, 145:abel\ttshpipi.pac, 146:abel\ttpishpi.pac, 147:abel\ttttttmt.pac, 148:abel\ttmtttmt.pac, 149:abel\ttmttttt.pac, 150:abel\ttttmtmt.pac, 151:abel\mtmtmttt.pac, 152:abel\mttttttt.pac, 153:abel\ttttmttt.pac, 154:abel\mtttmttt.pac, 155:abel\ttp4p4tt.pac, 156:abel\ttttbtbt.pac, 157:abel\btbttttt.pac, 158:abel\ttshpish.pac, 159:abel\mtmtttmt.pac, 160:abel\mtttmtmt.pac, 161:abel\mtmttttt.pac, 162:abel\ttpishsh.pac, 163:abel\ttttpis3.pac, 164:abel\pis3pipi.pac, 165:abel\s3s3pipi.pac, 166:abel\s3s3pitt.pac, 167:abel\ttbtttpi.pac, 168:abel\ttpibtpi.pac, 169:abel\btpibtbt.pac, 170:abel\btbtpipi.pac, 171:abel\pipibtpi.pac, 172:abel\btpibtpi.pac, 173:abel\btpipipi.pac, 174:abel\ttttshpi.pac, 175:abel\ttpipitt.pac, 176:abel\shpipitt.pac, 177:abel\btttbtbt.pac, 178:abel\ttbtbtbt.pac, 179:abel\ttpittbt.pac, 180:abel\ttbtpipi.pac, 181:abel\pipibtbt.pac, 182:abel\pipipibt.pac, 183:abel\pibtpipi.pac, 184:abel\ttpipibt.pac, 185:abel\pibtbtpi.pac, 186:abel\pibtpibt.pac, 187:abel\tttvshtt.pac, 188:abel\tttvpitt.pac, 189:abel\pittttpi.pac]
+[2026-08-09 00:08:54.228] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu grass: mid-LOD clump texture uploaded (1024x1024, 4 src channels) from 'assets/grass/meadow-grass-clump-alpha-1024.png'
+[2026-08-09 00:08:54.231] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Wgpu grass: near-LOD photo blade atlas uploaded (8 layers, 64x256)
+[2026-08-09 00:08:54.447] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water geometry quality applied: preset=1 baseMult=6.00 range0=1200m
+[2026-08-09 00:08:54.475] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water look applied: amplitude=1.000, choppiness=1.000, speed=1.000, preset=1, FFT=512x512
+[2026-08-09 00:08:54.475] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water CDLOD config: leafSize=200.0m levels=9 baseMult=6.0 ratio=2.00 range0=1200m
+[2026-08-09 00:08:54.475] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water GPU ms: evolve=0.280 fftH=0.544 fftV=0.563 compose=0.763 draw=-1.000 foam=0.162 interaction=0.028 planar=0.000 total=2.362
+[2026-08-09 00:08:54.475] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Lighting GPU ms: ao_prep=-1.000 ao_march=-1.000 ao_blur=-1.000 ao_total=0.000 | isky_cull=-1.000 isky_maps=-1.000 isky_total=0.000 | frame=3.796
+[2026-08-09 00:08:54.475] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water CDLOD nodes: total=104 lod0=44 lod1=24 lod2=24 lod3=11 lod4=1 lod5+=0 tris=1916928
+[2026-08-09 00:08:54.884] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water submersion: submerged=1 camY=3.71 sea=3.17 localSurface=3.84 camAbove=0.54 submersion=0.13 preset=1 waveAmp=1.00 effect=0
+[2026-08-09 00:08:54.911] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  Water submersion: submerged=0 camY=4.36 sea=3.18 localSurface=3.90 camAbove=1.18 submersion=-0.46 preset=1 waveAmp=1.00 effect=0
+[2026-08-09 00:08:55.181] [app-1678] [[0;32mINFO[0m] [[1;32mGRAPHICS[0m]  wgpu: wgpu screenshot readback completed
+[2026-08-09 00:08:55.969] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Screenshot test: saved to C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\tmp\test-model-static-loader\wgpu-a3-rock.png
+[2026-08-09 00:08:55.969] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    AUTO-TEST SUCCESS
+[2026-08-09 00:08:55.969] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Shutdown: begin (exit code 0)
+[2026-08-09 00:08:55.969] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Shutdown: DDTerm
+[2026-08-09 00:08:56.014] [app-1678] [[0;32mINFO[0m] [[1;36mAUDIO[0m]   System shutdown
+[2026-08-09 00:08:56.169] [app-1678] [[0;32mINFO[0m] [[1;34mCORE[0m]    Shutdown complete
