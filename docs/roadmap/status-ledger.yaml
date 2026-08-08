@@ -1537,18 +1537,16 @@ tickets:
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
     test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights,
-               ast-018-odol73-winding]
+               ast-018-odol73-winding, ast-018-geometry-basis]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
     known_failures:
       - >-
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
-        split, preservation of the MLOD named-selection weight byte, and a
-        measured winding for the ODOL 73 path. Normal orientation, tangent
-        handedness, source origin and centre-of-mass relationship are still not
-        stated anywhere, and the MLOD paths' sourceWinding remains an assumption
-        ending in _ASSUMED. Proxy identity and section boundaries are unchanged.
+        split, preservation of the MLOD named-selection weight byte, a measured
+        winding for the ODOL 73 path, and a typed source-geometry basis with a
+        confidence per axis. Proxy identity and section boundaries are unchanged.
       - >-
         The ODOL 73 winding is measured only relative to the model's own stored
         normals: all 16 faces of the reference fixture wind clockwise about them,
@@ -1608,6 +1606,15 @@ tickets:
       same 6 pre-existing environment failures as before the change (dev-mode
       gate, and localisation data absent from packages/Remaster).
 
+      The basis is typed rather than free text: GeometryBasis carries winding,
+      normal orientation, tangent handedness, source origin and the
+      centre-of-mass relationship, each with its own confidence
+      (Unknown/Assumed/Established/Measured). Unknown is the default, so a
+      consumer that needs a tangent frame learns this build cannot supply one
+      instead of reading a plausible default. The legacy sourceWinding string is
+      derived from the record via DescribeWinding, so the label and the typed
+      form cannot drift; a test pins all three existing string values.
+
       Winding is measured rather than assumed for the ODOL 73 path: the file
       supplies both index order and per-vertex normals, so the cross product of
       each face's first two edges is compared against its own stored normal. All
@@ -1647,6 +1654,7 @@ tickets:
     supersedes: []
     evidence:
       - engine/Poseidon/World/Model/LodPurpose.hpp
+      - engine/Poseidon/World/Model/GeometryBasis.hpp
       - engine/Poseidon/World/Model/ModelFlags.hpp
       - tests/unit/engine/Poseidon/World/Model/test_lod_purpose.cpp
       - tests/unit/engine/Poseidon/World/Model/test_flag_bit_preservation.cpp

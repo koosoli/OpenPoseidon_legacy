@@ -8,6 +8,7 @@
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Model/GeometryBasis.hpp>
 #include <Poseidon/World/Model/ModelFlags.hpp>
 #include "../../test_fixtures.hpp"
 #include <algorithm>
@@ -219,4 +220,57 @@ TEST_CASE("The MLOD weight byte is preserved, not reinterpreted", "[model][selec
             REQUIRE(selection.vertexWeights.empty());
         }
     REQUIRE(checked > 0);
+}
+
+// AST-018: the explicit source-geometry basis.
+TEST_CASE("The legacy winding label is derived from the typed basis", "[model][basis][ast-018]")
+{
+    // These three strings are what the SP3X, P3DM and ODOL 73 paths already
+    // recorded. Deriving them is what stops the label and the typed record from
+    // disagreeing the first time one of them is edited.
+    REQUIRE(DescribeWinding(SourceWinding::ClockwiseReversedOnLoad, BasisConfidence::Established) ==
+            "CW_REVERSED_ON_LOAD");
+    REQUIRE(DescribeWinding(SourceWinding::ClockwiseReversedOnLoad, BasisConfidence::Assumed) ==
+            "CW_REVERSED_ON_LOAD_ASSUMED");
+    REQUIRE(DescribeWinding(SourceWinding::ClockwiseRelativeToStoredNormals, BasisConfidence::Measured) ==
+            "CW_RELATIVE_TO_STORED_NORMALS_MEASURED");
+    // An unstated winding produces no label at all rather than a plausible one.
+    REQUIRE(DescribeWinding(SourceWinding::Unknown, BasisConfidence::Measured).empty());
+}
+
+TEST_CASE("An unstated basis is representable and detectable", "[model][basis][ast-018]")
+{
+    // The default has to be "nothing established", not a plausible-looking
+    // default that a consumer would read and believe.
+    GeometryBasis basis;
+    REQUIRE(IsBasisUnstated(basis));
+    REQUIRE(basis.winding == SourceWinding::Unknown);
+    REQUIRE(basis.tangents == TangentHandedness::Unknown);
+    REQUIRE_FALSE(basis.centreOfMassAtOrigin);
+    REQUIRE(basis.centreOfMassConfidence == BasisConfidence::Unknown);
+
+    basis.windingConfidence = BasisConfidence::Assumed;
+    REQUIRE_FALSE(IsBasisUnstated(basis));
+}
+
+TEST_CASE("MLOD loaders state their basis with honest confidences", "[model][basis][ast-018]")
+{
+    Poseidon::Model::Model model;
+    try { model = Poseidon::Asset::Formats::MLODLoader::load(GET_FIXTURE("p3d/animated_actor.p3d")); }
+    catch (const std::exception&) { SKIP("animated_actor fixture not readable"); }
+    REQUIRE_FALSE(model.lodLevels.empty());
+
+    for (const auto& lod : model.lodLevels)
+    {
+        CAPTURE(lod.sourceEncoding);
+        REQUIRE_FALSE(IsBasisUnstated(lod.basis));
+        REQUIRE(lod.basis.winding == SourceWinding::ClockwiseReversedOnLoad);
+        // Whichever encoding it is, the label must agree with the record.
+        REQUIRE(lod.sourceWinding == DescribeWinding(lod.basis.winding, lod.basis.windingConfidence));
+        // Neither MLOD encoding supplies a tangent frame, and saying so is the
+        // point: a consumer that needs one learns it will not get it here.
+        REQUIRE(lod.basis.tangents == TangentHandedness::NotSupplied);
+        // Nothing has established where the centre of mass sits.
+        REQUIRE(lod.basis.centreOfMassConfidence == BasisConfidence::Unknown);
+    }
 }

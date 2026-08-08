@@ -107,7 +107,18 @@ class MLODLoader
         lod.resolution     = taggData.resolution;
         lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.sourceEncoding = "SP3X";
-        lod.sourceWinding  = "CW_REVERSED_ON_LOAD";
+        // AST-018. Established, not measured: reversing SP3X index order on load
+        // is what the original engine's own loader does. Nothing in this repo has
+        // rendered it to confirm the result looks right.
+        lod.basis.winding            = Poseidon::Model::SourceWinding::ClockwiseReversedOnLoad;
+        lod.basis.windingConfidence  = Poseidon::Model::BasisConfidence::Established;
+        lod.basis.normals            = Poseidon::Model::NormalOrientation::StoredPerVertex;
+        lod.basis.normalsConfidence  = Poseidon::Model::BasisConfidence::Established;
+        lod.basis.tangents           = Poseidon::Model::TangentHandedness::NotSupplied;
+        lod.basis.tangentsConfidence = Poseidon::Model::BasisConfidence::Established;
+        lod.basis.origin             = Poseidon::Model::SourceOrigin::ModelSpace;
+        lod.basis.originConfidence   = Poseidon::Model::BasisConfidence::Established;
+        lod.sourceWinding  = Poseidon::Model::DescribeWinding(lod.basis.winding, lod.basis.windingConfidence);
 
         return lod;
     }
@@ -143,13 +154,21 @@ class MLODLoader
         lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.uvSetCount     = taggData.uvSetCount;
         lod.sourceEncoding = "P3DM";
-        // Recorded rather than asserted. The SP3X path reverses winding on load and
-        // the same reversal is applied here, but that P3DM uses the identical
+        // Recorded rather than asserted. The SP3X path reverses winding on load
+        // and the same reversal is applied here, but that P3DM uses the identical
         // convention is an assumption -- no P3DM model has been rendered yet, so
-        // nothing has confirmed it. Naming the assumption on the LOD means a later
+        // nothing has confirmed it. The Assumed confidence is the point: a later
         // visual check can contradict it in one place instead of hunting for an
         // implicit swap buried in the converter.
-        lod.sourceWinding  = "CW_REVERSED_ON_LOAD_ASSUMED";
+        lod.basis.winding            = Poseidon::Model::SourceWinding::ClockwiseReversedOnLoad;
+        lod.basis.windingConfidence  = Poseidon::Model::BasisConfidence::Assumed;
+        lod.basis.normals            = Poseidon::Model::NormalOrientation::StoredPerVertex;
+        lod.basis.normalsConfidence  = Poseidon::Model::BasisConfidence::Assumed;
+        lod.basis.tangents           = Poseidon::Model::TangentHandedness::NotSupplied;
+        lod.basis.tangentsConfidence = Poseidon::Model::BasisConfidence::Established;
+        lod.basis.origin             = Poseidon::Model::SourceOrigin::ModelSpace;
+        lod.basis.originConfidence   = Poseidon::Model::BasisConfidence::Assumed;
+        lod.sourceWinding  = Poseidon::Model::DescribeWinding(lod.basis.winding, lod.basis.windingConfidence);
 
         return lod;
     }

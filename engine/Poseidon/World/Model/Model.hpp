@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poseidon/World/Model/GeometryBasis.hpp>
 #include <Poseidon/World/Model/LodPurpose.hpp>
 #include <Poseidon/World/Model/ModelFlags.hpp>
 #include <cstdint>
@@ -274,7 +275,13 @@ struct LODLevel {
     // needs to know which one it got -- or on what winding assumption the indices
     // were built -- has to be told. sourceWinding ending in _ASSUMED means the
     // convention has not been confirmed against a render.
-    std::string sourceEncoding;   // "SP3X" | "P3DM"
+    std::string sourceEncoding;   // "SP3X" | "P3DM" | "ODOL73"
+
+    // AST-018: the typed form of the same facts, with a confidence per axis so
+    // "not established" is representable instead of being implied by a suffix on
+    // a string. sourceWinding below is derived from it via DescribeWinding, so
+    // the label and the record cannot disagree.
+    GeometryBasis basis;
     std::string sourceWinding;
     int32_t uvSetCount = 0;       // #UVSet# blocks present; payload is AST-011C
     

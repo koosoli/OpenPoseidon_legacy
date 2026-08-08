@@ -131,7 +131,17 @@ class ODOLLoader
             // factor being negative (DecodeOdol73Normal); flip that sign and the
             // conclusion flips with it. No render has confirmed which way the
             // faces actually point on screen.
-            lod.sourceWinding  = "CW_RELATIVE_TO_STORED_NORMALS_MEASURED";
+            lod.basis.winding            = Poseidon::Model::SourceWinding::ClockwiseRelativeToStoredNormals;
+            lod.basis.windingConfidence  = Poseidon::Model::BasisConfidence::Measured;
+            lod.basis.normals            = Poseidon::Model::NormalOrientation::StoredPerVertex;
+            lod.basis.normalsConfidence  = Poseidon::Model::BasisConfidence::Measured;
+            // The format does carry packed ST pairs, but this build does not
+            // decode them into a handed tangent frame, so nothing may assume one.
+            lod.basis.tangents           = Poseidon::Model::TangentHandedness::Unknown;
+            lod.basis.tangentsConfidence = Poseidon::Model::BasisConfidence::Unknown;
+            lod.basis.origin             = Poseidon::Model::SourceOrigin::ModelSpace;
+            lod.basis.originConfidence   = Poseidon::Model::BasisConfidence::Measured;
+            lod.sourceWinding = Poseidon::Model::DescribeWinding(lod.basis.winding, lod.basis.windingConfidence);
             lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
             model.lodLevels.push_back(std::move(lod));
