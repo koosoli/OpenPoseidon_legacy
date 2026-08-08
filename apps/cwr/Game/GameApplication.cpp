@@ -1185,22 +1185,12 @@ void GameApplication::RunMainLoop()
         // CPU rasteriser in ModelRenderer, so a newly-supported format can be
         // read, converted, and still never proven to draw.
         //
-        // INCOMPLETE: the object is created, positioned, added to the world
-        // vehicle list and to the landscape grid, and its shape reports real
-        // LODs and faces -- but nothing appears on screen. Verified not to be a
-        // renderer fault: WGPU and GL33 both draw nothing, and placing the model
-        // exactly at the camera with a 16 m bounding radius still shows an empty
-        // frame, so it is object registration rather than culling or transform.
-        // NewNonAIVehicle with fullCreate both false and true, and SetType
-        // (TypeVehicle), make no difference. Nor is it LOD selection: the shape
-        // reports lod 0 at resolution 1 with 2930 faces, an ordinary visual LOD,
-        // alongside its geometry and shadow levels. Whatever a mission-loaded
-        // object gets that this does not has not been found yet; until it is,
-        // this flag proves load and conversion in the live engine, not drawing.
-        //
-        // The next thing to try is diffing this against the mission loader's own
-        // object creation, rather than against createVehicle, which is what the
-        // above already imitates.
+        // Static objects loaded with a mission do not go through createVehicle.
+        // Landscape::ObjectCreate loads a shape, creates its Object subclass from
+        // the shape's class hint, assigns the transform, and adds it to the
+        // landscape grid. This matters for external models: a valid Arma 3 rock
+        // has no CWA CfgVehicles entry, so wrapping it in the generic "Building"
+        // vehicle type is not the lifecycle a normal static world object follows.
         if (spawnTestModel && !testModelSpawned && GWorld->GetMode() == GModeArcade)
         {
             testModelSpawned = true; // one attempt: a retry loop would spam the log every frame
@@ -1218,52 +1208,48 @@ void GameApplication::RunMainLoop()
                 const Vector3 ahead = view.Position() + view.Direction() * 10.0f;
                 const float x = ahead.X();
                 const float z = ahead.Z();
-                const float y = GLandscape->SurfaceY(x, z);
-                // A dynamic vehicle, not Landscape::AddObject. AddObject files
-                // the model into the static terrain grid, which the scene has
-                // already built by the time gameplay starts -- the object exists
-                // and simply never appears. The vehicle list is drawn per frame.
-                Entity* placed = NewNonAIVehicle("Building", testModelPath.c_str(), true);
-                if (!placed)
+                // This is a render harness, not normal placement gameplay. Keep
+                // the test object on the camera's elevation: an empty dev scene
+                // can look out over water, where SurfaceY is the sea floor and
+                // would put a perfectly valid fixture tens of metres below view.
+                const float y = view.Position().Y();
+                // Match Landscape::ObjectCreate precisely up to the unique object
+                // id: Shapes.New is the production ModelCache/detector route and
+                // NewObject chooses the normal static-object class (ObjectPlain
+                // for an unconfigured external model).
+                Ref<LODShapeWithShadow> shape = Shapes.New(testModelPath.c_str(), false, true);
+                if (!shape)
                 {
-                    LOG_ERROR(Core, "--test-model: failed to create an object for {}", testModelPath);
+                    LOG_ERROR(Core, "--test-model: failed to load {}", testModelPath);
                 }
                 else
                 {
                     Matrix4 transform;
                     transform.SetIdentity();
                     transform.SetPosition(Vector3(x, y, z));
-                    placed->Init(transform);
-                    placed->SetPosition(Vector3(x, y, z));
-                    // Simul's createVehicle does this and it is not cosmetic: an
-                    // object left as Primary is not classified as a drawable
-                    // vehicle.
-                    if (placed->Object::GetType() == Primary)
-                        placed->SetType(TypeVehicle);
-                    GWorld->AddVehicle(placed);
-                    // The world list owns it; the landscape grid is what the
-                    // scene walks when it decides what to draw. Adding to only
-                    // one of the two produces an object that exists and is never
-                    // rendered, which is indistinguishable from a broken model.
+                    Object* placed = NewObject(shape, -1);
+                    placed->SetTransform(transform);
+                    // Landscape owns the object and walks this grid every frame.
+                    // Unlike the dynamic vehicle path, no CfgVehicles type or
+                    // simulation list is involved for a normal static object.
                     GLandscape->AddObject(placed);
                     // Report what actually loaded. Shapes.New hands back a
                     // usable object even when the model behind it is empty, so
                     // "placed" alone does not mean there is anything to draw.
-                    LODShapeWithShadow* shape = placed->GetShape();
-                    const int levels = shape ? shape->NLevels() : 0;
-                    const int faces = (shape && levels > 0) ? shape->Level(0)->NFaces() : 0;
+                    const int levels = shape->NLevels();
+                    const int faces = levels > 0 ? shape->Level(0)->NFaces() : 0;
                     LOG_INFO(Core, "--test-model: placed {} at {} {} {} (lods={} faces={})", testModelPath, x, y, z,
                              levels, faces);
                     LOG_INFO(Core, "--test-model: camera at {} {} {} dir {} {} {}", view.Position().X(),
                              view.Position().Y(), view.Position().Z(), view.Direction().X(), view.Direction().Y(),
                              view.Direction().Z());
                     LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {}", placed->Position().X(),
-                             placed->Position().Y(), placed->Position().Z(), shape ? shape->BoundingSphere() : -1.0f);
+                             placed->Position().Y(), placed->Position().Z(), shape->BoundingSphere());
                     // Resolutions decide which LOD is drawable at all: a shape
                     // whose levels are every one of them special (geometry,
                     // memory, shadow) has nothing to draw at any distance, which
                     // looks identical to a rendering failure.
-                    for (int level = 0; shape && level < levels; ++level)
+                    for (int level = 0; level < levels; ++level)
                         LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
                                  shape->Resolution(level), shape->Level(level)->NFaces());
                     if (faces <= 0)
