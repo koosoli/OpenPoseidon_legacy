@@ -1581,6 +1581,12 @@ tickets:
         comparisons in TransportCore and Simul still take raw floats. The macros
         in SpecLods.hpp remain the source of those constants.
       - >-
+        The crewed-view slots (_geometryViewGunner, _geometryViewCommander,
+        _geometryViewCargo) are unverified against real content. The owner's
+        smoke test covered the driver seat only, and the training-mission capture
+        contains no crewed vehicle. A wrong slot there would show as a bad or
+        empty interior view for those seats specifically.
+      - >-
         One deliberate behaviour change: the old ResolGeometryOnly listed the
         fire-geometry sentinel but not its gunner variant (1e15 * 16), so that
         LOD was loaded with normals as if it were drawable. It is geometry-only
@@ -1640,6 +1646,13 @@ tickets:
       sentinel the shape path's old ResolGeometryOnly table listed still
       classifies geometry-only, the visual range still does not, and the single
       deliberate difference (the gunner fire-geometry sentinel) is named.
+
+      Owner smoke test, 2026-08-08: drove a jeep in the installed game against
+      the deployed build, no issues. That exercises the driver view and, since
+      the vehicle was moving over terrain, the roadway and land-contact special
+      LODs -- the parts of the rewritten index assignment most likely to show a
+      wrong slot. Gunner, commander and cargo seats were NOT tested, and no
+      building interior was entered.
 
       Rendered: the original training mission was captured through the deployed
       WGPU build and read. Terrain, structures, the character, the weapon
