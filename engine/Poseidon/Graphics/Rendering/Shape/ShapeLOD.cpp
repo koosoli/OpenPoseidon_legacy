@@ -72,56 +72,29 @@ namespace Poseidon
 namespace Poseidon
 {
 
+// The names are the ones config and model.cfg use, so they stay exactly as they
+// were; only the dispatch moved onto the IR's table (AST-018).
 const char* LevelName(float resolution)
 {
     static char buf[256];
-    if (IsSpec(resolution, GEOMETRY_SPEC))
+    switch (Model::ClassifyLodResolution(resolution))
     {
-        return "geometry";
-    }
-    else if (IsSpec(resolution, MEMORY_SPEC))
-    {
-        return "memory";
-    }
-    else if (IsSpec(resolution, LANDCONTACT_SPEC))
-    {
-        return "landContact";
-    }
-    else if (IsSpec(resolution, ROADWAY_SPEC))
-    {
-        return "roadway";
-    }
-    else if (IsSpec(resolution, PATHS_SPEC))
-    {
-        return "paths";
-    }
-    else if (IsSpec(resolution, HITPOINTS_SPEC))
-    {
-        return "hitpoints";
-    }
-    else if (IsSpec(resolution, VIEW_GEOM_SPEC))
-    {
-        return "geometryView";
-    }
-    else if (IsSpec(resolution, FIRE_GEOM_SPEC))
-    {
-        return "geometryFire";
-    }
-    else if (IsSpec(resolution, VIEW_PILOT_GEOM_SPEC))
-    {
-        return "geometryViewPilot";
-    }
-    else if (IsSpec(resolution, VIEW_GUNNER_GEOM_SPEC))
-    {
-        return "geometryViewGunner";
-    }
-    else if (IsSpec(resolution, VIEW_COMMANDER_GEOM_SPEC))
-    {
-        return "geometryViewCommander";
-    }
-    else if (IsSpec(resolution, VIEW_CARGO_GEOM_SPEC))
-    {
-        return "geometryViewCargo";
+        case Model::LodPurpose::Geometry:              return "geometry";
+        case Model::LodPurpose::Memory:                return "memory";
+        case Model::LodPurpose::LandContact:           return "landContact";
+        case Model::LodPurpose::Roadway:               return "roadway";
+        case Model::LodPurpose::Paths:                 return "paths";
+        case Model::LodPurpose::HitPoints:             return "hitpoints";
+        case Model::LodPurpose::ViewGeometry:          return "geometryView";
+        case Model::LodPurpose::FireGeometry:          return "geometryFire";
+        case Model::LodPurpose::ViewPilotGeometry:     return "geometryViewPilot";
+        case Model::LodPurpose::ViewGunnerGeometry:    return "geometryViewGunner";
+        case Model::LodPurpose::ViewCommanderGeometry: return "geometryViewCommander";
+        case Model::LodPurpose::ViewCargoGeometry:     return "geometryViewCargo";
+        default:
+            // Visual LODs, the crewed view distances and any sentinel this build
+            // cannot name all print their resolution, as before.
+            break;
     }
     snprintf(buf, sizeof(buf), "%g", resolution);
     return buf;
@@ -1941,63 +1914,28 @@ void LODShape::ScanShapes()
         float resolution = _resolutions[i];
         if (resolution > 900)
         {
-            if (IsSpec(resolution, GEOMETRY_SPEC))
+            // AST-018: the third copy of the sentinel table, now the IR's.
+            switch (Model::ClassifyLodResolution(resolution))
             {
-                _geometry = i;
-            }
-            else if (IsSpec(resolution, MEMORY_SPEC))
-            {
-                _memory = i;
-            }
-            else if (IsSpec(resolution, LANDCONTACT_SPEC))
-            {
-                _landContact = i;
-            }
-            else if (IsSpec(resolution, ROADWAY_SPEC))
-            {
-                _roadway = i;
-            }
-            else if (IsSpec(resolution, PATHS_SPEC))
-            {
-                _paths = i;
-            }
-            else if (IsSpec(resolution, HITPOINTS_SPEC))
-            {
-                _hitpoints = i;
-            }
-            else if (IsSpec(resolution, VIEW_GEOM_SPEC))
-            {
-                _geometryView = i;
-            }
-            else if (IsSpec(resolution, FIRE_GEOM_SPEC))
-            {
-                _geometryFire = i;
-            }
-            else if (IsSpec(resolution, VIEW_PILOT_GEOM_SPEC))
-            {
-                _geometryViewPilot = i;
-            }
-            else if (IsSpec(resolution, VIEW_GUNNER_GEOM_SPEC))
-            {
-                _geometryViewGunner = i;
-            }
-            else if (IsSpec(resolution, VIEW_COMMANDER_GEOM_SPEC))
-            {
-                _geometryViewCommander = i;
-            }
-            else if (IsSpec(resolution, VIEW_CARGO_GEOM_SPEC))
-            {
-                _geometryViewCargo = i;
-            }
-            else if (resolution < 2000) // cockpit LOD
-            {
-            }
-            else if (resolution < 10000) // spec cockpit LOD
-            {
-            }
-            else
-            {
-                LOG_DEBUG(Graphics, "{}: Uknown spec lod ({})", (const char*)Name(), resolution);
+                case Model::LodPurpose::Geometry:              _geometry = i; break;
+                case Model::LodPurpose::Memory:                _memory = i; break;
+                case Model::LodPurpose::LandContact:           _landContact = i; break;
+                case Model::LodPurpose::Roadway:               _roadway = i; break;
+                case Model::LodPurpose::Paths:                 _paths = i; break;
+                case Model::LodPurpose::HitPoints:             _hitpoints = i; break;
+                case Model::LodPurpose::ViewGeometry:          _geometryView = i; break;
+                case Model::LodPurpose::FireGeometry:          _geometryFire = i; break;
+                case Model::LodPurpose::ViewPilotGeometry:     _geometryViewPilot = i; break;
+                case Model::LodPurpose::ViewGunnerGeometry:    _geometryViewGunner = i; break;
+                case Model::LodPurpose::ViewCommanderGeometry: _geometryViewCommander = i; break;
+                case Model::LodPurpose::ViewCargoGeometry:     _geometryViewCargo = i; break;
+                default:
+                    // Cockpit and spec-cockpit LODs are drawn, so they take no
+                    // index here; anything else above 10000 is a sentinel this
+                    // build has no slot for and is worth saying so.
+                    if (resolution >= 10000)
+                        LOG_DEBUG(Graphics, "{}: Uknown spec lod ({})", (const char*)Name(), resolution);
+                    break;
             }
         }
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
+#include <Poseidon/World/Model/LodPurpose.hpp>
 #include <cmath>
 
 
@@ -11,14 +12,12 @@ inline bool IsSpec(float resolution, float spec)
     return fabs(resolution - spec) < spec * 1e-3;
 }
 
+// AST-018: one table, in the IR. This used to spell the list out again here,
+// and had drifted -- it omitted the gunner fire-geometry sentinel, so a LOD that
+// is by definition never drawn was being loaded with normals as if it were.
 static inline bool ResolGeometryOnly(float resolution)
 {
-    return (IsSpec(resolution, GEOMETRY_SPEC) || IsSpec(resolution, VIEW_GEOM_SPEC) ||
-            IsSpec(resolution, FIRE_GEOM_SPEC) || IsSpec(resolution, VIEW_PILOT_GEOM_SPEC) ||
-            IsSpec(resolution, VIEW_CARGO_GEOM_SPEC) || IsSpec(resolution, VIEW_COMMANDER_GEOM_SPEC) ||
-            IsSpec(resolution, VIEW_GUNNER_GEOM_SPEC) || IsSpec(resolution, MEMORY_SPEC) ||
-            IsSpec(resolution, LANDCONTACT_SPEC) || IsSpec(resolution, ROADWAY_SPEC) ||
-            IsSpec(resolution, PATHS_SPEC) || IsSpec(resolution, HITPOINTS_SPEC));
+    return Model::IsGeometryOnlyLod(Model::ClassifyLodResolution(resolution));
 }
 
 struct SortVertex

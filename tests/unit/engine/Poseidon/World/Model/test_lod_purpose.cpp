@@ -86,6 +86,41 @@ TEST_CASE("Every geometry-only purpose has a name that is not Visual", "[model][
     }
 }
 
+// The shape path's ResolGeometryOnly now delegates to the IR table. That is a
+// change to the draw path, so the claim "same answers" is pinned here rather
+// than asserted in a commit message.
+TEST_CASE("Geometry-only classification matches the shape path's old table", "[model][lod][ast-018]")
+{
+    const float kOldTable[] = {1e13f,        // GEOMETRY_SPEC
+                               6e15f, 7e15f, // VIEW_GEOM_SPEC, FIRE_GEOM_SPEC
+                               13e15f,       // VIEW_PILOT_GEOM_SPEC
+                               8e15f,        // VIEW_CARGO_GEOM_SPEC
+                               11e15f,       // VIEW_COMMANDER_GEOM_SPEC
+                               15e15f,       // VIEW_GUNNER_GEOM_SPEC
+                               1e15f,        // MEMORY_SPEC
+                               2e15f, 3e15f, // LANDCONTACT_SPEC, ROADWAY_SPEC
+                               4e15f, 5e15f};// PATHS_SPEC, HITPOINTS_SPEC
+    for (float resolution : kOldTable)
+    {
+        CAPTURE(resolution);
+        REQUIRE(IsGeometryOnlyLod(ClassifyLodResolution(resolution)));
+    }
+    for (float resolution : {1.0f, 100.0f, 1000.0f, 1100.0f, 1200.0f, 5000.0f})
+    {
+        CAPTURE(resolution);
+        REQUIRE_FALSE(IsGeometryOnlyLod(ClassifyLodResolution(resolution)));
+    }
+    // The one deliberate difference. The old table listed the fire-geometry
+    // sentinel but not its gunner variant, so a LOD that is never drawn was
+    // loaded with normals as if it were. It is geometry-only now.
+    REQUIRE(IsGeometryOnlyLod(ClassifyLodResolution(16e15f)));
+    // Unknown stays outside the geometry-only set, exactly as an unlisted
+    // sentinel did before: this change adds no new load-path behaviour for LODs
+    // the table cannot name.
+    REQUIRE(ClassifyLodResolution(9e15f) == LodPurpose::Unknown);
+    REQUIRE_FALSE(IsGeometryOnlyLod(LodPurpose::Unknown));
+}
+
 TEST_CASE("A LOD built from a resolution carries its purpose", "[model][lod][ast-018]")
 {
     // The convenience constructor is what most call sites use; leaving it to

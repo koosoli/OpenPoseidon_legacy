@@ -1534,6 +1534,8 @@ tickets:
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertOdol73
       - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
       - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
+      - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
+      - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
     test_ids: [ast-018-lod-purpose]
     benchmark_artifacts: []
     evidence_hash: null
@@ -1547,10 +1549,18 @@ tickets:
         selections, raw-plus-decoded flag bits, proxy identity and section
         boundaries are unchanged by this slice.
       - >-
-        LodPurpose classifies; nothing consumes it yet. ResolGeometryOnly and the
-        SpecLods macros are still what the renderer and AI branch on, so the
-        float comparisons this replaces have not actually been removed from the
-        draw path -- only from the asset probe.
+        The three copies of the sentinel table in the shape path (LevelName, the
+        special-LOD index assignment, and ResolGeometryOnly) now delegate to the
+        IR table, but Shape::IsSpecLevel and the VIEW_COMMANDER/VIEW_PILOT
+        comparisons in TransportCore and Simul still take raw floats. The macros
+        in SpecLods.hpp remain the source of those constants.
+      - >-
+        One deliberate behaviour change: the old ResolGeometryOnly listed the
+        fire-geometry sentinel but not its gunner variant (1e15 * 16), so that
+        LOD was loaded with normals as if it were drawable. It is geometry-only
+        now. No model in the captured training mission exercises it -- the run
+        logged no unknown-spec-LOD lines at all -- so the fix is reasoned and
+        unit-pinned, not observed.
       - >-
         Sentinels at 1e15 * 9, 12 and 14 are commented out in the engine's own
         SpecLods table. They classify as Unknown, which keeps them undrawable,
@@ -1570,13 +1580,27 @@ tickets:
       same 6 pre-existing environment failures as before the change (dev-mode
       gate, and localisation data absent from packages/Remaster).
 
-      NOT checked: no render. Nothing confirms that a LOD classified geometry-only
-      is in fact excluded from the draw path, because the draw path does not read
-      this field yet.
+      One case pins the parity claim for the draw-path change directly: every
+      sentinel the shape path's old ResolGeometryOnly table listed still
+      classifies geometry-only, the visual range still does not, and the single
+      deliberate difference (the gunner fire-geometry sentinel) is named.
+
+      Rendered: the original training mission was captured through the deployed
+      WGPU build and read. Terrain, structures, the character, the weapon
+      viewmodel, grass and shadows all draw; no geometry-only LOD leaks into the
+      frame, and the run logged no unknown-spec-LOD lines.
+
+      NOT checked: the capture is a single frame of one mission and was not
+      diffed against a matched baseline -- the older reference capture differs by
+      session nondeterminism (grass instancing, AI position), so a pixel diff
+      against it measures nothing. No model exercising the gunner fire-geometry
+      sentinel was found, so that fix is reasoned and unit-pinned, not observed.
     supersedes: []
     evidence:
       - engine/Poseidon/World/Model/LodPurpose.hpp
       - tests/unit/engine/Poseidon/World/Model/test_lod_purpose.cpp
+      - docs/roadmap/evidence/ast018-lodpurpose-training-capture.png
+      - docs/roadmap/evidence/ast018-lodpurpose-training-capture.json
   - id: AST-019
     overlay: COMPAT-C1-EXEC-001
     is_example: false
