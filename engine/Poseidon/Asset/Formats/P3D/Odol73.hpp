@@ -70,6 +70,18 @@ struct Odol73EmbeddedMaterial
     std::vector<TexGen> texGens;
 };
 
+struct Odol73StaticPolygonPrefix
+{
+    // The selected v73 LOD has a one-byte index-stream marker and an adjacent
+    // 32-bit value before its polygon count.  Their semantics are intentionally
+    // retained as raw data until point/vertex mappings are independently
+    // verified; polygons must not silently claim they are vertex indices.
+    bool indexStreamMarker = false;
+    uint32_t unparsedIndexValue = 0;
+    std::vector<std::vector<uint32_t>> polygons;
+    uint32_t followingByteOffset = 0;
+};
+
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 {
     std::string value;
@@ -262,6 +274,37 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         materials.push_back(std::move(material));
     }
     return materials;
+}
+
+// Fixture-led static polygon prefix.  The leading value is retained as raw
+// metadata: the selected body changes layout after eleven packed face records,
+// so it is not safe to call it a total face count.
+inline Odol73StaticPolygonPrefix ReadOdol73StaticPolygonPrefix(BinaryReader& reader, uint32_t end)
+{
+    Odol73StaticPolygonPrefix result;
+    result.indexStreamMarker = reader.read<bool>();
+    result.unparsedIndexValue = reader.read<uint32_t>();
+    const uint32_t declaredValue = reader.read<uint32_t>();
+    if (declaredValue == 0 || declaredValue > 1'000'000)
+        throw std::runtime_error("ODOL 73 LOD polygon-prefix value is invalid");
+    result.polygons.reserve(declaredValue);
+    while (reader.tell() < static_cast<int>(end))
+    {
+        const uint8_t vertices = reader.read<uint8_t>();
+        if (vertices < 3 || vertices > 32)
+        {
+            reader.seek(reader.tell() - 1);
+            break;
+        }
+        std::vector<uint32_t> polygon(vertices);
+        for (uint32_t& index : polygon)
+            index = reader.read<uint32_t>();
+        result.polygons.push_back(std::move(polygon));
+    }
+    if (result.polygons.empty())
+        throw std::runtime_error("ODOL 73 LOD has no decodable polygon prefix");
+    result.followingByteOffset = static_cast<uint32_t>(reader.tell());
+    return result;
 }
 
 inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMaterial& raw)

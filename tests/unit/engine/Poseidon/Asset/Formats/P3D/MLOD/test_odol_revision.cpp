@@ -197,4 +197,10 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(source.embedded);
     REQUIRE(source.stages.size() == materials[0].stageTextures.size());
     REQUIRE(source.texGens.size() == 8);
+    const auto polygons = P3D::ReadOdol73StaticPolygonPrefix(reader, directory.ends[0]);
+    REQUIRE_FALSE(polygons.indexStreamMarker);
+    REQUIRE(polygons.unparsedIndexValue == 26);
+    REQUIRE(polygons.polygons.size() == 11);
+    REQUIRE(polygons.polygons[0] == std::vector<uint32_t>{39, 35, 31, 43});
+    REQUIRE(polygons.followingByteOffset == 0x748);
 }
