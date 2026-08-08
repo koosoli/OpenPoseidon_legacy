@@ -935,6 +935,16 @@ float AlphaRefFromDesc(const render::RenderPassDescriptor& desc)
     return test ? desc.alphaRef / 255.0f : 0.0f;
 }
 
+// True when nothing in the material can make the surface see-through, so any
+// translucency would have to come from the texture. A fade driven by material
+// alpha over an opaque texture is real and must keep its blend.
+bool MaterialIsFullyOpaque(const TLMaterial& material)
+{
+    constexpr float kOpaque = 1.0f - 1.0f / 255.0f;
+    return material.diffuse.A() >= kOpaque && material.ambient.A() >= kOpaque &&
+           material.emmisive.A() >= kOpaque && material.forcedDiffuse.A() >= kOpaque;
+}
+
 // Pack an engine PackedColor into the FFI's 0xAARRGGBB WgrRgba8.
 WgrRgba8 PackColor(PackedColor c)
 {
@@ -1743,6 +1753,28 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         blend = render::BlendMode::Opaque;
         alphaRef = 0.5f;
+    }
+    else if (blend == render::BlendMode::AlphaBlend && tex != 0 && alphaClass == Poseidon::AlphaStats::Opaque &&
+             MaterialIsFullyOpaque(_curMaterial))
+    {
+        // The same class of bug as the Cutout case above, one step further out.
+        // Backend::IsAlpha means "this face's texture has an alpha channel", not
+        // "blend this face" -- BuildRenderPassDescriptor maps it to AlphaBlend
+        // because it only sees the section SPEC. When the texture then turns out
+        // to carry no partial *and* no clear alpha (AlphaStats::Opaque -- e.g.
+        // OFP head textures, DXT1 with a fully opaque alpha channel), there is
+        // nothing for blending to do except soft-blend the surface against
+        // whatever is already in the framebuffer. That is the translucent-faces
+        // report: a solid head rendered semi-transparent.
+        //
+        // Three conditions, all necessary. A texture must be present, because
+        // alphaClass defaults to Opaque when there is none and an untextured
+        // AlphaBlend draw is a genuine colour fade. The texture must classify
+        // Opaque, so Cutout and Blend keep their own routing. And the material
+        // must be fully opaque, because a fade driven by material alpha over an
+        // opaque texture is real translucency and must keep blending.
+        blend = render::BlendMode::Opaque;
+        alphaRef = 0.0f;
     }
     d.blend = BlendFromDesc(blend);
     d.sampler = U32(SamplerForSpec(effectiveSpec));
