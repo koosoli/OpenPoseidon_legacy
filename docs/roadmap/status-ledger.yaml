@@ -1388,13 +1388,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 040fc9f
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [040fc9f]
     production_call_sites:
       - file: engine/Poseidon/Asset/Cache/DerivedAssetKey.hpp
         symbol: Poseidon::Asset::Cache::DerivedAssetKey
@@ -1402,7 +1402,7 @@ tickets:
         symbol: Poseidon::Foundation::Sha256
     test_ids: [ast-020]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 287ec31230e87fd10be0722b9d74acf19e6c100245eebcbe6bbb44ca2c637c64
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
