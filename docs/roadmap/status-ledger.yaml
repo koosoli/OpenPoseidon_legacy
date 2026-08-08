@@ -583,7 +583,7 @@ tickets:
     production_call_sites: []
     test_ids: [ast-007-fixture-index]
     benchmark_artifacts: []
-    evidence_hash: 5050232cf2752e91073c38060cb0d05849467674f643ecc101fd519c58664a39
+    evidence_hash: ae726685e3c338669c6b1dae44d37b10a39ba9232c001f6e9ade1dd5fedfb80b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: 1cccca409275367a336b9ea6a454a4ca4a8d57cbf725b11ee5d5cc6825760778
+    evidence_hash: a71a76e00a56576219f5e2f6ef934e691e6649677988e29b41f9d91496cedfdc
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1044,13 +1044,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 8a990e0
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [8a990e0]
     production_call_sites:
       - file: engine/Poseidon/Asset/Addon/VirtualPath.hpp
         symbol: Poseidon::Asset::VirtualPath
@@ -1058,7 +1058,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 09453b0e509cfd63762d35a80ad1bab32bd7700cc46ed2c87c53fc682c4cb2c0
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
