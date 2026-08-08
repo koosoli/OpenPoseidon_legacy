@@ -632,8 +632,9 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
-    # The umbrella itself stays PLANNED: its children carry the work.
-    scheduling_state: ACTIVE
+    # HOLD, not ACTIVE: nothing blocks it, but it has no owner and its children
+    # carry the actual work. BLOCKED would misreport why it is not moving.
+    scheduling_state: HOLD
     status: PLANNED
     outcome: null
     owner: null
@@ -674,8 +675,9 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
-    # The umbrella itself stays PLANNED: its children carry the work.
-    scheduling_state: ACTIVE
+    # HOLD, not ACTIVE: nothing blocks it, but it has no owner and its children
+    # carry the actual work. BLOCKED would misreport why it is not moving.
+    scheduling_state: HOLD
     status: PLANNED
     outcome: null
     owner: null
@@ -961,8 +963,9 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
-    # The umbrella itself stays PLANNED: its children carry the work.
-    scheduling_state: ACTIVE
+    # HOLD, not ACTIVE: nothing blocks it, but it has no owner and its children
+    # carry the actual work. BLOCKED would misreport why it is not moving.
+    scheduling_state: HOLD
     status: PLANNED
     outcome: null
     owner: null
