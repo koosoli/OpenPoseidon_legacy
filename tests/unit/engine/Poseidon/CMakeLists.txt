@@ -218,6 +218,8 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
     Foundation/Algorithms/test_lzo1x.cpp
+    Foundation/Algorithms/test_sha256.cpp
+    Asset/Cache/test_derived_asset_key.cpp
     Asset/Formats/Material/test_rv_material_source.cpp
     Asset/Formats/Material/test_shader_schema.cpp
     Asset/Formats/Material/test_material_channels.cpp

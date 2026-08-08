@@ -1381,30 +1381,74 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADAPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-011C, AST-014, MAT-030]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Cache/DerivedAssetKey.hpp
+        symbol: Poseidon::Asset::Cache::DerivedAssetKey
+      - file: engine/Poseidon/Foundation/Algorithms/Sha256.hpp
+        symbol: Poseidon::Foundation::Sha256
+    test_ids: [ast-020]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        Identity only. This lands the deterministic KEY for a derived asset, not the
+        compiler that produces one or the store that holds it: nothing is written to
+        disk yet, so there is no cache-reload path to test. Serialising compiled
+        geometry and materials is the remaining half and is what AST-021's golden
+        manifests will be taken over.
+      - >-
+        kCompilerVersion is maintained by hand. That is deliberate -- deriving it
+        from a build timestamp would invalidate every cache on a rebuild that
+        changed nothing -- but it means a translation change that forgets to bump it
+        will silently reuse stale artefacts.
+    fallback: >-
+      Version-tagged filenames (v1-<hash>.pdc) mean artefacts from different
+      compiler versions coexist rather than overwrite, so a rollback reads its own
+      output instead of a forward version's.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. 10 Catch2 cases, 23 assertions under
+      [ast-020]; full suite green apart from the 6 failures pre-existing at HEAD.
+
+      SHA-256 was written from FIPS 180-4 and checked against its published vectors,
+      then those vectors were independently re-derived with Python hashlib rather
+      than trusted from memory -- including the 64-byte block-boundary case, which
+      is where a padding error hides. A hash that is subtly wrong produces stable
+      garbage and shows up much later as a cache serving the wrong asset.
+
+      CRC32 already existed in the tree and was deliberately not used: at 32 bits a
+      collision across tens of thousands of derived artefacts is a real probability,
+      and the consequence is not a failed checksum but silently wrong content.
+
+      Each key property is tested as a way the guarantee is normally lost: discovery
+      order must not change the key, changed source content must, the compiler
+      version must, options must and their order must not, adjacent fields must not
+      run together ("model"+"aa" vs "modela"+"a"), and path spelling must not fork
+      the cache.
+
+      NOT checked: no derived artefact was produced, written, reloaded or rendered.
+      This is the identity function alone. The claim is that equal inputs give equal
+      keys and unequal inputs give unequal keys -- not that anything downstream
+      consumes them correctly.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Cache/DerivedAssetKey.hpp
+      - engine/Poseidon/Foundation/Algorithms/Sha256.hpp
   - id: AST-021
     overlay: COMPAT-C1-EXEC-001
     is_example: false
