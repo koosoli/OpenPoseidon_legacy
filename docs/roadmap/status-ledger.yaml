@@ -1050,24 +1050,25 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
     status: PLANNED
     outcome: null
-    owner: null
-    branch: null
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [AST-012A]
-    blocked_by: [AST-012A]
+    blocked_by: []
     blocks: []
     implementation_commits: []
     production_call_sites: []
     test_ids: []
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
+    decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     known_failures: []
     fallback: null
     reviewer: null
