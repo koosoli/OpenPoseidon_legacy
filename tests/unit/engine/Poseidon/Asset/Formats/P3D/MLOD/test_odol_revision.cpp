@@ -191,6 +191,7 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     const auto materials = P3D::ReadOdol73EmbeddedMaterials(reader);
     REQUIRE(materials.size() == 1);
     REQUIRE(materials[0].name == "a3\\3den\\objects\\data\\area.rvmat");
+    REQUIRE(materials[0].version == 11);
     REQUIRE(materials[0].texGens.size() == 8);
     const auto source = P3D::ToRvMaterialSource(materials[0]);
     REQUIRE(source.embedded);

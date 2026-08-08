@@ -86,9 +86,8 @@ inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 // ODOL 73 puts an explicit compression flag before each LZO payload.  The
 // decoder reports its explicit LZO end marker, so restore the stream to that
 // boundary; no following array is swallowed.
-inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t expected)
+inline std::vector<uint8_t> ReadOdol73CompressedPayload(BinaryReader& reader, size_t expected, bool compressed)
 {
-    const bool compressed = reader.read<bool>();
     std::vector<uint8_t> output(expected);
     if (!compressed) { reader.readBytes(output.data(), expected); return output; }
     const int start = reader.tell(); const int remaining = reader.remaining();
@@ -97,6 +96,11 @@ inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t ex
     if (Foundation::Lzo1x::Decompress(source.data(), source.size(), output.data(), output.size(), &consumed) == expected && consumed != 0)
     { reader.seek(start + static_cast<int>(consumed)); return output; }
     throw std::runtime_error("ODOL 73 LZO array did not terminate at the expected size");
+}
+
+inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t expected)
+{
+    return ReadOdol73CompressedPayload(reader, expected, reader.read<bool>());
 }
 
 inline Odol73Preamble ReadOdol73Preamble(BinaryReader& reader)
@@ -237,7 +241,9 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         {
             (void)reader.read<uint32_t>(); // texture filter
             material.stageTextures.push_back(ReadBoundedAsciiz(reader, "embedded stage texture"));
-            (void)reader.read<uint32_t>(); (void)reader.read<bool>();
+            (void)reader.read<uint32_t>(); // stage id (material revision >= 9 here)
+            if (material.version >= 11)
+                (void)reader.read<bool>(); // use-world-env-map
         }
         for (uint32_t texGen = 0; texGen < texGens; ++texGen)
         {
@@ -249,7 +255,9 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         if (material.version >= 10)
         {
             (void)reader.read<uint32_t>(); (void)ReadBoundedAsciiz(reader, "thermal stage texture");
-            (void)reader.read<uint32_t>(); (void)reader.read<bool>();
+            (void)reader.read<uint32_t>();
+            if (material.version >= 11)
+                (void)reader.read<bool>();
         }
         materials.push_back(std::move(material));
     }
