@@ -332,6 +332,43 @@ inline uint32_t ToUint32(SpecialFlags flags) {
     return static_cast<uint32_t>(flags);
 }
 
+// AST-018 -- which bits this build claims to understand.
+//
+// The loaders already keep the source word intact: every flag field is a raw
+// cast, so no bit is dropped. What was missing is the other half of "preserve
+// raw bits plus decoded known flags" -- a way to ask which bits were decoded and
+// which were merely carried. Without it, a face whose word contains a bit no
+// enum names is indistinguishable from one that is fully understood, and the
+// difference only turns up as a rendering surprise.
+//
+// These masks are the union of the named values, deliberately including the
+// user-defined ranges: a user bit is a bit the format reserves for content, so
+// it is known even though its meaning is content's business.
+constexpr uint32_t kKnownVertexFlagBits =
+    static_cast<uint32_t>(VertexFlags::ClipAll) | static_cast<uint32_t>(VertexFlags::ClipUser) |
+    static_cast<uint32_t>(VertexFlags::LandMask) | static_cast<uint32_t>(VertexFlags::DecalMask) |
+    static_cast<uint32_t>(VertexFlags::FogMask) | static_cast<uint32_t>(VertexFlags::LightMask) |
+    static_cast<uint32_t>(VertexFlags::SpecialMask) | static_cast<uint32_t>(VertexFlags::UserMask);
+
+constexpr uint32_t kKnownFaceFlagBits =
+    static_cast<uint32_t>(FaceFlags::LightMask) | static_cast<uint32_t>(FaceFlags::ShadowMask) |
+    static_cast<uint32_t>(FaceFlags::ZBiasMask) | static_cast<uint32_t>(FaceFlags::FanStripMask) |
+    static_cast<uint32_t>(FaceFlags::DisableTexMerge) | static_cast<uint32_t>(FaceFlags::UserMask);
+
+inline uint32_t UnknownBits(VertexFlags flags) {
+    return static_cast<uint32_t>(flags) & ~kKnownVertexFlagBits;
+}
+
+inline uint32_t UnknownBits(FaceFlags flags) {
+    return static_cast<uint32_t>(flags) & ~kKnownFaceFlagBits;
+}
+
+// True when the word carries something this build cannot name. Not an error:
+// the bits are still there to be interpreted later. It is a fact a consumer --
+// or a conformance report -- is entitled to know.
+inline bool HasUnknownBits(VertexFlags flags) { return UnknownBits(flags) != 0; }
+inline bool HasUnknownBits(FaceFlags flags) { return UnknownBits(flags) != 0; }
+
 } // namespace Model
 } // namespace Poseidon
 

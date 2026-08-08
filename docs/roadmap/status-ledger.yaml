@@ -1536,18 +1536,27 @@ tickets:
       - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
-    test_ids: [ast-018-lod-purpose]
+    test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
     known_failures:
       - >-
-        Only the typed-LOD-purpose slice is done. Winding, normal orientation,
-        tangent handedness, source origin and centre-of-gravity relationship are
-        still not stated anywhere; LODLevel::sourceWinding remains a recorded
-        assumption ending in _ASSUMED, unconfirmed by any render. Weighted named
-        selections, raw-plus-decoded flag bits, proxy identity and section
-        boundaries are unchanged by this slice.
+        Two slices are done: typed LOD purposes, and the known/unknown flag-bit
+        split. Winding, normal orientation, tangent handedness, source origin and
+        centre-of-gravity relationship are still not stated anywhere;
+        LODLevel::sourceWinding remains a recorded assumption ending in
+        _ASSUMED, unconfirmed by any render. Weighted named selections, proxy
+        identity and section boundaries are unchanged.
+      - >-
+        VertexFlags::UserMask (0xFF0000) overlaps LightMask (0xF0000), so the
+        per-vertex lighting bits are also inside the user range. That comes from
+        data3d.h. It is recorded and pinned by test, not resolved -- deciding
+        which reading is right needs content evidence this build does not have.
+      - >-
+        HasUnknownBits reports; nothing calls it yet. No loader logs unnamed bits
+        and no conformance report counts them, so the capability exists but the
+        corpus has not actually been surveyed for bits this build cannot name.
       - >-
         The three copies of the sentinel table in the shape path (LevelName, the
         special-LOD index assignment, and ResolGeometryOnly) now delegate to the
@@ -1598,7 +1607,9 @@ tickets:
     supersedes: []
     evidence:
       - engine/Poseidon/World/Model/LodPurpose.hpp
+      - engine/Poseidon/World/Model/ModelFlags.hpp
       - tests/unit/engine/Poseidon/World/Model/test_lod_purpose.cpp
+      - tests/unit/engine/Poseidon/World/Model/test_flag_bit_preservation.cpp
       - docs/roadmap/evidence/ast018-lodpurpose-training-capture.png
       - docs/roadmap/evidence/ast018-lodpurpose-training-capture.json
   - id: AST-019
