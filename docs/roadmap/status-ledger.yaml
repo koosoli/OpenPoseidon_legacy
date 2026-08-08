@@ -1505,30 +1505,74 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-014]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+        symbol: Poseidon::Asset::Material::TranslateMaterial
+    test_ids: [mat-030]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        SUPERMATERIAL: PARTIAL. Only the Super family has a schema. 1,222 materials
+        across 22 other families (NormalMapMacroASSpecularDIMap 195,
+        NormalMapSpecularDIMap 191, Normal 186, Detail 90, Skin 77, ...) bind
+        nothing and report every stage as unmapped, which is deliberate -- guessing
+        an unregistered family's stages is what the roadmap forbids.
+      - >-
+        No value is reinterpreted. SMDI lands in SpecularDetail and stays SMDI;
+        converting it to roughness is MAT-020's decision and needs its own
+        evidence. Parallax/NOPX has no slot because Super does not use one.
+      - >-
+        Nothing consumes MaterialIR yet -- no renderer path reads it, so no
+        material has been drawn through this mapping.
+    fallback: >-
+      An unknown shader family leaves every slot empty rather than binding by
+      guesswork, and the AST-014 source IR still carries everything the material
+      declared, so nothing is lost by the schema declining to translate.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. The stage->slot table was measured
+      across all 2,853 Super materials in the corpora rather than assumed. The
+      corpus carries two independent witnesses: a procedural stage names its own
+      role in the texture string (`...,DT)`), and a file texture carries a suffix.
+      They agree, giving Stage1 NormalMap ~99%, Stage2 Detail ~96%, Stage3 Macro
+      ~93%, Stage4 AmbientShadow ~90%, Stage5 SpecularDetail ~99%, Stage6 Fresnel
+      ~99%, Stage7 Environment (2,529 of 2,844 are ca\data\env_land_co.tga).
+
+      Re-checked against the corpus after implementation: of 12,110 bindings that
+      have a filename to compare, the suffix corroborates the slot in 9,055.
+      Every disagreement is explained rather than waved past. 2,821 are Stage7,
+      whose environment maps are named `_co` -- the systematic case that proves the
+      point of the design, since a suffix-driven classifier calls all 2,821 a base
+      colour. 225 more are `_ca` colour maps reused in Detail/Macro slots, which is
+      legitimate authoring. Excluding the Stage7 systematic, disagreement is 234 of
+      9,289 (2.5%). 9 Catch2 assertions... 7 cases, 37 assertions under [mat-030];
+      full suite green apart from the 6 failures pre-existing at HEAD.
+
+      NOT checked: nothing was rendered and no material was drawn, so no claim is
+      made that a translated Super material looks correct -- only that stages land
+      in the slots the corpus says they occupy. The suffix agreement rate measures
+      self-consistency between two descriptions of the same file, not correctness
+      against an authored reference.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+      - engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
   - id: CLD-015
     overlay: COMPAT-C1-EXEC-001
     is_example: false
