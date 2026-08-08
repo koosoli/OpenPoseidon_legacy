@@ -12,6 +12,8 @@
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include "../../../../test_fixtures.hpp"
 #include <cstring>
+#include <cstdlib>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -140,4 +142,20 @@ TEST_CASE("ODOL 73 preamble reads its distinct ModelInfo prefix", "[p3d][odol][a
     const auto preamble = P3D::ReadOdol73Preamble(reader);
     REQUIRE(preamble.appId == 107410); REQUIRE(preamble.resolutions == std::vector<float>{1.0f, 10000.0f});
     REQUIRE(preamble.special == 512); REQUIRE(preamble.aimingCenter.z == 3.0f); REQUIRE(preamble.bboxMin.x == -1.0f);
+}
+
+TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d][odol][ast-012b][corpus]")
+{
+    const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
+    if (!path || !*path)
+        SKIP("set POSEIDON_ODOL73_FIXTURE to the extracted AST-012B fixture");
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    REQUIRE(file.good());
+    const auto size = file.tellg(); file.seekg(0);
+    std::vector<char> bytes(static_cast<size_t>(size)); file.read(bytes.data(), size);
+    QIStream stream(bytes.data(), static_cast<int>(bytes.size())); Poseidon::Asset::Formats::BinaryReader reader(stream);
+    const auto preamble = P3D::ReadOdol73Preamble(reader);
+    REQUIRE(preamble.appId == 107410);
+    REQUIRE(preamble.resolutions.size() == 2);
+    REQUIRE(preamble.resolutions[0] == 1.0f);
 }
