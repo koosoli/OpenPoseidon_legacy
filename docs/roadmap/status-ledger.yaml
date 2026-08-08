@@ -643,18 +643,26 @@ tickets:
     depends_on: []
     blocked_by: [AST-007]
     blocks: []
-    implementation_commits: []
+    implementation_commits: [64774ea, 5ff7bc0, 316f97d, fc344a3, c5f22d1, 5a0cf0d, 6d57c76, ffc0162, e167752, 2372f75, 8220873, 05f30c1, ccce39b]
     production_call_sites: []
-    test_ids: []
+    test_ids: [ast-012b-odol73-fixture]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
-    known_failures: []
+    known_failures:
+      - >-
+        The selected ODOL 73 body is parsed through its static material,
+        polygon-prefix and section slices only. Point/vertex mapping, positions,
+        complete polygon layout and conversion to common Model IR remain
+        unimplemented; ODOLLoader therefore continues to reject revision 73.
     fallback: null
     reviewer: null
     reviewer_method: null
     supersedes: []
-    evidence: []
+    evidence:
+      - docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
+      - engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
+      - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
   - id: AST-011
     overlay: COMPAT-C1-EXEC-001
     is_example: false
