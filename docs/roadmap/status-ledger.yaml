@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: 62100e37a4c137afa85f26b925ce4503248dac1bd381ea41d66b34f9d38aac3f
+    evidence_hash: e8e19cdda80b3bec36859b8af0d42eef4edc97895892ef8c0bfc1bb210d025bf
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -775,7 +775,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 4f1371fc72c6704f5b38d3c99a3640ea87437ad9ff75a4cac512db1993a7cf9e
+    evidence_hash: fed209690c15f2a7424e0fcb13f6642c768926ad9bad1d9ab515482c61dcffe6
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -849,7 +849,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: 4f1371fc72c6704f5b38d3c99a3640ea87437ad9ff75a4cac512db1993a7cf9e
+    evidence_hash: fed209690c15f2a7424e0fcb13f6642c768926ad9bad1d9ab515482c61dcffe6
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1017,7 +1017,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: a2fbe213ebc4a8b5d84dd94bef424618eee7f3b4e4f778fdb25b2795b155d843
+    evidence_hash: 5836ae34a7b66104e3f4943a99253857c0a57d82858387242ad956c1325345c7
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1098,13 +1098,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 196531a
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [196531a]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
         symbol: Poseidon::Asset::Material::ParseRvMaterial
@@ -1114,7 +1114,7 @@ tickets:
         symbol: Preproc::Process
     test_ids: [ast-014]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: a942562e15a59c3061f50a2610f4b399b5e046af97a959399eccb29093f1acff
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1189,7 +1189,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: 12dfe1939cfb100efc2e40db9caec51e924df69f7575d8b3919b21f579669a40
+    evidence_hash: 4dc7314915ac254c1c93760173e7f2c91d547690dfa571fee9df243ea0e1fca9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
