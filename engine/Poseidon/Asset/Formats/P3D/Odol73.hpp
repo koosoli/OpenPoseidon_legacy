@@ -3,6 +3,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/Asset/Formats/BISStructures.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 #include <cstdint>
 #include <array>
 #include <cstring>
@@ -80,6 +81,22 @@ inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
             throw std::runtime_error(std::string("ODOL 73 ") + field + " exceeds 4096 bytes");
         value.push_back(c);
     }
+}
+
+// ODOL 73 puts an explicit compression flag before each LZO payload.  The
+// existing decoder is deliberately buffer-based, so discover the exact consumed
+// prefix and restore the stream to that boundary; no following array is swallowed.
+inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t expected)
+{
+    const bool compressed = reader.read<bool>();
+    std::vector<uint8_t> output(expected);
+    if (!compressed) { reader.readBytes(output.data(), expected); return output; }
+    const int start = reader.tell(); const int remaining = reader.remaining();
+    std::vector<uint8_t> source(static_cast<size_t>(remaining)); reader.readBytes(source.data(), source.size());
+    for (size_t size = 1; size <= source.size(); ++size)
+        if (Foundation::Lzo1x::Decompress(source.data(), size, output.data(), output.size()) == expected)
+        { reader.seek(start + static_cast<int>(size)); return output; }
+    throw std::runtime_error("ODOL 73 LZO array did not terminate at the expected size");
 }
 
 inline Odol73Preamble ReadOdol73Preamble(BinaryReader& reader)
