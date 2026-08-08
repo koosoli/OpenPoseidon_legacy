@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include "../../../../test_fixtures.hpp"
 #include <cstring>
@@ -121,4 +122,22 @@ TEST_CASE("Existing OFP/CWA ODOL models still load", "[p3d][odol][ast-012a]")
     REQUIRE(model.sourceFormat == "ODOL");
     REQUIRE(model.sourceVersion == 7);
     REQUIRE_FALSE(model.lodLevels.empty());
+}
+
+TEST_CASE("ODOL 73 preamble reads its distinct ModelInfo prefix", "[p3d][odol][ast-012b]")
+{
+    std::vector<char> data;
+    auto append = [&data](auto value) { const char* p = reinterpret_cast<const char*>(&value); data.insert(data.end(), p, p + sizeof(value)); };
+    data.insert(data.end(), {'O','D','O','L'}); append(uint32_t{73}); append(uint32_t{107410});
+    data.push_back('\0'); append(uint32_t{2}); append(1.0f); append(10000.0f);
+    append(int32_t{512}); append(2.0f); append(3.0f); append(int32_t{4}); append(int32_t{5}); append(int32_t{6});
+    Vector3 aim{1.0f, 2.0f, 3.0f}; data.insert(data.end(), reinterpret_cast<char*>(&aim), reinterpret_cast<char*>(&aim) + sizeof(aim));
+    append(uint32_t{0x11223344}); append(uint32_t{0x55667788}); append(0.5f);
+    Vector3 min{-1.0f, -2.0f, -3.0f}, max{1.0f, 2.0f, 3.0f};
+    data.insert(data.end(), reinterpret_cast<char*>(&min), reinterpret_cast<char*>(&min) + sizeof(min));
+    data.insert(data.end(), reinterpret_cast<char*>(&max), reinterpret_cast<char*>(&max) + sizeof(max));
+    QIStream stream(data.data(), static_cast<int>(data.size())); Poseidon::Asset::Formats::BinaryReader reader(stream);
+    const auto preamble = P3D::ReadOdol73Preamble(reader);
+    REQUIRE(preamble.appId == 107410); REQUIRE(preamble.resolutions == std::vector<float>{1.0f, 10000.0f});
+    REQUIRE(preamble.special == 512); REQUIRE(preamble.aimingCenter.z == 3.0f); REQUIRE(preamble.bboxMin.x == -1.0f);
 }
