@@ -1481,19 +1481,19 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 485ad2a
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [485ad2a]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
         symbol: Poseidon::Asset::Material::TranslateSemantics
     test_ids: [mat-020]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: df334a7625903f663f73b980a2f0f2cccd56effa72e3dda17bf218efb24465ac
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
