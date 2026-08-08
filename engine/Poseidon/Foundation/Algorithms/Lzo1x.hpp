@@ -28,9 +28,15 @@ class Lzo1x
 {
   public:
     // Returns the number of bytes written, or 0 on any malformed input. `dst` is
-    // never written past `dstCapacity`.
-    static size_t Decompress(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstCapacity)
+    // never written past `dstCapacity`.  When `consumed` is supplied it receives
+    // the exact byte position after an LZO end marker (or zero if no complete
+    // marker was encountered).  ODOL stores compressed arrays back-to-back, so
+    // callers must not have to guess where one payload ends.
+    static size_t Decompress(const uint8_t* src, size_t srcSize, uint8_t* dst, size_t dstCapacity,
+                             size_t* consumed = nullptr)
     {
+        if (consumed)
+            *consumed = 0;
         if (!src || !dst || srcSize == 0)
             return 0;
 
@@ -180,7 +186,11 @@ class Lzo1x
                         // A zero distance in this opcode is the end-of-stream
                         // marker, not a self-referencing match.
                         if (base + off == 0)
+                        {
+                            if (consumed)
+                                *consumed = ip;
                             return op;
+                        }
                         const size_t back = base + off + 0x4000;
                         if (back > op)
                             return 0;

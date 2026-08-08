@@ -84,8 +84,8 @@ inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 }
 
 // ODOL 73 puts an explicit compression flag before each LZO payload.  The
-// existing decoder is deliberately buffer-based, so discover the exact consumed
-// prefix and restore the stream to that boundary; no following array is swallowed.
+// decoder reports its explicit LZO end marker, so restore the stream to that
+// boundary; no following array is swallowed.
 inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t expected)
 {
     const bool compressed = reader.read<bool>();
@@ -93,9 +93,9 @@ inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t ex
     if (!compressed) { reader.readBytes(output.data(), expected); return output; }
     const int start = reader.tell(); const int remaining = reader.remaining();
     std::vector<uint8_t> source(static_cast<size_t>(remaining)); reader.readBytes(source.data(), source.size());
-    for (size_t size = 1; size <= source.size(); ++size)
-        if (Foundation::Lzo1x::Decompress(source.data(), size, output.data(), output.size()) == expected)
-        { reader.seek(start + static_cast<int>(size)); return output; }
+    size_t consumed = 0;
+    if (Foundation::Lzo1x::Decompress(source.data(), source.size(), output.data(), output.size(), &consumed) == expected && consumed != 0)
+    { reader.seek(start + static_cast<int>(consumed)); return output; }
     throw std::runtime_error("ODOL 73 LZO array did not terminate at the expected size");
 }
 

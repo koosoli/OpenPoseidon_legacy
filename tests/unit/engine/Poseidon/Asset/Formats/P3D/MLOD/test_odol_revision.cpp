@@ -144,6 +144,30 @@ TEST_CASE("ODOL 73 preamble reads its distinct ModelInfo prefix", "[p3d][odol][a
     REQUIRE(preamble.special == 512); REQUIRE(preamble.aimingCenter.z == 3.0f); REQUIRE(preamble.bboxMin.x == -1.0f);
 }
 
+TEST_CASE("ODOL 73 uncompressed arrays preserve the next field", "[p3d][odol][ast-012b]")
+{
+    // A v73 compressed-array flag is per payload.  The uncompressed branch is
+    // still required to consume exactly its bytes because another payload follows.
+    const std::vector<char> data{0, 'a', 'b', 'c', 0x7f};
+    QIStream stream(data.data(), static_cast<int>(data.size()));
+    Poseidon::Asset::Formats::BinaryReader reader(stream);
+    const auto bytes = P3D::ReadOdol73Compressed(reader, 3);
+    REQUIRE(bytes == std::vector<uint8_t>{'a', 'b', 'c'});
+    REQUIRE(reader.read<uint8_t>() == 0x7f);
+}
+
+TEST_CASE("ODOL 73 LZO arrays stop at their explicit end marker", "[p3d][odol][ast-012b]")
+{
+    // LZO: first literal run of three bytes, followed by the 17/0/0 end marker.
+    // The sentinel models the compression flag of the following ODOL payload.
+    const std::vector<char> data{1, 20, 'a', 'b', 'c', 17, 0, 0, 0x7f};
+    QIStream stream(data.data(), static_cast<int>(data.size()));
+    Poseidon::Asset::Formats::BinaryReader reader(stream);
+    const auto bytes = P3D::ReadOdol73Compressed(reader, 3);
+    REQUIRE(bytes == std::vector<uint8_t>{'a', 'b', 'c'});
+    REQUIRE(reader.read<uint8_t>() == 0x7f);
+}
+
 TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d][odol][ast-012b][corpus]")
 {
     const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
