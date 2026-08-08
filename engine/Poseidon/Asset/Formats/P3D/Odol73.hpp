@@ -371,6 +371,16 @@ inline void SkipOdol73RestData(BinaryReader& reader, const Odol73StaticPreRestDa
     reader.seek(static_cast<int>(target));
 }
 
+inline uint8_t ReadOdol73TrailingLodByte(BinaryReader& reader, uint32_t end)
+{
+    if (reader.tell() != static_cast<int>(end) - 1)
+        throw std::runtime_error("ODOL 73 trailing LOD field is not at the declared boundary");
+    const uint8_t value = reader.read<uint8_t>();
+    if (reader.tell() != static_cast<int>(end))
+        throw std::runtime_error("ODOL 73 trailing LOD field did not close the declared range");
+    return value;
+}
+
 inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMaterial& raw)
 {
     Material::RvMaterialSource source;
