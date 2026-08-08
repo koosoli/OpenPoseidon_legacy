@@ -115,13 +115,26 @@ inline std::vector<Section> generateSections(const std::vector<Triangle>& triang
     return sections;
 }
 
+// AST-018: the proxy frame, built the way the engine's own proxy code builds it.
+//
+// This previously took the three selection vertices in index order and made
+// v1-v0 the aside axis. Both halves were wrong. MLOD selection membership is
+// gathered by iterating point indices, so the order the three vertices arrive in
+// is an artefact of point numbering, not of the triangle -- and LODShape's proxy
+// scan (ShapeLOD.cpp) first sorts the points so that p0p1 is the shortest edge
+// and p0p2 the second shortest, precisely to make the frame independent of that
+// order. It then builds the frame with p1-p0 as the *direction* and p2-p0 as up,
+// not as aside.
+//
+// A proxy transform that disagrees with the engine's puts every attached object
+// -- weapons, crew, cargo -- at the wrong orientation, so this follows the
+// engine step for step rather than deriving something equivalent-looking.
 inline Matrix4x3 computeProxyTransform(
     const std::vector<Vertex>& vertices,
     const NamedSelection& selection
 ) {
     Matrix4x3 transform;
 
-    // Proxy selection must have exactly 3 vertices
     if (selection.vertexIndices.size() != 3) {
         return transform;  // identity
     }
@@ -129,54 +142,63 @@ inline Matrix4x3 computeProxyTransform(
     uint32_t i0 = selection.vertexIndices[0];
     uint32_t i1 = selection.vertexIndices[1];
     uint32_t i2 = selection.vertexIndices[2];
-    
+
     if (i0 >= vertices.size() || i1 >= vertices.size() || i2 >= vertices.size()) {
         return transform;  // identity
     }
 
-    const Vector3& v0 = vertices[i0].position;
-    const Vector3& v1 = vertices[i1].position;
-    const Vector3& v2 = vertices[i2].position;
-    
-    // Build local coordinate system from the proxy triangle
-    Vector3 right = {v1.x - v0.x, v1.y - v0.y, v1.z - v0.z};
-    float rightLen = std::sqrt(right.x * right.x + right.y * right.y + right.z * right.z);
-    if (rightLen > 0.0001f) {
-        right.x /= rightLen;
-        right.y /= rightLen;
-        right.z /= rightLen;
-    } else {
-        right = {1, 0, 0};
-    }
-    
-    Vector3 edge1 = {v1.x - v0.x, v1.y - v0.y, v1.z - v0.z};
-    Vector3 edge2 = {v2.x - v0.x, v2.y - v0.y, v2.z - v0.z};
-    Vector3 forward = {
-        edge1.y * edge2.z - edge1.z * edge2.y,
-        edge1.z * edge2.x - edge1.x * edge2.z,
-        edge1.x * edge2.y - edge1.y * edge2.x
+    const Vector3* p0 = &vertices[i0].position;
+    const Vector3* p1 = &vertices[i1].position;
+    const Vector3* p2 = &vertices[i2].position;
+
+    auto distance2 = [](const Vector3* a, const Vector3* b) {
+        const float dx = a->x - b->x, dy = a->y - b->y, dz = a->z - b->z;
+        return dx * dx + dy * dy + dz * dz;
     };
-    float forwardLen = std::sqrt(forward.x * forward.x + forward.y * forward.y + forward.z * forward.z);
-    if (forwardLen > 0.0001f) {
-        forward.x /= forwardLen;
-        forward.y /= forwardLen;
-        forward.z /= forwardLen;
-    } else {
-        forward = {0, 0, 1};
-    }
-    
-    Vector3 up = {
-        forward.y * right.z - forward.z * right.y,
-        forward.z * right.x - forward.x * right.z,
-        forward.x * right.y - forward.y * right.x
+    float d01 = distance2(p0, p1), d02 = distance2(p0, p2), d12 = distance2(p1, p2);
+    // Canonical ordering, identical to LODShape's: p0p1 shortest, p0p2 second.
+    if (d01 > d02) { std::swap(p1, p2); std::swap(d01, d02); }
+    if (d01 > d12) { std::swap(p0, p2); std::swap(d01, d12); }
+    if (d02 > d12) { std::swap(p0, p1); std::swap(d02, d12); }
+
+    auto sub = [](const Vector3* a, const Vector3* b) {
+        return Vector3(a->x - b->x, a->y - b->y, a->z - b->z);
     };
-    
+    auto length = [](const Vector3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); };
+    auto cross = [](const Vector3& a, const Vector3& b) {
+        return Vector3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x);
+    };
+
+    // Matrix3P::SetDirectionAndUp: normalise the direction, project up into the
+    // plane perpendicular to it, then aside = up x direction.
+    Vector3 direction = sub(p1, p0);
+    float directionLength = length(direction);
+    if (directionLength <= 1e-6f) {
+        return transform;  // degenerate proxy triangle; identity rather than a guess
+    }
+    direction = Vector3(direction.x / directionLength, direction.y / directionLength,
+                        direction.z / directionLength);
+
+    Vector3 up = sub(p2, p0);
+    const float projection = up.x * direction.x + up.y * direction.y + up.z * direction.z;
+    up = Vector3(up.x - direction.x * projection, up.y - direction.y * projection,
+                 up.z - direction.z * projection);
+    float upLength = length(up);
+    if (upLength <= 1e-6f) {
+        return transform;  // the three points are colinear
+    }
+    up = Vector3(up.x / upLength, up.y / upLength, up.z / upLength);
+
+    const Vector3 aside = cross(up, direction);
+
+    // Row 0 aside, row 1 up, row 2 direction, last column the position -- the
+    // layout ShapeAdapter reads back.
     transform.Set(
-        right.x, right.y, right.z, v0.x,
-        up.x, up.y, up.z, v0.y,
-        forward.x, forward.y, forward.z, v0.z
+        aside.x,     aside.y,     aside.z,     p0->x,
+        up.x,        up.y,        up.z,        p0->y,
+        direction.x, direction.y, direction.z, p0->z
     );
-    
+
     return transform;
 }
 
@@ -191,7 +213,17 @@ inline std::vector<Proxy> generateProxiesFromSelections(
         
         if (sel.name.find("proxy:") == 0 && sel.vertexIndices.size() == 3) {
             Proxy proxy;
-            proxy.name = sel.name;
+            // "proxy:<model>.<id>" -- the prefix and the id are not part of the
+            // model name. ShapeAdapter hands Proxy::name straight to
+            // NewProxyObject, so leaving either attached would look up a shape
+            // that does not exist. Same split as LODShape's proxy scan.
+            std::string body = sel.name.substr(6);
+            const size_t dot = body.find('.');
+            if (dot != std::string::npos) {
+                proxy.id = std::atoi(body.c_str() + dot + 1);
+                body.resize(dot);
+            }
+            proxy.name = body;
             proxy.selectionIndex = static_cast<uint32_t>(i);
             proxy.transform = computeProxyTransform(vertices, sel);
             proxies.push_back(proxy);

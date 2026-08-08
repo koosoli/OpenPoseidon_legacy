@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Model/Model.hpp>
+#include <Poseidon/World/Model/ModelComputation.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODStructures.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/Core/Data3D.h>
@@ -104,6 +105,13 @@ class MLODLoader
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
+        // AST-018: MLOD encodes proxies as three-vertex "proxy:" selections.
+        // Extraction existed but nothing called it, so every MLOD model reached
+        // the IR with no proxies at all -- no weapons, no crew, no cargo. Must
+        // run after the vertex sort, which is what fixes the indices the
+        // selections refer to.
+        lod.mesh.proxies = Poseidon::Model::ModelComputation::generateProxiesFromSelections(
+            lod.mesh.vertices, lod.mesh.selections);
         lod.resolution     = taggData.resolution;
         lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.sourceEncoding = "SP3X";
@@ -150,6 +158,13 @@ class MLODLoader
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
+        // AST-018: MLOD encodes proxies as three-vertex "proxy:" selections.
+        // Extraction existed but nothing called it, so every MLOD model reached
+        // the IR with no proxies at all -- no weapons, no crew, no cargo. Must
+        // run after the vertex sort, which is what fixes the indices the
+        // selections refer to.
+        lod.mesh.proxies = Poseidon::Model::ModelComputation::generateProxiesFromSelections(
+            lod.mesh.vertices, lod.mesh.selections);
         lod.resolution     = taggData.resolution;
         lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.uvSetCount     = taggData.uvSetCount;

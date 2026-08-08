@@ -9,6 +9,7 @@
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/GeometryBasis.hpp>
+#include <Poseidon/World/Model/ModelComputation.hpp>
 #include <Poseidon/World/Model/ModelFlags.hpp>
 #include "../../test_fixtures.hpp"
 #include <algorithm>
@@ -273,4 +274,81 @@ TEST_CASE("MLOD loaders state their basis with honest confidences", "[model][bas
         // Nothing has established where the centre of mass sits.
         REQUIRE(lod.basis.centreOfMassConfidence == BasisConfidence::Unknown);
     }
+}
+
+// AST-018: proxy identity, transform and selection.
+TEST_CASE("MLOD proxies reach the IR with identity and frame", "[model][proxy][ast-018]")
+{
+    // Extraction existed but was never called, so MLOD models arrived with no
+    // proxies at all -- nothing attached, no weapons, no crew.
+    const char* candidates[] = {"p3d/simple_proxy.p3d", "p3d/proxy_structure.p3d", "p3d/crew_proxy.p3d"};
+    size_t proxiesSeen = 0;
+    for (const char* candidate : candidates)
+    {
+        Poseidon::Model::Model model;
+        try { model = Poseidon::Asset::Formats::MLODLoader::load(GET_FIXTURE(candidate)); }
+        catch (const std::exception&) { continue; }
+        for (const auto& lod : model.lodLevels)
+            for (const auto& proxy : lod.mesh.proxies)
+            {
+                ++proxiesSeen;
+                CAPTURE(candidate, proxy.name, proxy.id);
+                // The prefix and the ".NN" id are not part of the model name;
+                // ShapeAdapter feeds this string straight to NewProxyObject.
+                REQUIRE(proxy.name.find("proxy:") == std::string::npos);
+                REQUIRE(proxy.name.find('.') == std::string::npos);
+                REQUIRE_FALSE(proxy.name.empty());
+                // The selection it came from has to stay referenced.
+                REQUIRE(proxy.selectionIndex < lod.mesh.selections.size());
+                REQUIRE(lod.mesh.selections[proxy.selectionIndex].name.find("proxy:") == 0);
+
+                // An orthonormal frame, or the attached object is skewed.
+                const auto& m = proxy.transform.m;
+                for (int row = 0; row < 3; ++row)
+                {
+                    const float length = std::sqrt(m[row][0] * m[row][0] + m[row][1] * m[row][1] +
+                                                   m[row][2] * m[row][2]);
+                    CAPTURE(row, length);
+                    REQUIRE(length > 0.99f);
+                    REQUIRE(length < 1.01f);
+                }
+                for (int a = 0; a < 3; ++a)
+                    for (int b = a + 1; b < 3; ++b)
+                    {
+                        const float dot = m[a][0] * m[b][0] + m[a][1] * m[b][1] + m[a][2] * m[b][2];
+                        CAPTURE(a, b, dot);
+                        REQUIRE(std::abs(dot) < 1e-3f);
+                    }
+            }
+    }
+    REQUIRE(proxiesSeen > 0);
+}
+
+TEST_CASE("The proxy frame does not depend on selection vertex order", "[model][proxy][ast-018]")
+{
+    // Why the canonical ordering exists. MLOD gathers selection membership by
+    // iterating point indices, so the order the three vertices arrive in is an
+    // artefact of point numbering. Permuting them must not move the frame.
+    std::vector<Vertex> vertices(3);
+    vertices[0].position = Poseidon::Model::Vector3(1.0f, 2.0f, 3.0f);          // apex
+    vertices[1].position = Poseidon::Model::Vector3(1.5f, 2.0f, 3.0f);          // nearest: direction
+    vertices[2].position = Poseidon::Model::Vector3(1.0f, 2.0f, 4.0f);          // second: up
+    const uint32_t order[6][3] = {{0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}};
+
+    Matrix4x3 reference;
+    for (int permutation = 0; permutation < 6; ++permutation)
+    {
+        NamedSelection selection("proxy:test.01");
+        for (int i = 0; i < 3; ++i) selection.vertexIndices.push_back(order[permutation][i]);
+        const auto transform = ModelComputation::computeProxyTransform(vertices, selection);
+        if (permutation == 0) { reference = transform; continue; }
+        CAPTURE(permutation);
+        for (int row = 0; row < 3; ++row)
+            for (int column = 0; column < 4; ++column)
+                REQUIRE(std::abs(transform.m[row][column] - reference.m[row][column]) < 1e-4f);
+    }
+    // The apex is the origin of the frame, whatever order it arrived in.
+    REQUIRE(reference.m[0][3] == 1.0f);
+    REQUIRE(reference.m[1][3] == 2.0f);
+    REQUIRE(reference.m[2][3] == 3.0f);
 }

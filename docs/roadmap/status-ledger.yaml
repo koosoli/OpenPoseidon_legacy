@@ -1537,7 +1537,7 @@ tickets:
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
     test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights,
-               ast-018-odol73-winding, ast-018-geometry-basis]
+               ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
@@ -1545,8 +1545,9 @@ tickets:
       - >-
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
         split, preservation of the MLOD named-selection weight byte, a measured
-        winding for the ODOL 73 path, and a typed source-geometry basis with a
-        confidence per axis. Proxy identity and section boundaries are unchanged.
+        winding for the ODOL 73 path, a typed source-geometry basis with a
+        confidence per axis, and MLOD proxy extraction. Section boundaries are
+        unchanged.
       - >-
         The ODOL 73 winding is measured only relative to the model's own stored
         normals: all 16 faces of the reference fixture wind clockwise about them,
@@ -1563,6 +1564,21 @@ tickets:
         byte's actual scale is not established: the BIS reference carries it
         undecoded too, so there was no second implementation to check against.
         Decoding it on a guess would silently reweight every skinned MLOD model.
+      - >-
+        MLOD proxy transforms are built by following the engine's own proxy scan
+        (LODShape, ShapeLOD.cpp) step for step, and are pinned for orthonormality
+        and independence from selection vertex order. They have NOT been compared
+        against a reference transform from real content, and no MLOD model with
+        proxies has been rendered -- retail CWA content is ODOL, so the training
+        capture does not exercise this path at all. Before this change MLOD
+        models reached the IR with no proxies whatsoever, so the change cannot
+        regress attachment placement, only start doing it.
+      - >-
+        Section boundaries remain ambiguous across paths:
+        Section::startTriangle/triangleCount hold face-stream byte offsets on the
+        ODOL v7 path and face-data offsets on the ODOL 73 path, neither of which
+        is a triangle index. A consumer reading them as triangle indices is wrong
+        on both. Left as-is because ShapeAdapter uses FindSections instead.
       - >-
         VertexFlags::UserMask (0xFF0000) overlaps LightMask (0xF0000), so the
         per-vertex lighting bits are also inside the user range. That comes from
@@ -1668,6 +1684,7 @@ tickets:
     evidence:
       - engine/Poseidon/World/Model/LodPurpose.hpp
       - engine/Poseidon/World/Model/GeometryBasis.hpp
+      - engine/Poseidon/World/Model/ModelComputation.hpp
       - engine/Poseidon/World/Model/ModelFlags.hpp
       - tests/unit/engine/Poseidon/World/Model/test_lod_purpose.cpp
       - tests/unit/engine/Poseidon/World/Model/test_flag_bit_preservation.cpp
