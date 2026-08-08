@@ -1061,12 +1061,15 @@ tickets:
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
     scheduling_state: ACTIVE
-    status: PLANNED
-    outcome: null
+    # VALIDATED, not INTEGRATED: revision 73 reaches the common Model IR through
+    # the production loader entry point and is byte-verified against the selected
+    # fixture, but only one static shape reads and nothing has been rendered.
+    status: VALIDATED
+    outcome: ADAPTED
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 4f5b988
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [AST-012A]
