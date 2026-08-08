@@ -3,6 +3,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/Asset/Formats/BISStructures.hpp>
 #include <cstdint>
+#include <array>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -62,6 +63,8 @@ struct Odol73EmbeddedMaterial
     uint32_t vertexShader = 0;
     uint32_t renderFlags = 0;
     std::vector<std::string> stageTextures;
+    struct TexGen { uint32_t uvSource = 0; std::array<float, 16> matrix{}; };
+    std::vector<TexGen> texGens;
 };
 
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
@@ -218,8 +221,10 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         }
         for (uint32_t texGen = 0; texGen < texGens; ++texGen)
         {
-            (void)reader.read<uint32_t>();
-            for (int element = 0; element < 16; ++element) (void)reader.read<float>();
+            Odol73EmbeddedMaterial::TexGen transform;
+            transform.uvSource = reader.read<uint32_t>();
+            for (float& element : transform.matrix) element = reader.read<float>();
+            material.texGens.push_back(transform);
         }
         if (material.version >= 10)
         {
