@@ -54,6 +54,16 @@ struct Odol73StaticLodHeader
     std::vector<std::string> textures;
 };
 
+struct Odol73EmbeddedMaterial
+{
+    std::string name;
+    uint32_t version = 0;
+    uint32_t pixelShader = 0;
+    uint32_t vertexShader = 0;
+    uint32_t renderFlags = 0;
+    std::vector<std::string> stageTextures;
+};
+
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 {
     std::string value;
@@ -177,6 +187,48 @@ inline Odol73StaticLodHeader ReadOdol73StaticLodHeader(BinaryReader& reader, uin
     if (reader.tell() > static_cast<int>(end))
         throw std::runtime_error("ODOL 73 LOD header exceeds its declared range");
     return result;
+}
+
+inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryReader& reader)
+{
+    const uint32_t count = reader.read<uint32_t>();
+    if (count > 64) throw std::runtime_error("ODOL 73 LOD has too many embedded materials");
+    std::vector<Odol73EmbeddedMaterial> materials; materials.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        Odol73EmbeddedMaterial material;
+        material.name = ReadBoundedAsciiz(reader, "embedded material name");
+        material.version = reader.read<uint32_t>();
+        if (material.version < 6 || material.version > 32)
+            throw std::runtime_error("ODOL 73 embedded material revision is unsupported");
+        for (int color = 0; color < 6 * 4; ++color) (void)reader.read<float>();
+        (void)reader.read<float>(); // specular power
+        material.pixelShader = reader.read<uint32_t>(); material.vertexShader = reader.read<uint32_t>();
+        (void)reader.read<uint32_t>(); (void)reader.read<uint32_t>(); // light + fog
+        (void)ReadBoundedAsciiz(reader, "embedded material surface");
+        (void)reader.read<uint32_t>(); material.renderFlags = reader.read<uint32_t>();
+        const uint32_t stages = material.version > 6 ? reader.read<uint32_t>() : 0;
+        const uint32_t texGens = material.version > 8 ? reader.read<uint32_t>() : stages;
+        if (stages > 32 || texGens > 32) throw std::runtime_error("ODOL 73 material stage count is invalid");
+        for (uint32_t stage = 0; stage < stages; ++stage)
+        {
+            (void)reader.read<uint32_t>(); // texture filter
+            material.stageTextures.push_back(ReadBoundedAsciiz(reader, "embedded stage texture"));
+            (void)reader.read<uint32_t>(); (void)reader.read<bool>();
+        }
+        for (uint32_t texGen = 0; texGen < texGens; ++texGen)
+        {
+            (void)reader.read<uint32_t>();
+            for (int element = 0; element < 16; ++element) (void)reader.read<float>();
+        }
+        if (material.version >= 10)
+        {
+            (void)reader.read<uint32_t>(); (void)ReadBoundedAsciiz(reader, "thermal stage texture");
+            (void)reader.read<uint32_t>(); (void)reader.read<bool>();
+        }
+        materials.push_back(std::move(material));
+    }
+    return materials;
 }
 
 } // namespace Poseidon::Asset::Formats::P3D

@@ -164,4 +164,7 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     const auto lod = P3D::ReadOdol73StaticLodHeader(reader, directory.starts[0], directory.ends[0]);
     REQUIRE(lod.vertexCount == 48);
     REQUIRE(lod.textures == std::vector<std::string>{"a3\\3den\\objects\\data\\area_ca.paa"});
+    const auto materials = P3D::ReadOdol73EmbeddedMaterials(reader);
+    REQUIRE(materials.size() == 1);
+    REQUIRE(materials[0].name == "a3\\3den\\objects\\data\\area.rvmat");
 }
