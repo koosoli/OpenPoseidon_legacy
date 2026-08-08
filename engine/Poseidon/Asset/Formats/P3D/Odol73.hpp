@@ -90,6 +90,15 @@ struct Odol73StaticSection
     int32_t materialIndex = 0;
 };
 
+struct Odol73StaticPreRestData
+{
+    int32_t colorTop = 0;
+    int32_t color = 0;
+    int32_t special = 0;
+    bool vertexBoneRefIsSimple = false;
+    uint32_t restDataSize = 0;
+};
+
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 {
     std::string value;
@@ -336,6 +345,21 @@ inline std::vector<Odol73StaticSection> ReadOdol73StaticSections(BinaryReader& r
         if (reader.tell() > static_cast<int>(end)) throw std::runtime_error("ODOL 73 section exceeds LOD range");
         result.push_back(section);
     }
+    return result;
+}
+
+inline Odol73StaticPreRestData ReadOdol73StaticPreRestData(BinaryReader& reader, uint32_t end)
+{
+    // The selected static fixture has no named selections, properties or frames.
+    // Do not skip a non-empty array: each has its own later-ODOL layout.
+    for (const char* field : {"named selections", "named properties", "frames"})
+        if (reader.read<uint32_t>() != 0)
+            throw std::runtime_error(std::string("ODOL 73 ") + field + " are not implemented");
+    Odol73StaticPreRestData result;
+    result.colorTop = reader.read<int32_t>(); result.color = reader.read<int32_t>();
+    result.special = reader.read<int32_t>(); result.vertexBoneRefIsSimple = reader.read<bool>();
+    result.restDataSize = reader.read<uint32_t>();
+    if (reader.tell() > static_cast<int>(end)) throw std::runtime_error("ODOL 73 pre-rest data exceeds LOD range");
     return result;
 }
 
