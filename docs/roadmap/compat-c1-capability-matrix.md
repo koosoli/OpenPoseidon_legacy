@@ -49,6 +49,8 @@ corpora*, not about a game.
 | `VIRTUAL_PATH_CANONICAL` | `VALIDATED` | 12,680 references resolved across 512 PBO prefixes, 0 collisions | AST-015 | `8a990e0` |
 | `DERIVED_ASSET_KEY` | `VALIDATED` | content+version+options, order-independent | AST-020 | `040fc9f` |
 | `DERIVED_ASSET_STORE` | `UNSUPPORTED` | identity only; nothing written or reloaded | AST-020 | `040fc9f` |
+| `CAPABILITY_MATRIX` | `VALIDATED` | 28 claims across 10 tickets, each carrying its own denominator | AST-021 | `682e3ee` |
+| `GOLDEN_SEMANTIC_MANIFEST` | `UNSUPPORTED` | no derived artefact exists to snapshot; blocked on AST-020's store half | AST-021 | `682e3ee` |
 | `AS_CHANNEL_SEMANTICS` | `VALIDATED` | n=25: R/B/A constant in 25/25; term in G | MAT-020 | `485ad2a` |
 | `NORMAL_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R constant 0 in 40/40; X in A, Y in G | MAT-020 | `485ad2a` |
 | `SMDI_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R and A constant in 40/40; G specular, B gloss | MAT-020 | `485ad2a` |

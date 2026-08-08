@@ -80,7 +80,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-ledger-validation]
     benchmark_artifacts: []
-    evidence_hash: a4044e251f4d46ddf4651dc119e915ecfc83b325d7ba8ea7a81432c3a81c183d
+    evidence_hash: bf1e04cfdd177bae985354981f6dc4f34cafee590e167aca4c1998ebc7b3d9dd
     decision_record: null
     known_failures:
       - No reviewed activation commit exists; the overlay remains PREPARED.
@@ -1559,13 +1559,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 682e3ee
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [682e3ee]
     production_call_sites:
       - file: scripts/generate_compat_capability_matrix.py
         symbol: generate_compat_capability_matrix.main
@@ -1573,7 +1573,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: abd311a020c83519811b6ac84d27f957737d0ebe088da52b38bbcd5486d184a6
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
