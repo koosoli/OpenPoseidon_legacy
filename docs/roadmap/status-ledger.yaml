@@ -573,17 +573,17 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: a72fbae
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [a72fbae]
     production_call_sites: []
     test_ids: [ast-007-fixture-index]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: a24ce6548b7f7be7447035b4736c83b12e1d6d0944bb12bfdd14c2ce61037ba5
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -691,13 +691,13 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: a72fbae
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: [AST-007]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [a72fbae]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
         symbol: MLODLoader::loadLOD
@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 7d4604313077895d53dca1a6ea5f1b23d226859e48a172c08f95613a1d44f020
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
