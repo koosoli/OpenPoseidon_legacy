@@ -1517,18 +1517,22 @@ tickets:
     execution_mode: IMPLEMENT
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
     scheduling_state: ACTIVE
-    status: PLANNED
-    outcome: null
+    # VALIDATED, not INTEGRATED: every axis the ticket names is now
+    # represented and unit-verified, but several are represented as Unknown
+    # rather than established, and none of it has been confirmed by render.
+    status: VALIDATED
+    outcome: ADAPTED
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 84d00a0
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [d5519c7, e37aecb, 083906a, e56591d, ccb91f0, 0f0be52,
+                             72ad61c, 770999e, 276b044, 84d00a0]
     production_call_sites:
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertLOD
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertOdol73
