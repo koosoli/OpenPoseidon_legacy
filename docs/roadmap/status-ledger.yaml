@@ -1663,6 +1663,20 @@ tickets:
       classifies geometry-only, the visual range still does not, and the single
       deliberate difference (the gunner fire-geometry sentinel) is named.
 
+      Owner report, 2026-08-08: NPC faces appear translucent when riding as a
+      jeep passenger. Investigated and NOT attributed to this work. The slot
+      assignment is the only mechanism here that could cause it -- the code after
+      it does _lods[_geometry]->OrSpecial(IsAlpha | IsAlphaFog | IsColored), so a
+      visual LOD in a geometry slot would render translucent -- and a test now
+      runs the old macro chain and the new switch side by side over every
+      sentinel (1e15 x 1..20, plus 1e13 and its float-rounded form) and the whole
+      ordinary and crewed-view range, requiring agreement and requiring that no
+      visual resolution is ever assigned a slot. Separately, the soldier's head
+      in the training capture is 99.73% pixel-identical before and after the
+      change, with a maximum channel difference of 1. Translucent faces are
+      therefore a pre-existing symptom with a cause elsewhere, most likely alpha
+      handling on head textures; not investigated further under this ticket.
+
       Owner smoke test, 2026-08-08: drove a jeep in the installed game against
       the deployed build, no issues. That exercises the driver view and, since
       the vehicle was moving over terrain, the roadway and land-contact special

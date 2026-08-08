@@ -128,3 +128,77 @@ TEST_CASE("A LOD built from a resolution carries its purpose", "[model][lod][ast
     REQUIRE(Poseidon::Model::LODLevel(1e13f).purpose == LodPurpose::Geometry);
     REQUIRE(Poseidon::Model::LODLevel(100.0f).purpose == LodPurpose::Visual);
 }
+
+// The special-LOD slot assignment in LODShape decides which LOD index lands in
+// _geometry, _memory, _roadway and friends -- and the code immediately after it
+// does _lods[_geometry]->OrSpecial(IsAlpha | IsAlphaFog | IsColored). So a
+// visual LOD wrongly assigned a geometry slot would be made alpha-transparent:
+// the model would render translucent. This reproduces the old macro chain and
+// the new switch side by side and requires them to agree everywhere.
+TEST_CASE("Special-LOD slot assignment is unchanged by the typed table", "[model][lod][ast-018]")
+{
+    enum Slot { None, Geometry, Memory, LandContact, Roadway, Paths, HitPoints,
+                ViewGeom, FireGeom, PilotGeom, GunnerGeom, CommanderGeom, CargoGeom };
+
+    auto isSpec = [](float resolution, double spec) {
+        const double difference = static_cast<double>(resolution) - spec;
+        return (difference < 0 ? -difference : difference) < spec * 1e-3;
+    };
+    // The chain exactly as it was written, in its original order.
+    auto oldSlot = [&](float r) {
+        if (!(r > 900)) return None;
+        if (isSpec(r, 1e13)) return Geometry;
+        if (isSpec(r, 1e15 * 1)) return Memory;
+        if (isSpec(r, 1e15 * 2)) return LandContact;
+        if (isSpec(r, 1e15 * 3)) return Roadway;
+        if (isSpec(r, 1e15 * 4)) return Paths;
+        if (isSpec(r, 1e15 * 5)) return HitPoints;
+        if (isSpec(r, 1e15 * 6)) return ViewGeom;
+        if (isSpec(r, 1e15 * 7)) return FireGeom;
+        if (isSpec(r, 1e15 * 13)) return PilotGeom;
+        if (isSpec(r, 1e15 * 15)) return GunnerGeom;
+        if (isSpec(r, 1e15 * 11)) return CommanderGeom;
+        if (isSpec(r, 1e15 * 8)) return CargoGeom;
+        return None;
+    };
+    auto newSlot = [](float r) {
+        if (!(r > 900)) return None;
+        switch (ClassifyLodResolution(r))
+        {
+            case LodPurpose::Geometry:              return Geometry;
+            case LodPurpose::Memory:                return Memory;
+            case LodPurpose::LandContact:           return LandContact;
+            case LodPurpose::Roadway:               return Roadway;
+            case LodPurpose::Paths:                 return Paths;
+            case LodPurpose::HitPoints:             return HitPoints;
+            case LodPurpose::ViewGeometry:          return ViewGeom;
+            case LodPurpose::FireGeometry:          return FireGeom;
+            case LodPurpose::ViewPilotGeometry:     return PilotGeom;
+            case LodPurpose::ViewGunnerGeometry:    return GunnerGeom;
+            case LodPurpose::ViewCommanderGeometry: return CommanderGeom;
+            case LodPurpose::ViewCargoGeometry:     return CargoGeom;
+            default:                                return None;
+        }
+    };
+
+    // Every sentinel, including the reserved-but-unnamed ones.
+    for (int multiple = 1; multiple <= 20; ++multiple)
+    {
+        const float resolution = static_cast<float>(1e15 * multiple);
+        CAPTURE(multiple, resolution);
+        REQUIRE(oldSlot(resolution) == newSlot(resolution));
+    }
+    REQUIRE(oldSlot(1e13f) == newSlot(1e13f));
+    REQUIRE(oldSlot(9999999827968.0f) == newSlot(9999999827968.0f));
+
+    // And a sweep of ordinary and crewed-view distances: none of these may be
+    // assigned a slot, because a slot means "made alpha transparent" for
+    // _geometry, _geometryView and _geometryFire.
+    for (float resolution : {0.5f, 1.0f, 100.0f, 901.0f, 999.0f, 1000.0f, 1100.0f, 1200.0f,
+                             1999.0f, 2000.0f, 5000.0f, 9999.0f, 10000.0f, 50000.0f, 99999.0f})
+    {
+        CAPTURE(resolution);
+        REQUIRE(oldSlot(resolution) == newSlot(resolution));
+        REQUIRE(newSlot(resolution) == None);
+    }
+}
