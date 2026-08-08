@@ -124,8 +124,15 @@ class MLODLoader
         auto     vertexTable = MLOD::readVertexTable(reader, header.nPos);
         auto     normalTable = MLOD::readNormalTable(reader, header.nNorm);
         auto     faceTable   = MLOD::readP3DMFaceTable(reader, header.nFace);
-        auto     taggData    = MLOD::readP3DMTAGGSection(reader, header.nPos, header.nFace);
+        // #UVSet# payloads are sized by the actual face-vertex total (face.n each),
+        // not by the four slots a face record reserves, so the tagg reader has to
+        // be told it -- it cannot derive it from the point or face counts alone.
+        int32_t  totalFaceVertices = 0;
+        for (const auto& face : faceTable.faces)
+            totalFaceVertices += face.n;
+        auto     taggData    = MLOD::readP3DMTAGGSection(reader, header.nPos, header.nFace, totalFaceVertices);
 
+        convertUVChannels(lod, faceTable, taggData);
         auto vertexToPoint = convertGeometry(lod.mesh, vertexTable, normalTable, faceTable, taggData);
         convertMaterials(lod.mesh, faceTable);
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
@@ -143,6 +150,26 @@ class MLODLoader
         lod.sourceWinding  = "CW_REVERSED_ON_LOAD_ASSUMED";
 
         return lod;
+    }
+
+    // AST-011C. Keeps every decoded channel on the LOD in source order, so a
+    // material's uvSource can name one of them later. Channel 1 is additionally
+    // promoted onto Vertex::uv1 by convertGeometry; the rest stay here rather than
+    // being dropped for want of a vertex slot to put them in.
+    static void convertUVChannels(LODLevel& lod, const MLOD::FaceTable& faceTable, const MLOD::TAGGData& taggData)
+    {
+        (void)faceTable;
+        for (const auto& set : taggData.uvSets)
+        {
+            if (!set.decoded)
+                continue;
+            Poseidon::Model::UVChannel channel;
+            channel.id = set.id;
+            channel.faceVertexUVs.reserve(set.uv.size() / 2);
+            for (size_t i = 0; i + 1 < set.uv.size(); i += 2)
+                channel.faceVertexUVs.push_back(Vector2(set.uv[i], set.uv[i + 1]));
+            lod.uvChannels.push_back(std::move(channel));
+        }
     }
 
     // Converts raw POINT_* flags from data3d.h to ClipFlags (matches Shape.cpp:410-504)
@@ -241,11 +268,26 @@ class MLODLoader
                 return false;
             if (std::abs(a.uv.v - b.uv.v) > precUV)
                 return false;
+            // AST-011C: the second channel participates in identity. Two vertices
+            // agreeing on uv0 but differing on uv1 are different vertices, and
+            // merging them would discard the channel a material's uvSource selects.
+            // SP3X leaves uv1 zero throughout, so this never splits an SP3X mesh.
+            if (std::abs(a.uv1.u - b.uv1.u) > precUV)
+                return false;
+            if (std::abs(a.uv1.v - b.uv1.v) > precUV)
+                return false;
             return true;
         };
 
         mesh.vertices.reserve(faceTable.faces.size() * 3);
         mesh.triangles.reserve(faceTable.faces.size());
+
+        // Channel 1 if the LOD carried one. Channel 0 duplicates the per-face UVs
+        // already read from the face records, so promoting it would change nothing.
+        const std::vector<float>* uv1Source = nullptr;
+        if (taggData.uvSets.size() > 1 && taggData.uvSets[1].decoded)
+            uv1Source = &taggData.uvSets[1].uv;
+        size_t faceVertexCursor = 0;
 
         uint32_t faceIndex = 0;
         for (const auto& face : faceTable.faces)
@@ -269,6 +311,12 @@ class MLODLoader
                         v.normal = Vector3(n.x, n.y, n.z);
                     }
                     v.uv = Vector2(face.vs[i].mapU, face.vs[i].mapV);
+                    if (uv1Source)
+                    {
+                        const size_t at = (faceVertexCursor + static_cast<size_t>(i)) * 2;
+                        if (at + 1 < uv1Source->size())
+                            v.uv1 = Vector2((*uv1Source)[at], (*uv1Source)[at + 1]);
+                    }
 
                     uint32_t foundIndex = UINT32_MAX;
                     if (pointIndex >= 0 && pointIndex < static_cast<int32_t>(pointToVertices.size()))
@@ -296,6 +344,7 @@ class MLODLoader
                 }
                 tri.flags         = static_cast<FaceFlags>(static_cast<uint32_t>(face.flags));
                 tri.originalIndex = faceIndex++;
+                faceVertexCursor += 3;
                 std::swap(tri.indices[0], tri.indices[1]); // reverse winding
                 mesh.triangles.push_back(tri);
             }
@@ -318,6 +367,12 @@ class MLODLoader
                         v.normal = Vector3(n.x, n.y, n.z);
                     }
                     v.uv = Vector2(face.vs[i].mapU, face.vs[i].mapV);
+                    if (uv1Source)
+                    {
+                        const size_t at = (faceVertexCursor + static_cast<size_t>(i)) * 2;
+                        if (at + 1 < uv1Source->size())
+                            v.uv1 = Vector2((*uv1Source)[at], (*uv1Source)[at + 1]);
+                    }
 
                     uint32_t foundIndex = UINT32_MAX;
                     if (pointIndex >= 0 && pointIndex < static_cast<int32_t>(pointToVertices.size()))
@@ -345,6 +400,7 @@ class MLODLoader
                 }
                 quad.flags         = static_cast<FaceFlags>(static_cast<uint32_t>(face.flags));
                 quad.originalIndex = faceIndex++;
+                faceVertexCursor += 4;
                 std::swap(quad.indices[0], quad.indices[1]); // reverse winding
                 std::swap(quad.indices[2], quad.indices[3]);
                 mesh.quads.push_back(quad);

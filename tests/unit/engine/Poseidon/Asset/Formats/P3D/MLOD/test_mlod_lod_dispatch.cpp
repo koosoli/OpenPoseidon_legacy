@@ -13,6 +13,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include "../../../../test_fixtures.hpp"
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -219,4 +220,78 @@ TEST_CASE("P3DM: a wrong version is refused rather than desynchronised", "[mlod]
     REQUIRE_THROWS_AS(
         MLODLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "corrupt"),
         std::runtime_error);
+}
+
+// -- AST-011C: #UVSet# decoding and no UV1 -> UV0 collapse --------------------
+
+TEST_CASE("P3DM: every UV channel is decoded and kept in source order", "[mlod][p3dm][ast-011c]")
+{
+    auto        model = MLODLoader::load(GET_FIXTURE("mlod/p3dm_two_lod.p3d"));
+    const auto& visual = model.lodLevels[0];
+
+    REQUIRE(visual.uvSetCount == 2);
+    REQUIRE(visual.uvChannels.size() == 2);
+    REQUIRE(visual.uvChannels[0].id == 0);
+    REQUIRE(visual.uvChannels[1].id == 1);
+
+    // One entry per ACTUAL face vertex: a triangle plus a quad is 7, not 8. Reading
+    // the four reserved slots instead would give 8 and shift every later value.
+    REQUIRE(visual.uvChannels[0].faceVertexUVs.size() == 7);
+    REQUIRE(visual.uvChannels[1].faceVertexUVs.size() == 7);
+
+    // Channel 1 is offset from channel 0 by construction, so equal values here
+    // would mean one channel had overwritten the other.
+    REQUIRE(visual.uvChannels[0].faceVertexUVs[0].u == 0.0f);
+    REQUIRE(visual.uvChannels[1].faceVertexUVs[0].u == 1.0f);
+    REQUIRE(visual.uvChannels[1].faceVertexUVs[0].v == 0.5f);
+}
+
+TEST_CASE("P3DM: vertices differing only in UV1 are not merged", "[mlod][p3dm][ast-011c]")
+{
+    // Two coincident triangles: identical positions, normals and uv0, differing
+    // only in channel 1. Merging on uv0 alone would fold them into three shared
+    // vertices and discard uv1 -- the collapse this ticket forbids.
+    auto        model = MLODLoader::load(GET_FIXTURE("mlod/p3dm_uv_collapse.p3d"));
+    const auto& mesh  = model.lodLevels[0].mesh;
+
+    REQUIRE(mesh.triangles.size() == 2);
+    REQUIRE(mesh.vertices.size() == 6);
+
+    const auto& first  = mesh.vertices[mesh.triangles[0].indices[0]];
+    const auto& second = mesh.vertices[mesh.triangles[1].indices[0]];
+    REQUIRE(first.uv.u == second.uv.u);      // same base channel
+    REQUIRE(first.uv1.u != second.uv1.u);    // different second channel
+}
+
+TEST_CASE("P3DM: a mis-sized UV block is skipped, not guessed at", "[mlod][p3dm][ast-011c]")
+{
+    // The fixture's second #UVSet# is internally consistent -- its declared size
+    // matches its own payload, so the stream stays in sync -- but it is one pair
+    // short of the face-vertex total. Decoding it anyway would put
+    // plausible-looking wrong UVs on the mesh, which is far harder to notice than
+    // a channel that is simply absent.
+    auto        model = MLODLoader::load(GET_FIXTURE("mlod/p3dm_uv_bad_size.p3d"));
+    const auto& lod   = model.lodLevels[0];
+
+    // The count still records that the source carried two, so the discrepancy is
+    // visible rather than erased.
+    REQUIRE(lod.uvSetCount == 2);
+    REQUIRE(lod.uvChannels.size() == 1);
+    REQUIRE(lod.uvChannels[0].id == 0);
+    REQUIRE(lod.uvChannels[0].faceVertexUVs.size() == 3);
+}
+
+TEST_CASE("SP3X: no UV channels and a zero second channel", "[mlod][p3dm][ast-011c]")
+{
+    // uv1 joins vertex identity, so it must stay zero for SP3X or the merge would
+    // start splitting vertices in models that have no second channel at all.
+    auto        model = MLODLoader::load(GET_FIXTURE("mlod/complex_vehicle_mlod.p3d"));
+    const auto& lod   = model.lodLevels[0];
+    REQUIRE(lod.uvChannels.empty());
+    REQUIRE(lod.uvSetCount == 0);
+    for (const auto& vertex : lod.mesh.vertices)
+    {
+        REQUIRE(vertex.uv1.u == 0.0f);
+        REQUIRE(vertex.uv1.v == 0.0f);
+    }
 }

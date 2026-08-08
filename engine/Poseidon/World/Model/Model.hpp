@@ -82,6 +82,10 @@ struct Vertex {
     Vector3 position;
     Vector3 normal;
     Vector2 uv;
+    // Second UV channel (AST-011C). P3DM models routinely carry more than one
+    // #UVSet#, and folding the second into `uv` would destroy exactly the data a
+    // material's uvSource selects between. Zero for SP3X, which has no UV sets.
+    Vector2 uv1;
     VertexFlags flags = VertexFlags::None;  // Clip flags, lighting, surface attributes
 
     Vertex() = default;
@@ -226,9 +230,21 @@ struct Mesh {
     bool IsEmpty() const { return vertices.empty() && triangles.empty(); }
 };
 
+// One #UVSet# block, kept as the source stored it.
+struct UVChannel {
+    int32_t id = 0;
+    std::vector<Vector2> faceVertexUVs;  // one entry per face vertex, source order
+};
+
 struct LODLevel {
     float resolution = 0.0f;  // viewing distance in metres
     Mesh mesh;
+
+    // Every UV channel the source carried, in source order and indexed by
+    // cumulative face-vertex -- not merged into the vertex stream. A material's
+    // uvSource names one of these, so the mapping has to survive intact even
+    // though only channel 1 is currently promoted onto Vertex::uv1.
+    std::vector<UVChannel> uvChannels;
 
     // Source-format facts, recorded rather than re-derived (AST-011B).
     // "MLOD" names the container, not the per-LOD encoding, so a consumer that

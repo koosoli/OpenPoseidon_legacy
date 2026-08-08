@@ -530,6 +530,18 @@ inline TAGGMaterialIndex readTAGGMaterialIndex(BinaryReader& reader)
     return mat;
 }
 
+// A decoded #UVSet# payload: a uint32 id followed by one (u,v) pair per ACTUAL
+// face vertex -- face.n entries, not the four slots the face record reserves.
+// Measured, not assumed: across 3,598 UV-set blocks in the indexed Arma 2/OA
+// corpus every payload was exactly 4 + 8 * sum(face.n) bytes, and none matched
+// the four-slot reading.
+struct UVSetData
+{
+    int32_t            id = 0;
+    std::vector<float> uv;          // 2 floats per face vertex
+    bool               decoded = false;  // false when the size did not match
+};
+
 struct TAGGData
 {
     std::vector<TAGGNamedSelection>  namedSelections;
@@ -537,6 +549,8 @@ struct TAGGData
     std::vector<TAGGAnimationPhase>  animationPhases;
     TAGGMaterialIndex                materialIndex;
     TAGGMass                         mass;
+    // Decoded #UVSet# blocks (AST-011C), in source order.
+    std::vector<UVSetData>           uvSets;
     float                            resolution       = 0.0f;
     // How many #UVSet# blocks the LOD carried. Counted by the P3DM reader and left
     // at zero by SP3X, which has no such tagg.
@@ -592,7 +606,8 @@ inline TAGGData readTAGGSection(BinaryReader& reader, int32_t nPoints, int32_t n
 // P3DM tags are `active byte, asciiz name, uint32 size` -- not SP3X's fixed
 // 64-byte name plus size. Reading one with the other's layout desynchronises on
 // the first tag, which is why this is a separate function rather than a flag.
-inline TAGGData readP3DMTAGGSection(BinaryReader& reader, int32_t nPoints, int32_t nFaces)
+inline TAGGData readP3DMTAGGSection(BinaryReader& reader, int32_t nPoints, int32_t nFaces,
+                                    int32_t totalFaceVertices)
 {
     TAGGData data;
     readTAGGHeader(reader);
@@ -614,11 +629,26 @@ inline TAGGData readP3DMTAGGSection(BinaryReader& reader, int32_t nPoints, int32
         }
         else if (name == "#UVSet#")
         {
-            // Counted, not decoded. Reading the additional UV channels is AST-011C;
-            // recording the count here is what lets that ticket assert it found
-            // them all rather than trusting the first one it sees.
             ++data.uvSetCount;
-            reader.seekRelative(size);
+            UVSetData set;
+            const int32_t expected = 4 + 8 * totalFaceVertices;
+            if (size == expected && totalFaceVertices > 0)
+            {
+                set.id = reader.read<int32_t>();
+                set.uv.reserve(static_cast<size_t>(totalFaceVertices) * 2);
+                for (int32_t i = 0; i < totalFaceVertices * 2; ++i)
+                    set.uv.push_back(reader.read<float>());
+                set.decoded = true;
+            }
+            else
+            {
+                // Skipped rather than guessed at. A UV block of an unexpected size
+                // means this reading of the format does not hold for that file, and
+                // decoding it anyway would put plausible-looking wrong UVs on the
+                // mesh -- far harder to notice than a channel that is absent.
+                reader.seekRelative(size);
+            }
+            data.uvSets.push_back(std::move(set));
         }
         else if (!name.empty() && name[0] != '#' && name[0] != '-' && name[0] != '.' &&
                  size == nPoints + nFaces)

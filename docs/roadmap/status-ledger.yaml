@@ -814,30 +814,67 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: [AST-011B]
-    blocked_by: [AST-011B]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+        symbol: MLODLoader::convertUVChannels
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+        symbol: MLOD::readP3DMTAGGSection
+    test_ids: [ast-011c]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        Only channel 1 is promoted onto Vertex::uv1. Further channels are preserved
+        on LODLevel::uvChannels but have no vertex slot, so a material selecting a
+        third channel cannot be satisfied yet. No indexed fixture needs one.
+      - >-
+        Nothing consumes uvChannels yet. RVMAT uvSource values are parsed by the
+        AST-007 indexer but the runtime does not bind a material to a channel until
+        MAT-030/MAT-020, so this preserves the mapping rather than using it.
+    fallback: >-
+      A #UVSet# whose size does not match the face-vertex total is skipped and the
+      LOD still records that the source carried it, so a channel is missing and
+      visible rather than silently wrong.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. The payload layout was measured, not
+      assumed: across the whole indexed corpus, 16,164 #UVSet# blocks in 1,640
+      models are each exactly 4 + 8 * sum(face.n) bytes, with zero exceptions, and
+      none match the four-reserved-slots reading that a face record might suggest.
+      Machine-checked: 5 Catch2 cases under [ast-011c] including a fixture whose
+      two triangles differ only in channel 1 and must not be merged, and a
+      mis-sized block that must be skipped; 29 [mlod] cases green (151 assertions);
+      full suite 2,323 passed with only the 6 failures pre-existing at HEAD; and
+      scripts/verify_p3dm_against_index.py still 1,661 models with 0 refused and 0
+      mismatched after UV decoding was switched on.
+
+      NOT checked: nothing was rendered, so no UV channel has been seen mapped onto
+      a surface. That the second channel is the one a material's uvSource means is
+      inferred from the format, not confirmed against an image. uv1 now takes part
+      in vertex identity, which splits vertices that previously merged; SP3X leaves
+      it zero and its meshes are unchanged, but the vertex-count effect on P3DM
+      models has not been profiled.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+      - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+      - engine/Poseidon/World/Model/Model.hpp
+      - scripts/verify_p3dm_against_index.py
   - id: AST-012
     overlay: COMPAT-C1-EXEC-001
     is_example: false
