@@ -31,6 +31,7 @@
 #include <Poseidon/Core/ModSystem.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
@@ -1270,9 +1271,47 @@ void GameApplication::RunMainLoop()
                         {
                             const ShapeSection& sec = lod->GetSection(section);
                             if (sec.surfMat)
+                            {
+                                const char* materialPath = sec.surfMat->GetName().Data();
                                 LOG_INFO(Core, "--test-model:     section {} material {} exists={}", section,
-                                         sec.surfMat->GetName().Data(),
-                                         QIFStream::FileExists(sec.surfMat->GetName().Data()));
+                                         materialPath, QIFStream::FileExists(materialPath));
+                                ParamFile materialFile;
+                                // Match the established text-RVMAT production parser.
+                                // `ParamFile` is deliberately not treated as an Arma raP
+                                // decoder: its binary representation is Poseidon's own
+                                // serializer layout, while a retail Arma RVMAT begins
+                                // `\\0raP` and has a different body.
+                                if (materialFile.Parse(materialPath) != LSOK)
+                                {
+                                    LOG_ERROR(Core, "--test-model:     material parse failed {}", materialPath);
+                                    continue;
+                                }
+                                const auto source = Asset::Material::ParseRvMaterial(materialFile, materialPath);
+                                if (source.pixelShaderId.empty() && source.stages.empty())
+                                {
+                                    std::ifstream raw(materialPath, std::ios::binary);
+                                    char header[4]{};
+                                    raw.read(header, sizeof(header));
+                                    const bool isArmaRap = raw.gcount() == sizeof(header) && header[0] == '\0' &&
+                                                           header[1] == 'r' && header[2] == 'a' && header[3] == 'P';
+                                    LOG_WARN(Core,
+                                             "--test-model:     material yielded no entries{}; no stages are bound",
+                                             isArmaRap ? " (Arma raP decoding is not implemented)" : "");
+                                    continue;
+                                }
+                                const auto translated = Asset::Material::TranslateSemantics(
+                                    source, Asset::Material::TranslateMaterial(source));
+                                LOG_INFO(Core, "--test-model:     material shader={} schema={}",
+                                         translated.shaderFamily, translated.schemaKnown);
+                                for (const auto& slot : translated.slots)
+                                {
+                                    const bool procedural = !slot.texture.raw.empty() && slot.texture.raw[0] == '#';
+                                    LOG_INFO(Core, "--test-model:       slot {} stage {} uv={} texture={} exists={} procedural={}",
+                                             Asset::Material::ToString(slot.slot), slot.sourceStage, slot.uvSource,
+                                             slot.texture.raw, procedural || QIFStream::FileExists(slot.texture.raw.c_str()),
+                                             procedural);
+                                }
+                            }
                         }
                     }
                     if (faces <= 0)

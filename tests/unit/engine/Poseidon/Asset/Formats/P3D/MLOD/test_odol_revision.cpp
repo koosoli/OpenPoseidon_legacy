@@ -291,6 +291,8 @@ TEST_CASE("ODOL 73 static fixture reaches the common Poseidon model IR", "[p3d][
     REQUIRE(lod.mesh.materials.size() == 1);
     REQUIRE(lod.mesh.materials[0].texturePath == "a3\\3den\\objects\\data\\area_ca.paa");
     REQUIRE(lod.mesh.materials[0].materialPath == "a3\\3den\\objects\\data\\area.rvmat");
+    REQUIRE(lod.mesh.materials[0].embeddedStages.size() == 8);
+    REQUIRE(lod.mesh.materials[0].embeddedStages[1].sourceStage == 1);
     REQUIRE(lod.mesh.vertices[0].position.x == -0.5f);
     REQUIRE(lod.mesh.vertices[0].normal.z == 1.0f);
     REQUIRE(lod.mesh.vertices[0].uv.u == Catch::Approx(0.250250f).margin(1e-5));

@@ -131,6 +131,7 @@ struct TranslatedSlot
 {
     MaterialSlot   slot = MaterialSlot::Count;
     bool           present = false;
+    int            sourceStage = -1;
     RvTextureRef   texture;
     std::string    uvSource;
     SlotChannelMap channels;
@@ -186,6 +187,7 @@ inline TranslatedMaterial TranslateSemantics(const RvMaterialSource& source, con
         TranslatedSlot entry;
         entry.slot     = static_cast<MaterialSlot>(i);
         entry.present  = true;
+        entry.sourceStage = binding.sourceStage;
         entry.texture  = binding.texture;
         entry.uvSource = binding.uvSource;
         entry.channels = ChannelsForSlot(entry.slot);

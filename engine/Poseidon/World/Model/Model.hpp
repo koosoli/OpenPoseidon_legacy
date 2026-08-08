@@ -117,6 +117,15 @@ struct Quad {
         : indices{i0, i1, i2, i3}, materialIndex(matIdx), flags(flags) {}
 };
 
+// Authored RVMAT stage data, carried independently of a renderer binding.
+// `uvSource` is the source's numeric selector; mapping it to a vertex UV set is
+// a separate, evidence-backed rendering decision.
+struct MaterialStage {
+    uint32_t    sourceStage = 0;
+    std::string texturePath;
+    uint32_t    uvSource = 0;
+};
+
 struct Material {
     std::string name;
     std::string texturePath;
@@ -124,6 +133,7 @@ struct Material {
     // is a shader description, not an image; MAT-020/MAT-030 interpret it. SP3X
     // has no equivalent and leaves this empty.
     std::string materialPath;
+    std::vector<MaterialStage> embeddedStages;
     float metallic = 0.0f;
     float roughness = 1.0f;
     float emissive = 0.0f;

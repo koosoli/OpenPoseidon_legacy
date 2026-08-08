@@ -131,6 +131,8 @@ class Stage5 { texture="ca\t\x_smdi.tga"; uvSource="tex"; };
 TEST_CASE("uvSource survives into the translated slot", "[asset][material][mat-020]")
 {
     auto ir = translate(kSuper);
+    REQUIRE(ir.Find(MaterialSlot::NormalMap)->sourceStage == 1);
+    REQUIRE(ir.Find(MaterialSlot::SpecularDetail)->sourceStage == 5);
     REQUIRE(ir.Find(MaterialSlot::NormalMap)->uvSource == "tex");
     REQUIRE(ir.Find(MaterialSlot::Environment)->uvSource == "none");
 }

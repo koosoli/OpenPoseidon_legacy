@@ -26,6 +26,7 @@ class ODOLLoader
     using Triangle       = Poseidon::Model::Triangle;
     using Quad           = Poseidon::Model::Quad;
     using Material       = Poseidon::Model::Material;
+    using MaterialStage  = Poseidon::Model::MaterialStage;
     using NamedSelection = Poseidon::Model::NamedSelection;
     using NamedProperty  = Poseidon::Model::NamedProperty;
     using Proxy          = Poseidon::Model::Proxy;
@@ -179,7 +180,22 @@ class ODOLLoader
             if (section.textureIndex < 0 || static_cast<size_t>(section.textureIndex) >= mesh.materials.size())
                 continue;
             if (section.materialIndex >= 0 && static_cast<size_t>(section.materialIndex) < source.materials.size())
-                mesh.materials[section.textureIndex].materialPath = source.materials[section.materialIndex].name;
+            {
+                Material& material = mesh.materials[section.textureIndex];
+                const auto& embedded = source.materials[section.materialIndex];
+                material.materialPath = embedded.name;
+                material.embeddedStages.clear();
+                material.embeddedStages.reserve(embedded.stageTextures.size());
+                for (size_t stage = 0; stage < embedded.stageTextures.size(); ++stage)
+                {
+                    MaterialStage entry;
+                    entry.sourceStage = static_cast<uint32_t>(stage);
+                    entry.texturePath = embedded.stageTextures[stage];
+                    if (stage < embedded.texGens.size())
+                        entry.uvSource = embedded.texGens[stage].uvSource;
+                    material.embeddedStages.push_back(std::move(entry));
+                }
+            }
         }
 
         // Section bounds are offsets into the face stream, not face indices, so
