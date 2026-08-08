@@ -5,10 +5,12 @@
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 #include <cstdint>
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Poseidon::Asset::Formats::P3D
@@ -102,6 +104,21 @@ struct Odol73StaticPreRestData
     uint32_t restDataSize = 0;
 };
 
+struct Odol73NamedSelection
+{
+    std::string name;
+    // Face-stream offsets in the same unit as the section bounds, not face
+    // indices; Odol73FaceStreamOffsets converts them.
+    std::vector<int32_t> selectedFaces;
+    bool isSectional = false;
+    std::vector<int32_t> sections;
+    std::vector<int32_t> selectedVertices;
+    // Parallel to selectedVertices when present, and absent entirely when the
+    // selection is unweighted -- the payload is sized by its own field, not by
+    // the vertex count.
+    std::vector<uint8_t> vertexWeights;
+};
+
 struct Odol73UvSet
 {
     float minU = 0.0f, minV = 0.0f, maxU = 0.0f, maxV = 0.0f;
@@ -118,6 +135,9 @@ struct Odol73StaticRestData
     std::vector<int32_t> clip;
     Odol73UvSet uv0;
     uint32_t uvSetCount = 0;
+    // Sets 1..n, decoded and kept. Only set 0 and set 1 have a home on Vertex;
+    // the rest are preserved here rather than dropped for want of a slot.
+    std::vector<Odol73UvSet> extraUvSets;
     std::vector<Vector3> positions;
     std::vector<Vector3> normals;
     // Packed tangent/binormal pairs, retained unconverted: no consumer needs
@@ -134,6 +154,8 @@ struct Odol73StaticLod
     std::vector<int32_t> vertexToPoint;
     Odol73Polygons polygons;
     std::vector<Odol73StaticSection> sections;
+    std::vector<Odol73NamedSelection> namedSelections;
+    std::vector<std::pair<std::string, std::string>> namedProperties;
     Odol73StaticPreRestData endData;
     Odol73StaticRestData rest;
     uint8_t trailingByte = 0;
@@ -438,13 +460,63 @@ inline std::vector<Odol73StaticSection> ReadOdol73StaticSections(BinaryReader& r
     return result;
 }
 
+// Named selections. The weight payload is sized by its own preceding field
+// rather than by the vertex count, so an unweighted selection carries no bytes
+// at all -- deriving the size from selectedVertices would desynchronise the
+// whole remainder of the LOD.
+inline std::vector<Odol73NamedSelection> ReadOdol73NamedSelections(BinaryReader& reader, uint32_t end)
+{
+    const uint32_t count = reader.read<uint32_t>();
+    if (count > 4096)
+        throw std::runtime_error("ODOL 73 LOD has too many named selections");
+    std::vector<Odol73NamedSelection> result;
+    result.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        Odol73NamedSelection selection;
+        selection.name = ReadBoundedAsciiz(reader, "named selection");
+        selection.selectedFaces = ReadOdol73VertexIndexArray(reader, "named selection faces");
+        (void)reader.read<int32_t>(); // unused
+        selection.isSectional = reader.read<bool>();
+        selection.sections = ReadOdol73CompressedArray<int32_t>(reader, "named selection sections", 1'000'000);
+        selection.selectedVertices = ReadOdol73VertexIndexArray(reader, "named selection vertices");
+        const int32_t weightBytes = reader.read<int32_t>();
+        if (weightBytes < 0 || static_cast<uint32_t>(weightBytes) > 1'000'000)
+            throw std::runtime_error("ODOL 73 named selection weight size is out of range");
+        const auto weights = ReadOdol73Compressed(reader, static_cast<size_t>(weightBytes));
+        selection.vertexWeights.assign(weights.begin(), weights.end());
+        if (reader.tell() > static_cast<int>(end))
+            throw std::runtime_error("ODOL 73 named selections exceed their declared LOD range");
+        result.push_back(std::move(selection));
+    }
+    return result;
+}
+
+inline std::vector<std::pair<std::string, std::string>> ReadOdol73NamedProperties(BinaryReader& reader, uint32_t end)
+{
+    const uint32_t count = reader.read<uint32_t>();
+    if (count > 4096)
+        throw std::runtime_error("ODOL 73 LOD has too many named properties");
+    std::vector<std::pair<std::string, std::string>> result;
+    result.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        std::string name = ReadBoundedAsciiz(reader, "named property name");
+        std::string value = ReadBoundedAsciiz(reader, "named property value");
+        result.emplace_back(std::move(name), std::move(value));
+    }
+    if (reader.tell() > static_cast<int>(end))
+        throw std::runtime_error("ODOL 73 named properties exceed their declared LOD range");
+    return result;
+}
+
 inline Odol73StaticPreRestData ReadOdol73StaticPreRestData(BinaryReader& reader, uint32_t end)
 {
-    // The selected static fixture has no named selections, properties or frames.
-    // Do not skip a non-empty array: each has its own later-ODOL layout.
-    for (const char* field : {"named selections", "named properties", "frames"})
-        if (reader.read<uint32_t>() != 0)
-            throw std::runtime_error(std::string("ODOL 73 ") + field + " are not implemented");
+    // Keyframes remain unimplemented: an animated LOD is not the static shape
+    // this reader claims, and skipping a non-empty array would make every later
+    // offset untrustworthy.
+    if (reader.read<uint32_t>() != 0)
+        throw std::runtime_error("ODOL 73 keyframes are not implemented");
     Odol73StaticPreRestData result;
     result.colorTop = reader.read<int32_t>(); result.color = reader.read<int32_t>();
     result.special = reader.read<int32_t>(); result.vertexBoneRefIsSimple = reader.read<bool>();
@@ -515,11 +587,16 @@ inline Odol73StaticRestData ReadOdol73StaticRestData(BinaryReader& reader, const
     Odol73StaticRestData rest;
     rest.clip = ReadOdol73CondensedArray<int32_t>(reader, "clip flags", 1'000'000);
     rest.uv0 = ReadOdol73UvSet(reader, header.vertexCount);
-    rest.uvSetCount = reader.read<uint32_t>();
-    // A second UV set has its own payload; promoting only the first would drop
-    // exactly the channel a material's uvSource selects.
-    if (rest.uvSetCount > 1)
-        throw std::runtime_error("ODOL 73 additional UV sets are not implemented by the static LOD reader");
+    // The count follows the first set and covers it, so a file that says 0 still
+    // has the one already read.
+    rest.uvSetCount = std::max(1u, reader.read<uint32_t>());
+    if (rest.uvSetCount > 8)
+        throw std::runtime_error("ODOL 73 LOD declares more UV sets than the format uses");
+    // Each further set carries its own payload and must be consumed here. They
+    // are kept rather than skipped: a material's uvSource names one of them, so
+    // dropping them would silently discard exactly the channel it selects.
+    for (uint32_t set = 1; set < rest.uvSetCount; ++set)
+        rest.extraUvSets.push_back(ReadOdol73UvSet(reader, header.vertexCount));
 
     struct Packed3 { float x, y, z; };
     const auto positions = ReadOdol73CompressedArray<Packed3>(reader, "vertex positions", 1'000'000);
@@ -575,6 +652,8 @@ inline Odol73StaticLod ReadOdol73StaticLod(BinaryReader& reader, uint32_t start,
     lod.vertexToPoint = ReadOdol73VertexIndexArray(reader, "vertex-to-point map");
     lod.polygons = ReadOdol73Polygons(reader, lod.header.vertexCount, end);
     lod.sections = ReadOdol73StaticSections(reader, end);
+    lod.namedSelections = ReadOdol73NamedSelections(reader, end);
+    lod.namedProperties = ReadOdol73NamedProperties(reader, end);
     lod.endData = ReadOdol73StaticPreRestData(reader, end);
     lod.rest = ReadOdol73StaticRestData(reader, lod.header, lod.endData, end);
     lod.trailingByte = ReadOdol73TrailingLodByte(reader, end);

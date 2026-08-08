@@ -228,6 +228,11 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(sections[0].faceLower == 0);
     REQUIRE(sections[0].faceUpper == 320);
     REQUIRE(sections[0].materialIndex == 0);
+    // The selected fixture has neither, but they are read rather than assumed
+    // absent: the arrays are counted on the wire and skipping them would put
+    // every later offset out by their length.
+    REQUIRE(P3D::ReadOdol73NamedSelections(reader, directory.ends[0]).empty());
+    REQUIRE(P3D::ReadOdol73NamedProperties(reader, directory.ends[0]).empty());
     const auto preRest = P3D::ReadOdol73StaticPreRestData(reader, directory.ends[0]);
     REQUIRE(preRest.colorTop == static_cast<int32_t>(0xff000000));
     REQUIRE(preRest.restDataSize == 613);

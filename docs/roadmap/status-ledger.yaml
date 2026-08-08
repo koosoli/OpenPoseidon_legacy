@@ -1008,7 +1008,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
     test_ids: [ast-012a]
     benchmark_artifacts: []
-    evidence_hash: 18876805506d47b3bc3ca9ba638afbed8546837876fe15f4595f376a5712a8e8
+    evidence_hash: eae5bb63ababa07fc3299081f4c934ca4c37c398119dc2f0c5fbd490caf8f7f9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: ODOL_REVISION_DISPATCH
@@ -1090,26 +1090,28 @@ tickets:
     test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir,
                ast-012b-odol73-corpus-survey]
     benchmark_artifacts: []
-    evidence_hash: 21227fa0c05b0f1b233f2e8eceed7041e60d8c265c247cd233ae8193d0b8fdec
+    evidence_hash: 83708f48817324c6b962c06d9c5472da8eb6a3750ed099bed4f91292d1b55284
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
         status: PARTIAL
         denominator: >-
-          5 of the 8 revision-73 models in Arma 3's 3den.pbo load
-          (boundingboxbase, ellipse, ellipselimited, rectangle,
-          rectanglelimited); the other 3 are refused, all naming the same
-          constraint -- named selections are not implemented. On the selected
-          fixture both LOD bodies are consumed to their declared end offsets and
-          the rest-data section to its declared 613 bytes. Static LODs only: no
-          skeleton, animation, proxy, sub-skeleton, named selection, keyframe or
-          skinning data, at most one UV set, and triangle or quad faces
+          450 of 456 revision-73 models load across four Arma 3 PBOs (3den 8/8,
+          signs_f, rocks_f, misc_f); all 6 refusals name the same remaining
+          constraint, skeletons. Every accepted model consumes each LOD body to
+          its declared end offset and each rest-data section to its declared
+          size, so a load is a full read rather than a prefix. Still refused: any
+          model with a skeleton, animation, proxy, sub-skeleton or keyframe data,
+          per-vertex skinning, or a face that is not a triangle or a quad
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
-          the same 1 fixture reaches Poseidon::Model::Model through
-          ODOLLoader::load: 48 positions, 48 normals, 48 UVs, 48 clip flags and
-          16 quads with texture and RVMAT attached
+          all 450 accepted models reach Poseidon::Model::Model through
+          ODOLLoader::load and are required to carry at least one vertex, so an
+          empty success cannot pass as a load; on the selected fixture that is 48
+          positions, 48 normals, 48 UVs, 48 clip flags and 16 quads with texture
+          and RVMAT attached. Named selections, named properties and a second UV
+          channel now cross into the IR
       - capability: ODOL73_TANGENT_FRAME
         status: CAPTURED_NOT_INTERPRETED
         denominator: >-
@@ -1947,7 +1949,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: e669228946c376bd17c2ea73ff557e30be326e14a63ad947a682393c33f03055
+    evidence_hash: 4296ec26cf8653848f0c29ec924bbe786ea94a1c8756412ce4290cf966befa9b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX

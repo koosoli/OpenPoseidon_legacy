@@ -160,6 +160,11 @@ class ODOLLoader
             vertex.position = Vector3(rest.positions[i].x, rest.positions[i].y, rest.positions[i].z);
             vertex.normal   = Vector3(rest.normals[i].x, rest.normals[i].y, rest.normals[i].z);
             vertex.uv       = Vector2(rest.uv0.uv[i][0], rest.uv0.uv[i][1]);
+            // Channel 1 is promoted onto the vertex, as the MLOD path does. Any
+            // further channels stay on the source record rather than being
+            // silently folded into these two.
+            if (!rest.extraUvSets.empty() && i < rest.extraUvSets[0].uv.size())
+                vertex.uv1 = Vector2(rest.extraUvSets[0].uv[i][0], rest.extraUvSets[0].uv[i][1]);
             vertex.flags    = static_cast<VertexFlags>(rest.clip[i]);
             mesh.vertices.push_back(vertex);
         }
@@ -236,6 +241,38 @@ class ODOLLoader
             }
             mesh.sections.push_back(section);
         }
+
+        // Named selections. selectedFaces are face-stream offsets in the section
+        // bounds' unit, so they go through the same offset table the sections
+        // did rather than being copied across as if they were face indices.
+        mesh.selections.reserve(source.namedSelections.size());
+        for (const auto& sourceSelection : source.namedSelections)
+        {
+            NamedSelection selection;
+            selection.name = sourceSelection.name;
+            selection.vertexIndices.reserve(sourceSelection.selectedVertices.size());
+            for (int32_t index : sourceSelection.selectedVertices)
+                if (index >= 0 && static_cast<size_t>(index) < mesh.vertices.size())
+                    selection.vertexIndices.push_back(static_cast<uint32_t>(index));
+            selection.vertexWeights = sourceSelection.vertexWeights;
+            selection.sourceVertexWeights = sourceSelection.vertexWeights;
+            for (int32_t offset : sourceSelection.selectedFaces)
+                for (size_t face = 0; face + 1 < offsets.size(); ++face)
+                    if (offsets[face] == static_cast<uint32_t>(offset))
+                    {
+                        selection.triangleIndices.push_back(static_cast<uint32_t>(face));
+                        break;
+                    }
+            selection.sectionIndices.reserve(sourceSelection.sections.size());
+            for (int32_t index : sourceSelection.sections)
+                if (index >= 0) selection.sectionIndices.push_back(static_cast<uint32_t>(index));
+            selection.needsSections = sourceSelection.isSectional;
+            mesh.selections.push_back(std::move(selection));
+        }
+
+        mesh.properties.reserve(source.namedProperties.size());
+        for (const auto& property : source.namedProperties)
+            mesh.properties.emplace_back(property.first, property.second);
 
         mesh.boundingBox.min = Vector3(source.header.bboxMin.x, source.header.bboxMin.y, source.header.bboxMin.z);
         mesh.boundingBox.max = Vector3(source.header.bboxMax.x, source.header.bboxMax.y, source.header.bboxMax.z);
