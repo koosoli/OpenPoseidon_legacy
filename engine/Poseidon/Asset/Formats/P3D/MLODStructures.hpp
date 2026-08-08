@@ -3,6 +3,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/Asset/Formats/BISStructures.hpp>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -245,10 +246,22 @@ struct DataVertex
 
 struct DataFaceEx
 {
-    char       texture[33] = {}; // 32 wire bytes + guaranteed NUL terminator
+    char       texture[33] = {}; // SP3X: 32 wire bytes + guaranteed NUL terminator
     int32_t    n;       // vertex count (3 or 4)
     DataVertex vs[4];   // up to 4 vertices (MAX_DATA_POLY)
     int32_t    flags;
+
+    // P3DM stores both references as variable-length NUL-terminated strings after
+    // the vertex block, and they are routinely longer than SP3X's 32-byte field --
+    // a real path like `ca\characters2\civil\worker\data\w1_worker.rvmat` is 46
+    // bytes and would be silently truncated into the fixed array above.
+    //
+    // The two references are also different things, which SP3X had no way to say:
+    // `textureName` is an image, `materialName` is an RVMAT describing a whole
+    // shader setup. Collapsing them loses the material entirely, so they are kept
+    // apart here and MAT-020/MAT-030 decide what the RVMAT means later.
+    std::string textureName;
+    std::string materialName;
 };
 
 struct FaceTable
@@ -275,6 +288,98 @@ inline FaceTable readFaceTable(BinaryReader& reader, int32_t nFace)
             face.vs[j].mapV   = reader.read<float>();
         }
         face.flags = reader.read<int32_t>();
+        // Mirror the fixed field into the shared string so downstream conversion
+        // has one path for both encodings. SP3X carries no material reference, so
+        // materialName stays empty rather than being invented from the texture.
+        face.textureName = std::string(face.texture);
+        ftable.faces.push_back(face);
+    }
+    return ftable;
+}
+
+// ── P3DM ───────────────────────────────────────────────────────────────────
+//
+// The Arma-generation MLOD LOD. Same container, different everything else: no
+// headSize field, a normal count independent of the vertex count, variable-length
+// per-face strings, and a different TAGG encoding.
+
+struct P3DMSection
+{
+    char    signature[4] = {0}; // "P3DM"
+    int32_t majorVersion = 0;
+    int32_t minorVersion = 0;
+    int32_t nPos         = 0;
+    int32_t nNorm        = 0;
+    int32_t nFace        = 0;
+    int32_t flags        = 0;
+
+    bool isValid() const { return std::memcmp(signature, "P3DM", 4) == 0; }
+};
+
+inline P3DMSection readP3DMHeader(BinaryReader& reader)
+{
+    P3DMSection section;
+    uint32_t    sig = reader.read<uint32_t>();
+    std::memcpy(section.signature, &sig, 4);
+    section.majorVersion = reader.read<int32_t>();
+    section.minorVersion = reader.read<int32_t>();
+    section.nPos         = reader.read<int32_t>();
+    section.nNorm        = reader.read<int32_t>();
+    section.nFace        = reader.read<int32_t>();
+    section.flags        = reader.read<int32_t>();
+
+    if (!section.isValid())
+        throw std::runtime_error("Invalid P3DM signature: expected 'P3DM', got '" + std::string(section.signature, 4) + "'");
+    // Unlike SP3X there is no headSize to skip by, so the header size is fixed at
+    // 28 bytes and a wrong version would desynchronise everything after it.
+    if (section.majorVersion != 28 || section.minorVersion != 256)
+        throw std::runtime_error("Unsupported P3DM version " + std::to_string(section.majorVersion) + "." +
+                                 std::to_string(section.minorVersion) + " (expected 28.256)");
+
+    return section;
+}
+
+// A NUL-terminated string of unbounded length on the wire.
+inline std::string readAsciiZ(BinaryReader& reader, const char* what)
+{
+    std::string text;
+    for (;;)
+    {
+        if (reader.remaining() <= 0)
+            throw std::runtime_error(std::string("P3DM ") + what + " string is unterminated");
+        char ch = reader.read<char>();
+        if (ch == '\0')
+            return text;
+        // Bound it so a corrupt file cannot grow a string until allocation fails.
+        if (text.size() >= 1024)
+            throw std::runtime_error(std::string("P3DM ") + what + " string exceeds 1024 bytes");
+        text += ch;
+    }
+}
+
+inline FaceTable readP3DMFaceTable(BinaryReader& reader, int32_t nFace)
+{
+    FaceTable ftable;
+    validateCount(reader, nFace, "face");
+    ftable.faces.reserve(nFace);
+    for (int32_t i = 0; i < nFace; ++i)
+    {
+        DataFaceEx face;
+        face.n = reader.read<int32_t>();
+        if (face.n < 3 || face.n > 4)
+            throw std::runtime_error("P3DM face " + std::to_string(i) + " has invalid vertex count " + std::to_string(face.n));
+        // Four vertex slots are always stored, even for a triangle; the unused
+        // slot is skipped by reading it, not by seeking past a computed size.
+        for (int j = 0; j < 4; ++j)
+        {
+            face.vs[j].point  = reader.read<int32_t>();
+            face.vs[j].normal = reader.read<int32_t>();
+            face.vs[j].mapU   = reader.read<float>();
+            face.vs[j].mapV   = reader.read<float>();
+        }
+        face.flags        = reader.read<int32_t>();
+        face.textureName  = readAsciiZ(reader, "face texture");
+        face.materialName = readAsciiZ(reader, "face material");
         ftable.faces.push_back(face);
     }
     return ftable;
@@ -433,6 +538,9 @@ struct TAGGData
     TAGGMaterialIndex                materialIndex;
     TAGGMass                         mass;
     float                            resolution       = 0.0f;
+    // How many #UVSet# blocks the LOD carried. Counted by the P3DM reader and left
+    // at zero by SP3X, which has no such tagg.
+    int32_t                          uvSetCount       = 0;
     bool                             hasMass          = false;
     bool                             hasAnimations    = false;
     bool                             hasMaterialIndex = false;
@@ -480,6 +588,56 @@ inline TAGGData readTAGGSection(BinaryReader& reader, int32_t nPoints, int32_t n
     data.resolution = reader.read<float>();
     return data;
 }
+
+// P3DM tags are `active byte, asciiz name, uint32 size` -- not SP3X's fixed
+// 64-byte name plus size. Reading one with the other's layout desynchronises on
+// the first tag, which is why this is a separate function rather than a flag.
+inline TAGGData readP3DMTAGGSection(BinaryReader& reader, int32_t nPoints, int32_t nFaces)
+{
+    TAGGData data;
+    readTAGGHeader(reader);
+
+    for (;;)
+    {
+        reader.read<uint8_t>(); // active flag
+        std::string name = readAsciiZ(reader, "tagg name");
+        int32_t     size = reader.read<int32_t>();
+        validateCount(reader, size, "tagg payload");
+
+        if (name == "#EndOfFile#")
+            break;
+
+        if (name == "#Property#" && size >= 128)
+        {
+            data.namedProperties.push_back(readTAGGProperty(reader));
+            reader.seekRelative(size - 128);
+        }
+        else if (name == "#UVSet#")
+        {
+            // Counted, not decoded. Reading the additional UV channels is AST-011C;
+            // recording the count here is what lets that ticket assert it found
+            // them all rather than trusting the first one it sees.
+            ++data.uvSetCount;
+            reader.seekRelative(size);
+        }
+        else if (!name.empty() && name[0] != '#' && name[0] != '-' && name[0] != '.' &&
+                 size == nPoints + nFaces)
+        {
+            TAGGTag tag{};
+            std::snprintf(tag.name, sizeof(tag.name), "%s", name.c_str());
+            tag.size = size;
+            data.namedSelections.push_back(readTAGGNamedSelection(reader, tag, nPoints, nFaces));
+        }
+        else
+        {
+            reader.seekRelative(size);
+        }
+    }
+
+    data.resolution = reader.read<float>();
+    return data;
+}
+
 
 } // namespace MLOD
 } // namespace Poseidon::Asset::Formats

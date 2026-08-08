@@ -51,7 +51,7 @@ struct GrassParams {
     //   .z = blade width scale, .w = use_photo_tuft
     species_mix: vec4<f32>,
     //   .x = albedo saturation (1.0 = untouched)
-    //   .y = dry-patch amount, .z = dry-patch noise scale, .w spare
+    //   .y = dry-patch amount, .z = dry-patch noise scale, .w = mid-clump radius
     look: vec4<f32>,
     //   .x = shape variety (0 = legacy three profiles, 1 = eight distinct)
     //   .y = per-blade taper jitter, .z = per-blade bend jitter
@@ -121,6 +121,16 @@ const GEO_EXCLUDE_SOFT: u32 = 0x00000018u; // forestInner | forestOuter
 // with it, so excluding it removes every blade from valid grass terrain.
 const BLADE_SEGMENTS: u32 = 5u;
 const VERTS_PER_CARD: u32 = BLADE_SEGMENTS * 6u;
+const NEAR_CLUMP_BLADES: u32 = 6u;
+const VERTS_PER_NEAR_BLADE: u32 = BLADE_SEGMENTS * 6u;
+const VERTS_PER_NEAR_CLUMP: u32 = NEAR_CLUMP_BLADES * VERTS_PER_NEAR_BLADE;
+// Mid LOD's unit is a clump: six independently varied three-segment ribbons.
+// It deliberately uses opaque geometry rather than a photographed alpha card,
+// preserving early-Z while keeping a volumetric silhouette at 25-160 m.
+const MID_CLUMP_BLADES: u32 = 6u;
+const MID_BLADE_SEGMENTS: u32 = 3u;
+const VERTS_PER_MID_BLADE: u32 = MID_BLADE_SEGMENTS * 6u;
+const VERTS_PER_MID_CLUMP: u32 = MID_CLUMP_BLADES * VERTS_PER_MID_BLADE;
 
 fn hash11(p: vec2<f32>) -> f32 {
     let h = dot(p, vec2<f32>(127.1, 311.7));
@@ -216,7 +226,7 @@ fn blade_texture_strength(world_rel: vec3<f32>) -> f32 {
 // ended all grass at the near radius.
 fn mid_ring_end() -> f32 {
     let natural = max(grass.near_radius + 10.0, min(160.0, grass.near_radius * 2.5));
-    return select(natural, min(grass.far_radius, natural), grass.far_radius > 1.0);
+    return clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, 160.0);
 }
 
 // Coverage multiplier from a world-space noise map, so density is patchy rather
@@ -228,7 +238,11 @@ fn density_field(world_xz: vec2<f32>) -> f32 {
     let scale = max(grass.render_flags.z, 0.002);
     let field = clump_noise(world_xz, scale, 0xc7136d5bu);
     let patchy = mix(1.0 - strength, 1.0 + strength * 0.64, field);
-    return mix(1.0, patchy, grass.debug_flags.y);
+    // A second, metre-scale field creates deliberate bare pockets rather than
+    // merely tinting a uniform lawn. It is gated by the existing noise strength:
+    // zero remains a useful flat-density diagnostic setting.
+    let bare_gap = smoothstep(0.12, 0.30, clump_noise(world_xz, 0.24, 0x8f54a231u));
+    return mix(1.0, patchy * bare_gap, grass.debug_flags.y);
 }
 
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField {
@@ -263,6 +277,17 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     // gain small independent turbulence inside a travelling gust.
     result.turbulence = (flutter_noise - 0.5) * (0.035 + 0.085 * gust) * height_t;
     return result;
+}
+
+// Two seed-offset, advected noise fields replace the former short shared sine
+// cycles, so rotor flutter never visibly restarts in unison across the field.
+fn rotor_flutter_direction(world_xz: vec2<f32>, seed: f32) -> vec2<f32> {
+    let time_a = vec2<f32>(terrain.time * 13.7, -terrain.time * 9.1);
+    let time_b = vec2<f32>(-terrain.time * 7.3, terrain.time * 15.9);
+    let a = clump_noise(world_xz * 0.65 + time_a + vec2<f32>(seed * 37.0, seed * 61.0), 0.38, 0x49c28e17u);
+    let b = clump_noise(world_xz * 0.65 + time_b + vec2<f32>(seed * 71.0, seed * 23.0), 0.38, 0xb71d4a63u);
+    let direction = vec2<f32>(a - 0.5, b - 0.5);
+    return select(vec2<f32>(1.0, 0.0), normalize(direction), dot(direction, direction) > 0.0001);
 }
 
 fn hm_load(ix: i32, iz: i32) -> f32 {
@@ -435,6 +460,22 @@ fn species_shape_mixed(species: u32, variety: f32) -> vec3<f32> {
     return mix(species_shape_legacy(species), species_shape_varied(species), clamp(variety, 0.0, 1.0));
 }
 
+// RGB is the thin-blade transmission tint and W is authored thickness. Grass
+// stays green-gold, broad weeds transmit more olive light, and flower stems are
+// cooler and weaker instead of sharing one orange plastic backlight.
+fn species_transmission(species: u32) -> vec4<f32> {
+    switch (species) {
+        case 0u: { return vec4<f32>(0.78, 0.90, 0.24, 0.72); }
+        case 1u: { return vec4<f32>(0.66, 0.82, 0.18, 0.88); }
+        case 2u: { return vec4<f32>(0.72, 0.86, 0.20, 1.00); }
+        case 3u: { return vec4<f32>(0.84, 0.92, 0.30, 0.58); }
+        case 4u: { return vec4<f32>(0.58, 0.72, 0.16, 1.18); }
+        case 5u: { return vec4<f32>(0.62, 0.76, 0.18, 1.05); }
+        case 6u: { return vec4<f32>(0.74, 0.84, 0.42, 0.50); }
+        default: { return vec4<f32>(0.78, 0.88, 0.48, 0.44); }
+    }
+}
+
 fn pack_flatten(flatten: vec4<f32>, species: u32) -> vec4<u32> {
     return vec4<u32>(pack2x16snorm(clamp(flatten.xy, vec2<f32>(-1.0), vec2<f32>(1.0))),
                      pack2x16unorm(vec2<f32>(clamp(flatten.z, 0.0, 1.0), clamp(flatten.w, 0.0, 1.0))),
@@ -458,15 +499,18 @@ fn active_rotor_wash(world_xz: vec2<f32>, crush: f32, cached_wash: f32) -> f32 {
 @compute @workgroup_size(8, 8, 1)
 fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= GRID_DIM || gid.y >= GRID_DIM || grass.enabled < 0.5) { return; }
+    // Six ribbons replace the old two crossed ribbons, so one clump covers
+    // roughly three former cells and stays within the established vertex budget.
+    let near_spacing = grass.spacing * 1.72;
     let half = f32(GRID_DIM) * 0.5;
-    let snap = floor(frame.cam_pos.xz / grass.spacing) * grass.spacing;
+    let snap = floor(frame.cam_pos.xz / near_spacing) * near_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
-    let cell_world = snap + cell * grass.spacing;
-    let cell_id = vec2<i32>(floor(cell_world / grass.spacing));
+    let cell_world = snap + cell * near_spacing;
+    let cell_id = vec2<i32>(floor(cell_world / near_spacing));
     let seed = hash_cell01(cell_id, 0x4d2f91c3u);
     // ±0.925 cells: candidates may cross their nominal cell boundaries, so
     // the dense field has no obvious square lattice or marching rows.
-    let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (grass.spacing * 1.85);
+    let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (near_spacing * 1.85);
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
     let coverage = grass.density * density_field(world_xz);
@@ -497,8 +541,8 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     instances[out_index].packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
 }
 
-// The middle ring uses a stable half-density grid and a simplified two-segment
-// crossed blade. It bridges the detailed cards and distant tufts without any
+// The middle ring uses a stable half-density grid and opaque multi-blade clumps.
+// It bridges the detailed near clumps and distant coverage without any
 // camera-facing tile swap or frame-to-frame randomisation.
 @compute @workgroup_size(8, 8, 1)
 fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -564,7 +608,8 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     let near_start = mid_end + far_spacing * 0.5;
     // Keep the outer ring visually continuous. It is still economical (one
     // triangle per tuft), but no longer becomes invisible just past 60 m.
-    if (distance2 <= near_start * near_start || distance2 > grass.far_radius * grass.far_radius) { return; }
+    let far_coverage = grass.density * density_field(world_xz);
+    if (distance2 <= near_start * near_start || distance2 > grass.far_radius * grass.far_radius || seed > far_coverage) { return; }
     let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
@@ -602,69 +647,53 @@ struct VsOut {
 fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VsOut {
     let inst = instances[instance_index].pos_seed;
     let seed = inst.w;
-    let field = clump_noise(inst.xz, 0.075, 0x48ac2f19u);
-    let angle = mix(seed * 6.2831853, field * 6.2831853, grass.debug_flags.y);
-    let side = vec3<f32>(cos(angle), 0.0, -sin(angle));
-    let forward = vec3<f32>(sin(angle), 0.0, cos(angle));
-    let height_seed = mix(hash11(inst.xz + 2.0), clump_noise(inst.xz, 0.21, 0xa47f3cd1u), grass.debug_flags.y * 0.72);
-    // Resolved once per blade in cs_place; the shadow pass reads the same bytes.
-    // Named `inst_packed`: `packed` is already the vertex-index decode below.
     let inst_packed = instances[instance_index].packed;
-    // Species drives shape as well as albedo: a broad weed leaf and a flower
-    // stem are not the same ribbon with a different texture on it.
     let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
-    let height = mix(0.35, 1.05, height_seed) * grass.blade_height * shape.y;
-    // species_mix.z is the Grass-tab blade width multiplier (1.0 = stock look).
-    // Alpha cards carve their silhouette out of the texture, so the quad has to
-    // be WIDER than the blade it will show -- otherwise there is nothing for the
-    // cutout to remove and the card reads as a rectangle again.
-    let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
-    let width = mix(0.018, 0.045, hash11(inst.xz + 9.0)) * shape.x *
-        max(grass.species_mix.z, 0.05) * card_widen;
-    // Per-blade bend jitter. The stock range is deliberately the midpoint, so
-    // jitter 0 leaves the old look untouched and turning it up widens the spread
-    // in both directions rather than only leaning everything further over.
-    let bend_jitter = 1.0 + (hash11(inst.xz + 57.0) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
-    // ARCH. The old range displaced a tip by 5.5-19 cm on a blade around 0.8 m tall -- about ten
-    // degrees of lean, which is why a field of these read as rigid spikes standing to attention.
-    // Real meadow grass arcs over, and a taller blade arcs MORE because it is supporting more of
-    // its own length, so this is scaled by height below rather than being an absolute distance.
-    let arch = max(grass.cards.w, 0.0);
-    let static_bend = forward * mix(0.10, 0.34, hash11(inst.xz + 31.0)) * bend_jitter * arch;
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
-    // Arch proportional to height: a 1.3 m blade should lie over further than a 0.4 m one, not by
-    // the same number of centimetres.
-    let height_arch = static_bend * height;
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
-    // Two crossed ribbons, each built from five quads. Every vertex samples
-    // its own height along a quadratic curve rather than simply moving a tip.
-    let card = vertex_index / VERTS_PER_CARD;
-    let packed = vertex_index % VERTS_PER_CARD;
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE;
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE;
     let segment = packed / 6u;
     let corner = packed % 6u;
     let upper = corner == 2u || corner == 4u || corner == 5u;
     let left = corner == 0u || corner == 3u || corner == 5u;
     let t = f32(segment + select(0u, 1u, upper)) / f32(BLADE_SEGMENTS);
-    let blade_axis = select(side, forward, card != 0u);
-    let wind = sample_wind_field(inst.xz, t, seed);
+    // Four clump archetypes: compact upright, open meadow, low splayed, tall wisp.
+    let archetype = u32(seed * 4.0);
+    // Most meadow clumps stay short; the occasional wisp preserves a layered
+    // field without returning the whole near ring to the former tall profile.
+    let clump_height = select(select(select(0.60, 0.75, archetype == 1u), 0.52, archetype == 2u), 0.90, archetype == 3u);
+    let clump_spread = select(select(select(0.10, 0.20, archetype == 1u), 0.28, archetype == 2u), 0.14, archetype == 3u);
+    let clump_bend = select(select(select(0.70, 1.05, archetype == 1u), 1.45, archetype == 2u), 0.88, archetype == 3u);
+    let blade_seed = hash11(inst.xz + vec2<f32>(f32(blade) * 17.0 + 3.0, f32(blade) * 29.0 + 11.0));
+    let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
+    let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
+    let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
+    let base_offset = radial * (clump_spread * mix(0.18, 1.0, blade_seed));
+    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) * grass.blade_height * shape.y * clump_height;
+    let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
+    let width = mix(0.016, 0.043, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * card_widen;
+    let bend_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 23.0, 57.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
+    let static_bend = radial * mix(0.10, 0.34, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * bend_jitter * max(grass.cards.w, 0.0) * height * clump_bend;
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
+    let crushed_height = height * (1.0 - 0.55 * crush);
+    let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
         (0.035 + 0.21 * wind.gust + wind.turbulence);
     // Rotor wash has its own fast, per-blade turbulence. It is driven by the
     // cached crush amount so normal grass remains governed solely by weather.
-    let crush_flutter = vec3<f32>(sin(terrain.time * 28.0 + seed * 37.0), 0.0,
-                                  cos(terrain.time * 33.0 + seed * 53.0)) * height * (0.95 * rotor_wash);
+    let flutter_dir = rotor_flutter_direction(inst.xz + base_offset.xz, seed + blade_seed);
+    let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     // Flowers use a near-flat taper exponent so the stem keeps its width up to
     // the tip -- a petal head painted on a point would vanish.
     // Per-blade taper jitter, multiplicative about 1.0 for the same reason as the
     // bend jitter: 0 is the stock look, not a shifted one.
-    let taper_jitter = 1.0 + (hash11(inst.xz + 71.0) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
+    let taper_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 13.0, 71.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
     let taper = pow(max(1.0 - t, 0.0), max(shape.z * taper_jitter, 0.05));
     let half_width = width * taper;
-    let standing_bend = (height_arch + wind_bend) * (1.0 - 0.55 * crush) + crush_flutter;
+    let standing_bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_flutter;
     let curve = (standing_bend + crush_bend) * (t * t);
     let tangent = vec3<f32>(0.0, crushed_height, 0.0) + (standing_bend + crush_bend) * (2.0 * t);
     // Preserve a minimum apparent silhouette when a card is nearly edge-on
@@ -674,7 +703,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let view_dir = normalize(frame.cam_pos.xyz - inst.xyz);
     let edge_on = pow(1.0 - abs(dot(blade_normal, view_dir)), 4.0);
     let lateral = select(blade_axis * half_width, -blade_axis * half_width, left) * (1.0 + edge_on * 1.6);
-    let local = lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve;
+    let local = base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve;
     let world = inst.xyz + local;
     let rel = world - frame.cam_pos.xyz;
     var out: VsOut;
@@ -693,39 +722,38 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
 fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> VsOut {
     let inst = instances[instance_index].pos_seed;
     let seed = inst.w;
-    let field = clump_noise(inst.xz, 0.075, 0x48ac2f19u);
-    let angle = mix(seed * 6.2831853, field * 6.2831853, grass.debug_flags.y);
-    let side = vec3<f32>(cos(angle), 0.0, -sin(angle));
-    let forward = vec3<f32>(sin(angle), 0.0, cos(angle));
-    let height_seed = mix(hash11(inst.xz + 13.0), clump_noise(inst.xz, 0.21, 0xa47f3cd1u), grass.debug_flags.y * 0.72);
     let inst_packed = instances[instance_index].packed;
-    // Same species shape as the near path, so a plant does not change
-    // proportions as it crosses the near/mid boundary. That includes the variety
-    // blend: applying it to only one ring would make blades visibly change shape
-    // as the player walks toward them.
     let shape = species_shape_mixed(inst_packed.w & 7u, grass.shape_mix.x);
-    let height = mix(0.32, 0.92, height_seed) * grass.blade_height * shape.y;
-    let width = mix(0.024, 0.055, hash11(inst.xz + 23.0)) * shape.x * max(grass.species_mix.z, 0.05);
-    let static_bend = forward * mix(0.04, 0.14, hash11(inst.xz + 71.0));
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
-    let card = vertex_index / 12u;
-    let packed = vertex_index % 12u;
+    let blade = vertex_index / VERTS_PER_MID_BLADE;
+    let packed = vertex_index % VERTS_PER_MID_BLADE;
     let segment = packed / 6u;
     let corner = packed % 6u;
     let upper = corner == 2u || corner == 4u || corner == 5u;
     let left = corner == 0u || corner == 3u || corner == 5u;
-    let t = f32(segment + select(0u, 1u, upper)) * 0.5;
-    let blade_axis = select(side, forward, card != 0u);
-    let wind = sample_wind_field(inst.xz, t, seed);
+    let t = f32(segment + select(0u, 1u, upper)) / f32(MID_BLADE_SEGMENTS);
+    // Each member gets a stable radial base, orientation, height and bend. The
+    // spacing remains at the clump centre, so interaction and placement stay
+    // exactly as before while the rendered unit becomes a tuft of real blades.
+    let blade_seed = hash11(inst.xz + vec2<f32>(f32(blade) * 17.0 + 3.0, f32(blade) * 29.0 + 11.0));
+    let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
+    let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
+    let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
+    let base_offset = radial * mix(0.025, 0.16, blade_seed);
+    let height = mix(0.29, 0.71, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
+        grass.blade_height * shape.y;
+    let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05);
+    let static_bend = radial * mix(0.10, 0.32, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * height;
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
+    let crushed_height = height * (1.0 - 0.55 * crush);
+    let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
         (0.030 + 0.18 * wind.gust + wind.turbulence);
-    let crush_flutter = vec3<f32>(sin(terrain.time * 28.0 + seed * 37.0), 0.0,
-                                  cos(terrain.time * 33.0 + seed * 53.0)) * height * (0.95 * rotor_wash);
+    let flutter_dir = rotor_flutter_direction(inst.xz + base_offset.xz, seed + blade_seed);
+    let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     let bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_flutter;
     let curve = (bend + crush_bend) * (t * t);
     let tangent = vec3<f32>(0.0, crushed_height, 0.0) + (bend + crush_bend) * (2.0 * t);
@@ -733,7 +761,7 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let view_dir = normalize(frame.cam_pos.xyz - inst.xyz);
     let edge_on = pow(1.0 - abs(dot(blade_normal, view_dir)), 4.0);
     let lateral = select(blade_axis, -blade_axis, left) * width * pow(max(1.0 - t, 0.0), shape.z) * (1.0 + edge_on * 1.25);
-    let rel = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve - frame.cam_pos.xyz;
+    let rel = inst.xyz + base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + curve - frame.cam_pos.xyz;
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(rel, 1.0));
     out.world_rel = rel;
@@ -790,8 +818,8 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let wind = sample_wind_field(inst.xz, vh, seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
         (0.030 + 0.18 * wind.gust + wind.turbulence);
-    let crush_flutter = vec3<f32>(sin(terrain.time * 28.0 + seed * 37.0), 0.0,
-                                  cos(terrain.time * 33.0 + seed * 53.0)) * height * (0.95 * rotor_wash);
+    let flutter_dir = rotor_flutter_direction(inst.xz, seed);
+    let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     // The whole card leans; roots stay pinned. Quadratic in height, as the
     // procedural blades bend, so a clump does not shear against its neighbours.
     let lean = (wind_bend * (1.0 - 0.55 * crush) + crush_bend + crush_flutter) * (vh * vh);
@@ -916,8 +944,10 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) * (1.0 - terrain_shadow) * cloud_lit;
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
     let view_dir = normalize(-in.world_rel);
-    let transmission = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) * grass.debug_flags.w;
-    let subsurface = vec3<f32>(1.0, 0.72, 0.18) * transmission * frame.sun_diffuse.rgb * (1.0 - terrain_shadow) * cloud_lit;
+    let transmission = species_transmission(u32(in.blade_uv.z));
+    let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *
+        grass.debug_flags.w * transmission.w;
+    let subsurface = transmission.rgb * transmission_amount * frame.sun_diffuse.rgb * (1.0 - terrain_shadow) * cloud_lit;
     let lit = albedo * (ambient + direct + subsurface);
     let fogged = apply_fog(lit, in.world_rel);
     return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
@@ -932,7 +962,12 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     // naturally at the horizon.
     let gust_highlight = 1.0 + in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5) * 0.05;
     let albedo = grass_saturation(dry_patch(mix(vec3<f32>(0.075, 0.135, 0.028), vec3<f32>(0.19, 0.27, 0.055), field_noise) * gust_highlight, world.xz, 0.65));
-    let n = normalize(mix(in.normal, vec3<f32>(0.0, 1.0, 0.0), 0.65));
+    let macro_dx = clump_noise(world.xz + vec2<f32>(1.0, 0.0), 0.075, 0x4f93d71bu) -
+        clump_noise(world.xz - vec2<f32>(1.0, 0.0), 0.075, 0x4f93d71bu);
+    let macro_dz = clump_noise(world.xz + vec2<f32>(0.0, 1.0), 0.075, 0x4f93d71bu) -
+        clump_noise(world.xz - vec2<f32>(0.0, 1.0), 0.075, 0x4f93d71bu);
+    let macro_normal = normalize(vec3<f32>(-macro_dx * 0.24, 1.0, -macro_dz * 0.24));
+    let n = normalize(mix(mix(in.normal, macro_normal, 0.42), vec3<f32>(0.0, 1.0, 0.0), 0.48));
     let light_dir = normalize(frame.sun_dir_world.xyz);
     let diffuse = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);

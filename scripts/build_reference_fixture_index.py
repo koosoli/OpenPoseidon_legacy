@@ -479,6 +479,11 @@ def headline(record: dict) -> dict:
             "max_uv_sets": detail.get("max_uv_sets"),
             "faces": sum(lod.get("faces", 0) for lod in detail.get("lods", [])),
             "materials": detail.get("references", {}).get("material_count"),
+            # Kept per LOD, not just as roles: they are exact sentinels, so they
+            # are what a second implementation can be checked against byte-for-byte
+            # (scripts/verify_p3dm_against_index.py). A role name would compare
+            # equal across a whole class of offset errors.
+            "lod_resolutions": [lod.get("resolution") for lod in detail.get("lods", [])],
         }
     if record["kind"] == "material":
         return {"shaders": detail.get("shader_ids", []), "stages": len(detail.get("stages", []))}

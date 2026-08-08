@@ -747,30 +747,66 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: [AST-011A]
-    blocked_by: [AST-011A]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+        symbol: MLODLoader::loadP3DMLOD
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+        symbol: MLOD::readP3DMFaceTable
+    test_ids: [ast-011b]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        #UVSet# payloads are counted, not decoded, so only the base UV channel from
+        the face records is read. Reading the additional channels is AST-011C.
+      - >-
+        The RVMAT reference is stored on Material.materialPath but has no
+        PoseidonFormats C accessor, so the Blender addon cannot see it yet. Adding
+        one is an ABI addition better made when MAT-020 gives it meaning.
+    fallback: >-
+      An unexpected P3DM header version or a malformed face/tagg record throws
+      rather than resynchronising, so a bad model refuses instead of loading wrong.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked: 7 Catch2 cases under
+      [ast-011b] plus 25 [mlod] cases green (110 assertions), and the full suite at
+      2,319 passed with only the 6 failures already pre-existing at HEAD. The real
+      evidence is scripts/verify_p3dm_against_index.py, which drove the shipped
+      PoseidonFormats DLL over 1,661 actual Bohemia models and agreed with the
+      independent AST-007 Python walker on every LOD count and every LOD
+      resolution -- 0 refused, 0 mismatched. The two readers share no code, and LOD
+      resolutions are exact sentinels, so a desynchronised walk cannot match by
+      chance.
+
+      NOT checked: nothing was rendered. No claim is made that the geometry is
+      visually correct, only that it round-trips consistently between two
+      implementations. Winding in particular is UNVERIFIED -- P3DM is assumed to
+      share SP3X's convention and the LOD records that as
+      CW_REVERSED_ON_LOAD_ASSUMED; confirming or refuting it needs a visual check
+      the owner must make once a P3DM model reaches the screen. Material semantics
+      are untouched: the RVMAT path is carried through as an opaque string and
+      nothing interprets it.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+      - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+      - engine/Poseidon/World/Model/Model.hpp
+      - scripts/verify_p3dm_against_index.py
   - id: AST-011C
     overlay: COMPAT-C1-EXEC-001
     is_example: false

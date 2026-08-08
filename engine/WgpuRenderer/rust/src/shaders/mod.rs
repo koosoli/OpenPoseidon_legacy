@@ -145,6 +145,10 @@ mod tests {
             "terrain/terrain_shadow.wgsl",
         );
         compose(include_str!("../grass/grass.wgsl"), "grass/grass.wgsl");
+        compose(
+            include_str!("../grass/grass_shadow.wgsl"),
+            "grass/grass_shadow.wgsl",
+        );
         compose(include_str!("../water/water.wgsl"), "water/water.wgsl");
         compose(
             include_str!("../water/whitewater_render.wgsl"),

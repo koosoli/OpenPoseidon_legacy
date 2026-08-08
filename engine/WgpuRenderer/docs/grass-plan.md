@@ -11,12 +11,14 @@ Three GPU-generated LOD rings, all placed by compute, none by the CPU:
 
 | ring | grid | geometry | measured (reference mission) |
 |---|---|---|---|
-| near | 512² candidates | real blade geometry — two crossed ribbons, five segments, wind-bent per blade | 48 647 instances, 2 918 820 verts |
-| mid | 384² candidates | crossed cards keeping a real blade silhouette | 14 165 instances |
-| far | 384² candidates | one terrain-conforming coverage quad per compacted cell | **off by default** (`farRadius` gates it) |
+| near | 512² candidates | opaque six-blade, five-segment geometry clumps with four stable archetypes | 48 647 instances, 2 918 820 verts |
+| mid | 384² candidates | opaque six-blade, three-segment geometry clumps | 14 165 instances |
+| far | 384² candidates | one terrain-conforming coverage quad per compacted cell | **off by default** (explicit `farRadius` opt-in) |
 
 The mid ring is deliberately not a shortcut between near and far: a two-level field
 puts an obvious quality cliff at 25–50 m, and the third level is what removes it.
+Near and mid radii are independently tunable in the Grass developer tab; the far
+coverage proxy stays disabled until it is visually accepted.
 
 Only the near ring casts shadows. That is a cost decision, not an oversight.
 
@@ -35,7 +37,7 @@ Grass shadow   0.156 ms
 
 Two independent texture paths, each with a silent, deliberate fallback.
 
-**Near blades** — `blade_atlas.rs` generates an 8-layer `64×256` `Rgba8UnormSrgb`
+**Near clumps** — `blade_atlas.rs` generates an 8-layer `64×256` `Rgba8UnormSrgb`
 array on the CPU at init. A texture **array**, not a column atlas: an atlas averages
 neighbouring columns in the lower mips, so a distant blade would bleed into the
 flower beside it. Layers mip independently.
@@ -45,10 +47,29 @@ this repo is GPL, and the game's own grass textures are APL-SA. Species ordering
 (`0..4` grass, `4..6` weed, `6..8` flower) is an ABI shared with `grass.wgsl`, which
 cannot import Rust — tests are what keep the two definitions honest.
 
-The blades are **opaque**. The silhouette is geometry, so there is no alpha cutout
-and no discard, and the near colour pass keeps early-Z.
+The blades are **opaque**. Near and mid placement instances are clumps, with
+per-clump compact, open, low-splayed and tall-wisp archetypes plus independently
+varied members. Geometry carries the silhouette, so there is no alpha cutout and
+no discard, and the near colour pass keeps early-Z. Near placement is sparser to
+keep the original vertex budget while changing the rendered unit. The distribution
+is biased toward shorter meadow grass (about 25% below the prior height range),
+with occasional taller wisps retained for field-scale variation.
 
-**Mid clump** — procedural crossed ribbons, overridden by a clump alpha when found.
+Placement combines terrain material/slope rejection, broad density variation and
+metre-scale deliberate bare gaps. Thin-blade transmission is species-authored:
+grass, weeds and flower stems no longer share one backlight colour or thickness.
+Biome/moisture data is not available from the current terrain upload; adding it is
+the remaining placement-input prerequisite rather than something to fake from noise.
+
+Rotor-wash flutter uses two seed-offset, advected noise fields rather than shared
+sine cycles, so it has no obvious common restart. The far coverage ring now obeys
+the same density gaps and shades with stable macro-normal variation.
+
+**Mid clump** — six opaque, independently varied blade ribbons per placement
+instance. The legacy photographed tuft can still be uploaded without breaking
+the game-side ABI, but it is not rendered: its alpha cutout forfeits early-Z and
+the crossed-card silhouette was rejected. Mid is the first clump conversion;
+near now uses the same clump direction with denser five-segment blades.
 
 Both are replaced by authored images if they exist on disk, via `UploadGrassTuft()`
 and `UploadGrassBladeAtlas()` in `TerrainWgpu.cpp`. Absence logs at INFO and falls
@@ -90,14 +111,19 @@ without separate licence verification" — and it has not happened.
 
 ### Progress, 2026-08-05
 
-Source, registry and recipe are done; the authored path now runs from a verified
-CC0 source rather than from unverifiable local files.
+Source, registry and recipe are done, but the multi-species 4K atlas unwrap is
+not visually accepted: its source sheets contain merged/background regions that
+the current component recipe cannot safely turn into blade surfaces. It remains
+available for development comparison but is disabled by default; the procedural
+surface remains the honest default until a source-specific segmentation recipe
+passes a meadow visual gate.
 
 - `docs/assets/source-registry.yaml` records the selected source with its
   original-provider licence quote and per-file hashes, plus the rejected
   candidate and why. `scripts/validate_asset_registry.py` enforces it in CI.
 - `scripts/build_grass_blade_atlas.py` rebuilds the eight layers deterministically
-  from that source. `--check` is a real determinism test.
+  from six registered 4K source sheets, selecting isolated blades across species.
+  `--check` is a real determinism test.
 - Engine confirms the load: *"near-LOD photo blade atlas uploaded (8 layers,
   64x256)"* (`docs/roadmap/evidence/grs-gate1-blades-20260805-original-training-capture.log`).
 

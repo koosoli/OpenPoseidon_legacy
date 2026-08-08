@@ -55,7 +55,7 @@ struct GrassParams {
     saturation: f32,
     dry_patches: f32,
     dry_patch_scale: f32,
-    _pad3: f32,
+    mid_radius: f32,
     // Shape and card controls. Trailing vec4 pair keeps the UBO 16-byte aligned.
     //   shape_mix = (variety, taper jitter, bend jitter, blade texture strength)
     //   cards     = (alpha cards on, alpha cutoff, card widening, spare)
@@ -151,9 +151,6 @@ pub struct Grass {
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
     mid_color_no_write_pipeline: wgpu::RenderPipeline,
-    mid_tuft_prepass_pipeline: wgpu::RenderPipeline,
-    mid_tuft_color_pipeline: wgpu::RenderPipeline,
-    mid_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
     far_color_pipeline: wgpu::RenderPipeline,
     far_color_no_write_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -241,7 +238,7 @@ impl Grass {
             wind_direction: 0.0,
             // The far ring's accept band opens past the mid ring's reach, so a
             // far radius equal to the detail radius emits nothing at all.
-            far_radius: (radius * 5.0).clamp(60.0, 5000.0),
+            far_radius: 0.0,
             interactor_x: 0.0,
             interactor_z: 0.0,
             interactor_radius: 0.0,
@@ -273,14 +270,14 @@ impl Grass {
             saturation: 1.0,
             dry_patches: 0.35,
             dry_patch_scale: 0.030,
-            _pad3: 0.0,
+            mid_radius: 100.0,
             // Shape variety defaults ON: four grass species sharing one
             // silhouette is the defect, not a look worth preserving by default.
             // 0 still reproduces it exactly for A/B.
             shape_variety: 1.0,
             taper_jitter: 0.35,
             bend_jitter: 0.30,
-            blade_texture_strength: 1.0,
+            blade_texture_strength: 0.0,
             // Alpha cards OFF by default: they cost early-Z and add overdraw, so
             // adopting them is a measured decision, not a default.
             alpha_cards: 0.0,
@@ -712,29 +709,6 @@ impl Grass {
             surface_format,
             false,
         );
-        // GRS-E photographed tuft cards; used instead of the procedural mid
-        // blades once the game has uploaded the decoded PAA.
-        let mid_tuft_prepass_pipeline = make_pipeline(
-            "wgr_grass_mid_tuft_prepass",
-            "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft_prepass",
-            NORMAL_FORMAT,
-            true,
-        );
-        let mid_tuft_color_pipeline = make_pipeline(
-            "wgr_grass_mid_tuft_color",
-            "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
-            surface_format,
-            true,
-        );
-        let mid_tuft_color_no_write_pipeline = make_pipeline(
-            "wgr_grass_mid_tuft_color_no_write",
-            "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
-            surface_format,
-            false,
-        );
         let far_color_pipeline = make_pipeline(
             "wgr_grass_far_color",
             "vs_grass_far",
@@ -829,9 +803,6 @@ impl Grass {
             mid_prepass_pipeline,
             mid_color_pipeline,
             mid_color_no_write_pipeline,
-            mid_tuft_prepass_pipeline,
-            mid_tuft_color_pipeline,
-            mid_tuft_color_no_write_pipeline,
             far_color_pipeline,
             far_color_no_write_pipeline,
             shadow_pipeline,
@@ -1016,7 +987,7 @@ impl Grass {
             saturation: params.saturation.clamp(0.0, 2.0),
             dry_patches: params.dry_patches.clamp(0.0, 1.0),
             dry_patch_scale: params.dry_patch_scale.clamp(0.002, 0.3),
-            _pad3: 0.0,
+            mid_radius: params.mid_radius.clamp(8.0, 160.0),
             shape_variety: params.shape_variety.clamp(0.0, 1.0),
             taper_jitter: params.taper_jitter.clamp(0.0, 1.0),
             bend_jitter: params.bend_jitter.clamp(0.0, 1.0),
@@ -1169,9 +1140,8 @@ impl Grass {
             }
         }
         // Vertex counts mirror reset_indirect's per-LOD vertex-per-instance values.
-        self.stats.near_vertices = self.stats.near_instances * 60;
-        self.stats.mid_vertices =
-            self.stats.mid_instances * if self.tuft_enabled { 12 } else { 24 };
+        self.stats.near_vertices = self.stats.near_instances * 180;
+        self.stats.mid_vertices = self.stats.mid_instances * 108;
         self.stats.far_vertices = self.stats.far_instances * 6;
     }
 
@@ -1191,11 +1161,12 @@ impl Grass {
         queue.write_buffer(&self.placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.mid_placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
-        // Two crossed five-segment blade ribbons (2 cards * 5 quads * 6 verts).
-        queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[60u32, 0, 0, 0]));
-        // Mid geometry depends on which path is live: 12 verts for two crossed
-        // photographed tuft quads, 24 for the two-segment procedural ribbons.
-        let mid_verts: u32 = if self.tuft_enabled { 12 } else { 24 };
+        // Near LOD: six five-segment opaque ribbons per clump (6 * 5 * 6).
+        queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[180u32, 0, 0, 0]));
+        // Mid LOD is six opaque, three-segment ribbons per clump. The legacy
+        // photographed alpha tuft remains loadable for ABI compatibility but is
+        // not selected: the clump geometry owns this silhouette.
+        let mid_verts: u32 = 108;
         queue.write_buffer(
             &self.mid_indirect,
             0,
@@ -1256,15 +1227,10 @@ impl Grass {
             pass.set_bind_group(2, &self.far_data_bind, &[]);
             pass.draw_indirect(&self.far_indirect, 0);
         }
-        // GRS-E: photographed tuft cards once the game has uploaded the PAA,
-        // procedural ribbons until then (and if the texture is missing).
-        let mid_pipeline = match (kind, self.tuft_enabled) {
-            (GrassPass::Color, true) => &self.mid_tuft_color_pipeline,
-            (GrassPass::ColorNoWrite, true) => &self.mid_tuft_color_no_write_pipeline,
-            (GrassPass::Prepass, true) => &self.mid_tuft_prepass_pipeline,
-            (GrassPass::Color, false) => &self.mid_color_pipeline,
-            (GrassPass::ColorNoWrite, false) => &self.mid_color_no_write_pipeline,
-            (GrassPass::Prepass, false) => &self.mid_prepass_pipeline,
+        let mid_pipeline = match kind {
+            GrassPass::Color => &self.mid_color_pipeline,
+            GrassPass::ColorNoWrite => &self.mid_color_no_write_pipeline,
+            GrassPass::Prepass => &self.mid_prepass_pipeline,
         };
         pass.set_pipeline(mid_pipeline);
         pass.set_bind_group(0, camera_bind, &[camera_offset]);

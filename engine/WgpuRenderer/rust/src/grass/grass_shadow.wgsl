@@ -79,15 +79,19 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> vec4<f32>
     return vec4<f32>(cos(direction_angle), sin(direction_angle), gust, turbulence);
 }
 
+fn rotor_flutter_direction(world_xz: vec2<f32>, seed: f32) -> vec2<f32> {
+    let time_a = vec2<f32>(terrain.time * 13.7, -terrain.time * 9.1);
+    let time_b = vec2<f32>(-terrain.time * 7.3, terrain.time * 15.9);
+    let a = clump_noise(world_xz * 0.65 + time_a + vec2<f32>(seed * 37.0, seed * 61.0), 0.38, 0x49c28e17u);
+    let b = clump_noise(world_xz * 0.65 + time_b + vec2<f32>(seed * 71.0, seed * 23.0), 0.38, 0xb71d4a63u);
+    let direction = vec2<f32>(a - 0.5, b - 0.5);
+    return select(vec2<f32>(1.0, 0.0), normalize(direction), dot(direction, direction) > 0.0001);
+}
+
 @vertex
 fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> @builtin(position) vec4<f32> {
     let inst = instances[instance_index].pos_seed;
     let seed = inst.w;
-    let field = clump_noise(inst.xz, 0.075, 0x48ac2f19u);
-    let angle = mix(seed * 6.2831853, field * 6.2831853, grass.debug_flags.y);
-    let side = vec3<f32>(cos(angle), 0.0, -sin(angle));
-    let forward = vec3<f32>(sin(angle), 0.0, cos(angle));
-    let height_seed = mix(hash11(inst.xz + 2.0), clump_noise(inst.xz, 0.21, 0xa47f3cd1u), grass.debug_flags.y * 0.72);
     // Species shape must mirror grass.wgsl's species_shape_mixed(): a broad weed
     // leaf casts a broad shadow, and a flower stem must not taper to a point.
     // This file re-implements it rather than importing, so the two drift unless
@@ -108,12 +112,6 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         default: { varied = vec3<f32>(0.68, 1.32, 0.09); }
     }
     let shape = mix(legacy, varied, clamp(grass.shape_mix.x, 0.0, 1.0));
-    let height = mix(0.35, 1.05, height_seed) * grass.blade_height * shape.y;
-    let bend_jitter = 1.0 + (hash11(inst.xz + 57.0) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
-    // Arch must mirror grass.wgsl exactly, height scaling included, or a blade's shadow is cast
-    // by a straighter blade than the one being drawn.
-    let arch = max(grass.cards.w, 0.0);
-    let static_bend = forward * mix(0.10, 0.34, hash11(inst.xz + 31.0)) * bend_jitter * arch * height;
     // Flattening cached by cs_place. Without this the shadow pass rebuilt an
     // upright blade, so grass a player had walked flat kept casting a full
     // standing shadow.
@@ -128,32 +126,43 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         let live_wash = (1.0 - smoothstep(grass.interactor_radius * 0.18, grass.interactor_radius, length(delta))) * crush;
         rotor_wash = max(cached_wash, live_wash);
     }
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
-    let card = vertex_index / 30u;
+    let blade = vertex_index / 30u;
     let packed = vertex_index % 30u;
     let segment = packed / 6u;
     let corner = packed % 6u;
     let upper = corner == 2u || corner == 4u || corner == 5u;
     let left = corner == 0u || corner == 3u || corner == 5u;
     let t = f32(segment + select(0u, 1u, upper)) / 5.0;
-    let axis = select(side, forward, card != 0u);
-    let wind = sample_wind_field(inst.xz, t, seed);
+    let archetype = u32(seed * 4.0);
+    let clump_height = select(select(select(0.60, 0.75, archetype == 1u), 0.52, archetype == 2u), 0.90, archetype == 3u);
+    let clump_spread = select(select(select(0.10, 0.20, archetype == 1u), 0.28, archetype == 2u), 0.14, archetype == 3u);
+    let clump_bend = select(select(select(0.70, 1.05, archetype == 1u), 1.45, archetype == 2u), 0.88, archetype == 3u);
+    let blade_seed = hash11(inst.xz + vec2<f32>(f32(blade) * 17.0 + 3.0, f32(blade) * 29.0 + 11.0));
+    let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
+    let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
+    let axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
+    let base_offset = radial * (clump_spread * mix(0.18, 1.0, blade_seed));
+    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) * grass.blade_height * shape.y * clump_height;
+    let bend_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 23.0, 57.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
+    let static_bend = radial * mix(0.10, 0.34, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * bend_jitter * max(grass.cards.w, 0.0) * height * clump_bend;
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
+    let crushed_height = height * (1.0 - 0.55 * crush);
+    let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
         (0.035 + 0.21 * wind.z + wind.w);
-    let crush_flutter = vec3<f32>(sin(terrain.time * 28.0 + seed * 37.0), 0.0,
-                                  cos(terrain.time * 33.0 + seed * 53.0)) * height * (0.95 * rotor_wash);
+    let flutter_dir = rotor_flutter_direction(inst.xz + base_offset.xz, seed + blade_seed);
+    let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     let bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_bend + crush_flutter;
     // species_mix.z mirrors the Grass-tab blade width multiplier, or a widened
     // blade would cast the shadow of a thin one.
     // Card widening and taper jitter mirror grass.wgsl: a shadow cast by the
     // un-widened blade would not match the silhouette actually drawn.
     let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
-    let taper_jitter = 1.0 + (hash11(inst.xz + 71.0) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
-    let width = mix(0.018, 0.045, hash11(inst.xz + 9.0)) * shape.x *
+    let taper_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 13.0, 71.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
+    let width = mix(0.016, 0.043, blade_seed) * shape.x *
         max(grass.species_mix.z, 0.05) * card_widen *
         pow(max(1.0 - t, 0.0), max(shape.z * taper_jitter, 0.05));
     let lateral = select(axis * width, -axis * width, left);
-    let world = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + bend * (t * t);
+    let world = inst.xyz + base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + bend * (t * t);
     return shadow.light_vp * vec4<f32>(world - shadow.cam_pos.xyz, 1.0);
 }

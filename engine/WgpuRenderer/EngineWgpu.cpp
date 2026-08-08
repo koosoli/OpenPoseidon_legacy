@@ -3275,7 +3275,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // full candidate dispatch every frame and emitted nothing.
     // 0 disables the outer ring entirely (and skips its dispatch); any other
     // value is floored past the mid ring so it can never land in the dead band.
-    const float midReach = std::min(160.0f, std::max(params.near_radius + 10.0f, params.near_radius * 2.5f));
+    const float midReach = std::clamp(settings.midRadius, params.near_radius + 10.0f, 160.0f);
+    params.mid_radius = midReach;
     params.far_radius = settings.farRadius <= 0.0f ? 0.0f : std::clamp(settings.farRadius, midReach + 8.0f, 5000.0f);
     params.density_noise_scale = std::clamp(settings.densityNoiseScale, 0.002f, 0.5f);
     params.density_noise_strength = std::clamp(settings.densityNoiseStrength, 0.0f, 1.0f);

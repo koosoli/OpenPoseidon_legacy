@@ -1061,17 +1061,19 @@ class Engine : public IGraphicsEngine
         // default 60 m field affordable while the inner cards remain detailed.
         float density = 1.0f;
         float spacing = 0.20f;
-        // Detail radius: drives the dense near cards and the mid blade ring.
-        // Both are bounded by their placement grids, so raising this past
-        // roughly 64 m has no effect -- the outer field is `farRadius`.
+        // Detail radius: dense near clumps only. Mid reach is independent so a
+        // bad far proxy never forces the detailed grass to stop too close.
         float radius = 30.0f;
+        // Opaque mid-clump reach. Clamped above the near ring and below the
+        // fixed grid's 160 m quality bound by the WGPU backend.
+        float midRadius = 100.0f;
         // Outer terrain-cover ring. 0 = off (the historical behaviour: grass
         // simply ends at the mid ring). When on it MUST stay above the mid
         // ring's reach or the far LOD's accept band is empty, so the mapping
         // in EngineWgpu floors it -- there is no silently-dead middle ground.
         // Off by default: the flat coverage quads read as a second green
         // surface over the terrain and look worse than no distant grass.
-        float farRadius = 1.0f;
+        float farRadius = 0.0f;
         // Density noise: breaks the field into thicker and thinner patches so
         // coverage is not uniform. Scale is the noise frequency (1/metres);
         // strength 0 = flat density. 0.55 reproduces the previous hardcoded
@@ -1110,7 +1112,10 @@ class Engine : public IGraphicsEngine
         // distance fade. 0 keeps the procedural surface detail even when the
         // photo layers are present, which is the quickest way to tell whether a
         // look problem is the texture or the geometry.
-        float bladeTextureStrength = 1.0f;
+        // The active photo atlas remains opt-in until its source-sheet unwrap
+        // passes visual acceptance; a bad opaque layer is worse than the stable
+        // procedural surface because geometry cannot hide its blurred background.
+        float bladeTextureStrength = 0.0f;
         // Alpha cut-out cards: take the silhouette from the texture instead of
         // the quad, so one card can carry several blade shapes. This is the
         // Reforger-style approach and it buys shape variety without more

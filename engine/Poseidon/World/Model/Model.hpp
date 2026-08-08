@@ -114,6 +114,10 @@ struct Quad {
 struct Material {
     std::string name;
     std::string texturePath;
+    // The RVMAT the source face named. Kept separate from texturePath because it
+    // is a shader description, not an image; MAT-020/MAT-030 interpret it. SP3X
+    // has no equivalent and leaves this empty.
+    std::string materialPath;
     float metallic = 0.0f;
     float roughness = 1.0f;
     float emissive = 0.0f;
@@ -225,6 +229,15 @@ struct Mesh {
 struct LODLevel {
     float resolution = 0.0f;  // viewing distance in metres
     Mesh mesh;
+
+    // Source-format facts, recorded rather than re-derived (AST-011B).
+    // "MLOD" names the container, not the per-LOD encoding, so a consumer that
+    // needs to know which one it got -- or on what winding assumption the indices
+    // were built -- has to be told. sourceWinding ending in _ASSUMED means the
+    // convention has not been confirmed against a render.
+    std::string sourceEncoding;   // "SP3X" | "P3DM"
+    std::string sourceWinding;
+    int32_t uvSetCount = 0;       // #UVSet# blocks present; payload is AST-011C
     
     LODLevel() = default;
     explicit LODLevel(float resolution) : resolution(resolution) {}

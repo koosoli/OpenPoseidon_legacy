@@ -2609,18 +2609,18 @@ void DrawGrassTab()
     changed |= ImGui::SliderFloat("Base spacing (m)", &grass.spacing, 0.10f, 0.75f, "%.2f");
     ImGui::TextDisabled(
         "Distance between candidates before the density boost; lower values make grass substantially denser.");
-    changed |= ImGui::SliderFloat("Detail radius (m)", &grass.radius, 8.0f, 200.0f, "%.0f");
-    ImGui::TextDisabled("Dense cards plus the mid blade ring. Both are bounded by their placement grids, so values "
-                        "past ~64 m have no further effect.");
+    changed |= ImGui::SliderFloat("Near clump radius (m)", &grass.radius, 8.0f, 200.0f, "%.0f");
+    ImGui::TextDisabled("Dense six-blade clumps. The fixed near placement grid limits its effective reach.");
+    changed |= ImGui::SliderFloat("Mid clump radius (m)", &grass.midRadius, 18.0f, 160.0f, "%.0f");
+    ImGui::TextDisabled("Opaque mid-clump reach. Extend this before enabling the far terrain-cover proxy.");
     changed |= ImGui::SliderFloat("Far radius (m)", &grass.farRadius, 0.0f, 5000.0f, "%.0f");
-    ImGui::TextDisabled("Outer terrain-cover proxy. 0 = off (grass ends at the mid ring). Any other value is floored "
+    ImGui::TextDisabled("Outer terrain-cover proxy. 0 = off (default). Any other value is floored "
                         "past the mid ring, and its dispatch is skipped entirely when off.");
     changed |= ImGui::SliderFloat("Density noise scale", &grass.densityNoiseScale, 0.002f, 0.5f, "%.3f");
     ImGui::TextDisabled(
         "Patch frequency in 1/metres. 0.075 gives ~13 m patches; lower = broader sweeps, higher = finer mottling.");
     changed |= ImGui::SliderFloat("Density noise strength", &grass.densityNoiseStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("0 = perfectly uniform coverage; 1 = bare ground between dense clumps. Scaled by Field "
-                        "clumping below, and does not affect the far ring.");
+    ImGui::TextDisabled("0 = perfectly uniform coverage; 1 = bare ground between dense clumps. Applies to every LOD.");
 
     changed |= ImGui::SliderFloat("Colour saturation", &grass.saturation, 0.0f, 2.0f, "%.2f");
     ImGui::TextDisabled("1.00 = untouched, 0.00 = greyscale. Pushed about the luma axis, so brightness is "
@@ -2709,14 +2709,14 @@ void DrawGrassTab()
     changed |= ImGui::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
     const float effectiveSpacing = std::max(0.10f, grass.spacing / std::sqrt(std::max(1.0f, grass.densityBoost)));
     const float nearDetailRadius = std::min(grass.radius, effectiveSpacing * 255.0f);
-    const float midReach = std::min(160.0f, std::max(nearDetailRadius + 10.0f, nearDetailRadius * 2.5f));
+    const float midReach = std::clamp(grass.midRadius, nearDetailRadius + 10.0f, 160.0f);
     if (grass.farRadius <= 0.0f)
-        ImGui::TextDisabled("LOD field: detailed %.0f m, mid blades to %.0f m, no far ring.", nearDetailRadius,
+        ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, no far ring.", nearDetailRadius,
                             midReach);
     else
     {
         const float farReach = std::clamp(grass.farRadius, midReach + 8.0f, 5000.0f);
-        ImGui::TextDisabled("LOD field: detailed %.0f m, mid blades to %.0f m, far cover %.0f-%.0f m.",
+        ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, far cover %.0f-%.0f m.",
                             nearDetailRadius, midReach, midReach, farReach);
     }
     ImGui::TextDisabled("Wind: travelling direction field plus local gusts; roots stay pinned and player/vehicle "
@@ -2736,7 +2736,8 @@ void DrawGrassTab()
         grass.densityBoost = 4.0f;
         grass.spacing = 0.20f;
         grass.radius = 30.0f;
-        grass.farRadius = 1.0f;
+        grass.midRadius = 100.0f;
+        grass.farRadius = 0.0f;
         grass.densityNoiseScale = 0.075f;
         grass.densityNoiseStrength = 0.55f;
         grass.bladeWidth = 1.0f;
@@ -2748,7 +2749,7 @@ void DrawGrassTab()
         grass.shapeVariety = 1.0f;
         grass.taperJitter = 0.35f;
         grass.bendJitter = 0.30f;
-        grass.bladeTextureStrength = 1.0f;
+        grass.bladeTextureStrength = 0.0f;
         grass.alphaCards = false;
         grass.alphaCutoff = 0.5f;
         grass.cardWiden = 1.6f;

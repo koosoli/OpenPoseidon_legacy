@@ -82,10 +82,7 @@ class MLODLoader
             case MLOD::LodSignature::SP3X:
                 return loadSP3XLOD(reader);
             case MLOD::LodSignature::P3DM:
-                throw MLOD::UnsupportedLodFormat(
-                    signature, lodIndex,
-                    "P3DM LOD parsing is not implemented in this build (AST-011B); the SP3X reader "
-                    "cannot decode it because P3DM face records are variable-length");
+                return loadP3DMLOD(reader);
             default:
                 throw MLOD::UnsupportedLodFormat(
                     signature, lodIndex,
@@ -107,7 +104,43 @@ class MLODLoader
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
-        lod.resolution = taggData.resolution;
+        lod.resolution     = taggData.resolution;
+        lod.sourceEncoding = "SP3X";
+        lod.sourceWinding  = "CW_REVERSED_ON_LOAD";
+
+        return lod;
+    }
+
+    // AST-011B. Deliberately the same conversion as SP3X after the read: the two
+    // encodings differ in how the tables are stored, not in what they mean, so a
+    // second converter would be a second place for the winding and vertex-merge
+    // rules to drift apart.
+    static LODLevel loadP3DMLOD(BinaryReader& reader)
+    {
+        LODLevel lod;
+        auto     header = MLOD::readP3DMHeader(reader);
+        // Note nNorm, not nPos: P3DM normal count is independent of the vertex
+        // count, and reusing nPos here would truncate or overrun the normal table.
+        auto     vertexTable = MLOD::readVertexTable(reader, header.nPos);
+        auto     normalTable = MLOD::readNormalTable(reader, header.nNorm);
+        auto     faceTable   = MLOD::readP3DMFaceTable(reader, header.nFace);
+        auto     taggData    = MLOD::readP3DMTAGGSection(reader, header.nPos, header.nFace);
+
+        auto vertexToPoint = convertGeometry(lod.mesh, vertexTable, normalTable, faceTable, taggData);
+        convertMaterials(lod.mesh, faceTable);
+        convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
+        convertProperties(lod.mesh, taggData.namedProperties);
+        sortVerticesByPointIndex(lod.mesh, vertexToPoint);
+        lod.resolution     = taggData.resolution;
+        lod.uvSetCount     = taggData.uvSetCount;
+        lod.sourceEncoding = "P3DM";
+        // Recorded rather than asserted. The SP3X path reverses winding on load and
+        // the same reversal is applied here, but that P3DM uses the identical
+        // convention is an assumption -- no P3DM model has been rendered yet, so
+        // nothing has confirmed it. Naming the assumption on the LOD means a later
+        // visual check can contradict it in one place instead of hunting for an
+        // implicit swap buried in the converter.
+        lod.sourceWinding  = "CW_REVERSED_ON_LOAD_ASSUMED";
 
         return lod;
     }
@@ -333,36 +366,45 @@ class MLODLoader
 
     static void convertMaterials(Mesh& mesh, const MLOD::FaceTable& faceTable)
     {
+        // Keyed on the texture AND material pair, not the texture alone.
+        //
+        // SP3X faces name only a texture, so for them this partitions exactly as
+        // before. P3DM faces name both, and the common Arma case is several faces
+        // sharing one texture (often none at all) while pointing at different
+        // RVMATs -- the Arma 2 worker head, for instance, has no face texture and
+        // two distinct materials. Keying on the texture would merge those into a
+        // single "#default#" material and silently discard the distinction this
+        // ticket exists to preserve.
+        auto keyOf = [](const MLOD::DataFaceEx& face)
+        { return face.textureName + '|' + face.materialName; };
+
         std::unordered_map<std::string, uint32_t> materialMap;
         for (const auto& face : faceTable.faces)
         {
-            std::string textureName(face.texture);
-            size_t      nullPos = textureName.find('\0');
-            if (nullPos != std::string::npos)
-                textureName = textureName.substr(0, nullPos);
-            const bool isEmpty = textureName.empty();
-            if (isEmpty)
-                textureName = "#default#";
-            if (materialMap.find(textureName) == materialMap.end())
-            {
-                Material mat;
-                mat.name        = textureName;
-                mat.texturePath = isEmpty ? "" : textureName;
-                materialMap[textureName] = static_cast<uint32_t>(mesh.materials.size());
-                mesh.materials.push_back(mat);
-            }
+            const std::string key = keyOf(face);
+            if (materialMap.find(key) != materialMap.end())
+                continue;
+
+            Material mat;
+            // Prefer the texture for the display name so SP3X models keep the
+            // names they had; fall back to the RVMAT when there is no texture.
+            if (!face.textureName.empty())
+                mat.name = face.textureName;
+            else if (!face.materialName.empty())
+                mat.name = face.materialName;
+            else
+                mat.name = "#default#";
+            mat.texturePath  = face.textureName;
+            mat.materialPath = face.materialName;
+
+            materialMap[key] = static_cast<uint32_t>(mesh.materials.size());
+            mesh.materials.push_back(mat);
         }
 
         size_t triIdx = 0, quadIdx = 0;
         for (const auto& face : faceTable.faces)
         {
-            std::string textureName(face.texture);
-            size_t      nullPos = textureName.find('\0');
-            if (nullPos != std::string::npos)
-                textureName = textureName.substr(0, nullPos);
-            uint32_t materialIdx = 0;
-            if (!textureName.empty())
-                materialIdx = materialMap[textureName];
+            const uint32_t materialIdx = materialMap[keyOf(face)];
             if (face.n == 3)
             {
                 if (triIdx < mesh.triangles.size())

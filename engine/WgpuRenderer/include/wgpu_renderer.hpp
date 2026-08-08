@@ -813,7 +813,7 @@ struct WgrGrassParams
      * the patch size (noise frequency, 1/metres). */
     float dry_patches;
     float dry_patch_scale;
-    float _pad3;
+    float mid_radius;     /* opaque mid-clump radius (formerly reserved) */
     /* Blade shape controls. The four grass species used to share ONE silhouette,
      * so a field read as the same blade repeated; shape_variety blends from that
      * legacy behaviour (0) to eight distinct profiles (1), and the two jitters
