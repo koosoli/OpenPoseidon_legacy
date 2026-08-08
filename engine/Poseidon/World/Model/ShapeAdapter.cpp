@@ -438,7 +438,15 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     tex = materialIndexToTexture[sec.materialIndex];
                 shapeSections[s].properties.SetTexture(tex);
                 shapeSections[s].properties.SetSpecial(static_cast<int>(sec.hints));
-                shapeSections[s].surfMat = GTexMaterialBank.TextureToMaterial(tex);
+                // An Arma P3D section may name an RVMAT independently of its
+                // base texture. Prefer that authored material over the legacy
+                // CfgTextureToMaterial lookup, which cannot recover the RVMAT
+                // once the common model IR has preserved it separately.
+                if (sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size() &&
+                    !mesh.materials[sec.materialIndex].materialPath.empty())
+                    shapeSections[s].surfMat = GTexMaterialBank.New(mesh.materials[sec.materialIndex].materialPath.c_str());
+                else
+                    shapeSections[s].surfMat = GTexMaterialBank.TextureToMaterial(tex);
                 for (int f = 0; f < facesPerSection[s]; ++f)
                     faceStream.Next(nativePos);
                 shapeSections[s].end = nativePos;

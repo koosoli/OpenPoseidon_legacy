@@ -1270,8 +1270,9 @@ void GameApplication::RunMainLoop()
                         {
                             const ShapeSection& sec = lod->GetSection(section);
                             if (sec.surfMat)
-                                LOG_INFO(Core, "--test-model:     section {} material {}", section,
-                                         sec.surfMat->GetName().Data());
+                                LOG_INFO(Core, "--test-model:     section {} material {} exists={}", section,
+                                         sec.surfMat->GetName().Data(),
+                                         QIFStream::FileExists(sec.surfMat->GetName().Data()));
                         }
                     }
                     if (faces <= 0)

@@ -44,6 +44,10 @@ Type LoadValue(const ParamEntry& cfg, const char* name, const Type& defVal)
 
 TexMaterial::TexMaterial(const char* name)
 {
+    // Keep the authored RVMAT path for section diagnostics and cache identity.
+    // TextureToMaterial historically supplied it through the cache key, but a
+    // model may now construct a material directly from its own materialPath.
+    _name = name;
     ParamFile cfg;
     const ParamEntry* entry = nullptr;
     if (*name == '#')
