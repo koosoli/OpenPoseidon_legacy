@@ -41,6 +41,19 @@ struct Odol73LodDirectory
     std::vector<bool> permanent;
 };
 
+struct Odol73StaticLodHeader
+{
+    uint32_t vertexCount = 0;
+    float faceArea = 0.0f;
+    int32_t orHints = 0;
+    int32_t andHints = 0;
+    Vector3 bboxMin;
+    Vector3 bboxMax;
+    Vector3 bboxCenter;
+    float bboxRadius = 0.0f;
+    std::vector<std::string> textures;
+};
+
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 {
     std::string value;
@@ -131,6 +144,38 @@ inline Odol73LodDirectory ReadOdol73StaticDirectory(BinaryReader& reader, int fi
     for (size_t i = 0; i < count; ++i)
         if (result.starts[i] >= result.ends[i] || result.ends[i] > static_cast<uint32_t>(fileSize))
             throw std::runtime_error("ODOL 73 LOD directory has an invalid byte range");
+    return result;
+}
+
+inline Odol73StaticLodHeader ReadOdol73StaticLodHeader(BinaryReader& reader, uint32_t start, uint32_t end)
+{
+    if (start >= end || end > static_cast<uint32_t>(reader.tell() + reader.remaining()))
+        throw std::runtime_error("ODOL 73 LOD header range is invalid");
+    reader.seek(static_cast<int>(start));
+    auto requireEmptyArray = [&reader](const char* name) {
+        if (reader.read<uint32_t>() != 0)
+            throw std::runtime_error(std::string("ODOL 73 ") + name + " is not implemented by the static LOD reader");
+    };
+    requireEmptyArray("proxies");
+    requireEmptyArray("sub-skeleton mapping");
+    requireEmptyArray("sub-skeleton sets");
+    Odol73StaticLodHeader result;
+    result.vertexCount = reader.read<uint32_t>();
+    result.faceArea = reader.read<float>();
+    result.orHints = reader.read<int32_t>();
+    result.andHints = reader.read<int32_t>();
+    reader.readBytes(&result.bboxMin, sizeof(result.bboxMin));
+    reader.readBytes(&result.bboxMax, sizeof(result.bboxMax));
+    reader.readBytes(&result.bboxCenter, sizeof(result.bboxCenter));
+    result.bboxRadius = reader.read<float>();
+    const uint32_t textureCount = reader.read<uint32_t>();
+    if (textureCount > 64)
+        throw std::runtime_error("ODOL 73 LOD has too many texture references");
+    result.textures.reserve(textureCount);
+    for (uint32_t i = 0; i < textureCount; ++i)
+        result.textures.push_back(ReadBoundedAsciiz(reader, "texture reference"));
+    if (reader.tell() > static_cast<int>(end))
+        throw std::runtime_error("ODOL 73 LOD header exceeds its declared range");
     return result;
 }
 

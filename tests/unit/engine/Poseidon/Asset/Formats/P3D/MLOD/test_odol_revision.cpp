@@ -160,4 +160,8 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(directory.model.resolutions[0] == 1.0f);
     REQUIRE(directory.starts.size() == 2);
     REQUIRE(directory.starts[0] < directory.ends[0]);
+    CAPTURE(directory.starts, directory.ends, directory.permanent);
+    const auto lod = P3D::ReadOdol73StaticLodHeader(reader, directory.starts[0], directory.ends[0]);
+    REQUIRE(lod.vertexCount == 48);
+    REQUIRE(lod.textures == std::vector<std::string>{"a3\\3den\\objects\\data\\area_ca.paa"});
 }
