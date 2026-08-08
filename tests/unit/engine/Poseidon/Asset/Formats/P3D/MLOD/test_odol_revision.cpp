@@ -311,3 +311,67 @@ TEST_CASE("An ODOL 73 model outside the implemented shape is still refused", "[p
         REQUIRE(std::string(error.what()).find("static LODs") != std::string::npos);
     }
 }
+
+TEST_CASE("ODOL 73 face winding is measured against the model's own normals",
+          "[p3d][odol][ast-012b][ast-018][corpus]")
+{
+    // AST-018 asks for an explicit source-geometry basis. Winding is the part
+    // that can be established here without a render, because the file supplies
+    // both sides of the comparison: index order and per-vertex normals. If the
+    // cross product of the first two edges agrees with the stored normal the
+    // indices are counter-clockwise about it; if it opposes, clockwise.
+    //
+    // What makes this evidence rather than a sample is unanimity. The fixture is
+    // a double-sided sheet -- half its faces point inward -- so a winding rule
+    // that held only for outward faces would show up here as a split.
+    const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
+    if (!path || !*path)
+        SKIP("set POSEIDON_ODOL73_FIXTURE to the extracted AST-012B fixture");
+
+    const auto model = ODOLLoader::load(path);
+    const auto& mesh = model.lodLevels[0].mesh;
+    REQUIRE(mesh.quads.size() == 16);
+
+    int agreeing = 0, opposing = 0, degenerate = 0;
+    for (const auto& quad : mesh.quads)
+    {
+        const auto& a = mesh.vertices[quad.indices[0]].position;
+        const auto& b = mesh.vertices[quad.indices[1]].position;
+        const auto& c = mesh.vertices[quad.indices[2]].position;
+        const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        const float gx = uy * vz - uz * vy, gy = uz * vx - ux * vz, gz = ux * vy - uy * vx;
+        if (gx * gx + gy * gy + gz * gz < 1e-12f) { ++degenerate; continue; }
+        const auto& n = mesh.vertices[quad.indices[0]].normal;
+        const float sign = gx * n.x + gy * n.y + gz * n.z;
+        if (sign > 0.0f) ++agreeing;
+        else if (sign < 0.0f) ++opposing;
+    }
+    CAPTURE(agreeing, opposing, degenerate);
+    REQUIRE(degenerate == 0);
+    REQUIRE(agreeing == 0);
+    REQUIRE(opposing == 16);
+    // The conclusion the converter records, so the two cannot drift apart.
+    REQUIRE(model.lodLevels[0].sourceWinding == "CW_RELATIVE_TO_STORED_NORMALS_MEASURED");
+}
+
+TEST_CASE("The ODOL 73 fixture really is double sided", "[p3d][odol][ast-018][corpus]")
+{
+    // Load-bearing for the winding case above: it is only unanimity across both
+    // facings if both facings are present. Half the vertex normals point away
+    // from the origin and half toward it.
+    const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
+    if (!path || !*path)
+        SKIP("set POSEIDON_ODOL73_FIXTURE to the extracted AST-012B fixture");
+
+    const auto model = ODOLLoader::load(path);
+    const auto& mesh = model.lodLevels[0].mesh;
+    int outward = 0;
+    for (const auto& vertex : mesh.vertices)
+        if (vertex.position.x * vertex.normal.x + vertex.position.y * vertex.normal.y +
+            vertex.position.z * vertex.normal.z > 0.0f)
+            ++outward;
+    CAPTURE(outward, mesh.vertices.size());
+    REQUIRE(outward == 24);
+    REQUIRE(mesh.vertices.size() == 48);
+}

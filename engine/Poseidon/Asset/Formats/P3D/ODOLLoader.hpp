@@ -121,6 +121,17 @@ class ODOLLoader
             lod.resolution     = info.resolutions[i];
             lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
             lod.sourceEncoding = "ODOL73";
+            // AST-018. Measured, not assumed: for all 16 faces of the reference
+            // fixture the cross product of the first two edges in index order
+            // points opposite the model's own stored vertex normal, unanimously.
+            // The indices are therefore clockwise with respect to those normals.
+            //
+            // The name says "relative to stored normals" because that is the
+            // whole of what was measured. It rests on the packed-normal scale
+            // factor being negative (DecodeOdol73Normal); flip that sign and the
+            // conclusion flips with it. No render has confirmed which way the
+            // faces actually point on screen.
+            lod.sourceWinding  = "CW_RELATIVE_TO_STORED_NORMALS_MEASURED";
             lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
             model.lodLevels.push_back(std::move(lod));

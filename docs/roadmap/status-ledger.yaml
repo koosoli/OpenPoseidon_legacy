@@ -1536,18 +1536,27 @@ tickets:
       - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
-    test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights]
+    test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights,
+               ast-018-odol73-winding]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
     known_failures:
       - >-
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
-        split, and preservation of the MLOD named-selection weight byte. Winding,
-        normal orientation, tangent handedness, source origin and centre-of-mass
-        relationship are still not stated anywhere; LODLevel::sourceWinding
-        remains a recorded assumption ending in _ASSUMED, unconfirmed by any
-        render. Proxy identity and section boundaries are unchanged.
+        split, preservation of the MLOD named-selection weight byte, and a
+        measured winding for the ODOL 73 path. Normal orientation, tangent
+        handedness, source origin and centre-of-mass relationship are still not
+        stated anywhere, and the MLOD paths' sourceWinding remains an assumption
+        ending in _ASSUMED. Proxy identity and section boundaries are unchanged.
+      - >-
+        The ODOL 73 winding is measured only relative to the model's own stored
+        normals: all 16 faces of the reference fixture wind clockwise about them,
+        unanimously across both facings of a double-sided sheet. It is not a
+        claim about which way faces point on screen, and it rests on the packed
+        normal's scale factor being negative -- taken from the BIS reference and
+        not independently confirmed. Flip that sign and the conclusion flips.
+        Still no render.
       - >-
         The MLOD selection weight byte is preserved but NOT decoded.
         NamedSelection::vertexWeights -- the linear 0-255 scale ShapeAdapter
@@ -1598,6 +1607,14 @@ tickets:
       equality check would miss. The full engine suite runs 2405 cases with the
       same 6 pre-existing environment failures as before the change (dev-mode
       gate, and localisation data absent from packages/Remaster).
+
+      Winding is measured rather than assumed for the ODOL 73 path: the file
+      supplies both index order and per-vertex normals, so the cross product of
+      each face's first two edges is compared against its own stored normal. All
+      16 faces oppose, none agree, none are degenerate. A companion case
+      establishes the fixture is a double-sided sheet (24 of 48 vertex normals
+      point away from the origin), which is what makes the unanimity meaningful
+      rather than a property of outward faces only.
 
       The named-selection weight fix is pinned from the fixtures rather than by
       construction: real MLOD selections are loaded and every member's source
