@@ -81,6 +81,22 @@ PF_API void        pf_image_free(PF_HANDLE img);
 PF_API int         pf_image_width(PF_HANDLE img);
 PF_API int         pf_image_height(PF_HANDLE img);
 PF_API const char* pf_image_format(PF_HANDLE img);
+
+/* --- RVMAT material source (AST-014) ---------------------------------------
+ * Reads a material into the common source IR and reports its shape. Exposed so
+ * the IR can be driven over the whole reference corpus from outside the build,
+ * which is the only way to find the cases a hand-written fixture does not
+ * contain -- TexGen blocks masquerading as stages were found exactly that way. */
+PF_API PF_HANDLE   pf_material_load(const char* path);
+PF_API void        pf_material_free(PF_HANDLE mat);
+PF_API const char* pf_material_pixel_shader(PF_HANDLE mat);
+PF_API int         pf_material_stage_count(PF_HANDLE mat);
+PF_API int         pf_material_stage_index(PF_HANDLE mat, int i);
+PF_API const char* pf_material_stage_texture(PF_HANDLE mat, int i);
+PF_API const char* pf_material_stage_uvsource(PF_HANDLE mat, int i);
+PF_API int         pf_material_stage_is_procedural(PF_HANDLE mat, int i);
+PF_API int         pf_material_texgen_count(PF_HANDLE mat);
+PF_API int         pf_material_other_class_count(PF_HANDLE mat);
 PF_API void        pf_image_get_rgba(PF_HANDLE img, uint8_t* buffer);
 
 // ── PBO Archive ────────────────────────────────────────────────────────────

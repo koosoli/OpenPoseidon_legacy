@@ -38,3 +38,23 @@ no holes, no inverted or exploded geometry, no crash.
   the channel a material's `uvSource` selects is inferred from the format.
 - Not a performance measurement. The vertex-merge change can only increase vertex
   counts on P3DM models, which were not drawn.
+
+---
+
+## Second run — after AST-013 (LZO / Pactext), same day
+
+**Build**: `dist/x64-win-rwdi/PoseidonGame.exe` 12:14, deployed over
+`ColdWarAssault.exe` in the retail install and launched directly.
+**Covers commit**: `a800dc4`
+**Result**: PASS — no crash, nothing visibly wrong.
+
+This run mattered more than the first. AST-013 changed `Pactext.cpp`, which is the
+live texture path *and* the font path, and removed a refusal in
+`PacLevelMem::Init` so that a mip with bit 15 set is masked and accepted instead
+of rejected. The claim that no OFP/CWA texture sets that bit is what the run
+tested; menus, UI text and in-mission textures all rendered.
+
+Still NOT verified by this run: nothing exercised the LZO path, because no
+OFP/CWA texture is compressed. Compressed-mip decode is evidenced only by the
+offline corpus check (124/124 Arma 3 sample textures through the shipped DLL), and
+Pactext's own decode routines remain raw-only.

@@ -250,6 +250,26 @@ bool Preproc::Process(QOStream* out, const char* name)
         error = prStreamOpenError;
         return false;
     }
+    // Step over a UTF-8 byte-order mark. Some shipped configs carry one -- two of
+    // the 4,075 RVMATs in the reference corpora do -- and the scanner treats the
+    // EF BB BF as the first token, which makes the whole file parse to nothing.
+    // The failure is silent: a material with six stages simply reports none.
+    const int b0 = in->get();
+    if (b0 == 0xEF)
+    {
+        const int b1 = in->get();
+        const int b2 = in->get();
+        if (b1 != 0xBB || b2 != 0xBF)
+        {
+            // Not a BOM after all; put the stream back where it was.
+            in->seekg(-3, QIOS::cur);
+        }
+    }
+    else if (b0 != EOF)
+    {
+        in->seekg(-1, QIOS::cur);
+    }
+
     item = lxNewLine;
     AtBeginLine(*out);
     bool ret = GlobalScan(*in, out);

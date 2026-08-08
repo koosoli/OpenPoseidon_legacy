@@ -37,22 +37,33 @@ import numpy as np
 from PIL import Image
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SOURCE_ID = "pbrpx-echinochloa-crus-galli-leaf-01"
-PRODUCT = "PX_Echinochloa_crus_galli_Leaf_01"
-SOURCE_DIR = ROOT / "assets" / "sources" / PRODUCT
+SOURCE_ID = "pbrpx-grass-species-4k"
+# The eight ABI layers deliberately draw from several photographed PBRPX species
+# instead of repeatedly unwrapping one leaf sheet. These local inputs are covered
+# by source-registry entries and remain outside the tracked source tree.
+SOURCES = (
+    "PX_Echinochloa_crus_galli_Leaf_01",
+    "PX_Acorus_calamus_Atlas_02",
+    "PX_Nassella_tenuissima_Atlas_13",
+    "PX_Pennisetum_alopecuroides_Leaf_06",
+    "PX_Zoysia_japonica_Atlas_04",
+)
+SOURCE_ROOT = ROOT / "assets" / "grass" / "more_grass"
 OUT_DIR = ROOT / "assets" / "grass"
 
 # Bumping this invalidates every derived hash on purpose: it is the "processing
 # version" ASSET-010 asks for, so a recipe change is visible as a provenance
 # change rather than as an unexplained image diff.
-RECIPE_VERSION = 4
+RECIPE_VERSION = 5
 
 LAYER_W, LAYER_H, LAYERS = 64, 256, 8
 
 # A blade must be tall enough to be worth a 256-row layer, and solid enough not to
 # be a fragment. Both are in source pixels at 1024x1024.
-MIN_HEIGHT = 380
-MIN_AREA = 3000
+# Sources are reduced 4x before component analysis, so these retain the original
+# 4K thresholds in source-space terms (380/4 pixels tall, 3000/16 pixels area).
+MIN_HEIGHT = 95
+MIN_AREA = 188
 # Rows where the mask has more than one run mean two blades crossed and merged
 # into one component; unwrapping that would blend two blades together.
 MAX_MULTI_RUN_FRACTION = 0.08
@@ -178,22 +189,25 @@ def unwrap(albedo: np.ndarray, mask: np.ndarray, bbox: tuple[int, int, int, int]
     return (stacked[lower] * (1.0 - frac) + stacked[upper] * frac).astype(np.uint8)
 
 
-def build() -> list[tuple[str, bytes]]:
-    albedo_path = SOURCE_DIR / f"{PRODUCT}_albedo.jpg"
-    opacity_path = SOURCE_DIR / f"{PRODUCT}_opacity.jpg"
+def source_candidates(product: str) -> list[tuple[int, int, int, int, int, np.ndarray, np.ndarray]]:
+    source_dir = SOURCE_ROOT / f"{product}_4K"
+    albedo_path = source_dir / f"{product}_albedo.jpg"
+    opacity_path = source_dir / f"{product}_opacity.jpg"
     for path in (albedo_path, opacity_path):
         if not path.is_file():
-            raise SystemExit(
-                f"missing registered source: {path.relative_to(ROOT)}\n"
-                "Fetch it from the source_url in docs/assets/source-registry.yaml."
-            )
+            raise SystemExit(f"missing registered source: {path.relative_to(ROOT)}")
 
-    albedo = np.asarray(Image.open(albedo_path).convert("RGB"))
-    opacity = np.asarray(Image.open(opacity_path).convert("L"))
-    mask = opacity >= ALPHA_THRESHOLD
-
-    labels, count = label_components(mask)
-    candidates = []
+    # Final layers are 64x256. Reducing a 4K source to 1024 before the Python
+    # connected-component pass preserves the blade topology at that target while
+    # avoiding an impractical 16-million-pixel scalar walk per source.
+    albedo_image = Image.open(albedo_path).convert("RGB")
+    opacity_image = Image.open(opacity_path).convert("L")
+    albedo_image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    opacity_image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    albedo = np.asarray(albedo_image)
+    opacity = np.asarray(opacity_image)
+    labels, count = label_components(opacity >= ALPHA_THRESHOLD)
+    candidates: list[tuple[int, int, int, int, int, np.ndarray, np.ndarray]] = []
     for label in range(1, count + 1):
         ys, xs = np.nonzero(labels == label)
         if ys.size < MIN_AREA:
@@ -209,18 +223,31 @@ def build() -> list[tuple[str, bytes]]:
         )
         if multi / max(1, y1 - y0 + 1) > MAX_MULTI_RUN_FRACTION:
             continue  # two blades merged into one component
-        candidates.append((int(ys.size), y0, y1, int(xs.min()), int(xs.max()), blade_mask))
+        candidates.append((int(ys.size), y0, y1, int(xs.min()), int(xs.max()), blade_mask, albedo))
+    candidates.sort(key=lambda c: (-c[0], c[3]))
+    return candidates
 
-    if len(candidates) < LAYERS:
+
+def build() -> list[tuple[str, bytes]]:
+    # Take one distinctive, largest valid blade from each species first. The
+    # remaining two layers come from the largest second candidates, preserving a
+    # mixed field even if a source sheet contains many near-identical blades.
+    per_source = [source_candidates(product) for product in SOURCES]
+    per_source = [candidates for candidates in per_source if candidates]
+    selected = [candidates[0] for candidates in per_source]
+    for candidates in per_source:
+        if len(selected) >= LAYERS:
+            break
+        if len(candidates) > 1:
+            selected.append(candidates[1])
+
+    if len(selected) < LAYERS:
         raise SystemExit(
-            f"only {len(candidates)} usable blades found, need {LAYERS}. "
-            "Loosen MIN_AREA/MIN_HEIGHT or pick another source."
+            f"only {len(selected)} usable blades found, need {LAYERS}."
         )
 
-    # Deterministic: largest area first, ties broken by left edge. Never random.
-    candidates.sort(key=lambda c: (-c[0], c[3]))
     outputs: list[tuple[str, bytes]] = []
-    for layer, (_, y0, y1, x0, x1, blade_mask) in enumerate(candidates[:LAYERS]):
+    for layer, (_, y0, y1, x0, x1, blade_mask, albedo) in enumerate(selected[:LAYERS]):
         rgba = unwrap(albedo, blade_mask, (y0, y1, x0, x1))
         image = Image.fromarray(rgba)
         from io import BytesIO

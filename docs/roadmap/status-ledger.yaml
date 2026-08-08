@@ -1091,30 +1091,76 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-011B]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
+        symbol: Poseidon::Asset::Material::ParseRvMaterial
+      - file: engine/PoseidonFormats/PoseidonFormats.cpp
+        symbol: pf_material_load
+      - file: engine/Poseidon/IO/PreprocC/Preproc.cpp
+        symbol: Preproc::Process
+    test_ids: [ast-014]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        Only the text-RVMAT side is exercised. The IR takes a ParamClass precisely
+        so an ODOL's embedded material can use the same code, but no ODOL body is
+        parsed yet (AST-012A/B), so `embedded` is never set true by anything.
+      - >-
+        A stage with a non-numeric suffix -- `class StageTI` for thermal imaging --
+        is recorded in otherClasses rather than as a stage, because its index
+        cannot be read. That preserves it without inventing a slot for it; a
+        shader family that needs StageTI must claim it explicitly.
+      - >-
+        Binarized RVMATs are untested: all 4,075 in the corpora are text. The
+        engine's config reader handles binarized configs, so the path exists, but
+        nothing here demonstrates it.
+    fallback: >-
+      The IR interprets nothing and preserves unrecognised keys, stray classes and
+      the original texture spelling, so a consumer that does not understand a
+      material can still see everything it declared.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked: 7 Catch2 cases under
+      [ast-014] (42 assertions); full PoseidonTests green apart from the 6 failures
+      pre-existing at HEAD, and all 793 PoseidonCoreTests pass -- that second suite
+      matters because this ticket changed the shared config preprocessor.
+
+      The evidence that counts is scripts/verify_rvmat_ir.py, which drives the real
+      IR through the shipped DLL over every RVMAT in the corpora and compares its
+      shape against an independent text scan: 4,075 parsed, 0 refused, 0
+      stage-count mismatches, 0 texgen-count mismatches. It earned its keep by
+      finding three defects a fixture could not: TexGen<N> blocks being parsed as
+      stages (56 in the corpus, both carry a trailing index); ParamFile's raw
+      stream parser losing sync on `//` comments, which silently reported 4 stages
+      where a file declares 7 (148 materials affected, fixed by parsing through the
+      preprocessing entry point); and a UTF-8 BOM making a whole config parse to
+      nothing (2 materials, fixed in Preproc::Process).
+
+      NOT checked: nothing rendered, and no material was translated. This layer
+      deliberately assigns no meaning -- it does not know which stage is a normal
+      map, and the shader-family counts it reports (Super 2,840 of 4,075) are the
+      denominator for MAT-030's claims, not a claim of support for any of them.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
+      - engine/Poseidon/IO/PreprocC/Preproc.cpp
+      - scripts/verify_rvmat_ir.py
   - id: AST-015
     overlay: COMPAT-C1-EXEC-001
     is_example: false

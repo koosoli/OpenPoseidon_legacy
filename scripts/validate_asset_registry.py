@@ -52,13 +52,13 @@ REQUIRED_FIELDS = (
 )
 
 
-def parse_sources(text: str) -> list[dict]:
-    """Split the `sources:` block into per-entry dicts with a `files` list."""
+def parse_sources(text: str, block_name: str) -> list[dict]:
+    """Split a source-list block into per-entry dicts with a `files` list."""
     lines = text.splitlines()
     try:
-        start = next(i for i, line in enumerate(lines) if line.rstrip() == "sources:") + 1
+        start = next(i for i, line in enumerate(lines) if line.rstrip() == f"{block_name}:") + 1
     except StopIteration:
-        raise SystemExit("registry has no sources: block")
+        return []
 
     entries: list[dict] = []
     current: dict | None = None
@@ -101,7 +101,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     problems: list[str] = []
-    entries = parse_sources(REGISTRY.read_text(encoding="utf-8"))
+    text = REGISTRY.read_text(encoding="utf-8")
+    entries = parse_sources(text, "sources") + parse_sources(text, "additional_sources")
     if not entries:
         print("registry lists no sources", file=sys.stderr)
         return 1
@@ -141,6 +142,9 @@ def main(argv: list[str]) -> int:
                 problems.append(f"{ident}: {record['name']} has a malformed sha256")
                 continue
             path = SOURCE_ROOT / entry.get("product_name", "") / record["name"]
+            local_path = entry.get("local_path")
+            if local_path:
+                path = ROOT / local_path / record["name"]
             if not path.is_file():
                 skipped += 1
                 if require_files:

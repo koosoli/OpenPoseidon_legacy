@@ -8,6 +8,7 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <Poseidon/Asset/Formats/Common/FormatDetector.hpp>
 using Poseidon::Asset::Formats::P3DFormatDetector;
 using Poseidon::Asset::Formats::FormatInfo;
@@ -781,4 +782,89 @@ PF_API void pf_rtm_bone_matrix(PF_HANDLE rtm, int phase, int bone, float* mat4x4
     mat4x4[4]  = m[3];  mat4x4[5]  = m[4];  mat4x4[6]  = m[5];  mat4x4[7]  = 0.0f;
     mat4x4[8]  = m[6];  mat4x4[9]  = m[7];  mat4x4[10] = m[8];  mat4x4[11] = 0.0f;
     mat4x4[12] = m[9];  mat4x4[13] = m[10]; mat4x4[14] = m[11]; mat4x4[15] = 1.0f;
+}
+
+// --- RVMAT material source (AST-014) ---------------------------------------
+
+namespace
+{
+struct PFMaterial
+{
+    Poseidon::Asset::Material::RvMaterialSource source;
+    std::string                                 scratch;
+};
+} // namespace
+
+PF_API PF_HANDLE pf_material_load(const char* path)
+{
+    ClearError();
+    if (!path) { SetError("null path"); return nullptr; }
+    try
+    {
+        {
+            std::ifstream probe(path, std::ios::binary);
+            if (!probe) { SetError("cannot open material"); return nullptr; }
+        }
+        auto*     wrapper = new PFMaterial();
+        ParamFile config;
+        // Parse(path), not Parse(stream): the former runs the preprocessor first.
+        // RVMATs contain `//` comments -- one sits inside a commented-out texture
+        // line in the Arma 2 helicopter materials -- and the raw stream parser
+        // loses sync on them, silently reporting 4 stages where the file declares
+        // 7. That is invisible unless the count is checked against the source.
+        config.Parse(path);
+        wrapper->source = Poseidon::Asset::Material::ParseRvMaterial(config, path);
+        return wrapper;
+    }
+    catch (const std::exception& e) { SetError(e.what()); return nullptr; }
+}
+
+PF_API void pf_material_free(PF_HANDLE mat) { delete static_cast<PFMaterial*>(mat); }
+
+static PFMaterial* AsMaterial(PF_HANDLE mat) { return static_cast<PFMaterial*>(mat); }
+
+PF_API const char* pf_material_pixel_shader(PF_HANDLE mat)
+{
+    auto* m = AsMaterial(mat);
+    return m ? m->source.pixelShaderId.c_str() : "";
+}
+PF_API int pf_material_stage_count(PF_HANDLE mat)
+{
+    auto* m = AsMaterial(mat);
+    return m ? static_cast<int>(m->source.stages.size()) : 0;
+}
+PF_API int pf_material_stage_index(PF_HANDLE mat, int i)
+{
+    auto* m = AsMaterial(mat);
+    if (!m || i < 0 || i >= static_cast<int>(m->source.stages.size())) return -1;
+    return m->source.stages[i].index;
+}
+PF_API const char* pf_material_stage_texture(PF_HANDLE mat, int i)
+{
+    auto* m = AsMaterial(mat);
+    if (!m || i < 0 || i >= static_cast<int>(m->source.stages.size())) return "";
+    m->scratch = m->source.stages[i].texture.raw;
+    return m->scratch.c_str();
+}
+PF_API const char* pf_material_stage_uvsource(PF_HANDLE mat, int i)
+{
+    auto* m = AsMaterial(mat);
+    if (!m || i < 0 || i >= static_cast<int>(m->source.stages.size())) return "";
+    return m->source.stages[i].uvSource.c_str();
+}
+PF_API int pf_material_stage_is_procedural(PF_HANDLE mat, int i)
+{
+    auto* m = AsMaterial(mat);
+    if (!m || i < 0 || i >= static_cast<int>(m->source.stages.size())) return 0;
+    return m->source.stages[i].texture.isProcedural ? 1 : 0;
+}
+PF_API int pf_material_texgen_count(PF_HANDLE mat)
+{
+    auto* m = AsMaterial(mat);
+    return m ? static_cast<int>(m->source.texGens.size()) : 0;
+}
+PF_API int pf_material_other_class_count(PF_HANDLE mat)
+{
+    auto* m = AsMaterial(mat);
+    return m ? static_cast<int>(m->source.otherClasses.size()) : 0;
 }
