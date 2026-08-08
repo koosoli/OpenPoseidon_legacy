@@ -363,6 +363,14 @@ inline Odol73StaticPreRestData ReadOdol73StaticPreRestData(BinaryReader& reader,
     return result;
 }
 
+inline void SkipOdol73RestData(BinaryReader& reader, const Odol73StaticPreRestData& header, uint32_t end)
+{
+    const uint64_t target = static_cast<uint64_t>(reader.tell()) + header.restDataSize;
+    if (target > end)
+        throw std::runtime_error("ODOL 73 rest-data range exceeds its declared LOD range");
+    reader.seek(static_cast<int>(target));
+}
+
 inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMaterial& raw)
 {
     Material::RvMaterialSource source;
