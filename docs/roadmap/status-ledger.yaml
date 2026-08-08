@@ -585,6 +585,15 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: ae726685e3c338669c6b1dae44d37b10a39ba9232c001f6e9ade1dd5fedfb80b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: REFERENCE_CORPUS_INDEX
+        status: VALIDATED
+        denominator: >-
+          6,405 files across 3 roots, 0 parse failures
+      - capability: ODOL_REVISIONS_AVAILABLE
+        status: VALIDATED
+        denominator: >-
+          revisions 48/49/50/52/73 found across 545 PBOs
     known_failures:
       - >-
         The Arma 3 root is indexed by PBO entry table only, so a3\ dependencies are
@@ -707,6 +716,15 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: 9e2f8e0a7e176810169feefd4dc190e2ec77dcef93504f39d7635883bffa3703
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: MLOD_PER_LOD_DISPATCH
+        status: VALIDATED
+        denominator: >-
+          1,661 models routed; 1,659 loose models, 2 SP3X
+      - capability: UNKNOWN_LOD_SIGNATURE_REJECT
+        status: VALIDATED
+        denominator: >-
+          structured refusal naming the bytes found
     known_failures:
       - >-
         A P3DM LOD is refused rather than skipped. It cannot be skipped: P3DM face
@@ -777,6 +795,19 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: P3DM_STATIC_GEOMETRY
+        status: VALIDATED
+        denominator: >-
+          1,661 models, 0 refused, 0 mismatches vs independent reader
+      - capability: P3DM_MATERIAL_REFERENCE
+        status: VALIDATED
+        denominator: >-
+          texture and RVMAT kept distinct, keyed as a pair
+      - capability: P3DM_SOURCE_WINDING
+        status: UNVERIFIED
+        denominator: >-
+          recorded CW_REVERSED_ON_LOAD_ASSUMED; no P3DM rendered
     known_failures:
       - >-
         #UVSet# payloads are counted, not decoded, so only the base UV channel from
@@ -851,6 +882,19 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: MULTI_UV
+        status: VALIDATED
+        denominator: >-
+          16,164 #UVSet# blocks in 1,640 models match 4+8*sum(face.n)
+      - capability: UV1_NO_COLLAPSE
+        status: VALIDATED
+        denominator: >-
+          uv1 participates in vertex identity
+      - capability: UV_CHANNEL_BINDING
+        status: UNVERIFIED
+        denominator: >-
+          no UV channel seen mapped onto a rendered surface
     known_failures:
       - >-
         Only channel 1 is promoted onto Vertex::uv1. Further channels are preserved
@@ -1019,6 +1063,23 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: e592a8e4164892cf9ef8254a65940defe5db5e01394146af7652cbbf6ddd26ba
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: PAA_TAGG_CAPTURE
+        status: VALIDATED
+        denominator: >-
+          AVGC/MAXC/FLAG/SWIZ/OFFS over 3,283 archived textures
+      - capability: PAA_COMPRESSED_MIP
+        status: PARTIAL
+        denominator: >-
+          124/124 sample textures decode offline; Pactext decode still raw-only
+      - capability: PAA_SWIZ
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          1,146 observed values; encoding unresolved, never guessed
+      - capability: PAA_FLAG
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          values 1 and 2 carried verbatim
     known_failures:
       - >-
         PAA_COMPRESSED_MIP decode is implemented for the modern decoder path only
@@ -1116,6 +1177,19 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: d97c829ba3065127e305cc47dcc0930c7ee851251eafe8575af4b879d065d2c9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: RVMAT_SOURCE_IR
+        status: VALIDATED
+        denominator: >-
+          4,075 RVMATs, 0 refused, 0 stage/texgen mismatches
+      - capability: EMBEDDED_MATERIAL_IR
+        status: UNSUPPORTED
+        denominator: >-
+          no ODOL body parsed yet; shape is shared, path unused
+      - capability: BINARIZED_RVMAT
+        status: UNTESTED
+        denominator: >-
+          0 of 4,075 corpus RVMATs are binarized
     known_failures:
       - >-
         Only the text-RVMAT side is exercised. The IR takes a ParamClass precisely
@@ -1199,6 +1273,19 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: d04093c5d5e848508abf465aa829c5ad70744e545e398e94993f0018feef53a9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: VIRTUAL_PATH_CANONICAL
+        status: VALIDATED
+        denominator: >-
+          12,680 references resolved across 512 PBO prefixes, 0 collisions
+      - capability: SOURCE_TO_SHIPPED_SUBSTITUTION
+        status: VALIDATED
+        denominator: >-
+          tga/tif/tiff/png -> paa
+      - capability: ARCHIVE_READ_THROUGH
+        status: UNSUPPORTED
+        denominator: >-
+          resolution names the owning PBO; no bytes read from it
     known_failures:
       - >-
         The canonical form and the addon namespace exist and ModelCache keys on
@@ -1404,6 +1491,15 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: 287ec31230e87fd10be0722b9d74acf19e6c100245eebcbe6bbb44ca2c637c64
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: DERIVED_ASSET_KEY
+        status: VALIDATED
+        denominator: >-
+          content+version+options, order-independent
+      - capability: DERIVED_ASSET_STORE
+        status: UNSUPPORTED
+        denominator: >-
+          identity only; nothing written or reloaded
     known_failures:
       - >-
         Identity only. This lands the deterministic KEY for a derived asset, not the
@@ -1456,30 +1552,76 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADAPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-020]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: scripts/generate_compat_capability_matrix.py
+        symbol: generate_compat_capability_matrix.main
+      - file: .github/workflows/lint.yml
+        symbol: Validate COMPAT-C1 capability matrix
+    test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: CAPABILITY_MATRIX
+        status: VALIDATED
+        denominator: >-
+          28 claims across 10 tickets, each carrying its own denominator
+      - capability: GOLDEN_SEMANTIC_MANIFEST
+        status: UNSUPPORTED
+        denominator: >-
+          no derived artefact exists to snapshot; blocked on AST-020's store half
+    known_failures:
+      - >-
+        Golden semantic manifests are NOT delivered. AST-020 landed derived-asset
+        identity but not the store, so there is no compiled artefact to snapshot and
+        a manifest would be a golden file of nothing. The claims half of this ticket
+        is done; the snapshot half waits on a producer.
+      - >-
+        Claims are asserted by the ticket that made them, not re-measured by the
+        generator. The generator guarantees the published table matches the ledger,
+        not that a ledger entry is true -- that rests on each ticket's own evidence.
+    fallback: >-
+      The matrix is generated, never hand-edited, and CI diffs it. A stale table
+      fails the build rather than being published as current.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. The roadmap forbids reporting
+      "Arma 3 supported" and requires every claim to name its fixture, limitation
+      and verification commit, plus a denominator for any percentage. Rather than
+      promise that in prose, claims are structured `capability_claims` records in
+      the ledger and the published table is generated from them; CI runs
+      `--check` and fails on drift, so it cannot quietly diverge from the ledger it
+      summarises. That is the RND-030 failure mode -- a hand-maintained capability
+      table drifting from reality -- and a compatibility claim is worse than a
+      feature claim to get wrong because an outside reader cannot check it without
+      the corpora.
+
+      28 claims across 10 tickets. The matrix states plainly that no Arma-generation
+      content has been rendered and that P3DM winding remains an unverified
+      assumption, so the honest gaps are published rather than omitted.
+
+      NOT checked: the generator does not re-measure anything. It guarantees the
+      table matches the ledger, not that a ledger claim is true; each rests on its
+      own ticket's evidence. Golden semantic manifests are not delivered at all.
     supersedes: []
-    evidence: []
+    evidence:
+      - scripts/generate_compat_capability_matrix.py
+      - docs/roadmap/compat-c1-capability-matrix.md
+      - .github/workflows/lint.yml
   - id: AST-022
     overlay: COMPAT-C1-EXEC-001
     is_example: false
@@ -1539,6 +1681,23 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: df334a7625903f663f73b980a2f0f2cccd56effa72e3dda17bf218efb24465ac
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: SMDI_CHANNEL_SEMANTICS
+        status: VALIDATED
+        denominator: >-
+          n=40: R and A constant in 40/40; G specular, B gloss
+      - capability: NORMAL_CHANNEL_SEMANTICS
+        status: VALIDATED
+        denominator: >-
+          n=40: R constant 0 in 40/40; X in A, Y in G
+      - capability: AS_CHANNEL_SEMANTICS
+        status: VALIDATED
+        denominator: >-
+          n=25: R/B/A constant in 25/25; term in G
+      - capability: SMDI_TO_ROUGHNESS
+        status: NOT_PRODUCED
+        denominator: >-
+          gloss carried; conversion opt-in and unvalidated
     known_failures:
       - >-
         Gloss is carried, roughness is not produced. SMDI's B is a gloss term, so a
@@ -1617,6 +1776,15 @@ tickets:
     benchmark_artifacts: []
     evidence_hash: 985a3a2f83f1ce927a0e3831065c87424096665cb852c690f7060fe37f317c74
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: SUPERMATERIAL
+        status: PARTIAL
+        denominator: >-
+          Super schema over 2,853 materials; 1,222 in 22 other families bind nothing
+      - capability: SHADER_FAMILY_SCHEMA
+        status: VALIDATED
+        denominator: >-
+          1 of 23 observed families has a schema
     known_failures:
       - >-
         SUPERMATERIAL: PARTIAL. Only the Super family has a schema. 1,222 materials

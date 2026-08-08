@@ -38,6 +38,12 @@ jobs:
       - name: Validate COMPAT-C1 ledger and overlay
         run: python3 scripts/validate_compat_c1_ledger.py
 
+      # The compatibility matrix is derived from the ledger, so the only way it can
+      # lie is by being stale. A compatibility claim is worse than a feature claim
+      # to get wrong, because a reader cannot check it without the reference corpora.
+      - name: Validate COMPAT-C1 capability matrix
+        run: python3 scripts/generate_compat_capability_matrix.py --check
+
       # Re-checks every production call site the shipped-renderer register claims,
       # against the branch. Without this the register is another hand-maintained
       # table that goes stale silently, which is the RND-030 failure it exists to
