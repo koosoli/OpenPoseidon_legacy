@@ -1947,7 +1947,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: c47ef7e104123af9eedd491e3bd6cd5bcf7967af53b8cac72c4534b8a48e891f
+    evidence_hash: e669228946c376bd17c2ea73ff557e30be326e14a63ad947a682393c33f03055
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
