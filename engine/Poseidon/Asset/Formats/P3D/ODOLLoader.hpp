@@ -2,6 +2,7 @@
 
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/P3D/P3DStructures.hpp>
+#include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <algorithm>
@@ -53,7 +54,19 @@ class ODOLLoader
     {
         QIStream     stream(const_cast<char*>(data), size);
         BinaryReader reader(stream);
-        auto         odolModel = P3D::readModel(reader);
+
+        // AST-012A: route on the exact revision before any body is read.
+        //
+        // Dispatching first is what keeps a later revision from being fed to the v7
+        // reader, which would not fail cleanly -- it would desynchronise and report
+        // whatever the misaligned bytes said, the same failure mode AST-011A found
+        // in the MLOD path. The revision is read without consuming it so the chosen
+        // parser still sees its own header.
+        const P3D::OdolRevisionInfo revision = P3D::PeekOdolRevision(reader);
+        if (revision.support != P3D::OdolSupport::Parsed)
+            throw P3D::UnsupportedOdolRevision(revision);
+
+        auto odolModel = P3D::readModel(reader);
         return convertToModel(odolModel, sourcePath);
     }
 
