@@ -1090,19 +1090,22 @@ tickets:
     test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir,
                ast-012b-odol73-corpus-survey]
     benchmark_artifacts: []
-    evidence_hash: 83708f48817324c6b962c06d9c5472da8eb6a3750ed099bed4f91292d1b55284
+    evidence_hash: 60556e6df318b79c59327823f3aa776c4db488509e2c9c1c5c8716049ccb10ba
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
         status: PARTIAL
         denominator: >-
           450 of 456 revision-73 models load across four Arma 3 PBOs (3den 8/8,
-          signs_f, rocks_f, misc_f); all 6 refusals name the same remaining
-          constraint, skeletons. Every accepted model consumes each LOD body to
-          its declared end offset and each rest-data section to its declared
-          size, so a load is a full read rather than a prefix. Still refused: any
-          model with a skeleton, animation, proxy, sub-skeleton or keyframe data,
-          per-vertex skinning, or a face that is not a triangle or a quad
+          signs_f, rocks_f, misc_f). The 6 refusals are all animation-scope: 4
+          name animations and 2 name sub-skeleton mapping. Every accepted model
+          consumes each LOD body to its declared end offset and each rest-data
+          section to its declared size, so a load is a full read rather than a
+          prefix. Still refused: animations, sub-skeleton mapping, proxies,
+          keyframes, per-vertex skinning, and any face that is not a triangle or
+          a quad. A declared skeleton is now read rather than refused -- it is a
+          declaration in ModelInfo, and the per-LOD bone arrays remain the check
+          for whether a LOD is actually skinned
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
@@ -1958,7 +1961,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: 4296ec26cf8653848f0c29ec924bbe786ea94a1c8756412ce4290cf966befa9b
+    evidence_hash: 06978e334ab9bd13570cc7df93a73fc1a1e880de9e3c45090c8571450909a793
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX

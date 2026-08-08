@@ -38,9 +38,20 @@ struct Odol73Preamble
     Vector3 bboxMax;
 };
 
+struct Odol73Bone
+{
+    std::string name;
+    std::string parent;
+};
+
 struct Odol73LodDirectory
 {
     Odol73Preamble model;
+    // Declared by ModelInfo. Present on plenty of models whose LODs carry no
+    // per-vertex weights at all, so it is read rather than treated as a refusal.
+    std::string skeletonName;
+    bool skeletonIsDiscrete = false;
+    std::vector<Odol73Bone> bones;
     std::vector<uint32_t> starts;
     std::vector<uint32_t> ends;
     std::vector<bool> permanent;
@@ -290,8 +301,27 @@ inline Odol73LodDirectory ReadOdol73StaticDirectory(BinaryReader& reader, int fi
     for (int i = 0; i < 6; ++i) skipFloat();
     (void)reader.read<bool>(); (void)reader.read<int32_t>(); (void)reader.read<bool>(); skipFloat();
     (void)reader.read<bool>();                // animated
-    if (!ReadBoundedAsciiz(reader, "skeleton name").empty())
-        throw std::runtime_error("ODOL 73 skeletons are not implemented by the static directory reader");
+    // A skeleton in ModelInfo is a declaration, not evidence that any LOD is
+    // skinned: the per-LOD vertex- and neighbour-bone arrays are what carry
+    // weights, and those are still required to be empty. Reading the names here
+    // is what lets a rigged-but-static model through; refusing on the name alone
+    // rejected models whose geometry this reader handles perfectly well.
+    result.skeletonName = ReadBoundedAsciiz(reader, "skeleton name");
+    if (!result.skeletonName.empty())
+    {
+        result.skeletonIsDiscrete = reader.read<bool>();
+        const uint32_t boneCount = reader.read<uint32_t>();
+        if (boneCount > 4096)
+            throw std::runtime_error("ODOL 73 skeleton declares too many bones");
+        result.bones.reserve(boneCount);
+        for (uint32_t bone = 0; bone < boneCount; ++bone)
+        {
+            std::string name = ReadBoundedAsciiz(reader, "bone name");
+            std::string parent = ReadBoundedAsciiz(reader, "parent bone name");
+            result.bones.push_back({std::move(name), std::move(parent)});
+        }
+        (void)ReadBoundedAsciiz(reader, "obsolete pivots name");
+    }
     (void)reader.read<uint8_t>();             // map type
     const auto mass = reader.readCompressedArray<float>();
     (void)mass;
