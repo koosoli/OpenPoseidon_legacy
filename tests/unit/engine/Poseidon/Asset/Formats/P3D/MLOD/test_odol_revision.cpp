@@ -154,8 +154,10 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     const auto size = file.tellg(); file.seekg(0);
     std::vector<char> bytes(static_cast<size_t>(size)); file.read(bytes.data(), size);
     QIStream stream(bytes.data(), static_cast<int>(bytes.size())); Poseidon::Asset::Formats::BinaryReader reader(stream);
-    const auto preamble = P3D::ReadOdol73Preamble(reader);
-    REQUIRE(preamble.appId == 107410);
-    REQUIRE(preamble.resolutions.size() == 2);
-    REQUIRE(preamble.resolutions[0] == 1.0f);
+    const auto directory = P3D::ReadOdol73StaticDirectory(reader, static_cast<int>(bytes.size()));
+    REQUIRE(directory.model.appId == 107410);
+    REQUIRE(directory.model.resolutions.size() == 2);
+    REQUIRE(directory.model.resolutions[0] == 1.0f);
+    REQUIRE(directory.starts.size() == 2);
+    REQUIRE(directory.starts[0] < directory.ends[0]);
 }
