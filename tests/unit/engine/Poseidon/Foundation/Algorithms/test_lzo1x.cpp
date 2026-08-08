@@ -91,3 +91,14 @@ TEST_CASE("LZO1X: the end-of-stream opcode terminates", "[foundation][lzo][ast-0
     const size_t         n = Lzo1x::Decompress(stream.data(), stream.size(), out.data(), out.size());
     REQUIRE(n == 4);
 }
+
+TEST_CASE("LZO1X: reports the boundary after an end marker", "[foundation][lzo][ast-013]")
+{
+    std::vector<uint8_t> stream = {0x15, 'A', 'B', 'C', 'D'};
+    stream.insert(stream.end(), kEnd.begin(), kEnd.end());
+    stream.insert(stream.end(), {0xFF, 0xFF});
+    std::vector<uint8_t> out(64);
+    size_t consumed = 0;
+    REQUIRE(Lzo1x::Decompress(stream.data(), stream.size(), out.data(), out.size(), &consumed) == 4);
+    REQUIRE(consumed == 8);
+}
