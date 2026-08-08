@@ -14,6 +14,8 @@
 #include "../../../../test_fixtures.hpp"
 #include <cstring>
 #include <cstdlib>
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -447,4 +449,70 @@ TEST_CASE("An unconverted section range says so rather than reading as empty",
     }
     CAPTURE(modelsRead, sectionsSeen);
     REQUIRE(modelsRead > 0);
+}
+
+// AST-010 asks for structured unsupported-feature reports, and AST-012B's claim
+// rests on one fixture. Point POSEIDON_ODOL73_CORPUS at a directory of extracted
+// revision-73 models and this reports, per file, whether the narrow reader takes
+// it and which constraint refuses it when it does not.
+//
+// It deliberately does not require every model to load. The reader implements one
+// shape; a refusal is the designed outcome for anything else, and the value here
+// is that the refusals are specific and the successes are real.
+TEST_CASE("ODOL 73 corpus survey reports what the narrow reader takes",
+          "[p3d][odol][ast-012b][corpus][survey]")
+{
+    namespace fs = std::filesystem;
+    const char* root = std::getenv("POSEIDON_ODOL73_CORPUS");
+    if (!root || !*root)
+        SKIP("set POSEIDON_ODOL73_CORPUS to a directory of extracted revision-73 models");
+    if (!fs::exists(root))
+        SKIP("POSEIDON_ODOL73_CORPUS does not exist");
+
+    std::vector<std::string> files;
+    for (const auto& entry : fs::recursive_directory_iterator(root))
+        if (entry.is_regular_file() && entry.path().extension() == ".p3d")
+            files.push_back(entry.path().string());
+    std::sort(files.begin(), files.end());
+    REQUIRE_FALSE(files.empty());
+
+    size_t loaded = 0, refused = 0, notRevision73 = 0;
+    std::string report;
+    for (const auto& file : files)
+    {
+        const std::string name = fs::path(file).filename().string();
+        try
+        {
+            const auto model = ODOLLoader::load(file);
+            if (model.sourceVersion != 73) { ++notRevision73; continue; }
+            ++loaded;
+            // A load that produced nothing is not a load. Every accepted model
+            // must carry at least one LOD and a vertex somewhere, or the survey
+            // is counting empty successes.
+            REQUIRE_FALSE(model.lodLevels.empty());
+            size_t vertices = 0;
+            for (const auto& lod : model.lodLevels) vertices += lod.mesh.vertices.size();
+            CAPTURE(name, vertices);
+            REQUIRE(vertices > 0);
+            report += "  LOADED   " + name + "\n";
+        }
+        catch (const P3D::UnsupportedOdolRevision& error)
+        {
+            ++refused;
+            report += "  REFUSED  " + name + ": " + error.what() + "\n";
+        }
+        catch (const std::exception& error)
+        {
+            ++refused;
+            report += "  ERROR    " + name + ": " + error.what() + "\n";
+        }
+    }
+    WARN("ODOL 73 corpus survey (" << files.size() << " files, " << loaded << " loaded, " << refused
+                                   << " refused, " << notRevision73 << " other revisions):\n"
+                                   << report);
+    // The survey must have reached a verdict on every file it listed.
+    REQUIRE(loaded + refused + notRevision73 == files.size());
+    // And at least one revision-73 model must load, or the reader has regressed
+    // to accepting nothing and every refusal below would look like good news.
+    REQUIRE(loaded > 0);
 }

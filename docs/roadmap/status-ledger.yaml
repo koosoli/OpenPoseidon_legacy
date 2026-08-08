@@ -1087,7 +1087,8 @@ tickets:
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
         symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
-    test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir]
+    test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir,
+               ast-012b-odol73-corpus-survey]
     benchmark_artifacts: []
     evidence_hash: 21227fa0c05b0f1b233f2e8eceed7041e60d8c265c247cd233ae8193d0b8fdec
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
@@ -1095,11 +1096,14 @@ tickets:
       - capability: ODOL73_STATIC_LOD_PARSE
         status: PARTIAL
         denominator: >-
-          1 fixture (a3 3den rectangle.p3d); both LOD bodies consumed to their
-          declared end offsets and the rest-data section to its declared 613
-          bytes. Static LODs only: no skeleton, animation, proxy, sub-skeleton,
-          named selection, keyframe or skinning data, at most one UV set, and
-          faces that are triangles or quads
+          5 of the 8 revision-73 models in Arma 3's 3den.pbo load
+          (boundingboxbase, ellipse, ellipselimited, rectangle,
+          rectanglelimited); the other 3 are refused, all naming the same
+          constraint -- named selections are not implemented. On the selected
+          fixture both LOD bodies are consumed to their declared end offsets and
+          the rest-data section to its declared 613 bytes. Static LODs only: no
+          skeleton, animation, proxy, sub-skeleton, named selection, keyframe or
+          skinning data, at most one UV set, and triangle or quad faces
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
