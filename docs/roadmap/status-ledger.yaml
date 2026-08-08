@@ -1554,9 +1554,11 @@ tickets:
         data3d.h. It is recorded and pinned by test, not resolved -- deciding
         which reading is right needs content evidence this build does not have.
       - >-
-        HasUnknownBits reports; nothing calls it yet. No loader logs unnamed bits
-        and no conformance report counts them, so the capability exists but the
-        corpus has not actually been surveyed for bits this build cannot name.
+        The unnamed-bit survey covers the twelve P3D files in tests/fixtures
+        only, and all twelve are clean. That is a small, repo-local corpus of
+        mostly generated fixtures -- it is not the owner's 6,405-file reference
+        corpus, and it says nothing about what retail content carries. No loader
+        logs unnamed bits at runtime either.
       - >-
         The three copies of the sentinel table in the shape path (LevelName, the
         special-LOD index assignment, and ResolGeometryOnly) now delegate to the
@@ -1588,6 +1590,12 @@ tickets:
       equality check would miss. The full engine suite runs 2405 cases with the
       same 6 pre-existing environment failures as before the change (dev-mode
       gate, and localisation data absent from packages/Remaster).
+
+      The flag-bit split is surveyed against the shipped corpus rather than left
+      as an unused capability: all twelve P3D fixtures load and none carries a
+      vertex or face bit this build cannot name. The survey asserts it read every
+      file it listed, so a silent load failure cannot report a clean corpus by
+      finding nothing.
 
       One case pins the parity claim for the draw-path change directly: every
       sentinel the shape path's old ResolGeometryOnly table listed still
