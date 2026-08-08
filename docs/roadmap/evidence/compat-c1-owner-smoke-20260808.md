@@ -58,3 +58,30 @@ Still NOT verified by this run: nothing exercised the LZO path, because no
 OFP/CWA texture is compressed. Compressed-mip decode is evidenced only by the
 offline corpus check (124/124 Arma 3 sample textures through the shipped DLL), and
 Pactext's own decode routines remain raw-only.
+
+---
+
+## Third run — after AST-014, automated rather than owner-run
+
+**Build**: `dist/x64-win-rwdi/PoseidonGame.exe` 15:24
+**Covers commit**: `196531a`
+**Method**: `scripts/run_preview0_wgpu_check.ps1 -MissionCaptureSmoke`
+**Artifacts**: `compat-c1-ast014-boot-check.log`,
+`compat-c1-ast014-boot-check-original-training-capture.png`
+**Result**: PASS.
+
+The owner had no time to smoke test, so this run was produced and inspected
+without him. AST-014 changed `Preproc::Process`, which every config in the engine
+passes through -- a wider blast radius than any earlier ticket here -- so leaving
+it unverified was not acceptable either.
+
+The harness boots the engine with `--check`, loads a real mission and captures a
+frame. The capture shows correct soldier camo, textured buildings, terrain, grass
+and trees, and correctly rendered UI and weapon text. Fonts matter specifically:
+they run through `Pactext`, the other live path this programme has modified.
+
+This is a regression check and nothing more. It answers "does existing OFP/CWA
+content still load and render", which is exactly the risk a shared-path change
+carries. It does not answer whether anything *looks right* as a design judgement,
+it exercises one frame rather than interactive play, and it still renders no
+Arma-generation content.

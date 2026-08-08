@@ -705,7 +705,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: e8e19cdda80b3bec36859b8af0d42eef4edc97895892ef8c0bfc1bb210d025bf
+    evidence_hash: 9e2f8e0a7e176810169feefd4dc190e2ec77dcef93504f39d7635883bffa3703
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -775,7 +775,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: fed209690c15f2a7424e0fcb13f6642c768926ad9bad1d9ab515482c61dcffe6
+    evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -849,7 +849,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: fed209690c15f2a7424e0fcb13f6642c768926ad9bad1d9ab515482c61dcffe6
+    evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1017,7 +1017,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: 5836ae34a7b66104e3f4943a99253857c0a57d82858387242ad956c1325345c7
+    evidence_hash: e592a8e4164892cf9ef8254a65940defe5db5e01394146af7652cbbf6ddd26ba
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1114,7 +1114,7 @@ tickets:
         symbol: Preproc::Process
     test_ids: [ast-014]
     benchmark_artifacts: []
-    evidence_hash: a942562e15a59c3061f50a2610f4b399b5e046af97a959399eccb29093f1acff
+    evidence_hash: d97c829ba3065127e305cc47dcc0930c7ee851251eafe8575af4b879d065d2c9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
@@ -1152,12 +1152,20 @@ tickets:
       preprocessing entry point); and a UTF-8 BOM making a whole config parse to
       nothing (2 materials, fixed in Preproc::Process).
 
-      NOT checked: nothing rendered, and no material was translated. This layer
+      A mission capture was additionally produced and inspected
+      (run_preview0_wgpu_check.ps1 -MissionCaptureSmoke): existing OFP/CWA content
+      still loads and renders correctly, including fonts, which is the regression
+      the shared preprocessor change risked.
+
+      NOT checked: no Arma-generation content rendered, and no material was
+      translated. This layer
       deliberately assigns no meaning -- it does not know which stage is a normal
       map, and the shader-family counts it reports (Super 2,840 of 4,075) are the
       denominator for MAT-030's claims, not a claim of support for any of them.
     supersedes: []
     evidence:
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
+      - docs/roadmap/evidence/compat-c1-ast014-boot-check-original-training-capture.png
       - engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
       - engine/Poseidon/IO/PreprocC/Preproc.cpp
       - scripts/verify_rvmat_ir.py
@@ -1189,7 +1197,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: 4dc7314915ac254c1c93760173e7f2c91d547690dfa571fee9df243ea0e1fca9
+    evidence_hash: d04093c5d5e848508abf465aa829c5ad70744e545e398e94993f0018feef53a9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     known_failures:
       - >-
