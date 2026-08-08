@@ -629,6 +629,16 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                           "Run mission folder or mission.sqm directly and exit"),
                    CliHelpVisibility::Dev);
 
+        // Spawn one model in front of the player once a --test-mission reaches
+        // gameplay. The point is to get an arbitrary P3D through the real
+        // graphics backend: PoseidonTools and Studio both preview models with
+        // the CPU rasteriser in ModelRenderer, so before this there was no way
+        // to confirm a newly-supported format actually renders.
+        showOption(debugGroup->add_option("--test-model", _testModelPath,
+                                          "Load this P3D into a --test-mission world and report what it contains "
+                                          "(placement draws nothing yet -- see GameApplication)"),
+                   CliHelpVisibility::Dev);
+
         // Convenience wrapper over --test-mission so a developer can boot straight into a
         // scratch map without typing a path. Optional NAME (default "devtest") is resolved
         // against ./dev-missions/ in the WORKING DIRECTORY, which is the game folder for a

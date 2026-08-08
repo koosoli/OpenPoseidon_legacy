@@ -225,6 +225,7 @@ public:
     
     /// Test mission path (--test-mission)
     const std::string& GetTestMissionPath() const { return _testMissionPath; }
+    const std::string& GetTestModelPath() const { return _testModelPath; }
 
     /// True when --check and --test-mission are combined to run a bounded mission smoke boot.
     bool IsMissionSmokeCheck() const { return _checkInit && !_testMissionPath.empty(); }
@@ -425,6 +426,7 @@ private:
     float _confirmRevertTimeoutSeconds = 0.f; // 0 → engine default (15s)
     float _appTimeoutSeconds = 0.f;
     std::string _testMissionPath;
+    std::string _testModelPath;
     /// --dev-map NAME: scratch map to boot, resolved against ./dev-missions/.
     std::string _devMapName;
     std::string _testType = "autotest";

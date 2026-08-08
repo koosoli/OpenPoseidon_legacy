@@ -1127,10 +1127,14 @@ tickets:
       - capability: ODOL73_RENDERED_THROUGH_WGPU
         status: UNTESTED
         denominator: >-
-          0 revision-73 models drawn through the WGPU backend. Wireframe renders
-          exist but come from the CPU rasteriser in ModelRenderer, which is what
-          PoseidonTools and Studio both use; no path exists yet to draw an
-          arbitrary model through the graphics backend
+          0 revision-73 models drawn through the WGPU backend. A --test-model
+          flag now loads one into a live mission world through the production
+          path and reports what it contains (the Arma 3 rock: 10 LODs, 2930
+          faces, 16.2 m bounding radius), but the placed object does not appear.
+          Isolated as object registration, not rendering: WGPU and GL33 both draw
+          nothing, and the model placed exactly at the camera still leaves an
+          empty frame. Wireframe renders exist but come from the CPU rasteriser
+          in ModelRenderer, which is what PoseidonTools and Studio both use
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
@@ -1993,7 +1997,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: 65adafcc2e0c2a4a37ad65a9ec95f9df6db60b02fb1e4a3eaa771a4fa4355b50
+    evidence_hash: c3c2cea584e4b3e8410690177db060155115447cf564d4fe666821b4b0356cd9
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX

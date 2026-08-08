@@ -146,6 +146,7 @@ __attribute__((used)) static void (*_forceLinkGameStateExtTest)() = &InitModuleG
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <SDL3/SDL.h>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
 #include <Poseidon/Core/resincl.hpp>
@@ -1044,6 +1045,14 @@ void GameApplication::RunMainLoop()
     int screenshotFrameCount = 0;
     bool screenshotCaptured = false;
     std::string screenshotTestPath;
+    // --test-model rides on the mission screenshot mode: the model needs a world
+    // to stand in, and that mode already waits for one.
+    const std::string testModelPath = AppConfig::Instance().GetTestModelPath();
+    const bool spawnTestModel = !testModelPath.empty();
+    bool testModelSpawned = false;
+    if (spawnTestModel && !screenshotTestMode)
+        LOG_WARN(Core, "--test-model needs --test-mission to have a world to place the model in");
+
     if (screenshotTestMode)
     {
         screenshotTestPath = screenshotPath.empty() ? "tmp/test_screenshot.png" : screenshotPath;
@@ -1169,6 +1178,87 @@ void GameApplication::RunMainLoop()
         // A --test-mission screenshot is evidence for the mission, not the
         // menu/intro transition.  Waiting for GModeIntro here could capture a
         // valid PNG before staged mission startup had reached gameplay.
+        // --test-model: load one P3D into a live mission world.
+        //
+        // This exists because nothing else exercises an arbitrary model through
+        // the graphics backend -- PoseidonTools and Studio both preview with the
+        // CPU rasteriser in ModelRenderer, so a newly-supported format can be
+        // read, converted, and still never proven to draw.
+        //
+        // INCOMPLETE: the object is created, positioned, added to the world
+        // vehicle list and to the landscape grid, and its shape reports real
+        // LODs and faces -- but nothing appears on screen. Verified not to be a
+        // renderer fault: WGPU and GL33 both draw nothing, and placing the model
+        // exactly at the camera with a 16 m bounding radius still shows an empty
+        // frame, so it is object registration rather than culling or transform.
+        // NewNonAIVehicle with fullCreate both false and true, and SetType
+        // (TypeVehicle), make no difference. Whatever a mission-loaded object
+        // gets that this does not has not been found yet; until it is, this flag
+        // proves load and conversion in the live engine, not drawing.
+        if (spawnTestModel && !testModelSpawned && GWorld->GetMode() == GModeArcade)
+        {
+            testModelSpawned = true; // one attempt: a retry loop would spam the log every frame
+            Object* cameraOn = GWorld->CameraOn();
+            if (!cameraOn || !GLandscape)
+            {
+                LOG_ERROR(Core, "--test-model: no camera or landscape to place {} against", testModelPath);
+            }
+            else
+            {
+                // Along the camera's own view direction, not a fixed offset:
+                // a constant +x/+z lands behind the camera as often as in front
+                // of it, and an invisible model reads as a render failure.
+                const Matrix4 view = cameraOn->WorldTransform();
+                const Vector3 ahead = view.Position() + view.Direction() * 10.0f;
+                const float x = ahead.X();
+                const float z = ahead.Z();
+                const float y = GLandscape->SurfaceY(x, z);
+                // A dynamic vehicle, not Landscape::AddObject. AddObject files
+                // the model into the static terrain grid, which the scene has
+                // already built by the time gameplay starts -- the object exists
+                // and simply never appears. The vehicle list is drawn per frame.
+                Entity* placed = NewNonAIVehicle("Building", testModelPath.c_str(), true);
+                if (!placed)
+                {
+                    LOG_ERROR(Core, "--test-model: failed to create an object for {}", testModelPath);
+                }
+                else
+                {
+                    Matrix4 transform;
+                    transform.SetIdentity();
+                    transform.SetPosition(Vector3(x, y, z));
+                    placed->Init(transform);
+                    placed->SetPosition(Vector3(x, y, z));
+                    // Simul's createVehicle does this and it is not cosmetic: an
+                    // object left as Primary is not classified as a drawable
+                    // vehicle.
+                    if (placed->Object::GetType() == Primary)
+                        placed->SetType(TypeVehicle);
+                    GWorld->AddVehicle(placed);
+                    // The world list owns it; the landscape grid is what the
+                    // scene walks when it decides what to draw. Adding to only
+                    // one of the two produces an object that exists and is never
+                    // rendered, which is indistinguishable from a broken model.
+                    GLandscape->AddObject(placed);
+                    // Report what actually loaded. Shapes.New hands back a
+                    // usable object even when the model behind it is empty, so
+                    // "placed" alone does not mean there is anything to draw.
+                    LODShapeWithShadow* shape = placed->GetShape();
+                    const int levels = shape ? shape->NLevels() : 0;
+                    const int faces = (shape && levels > 0) ? shape->Level(0)->NFaces() : 0;
+                    LOG_INFO(Core, "--test-model: placed {} at {} {} {} (lods={} faces={})", testModelPath, x, y, z,
+                             levels, faces);
+                    LOG_INFO(Core, "--test-model: camera at {} {} {} dir {} {} {}", view.Position().X(),
+                             view.Position().Y(), view.Position().Z(), view.Direction().X(), view.Direction().Y(),
+                             view.Direction().Z());
+                    LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {}", placed->Position().X(),
+                             placed->Position().Y(), placed->Position().Z(), shape ? shape->BoundingSphere() : -1.0f);
+                    if (faces <= 0)
+                        LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
+                }
+            }
+        }
+
         if (screenshotTestMode && !screenshotCaptured && GWorld->GetMode() == GModeArcade)
         {
             screenshotFrameCount++;
