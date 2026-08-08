@@ -1192,9 +1192,15 @@ void GameApplication::RunMainLoop()
         // exactly at the camera with a 16 m bounding radius still shows an empty
         // frame, so it is object registration rather than culling or transform.
         // NewNonAIVehicle with fullCreate both false and true, and SetType
-        // (TypeVehicle), make no difference. Whatever a mission-loaded object
-        // gets that this does not has not been found yet; until it is, this flag
-        // proves load and conversion in the live engine, not drawing.
+        // (TypeVehicle), make no difference. Nor is it LOD selection: the shape
+        // reports lod 0 at resolution 1 with 2930 faces, an ordinary visual LOD,
+        // alongside its geometry and shadow levels. Whatever a mission-loaded
+        // object gets that this does not has not been found yet; until it is,
+        // this flag proves load and conversion in the live engine, not drawing.
+        //
+        // The next thing to try is diffing this against the mission loader's own
+        // object creation, rather than against createVehicle, which is what the
+        // above already imitates.
         if (spawnTestModel && !testModelSpawned && GWorld->GetMode() == GModeArcade)
         {
             testModelSpawned = true; // one attempt: a retry loop would spam the log every frame
@@ -1253,6 +1259,13 @@ void GameApplication::RunMainLoop()
                              view.Direction().Z());
                     LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {}", placed->Position().X(),
                              placed->Position().Y(), placed->Position().Z(), shape ? shape->BoundingSphere() : -1.0f);
+                    // Resolutions decide which LOD is drawable at all: a shape
+                    // whose levels are every one of them special (geometry,
+                    // memory, shadow) has nothing to draw at any distance, which
+                    // looks identical to a rendering failure.
+                    for (int level = 0; shape && level < levels; ++level)
+                        LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
+                                 shape->Resolution(level), shape->Level(level)->NFaces());
                     if (faces <= 0)
                         LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
                 }

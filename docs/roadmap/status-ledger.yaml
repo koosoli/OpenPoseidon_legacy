@@ -1132,8 +1132,9 @@ tickets:
           path and reports what it contains (the Arma 3 rock: 10 LODs, 2930
           faces, 16.2 m bounding radius), but the placed object does not appear.
           Isolated as object registration, not rendering: WGPU and GL33 both draw
-          nothing, and the model placed exactly at the camera still leaves an
-          empty frame. Wireframe renders exist but come from the CPU rasteriser
+          nothing, the model placed exactly at the camera still leaves an empty
+          frame, and the shape reports lod 0 at resolution 1 with 2930 faces so
+          it is not LOD selection either. Wireframe renders exist but come from the CPU rasteriser
           in ModelRenderer, which is what PoseidonTools and Studio both use
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
@@ -1997,7 +1998,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: c3c2cea584e4b3e8410690177db060155115447cf564d4fe666821b4b0356cd9
+    evidence_hash: a86d97e8f4671708ad6bd4c998b8c98329ff237d9cbdc3e46d802d463c33c750
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
