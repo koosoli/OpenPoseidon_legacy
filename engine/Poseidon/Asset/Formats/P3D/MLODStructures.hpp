@@ -55,6 +55,99 @@ inline MLODHeader readHeader(BinaryReader& reader)
     return header;
 }
 
+// A LOD's own signature, which the file header does not tell you.
+//
+// "MLOD" names the container, not the per-LOD encoding: an OFP/CWA model stores
+// SP3X LODs, every Arma-generation model stores P3DM, and both sit under the
+// identical `MLOD 1.1` header. AST-007's inventory of the owner-provided corpora
+// measured this -- 1,657 of 1,659 loose models are P3DM, and the two SP3X files
+// are camera helpers -- so treating the signature as a constant is not a corner
+// case, it is wrong for essentially every Real Virtuality model.
+//
+// The layouts diverge immediately and incompatibly. SP3X carries a sized header
+// and 32-byte fixed texture names in its faces; P3DM has no headSize and stores
+// texture and material references as consecutive NUL-terminated strings after the
+// vertex block. Their TAGG encodings differ too: SP3X tags are a fixed 64-byte
+// name plus a size, P3DM tags are an active byte, an asciiz name, then a size.
+// Reading one with the other's layout does not fail cleanly -- it desynchronises
+// and reports whatever the misaligned bytes happen to say.
+enum class LodSignature
+{
+    SP3X,
+    P3DM,
+    Unknown,
+};
+
+inline const char* toString(LodSignature signature)
+{
+    switch (signature)
+    {
+        case LodSignature::SP3X: return "SP3X";
+        case LodSignature::P3DM: return "P3DM";
+        default: return "unknown";
+    }
+}
+
+// Recognised container, unimplemented encoding.
+//
+// Distinct from the malformed-input runtime_errors above: those mean the bytes
+// are not a valid model, this means they are a valid model this build cannot read
+// yet. Callers that fall back per-LOD need to tell those apart, and a caller that
+// cannot is left guessing from message text.
+class UnsupportedLodFormat : public std::runtime_error
+{
+  public:
+    UnsupportedLodFormat(LodSignature signature, uint32_t lodIndex, const std::string& detail)
+        : std::runtime_error("MLOD LOD " + std::to_string(lodIndex) + " uses unsupported encoding '" +
+                             toString(signature) + "': " + detail),
+          signature_(signature),
+          lodIndex_(lodIndex)
+    {
+    }
+
+    LodSignature signature() const { return signature_; }
+    uint32_t     lodIndex() const { return lodIndex_; }
+
+  private:
+    LodSignature signature_;
+    uint32_t     lodIndex_;
+};
+
+// Read the next four bytes and rewind, so the chosen reader still sees its own
+// signature and the SP3X path stays byte-for-byte what it was.
+inline LodSignature peekLodSignature(BinaryReader& reader)
+{
+    if (reader.remaining() < 4)
+        throw std::runtime_error("MLOD LOD signature truncated");
+
+    char     signature[4] = {0};
+    uint32_t raw          = reader.read<uint32_t>();
+    std::memcpy(signature, &raw, 4);
+    reader.seekRelative(-4);
+
+    if (std::memcmp(signature, "SP3X", 4) == 0)
+        return LodSignature::SP3X;
+    if (std::memcmp(signature, "P3DM", 4) == 0)
+        return LodSignature::P3DM;
+    return LodSignature::Unknown;
+}
+
+// The raw four bytes, for diagnostics that must not lie about what was found.
+inline std::string peekLodSignatureBytes(BinaryReader& reader)
+{
+    if (reader.remaining() < 4)
+        return "<truncated>";
+    char     signature[4] = {0};
+    uint32_t raw          = reader.read<uint32_t>();
+    std::memcpy(signature, &raw, 4);
+    reader.seekRelative(-4);
+
+    std::string text;
+    for (char byte : signature)
+        text += (byte >= 0x20 && byte < 0x7F) ? byte : '?';
+    return text;
+}
+
 // SP3X section header (binary vertex/face data).
 // headSize covers all header bytes; fields after the first 28 are skipped.
 struct SP3XSection

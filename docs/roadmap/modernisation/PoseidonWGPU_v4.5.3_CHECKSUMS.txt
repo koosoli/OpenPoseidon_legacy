@@ -1,0 +1,40 @@
+PoseidonWGPU v4.5.3 roadmap / compatibility / observability package
+Generated: 2026-08-07
+
+PoseidonWGPU_Modernisation_Roadmap_v4.5.3.md
+SHA256: 3a77d2af7aa17e68534b8f917dd73fb95af82bc68d49d1e932d7c312647502ac
+
+PoseidonWGPU_Execution_Overlay_CompatC1_v0.3.yaml
+SHA256: 8d883fa963ead723707711486203388f03aba60b6f085930ef3b67f06d1fdc2f
+
+PoseidonWGPU_Status_Ledger_CompatC1_Seed_v4.5.3.yaml
+SHA256: 4005e673babf5809883a9bf68e08dd2f3bc85b7d6dcd10346e7ec402884aec52
+
+PoseidonWGPU_Agent_Prompt_CompatC1_v4.5.3.md
+SHA256: 71f55f13b559c4b79956fe5262c0a8a7981009ed0f6a823bd294f74a8fc491a4
+
+PoseidonWGPU_Agent_Prompt_CLD015_Cloud_AntiRepetition_v4.5.3.md
+SHA256: 69f7b659fa8a8fdba2d0339aa3fa7c0cd99e4bfe479d7c0b2dda83139db7b101
+
+PoseidonWGPU_Agent_Prompt_LIT010_GTAO_Performance_v4.5.3.md
+SHA256: b09d35bfdea951fcd3857aedb8b839654a5399d8804a55d4ecc0f83dce3035b9
+
+PoseidonWGPU_CompatC1_Preflight_v4.5.3.ps1
+SHA256: 42585405d03981b9179f2bfceec39e1e213393c880898abaef6eb485ca02f734
+
+Roadmap duplicate ticket IDs: none
+New roadmap tickets present: AST-023, DBG-BAL-000, DBG-INSPECT-000, LIT-040, PHY-MAT-000, TEST-007, WPN-000
+Overlay YAML: PASS
+Ledger seed YAML: PASS
+Overlay roadmap hash match: PASS
+Initial OPEN seed tickets: ['AST-007']
+AST-023 seed state: HOLD
+COMPAT-C1 initial OPEN queue: ['AST-007']
+
+Execution invariants:
+- COMPAT-C1 remains PREPARED/template=true until preflight/bootstrap passes.
+- AST-007 remains the sole initial OPEN compatibility ticket.
+- AST-023 is a HOLD follow-on and cannot delay the first C1 vertical slice.
+- CLD-015 remains outside COMPAT-C1.
+- LIT-010 GTAO optimisation remains outside COMPAT-C1 and has a separate task brief.
+- Preview-0 canonical overlay path must remain tracked and pass validate_preview0_ledger.py.

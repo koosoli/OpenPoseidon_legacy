@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "AST-007 reference corpora. Copy to .reference-corpora.json and edit the paths.",
+    "The real file is gitignored: these are one developer's local, licensed installs,",
+    "and they must never become a build dependency. Every root is optional -- CI has",
+    "none of them and the indexer records that instead of failing.",
+    "",
+    "deep=true parses faces, taggs, UV sets, and material/texture references.",
+    "deep=false records container/signature/header facts only. AST-007 explicitly",
+    "forbids recursively parsing gigabytes just because a directory exists, so the",
+    "game install stays shallow and the sample packages -- which are the",
+    "understandable source/reference pairs -- are the ones parsed in full."
+  ],
+  "roots": {
+    "a3-samples": {
+      "path": "D:/SteamLibrary/steamapps/common/Arma 3 Samples",
+      "generation": "arma3",
+      "deep": true,
+      "note": "First-party commented content-creation corpus; MLOD sources with model.cfg and config.cpp."
+    },
+    "officialarma": {
+      "path": "${USERPROFILE}/OneDrive/Documents/GitHub/CWR-CE-paavohuhtalafork-/inspiration/officialarma",
+      "generation": "arma2-oa",
+      "deep": true,
+      "note": "Bohemia licensed data packages (A2 Sample Models, A2/OA sample PBOs)."
+    },
+    "a3-game": {
+      "path": "D:/SteamLibrary/steamapps/common/Arma 3",
+      "generation": "arma3",
+      "deep": false,
+      "note": "Binarized runtime install. Shallow only -- used for runtime comparison, not source study."
+    }
+  }
+}

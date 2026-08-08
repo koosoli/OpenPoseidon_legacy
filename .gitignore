@@ -91,3 +91,6 @@ target/
 # which left only a 66-char budget for the clone root on Windows (MAX_PATH 260) and made a
 # fresh clone fail with "Filename too long". Regenerable, and kept on disk locally.
 .qoder/
+
+# AST-007 local reference corpus paths (see .reference-corpora.json.example)
+.reference-corpora.json

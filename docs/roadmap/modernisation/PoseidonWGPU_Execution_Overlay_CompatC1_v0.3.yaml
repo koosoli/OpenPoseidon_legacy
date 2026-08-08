@@ -1,0 +1,341 @@
+schema_version: 2
+overlay_id: COMPAT-C1-EXEC-001
+revision: "0.3"
+document_status: ACTIVATED
+template: false
+
+roadmap:
+  version: "4.5.3"
+  path: docs/roadmap/modernisation/PoseidonWGPU_Modernisation_Roadmap_v4.5.3.md
+  sha256: 3a77d2af7aa17e68534b8f917dd73fb95af82bc68d49d1e932d7c312647502ac
+  # Recorded by the commit that lands the v4.5.3 roadmap. It cannot be filled in
+  # by that commit itself -- the field would have to name a hash the commit does
+  # not yet have -- so it is set by the follow-up, exactly as PREVIEW0-EXEC-001
+  # documents for its own roadmap.
+  repository_commit: null
+
+# SUPERSET, not the default EXACT: this overlay deliberately seeds umbrella
+# records (AST-010/011/012), P1 holds and one follow-on candidate that it does
+# NOT authorise for claiming, so its scoped ledger set is wider than
+# authorised_tickets by design.
+ledger_ticket_set_policy: SUPERSET
+
+ledger:
+  path: docs/roadmap/status-ledger.yaml
+  # The ledger is shared with PREVIEW0-EXEC-001 and validated per overlay: every
+  # record names its owning overlay_id and `validate_compat_c1_ledger.py` reads
+  # only the COMPAT-C1 subset. An earlier revision asked for the seed to be
+  # merged into this file AND for `validate_preview0_ledger.py` to keep passing,
+  # which was impossible -- that validator asserted the whole file equalled the
+  # Preview-0 ticket set, so the merge in bootstrap step 8 destroyed the gate in
+  # step 3. WIP limits are the reason it stays one file: they are scoped to the
+  # integration target, so two ledgers could not enforce them.
+  scope_field: overlay
+  seed_patch_path: docs/roadmap/modernisation/PoseidonWGPU_Status_Ledger_CompatC1_Seed_v4.5.3.yaml
+  seed_merge_tool: scripts/merge_ledger_seed.py
+  validator: scripts/validate_compat_c1_ledger.py
+  create_if_missing: false
+  authoritative_for:
+    - owner
+    - branch
+    - baseline_commit
+    - verification_commit
+    - dependencies
+    - blocked_by
+    - scheduling_state
+    - lifecycle_status
+    - milestone_role
+    - evidence
+
+execution:
+  current_preview: COMPATIBILITY_PREVIEW_C1
+  integration_target: new-renderer-infrastructure
+  baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+  baseline_semantics: PRE_ACTIVATION_CODE_BASELINE
+  integration_owner: Oliver Kay
+  authorization_policy: DENY_UNLESS_LISTED
+  activation_state: ACTIVE
+  updated_at: "2026-08-08T12:00:00+02:00"
+
+bootstrap_policy:
+  implementation_forbidden_until_resolved: false
+  resolve_baseline_from_checkout: true
+  baseline_command: git rev-parse HEAD
+  required_actions:
+    - Confirm `docs/roadmap/modernisation/PoseidonWGPU_Execution_Overlay_Preview0_v1.2.1.yaml` exists at its canonical tracked path.
+    - If that canonical Preview-0 overlay is missing only because of a working-tree move/delete, restore it from the current baseline/HEAD before doing anything else; do not use an untracked `old/` copy as a substitute.
+    - Run `docs/roadmap/modernisation/PoseidonWGPU_CompatC1_Preflight_v4.5.3.ps1` and require PASS before activating COMPAT-C1.
+    - Preserve the active Preview-0 overlay as historical execution evidence; do not overwrite it.
+    - Confirm the v4.5.3 roadmap file and sha256 match this overlay.
+    - Resolve execution.baseline_commit from the actual checked-out integration target.
+    - Record roadmap.repository_commit after the roadmap is committed.
+    - Merge missing COMPAT-C1 seed records into the shared ledger with
+      `scripts/merge_ledger_seed.py --overlay COMPAT-C1-EXEC-001`, which is additive by
+      ticket ID and cannot overwrite a live record.
+    - Resolve seed baseline_commit fields from execution.baseline_commit.
+    - Require `scripts/validate_preview0_ledger.py` to STILL pass after the merge. It
+      validates only the PREVIEW0-EXEC-001 subset, so adding COMPAT-C1 records must not
+      disturb it; if it fails, the merge touched Preview-0 state and must be reverted.
+    - Confirm every authorised/candidate/held ticket exists in the canonical roadmap.
+    - Confirm only AST-007 is initially OPEN for this compatibility activation; the remaining P0 tickets begin BLOCKED.
+    - Confirm live ACTIVE records satisfy WIP limits before adding a claim.
+    - Set template=false, activation_state=ACTIVE, and implementation_forbidden_until_resolved=false atomically in one reviewed commit.
+  failure_policy: STOP_WITH_DIAGNOSTIC
+
+# Which route a completed ticket may use to close.
+#
+# Preview-0 had exactly one: a named human reviewer. Oliver Kay is the only human
+# on the project, so for work with no runtime or visual surface that gate blocks on
+# a review that cannot meaningfully happen -- there is nothing to look at, and the
+# queue stalls while no scrutiny is added. AST-007 and AST-011A both hit this: a
+# corpus indexer and a format dispatch, neither observable in a running game.
+#
+# The rule is therefore about the work, not about who is writing the record:
+# if the owner can SEE or PLAY the result, only they can sign it off.
+review_policy:
+  owner_review_required_classes: [LOCAL_COSMETIC, WORLD_VISUAL, GAMEPLAY]
+  automated_evidence_allowed_classes: [OFFLINE_TOOL, RUNTIME_INFRA, BUILD_INFRA]
+  automated_evidence_requires:
+    - named test_ids that actually run in CI or a local suite
+    - a reviewer_method recording what was machine-checked
+    - an explicit statement of what the automated evidence does NOT cover
+    - reviewer left null; this route never implies a human looked at it
+  note: >-
+    AUTOMATED_EVIDENCE is not a quieter way to claim a review. The ledger's rule
+    against asserting scrutiny that did not happen is unchanged: this route records
+    that no human reviewed the ticket and names what did, so a reader can still
+    tell the two apart. A RUNTIME_INFRA change that becomes visible in the
+    renderer moves to OWNER_REVIEW regardless of its class.
+
+wip_limits:
+  scope: INTEGRATION_TARGET
+  active_large_tickets_max: 2
+  active_small_tickets_max: 3
+  active_cross_system_tickets_max: 2
+  count_only_state: ACTIVE
+  size_values: [SMALL, LARGE]
+
+# These are the C1 P0 exit blockers for this overlay.
+# They are authorised up front so the overlay does not need a rewrite after every small step,
+# but all except AST-007 start BLOCKED and can only become claimable when their real
+# dependencies/evidence are satisfied in the live ledger.
+preview_blockers:
+  - AST-007
+  - AST-011A
+  - AST-011B
+  - AST-011C
+  - AST-015
+  - AST-013
+  - AST-014
+  - MAT-030
+  - MAT-020
+  - AST-020
+  - AST-021
+  - AST-012A
+
+authorised_tickets:
+  - AST-007
+  - AST-011A
+  - AST-011B
+  - AST-011C
+  - AST-015
+  - AST-013
+  - AST-014
+  - MAT-030
+  - MAT-020
+  - AST-020
+  - AST-021
+  - AST-012A
+
+execution_queue:
+  - id: AST-007
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: SMALL
+    cross_system: false
+    priority: 1
+    active_scope: >-
+      Inventory all owner-provided reference roots and select the smallest representative fixture ladder.
+  - id: AST-011A
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-007
+    size: SMALL
+    cross_system: false
+    priority: 2
+    active_scope: >-
+      Add per-LOD SP3X/P3DM detection and safe dispatch; preserve existing SP3X behaviour.
+  - id: AST-011B
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-011A
+    size: LARGE
+    cross_system: true
+    priority: 3
+    active_scope: >-
+      Parse the P3DM face/texture/material-reference subset required by the selected source-model fixture.
+  - id: AST-011C
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-011B
+    size: SMALL
+    cross_system: true
+    priority: 4
+    active_scope: >-
+      Preserve #UVSet# and multiple UV sets through common ModelIR for the selected fixture.
+  - id: AST-015
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-007
+    size: LARGE
+    cross_system: true
+    priority: 5
+    active_scope: >-
+      Introduce canonical Real Virtuality virtual-resource paths when indexed dependencies require them.
+  - id: AST-013
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-007
+    size: SMALL
+    cross_system: false
+    priority: 5
+    active_scope: >-
+      Implement decode-critical PAA SWIZ/FLAG/alpha/storage semantics exercised by indexed fixtures; capture/report lesser TAGGs.
+  - id: AST-014
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-011B
+    size: LARGE
+    cross_system: true
+    priority: 6
+    active_scope: >-
+      Unify text RVMAT and later embedded material source semantics into common source IR for an activated fixture.
+  - id: MAT-030
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-014
+    size: LARGE
+    cross_system: true
+    priority: 7
+    active_scope: >-
+      Implement the first real shader-family schema, preferably Super, with stage/TexGen/UV semantics.
+  - id: MAT-020
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-014
+      - MAT-030
+    size: LARGE
+    cross_system: true
+    priority: 7
+    active_scope: >-
+      Translate only the texture/material semantics required by the activated real material fixture.
+  - id: AST-020
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-011C
+      - AST-014
+      - MAT-030
+    size: LARGE
+    cross_system: true
+    priority: 8
+    active_scope: >-
+      Produce deterministic versioned derived runtime resources for the first stable source/model/material slice.
+  - id: AST-021
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-020
+    size: SMALL
+    cross_system: false
+    priority: 8
+    active_scope: >-
+      Emit golden semantic manifests and capability claims for the first vertical slice.
+  - id: AST-012A
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - AST-007
+    size: LARGE
+    cross_system: true
+    priority: 9
+    active_scope: >-
+      Create safe version/revision dispatch scaffolding for ODOL without claiming support for all later revisions.
+
+next_candidates:
+  - id: AST-012B
+    activation_condition: >-
+      AST-012A is validated and the fixture index identifies one exact strategically useful later ODOL revision.
+    reason: One fixture-led later revision is the next proof; it is not required to parse every A2/A3 ODOL first.
+  - id: AST-018
+    activation_condition: >-
+      A selected fixture exposes a geometry-basis, special-LOD, weighted-selection, proxy, section, or flag requirement
+      not already covered by the narrower P3DM/ODOL slice.
+    reason: Promote targeted geometry semantics when a real fixture needs them rather than front-loading every special LOD.
+
+named_holds:
+  - id: CLD-015
+    reason: >-
+      Cloud anti-repetition is intentionally outside COMPAT-C1. Run it under a separate
+      overlay/claim so cloud rendering and binary asset compatibility are not mixed.
+  - id: AST-016
+    reason: P1 animation/model.cfg work must not delay the first static/material slice unless a selected fixture requires it.
+  - id: AST-017
+    reason: P1 BMTR/RTM work follows the static/material slice unless a selected fixture requires it.
+  - id: AST-019
+    reason: P1 physical-surface/clutter integration follows real gameplay/terrain consumers.
+  - id: AST-023
+    reason: >-
+      Automated compatibility conformance is a C1 follow-on. First stabilise the fixture index,
+      semantic manifests, and one real vertical slice; do not let harness expansion delay AST-007/C1.
+  - id: AST-022
+    reason: Later WRP/OPRW expansion remains gated by world/streaming/far-world decisions.
+  - id: FAR-000
+    reason: Existing far-world research hold remains unchanged.
+
+claim_protocol:
+  ledger_is_lock_source: true
+  queue_state_is_bootstrap_only: true
+  claim_requires:
+    - ticket is listed in authorised_tickets
+    - live ledger scheduling_state is OPEN
+    - live ledger has no unresolved blocked_by entries
+    - WIP limits remain satisfied
+    - owner, branch, baseline_commit, and ACTIVE scheduling state are written atomically
+    - bootstrap_policy.implementation_forbidden_until_resolved is false
+  duplicate_claim_policy: FIRST_VALID_LEDGER_COMMIT_WINS
+
+unblock_policy:
+  - Initial BLOCKED state is a bootstrap safety state, not a permanent serial chain.
+  - Remove a blocker in the live ledger only when the dependency/evidence that justified it has actually been satisfied.
+  - AST-013 and AST-015 may become OPEN after AST-007 independently when the selected fixture exercises their need.
+  - AST-012A may become OPEN after AST-007 independently, but should remain lower priority than the first P3DM material slice.
+  - Do not make every P0 item wait for every earlier P0 item when there is no real dependency.
+  - Do not promote AST-012B until AST-012A and one exact fixture revision are ready.
+
+agent_startup_protocol:
+  - Read this overlay before implementation.
+  - Refuse implementation while template=true, activation_state!=ACTIVE, or implementation_forbidden_until_resolved=true.
+  - Read the canonical roadmap definition for the assigned ticket and its dependencies.
+  - Read the live status ledger before claiming.
+  - Inventory owner-provided fixtures before inventing synthetic substitutes for an ambiguous real format.
+  - At initial activation only AST-007 should be OPEN/claimable.
+  - Claim exactly one ticket unless the integration owner explicitly authorises more.
+  - Record tests, manifests, measurements, changed paths, evidence, compatibility impact, and remaining work.
+  - Do not self-approve SHIPPABLE, and do not stop for approval on work the owner cannot observe.
+    Close a class listed in review_policy.automated_evidence_allowed_classes via AUTOMATED_EVIDENCE
+    and continue to the next authorised ticket; escalate only when a visual or functional check
+    genuinely requires the integration owner.
+
+validation_rules:
+  - Every ledger record names the overlay_id that owns it; each overlay validates only its own subset.
+  - Every authorised ticket must have a ledger record owned by this overlay (holds and unpromoted candidates need not, since neither can be claimed).
+  - WIP limits are counted across every ACTIVE record in the shared ledger, not per overlay.
+  - Every preview_blocker must appear in authorised_tickets.
+  - Every authorised ticket must appear exactly once in execution_queue.
+  - Every authorised/candidate/held ticket must exist in the canonical roadmap.
+  - Every execution_queue ticket declares size and cross_system.
+  - Every initial BLOCKED queue entry declares at least one initial blocker.
+  - No named hold may appear in authorised_tickets.
+  - Candidate entries are not authorised until explicitly promoted.
+  - ACTIVE ledger records require non-null owner, branch, and baseline_commit.
+  - The roadmap hash must match this overlay before activation.
+  - Activation flags must change atomically after all bootstrap checks pass.
+  - The live ledger remains mutable execution truth.

@@ -31,6 +31,13 @@ jobs:
       - name: Validate execution ledger and overlay
         run: python3 scripts/validate_preview0_ledger.py
 
+      # The ledger is shared and validated per overlay -- each record names its
+      # owning overlay_id -- so the job above proves nothing about the COMPAT-C1
+      # records living in the same file. Both must run or half the ledger is
+      # unchecked.
+      - name: Validate COMPAT-C1 ledger and overlay
+        run: python3 scripts/validate_compat_c1_ledger.py
+
       # Re-checks every production call site the shipped-renderer register claims,
       # against the branch. Without this the register is another hand-maintained
       # table that goes stale silently, which is the RND-030 failure it exists to

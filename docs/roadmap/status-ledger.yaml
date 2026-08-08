@@ -20,6 +20,7 @@ execution:
     verified it, not that a second party did.
 tickets:
   - id: PERF-001
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Platform and performance targets
     class: BUILD_INFRA
@@ -57,6 +58,7 @@ tickets:
       - docs/roadmap/evidence/preview0-wgpu-water-scaling-baseline-20260801-original-training-capture.json
       - docs/roadmap/decisions/PERF-001-water-draw-scaling-20260801.md
   - id: CORE-005
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Authoritative machine-readable status ledger
     class: BUILD_INFRA
@@ -78,7 +80,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-ledger-validation]
     benchmark_artifacts: []
-    evidence_hash: 7e6bae332b29ebdba4d8be80852a5010a9b8ca6753242b7b5660a90f4f19475d
+    evidence_hash: a4044e251f4d46ddf4651dc119e915ecfc83b325d7ba8ea7a81432c3a81c183d
     decision_record: null
     known_failures:
       - No reviewed activation commit exists; the overlay remains PREPARED.
@@ -95,8 +97,10 @@ tickets:
       # attest to this ticket from outside itself; the ledger's own integrity is carried
       # by the validator and by git history, not by a hash it stores about itself.
       - scripts/validate_preview0_ledger.py
+      - scripts/validate_execution_ledger.py
       - .github/workflows/lint.yml (Preview-0 ledger job)
   - id: CORE-NEG-001
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Reproducible WGPU build and startup
     class: BUILD_INFRA
@@ -291,6 +295,7 @@ tickets:
       - docs/roadmap/evidence/preview0-gl33-post-lifecycle-stress-check-20260801.log
       - docs/roadmap/evidence/preview0-wgpu-missing-optional-mods-dir-20260802.log
   - id: CORE-NEG-002
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Versioned C++/Rust ABI
     class: BUILD_INFRA
@@ -315,7 +320,7 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 413a26ad04b67ab9a406ff183b361fe9c9a00b8fd79dcb812499efecbd5e5d3e
+    evidence_hash: 3519f1365524c2d60d673f461c22aff10c9a1b645ae10baafac8b5883cda940e
     decision_record: null
     known_failures: []
     fallback: C++ refuses an ABI mismatch before renderer creation.
@@ -330,6 +335,7 @@ tickets:
       - docs/roadmap/evidence/preview0-wgpu-automation-check-20260801.log
       - docs/roadmap/evidence/preview0-wgpu-abi-mismatch-check-20260801.log
   - id: RND-005A
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Renderer startup, capability, and safe shutdown
     class: RUNTIME_INFRA
@@ -360,7 +366,7 @@ tickets:
         verified_commit: null
     test_ids: [wgpu-capabilities-check, wgpu-windowed-resize-capture, wgpu-normal-loop-minimize-restore, wgpu-lifecycle-repeat-in-session, runtime-diagnostics-once]
     benchmark_artifacts: [docs/roadmap/evidence/preview0-manifest.json]
-    evidence_hash: dfa43396627120ef0f11310f2f820a65300d51cab94052b72d23b3776032590e
+    evidence_hash: c5c0fe2fedfef145e8ca8ba6e0ffc9c2c14d2cdf980a9c044987ad443e24593e
     decision_record: null
     known_failures: []
     fallback: Unsupported optional capabilities are reported and feature paths remain gated.
@@ -387,6 +393,7 @@ tickets:
       - docs/roadmap/evidence/preview0-wgpu-profile-overlay-automation-20260801-profile-overlay.png
       - docs/roadmap/evidence/preview0-wgpu-profile-overlay-automation-20260801-profile-overlay.log
   - id: TEST-002
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Capture, metrics, and build fingerprint
     class: BUILD_INFRA
@@ -475,6 +482,7 @@ tickets:
       - docs/roadmap/evidence/preview0-gl33-vs-wgpu-clean-baseline-diff-20260802.json
       - docs/roadmap/evidence/preview0-gl33-vs-wgpu-clean-baseline-diff-20260802.png
   - id: REL-000
+    overlay: PREVIEW0-EXEC-001
     is_example: false
     title: Preview release package and public capability matrix
     class: RELEASE
@@ -551,3 +559,773 @@ tickets:
       - docs/roadmap/evidence/preview0-wgpu-rel000-mission-20260805-original-training-capture.json
       - docs/roadmap/evidence/preview0-wgpu-rel000-mission-20260805-original-training-capture.png
       - docs/roadmap/evidence/preview0-manifest-rel000-candidate-20260805.json
+  - id: AST-007
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Owner-provided Arma reference corpus and fixture index
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: [ast-007-fixture-index]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        The Arma 3 root is indexed by PBO entry table only, so a3\ dependencies are
+        proven locatable but not yet readable: pulling an asset out of those archives
+        needs PackFiles wired into the resolution path. That is AST-015 work, not a
+        corpus gap. No reference material is outstanding.
+    fallback: >-
+      Absent corpora are recorded as absent rather than raised, so the indexer and
+      every check that reads it run unchanged on CI and on a machine with none of
+      these installs.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked: the indexer parsed
+      6,405 files across three corpora with zero parse failures, every P3D LOD
+      walked to its #EndOfFile# tagg and every PBO to its entry table, and a
+      desynchronised walk throws rather than guessing. The generated fixtures round
+      -trip through this walker and through the independent C++ reader, so two
+      implementations agree on the layout. All seven dependencies of the vegetation
+      fixture were resolved to named PBOs.
+
+      NOT checked: nobody looked at any asset. The index records structure, not
+      correctness of content -- it asserts that a file says it has two UV sets, not
+      that those UVs are right. Nothing here is rendered, so there is no visual
+      claim of any kind. The LOD-role table is from published format documentation,
+      and resolutions outside it are reported as Unknown rather than guessed.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+      - docs/roadmap/evidence/compat-c1-fixture-index.json
+      - scripts/build_reference_fixture_index.py
+  - id: AST-010
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Extend PoseidonFormats compatibility umbrella
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-011
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: MLOD SP3X + P3DM compatibility umbrella
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-011A
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Per-LOD SP3X/P3DM detection and dispatch
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: [AST-007]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+        symbol: MLODLoader::loadLOD
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+        symbol: MLOD::peekLodSignature
+    test_ids: [ast-011a]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        A P3DM LOD is refused rather than skipped. It cannot be skipped: P3DM face
+        records are variable-length, so the block end is only knowable by parsing
+        it, which is AST-011B. Every Arma-generation model therefore still fails to
+        load -- as it did before, but now with an accurate diagnostic instead of
+        "Invalid SP3X signature: got 'P3DM'".
+    fallback: >-
+      UnsupportedLodFormat derives from std::runtime_error, so the existing
+      catch-all sites in ModelCache and ShapeAdapter behave exactly as before; only
+      callers that want to distinguish unsupported-but-valid from malformed need to
+      know the new type.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked: 6 new Catch2 cases
+      (24 assertions) under tag [ast-011a], plus the 19 pre-existing [mlod] cases
+      still green, so the SP3X path is unchanged. Verified end to end through the
+      shipped PoseidonFormats DLL rather than only in-process: a P3DM and an
+      unknown-signature fixture are refused with accurate diagnostics while two
+      SP3X models still load with the expected LOD counts.
+
+      NOT checked: no P3DM model was rendered or even parsed -- this ticket only
+      routes and refuses, so nothing about P3DM geometry, UVs or materials is
+      claimed. The mixed-signature fixture steps over its P3DM LOD using a length
+      the generator knows, not one the reader derived; deriving it is AST-011B. Six
+      unrelated suite failures were confirmed pre-existing at HEAD (five need absent
+      packages\Remaster game data, one is a stale --dev CLI assertion from commit
+      2487647) and are untouched by this change.
+    supersedes: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
+      - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+      - docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+  - id: AST-011B
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: P3DM faces, textures, and material references
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: [AST-011A]
+    blocked_by: [AST-011A]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-011C
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: 'P3DM #UVSet# and multi-UV preservation'
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: [AST-011B]
+    blocked_by: [AST-011B]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-012
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Later ODOL compatibility umbrella
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-012A
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Versioned ODOL dispatch and parser-family scaffolding
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-012B
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: First later-ODOL fixture-led revision capability
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [AST-012A]
+    blocked_by: [AST-012A]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-013
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: PAA storage semantics and deterministic texture decode
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-014
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Real Virtuality material-source unification
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-011B]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-015
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Virtual Real Virtuality resource paths and addon/PBO namespace
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-016
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: model.cfg, CfgSkeletons, CfgModels and AnimationSources
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: CONDITIONAL_DEPENDENCY
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-017
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: RTM + BMTR/RTMB animation format family
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: CONDITIONAL_DEPENDENCY
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-018
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: 'Geometry semantics: winding, special LODs, flags, selections, proxies and sections'
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: [AST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-019
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: BISurface, CfgSurfaces, CfgSurfaceCharacters and clutter semantics
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: CONDITIONAL_DEPENDENCY
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-020
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Offline asset compiler
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-011C, AST-014, MAT-030]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-021
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Golden IR manifests and capability matrix
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-020]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-022
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: WRP/OPRW world-format expansion
+    class: OFFLINE_TOOL
+    obligation: SUGGESTED
+    execution_mode: INVESTIGATE
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: CONDITIONAL_DEPENDENCY
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: MAT-020
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Real Virtuality material semantic translator
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-014, MAT-030]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: MAT-030
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Shader families, TexGen, MultiMaterial, and layered materials
+    class: RUNTIME_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: BLOCKED
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: BLOCKING
+    depends_on: []
+    blocked_by: [AST-014]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: CLD-015
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Cloud macro-variation and anti-repetition hardening
+    class: LOCAL_COSMETIC
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []
+  - id: AST-023
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Automated cross-generation compatibility conformance harness
+    class: OFFLINE_TOOL
+    obligation: SUGGESTED
+    execution_mode: IMPLEMENT
+    scheduling_state: HOLD
+    status: PLANNED
+    outcome: null
+    owner: null
+    branch: null
+    baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
+    verification_commit: null
+    milestone: '9'
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [AST-007, AST-021, TEST-007]
+    blocked_by: [AST-021, TEST-007]
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: null
+    known_failures: []
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence: []

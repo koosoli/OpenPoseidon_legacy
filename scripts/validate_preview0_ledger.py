@@ -1,144 +1,35 @@
 #!/usr/bin/env python3
-"""Validate the Preview-0 overlay and status ledger without external packages."""
+"""Validate the Preview-0 overlay and the tickets it owns in the shared ledger.
+
+The generic checks moved to `validate_execution_ledger.py` when a second overlay
+(COMPAT-C1) began claiming tickets in the same ledger file.  What stays here is
+Preview-0's own evidence contract: the packaged capture manifest and the 4.4.1
+checksum manifest, neither of which any other overlay has.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 import pathlib
 import re
-import subprocess
 import sys
 
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from validate_execution_ledger import (  # noqa: E402
+    ROOT,
+    canonical_bytes,
+    git,
+    git_bytes,
+    text,
+    tracked_file,
+    validate,
+)
+
 OVERLAY = ROOT / "docs/roadmap/modernisation/PoseidonWGPU_Execution_Overlay_Preview0_v1.2.1.yaml"
-LEDGER = ROOT / "docs/roadmap/status-ledger.yaml"
 MANIFEST = ROOT / "docs/roadmap/evidence/preview0-manifest.json"
 CHECKSUMS = ROOT / "docs/roadmap/modernisation/PoseidonWGPU_Roadmap_4.4.1_CHECKSUMS_Overlay_v1.2.1.txt"
-
-
-def text(path: pathlib.Path) -> str:
-    if not path.is_file():
-        raise ValueError(f"missing: {path.relative_to(ROOT)}")
-    return path.read_text(encoding="utf-8")
-
-
-def canonical_bytes(path: pathlib.Path) -> bytes:
-    """Read a tracked text file as CI will check it out.
-
-    The roadmap and overlay hashes are recorded by hand on Windows and verified
-    on Linux, so hashing the working-tree bytes makes the check depend on line
-    endings rather than on content.  `.gitattributes` pins `*.md` to `eol=lf`,
-    so a Windows editor that writes CRLF produces a file whose hash cannot match
-    the blob CI reads -- and the failure is invisible locally, because the same
-    CRLF bytes are on both sides of the local comparison.  That happened: an
-    activation commit recorded a CRLF hash and would have failed hosted CI only.
-
-    Normalising to LF costs nothing, since the recorded values were always LF
-    hashes; it only stops a CRLF worktree from agreeing with itself.
-    """
-    if not path.is_file():
-        raise ValueError(f"missing: {path.relative_to(ROOT)}")
-    return path.read_bytes().replace(b"\r\n", b"\n")
-
-
-def ids(doc: str, key: str) -> list[str]:
-    lines = doc.splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line == f"{key}:") + 1
-    except StopIteration as exc:
-        raise ValueError(f"missing overlay key: {key}") from exc
-    found = []
-    for line in lines[start:]:
-        if line and not line.startswith(" "):
-            break
-        stripped = line.strip()
-        if stripped.startswith("- id: "):
-            found.append(stripped.removeprefix("- id: "))
-        elif key in {"preview_blockers", "authorised_tickets"} and stripped.startswith("- "):
-            found.append(stripped.removeprefix("- "))
-    return found
-
-
-def ticket_block(doc: str, ticket: str) -> str:
-    marker = f"- id: {ticket}"
-    try:
-        return marker + doc.split(marker, 1)[1].split("\n  - id:", 1)[0]
-    except IndexError as exc:
-        raise ValueError(f"missing ledger record: {ticket}") from exc
-
-
-def value(block: str, field: str) -> str:
-    for line in block.splitlines():
-        if line.strip().startswith(f"{field}:"):
-            return line.split(":", 1)[1].strip()
-    raise ValueError(f"missing {field}")
-
-
-def git(*args: str) -> str:
-    result = subprocess.run(("git", *args), cwd=ROOT, text=True, capture_output=True)
-    if result.returncode:
-        raise ValueError(result.stderr.strip() or f"git {' '.join(args)} failed")
-    return result.stdout.strip()
-
-
-def git_bytes(*args: str) -> bytes:
-    result = subprocess.run(("git", *args), cwd=ROOT, capture_output=True)
-    if result.returncode:
-        message = result.stderr.decode("utf-8", errors="replace").strip()
-        raise ValueError(message or f"git {' '.join(args)} failed")
-    return result.stdout
-
-
-def tracked_file(raw_path: str, context: str) -> pathlib.Path:
-    path = ROOT / raw_path
-    if not path.is_file():
-        raise ValueError(f"{context} missing file: {raw_path}")
-    git("ls-files", "--error-unmatch", "--", raw_path)
-    return path
-
-
-def evidence_paths(block: str) -> list[str]:
-    paths: list[str] = []
-    for line in block.splitlines():
-        match = re.match(r"\s+-\s+((?:docs|engine|apps|scripts|\.github)/\S+)", line)
-        if match:
-            paths.append(match.group(1))
-    return paths
-
-
-def list_values(raw: str) -> list[str]:
-    return [item for item in raw.strip("[]").replace(" ", "").split(",") if item]
-
-
-def verify_production_call_sites(block: str, ticket: str) -> None:
-    """Require stable file/symbol records instead of prose-only call sites."""
-    lines = block.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.strip().startswith("production_call_sites:"))
-    if lines[start].strip() == "production_call_sites: []":
-        return
-    entries: list[dict[str, str]] = []
-    current: dict[str, str] | None = None
-    for line in lines[start + 1:]:
-        if line.startswith("    ") and not line.startswith("      "):
-            break
-        stripped = line.strip()
-        if stripped.startswith("- file: "):
-            if current is not None:
-                entries.append(current)
-            current = {"file": stripped.removeprefix("- file: ")}
-        elif current is not None and stripped.startswith("symbol: "):
-            current["symbol"] = stripped.removeprefix("symbol: ")
-    if current is not None:
-        entries.append(current)
-    for entry in entries:
-        if not entry.get("file") or not entry.get("symbol"):
-            raise ValueError(f"{ticket} production call site needs file and symbol")
-        tracked_file(entry["file"], f"{ticket} production call site")
-    raw_lines = [line.strip() for line in lines[start + 1:] if line.startswith("      - ")]
-    if raw_lines and not entries:
-        raise ValueError(f"{ticket} production call sites must use file/symbol records")
 
 
 def verify_clean_manifest() -> None:
@@ -203,151 +94,13 @@ def verify_canonical_checksums(roadmap: pathlib.Path, overlay: pathlib.Path) -> 
         raise ValueError(f"Preview-0 checksum manifest mismatch: {sorted(missing)[0]}")
 
 
+def preview0_evidence(roadmap: pathlib.Path, overlay: pathlib.Path) -> None:
+    verify_canonical_checksums(roadmap, overlay)
+    verify_clean_manifest()
+
+
 def main() -> int:
-    try:
-        overlay = text(OVERLAY)
-        ledger = text(LEDGER)
-        if value(overlay, "template") not in {"true", "false"}:
-            raise ValueError("overlay template must be true or false")
-        overlay_template = value(overlay, "template") == "true"
-        overlay_activation = value(overlay, "activation_state")
-        activation = value(ledger, "activation_state")
-        if activation not in {"PREPARED", "ACTIVE"}:
-            raise ValueError(f"invalid activation state {activation}")
-        if overlay_activation != activation:
-            raise ValueError("overlay and ledger activation states differ")
-        if overlay_template and activation != "PREPARED":
-            raise ValueError("template overlay must remain PREPARED")
-        if not overlay_template and activation != "ACTIVE":
-            raise ValueError("resolved overlay must be ACTIVE")
-        path_line = next(line for line in overlay.splitlines() if line.startswith("  path: "))
-        roadmap = ROOT / path_line.split(": ", 1)[1]
-        roadmap_text = text(roadmap)
-        tracked_file(path_line.split(": ", 1)[1], "canonical roadmap")
-        tracked_file(str(OVERLAY.relative_to(ROOT)), "canonical overlay")
-        expected_hash = next(line for line in overlay.splitlines() if line.startswith("  sha256: ")).split(": ", 1)[1]
-        actual_hash = hashlib.sha256(canonical_bytes(roadmap)).hexdigest()
-        if actual_hash != expected_hash:
-            raise ValueError("canonical roadmap hash mismatch")
-        verify_canonical_checksums(roadmap, OVERLAY)
-        verify_clean_manifest()
-        authorised = ids(overlay, "authorised_tickets")
-        blockers = ids(overlay, "preview_blockers")
-        queue = ids(overlay, "execution_queue")
-        ledger_ids = [line.strip().removeprefix("- id: ") for line in ledger.splitlines() if line.strip().startswith("- id: ")]
-        if len(queue) != len(set(queue)) or len(ledger_ids) != len(set(ledger_ids)):
-            raise ValueError("duplicate ticket ID")
-        if set(authorised) != set(queue) or set(authorised) != set(ledger_ids):
-            raise ValueError("authorised, queue, and ledger ticket sets differ")
-        if not set(blockers).issubset(authorised):
-            raise ValueError("preview blocker is not authorised")
-        holds = ids(overlay, "named_holds")
-        candidates = ids(overlay, "next_candidates")
-        if set(holds) & set(authorised):
-            raise ValueError("named hold appears in authorised tickets")
-        canonical_ticket_ids = set(re.findall(r"^##\s+([A-Z][A-Z0-9-]+)\s+[—-]", roadmap_text, re.MULTILINE))
-        for ticket in authorised + holds + candidates:
-            if ticket not in canonical_ticket_ids:
-                raise ValueError(f"canonical roadmap does not define {ticket}")
-        active = []
-        for ticket in ledger_ids:
-            block = ticket_block(ledger, ticket)
-            required_fields = (
-                "id:", "is_example:", "title:", "class:", "obligation:",
-                "execution_mode:", "scheduling_state:", "status:", "outcome:",
-                "owner:", "branch:", "baseline_commit:", "verification_commit:",
-                "milestone:", "milestone_role:", "depends_on:", "blocked_by:",
-                "blocks:", "implementation_commits:", "production_call_sites:",
-                "test_ids:", "benchmark_artifacts:", "evidence_hash:",
-                "decision_record:", "known_failures:", "fallback:", "reviewer:",
-                "reviewer_method:", "supersedes:", "evidence:",
-            )
-            for field in required_fields:
-                if field not in block:
-                    raise ValueError(f"{ticket} missing {field}")
-            verify_production_call_sites(block, ticket)
-            scheduling = value(block, "scheduling_state")
-            lifecycle = value(block, "status")
-            if scheduling not in {"OPEN", "ACTIVE", "BLOCKED", "DONE", "HOLD"}:
-                raise ValueError(f"{ticket} has invalid scheduling state {scheduling}")
-            if lifecycle not in {"PLANNED", "RESEARCHED", "PROTOTYPED", "INTEGRATED", "VALIDATED", "SHIPPABLE", "DEFERRED", "SUPERSEDED"}:
-                raise ValueError(f"{ticket} has invalid lifecycle status {lifecycle}")
-            if value(block, "outcome") not in {"ADOPTED", "ADAPTED", "REJECTED", "DEFERRED", "NOT_APPLICABLE"}:
-                raise ValueError(f"{ticket} has invalid outcome")
-            evidence = evidence_paths(block)
-            for evidence_path in evidence:
-                tracked_file(evidence_path, ticket)
-            decision = value(block, "decision_record")
-            if decision != "null":
-                tracked_file(decision, ticket)
-            completed = scheduling == "DONE" or lifecycle in {"VALIDATED", "SHIPPABLE"}
-            if completed:
-                verification = value(block, "verification_commit")
-                if not re.fullmatch(r"[0-9a-f]{7,64}", verification):
-                    raise ValueError(f"completed {ticket} needs a verification commit")
-                git("cat-file", "-e", f"{verification}^{{commit}}")
-                evidence_hash = value(block, "evidence_hash")
-                if not re.fullmatch(r"[0-9a-f]{64}", evidence_hash):
-                    raise ValueError(f"completed {ticket} needs a SHA-256 evidence hash")
-                # Recompute it. The format check alone accepted any 64 hex
-                # characters, so the field attested to nothing: a hash could be
-                # invented, or left behind after the evidence it covered was
-                # replaced. Deriving it from the evidence files makes a stale or
-                # fabricated value fail here instead of shipping.
-                try:
-                    import compute_evidence_hash as ceh
-                except ImportError as exc:  # pragma: no cover - packaging guard
-                    raise ValueError(f"cannot verify {ticket} evidence hash: {exc}") from exc
-                expected, hashed = ceh.evidence_hash(block)
-                if not hashed:
-                    raise ValueError(f"completed {ticket} has an evidence hash but no tracked evidence files")
-                if expected != evidence_hash:
-                    raise ValueError(
-                        f"{ticket} evidence hash does not match its evidence "
-                        f"({len(hashed)} file(s)); recompute with "
-                        f"`python scripts/compute_evidence_hash.py --all --write`"
-                    )
-                reviewer = value(block, "reviewer")
-                owner = value(block, "owner")
-                integration_owner = value(ledger, "integration_owner")
-                if reviewer in {"", "null", owner}:
-                    raise ValueError(f"completed {ticket} needs a named reviewer")
-                # The integration owner may review their own integration, but
-                # only on the record.  Preview 0 has no second reviewer, so
-                # rather than let the ledger imply an independence it does not
-                # have, an owner review must state how it was carried out.
-                if reviewer == integration_owner:
-                    method = value(block, "reviewer_method")
-                    if method in {"", "null"}:
-                        raise ValueError(
-                            f"completed {ticket} is reviewed by the integration owner "
-                            "and needs a reviewer_method recording how it was verified"
-                        )
-                if not evidence:
-                    raise ValueError(f"completed {ticket} needs tracked file evidence")
-                if not list_values(value(block, "implementation_commits")):
-                    raise ValueError(f"completed {ticket} needs implementation commits")
-                for implementation_commit in list_values(value(block, "implementation_commits")):
-                    if not re.fullmatch(r"[0-9a-f]{7,64}", implementation_commit):
-                        raise ValueError(f"completed {ticket} has an invalid implementation commit")
-                    git("cat-file", "-e", f"{implementation_commit}^{{commit}}")
-            if scheduling == "ACTIVE":
-                for field in ("owner", "branch", "baseline_commit"):
-                    if value(block, field) in {"", "null"}:
-                        raise ValueError(f"ACTIVE {ticket} has no {field}")
-                active.append(ticket)
-            for dependency in list_values(value(block, "depends_on")):
-                if dependency and dependency not in ledger_ids:
-                    raise ValueError(f"{ticket} depends on unknown ticket {dependency}")
-                if scheduling == "DONE" and dependency and value(ticket_block(ledger, dependency), "scheduling_state") != "DONE":
-                    raise ValueError(f"completed {ticket} depends on unfinished {dependency}")
-        if len(active) > 3:
-            raise ValueError("active ticket count exceeds Preview-0 WIP maximum")
-        print(f"Preview-0 ledger valid: {len(authorised)} tickets, roadmap SHA-256 {actual_hash}")
-    except ValueError as exc:
-        print(f"Preview-0 ledger invalid: {exc}", file=sys.stderr)
-        return 1
-    return 0
+    return validate(OVERLAY, extra_checks=preview0_evidence)
 
 
 if __name__ == "__main__":

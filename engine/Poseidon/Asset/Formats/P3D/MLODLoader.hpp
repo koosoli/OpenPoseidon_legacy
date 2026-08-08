@@ -56,13 +56,44 @@ class MLODLoader
         model.sourceVersion = header.versionMajor * 10 + header.versionMinor;
 
         for (uint32_t lodIdx = 0; lodIdx < header.lodCount; ++lodIdx)
-            model.lodLevels.push_back(loadLOD(reader));
+            model.lodLevels.push_back(loadLOD(reader, lodIdx));
 
         return model;
     }
 
   private:
-    static LODLevel loadLOD(BinaryReader& reader)
+    // Per-LOD dispatch (AST-011A).
+    //
+    // Every LOD is routed on its own signature rather than on an assumption made
+    // once for the file: MLOD containers are not required to be homogeneous, and
+    // the two SP3X models AST-007 found sit in the same corpus as 1,657 P3DM ones.
+    //
+    // A recognised-but-unimplemented P3DM LOD stops here with UnsupportedLodFormat
+    // instead of being skipped. It cannot be skipped: P3DM face records are
+    // variable-length (two NUL-terminated strings each), so the end of the block
+    // is only knowable by parsing it, which is AST-011B. Guessing a length would
+    // resynchronise on arbitrary bytes and yield a model that loads and is wrong,
+    // which is worse than one that refuses.
+    static LODLevel loadLOD(BinaryReader& reader, uint32_t lodIndex)
+    {
+        const MLOD::LodSignature signature = MLOD::peekLodSignature(reader);
+        switch (signature)
+        {
+            case MLOD::LodSignature::SP3X:
+                return loadSP3XLOD(reader);
+            case MLOD::LodSignature::P3DM:
+                throw MLOD::UnsupportedLodFormat(
+                    signature, lodIndex,
+                    "P3DM LOD parsing is not implemented in this build (AST-011B); the SP3X reader "
+                    "cannot decode it because P3DM face records are variable-length");
+            default:
+                throw MLOD::UnsupportedLodFormat(
+                    signature, lodIndex,
+                    "expected 'SP3X' or 'P3DM', found '" + MLOD::peekLodSignatureBytes(reader) + "'");
+        }
+    }
+
+    static LODLevel loadSP3XLOD(BinaryReader& reader)
     {
         LODLevel lod;
         auto     sp3xHeader  = MLOD::readSP3XHeader(reader);
