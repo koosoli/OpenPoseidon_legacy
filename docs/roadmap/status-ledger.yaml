@@ -1664,6 +1664,13 @@ tickets:
           reports faceRangeKnown false rather than an unconverted number
     known_failures:
       - >-
+        PROCESS: this ticket is not in the overlay's authorised_tickets list. It
+        was picked up because its scheduling_state still read BLOCKED on AST-007
+        long after AST-007 was INTEGRATED, which was read as "unblocked" -- but
+        unblocked is not the same as authorised. The work and its evidence stand;
+        the authorisation does not, and the integration owner should either add
+        it to authorised_tickets or decide otherwise.
+      - >-
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
         split, preservation of the MLOD named-selection weight byte, a measured
         winding for the ODOL 73 path, a typed source-geometry basis with a
