@@ -1405,8 +1405,28 @@ int PacLevelMem::Init(QIStream& in, PacFormat sFormat)
             h = fgetiw(in);
         }
 
+        // Bit 15 of the stored width marks a compressed mip (AST-013). Arma 2/3
+        // textures set it routinely: every one of 3,283 sampled from the Arma 3
+        // archives does. Unmasked, a 2048-wide mip reads as 0x8800 = 34816 and
+        // falls into the size check below, which then blames the dimension for
+        // what is actually an unsupported compression -- and sends anyone reading
+        // the log looking for a corrupt file that is perfectly valid.
+        //
+        // Masking here does not make such a texture load: decoding still needs the
+        // LZO path this build does not have. It makes the refusal say so.
+        const bool compressedMip = (w & 0x8000) != 0;
+        if (compressedMip)
+            w &= 0x7FFF;
+
         // get compressed data size
         int dSize = fgeti24(in);
+
+        if (compressedMip)
+        {
+            LOG_ERROR(Graphics, "Compressed PAA mip ({}x{}) is not supported by this build", w, h);
+            error = 1;
+            goto Error;
+        }
 
         if (w > 4096 || w < 2 || h > 4096 || h < 2)
         {

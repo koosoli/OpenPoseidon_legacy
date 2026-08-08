@@ -15,6 +15,39 @@ struct DecodedImage
     bool valid() const { return width > 0 && height > 0 && !rgba.empty(); }
 };
 
+// The TAGG block a PAA carries before its mip chain (AST-013).
+//
+// Previously skipped wholesale. They are not decoration: SWIZ says how stored
+// channels map onto meaning, and FLAG carries the alpha/transparency policy, so
+// discarding them means guessing both. Measured across 3,283 archived Arma 3
+// textures: AVGC/MAXC/OFFS on every one, FLAG on 1,345, SWIZ on 1,146.
+struct PAATaggs
+{
+    bool     hasAvgColor = false;
+    uint32_t avgColor    = 0;      // AVGC, ARGB
+    bool     hasMaxColor = false;
+    uint32_t maxColor    = 0;      // MAXC, ARGB
+    bool     hasFlags    = false;
+    uint32_t flags       = 0;      // FLAG; observed values 1 and 2
+    bool     hasSwizzle  = false;
+    uint8_t  swizzle[4]  = {0, 0, 0, 0}; // SWIZ, one byte per output channel
+    bool     hasOffsets  = false;        // OFFS, per-mip file offsets
+
+    // Anything not recognised, kept by name so a fixture that needs it is visible
+    // rather than silently dropped. AST-013 asks for lesser tags to be captured
+    // and reported until a real fixture shows ignoring one changes correctness.
+    std::vector<std::string> unknown;
+
+    // SWIZ is recorded but NOT applied: the byte encoding is ambiguous across the
+    // observed values (0x00-0x09 appear, which does not fit a plain
+    // channel-plus-invert reading) and no local fixture settles it. Applying a
+    // guessed mapping would silently corrupt every normal map it touched.
+    bool isIdentitySwizzle() const
+    {
+        return !hasSwizzle || (swizzle[0] == 0 && swizzle[1] == 1 && swizzle[2] == 2 && swizzle[3] == 3);
+    }
+};
+
 struct PAAInfo
 {
     std::string path;
@@ -26,6 +59,13 @@ struct PAAInfo
     int paletteColors = 0;
     const char* formatName = nullptr;
     bool hasTransparentBlocks = false; // DXT1: any blocks with c0 <= c1 (1-bit alpha mode)
+    PAATaggs taggs;
+
+    // A mip whose stored width has bit 15 set holds compressed data. Recognising
+    // the flag is what stops the dimension being read as 0x8800 = 34816 and
+    // reported as an "extreme texture size" -- a diagnostic that blamed the size
+    // when the real problem is an unsupported compression.
+    bool hasCompressedMips = false;
 };
 
 // Read metadata without decoding pixel data

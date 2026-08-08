@@ -996,30 +996,78 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADAPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-007]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Textures/PAADecoder.cpp
+        symbol: Poseidon::ReadPAAInfo
+      - file: engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
+        symbol: PacLevelMem::Init
+    test_ids: [ast-013]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        PAA_COMPRESSED_MIP: UNSUPPORTED. A mip whose stored width has bit 15 set
+        holds compressed data needing an LZO decompressor this tree does not have
+        and vcpkg.json does not pull in. 98 of the 124 loose Arma 3 sample textures
+        and effectively all archived ones are affected, so this is the dominant
+        blocker for real texture decode -- it is the next ticket, not an edge case.
+      - >-
+        PAA_SWIZ: CAPTURED, NOT APPLIED. The four bytes are preserved verbatim but
+        no channel rearrangement is performed. Observed values across 1,146 archived
+        textures include 0x00-0x09, which does not fit a plain channel-plus-invert
+        reading, and no local fixture settles it: applying a guessed mapping would
+        silently corrupt every normal map it touched. Resolving it needs either a
+        fixture with a known-correct decoded reference or the format documented.
+      - >-
+        PAA_FLAG: CAPTURED, NOT INTERPRETED. Values 1 (1,243 files) and 2 (102) are
+        carried verbatim; alpha classification still comes from the existing decoded
+        -alpha scan rather than from the tag.
+    fallback: >-
+      An unsupported compressed mip now refuses with an accurate diagnostic instead
+      of being misreported as an extreme texture size, and existing uncompressed
+      PAA decoding is unchanged -- the owner smoke test after this change still
+      loads a mission with correct textures.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Capability claims, each naming its
+      denominator: PAA_TAGG_CAPTURE VALIDATED (AVGC/MAXC/FLAG/SWIZ/OFFS plus
+      unknown-tag capture); PAA_MIP_SIZE_FLAG VALIDATED; PAA_COMPRESSED_MIP
+      UNSUPPORTED; PAA_SWIZ CAPTURED_NOT_APPLIED; PAA_FLAG CAPTURED_NOT_INTERPRETED.
+
+      Machine-checked: 4 Catch2 cases under [ast-013] (33 assertions) over authored
+      fixtures covering full tags, an unknown tag that must not desynchronise the
+      mip chain, a file with no tags, and the compressed-mip flag; full suite green
+      apart from the 6 failures pre-existing at HEAD. Against the real corpus: tag
+      histograms were measured over 3,283 textures read out of 40 Arma 3 PBOs, and
+      for the 124 loose sample textures the C++ reader agreed with an independent
+      Python parse on the dimensions of all 26 decodable files with 0 mismatches,
+      while correctly flagging the other 98 as compressed.
+
+      NOT checked: no channel data was validated against a reference image -- this
+      ticket does not claim any decoded texture is correct, only that the container
+      is read correctly. SWIZ and FLAG are captured, not acted on, so nothing here
+      establishes what they mean. The compressed 98 were never decoded at all.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Graphics/Textures/PAADecoder.hpp
+      - engine/Poseidon/Graphics/Textures/PAADecoder.cpp
+      - engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
+      - docs/roadmap/evidence/compat-c1-owner-smoke-20260808.md
   - id: AST-014
     overlay: COMPAT-C1-EXEC-001
     is_example: false

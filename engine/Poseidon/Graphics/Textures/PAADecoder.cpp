@@ -326,17 +326,55 @@ bool ReadPAAInfo(const std::string& path, PAAInfo& info)
         f.seekg(0, std::ios::beg);
     }
 
-    // Skip TAGG sections
+    // Read the TAGG sections rather than skipping them (AST-013). SWIZ and FLAG
+    // decide what the stored channels mean; discarding them means guessing.
     while (f.good())
     {
         uint32_t m = readU32(f);
-        if (m != 0x54414747)
+        if (m != 0x54414747) // 'TAGG', stored as "GGAT"
         {
             f.seekg(-4, std::ios::cur);
             break;
         }
-        readU32(f);
-        uint32_t sz = readU32(f);
+        // The tag name is stored reversed alongside the reversed 'TAGG' marker.
+        char raw[4] = {};
+        f.read(raw, 4);
+        const std::string name{raw[3], raw[2], raw[1], raw[0]};
+        const uint32_t    sz = readU32(f);
+        const auto        payloadStart = f.tellg();
+
+        if (name == "AVGC" && sz == 4)
+        {
+            info.taggs.hasAvgColor = true;
+            info.taggs.avgColor    = readU32(f);
+        }
+        else if (name == "MAXC" && sz == 4)
+        {
+            info.taggs.hasMaxColor = true;
+            info.taggs.maxColor    = readU32(f);
+        }
+        else if (name == "FLAG" && sz == 4)
+        {
+            info.taggs.hasFlags = true;
+            info.taggs.flags    = readU32(f);
+        }
+        else if (name == "SWIZ" && sz == 4)
+        {
+            info.taggs.hasSwizzle = true;
+            f.read(reinterpret_cast<char*>(info.taggs.swizzle), 4);
+        }
+        else if (name == "OFFS")
+        {
+            info.taggs.hasOffsets = true;
+        }
+        else
+        {
+            info.taggs.unknown.push_back(name);
+        }
+
+        // Always resume from the declared size, so a tag read shorter or longer
+        // than expected cannot desynchronise the mip chain behind it.
+        f.seekg(payloadStart);
         f.seekg(sz, std::ios::cur);
     }
 
@@ -354,8 +392,15 @@ bool ReadPAAInfo(const std::string& path, PAAInfo& info)
             break;
         if (!f.good())
             break;
-        int rw = w, rh = h;
-        if (w == 1234 && h == 8765)
+        // Bit 15 of the stored width marks a compressed mip; the dimension is the
+        // remaining 15 bits. Without the mask a 2048-wide mip reads as 0x8800 =
+        // 34816 and is rejected as an "extreme texture size", which blames the
+        // dimension for what is really an unsupported compression. Every Arma 3
+        // texture sampled carries it.
+        if (w & 0x8000)
+            info.hasCompressedMips = true;
+        int rw = w & 0x7FFF, rh = h;
+        if (rw == 1234 && h == 8765)
         {
             rw = readU16(f);
             rh = readU16(f);
