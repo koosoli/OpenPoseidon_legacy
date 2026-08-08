@@ -82,6 +82,14 @@ struct Odol73StaticPolygonPrefix
     uint32_t followingByteOffset = 0;
 };
 
+struct Odol73StaticSection
+{
+    int32_t faceLower = 0, faceUpper = 0;
+    int32_t minBone = 0, boneCount = 0;
+    int16_t textureIndex = 0;
+    int32_t materialIndex = 0;
+};
+
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
 {
     std::string value;
@@ -304,6 +312,30 @@ inline Odol73StaticPolygonPrefix ReadOdol73StaticPolygonPrefix(BinaryReader& rea
     if (result.polygons.empty())
         throw std::runtime_error("ODOL 73 LOD has no decodable polygon prefix");
     result.followingByteOffset = static_cast<uint32_t>(reader.tell());
+    return result;
+}
+
+inline std::vector<Odol73StaticSection> ReadOdol73StaticSections(BinaryReader& reader, uint32_t end)
+{
+    const uint32_t count = reader.read<uint32_t>();
+    if (count > 64) throw std::runtime_error("ODOL 73 LOD has too many sections");
+    std::vector<Odol73StaticSection> result; result.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        Odol73StaticSection section;
+        section.faceLower = reader.read<int32_t>(); section.faceUpper = reader.read<int32_t>();
+        section.minBone = reader.read<int32_t>(); section.boneCount = reader.read<int32_t>();
+        (void)reader.read<uint32_t>(); section.textureIndex = reader.read<int16_t>();
+        (void)reader.read<uint32_t>(); section.materialIndex = reader.read<int32_t>();
+        if (section.materialIndex == -1) (void)ReadBoundedAsciiz(reader, "section material");
+        const uint32_t areas = reader.read<uint32_t>();
+        if (areas > 64) throw std::runtime_error("ODOL 73 section area array is too large");
+        for (uint32_t area = 0; area < areas; ++area) (void)reader.read<float>();
+        const int32_t flag67 = reader.read<int32_t>();
+        if (flag67 >= 1) for (int j = 0; j < 11; ++j) (void)reader.read<float>();
+        if (reader.tell() > static_cast<int>(end)) throw std::runtime_error("ODOL 73 section exceeds LOD range");
+        result.push_back(section);
+    }
     return result;
 }
 

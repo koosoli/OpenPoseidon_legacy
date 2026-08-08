@@ -203,4 +203,9 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(polygons.polygons.size() == 11);
     REQUIRE(polygons.polygons[0] == std::vector<uint32_t>{39, 35, 31, 43});
     REQUIRE(polygons.followingByteOffset == 0x748);
+    const auto sections = P3D::ReadOdol73StaticSections(reader, directory.ends[0]);
+    REQUIRE(sections.size() == 1);
+    REQUIRE(sections[0].faceLower == 0);
+    REQUIRE(sections[0].faceUpper == 320);
+    REQUIRE(sections[0].materialIndex == 0);
 }
