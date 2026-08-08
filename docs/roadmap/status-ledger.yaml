@@ -1037,30 +1037,73 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-007]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Addon/VirtualPath.hpp
+        symbol: Poseidon::Asset::VirtualPath
+      - file: engine/Poseidon/World/Model/ModelCache.cpp
+        symbol: ModelCache::normalizePath
+    test_ids: [ast-015]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        The canonical form and the addon namespace exist and ModelCache keys on
+        them, but nothing yet READS an asset out of a PBO through them. Wiring
+        AddonNamespace to PackFiles/FileServer is the follow-on; until then a
+        resolved path names its owning archive without opening it.
+      - >-
+        5,980 of 12,680 indexed references do not resolve because the Arma 2
+        base-game archives are absent from the corpus. That is a corpus gap, not a
+        defect in the representation, and it is why the fixture ladder was
+        corrected to lead with Arma 3 fixtures.
+    fallback: >-
+      VirtualPath is a pure value type with no filesystem knowledge, so it changes
+      no lookup behaviour on its own. ModelCache's key is now platform-independent
+      where it was previously chosen by #ifdef _WIN32.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked: 8 Catch2 cases under
+      [ast-015] (38 assertions) covering case, separator, leading/doubled/trailing
+      separator, hashing, prefix/extension, source->shipped substitution, longest
+      -prefix ownership and collision recording; full suite 2,331 passed with only
+      the 6 failures pre-existing at HEAD.
+
+      The rules were then checked against the corpus rather than only against
+      themselves: scripts/verify_virtual_path_resolution.py resolved all 12,680
+      model references from 1,661 real models, giving 4,417 into loose source trees
+      and 2,234 into named archives across 512 declared PBO prefixes with 0 prefix
+      collisions. That run is what corrected the AST-007 fixture ladder -- it showed
+      the Arma 2 fixture chosen earlier has no resolvable texture, because the
+      candidate scan behind it had only checked materials. It also found real
+      leaked developer host paths (p:\, j:\) in shipped content, which is why
+      looksHostAbsolute exists.
+
+      NOT checked: nothing was rendered and no asset was read out of a PBO through
+      this path -- resolution is proven to identify the owning archive, not to
+      retrieve bytes from it. The Python verifier mirrors the C++ rules rather than
+      calling them, so it corroborates the corpus outcome but is not a binding
+      check on the header; the Catch2 cases are what pin the behaviour.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Addon/VirtualPath.hpp
+      - engine/Poseidon/World/Model/ModelCache.cpp
+      - scripts/verify_virtual_path_resolution.py
+      - docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
   - id: AST-016
     overlay: COMPAT-C1-EXEC-001
     is_example: false

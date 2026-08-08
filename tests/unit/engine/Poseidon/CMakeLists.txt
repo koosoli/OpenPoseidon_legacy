@@ -215,6 +215,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # P3D format tests
     Asset/Formats/P3D/test_mlod_loader.cpp
     Asset/Formats/P3D/MLOD/test_mlod_lod_dispatch.cpp
+    Asset/Addon/test_virtual_path.cpp
 
     # PoseidonFormats C API tests
     Asset/Formats/test_poseidon_formats_capi.cpp

@@ -63,45 +63,70 @@ binarized-ParamFile material decoding until a fixture demands it.
 
 ## The ladder
 
-Selected by a hard criterion the overlay does not state but which decides
-everything: **the fixture's dependencies must resolve inside the local corpus.**
-The Arma 3 Samples models are the better-documented sources, but every one of
-them references `a3\…`, which resolves only through the 487 PBOs of the game
-install — an archive read the resolution path does not have yet. The
-`officialarma` models reference `ca\…`, and 5,289 of those virtual paths are
-satisfied by **loose files in the same tree**, so steps 1–4 need no PBO reader at
-all. That is why the first slice is Arma 2 source rather than the better-commented
-Arma 3 samples: it removes AST-015 archive work from the critical path without
-giving up any capability the slice has to prove.
+> **Corrected 2026-08-08 during AST-015.** The original ladder put the Arma 2
+> `ataka.p3d` first on the grounds that all its dependencies resolved locally.
+> That was wrong, and the error was mine: the candidate scan that chose it
+> required only its *materials* to resolve and never checked its textures.
+> Resolving all 12,680 model references through the canonical form showed
+> `officialarma` contains **zero** `.paa` files -- the Arma 2 base-game `ca\`
+> archives are not in the corpus, only the OA `_e` expansions -- so no Arma 2
+> texture resolves. The Arma 3 fixtures resolve completely, including the
+> `.tga`->`.paa` substitution. The ladder is reordered accordingly.
+
+Selected by a criterion the overlay does not state but which decides everything:
+**the fixture's dependencies must resolve inside the local corpus.** Measured
+per prefix rather than as one rate, because "96% resolve" hides which namespace
+is missing:
+
+| Resolution of 12,680 model references | Count |
+|---|---|
+| resolved in a loose source tree | 4,417 |
+| resolved in an addon archive | 2,234 |
+| unresolved, `ca\data` / `ca\weapons` / `ca\wheeled` / … | 5,980 |
+| unresolved, third-party (`vbs2`, `dingo`, `bwmod_wheeled`, `ofp2`) | 37 |
+| unresolved, leaked developer host paths (`p:\`, `j:\`) | 3 |
 
 | # | Fixture | Proves | Tickets |
 |---|---|---|---|
-| 1 | `officialarma:A2SM_Data_DPL_APL/Air/CA/Air/ataka.p3d@85da76e136e28209` | P3DM dispatch, faces, 5 visual LODs + ShadowVolume + Geometry, 2 UV sets, one `Super` material, one `ca\` texture — all deps resolvable | AST-011A/B/C, AST-015, AST-014, MAT-030 |
-| 2 | `ca\air\data\ataka.rvmat` (`Super`, roles: BaseColour, NormalMap, SpecularMapDetail, AmbientShadow) | one real Super material end to end | MAT-030, MAT-020 |
-| 3 | its PAA set | SWIZ/FLAG/alpha/storage on a texture the model actually uses | AST-013 |
-| 4 | `officialarma:…/Creatures/CA/Characters_E/Heads/Glasses/Delta1G.p3d` (586f, 2 materials, adds BaseColourAlpha) | alpha policy and multi-material on the same path | AST-013, MAT-020 |
-| 5 | `a3-game` PBOs, ODOL 73 (dispatch tested against 49/50/52 as the unknown revisions) | safe version dispatch, then one exact revision | AST-012A, AST-012B |
-| 6 | `a3-samples:Addons/Test_Plant_F/t_PinusP3s_F.p3d@5beb0501bf7e589d` | vegetation: 10 LODs, 2 UV sets, ShadowVolume + ShadowVolume2, 5 materials, all 7 dependencies verified resolvable in `plants_f.pbo` / `data_f.pbo` | grass/tree slice, AST-015 |
+| 1 | `a3-samples:Addons/Test_Lamp_01/Test_lamp_01_F.p3d` | smallest complete slice: 8 LODs, 2 UV sets, 3 `a3\` RVMATs, `model.cfg` + `config.cpp` present | AST-011A/B/C, AST-015 |
+| 2 | `a3-samples:Addons/Test_Plant_F/t_PinusP3s_F.p3d@5beb0501bf7e589d` | vegetation: 10 LODs, 2 UV sets, ShadowVolume + ShadowVolume2, **all 8 references resolve** into `plants_f.pbo` / `data_f.pbo` | grass/tree slice, AST-015 |
+| 3 | the RVMATs behind #2 | one real `Super` material end to end | MAT-030, MAT-020 |
+| 4 | `a3-samples` PAA set (124 loose files, the only loose PAA in any root) | SWIZ/FLAG/alpha/storage without needing an archive reader | AST-013 |
+| 5 | `a3-game` PBOs, ODOL 73 (49/50/52 as the unknown revisions) | safe version dispatch, then one exact revision | AST-012A, AST-012B |
+| 6 | `officialarma:…/Air/CA/Air/ataka.p3d@85da76e136e28209` | P3DM geometry across 5 visual LODs + ShadowVolume + Geometry, 2 UV sets; **material resolves, texture does not** | AST-011B (done), AST-018 |
 
-Fixture 1 is deliberately small (175 KB, 438-face visual LOD0) and asymmetric
-across its five visual LODs, so a winding or UV-collapse error is visible rather
-than plausible.
+Fixture 6 stays in the ladder because it is a good *geometry* fixture and it is
+what AST-011A/B/C were verified against; it is simply not a material or texture
+fixture on this machine.
 
-## Missing fixtures — none
+## Missing fixtures — one optional gap
 
-The Arma 3 install was empty when this index was first built, which blocked the
-vegetation fixture. The owner installed Arma 3 during this ticket and the root is
-now present (487 PBOs, 41 GiB). The blocker is resolved and **no further reference
-material is needed for the C1 P0 set**:
+The Arma 3 install was empty when this index was first built; the owner installed
+it during AST-007 and the root is now present (487 PBOs, 41 GiB). Every P0 ladder
+step is servable.
 
-- ladder steps 1–4 are servable from `officialarma` alone;
-- ODOL dispatch and one exact later revision have five revisions to choose from;
-- the vegetation fixture's seven `a3\…` dependencies were each located in a
-  specific PBO, so step 6 is unblocked.
+One gap remains and it is **not blocking**: the **Arma 2 base-game archives** are
+absent. `officialarma` ships the Arma 2 Sample Models (loose MLOD sources) and
+the OA/expansion PBOs (`cair_e`, `ca\structures_e`, …), but not the base
+`ca\data`, `ca\weapons`, `ca\wheeled`, `ca\characters` archives those sources
+reference. That is why 5,980 of 12,680 references do not resolve, and why the
+corpus contains **zero loose `.paa`** outside `a3-samples`.
 
-The one caveat worth recording: the Arma 3 root is indexed by PBO entry table
-only. Reading an asset *out* of those archives needs the existing `PackFiles`
-reader wired into the resolution path, which is AST-015 work, not a corpus gap.
+1. **What is missing**: the Arma 2 (not OA) base data PBOs providing `ca\data`,
+   `ca\weapons`, `ca\wheeled`, `ca\characters`, `cair`, `ca	racked`.
+2. **Generation**: Arma 2, base game.
+3. **Blocks**: nothing in the C1 P0 set. It would only make the Arma 2 sample
+   models usable as *material and texture* fixtures rather than geometry-only.
+4. **What it would provide**: cross-generation material coverage — a second
+   shader-family corpus to check MAT-030 against, instead of Arma 3 alone.
+5. **Where**: `inspiration\officialarma`, alongside the existing packages.
+
+Not requested as work: the Arma 3 fixtures cover every P0 capability, and the
+plan's own rule is to pick fixtures a real ticket needs rather than collect them.
+
+The other caveat: the Arma 3 root is indexed by PBO entry table only. Reading an
+asset *out* of those archives needs `PackFiles` wired into the resolution path —
+still AST-015 follow-on work, not a corpus gap.
 
 ## Constraints honoured
 

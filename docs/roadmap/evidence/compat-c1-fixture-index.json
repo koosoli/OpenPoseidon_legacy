@@ -3,7 +3,7 @@
   "ticket": "AST-007",
   "overlay": "COMPAT-C1-EXEC-001",
   "generator": "scripts/build_reference_fixture_index.py",
-  "elapsed_seconds": 67.7,
+  "elapsed_seconds": 83.6,
   "capability_index": {
     "CONTAINER_ODOL_48": {
       "fixtures": 2,

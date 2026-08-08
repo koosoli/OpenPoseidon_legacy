@@ -6,6 +6,7 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
+#include <Poseidon/Asset/Addon/VirtualPath.hpp>
 #include <Poseidon/IO/FileServer.hpp>
 #include <algorithm>
 #include <cctype>
@@ -18,18 +19,14 @@ using namespace Asset::Formats;
 
 std::string ModelCache::normalizePath(const std::string& path) const
 {
-    std::string normalized = path;
-
-    std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-
-#ifdef _WIN32
-    std::replace(normalized.begin(), normalized.end(), '/', '\\');
-#else
-    std::replace(normalized.begin(), normalized.end(), '\\', '/');
-#endif
-
-    return normalized;
+    // AST-015: one canonical form, not a platform-dependent one.
+    //
+    // This previously chose the separator by #ifdef _WIN32, so `ca\air\x.p3d` and
+    // `ca/air/x.p3d` produced two cache keys on Linux and one on Windows -- the
+    // same model cached twice, or not, depending on the host. A Real Virtuality
+    // virtual path is platform-independent identity, so it normalises the same way
+    // everywhere.
+    return Asset::VirtualPath::Parse(path).canonical();
 }
 
 std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& filePath)
