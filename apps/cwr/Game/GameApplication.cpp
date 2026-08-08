@@ -31,6 +31,7 @@
 #include <Poseidon/Core/ModSystem.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <Poseidon/UI/Multiplayer/MultiplayerModule.hpp>
@@ -1250,8 +1251,29 @@ void GameApplication::RunMainLoop()
                     // memory, shadow) has nothing to draw at any distance, which
                     // looks identical to a rendering failure.
                     for (int level = 0; level < levels; ++level)
+                    {
                         LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
                                  shape->Resolution(level), shape->Level(level)->NFaces());
+                        // The P3D may be drawable even if its companion assets
+                        // are absent. List the loader's resolved references here
+                        // so a white fallback is not later presented as a material
+                        // or texture compatibility result.
+                        const Shape* lod = shape->Level(level);
+                        for (int texture = 0; texture < lod->NTextures(); ++texture)
+                        {
+                            const Texture* tex = lod->GetTexture(texture);
+                            if (tex)
+                                LOG_INFO(Core, "--test-model:     texture {} {} exists={}", texture, tex->Name(),
+                                         QIFStream::FileExists(tex->Name()));
+                        }
+                        for (int section = 0; section < lod->NSections(); ++section)
+                        {
+                            const ShapeSection& sec = lod->GetSection(section);
+                            if (sec.surfMat)
+                                LOG_INFO(Core, "--test-model:     section {} material {}", section,
+                                         sec.surfMat->GetName().Data());
+                        }
+                    }
                     if (faces <= 0)
                         LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
                 }

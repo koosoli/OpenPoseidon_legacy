@@ -23,3 +23,20 @@ dependencies were intentionally absent, so the rock appears white. This is
 evidence of production-path geometry draw and scene inclusion only; it does not
 validate material assignment, texture resolution, alpha handling, Super shader
 mapping, winding, normal fidelity, section ranges, or additional UV channels.
+
+## Direct PAA texture dependency smoke
+
+The first capture established geometry submission, then exposed its own narrow
+limit: its level-0 texture reference was `a3\rocks_f\data\stonesharp_big_co.paa`
+and the new harness dependency log reported `exists=false`.
+
+For a separate installed-game smoke, the unmodified `a3/rocks_f` subset extracted
+from the same `rocks_f.pbo` was mounted at that virtual path. The log reports
+`exists=true` for the direct PAA reference at every visual LOD and the WGPU
+capture visibly samples the rock's grey albedo. See
+`compat-c1-odol73-wgpu-rock-texture-20260809.log` and `.png`.
+
+This proves direct PAA dependency resolution and sampling for this fixture only.
+The P3D's RVMAT path was not resolved or interpreted in this smoke; normal and
+specular maps, alpha treatment, Super shader mapping, winding, normal fidelity,
+section ranges and additional UV channels remain outside the claim.

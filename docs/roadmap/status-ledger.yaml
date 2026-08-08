@@ -1080,7 +1080,8 @@ tickets:
     scheduling_state: ACTIVE
     # VALIDATED, not INTEGRATED: revision 73 reaches the common Model IR through
     # the production loader entry point and one real static Arma 3 rock now draws
-    # through WGPU, but material dependencies and most asset shapes remain open.
+    # through WGPU with its direct PAA albedo dependency, but RVMAT handling and
+    # most asset shapes remain open.
     status: VALIDATED
     outcome: ADAPTED
     owner: Oliver Kay
@@ -1100,7 +1101,7 @@ tickets:
                ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
                ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 2272cd947a0731839086d8c74e20c80701d171253a633aac310b279a434af2c1
+    evidence_hash: 80db0cbc494f83b02a03a539d30dbd1601acfd9f25843834aae4c2fec3481251
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -1131,10 +1132,13 @@ tickets:
           1 real revision-73 Arma 3 static model visibly drawn through WGPU:
           rocks_f.pbo/stonesharp_big.p3d, with 10 LODs, 6,256 faces at visual
           LOD 0 and a 9.141871 m bounding radius. The control CWA a3rock.p3d
-          also draws through the same --test-model lifecycle. The extracted Arma
-          3 P3D had no accompanying RVMAT/PAA dependencies, so this validates
-          scene inclusion and geometry submission only, not material or texture
-          resolution.
+          also draws through the same --test-model lifecycle. With the direct
+          a3\rocks_f\data\stonesharp_big_co.paa dependency mounted for the
+          smoke, the WGPU capture visibly samples its albedo texture and the
+          harness reports exists=true. This validates scene inclusion, geometry
+          submission and that direct PAA texture; it does not validate RVMAT
+          interpretation, normal/specular maps, alpha, Super shader mapping,
+          winding, normal fidelity, section ranges or additional UV channels.
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
@@ -1171,11 +1175,11 @@ tickets:
         unconverted; their basis convention has not been verified against a
         render, so nothing downstream is given a tangent frame it could trust.
       - >-
-        One real revision-73 rock is visibly rendered in the game through WGPU,
-        but only after extracting its P3D without RVMAT/PAA dependencies. The
-        resulting white geometry proves draw submission, not its authored
-        materials, texture resolution, alpha treatment, Super mapping, winding,
-        normal fidelity, section ranges or additional UV channels.
+        One real revision-73 rock is visibly rendered in the game through WGPU.
+        Its direct PAA albedo dependency was mounted in the game file namespace
+        and the capture visibly samples it. RVMAT interpretation, normal/specular
+        maps, alpha treatment, Super mapping, winding, normal fidelity, section
+        ranges and additional UV channels remain unvalidated.
       - >-
         Correction to an earlier claim in this row: revision 73 was NOT on the
         runtime path when the reader landed. ModelCache consults
@@ -1218,21 +1222,26 @@ tickets:
       Python from the raw bytes before any C++ was changed.
 
       The installed-game WGPU smoke now proves one CWA control and one real Arma
-      3 static rock draw through the same harness. The rock was extracted without
-      its material dependencies and therefore appears white. NOT checked: authored
-      material/texture resolution, alpha, winding, normal fidelity, section ranges,
-      multi-UV rendering, a second revision-73 model, or any skinned/animated
-      model. The narrow subset is the claim; nothing broader has been tested.
+      3 static rock draw through the same harness. A second smoke mounted the
+      rock's direct PAA albedo texture at its original a3\\rocks_f virtual path;
+      the log reports it exists and the capture visibly samples it. NOT checked:
+      RVMAT interpretation, normal/specular maps, alpha, winding, normal fidelity,
+      section ranges, multi-UV rendering, a second revision-73 model, or any
+      skinned/animated model. The narrow subset is the claim; nothing broader has
+      been tested.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
       - engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
       - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+      - apps/cwr/Game/GameApplication.cpp
       - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
       - docs/roadmap/evidence/compat-c1-odol73-wgpu-static-render-20260809.md
       - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-20260809.log
       - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-20260809.png
+      - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-texture-20260809.log
+      - docs/roadmap/evidence/compat-c1-odol73-wgpu-rock-texture-20260809.png
       - docs/roadmap/evidence/compat-c1-wgpu-test-model-cwa-control-20260809.log
       - docs/roadmap/evidence/compat-c1-wgpu-test-model-cwa-control-20260809.png
   - id: AST-013
