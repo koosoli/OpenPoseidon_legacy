@@ -1474,30 +1474,77 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-014, MAT-030]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
+        symbol: Poseidon::Asset::Material::TranslateSemantics
+    test_ids: [mat-020]
     benchmark_artifacts: []
     evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    known_failures:
+      - >-
+        Gloss is carried, roughness is not produced. SMDI's B is a gloss term, so a
+        renderer wanting roughness must invert it -- a shading-model decision, not a
+        property of the asset. It is offered as GlossToRoughnessUnvalidated, whose
+        name records that no rendered reference has confirmed it.
+      - >-
+        NOPX/height and parallax have no slot, because the Super family does not
+        use one. Nothing is discarded -- an unmapped stage is reported by MAT-030 --
+        but a parallax-carrying family needs its own schema first.
+      - >-
+        Channel semantics are keyed by slot, so they apply only to families that
+        have a schema. The 1,222 materials in the 22 unschema'd families get no
+        slots and therefore no channel claims at all.
+      - >-
+        Nothing consumes TranslatedMaterial yet; no renderer reads it, so no
+        material has been shaded through these mappings.
+    fallback: >-
+      Unused channels are named per slot rather than left implicit, so a consumer
+      that samples one learns it is reading a measured constant instead of silently
+      shading from a flat value.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Every channel mapping was measured by
+      decoding real Arma 3 textures through the shipped DLL, which only became
+      possible once AST-013's LZO support landed. A channel was called unused when
+      it was dead flat across the sample:
+
+        SMDI n=40: R constant 255 in 40/40 and A constant 255 in 40/40; G varies
+          (mean 47) and B varies (mean 110) -> G is specular level, B is gloss.
+        AS   n=25: R, B and A constant 255 in 25/25; only G varies (mean 146).
+        NOHQ n=40: R constant 0 in 40/40 -> X in A, Y in G, Z reconstructed.
+          Independently corroborated on Minigun_NOHQ, where G+A is the only channel
+          pair with every texel satisfying x^2 + y^2 <= 1.
+
+      This is what makes the roadmap's prohibitions concrete rather than received
+      wisdom: SMDI cannot be mapped to roughness because the value reached for is
+      in a different channel and is a gloss term, inverted in polarity; and a
+      normal's X cannot come from R, which is flat zero everywhere. 8 Catch2 cases,
+      28 assertions under [mat-020]; full suite green apart from the 6 failures
+      pre-existing at HEAD.
+
+      NOT checked: nothing was rendered or shaded. These are statements about where
+      a quantity is stored, not about what a surface should look like. The samples
+      are Arma 3 textures only -- no Arma 2 SMDI was decoded, because the corpus
+      holds no loose Arma 2 PAA and its base-game archives are absent.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
   - id: MAT-030
     overlay: COMPAT-C1-EXEC-001
     is_example: false

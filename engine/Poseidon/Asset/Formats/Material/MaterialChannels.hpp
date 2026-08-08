@@ -1,0 +1,197 @@
+#pragma once
+
+#include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
+
+namespace Poseidon::Asset::Material
+{
+
+// MAT-020 -- what each slot's texture channels actually carry.
+//
+// MAT-030 decided which slot a stage occupies. This decides how to read the pixels
+// once they are there, and every entry below was MEASURED by decoding real Arma 3
+// textures rather than taken from folklore. The counts are how many of the sampled
+// textures held a channel dead flat, which is what identifies an unused channel:
+//
+//   SMDI (n=40)  R constant 255 in 40/40, A constant 255 in 40/40.
+//                G varies (mean 47), B varies (mean 110).
+//                -> G is the specular level, B is gloss. R and A carry nothing.
+//   AS   (n=25)  R, B, A all constant 255 in 25/25; only G varies (mean 146).
+//                -> the ambient-shadow term is in G alone.
+//   NOHQ (n=40)  R constant 0 in 40/40; G, B, A vary.
+//                -> DXT5nm: X in A, Y in G, Z reconstructed. R carries nothing.
+//                Independently corroborated: for a NOHQ texture, G+A is the only
+//                channel pair where every texel satisfies x^2 + y^2 <= 1.
+//
+// The roadmap's two standing prohibitions fall straight out of this. SMDI must not
+// be mapped to roughness: roughness is not even in the same channel as the value
+// people reach for, and B is a GLOSS term, so a direct mapping is wrong in channel
+// and inverted in polarity. And a normal map's X cannot be read from R, which is
+// flat zero in every sample.
+
+enum class TextureChannel
+{
+    R,
+    G,
+    B,
+    A,
+    None, // the quantity is not stored; derive it or leave it at its default
+};
+
+inline const char* ToString(TextureChannel channel)
+{
+    switch (channel)
+    {
+        case TextureChannel::R: return "R";
+        case TextureChannel::G: return "G";
+        case TextureChannel::B: return "B";
+        case TextureChannel::A: return "A";
+        default: return "None";
+    }
+}
+
+// How to read one slot's texture. Only the fields a slot actually uses are set.
+struct SlotChannelMap
+{
+    TextureChannel normalX = TextureChannel::None;
+    TextureChannel normalY = TextureChannel::None;
+    // Z is reconstructed as sqrt(1 - x^2 - y^2) rather than stored; B sits at ~254
+    // in every sampled NOHQ, which is a constant, not a usable component.
+    bool normalZReconstructed = false;
+
+    TextureChannel specularLevel = TextureChannel::None;
+    TextureChannel gloss         = TextureChannel::None;
+    TextureChannel ambientShadow = TextureChannel::None;
+    TextureChannel colour        = TextureChannel::None; // RGB triple when set to R
+    TextureChannel alpha         = TextureChannel::None;
+
+    // Channels measured to be dead in this slot. Recorded so a consumer sampling
+    // one knows it is reading a constant, not data.
+    std::vector<TextureChannel> unused;
+};
+
+inline SlotChannelMap ChannelsForSlot(MaterialSlot slot)
+{
+    SlotChannelMap map;
+    switch (slot)
+    {
+        case MaterialSlot::NormalMap:
+            map.normalX              = TextureChannel::A;
+            map.normalY              = TextureChannel::G;
+            map.normalZReconstructed = true;
+            map.unused               = {TextureChannel::R};
+            break;
+
+        case MaterialSlot::SpecularDetail: // SMDI
+            map.specularLevel = TextureChannel::G;
+            map.gloss         = TextureChannel::B;
+            map.unused        = {TextureChannel::R, TextureChannel::A};
+            break;
+
+        case MaterialSlot::AmbientShadow:
+            map.ambientShadow = TextureChannel::G;
+            map.unused        = {TextureChannel::R, TextureChannel::B, TextureChannel::A};
+            break;
+
+        case MaterialSlot::BaseColour:
+        case MaterialSlot::Detail:
+        case MaterialSlot::Macro:
+        case MaterialSlot::Environment:
+            // Ordinary colour textures: RGB is colour, A is alpha where present.
+            map.colour = TextureChannel::R; // marks "RGB triple starting at R"
+            map.alpha  = TextureChannel::A;
+            break;
+
+        case MaterialSlot::Fresnel:
+            // Generated, not sampled as colour: `#(ai,64,64,1)fresnel(2.0,0.1)` is a
+            // lookup built from its parameters, so no channel map applies.
+            break;
+
+        default:
+            break;
+    }
+    return map;
+}
+
+// Gloss and roughness are not the same quantity, and this is the only place that
+// says so out loud.
+//
+// The roadmap forbids mapping SMDI to roughness. SMDI's B channel is a gloss term:
+// higher means shinier. A renderer wanting roughness must invert it, and that
+// inversion is a RENDERING decision about a shading model, not a property of the
+// source asset -- so it is offered here as a named function a consumer opts into,
+// never applied while translating. Nothing in this programme has yet validated the
+// conversion against a rendered reference.
+inline float GlossToRoughnessUnvalidated(float gloss)
+{
+    return 1.0f - gloss;
+}
+
+// What a slot's texture means, resolved for one material.
+struct TranslatedSlot
+{
+    MaterialSlot   slot = MaterialSlot::Count;
+    bool           present = false;
+    RvTextureRef   texture;
+    std::string    uvSource;
+    SlotChannelMap channels;
+};
+
+struct TranslatedMaterial
+{
+    std::string                 origin;
+    std::string                 shaderFamily;
+    bool                        schemaKnown = false;
+    std::vector<TranslatedSlot> slots; // only the slots the material actually binds
+
+    // Render state carried straight through from the source. Not reinterpreted:
+    // `specularPower` stays the source's exponent rather than being converted into
+    // whatever the current shading model prefers.
+    std::array<float, 4> ambient{{1, 1, 1, 1}};
+    std::array<float, 4> diffuse{{1, 1, 1, 1}};
+    std::array<float, 4> forcedDiffuse{{0, 0, 0, 0}};
+    std::array<float, 4> emissive{{0, 0, 0, 1}};
+    std::array<float, 4> specular{{1, 1, 1, 1}};
+    float                specularPower = 1.0f;
+
+    const TranslatedSlot* Find(MaterialSlot slot) const
+    {
+        for (const auto& entry : slots)
+            if (entry.slot == slot)
+                return &entry;
+        return nullptr;
+    }
+};
+
+inline TranslatedMaterial TranslateSemantics(const RvMaterialSource& source, const MaterialIR& ir)
+{
+    TranslatedMaterial out;
+    out.origin        = ir.origin;
+    out.shaderFamily  = ir.shaderFamily;
+    out.schemaKnown   = ir.schemaKnown;
+    out.ambient       = source.ambient;
+    out.diffuse       = source.diffuse;
+    out.forcedDiffuse = source.forcedDiffuse;
+    out.emissive      = source.emissive;
+    out.specular      = source.specular;
+    out.specularPower = source.specularPower;
+
+    if (!ir.schemaKnown)
+        return out; // no schema, no slots -- and so nothing to give channels to
+
+    for (size_t i = 0; i < static_cast<size_t>(MaterialSlot::Count); ++i)
+    {
+        const MaterialSlotBinding& binding = ir.slots[i];
+        if (!binding.present)
+            continue;
+        TranslatedSlot entry;
+        entry.slot     = static_cast<MaterialSlot>(i);
+        entry.present  = true;
+        entry.texture  = binding.texture;
+        entry.uvSource = binding.uvSource;
+        entry.channels = ChannelsForSlot(entry.slot);
+        out.slots.push_back(std::move(entry));
+    }
+    return out;
+}
+
+} // namespace Poseidon::Asset::Material
