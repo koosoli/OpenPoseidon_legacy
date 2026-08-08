@@ -2,6 +2,7 @@
 
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/Asset/Formats/BISStructures.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <cstdint>
 #include <array>
 #include <cstring>
@@ -62,6 +63,7 @@ struct Odol73EmbeddedMaterial
     uint32_t pixelShader = 0;
     uint32_t vertexShader = 0;
     uint32_t renderFlags = 0;
+    std::array<std::array<float, 4>, 6> colours{};
     std::vector<std::string> stageTextures;
     struct TexGen { uint32_t uvSource = 0; std::array<float, 16> matrix{}; };
     std::vector<TexGen> texGens;
@@ -204,7 +206,8 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         material.version = reader.read<uint32_t>();
         if (material.version < 6 || material.version > 32)
             throw std::runtime_error("ODOL 73 embedded material revision is unsupported");
-        for (int color = 0; color < 6 * 4; ++color) (void)reader.read<float>();
+        for (auto& colour : material.colours)
+            for (float& component : colour) component = reader.read<float>();
         (void)reader.read<float>(); // specular power
         material.pixelShader = reader.read<uint32_t>(); material.vertexShader = reader.read<uint32_t>();
         (void)reader.read<uint32_t>(); (void)reader.read<uint32_t>(); // light + fog
@@ -234,6 +237,30 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         materials.push_back(std::move(material));
     }
     return materials;
+}
+
+inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMaterial& raw)
+{
+    Material::RvMaterialSource source;
+    source.origin = raw.name; source.embedded = true;
+    source.emissive = raw.colours[0]; source.ambient = raw.colours[1]; source.diffuse = raw.colours[2];
+    source.forcedDiffuse = raw.colours[3]; source.specular = raw.colours[4];
+    source.extra.emplace_back("odolPixelShader", std::to_string(raw.pixelShader));
+    source.extra.emplace_back("odolVertexShader", std::to_string(raw.vertexShader));
+    source.extra.emplace_back("odolRenderFlags", std::to_string(raw.renderFlags));
+    for (size_t i = 0; i < raw.stageTextures.size(); ++i)
+    {
+        Material::RvStage stage; stage.index = static_cast<int>(i); stage.texture = Material::RvTextureRef::Parse(raw.stageTextures[i]);
+        source.stages.push_back(std::move(stage));
+    }
+    for (const auto& rawGen : raw.texGens)
+    {
+        Material::RvTexGen gen; gen.index = static_cast<int>(source.texGens.size()); gen.uvSource = std::to_string(rawGen.uvSource);
+        gen.uvTransform.present = true;
+        for (int c = 0; c < 3; ++c) { gen.uvTransform.aside[c] = rawGen.matrix[c]; gen.uvTransform.up[c] = rawGen.matrix[4 + c]; gen.uvTransform.dir[c] = rawGen.matrix[8 + c]; gen.uvTransform.pos[c] = rawGen.matrix[12 + c]; }
+        source.texGens.push_back(std::move(gen));
+    }
+    return source;
 }
 
 } // namespace Poseidon::Asset::Formats::P3D
