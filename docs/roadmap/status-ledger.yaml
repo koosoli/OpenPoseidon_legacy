@@ -651,10 +651,11 @@ tickets:
     decision_record: null
     known_failures:
       - >-
-        The selected ODOL 73 body is parsed through its static material,
-        polygon-prefix and section slices only. Point/vertex mapping, positions,
-        complete polygon layout and conversion to common Model IR remain
-        unimplemented; ODOLLoader therefore continues to reject revision 73.
+        The selected ODOL 73 body now reads end to end -- point/vertex maps, face
+        stream, sections, UVs, positions and normals -- and reaches the common
+        Model IR through ODOLLoader. That covers one static shape of the revision
+        only; see AST-012B for the exact constraints and for what is still
+        refused.
     fallback: null
     reviewer: null
     reviewer_method: null
@@ -1071,18 +1072,73 @@ tickets:
     depends_on: [AST-012A]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [e167752, 05f30c1, ccce39b, cea41aa, aa8e67a, 4ffe786, 06b9220, ec2e6b9, 426e3c9]
+    production_call_sites:
+      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::loadFromBuffer
+    test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
-    known_failures: []
-    fallback: null
+    known_failures:
+      - >-
+        One shape of ODOL revision 73 reads: a static LOD with no skeleton,
+        animation, proxy, sub-skeleton, named-selection, named-property, keyframe
+        or skinning data, at most one UV set, and faces that are triangles or
+        quads. Everything else -- and every other later revision -- still raises
+        UnsupportedOdolRevision. DescribeOdolRevision(73) reports NarrowSubset
+        rather than Parsed for exactly this reason.
+      - >-
+        Packed ST (tangent/binormal) pairs are read and length-checked but kept
+        unconverted; their basis convention has not been verified against a
+        render, so nothing downstream is given a tangent frame it could trust.
+      - >-
+        Nothing here has been rendered. The evidence is byte-level: the reader
+        consumes every LOD body to its declared end offset and every rest-data
+        section to its declared size. That proves the layout, not that the model
+        looks right on screen.
+      - >-
+        Sections are carried into the IR with face-stream offsets in
+        Section::startTriangle/triangleCount, matching the existing v7 converter.
+        Those are not triangle indices, and a consumer that reads them as such
+        will be wrong on both paths.
+    fallback: >-
+      An ODOL 73 model outside the implemented shape raises UnsupportedOdolRevision
+      carrying the constraint that broke, so an unimplemented shape stays
+      distinguishable from a corrupt file and from an unrecognised revision.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. The corpus fixture
+      (.tmp-ast012b-odol73/objects/rectangle.p3d, SHA-256
+      774a780db8209c556033f16d5b267522aa789776cc80e8d10b5c6b771adde54a) is read
+      end to end: both LOD bodies close exactly on their declared end offsets
+      (0x207 and 0x9fd), and LOD 0's rest data consumes exactly its declared 613
+      bytes. 48 positions, 48 packed normals, 48 UVs and 48 clip flags are
+      decoded; the 16 quads reach Poseidon::Model::Model through
+      ODOLLoader::load with their texture and RVMAT attached.
+
+      The previous parse was wrong and passing. The stage transform is a 3x4
+      matrix, not a padded 4x4; reading sixteen floats ran the reader 128 bytes
+      past the end of the material and into the middle of a face record, where
+      the self-synchronising face encoding produced eleven plausible quads that
+      happened to end on the correct section boundary. Two checks now make that
+      class of error fail instead of pass: the rest-data section must consume its
+      own declared size, and the rebuilt face-stream offsets must sum to the LOD's
+      declared face-data size (320) before any section bound is read as a face
+      range. The layout was cross-read against the BIS.P3D reference
+      implementation (ODOL/LOD.cs, UVSet.cs, Polygon.cs, Polygons.cs,
+      EmbeddedMaterial.cs, BinaryReaderEx.cs), and independently decoded in
+      Python from the raw bytes before any C++ was changed.
+
+      NOT checked: no render, no second revision-73 model, no skinned or animated
+      model, no multi-section model, no multi-UV-set model. The narrow subset is
+      the claim; nothing broader has been tested.
     supersedes: []
-    evidence: []
+    evidence:
+      - docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
+      - engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
+      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+      - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+      - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
   - id: AST-013
     overlay: COMPAT-C1-EXEC-001
     is_example: false

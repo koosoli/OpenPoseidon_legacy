@@ -66,20 +66,23 @@ struct Odol73EmbeddedMaterial
     uint32_t renderFlags = 0;
     std::array<std::array<float, 4>, 6> colours{};
     std::vector<std::string> stageTextures;
-    struct TexGen { uint32_t uvSource = 0; std::array<float, 16> matrix{}; };
+    // The stage transform is a 3x4 affine matrix (three basis rows then the
+    // translation row), twelve floats -- not a padded 4x4.  Reading sixteen here
+    // silently consumed 128 bytes too many per material and put every later
+    // offset in the LOD body onto a face record that happened to resynchronise.
+    struct TexGen { uint32_t uvSource = 0; std::array<float, 12> matrix{}; };
     std::vector<TexGen> texGens;
 };
 
-struct Odol73StaticPolygonPrefix
+struct Odol73Polygons
 {
-    // The selected v73 LOD has a one-byte index-stream marker and an adjacent
-    // 32-bit value before its polygon count.  Their semantics are intentionally
-    // retained as raw data until point/vertex mappings are independently
-    // verified; polygons must not silently claim they are vertex indices.
-    bool indexStreamMarker = false;
-    uint32_t unparsedIndexValue = 0;
-    std::vector<std::vector<uint32_t>> polygons;
-    uint32_t followingByteOffset = 0;
+    // faceDataSize is the size of the face stream in the units the section
+    // bounds use: four bytes for the vertex count plus four per index.  That is
+    // not this file's on-disk face encoding (one byte for the count), so it is
+    // kept under its own name and cross-checked rather than assumed.
+    uint32_t faceDataSize = 0;
+    uint16_t unused = 0;
+    std::vector<std::vector<uint32_t>> faces;
 };
 
 struct Odol73StaticSection
@@ -97,6 +100,49 @@ struct Odol73StaticPreRestData
     int32_t special = 0;
     bool vertexBoneRefIsSimple = false;
     uint32_t restDataSize = 0;
+};
+
+struct Odol73UvSet
+{
+    float minU = 0.0f, minV = 0.0f, maxU = 0.0f, maxV = 0.0f;
+    // Decoded to floats here: the wire form is a pair of 16-bit fractions of the
+    // per-set range, which is meaningless without the range it belongs to.
+    std::vector<std::array<float, 2>> uv;
+};
+
+// Everything behind the LOD's rest-data size field.  Nothing in here is skipped:
+// the reader consumes each array and then requires its own position to match the
+// declared size, so a layout mistake cannot pass as a successful read.
+struct Odol73StaticRestData
+{
+    std::vector<int32_t> clip;
+    Odol73UvSet uv0;
+    uint32_t uvSetCount = 0;
+    std::vector<Vector3> positions;
+    std::vector<Vector3> normals;
+    // Packed tangent/binormal pairs, retained unconverted: no consumer needs
+    // them yet and guessing their basis convention would be a claim, not a read.
+    std::vector<std::array<uint32_t, 2>> stCoords;
+    uint32_t trailing = 0;
+};
+
+struct Odol73StaticLod
+{
+    Odol73StaticLodHeader header;
+    std::vector<Odol73EmbeddedMaterial> materials;
+    std::vector<int32_t> pointToVertex;
+    std::vector<int32_t> vertexToPoint;
+    Odol73Polygons polygons;
+    std::vector<Odol73StaticSection> sections;
+    Odol73StaticPreRestData endData;
+    Odol73StaticRestData rest;
+    uint8_t trailingByte = 0;
+};
+
+struct Odol73StaticModel
+{
+    Odol73LodDirectory directory;
+    std::vector<Odol73StaticLod> lods;
 };
 
 inline std::string ReadBoundedAsciiz(BinaryReader& reader, const char* field)
@@ -129,7 +175,42 @@ inline std::vector<uint8_t> ReadOdol73CompressedPayload(BinaryReader& reader, si
 
 inline std::vector<uint8_t> ReadOdol73Compressed(BinaryReader& reader, size_t expected)
 {
+    // A zero-length payload carries no flag byte at all; reading one would eat
+    // the count of whatever array follows.
+    if (expected == 0) return {};
     return ReadOdol73CompressedPayload(reader, expected, reader.read<bool>());
+}
+
+// count, then a (possibly compressed) payload of exactly count elements.
+template<typename T>
+inline std::vector<T> ReadOdol73CompressedArray(BinaryReader& reader, const char* field, uint32_t limit)
+{
+    const int32_t count = reader.read<int32_t>();
+    if (count < 0 || static_cast<uint32_t>(count) > limit)
+        throw std::runtime_error(std::string("ODOL 73 ") + field + " count is out of range");
+    const auto bytes = ReadOdol73Compressed(reader, static_cast<size_t>(count) * sizeof(T));
+    std::vector<T> result(static_cast<size_t>(count));
+    if (count != 0) std::memcpy(result.data(), bytes.data(), bytes.size());
+    return result;
+}
+
+// As above, but with a leading "every element is this value" flag.
+template<typename T>
+inline std::vector<T> ReadOdol73CondensedArray(BinaryReader& reader, const char* field, uint32_t limit)
+{
+    const int32_t count = reader.read<int32_t>();
+    if (count < 0 || static_cast<uint32_t>(count) > limit)
+        throw std::runtime_error(std::string("ODOL 73 ") + field + " count is out of range");
+    if (reader.read<bool>())
+    {
+        T value{};
+        reader.readBytes(&value, sizeof(T));
+        return std::vector<T>(static_cast<size_t>(count), value);
+    }
+    const auto bytes = ReadOdol73Compressed(reader, static_cast<size_t>(count) * sizeof(T));
+    std::vector<T> result(static_cast<size_t>(count));
+    if (count != 0) std::memcpy(result.data(), bytes.data(), bytes.size());
+    return result;
 }
 
 inline Odol73Preamble ReadOdol73Preamble(BinaryReader& reader)
@@ -293,34 +374,43 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
     return materials;
 }
 
-// Fixture-led static polygon prefix.  The leading value is retained as raw
-// metadata: the selected body changes layout after eleven packed face records,
-// so it is not safe to call it a total face count.
-inline Odol73StaticPolygonPrefix ReadOdol73StaticPolygonPrefix(BinaryReader& reader, uint32_t end)
+// The point/vertex maps that precede the face stream.  Revision 73 is past the
+// v69 boundary, so both are 32-bit indices rather than the older 16-bit form.
+inline std::vector<int32_t> ReadOdol73VertexIndexArray(BinaryReader& reader, const char* field)
 {
-    Odol73StaticPolygonPrefix result;
-    result.indexStreamMarker = reader.read<bool>();
-    result.unparsedIndexValue = reader.read<uint32_t>();
-    const uint32_t declaredValue = reader.read<uint32_t>();
-    if (declaredValue == 0 || declaredValue > 1'000'000)
-        throw std::runtime_error("ODOL 73 LOD polygon-prefix value is invalid");
-    result.polygons.reserve(declaredValue);
-    while (reader.tell() < static_cast<int>(end))
+    return ReadOdol73CompressedArray<int32_t>(reader, field, 1'000'000);
+}
+
+inline Odol73Polygons ReadOdol73Polygons(BinaryReader& reader, uint32_t vertexCount, uint32_t end)
+{
+    Odol73Polygons result;
+    const int32_t count = reader.read<int32_t>();
+    // The smallest face record is five bytes, so a count the range cannot hold
+    // is rejected before it drives an allocation.
+    if (count < 0 || static_cast<uint64_t>(count) * 5 > static_cast<uint64_t>(end) - reader.tell())
+        throw std::runtime_error("ODOL 73 LOD face count does not fit its declared range");
+    result.faceDataSize = reader.read<uint32_t>();
+    result.unused = reader.read<uint16_t>();
+    result.faces.reserve(static_cast<size_t>(count));
+    for (int32_t i = 0; i < count; ++i)
     {
         const uint8_t vertices = reader.read<uint8_t>();
-        if (vertices < 3 || vertices > 32)
+        // Triangles and quads are the only faces the Model IR carries; a larger
+        // polygon would have to be triangulated, which is a decision this narrow
+        // reader is not entitled to make silently.
+        if (vertices != 3 && vertices != 4)
+            throw std::runtime_error("ODOL 73 LOD has a face that is neither a triangle nor a quad");
+        std::vector<uint32_t> face(vertices);
+        for (uint32_t& index : face)
         {
-            reader.seek(reader.tell() - 1);
-            break;
-        }
-        std::vector<uint32_t> polygon(vertices);
-        for (uint32_t& index : polygon)
             index = reader.read<uint32_t>();
-        result.polygons.push_back(std::move(polygon));
+            if (index >= vertexCount)
+                throw std::runtime_error("ODOL 73 LOD face references a vertex outside the LOD");
+        }
+        result.faces.push_back(std::move(face));
     }
-    if (result.polygons.empty())
-        throw std::runtime_error("ODOL 73 LOD has no decodable polygon prefix");
-    result.followingByteOffset = static_cast<uint32_t>(reader.tell());
+    if (reader.tell() > static_cast<int>(end))
+        throw std::runtime_error("ODOL 73 face stream exceeds its declared LOD range");
     return result;
 }
 
@@ -363,12 +453,104 @@ inline Odol73StaticPreRestData ReadOdol73StaticPreRestData(BinaryReader& reader,
     return result;
 }
 
-inline void SkipOdol73RestData(BinaryReader& reader, const Odol73StaticPreRestData& header, uint32_t end)
+inline Odol73UvSet ReadOdol73UvSet(BinaryReader& reader, uint32_t vertexCount)
 {
-    const uint64_t target = static_cast<uint64_t>(reader.tell()) + header.restDataSize;
-    if (target > end)
+    Odol73UvSet set;
+    set.minU = reader.read<float>(); set.minV = reader.read<float>();
+    set.maxU = reader.read<float>(); set.maxV = reader.read<float>();
+    const uint32_t count = reader.read<uint32_t>();
+    if (count != vertexCount)
+        throw std::runtime_error("ODOL 73 UV set does not cover the LOD's vertices");
+    const bool defaultFill = reader.read<bool>();
+    std::vector<uint8_t> raw;
+    if (defaultFill)
+    {
+        raw.resize(4);
+        reader.readBytes(raw.data(), raw.size());
+        for (uint32_t i = 1; i < count; ++i) raw.insert(raw.end(), raw.begin(), raw.begin() + 4);
+    }
+    else
+    {
+        raw = ReadOdol73Compressed(reader, static_cast<size_t>(count) * 4);
+    }
+    // Each component is a 16-bit fraction of the set's own range.  The +32767
+    // and 2^-16 scale are the format's, not a normalisation of our choosing.
+    const double deltaU = static_cast<double>(set.maxU) - set.minU;
+    const double deltaV = static_cast<double>(set.maxV) - set.minV;
+    set.uv.resize(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        int16_t u = 0, v = 0;
+        std::memcpy(&u, raw.data() + static_cast<size_t>(i) * 4, 2);
+        std::memcpy(&v, raw.data() + static_cast<size_t>(i) * 4 + 2, 2);
+        set.uv[i][0] = static_cast<float>(1.52587890625e-05 * (u + 32767) * deltaU + set.minU);
+        set.uv[i][1] = static_cast<float>(1.52587890625e-05 * (v + 32767) * deltaV + set.minV);
+    }
+    return set;
+}
+
+// Revision 73 packs a normal into ten bits per axis with a negative scale; that
+// sign is the format's, and dropping it would flip every normal in the model.
+inline Vector3 DecodeOdol73Normal(uint32_t packed)
+{
+    auto axis = [](uint32_t value) {
+        int component = static_cast<int>(value & 0x3FFu);
+        if (component > 511) component -= 1024;
+        return static_cast<float>(component) * (-1.0f / 511.0f);
+    };
+    Vector3 normal;
+    normal.x = axis(packed);
+    normal.y = axis(packed >> 10);
+    normal.z = axis(packed >> 20);
+    return normal;
+}
+
+inline Odol73StaticRestData ReadOdol73StaticRestData(BinaryReader& reader, const Odol73StaticLodHeader& header,
+                                                     const Odol73StaticPreRestData& preRest, uint32_t end)
+{
+    const int start = reader.tell();
+    if (static_cast<uint64_t>(start) + preRest.restDataSize > end)
         throw std::runtime_error("ODOL 73 rest-data range exceeds its declared LOD range");
-    reader.seek(static_cast<int>(target));
+
+    Odol73StaticRestData rest;
+    rest.clip = ReadOdol73CondensedArray<int32_t>(reader, "clip flags", 1'000'000);
+    rest.uv0 = ReadOdol73UvSet(reader, header.vertexCount);
+    rest.uvSetCount = reader.read<uint32_t>();
+    // A second UV set has its own payload; promoting only the first would drop
+    // exactly the channel a material's uvSource selects.
+    if (rest.uvSetCount > 1)
+        throw std::runtime_error("ODOL 73 additional UV sets are not implemented by the static LOD reader");
+
+    struct Packed3 { float x, y, z; };
+    const auto positions = ReadOdol73CompressedArray<Packed3>(reader, "vertex positions", 1'000'000);
+    rest.positions.reserve(positions.size());
+    for (const auto& position : positions) rest.positions.push_back(Vector3{position.x, position.y, position.z});
+
+    const auto normals = ReadOdol73CondensedArray<uint32_t>(reader, "vertex normals", 1'000'000);
+    rest.normals.reserve(normals.size());
+    for (uint32_t packed : normals) rest.normals.push_back(DecodeOdol73Normal(packed));
+
+    struct PackedSt { uint32_t s, t; };
+    const auto st = ReadOdol73CompressedArray<PackedSt>(reader, "ST coordinates", 1'000'000);
+    rest.stCoords.reserve(st.size());
+    for (const auto& pair : st) rest.stCoords.push_back({pair.s, pair.t});
+
+    // Skinning: absent in the static subset, and its per-bone layout is not
+    // implemented, so a populated array is a refusal rather than a skip.
+    if (!ReadOdol73CompressedArray<std::array<uint8_t, 12>>(reader, "vertex bone references", 1'000'000).empty())
+        throw std::runtime_error("ODOL 73 vertex bone references are not implemented by the static LOD reader");
+    if (!ReadOdol73CompressedArray<std::array<uint8_t, 32>>(reader, "neighbour bone references", 1'000'000).empty())
+        throw std::runtime_error("ODOL 73 neighbour bone references are not implemented by the static LOD reader");
+    rest.trailing = reader.read<uint32_t>();
+
+    if (rest.positions.size() != header.vertexCount || rest.normals.size() != header.vertexCount ||
+        rest.clip.size() != header.vertexCount)
+        throw std::runtime_error("ODOL 73 rest-data arrays disagree with the LOD's vertex count");
+    // The decisive check: the LOD declared how many bytes this section spans, so
+    // a layout error cannot be mistaken for a successful read.
+    if (reader.tell() - start != static_cast<int>(preRest.restDataSize))
+        throw std::runtime_error("ODOL 73 rest data did not consume its declared size");
+    return rest;
 }
 
 inline uint8_t ReadOdol73TrailingLodByte(BinaryReader& reader, uint32_t end)
@@ -379,6 +561,52 @@ inline uint8_t ReadOdol73TrailingLodByte(BinaryReader& reader, uint32_t end)
     if (reader.tell() != static_cast<int>(end))
         throw std::runtime_error("ODOL 73 trailing LOD field did not close the declared range");
     return value;
+}
+
+// One complete static LOD body, start to declared end.  Every field between the
+// two offsets is consumed; the closing check is what makes the read a fact
+// rather than a plausible-looking prefix.
+inline Odol73StaticLod ReadOdol73StaticLod(BinaryReader& reader, uint32_t start, uint32_t end)
+{
+    Odol73StaticLod lod;
+    lod.header = ReadOdol73StaticLodHeader(reader, start, end);
+    lod.materials = ReadOdol73EmbeddedMaterials(reader);
+    lod.pointToVertex = ReadOdol73VertexIndexArray(reader, "point-to-vertex map");
+    lod.vertexToPoint = ReadOdol73VertexIndexArray(reader, "vertex-to-point map");
+    lod.polygons = ReadOdol73Polygons(reader, lod.header.vertexCount, end);
+    lod.sections = ReadOdol73StaticSections(reader, end);
+    lod.endData = ReadOdol73StaticPreRestData(reader, end);
+    lod.rest = ReadOdol73StaticRestData(reader, lod.header, lod.endData, end);
+    lod.trailingByte = ReadOdol73TrailingLodByte(reader, end);
+    return lod;
+}
+
+inline Odol73StaticModel ReadOdol73StaticModel(BinaryReader& reader, int fileSize)
+{
+    Odol73StaticModel model;
+    model.directory = ReadOdol73StaticDirectory(reader, fileSize);
+    model.lods.reserve(model.directory.starts.size());
+    for (size_t i = 0; i < model.directory.starts.size(); ++i)
+        model.lods.push_back(ReadOdol73StaticLod(reader, model.directory.starts[i], model.directory.ends[i]));
+    return model;
+}
+
+// Face-stream offsets, in the units the section bounds use: four bytes for the
+// vertex count plus four per index.  Returned so section ranges can be turned
+// into face indices instead of being carried around as opaque numbers; the
+// caller checks the total against the LOD's own declared face-data size.
+inline std::vector<uint32_t> Odol73FaceStreamOffsets(const Odol73Polygons& polygons)
+{
+    std::vector<uint32_t> offsets;
+    offsets.reserve(polygons.faces.size() + 1);
+    uint32_t offset = 0;
+    for (const auto& face : polygons.faces)
+    {
+        offsets.push_back(offset);
+        offset += 4 + 4 * static_cast<uint32_t>(face.size());
+    }
+    offsets.push_back(offset);
+    return offsets;
 }
 
 inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMaterial& raw)
@@ -399,7 +627,7 @@ inline Material::RvMaterialSource ToRvMaterialSource(const Odol73EmbeddedMateria
     {
         Material::RvTexGen gen; gen.index = static_cast<int>(source.texGens.size()); gen.uvSource = std::to_string(rawGen.uvSource);
         gen.uvTransform.present = true;
-        for (int c = 0; c < 3; ++c) { gen.uvTransform.aside[c] = rawGen.matrix[c]; gen.uvTransform.up[c] = rawGen.matrix[4 + c]; gen.uvTransform.dir[c] = rawGen.matrix[8 + c]; gen.uvTransform.pos[c] = rawGen.matrix[12 + c]; }
+        for (int c = 0; c < 3; ++c) { gen.uvTransform.aside[c] = rawGen.matrix[c]; gen.uvTransform.up[c] = rawGen.matrix[3 + c]; gen.uvTransform.dir[c] = rawGen.matrix[6 + c]; gen.uvTransform.pos[c] = rawGen.matrix[9 + c]; }
         source.texGens.push_back(std::move(gen));
     }
     return source;

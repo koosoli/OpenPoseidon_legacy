@@ -30,9 +30,10 @@ namespace Poseidon::Asset::Formats::P3D
 //   73  Arma 3                   -- 162 PBOs, the newest
 enum class OdolSupport
 {
-    Parsed,     // this build reads it
-    Recognised, // present in the corpora, deliberately not implemented yet
-    Unknown,    // never observed; refuse without speculating
+    Parsed,       // this build reads it
+    NarrowSubset, // AST-012B: one verified shape reads; everything else is refused
+    Recognised,   // present in the corpora, deliberately not implemented yet
+    Unknown,      // never observed; refuse without speculating
 };
 
 struct OdolRevisionInfo
@@ -51,7 +52,11 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
         case 49: return {49, OdolSupport::Recognised, "Arma 2"};
         case 50: return {50, OdolSupport::Recognised, "Arma 2 Operation Arrowhead"};
         case 52: return {52, OdolSupport::Recognised, "Arma 2 Operation Arrowhead"};
-        case 73: return {73, OdolSupport::Recognised, "Arma 3"};
+        // AST-012B reads exactly one shape of revision 73: a static LOD with no
+        // skeleton, animation, proxy, named selection or skinning data, whose
+        // faces are triangles and quads. That is a narrow subset of Arma 3
+        // content, not Arma 3 support, and everything outside it still refuses.
+        case 73: return {73, OdolSupport::NarrowSubset, "Arma 3"};
         default: return {version, OdolSupport::Unknown, "unknown"};
     }
 }
@@ -66,19 +71,38 @@ class UnsupportedOdolRevision : public std::runtime_error
 {
   public:
     explicit UnsupportedOdolRevision(const OdolRevisionInfo& info)
-        : std::runtime_error(BuildMessage(info)), info_(info)
+        : std::runtime_error(BuildMessage(info, std::string())), info_(info)
+    {
+    }
+
+    // The reason a narrow-subset reader gave up. Without it the caller is told
+    // the revision is unsupported when in fact one shape of it reads, and has no
+    // way to learn which constraint this particular file broke.
+    UnsupportedOdolRevision(const OdolRevisionInfo& info, const std::string& reason)
+        : std::runtime_error(BuildMessage(info, reason)), info_(info)
     {
     }
 
     const OdolRevisionInfo& info() const { return info_; }
     uint32_t                version() const { return info_.version; }
-    bool                    recognised() const { return info_.support == OdolSupport::Recognised; }
+    bool                    recognised() const
+    {
+        return info_.support == OdolSupport::Recognised || info_.support == OdolSupport::NarrowSubset;
+    }
 
   private:
-    static std::string BuildMessage(const OdolRevisionInfo& info)
+    static std::string BuildMessage(const OdolRevisionInfo& info, const std::string& reason)
     {
         std::string message = "ODOL revision " + std::to_string(info.version) + " is not supported by this build";
-        if (info.support == OdolSupport::Recognised)
+        if (info.support == OdolSupport::NarrowSubset)
+        {
+            message += " for this model (recognised: ";
+            message += info.generation;
+            message += "; AST-012B reads only static LODs of this revision";
+            if (!reason.empty()) message += ": " + reason;
+            message += ")";
+        }
+        else if (info.support == OdolSupport::Recognised)
         {
             // Naming the generation is the difference between a report that leads
             // somewhere and one that sends the reader to a hex editor.

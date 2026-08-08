@@ -5,6 +5,7 @@
 // those AST-007 found in the owner's corpora (7, 48, 49, 50, 52, 73) -- the only
 // population any claim here can honestly cover.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
@@ -33,13 +34,18 @@ static std::vector<char> odolHeader(uint32_t version)
 TEST_CASE("ODOL revisions found in the corpora are described", "[p3d][odol][ast-012a]")
 {
     REQUIRE(P3D::DescribeOdolRevision(7).support == P3D::OdolSupport::Parsed);
-    for (uint32_t version : {48u, 49u, 50u, 52u, 73u})
+    for (uint32_t version : {48u, 49u, 50u, 52u})
     {
         const auto info = P3D::DescribeOdolRevision(version);
         // Recognised means "present in the corpora", never "supported".
         REQUIRE(info.support == P3D::OdolSupport::Recognised);
         REQUIRE(std::string(info.generation) != "unknown");
     }
+    // AST-012B reads one shape of revision 73 and refuses the rest, which is a
+    // third state: claiming either Parsed or Recognised for it would be a lie in
+    // one direction or the other.
+    REQUIRE(P3D::DescribeOdolRevision(73).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(73).generation) == "Arma 3");
     REQUIRE(P3D::DescribeOdolRevision(9999).support == P3D::OdolSupport::Unknown);
 }
 
@@ -197,12 +203,24 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(source.embedded);
     REQUIRE(source.stages.size() == materials[0].stageTextures.size());
     REQUIRE(source.texGens.size() == 8);
-    const auto polygons = P3D::ReadOdol73StaticPolygonPrefix(reader, directory.ends[0]);
-    REQUIRE_FALSE(polygons.indexStreamMarker);
-    REQUIRE(polygons.unparsedIndexValue == 26);
-    REQUIRE(polygons.polygons.size() == 11);
-    REQUIRE(polygons.polygons[0] == std::vector<uint32_t>{39, 35, 31, 43});
-    REQUIRE(polygons.followingByteOffset == 0x748);
+    // The stage transform is 3x4. With 4x4 the reader ran 128 bytes past the end
+    // of the material, landed mid-face-record, and still produced eleven
+    // plausible quads -- the face encoding resynchronises, so "it parsed" was not
+    // evidence of anything. 0x626 is where the material actually ends.
+    REQUIRE(reader.tell() == 0x626);
+    REQUIRE(P3D::ReadOdol73VertexIndexArray(reader, "point-to-vertex map").empty());
+    REQUIRE(P3D::ReadOdol73VertexIndexArray(reader, "vertex-to-point map").empty());
+    const auto polygons = P3D::ReadOdol73Polygons(reader, lod.vertexCount, directory.ends[0]);
+    REQUIRE(polygons.faces.size() == 16);
+    REQUIRE(polygons.faceDataSize == 320);
+    REQUIRE(polygons.unused == 0);
+    REQUIRE(polygons.faces[0] == std::vector<uint32_t>{30, 28, 25, 27});
+    REQUIRE(polygons.faces[5] == std::vector<uint32_t>{39, 35, 31, 43});
+    REQUIRE(polygons.faces[15] == std::vector<uint32_t>{5, 17, 13, 9});
+    REQUIRE(reader.tell() == 0x748);
+    // The face stream measured in the section bounds' own units closes on the
+    // declared total, which is what licenses reading those bounds as face ranges.
+    REQUIRE(P3D::Odol73FaceStreamOffsets(polygons).back() == polygons.faceDataSize);
     const auto sections = P3D::ReadOdol73StaticSections(reader, directory.ends[0]);
     REQUIRE(sections.size() == 1);
     REQUIRE(sections[0].faceLower == 0);
@@ -212,8 +230,84 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(preRest.colorTop == static_cast<int32_t>(0xff000000));
     REQUIRE(preRest.restDataSize == 613);
     const int restStart = reader.tell();
-    P3D::SkipOdol73RestData(reader, preRest, directory.ends[0]);
+    const auto rest = P3D::ReadOdol73StaticRestData(reader, lod, preRest, directory.ends[0]);
     REQUIRE(reader.tell() == restStart + 613);
+    REQUIRE(rest.uvSetCount == 1);
+    REQUIRE(rest.positions.size() == 48);
+    REQUIRE(rest.normals.size() == 48);
+    REQUIRE(rest.clip.size() == 48);
+    // A unit cube from 3den: every position is a corner or an edge midpoint.
+    REQUIRE(rest.positions[0].x == -0.5f);
+    REQUIRE(rest.positions[0].y == -0.5f);
+    REQUIRE(rest.positions[0].z == -0.5f);
+    REQUIRE(rest.positions[39].x == 0.5f);
+    REQUIRE(rest.positions[39].z == 0.5f);
+    // Decoded normals are axis-aligned units; the format's scale factor is
+    // negative, so a sign error here would show up as -1 where +1 belongs.
+    REQUIRE(rest.normals[0].z == 1.0f);
+    REQUIRE(rest.normals[39].x == 1.0f);
+    REQUIRE(rest.uv0.uv[0][0] == Catch::Approx(0.250250f).margin(1e-5));
+    REQUIRE(rest.uv0.uv[47][0] == Catch::Approx(0.749720f).margin(1e-5));
     REQUIRE(P3D::ReadOdol73TrailingLodByte(reader, directory.ends[0]) == 1);
     REQUIRE(reader.tell() == static_cast<int>(directory.ends[0]));
+}
+
+TEST_CASE("ODOL 73 static fixture reaches the common Poseidon model IR", "[p3d][odol][ast-012b][corpus]")
+{
+    // The point of AST-012B: revision 73 has to arrive in the same IR every other
+    // format lands in, through the same loader entry point -- not in a private
+    // struct that only its own test can read.
+    const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
+    if (!path || !*path)
+        SKIP("set POSEIDON_ODOL73_FIXTURE to the extracted AST-012B fixture");
+
+    const auto model = ODOLLoader::load(path);
+    REQUIRE(model.sourceFormat == "ODOL");
+    REQUIRE(model.sourceVersion == 73);
+    REQUIRE(model.lodLevels.size() == 2);
+
+    const auto& lod = model.lodLevels[0];
+    REQUIRE(lod.resolution == 1.0f);
+    REQUIRE(lod.sourceEncoding == "ODOL73");
+    REQUIRE(lod.uvSetCount == 1);
+    REQUIRE(lod.mesh.vertices.size() == 48);
+    REQUIRE(lod.mesh.quads.size() == 16);
+    REQUIRE(lod.mesh.triangles.empty());
+    REQUIRE(lod.mesh.quads[0].indices[0] == 30);
+    REQUIRE(lod.mesh.quads[0].indices[3] == 27);
+    // The single section covers the whole face stream, so every face draws with
+    // its texture; an unassigned face would come out as UINT32_MAX.
+    for (const auto& quad : lod.mesh.quads)
+        REQUIRE(quad.materialIndex == 0);
+    REQUIRE(lod.mesh.materials.size() == 1);
+    REQUIRE(lod.mesh.materials[0].texturePath == "a3\\3den\\objects\\data\\area_ca.paa");
+    REQUIRE(lod.mesh.materials[0].materialPath == "a3\\3den\\objects\\data\\area.rvmat");
+    REQUIRE(lod.mesh.vertices[0].position.x == -0.5f);
+    REQUIRE(lod.mesh.vertices[0].normal.z == 1.0f);
+    REQUIRE(lod.mesh.vertices[0].uv.u == Catch::Approx(0.250250f).margin(1e-5));
+
+    // The second LOD is the geometry LOD and is genuinely empty. It is converted
+    // rather than dropped: silently losing a LOD would move every later index.
+    REQUIRE(model.lodLevels[1].mesh.vertices.empty());
+    REQUIRE(model.lodLevels[1].mesh.quads.empty());
+}
+
+TEST_CASE("An ODOL 73 model outside the implemented shape is still refused", "[p3d][odol][ast-012b]")
+{
+    // Truncated after the revision: the narrow reader must fail as an unsupported
+    // revision, not as a successful read of whatever the zeroes said.
+    auto data = odolHeader(73);
+    try
+    {
+        ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "a3.p3d");
+        FAIL("expected a non-static ODOL 73 model to be refused");
+    }
+    catch (const P3D::UnsupportedOdolRevision& error)
+    {
+        REQUIRE(error.version() == 73);
+        REQUIRE(error.recognised());
+        // The message has to carry the constraint that broke, or a caller has no
+        // way to tell "unimplemented shape" from "corrupt file".
+        REQUIRE(std::string(error.what()).find("static LODs") != std::string::npos);
+    }
 }

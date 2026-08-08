@@ -3,6 +3,7 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/P3D/P3DStructures.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <algorithm>
@@ -63,6 +64,12 @@ class ODOLLoader
         // in the MLOD path. The revision is read without consuming it so the chosen
         // parser still sees its own header.
         const P3D::OdolRevisionInfo revision = P3D::PeekOdolRevision(reader);
+        // AST-012B: revision 73 has one implemented shape. It gets its own reader
+        // and its own converter -- it is never fed to readModel(), whose layout is
+        // v7's -- and anything the narrow reader refuses comes back out as the
+        // same unsupported-revision failure, carrying the constraint that broke.
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 73)
+            return loadOdol73Static(reader, size, sourcePath, revision);
         if (revision.support != P3D::OdolSupport::Parsed)
             throw P3D::UnsupportedOdolRevision(revision);
 
@@ -71,6 +78,141 @@ class ODOLLoader
     }
 
   private:
+    static Model loadOdol73Static(BinaryReader& reader, int size, const std::string& sourcePath,
+                                  const P3D::OdolRevisionInfo& revision)
+    {
+        try
+        {
+            return convertOdol73(P3D::ReadOdol73StaticModel(reader, size), sourcePath);
+        }
+        catch (const P3D::UnsupportedOdolRevision&)
+        {
+            throw;
+        }
+        catch (const std::runtime_error& error)
+        {
+            throw P3D::UnsupportedOdolRevision(revision, error.what());
+        }
+    }
+
+    static Model convertOdol73(const P3D::Odol73StaticModel& source, const std::string& sourcePath)
+    {
+        const auto& info = source.directory.model;
+        Model model;
+        model.sourcePath    = sourcePath;
+        model.sourceFormat  = "ODOL";
+        model.sourceVersion = 73;
+        model.special       = static_cast<float>(info.special);
+        model.boundingSphere.radius = info.boundingSphere;
+        model.geometrySphere.radius = info.geometrySphere;
+        model.boundingBox.min = Vector3(info.bboxMin.x, info.bboxMin.y, info.bboxMin.z);
+        model.boundingBox.max = Vector3(info.bboxMax.x, info.bboxMax.y, info.bboxMax.z);
+        model.aimingCenter    = Vector3(info.aimingCenter.x, info.aimingCenter.y, info.aimingCenter.z);
+        model.color           = info.color;
+        model.viewDensity     = info.viewDensity;
+        model.remarksFlags    = info.remarks;
+        model.andHints        = static_cast<RenderHints>(info.andHints);
+        model.orHints         = static_cast<RenderHints>(info.orHints);
+
+        model.lodLevels.reserve(source.lods.size());
+        for (size_t i = 0; i < source.lods.size(); ++i)
+        {
+            LODLevel lod;
+            lod.resolution     = info.resolutions[i];
+            lod.sourceEncoding = "ODOL73";
+            lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
+            lod.mesh           = convertOdol73Mesh(source.lods[i]);
+            model.lodLevels.push_back(std::move(lod));
+        }
+        return model;
+    }
+
+    static Mesh convertOdol73Mesh(const P3D::Odol73StaticLod& source)
+    {
+        Mesh mesh;
+        const auto& rest = source.rest;
+        mesh.vertices.reserve(rest.positions.size());
+        for (size_t i = 0; i < rest.positions.size(); ++i)
+        {
+            Vertex vertex;
+            vertex.position = Vector3(rest.positions[i].x, rest.positions[i].y, rest.positions[i].z);
+            vertex.normal   = Vector3(rest.normals[i].x, rest.normals[i].y, rest.normals[i].z);
+            vertex.uv       = Vector2(rest.uv0.uv[i][0], rest.uv0.uv[i][1]);
+            vertex.flags    = static_cast<VertexFlags>(rest.clip[i]);
+            mesh.vertices.push_back(vertex);
+        }
+
+        for (const auto& texture : source.header.textures)
+            mesh.materials.emplace_back(texture, texture);
+        // The embedded RVMAT a section names is the shader description for the
+        // texture that section draws with; recording it against the wrong slot
+        // would be worse than leaving it empty.
+        for (const auto& section : source.sections)
+        {
+            if (section.textureIndex < 0 || static_cast<size_t>(section.textureIndex) >= mesh.materials.size())
+                continue;
+            if (section.materialIndex >= 0 && static_cast<size_t>(section.materialIndex) < source.materials.size())
+                mesh.materials[section.textureIndex].materialPath = source.materials[section.materialIndex].name;
+        }
+
+        // Section bounds are offsets into the face stream, not face indices, so
+        // the offsets are rebuilt and checked against the LOD's own declared
+        // face-data size before any face is assigned a material from them.
+        const auto offsets = P3D::Odol73FaceStreamOffsets(source.polygons);
+        if (offsets.back() != source.polygons.faceDataSize)
+            throw std::runtime_error("ODOL 73 face-stream offsets disagree with the LOD's declared face-data size");
+
+        for (size_t face = 0; face < source.polygons.faces.size(); ++face)
+        {
+            const auto& indices = source.polygons.faces[face];
+            uint32_t materialIndex = UINT32_MAX;
+            for (const auto& section : source.sections)
+                if (offsets[face] >= static_cast<uint32_t>(section.faceLower) &&
+                    offsets[face] < static_cast<uint32_t>(section.faceUpper) && section.textureIndex >= 0)
+                    materialIndex = static_cast<uint32_t>(section.textureIndex);
+            if (indices.size() == 3)
+            {
+                Triangle triangle;
+                for (int i = 0; i < 3; ++i) triangle.indices[i] = indices[i];
+                triangle.materialIndex = materialIndex;
+                triangle.originalIndex = static_cast<uint32_t>(face);
+                mesh.triangles.push_back(triangle);
+            }
+            else
+            {
+                Quad quad;
+                for (int i = 0; i < 4; ++i) quad.indices[i] = indices[i];
+                quad.materialIndex = materialIndex;
+                quad.originalIndex = static_cast<uint32_t>(face);
+                mesh.quads.push_back(quad);
+            }
+        }
+
+        mesh.sections.reserve(source.sections.size());
+        for (const auto& source_section : source.sections)
+        {
+            Section section;
+            section.materialIndex = source_section.textureIndex >= 0
+                                        ? static_cast<uint32_t>(source_section.textureIndex) : UINT32_MAX;
+            section.specialMaterial = source_section.materialIndex;
+            // Face-stream offsets, as on the v7 path: not triangle indices.
+            section.startTriangle = static_cast<uint32_t>(source_section.faceLower);
+            section.triangleCount = static_cast<uint32_t>(source_section.faceUpper - source_section.faceLower);
+            mesh.sections.push_back(section);
+        }
+
+        mesh.boundingBox.min = Vector3(source.header.bboxMin.x, source.header.bboxMin.y, source.header.bboxMin.z);
+        mesh.boundingBox.max = Vector3(source.header.bboxMax.x, source.header.bboxMax.y, source.header.bboxMax.z);
+        mesh.bCenter  = Vector3(source.header.bboxCenter.x, source.header.bboxCenter.y, source.header.bboxCenter.z);
+        mesh.bRadius  = source.header.bboxRadius;
+        mesh.orHints  = static_cast<RenderHints>(source.header.orHints);
+        mesh.andHints = static_cast<RenderHints>(source.header.andHints);
+        mesh.iconColor     = static_cast<uint32_t>(source.endData.colorTop);
+        mesh.selectedColor = static_cast<uint32_t>(source.endData.color);
+        mesh.special       = static_cast<Poseidon::Model::SpecialFlags>(source.endData.special);
+        return mesh;
+    }
+
     static Model convertToModel(const P3D::Model& odol, const std::string& sourcePath)
     {
         Model model;
