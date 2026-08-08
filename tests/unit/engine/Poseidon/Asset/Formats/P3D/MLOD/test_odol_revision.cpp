@@ -214,5 +214,7 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     const int restStart = reader.tell();
     P3D::SkipOdol73RestData(reader, preRest, directory.ends[0]);
     REQUIRE(reader.tell() == restStart + 613);
+    REQUIRE(reader.tell() == static_cast<int>(directory.ends[0]) - 1);
+    REQUIRE(reader.read<uint8_t>() == 4); // v68+ trailing field, preserved pending semantics
     REQUIRE(reader.tell() == static_cast<int>(directory.ends[0]));
 }
