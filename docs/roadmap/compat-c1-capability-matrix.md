@@ -37,6 +37,8 @@ corpora*, not about a game.
 | `MULTI_UV` | `VALIDATED` | 16,164 #UVSet# blocks in 1,640 models match 4+8*sum(face.n) | AST-011C | `08f3ac7` |
 | `UV1_NO_COLLAPSE` | `VALIDATED` | uv1 participates in vertex identity | AST-011C | `08f3ac7` |
 | `UV_CHANNEL_BINDING` | `UNVERIFIED` | no UV channel seen mapped onto a rendered surface | AST-011C | `08f3ac7` |
+| `LATER_ODOL_BODY_PARSE` | `UNSUPPORTED` | 0 later revision bodies parsed; AST-012B must select one exact fixture | AST-012A | `89eb8e3` |
+| `ODOL_REVISION_DISPATCH` | `VALIDATED` | version 7 routes to the existing reader; 48/49/50/52/73 are recognised and refused; synthetic unknown 4242 is refused without a layout fallback | AST-012A | `89eb8e3` |
 | `PAA_COMPRESSED_MIP` | `PARTIAL` | 124/124 sample textures decode offline; Pactext decode still raw-only | AST-013 | `a800dc4` |
 | `PAA_FLAG` | `CAPTURED_NOT_INTERPRETED` | values 1 and 2 carried verbatim | AST-013 | `a800dc4` |
 | `PAA_SWIZ` | `CAPTURED_NOT_APPLIED` | 1,146 observed values; encoding unresolved, never guessed | AST-013 | `a800dc4` |

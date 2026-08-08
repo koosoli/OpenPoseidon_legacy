@@ -978,30 +978,71 @@ tickets:
     class: OFFLINE_TOOL
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
-    status: PLANNED
-    outcome: null
-    owner: null
-    branch: null
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: ADOPTED
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: null
+    verification_commit: 89eb8e3
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
-    blocked_by: [AST-007]
+    blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    implementation_commits: [89eb8e3]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+        symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
+      - file: engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+        symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
+    test_ids: [ast-012a]
     benchmark_artifacts: []
-    evidence_hash: null
-    decision_record: null
-    known_failures: []
-    fallback: null
+    evidence_hash: c3c94499c2c163cf8626ce2ed63a12f37af17335d8adc8823ade1d7e1289b17e
+    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    capability_claims:
+      - capability: ODOL_REVISION_DISPATCH
+        status: VALIDATED
+        denominator: >-
+          version 7 routes to the existing reader; 48/49/50/52/73 are recognised
+          and refused; synthetic unknown 4242 is refused without a layout fallback
+      - capability: LATER_ODOL_BODY_PARSE
+        status: UNSUPPORTED
+        denominator: >-
+          0 later revision bodies parsed; AST-012B must select one exact fixture
+    known_failures:
+      - >-
+        Only ODOL revision 7 (OFP/CWA) reaches a parser. Revisions 48, 49, 50,
+        52 and 73 are registered because AST-007 observed them in the owner corpus,
+        but the loader rejects them before reading a body. This is deliberately not
+        a claim of Arma 2/OA/3 ODOL support.
+      - >-
+        AST-012B remains blocked until the integration owner selects one exact later
+        ODOL fixture. The next implementation must add a revision-specific parser
+        and capability row rather than altering the v7 reader or using a nearest-layout fallback.
+    fallback: >-
+      Recognised but unimplemented revisions raise UnsupportedOdolRevision with the
+      exact revision and generation; unrecognised revisions raise the same structured
+      type without pretending to identify a layout; malformed signatures remain
+      ordinary parse errors.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Seven Catch2 cases under [ast-012a]
+      (29 assertions) prove corpus revisions 48/49/50/52/73 are recognised but
+      refused, unknown revision 4242 is refused without speculation, malformed
+      signatures remain distinct from unsupported revisions, peeking is non-consuming,
+      and the existing revision-7 animated ODOL fixture still loads. The combined
+      [p3d],[odol] run passes 10 cases / 70 assertions. The revision population is
+      independently supplied by AST-007's PBO entry-table index: 48 (2 archives),
+      49 (19), 50 (9), 52 (13), and 73 (162). No later revision body was parsed,
+      so this is dispatch validation only.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+      - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
+      - docs/roadmap/evidence/compat-c1-fixture-index.json
   - id: AST-012B
     overlay: COMPAT-C1-EXEC-001
     is_example: false
