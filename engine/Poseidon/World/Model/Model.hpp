@@ -188,10 +188,27 @@ struct Proxy {
 
 struct Section {
     uint32_t materialIndex;
+    // Despite the names, these are the source's own face-stream offsets, not
+    // indices into Mesh::triangles: byte offsets on the ODOL v7 path, and
+    // offsets in the four-bytes-plus-four-per-index unit on the ODOL 73 path.
+    // They are kept because ShapeAdapter's FindSections needs them in source
+    // form. A consumer that reads them as triangle indices is wrong on both.
     uint32_t startTriangle;
     uint32_t triangleCount;
     RenderHints hints;
     int32_t specialMaterial;    // ODOL only
+
+    // AST-018: the same boundary as a face range, when the loader could work one
+    // out. firstFace indexes source face order -- the same numbering
+    // Triangle::originalIndex and Quad::originalIndex carry -- so a consumer can
+    // find a section's faces without knowing the source's offset unit.
+    //
+    // faceRangeKnown is the whole point of the field. It is false wherever the
+    // conversion has not been established (the ODOL v7 path), and a false there
+    // must be read as "ask elsewhere", not as "this section has no faces".
+    uint32_t firstFace = 0;
+    uint32_t faceCount = 0;
+    bool faceRangeKnown = false;
 
     Section() : materialIndex(0), startTriangle(0), triangleCount(0), hints(RenderHints::None), specialMaterial(0) {}
     Section(uint32_t matIdx, uint32_t start, uint32_t count, RenderHints hints = RenderHints::None)

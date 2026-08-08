@@ -1537,7 +1537,8 @@ tickets:
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
       - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
     test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights,
-               ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies]
+               ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies,
+               ast-018-section-face-range]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
@@ -1546,8 +1547,8 @@ tickets:
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
         split, preservation of the MLOD named-selection weight byte, a measured
         winding for the ODOL 73 path, a typed source-geometry basis with a
-        confidence per axis, and MLOD proxy extraction. Section boundaries are
-        unchanged.
+        confidence per axis, MLOD proxy extraction, and section boundaries
+        published as a face range on the ODOL 73 path.
       - >-
         The ODOL 73 winding is measured only relative to the model's own stored
         normals: all 16 faces of the reference fixture wind clockwise about them,
@@ -1573,12 +1574,14 @@ tickets:
         capture does not exercise this path at all. Before this change MLOD
         models reached the IR with no proxies whatsoever, so the change cannot
         regress attachment placement, only start doing it.
-      - >-
-        Section boundaries remain ambiguous across paths:
-        Section::startTriangle/triangleCount hold face-stream byte offsets on the
-        ODOL v7 path and face-data offsets on the ODOL 73 path, neither of which
-        is a triangle index. A consumer reading them as triangle indices is wrong
-        on both. Left as-is because ShapeAdapter uses FindSections instead.
+        Section::startTriangle/triangleCount still hold the source's own offsets
+        -- byte offsets on the ODOL v7 path, face-data offsets on the ODOL 73
+        path, a triangle index on neither -- because ShapeAdapter's FindSections
+        needs them in source form. The same boundary is now also published as a
+        face range (firstFace/faceCount in source face order) with an explicit
+        faceRangeKnown flag, but only the ODOL 73 path sets it. The v7 byte-offset
+        conversion has not been established, so v7 sections report the range as
+        unknown rather than as empty.
       - >-
         VertexFlags::UserMask (0xFF0000) overlaps LightMask (0xF0000), so the
         per-vertex lighting bits are also inside the user range. That comes from

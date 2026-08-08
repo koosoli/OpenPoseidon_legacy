@@ -220,6 +220,20 @@ class ODOLLoader
             // Face-stream offsets, as on the v7 path: not triangle indices.
             section.startTriangle = static_cast<uint32_t>(source_section.faceLower);
             section.triangleCount = static_cast<uint32_t>(source_section.faceUpper - source_section.faceLower);
+            // AST-018: and the same boundary as a face range. The offsets were
+            // already rebuilt and checked against the LOD's declared face-data
+            // size above, so this is a conversion, not an interpretation.
+            // Known for every revision-73 section, including an empty one: a
+            // zero faceCount here means the section covers no faces, not that
+            // the range could not be worked out.
+            section.faceRangeKnown = true;
+            for (size_t face = 0; face < source.polygons.faces.size(); ++face)
+            {
+                if (offsets[face] < static_cast<uint32_t>(source_section.faceLower)) continue;
+                if (offsets[face] >= static_cast<uint32_t>(source_section.faceUpper)) break;
+                if (section.faceCount == 0) section.firstFace = static_cast<uint32_t>(face);
+                ++section.faceCount;
+            }
             mesh.sections.push_back(section);
         }
 

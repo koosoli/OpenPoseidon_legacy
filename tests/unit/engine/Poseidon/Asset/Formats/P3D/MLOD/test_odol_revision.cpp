@@ -375,3 +375,76 @@ TEST_CASE("The ODOL 73 fixture really is double sided", "[p3d][odol][ast-018][co
     REQUIRE(outward == 24);
     REQUIRE(mesh.vertices.size() == 48);
 }
+
+TEST_CASE("ODOL 73 sections carry a usable face range", "[p3d][odol][ast-018][corpus]")
+{
+    // Section::startTriangle/triangleCount are the source's own offsets in a
+    // unit that differs per revision and is not a triangle index on any of them.
+    // AST-018 asks for section boundaries a later consumer can act on, so the
+    // same boundary is also published as a face range in source face order --
+    // the numbering Triangle::originalIndex and Quad::originalIndex carry.
+    const char* path = std::getenv("POSEIDON_ODOL73_FIXTURE");
+    if (!path || !*path)
+        SKIP("set POSEIDON_ODOL73_FIXTURE to the extracted AST-012B fixture");
+
+    const auto model = ODOLLoader::load(path);
+    const auto& mesh = model.lodLevels[0].mesh;
+    REQUIRE(mesh.sections.size() == 1);
+    const auto& section = mesh.sections[0];
+
+    // The raw offsets stay exactly as the source gave them.
+    REQUIRE(section.startTriangle == 0);
+    REQUIRE(section.triangleCount == 320);
+    // And the converted range covers the LOD's 16 quads.
+    REQUIRE(section.faceRangeKnown);
+    REQUIRE(section.firstFace == 0);
+    REQUIRE(section.faceCount == 16);
+    REQUIRE(section.faceCount == mesh.quads.size() + mesh.triangles.size());
+
+    // Every face the range names must exist in source face order, or the range
+    // is not usable for the thing it exists for.
+    for (uint32_t face = section.firstFace; face < section.firstFace + section.faceCount; ++face)
+    {
+        bool found = false;
+        for (const auto& quad : mesh.quads)
+            if (quad.originalIndex == face) found = true;
+        for (const auto& triangle : mesh.triangles)
+            if (triangle.originalIndex == face) found = true;
+        CAPTURE(face);
+        REQUIRE(found);
+    }
+}
+
+TEST_CASE("An unconverted section range says so rather than reading as empty",
+          "[p3d][odol][ast-018]")
+{
+    // The v7 path has not had its byte offsets converted to face indices, so it
+    // must report the range as unknown. A default of "known, zero faces" would
+    // be indistinguishable from a section that genuinely covers nothing.
+    // The default itself, which is what an unconverted path leaves in place.
+    REQUIRE_FALSE(Poseidon::Model::Section().faceRangeKnown);
+    REQUIRE(Poseidon::Model::Section().faceCount == 0);
+
+    // And the v7 path in practice, for whichever fixtures carry sections. The
+    // count is reported rather than required: the shipped v7 fixtures are small
+    // and several have none, so demanding sections here would pin the fixture
+    // set rather than the behaviour.
+    const char* fixtures[] = {"p3d/animated_morph_odol.p3d", "p3d/complex_vehicle.p3d",
+                              "p3d/multi_lod_vehicle.p3d", "p3d/simple_tree.p3d"};
+    size_t sectionsSeen = 0, modelsRead = 0;
+    for (const char* fixture : fixtures)
+    {
+        Poseidon::Model::Model model;
+        try { model = ODOLLoader::load(GET_FIXTURE(fixture)); }
+        catch (const std::exception&) { continue; }
+        ++modelsRead;
+        for (const auto& lod : model.lodLevels)
+            for (const auto& section : lod.mesh.sections)
+            {
+                ++sectionsSeen;
+                REQUIRE_FALSE(section.faceRangeKnown);
+            }
+    }
+    CAPTURE(modelsRead, sectionsSeen);
+    REQUIRE(modelsRead > 0);
+}
