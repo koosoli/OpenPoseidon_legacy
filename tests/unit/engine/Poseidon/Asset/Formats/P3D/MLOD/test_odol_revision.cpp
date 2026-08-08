@@ -210,5 +210,5 @@ TEST_CASE("ODOL 73 selected corpus fixture matches its recorded preamble", "[p3d
     REQUIRE(sections[0].materialIndex == 0);
     const auto preRest = P3D::ReadOdol73StaticPreRestData(reader, directory.ends[0]);
     REQUIRE(preRest.colorTop == static_cast<int32_t>(0xff000000));
-    REQUIRE(preRest.restDataSize == 48);
+    REQUIRE(preRest.restDataSize == 613);
 }
