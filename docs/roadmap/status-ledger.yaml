@@ -1139,10 +1139,19 @@ tickets:
         unconverted; their basis convention has not been verified against a
         render, so nothing downstream is given a tangent frame it could trust.
       - >-
-        Nothing here has been rendered. The evidence is byte-level: the reader
-        consumes every LOD body to its declared end offset and every rest-data
-        section to its declared size. That proves the layout, not that the model
-        looks right on screen.
+        Rendered only as wireframe, and only offline. PoseidonTools model render
+        draws Arma 3 rocks, signs and editor helpers correctly through the common
+        IR, which confirms positions and face indices form coherent solids. No
+        revision-73 model has been drawn in the game with textures, lighting or
+        materials, so nothing here is a claim about how one looks in a scene.
+      - >-
+        Correction to an earlier claim in this row: revision 73 was NOT on the
+        runtime path when the reader landed. ModelCache consults
+        P3DFormatDetector before calling ODOLLoader, and that detector hardcoded
+        {7, 8}, so every revision-73 model was rejected before reaching the
+        reader -- it was reachable from its own tests and from nothing else. The
+        detector now defers to DescribeOdolRevision; that gap existed from
+        4f5b988 until 34e6f3f.
       - >-
         Sections are carried into the IR with face-stream offsets in
         Section::startTriangle/triangleCount, matching the existing v7 converter.

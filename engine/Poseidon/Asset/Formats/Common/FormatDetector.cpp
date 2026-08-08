@@ -1,4 +1,5 @@
 #include <Poseidon/Asset/Formats/Common/FormatDetector.hpp>
+#include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <cstring>
 #include <fstream>
 
@@ -60,7 +61,8 @@ FormatInfo P3DFormatDetector::DetectFormat(std::istream& stream, const std::stri
     {
         info.isSupported = IsSupportedODOLVersion(version);
         if (!info.isSupported)
-            info.errorMessage = "Unsupported ODOL version: " + std::to_string(version) + " (only v7 and v8 supported)";
+            info.errorMessage = "Unsupported ODOL version: " + std::to_string(version) + " (" +
+                                std::string(P3D::DescribeOdolRevision(version).generation) + ")";
     }
     else
     {
@@ -91,8 +93,19 @@ bool P3DFormatDetector::IsSupportedMLODVersion(uint32_t version)
 
 bool P3DFormatDetector::IsSupportedODOLVersion(uint32_t version)
 {
-    // ODOL v7 and v8 (Arma: Cold War Assault)
-    return (version == 7 || version == 8);
+    // Deferred to the revision table rather than restated here. This was a
+    // hardcoded {7, 8}, and because ModelCache consults the detector *before*
+    // handing the file to ODOLLoader, it silently gated revision 73 out of the
+    // runtime path -- AST-012B's reader was reachable from its own tests and
+    // from nothing else. A second copy of "which revisions exist" is exactly the
+    // drift AST-012A introduced DescribeOdolRevision to prevent.
+    //
+    // v8 has no entry in that table and is kept explicitly: it is accepted by
+    // the v7 reader, and dropping it here would be a silent narrowing.
+    if (version == 8)
+        return true;
+    const auto revision = P3D::DescribeOdolRevision(version);
+    return revision.support == P3D::OdolSupport::Parsed || revision.support == P3D::OdolSupport::NarrowSubset;
 }
 
 std::string P3DFormatDetector::GetFileExtension(const std::string& path)
