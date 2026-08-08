@@ -1673,9 +1673,12 @@ tickets:
       ordinary and crewed-view range, requiring agreement and requiring that no
       visual resolution is ever assigned a slot. Separately, the soldier's head
       in the training capture is 99.73% pixel-identical before and after the
-      change, with a maximum channel difference of 1. Translucent faces are
-      therefore a pre-existing symptom with a cause elsewhere, most likely alpha
-      handling on head textures; not investigated further under this ticket.
+      change, with a maximum channel difference of 1. Translucent faces were
+      therefore a pre-existing symptom with a cause elsewhere, since found and
+      fixed: Backend::IsAlpha routed to AlphaBlend any face whose texture
+      classified Opaque (OFP head textures are DXT1 with no alpha channel at
+      all), so a solid head soft-blended against the framebuffer. Fixed in
+      EngineWgpu; owner confirmed resolved 2026-08-08.
 
       Owner smoke test, 2026-08-08: drove a jeep in the installed game against
       the deployed build, no issues. That exercises the driver view and, since
