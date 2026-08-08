@@ -10,6 +10,8 @@
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
+#include <Poseidon/Asset/Formats/Common/FormatDetector.hpp>
+#include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include "../../../../test_fixtures.hpp"
 #include <cstring>
@@ -520,4 +522,53 @@ TEST_CASE("ODOL 73 corpus survey reports what the narrow reader takes",
     // And at least one revision-73 model must load, or the reader has regressed
     // to accepting nothing and every refusal below would look like good news.
     REQUIRE(loaded > 0);
+}
+
+// Reachability through the production loader, not just through ODOLLoader.
+//
+// ModelCache is what the game calls, and it asks P3DFormatDetector whether a
+// file is supported *before* handing it to any reader. That detector hardcoded
+// {7, 8}, so revision 73 was rejected before the AST-012B reader was ever
+// consulted: the reader was reachable from its own tests and from nothing else.
+// This pins the fix at the layer that actually gates the runtime.
+TEST_CASE("ODOL 73 reaches the production model-loading path", "[p3d][odol][ast-012b][corpus][survey]")
+{
+    namespace fs = std::filesystem;
+    const char* root = std::getenv("POSEIDON_ODOL73_CORPUS");
+    if (!root || !*root)
+        SKIP("set POSEIDON_ODOL73_CORPUS to a directory of extracted revision-73 models");
+
+    std::string sample;
+    for (const auto& entry : fs::recursive_directory_iterator(root))
+        if (entry.is_regular_file() && entry.path().extension() == ".p3d")
+        {
+            // Pick one the narrow reader accepts; refusals are a separate case.
+            try { if (ODOLLoader::load(entry.path().string()).sourceVersion == 73) { sample = entry.path().string(); break; } }
+            catch (const std::exception&) { continue; }
+        }
+    if (sample.empty())
+        SKIP("no acceptable revision-73 model in POSEIDON_ODOL73_CORPUS");
+    CAPTURE(sample);
+
+    // The gate itself: the detector must report the revision supported.
+    const auto info = Poseidon::Asset::Formats::P3DFormatDetector::DetectFormat(sample);
+    REQUIRE(info.signature == "ODOL");
+    REQUIRE(info.version == 73);
+    REQUIRE(info.isSupported);
+
+    // And the production loader must return real geometry, not merely not-null.
+    Poseidon::ModelCache cache;
+    auto model = cache.load(sample);
+    REQUIRE(model != nullptr);
+    REQUIRE(model->sourceVersion == 73);
+    REQUIRE_FALSE(model->lodLevels.empty());
+    size_t vertices = 0, faces = 0;
+    for (const auto& lod : model->lodLevels)
+    {
+        vertices += lod.mesh.vertices.size();
+        faces += lod.mesh.triangles.size() + lod.mesh.quads.size();
+    }
+    CAPTURE(vertices, faces);
+    REQUIRE(vertices > 0);
+    REQUIRE(faces > 0);
 }

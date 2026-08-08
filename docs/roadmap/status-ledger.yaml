@@ -1097,7 +1097,7 @@ tickets:
       - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
         symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
     test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir,
-               ast-012b-odol73-corpus-survey]
+               ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path]
     benchmark_artifacts: []
     evidence_hash: 60556e6df318b79c59327823f3aa776c4db488509e2c9c1c5c8716049ccb10ba
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
@@ -1118,6 +1118,19 @@ tickets:
           a quad. A declared skeleton is now read rather than refused -- it is a
           declaration in ModelInfo, and the per-LOD bone arrays remain the check
           for whether a LOD is actually skinned
+      - capability: ODOL73_PRODUCTION_LOAD_PATH
+        status: VALIDATED
+        denominator: >-
+          ModelCache -- the loader the game itself calls -- accepts a revision-73
+          Arma 3 model and returns geometry, pinned by test. It previously did
+          not: P3DFormatDetector gated {7, 8} ahead of every reader
+      - capability: ODOL73_RENDERED_THROUGH_WGPU
+        status: UNTESTED
+        denominator: >-
+          0 revision-73 models drawn through the WGPU backend. Wireframe renders
+          exist but come from the CPU rasteriser in ModelRenderer, which is what
+          PoseidonTools and Studio both use; no path exists yet to draw an
+          arbitrary model through the graphics backend
       - capability: ODOL73_COMMON_MODEL_IR
         status: PARTIAL
         denominator: >-
@@ -1980,7 +1993,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: e5cf0f0ad55c1f948eb75b545096aa755a2ec8a65a3de4d93ed0cb733bcfbd61
+    evidence_hash: 65adafcc2e0c2a4a37ad65a9ec95f9df6db60b02fb1e4a3eaa771a4fa4355b50
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
