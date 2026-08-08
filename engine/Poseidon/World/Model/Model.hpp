@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Poseidon/World/Model/LodPurpose.hpp>
 #include <Poseidon/World/Model/ModelFlags.hpp>
 #include <cstdint>
 #include <vector>
@@ -237,7 +238,13 @@ struct UVChannel {
 };
 
 struct LODLevel {
-    float resolution = 0.0f;  // viewing distance in metres
+    float resolution = 0.0f;  // viewing distance in metres, or a special-LOD sentinel
+
+    // AST-018: what the resolution means, decided once by the loader. Consumers
+    // should branch on this rather than re-deriving it from the float, which is
+    // how a special LOD nobody's table names ends up drawn as ordinary geometry.
+    LodPurpose purpose = LodPurpose::Visual;
+
     Mesh mesh;
 
     // Every UV channel the source carried, in source order and indexed by
@@ -256,9 +263,10 @@ struct LODLevel {
     int32_t uvSetCount = 0;       // #UVSet# blocks present; payload is AST-011C
     
     LODLevel() = default;
-    explicit LODLevel(float resolution) : resolution(resolution) {}
-    LODLevel(float resolution, const Mesh& mesh) 
-        : resolution(resolution), mesh(mesh) {}
+    explicit LODLevel(float resolution)
+        : resolution(resolution), purpose(ClassifyLodResolution(resolution)) {}
+    LODLevel(float resolution, const Mesh& mesh)
+        : resolution(resolution), purpose(ClassifyLodResolution(resolution)), mesh(mesh) {}
 };
 
 struct Model {

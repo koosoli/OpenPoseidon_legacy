@@ -1515,30 +1515,68 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
-    scheduling_state: BLOCKED
+    # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
+    scheduling_state: ACTIVE
     status: PLANNED
     outcome: null
-    owner: null
-    branch: null
+    owner: Oliver Kay
+    branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
     verification_commit: null
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: []
-    blocked_by: [AST-007]
+    blocked_by: []
     blocks: []
     implementation_commits: []
-    production_call_sites: []
-    test_ids: []
+    production_call_sites:
+      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertLOD
+      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertOdol73
+      - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+      - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
+    test_ids: [ast-018-lod-purpose]
     benchmark_artifacts: []
     evidence_hash: null
     decision_record: null
-    known_failures: []
-    fallback: null
+    known_failures:
+      - >-
+        Only the typed-LOD-purpose slice is done. Winding, normal orientation,
+        tangent handedness, source origin and centre-of-gravity relationship are
+        still not stated anywhere; LODLevel::sourceWinding remains a recorded
+        assumption ending in _ASSUMED, unconfirmed by any render. Weighted named
+        selections, raw-plus-decoded flag bits, proxy identity and section
+        boundaries are unchanged by this slice.
+      - >-
+        LodPurpose classifies; nothing consumes it yet. ResolGeometryOnly and the
+        SpecLods macros are still what the renderer and AI branch on, so the
+        float comparisons this replaces have not actually been removed from the
+        draw path -- only from the asset probe.
+      - >-
+        Sentinels at 1e15 * 9, 12 and 14 are commented out in the engine's own
+        SpecLods table. They classify as Unknown, which keeps them undrawable,
+        but this build cannot say what they are.
+    fallback: >-
+      A resolution at or above 1e5 that matches no known sentinel classifies as
+      Unknown rather than Visual, so an unrecognised special LOD stays undrawable
+      instead of being treated as geometry at an absurd viewing distance.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Seven Catch2 cases under [ast-018]
+      cover the fourteen named sentinels, the three crewed view distances, the
+      ordinary visual range, and the Unknown fallback for reserved-but-unnamed
+      sentinels. One case pins the case that motivated the tolerance: the ODOL 73
+      fixture stores the 1e13 geometry sentinel as 9999999827968.0f, which an
+      equality check would miss. The full engine suite runs 2405 cases with the
+      same 6 pre-existing environment failures as before the change (dev-mode
+      gate, and localisation data absent from packages/Remaster).
+
+      NOT checked: no render. Nothing confirms that a LOD classified geometry-only
+      is in fact excluded from the draw path, because the draw path does not read
+      this field yet.
     supersedes: []
-    evidence: []
+    evidence:
+      - engine/Poseidon/World/Model/LodPurpose.hpp
+      - tests/unit/engine/Poseidon/World/Model/test_lod_purpose.cpp
   - id: AST-019
     overlay: COMPAT-C1-EXEC-001
     is_example: false

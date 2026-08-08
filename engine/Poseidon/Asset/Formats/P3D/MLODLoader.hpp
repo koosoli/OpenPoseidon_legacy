@@ -105,6 +105,7 @@ class MLODLoader
         convertProperties(lod.mesh, taggData.namedProperties);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
         lod.resolution     = taggData.resolution;
+        lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.sourceEncoding = "SP3X";
         lod.sourceWinding  = "CW_REVERSED_ON_LOAD";
 
@@ -139,6 +140,7 @@ class MLODLoader
         convertProperties(lod.mesh, taggData.namedProperties);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
         lod.resolution     = taggData.resolution;
+        lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
         lod.uvSetCount     = taggData.uvSetCount;
         lod.sourceEncoding = "P3DM";
         // Recorded rather than asserted. The SP3X path reverses winding on load and

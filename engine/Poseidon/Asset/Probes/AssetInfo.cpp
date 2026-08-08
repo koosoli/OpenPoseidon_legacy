@@ -6,6 +6,7 @@
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelFlags.hpp>
+#include <Poseidon/World/Model/LodPurpose.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/FontData.hpp>
@@ -32,39 +33,17 @@ namespace Poseidon
 using Asset::Formats::FormatInfo;
 using Asset::Formats::P3DFormatDetector;
 
-// LOD resolution to human-readable name
+// LOD resolution to human-readable name.
+//
+// AST-018: the table now lives with the IR (Model/LodPurpose.hpp). This kept its
+// own copy, which is how it came to name twelve sentinels while ResolGeometryOnly
+// named thirteen, and how any sentinel neither of them listed printed as a plain
+// distance -- "1e+15" reads as a viewing distance, not as an unrecognised LOD.
 static std::string ResolutionToName(float resolution)
 {
-    if (IsSpec(resolution, GEOMETRY_SPEC))
-        return "Geometry";
-    if (IsSpec(resolution, MEMORY_SPEC))
-        return "Memory";
-    if (IsSpec(resolution, LANDCONTACT_SPEC))
-        return "LandContact";
-    if (IsSpec(resolution, ROADWAY_SPEC))
-        return "Roadway";
-    if (IsSpec(resolution, PATHS_SPEC))
-        return "Paths";
-    if (IsSpec(resolution, HITPOINTS_SPEC))
-        return "HitPoints";
-    if (IsSpec(resolution, VIEW_GEOM_SPEC))
-        return "Geometry (View)";
-    if (IsSpec(resolution, FIRE_GEOM_SPEC))
-        return "Geometry (Fire)";
-    if (IsSpec(resolution, VIEW_PILOT_GEOM_SPEC))
-        return "Geometry (Pilot)";
-    if (IsSpec(resolution, VIEW_GUNNER_GEOM_SPEC))
-        return "Geometry (Gunner)";
-    if (IsSpec(resolution, VIEW_COMMANDER_GEOM_SPEC))
-        return "Geometry (Commander)";
-    if (IsSpec(resolution, VIEW_CARGO_GEOM_SPEC))
-        return "Geometry (Cargo)";
-    if (resolution >= 999.5f && resolution <= 1000.5f)
-        return "View (Gunner)";
-    if (resolution >= 1099.5f && resolution <= 1100.5f)
-        return "View (Pilot)";
-    if (resolution >= 1199.5f && resolution <= 1200.5f)
-        return "View (Cargo)";
+    const Model::LodPurpose purpose = Model::ClassifyLodResolution(resolution);
+    if (purpose != Model::LodPurpose::Visual)
+        return Model::LodPurposeName(purpose);
 
     char buf[64];
     snprintf(buf, sizeof(buf), "%.0f", resolution);

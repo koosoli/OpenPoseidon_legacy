@@ -208,6 +208,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/test_pac.cpp
     
     # World/Model tests (new architecture)
+    World/Model/test_lod_purpose.cpp
     World/Model/test_shape_adapter_papauto.cpp
     World/Model/test_shape_adapter_odol_animation.cpp
 

@@ -119,6 +119,7 @@ class ODOLLoader
         {
             LODLevel lod;
             lod.resolution     = info.resolutions[i];
+            lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
             lod.sourceEncoding = "ODOL73";
             lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
@@ -276,6 +277,7 @@ class ODOLLoader
     {
         LODLevel lod;
         lod.resolution = resolution;
+        lod.purpose    = Poseidon::Model::ClassifyLodResolution(resolution);
         lod.mesh       = convertMesh(odolLOD);
         return lod;
     }
