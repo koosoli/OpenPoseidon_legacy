@@ -723,7 +723,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: 9e2f8e0a7e176810169feefd4dc190e2ec77dcef93504f39d7635883bffa3703
+    evidence_hash: 96688e1fdb74c4c442ccd2bdf816d9dcca881006579dbabf67c0c924d4fcaa5b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: MLOD_PER_LOD_DISPATCH
@@ -802,7 +802,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
+    evidence_hash: 19f9ac3b4260e12260a1e697fbc17f62c21f120b49c9e0e2834048bc3f7f088b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
@@ -889,7 +889,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: 1d654fc0d4d7f86c016bced4525bc0d183d09f7002d65eba3091315da67a0c18
+    evidence_hash: 19f9ac3b4260e12260a1e697fbc17f62c21f120b49c9e0e2834048bc3f7f088b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: MULTI_UV
@@ -1008,7 +1008,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
     test_ids: [ast-012a]
     benchmark_artifacts: []
-    evidence_hash: c3c94499c2c163cf8626ce2ed63a12f37af17335d8adc8823ade1d7e1289b17e
+    evidence_hash: 18876805506d47b3bc3ca9ba638afbed8546837876fe15f4595f376a5712a8e8
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: ODOL_REVISION_DISPATCH
@@ -1017,9 +1017,10 @@ tickets:
           version 7 routes to the existing reader; 48/49/50/52/73 are recognised
           and refused; synthetic unknown 4242 is refused without a layout fallback
       - capability: LATER_ODOL_BODY_PARSE
-        status: UNSUPPORTED
+        status: PARTIAL
         denominator: >-
-          0 later revision bodies parsed; AST-012B must select one exact fixture
+          1 of 5 later revisions reads one shape of body (73, static LODs only,
+          see AST-012B); 48/49/50/52 parse no body at all
     known_failures:
       - >-
         Only ODOL revision 7 (OFP/CWA) reaches a parser. Revisions 48, 49, 50,
@@ -1044,8 +1045,15 @@ tickets:
       and the existing revision-7 animated ODOL fixture still loads. The combined
       [p3d],[odol] run passes 10 cases / 70 assertions. The revision population is
       independently supplied by AST-007's PBO entry-table index: 48 (2 archives),
-      49 (19), 50 (9), 52 (13), and 73 (162). No later revision body was parsed,
-      so this is dispatch validation only.
+      49 (19), 50 (9), 52 (13), and 73 (162). No later revision body was parsed
+      under this ticket, so this is dispatch validation only.
+
+      NOT checked: nothing here reads a body. The dispatch decision is proven;
+      whether any chosen parser then reads its revision correctly is not this
+      ticket's evidence. Revision 73 has since gained a narrow body reader under
+      AST-012B, which does not change what was verified here -- this ticket still
+      covers routing alone, and says nothing about revisions 48, 49, 50 or 52
+      beyond the fact that they are refused.
     supersedes: []
     evidence:
       - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
@@ -1077,11 +1085,41 @@ tickets:
     blocks: []
     implementation_commits: [e167752, 05f30c1, ccce39b, cea41aa, aa8e67a, 4ffe786, 06b9220, ec2e6b9, 426e3c9]
     production_call_sites:
-      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::loadFromBuffer
+      - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+        symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
     test_ids: [ast-012b-odol73-fixture, ast-012b-odol73-model-ir]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 21227fa0c05b0f1b233f2e8eceed7041e60d8c265c247cd233ae8193d0b8fdec
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
+    capability_claims:
+      - capability: ODOL73_STATIC_LOD_PARSE
+        status: PARTIAL
+        denominator: >-
+          1 fixture (a3 3den rectangle.p3d); both LOD bodies consumed to their
+          declared end offsets and the rest-data section to its declared 613
+          bytes. Static LODs only: no skeleton, animation, proxy, sub-skeleton,
+          named selection, keyframe or skinning data, at most one UV set, and
+          faces that are triangles or quads
+      - capability: ODOL73_COMMON_MODEL_IR
+        status: PARTIAL
+        denominator: >-
+          the same 1 fixture reaches Poseidon::Model::Model through
+          ODOLLoader::load: 48 positions, 48 normals, 48 UVs, 48 clip flags and
+          16 quads with texture and RVMAT attached
+      - capability: ODOL73_TANGENT_FRAME
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          packed ST pairs read and length-checked for all 48 vertices; no basis
+          convention claimed and nothing downstream is given a tangent frame
+      - capability: ODOL73_SKINNING
+        status: UNSUPPORTED
+        denominator: >-
+          0 skinned models parsed; a populated vertex- or neighbour-bone array
+          raises rather than being skipped
+      - capability: LATER_ODOL_REVISIONS_48_49_50_52
+        status: UNSUPPORTED
+        denominator: >-
+          0 bodies parsed across the 4 remaining corpus revisions
     known_failures:
       - >-
         One shape of ODOL revision 73 reads: a static LOD with no skeleton,
@@ -1170,7 +1208,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: e592a8e4164892cf9ef8254a65940defe5db5e01394146af7652cbbf6ddd26ba
+    evidence_hash: 0d3a3328e4453157bc667fcff4bd9048258164693eb0746ef45bc2f17ef14258
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: PAA_TAGG_CAPTURE
@@ -1515,6 +1553,10 @@ tickets:
     class: RUNTIME_INFRA
     obligation: REQUIRED
     execution_mode: IMPLEMENT
+    # No human reviewed this. RUNTIME_INFRA has no owner-visible surface of
+    # its own -- the tests are the scrutiny, and reviewer_method states what
+    # they do not cover.
+    review_model: AUTOMATED_EVIDENCE
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
     scheduling_state: ACTIVE
     # VALIDATED, not INTEGRATED: every axis the ticket names is now
@@ -1534,18 +1576,62 @@ tickets:
     implementation_commits: [d5519c7, e37aecb, 083906a, e56591d, ccb91f0, 0f0be52,
                              72ad61c, 770999e, 276b044, 84d00a0]
     production_call_sites:
-      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertLOD
-      - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp::convertOdol73
-      - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
-      - engine/Poseidon/Asset/Probes/AssetInfo.cpp::ResolutionToName
-      - engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp::ResolGeometryOnly
-      - engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp::LevelName
+      - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+        symbol: Poseidon::Asset::Formats::ODOLLoader::convertLOD
+      - file: engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
+        symbol: Poseidon::Asset::Formats::ODOLLoader::convertOdol73
+      - file: engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
+        symbol: Poseidon::Asset::Formats::MLODLoader::loadSP3XLOD
+      - file: engine/Poseidon/Asset/Probes/AssetInfo.cpp
+        symbol: Poseidon::ResolutionToName
+      - file: engine/Poseidon/Graphics/Rendering/Shape/ShapeShared.hpp
+        symbol: Poseidon::ResolGeometryOnly
+      - file: engine/Poseidon/Graphics/Rendering/Shape/ShapeLOD.cpp
+        symbol: Poseidon::LevelName
     test_ids: [ast-018-lod-purpose, ast-018-flag-bit-preservation, ast-018-selection-weights,
                ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies,
                ast-018-section-face-range]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: ca057bed46ebba7619e60a4a74efdfe539ade96bc053d3507b3654e7381f414b
     decision_record: null
+    capability_claims:
+      - capability: LOD_PURPOSE_TYPED
+        status: VALIDATED
+        denominator: >-
+          14 named sentinels plus the 3 crewed-view distances classify by type;
+          a resolution at or above 1e5 matching no sentinel classifies Unknown
+          rather than Visual, so it stays undrawable
+      - capability: FLAG_BITS_KNOWN_VS_UNKNOWN
+        status: VALIDATED
+        denominator: >-
+          12 of 12 shipped P3D fixtures surveyed, 0 carrying a vertex or face bit
+          this build cannot name; the survey asserts it read every file it listed
+      - capability: MLOD_SELECTION_WEIGHTS
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          the source weight byte is preserved parallel to the vertex indices and
+          was previously discarded entirely; its scale is not established, so
+          NamedSelection::vertexWeights stays empty on the MLOD path and
+          behaviour is unchanged
+      - capability: SOURCE_GEOMETRY_BASIS
+        status: PARTIAL
+        denominator: >-
+          winding measured on the ODOL 73 path (16 of 16 faces, unanimous),
+          established from the engine's own loader on SP3X, assumed on P3DM;
+          tangent handedness and the centre-of-mass relationship are recorded as
+          Unknown on every path
+      - capability: MLOD_PROXIES
+        status: UNVERIFIED
+        denominator: >-
+          proxies now reach the IR from 3 fixtures with identity, selection and
+          an orthonormal frame invariant under all 6 vertex permutations; 0
+          rendered, because retail CWA content is ODOL
+      - capability: SECTION_FACE_RANGE
+        status: PARTIAL
+        denominator: >-
+          the ODOL 73 path publishes firstFace/faceCount in source face order,
+          checked against the LOD's declared face-data size; the ODOL v7 path
+          reports faceRangeKnown false rather than an unconverted number
     known_failures:
       - >-
         Three slices are done: typed LOD purposes, the known/unknown flag-bit
@@ -1857,7 +1943,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: abd311a020c83519811b6ac84d27f957737d0ebe088da52b38bbcd5486d184a6
+    evidence_hash: c47ef7e104123af9eedd491e3bd6cd5bcf7967af53b8cac72c4534b8a48e891f
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX

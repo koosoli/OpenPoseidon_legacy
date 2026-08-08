@@ -37,8 +37,13 @@ corpora*, not about a game.
 | `MULTI_UV` | `VALIDATED` | 16,164 #UVSet# blocks in 1,640 models match 4+8*sum(face.n) | AST-011C | `08f3ac7` |
 | `UV1_NO_COLLAPSE` | `VALIDATED` | uv1 participates in vertex identity | AST-011C | `08f3ac7` |
 | `UV_CHANNEL_BINDING` | `UNVERIFIED` | no UV channel seen mapped onto a rendered surface | AST-011C | `08f3ac7` |
-| `LATER_ODOL_BODY_PARSE` | `UNSUPPORTED` | 0 later revision bodies parsed; AST-012B must select one exact fixture | AST-012A | `89eb8e3` |
+| `LATER_ODOL_BODY_PARSE` | `PARTIAL` | 1 of 5 later revisions reads one shape of body (73, static LODs only, see AST-012B); 48/49/50/52 parse no body at all | AST-012A | `89eb8e3` |
 | `ODOL_REVISION_DISPATCH` | `VALIDATED` | version 7 routes to the existing reader; 48/49/50/52/73 are recognised and refused; synthetic unknown 4242 is refused without a layout fallback | AST-012A | `89eb8e3` |
+| `LATER_ODOL_REVISIONS_48_49_50_52` | `UNSUPPORTED` | 0 bodies parsed across the 4 remaining corpus revisions | AST-012B | `4f5b988` |
+| `ODOL73_COMMON_MODEL_IR` | `PARTIAL` | the same 1 fixture reaches Poseidon::Model::Model through ODOLLoader::load: 48 positions, 48 normals, 48 UVs, 48 clip flags and 16 quads with texture and RVMAT attached | AST-012B | `4f5b988` |
+| `ODOL73_SKINNING` | `UNSUPPORTED` | 0 skinned models parsed; a populated vertex- or neighbour-bone array raises rather than being skipped | AST-012B | `4f5b988` |
+| `ODOL73_STATIC_LOD_PARSE` | `PARTIAL` | 1 fixture (a3 3den rectangle.p3d); both LOD bodies consumed to their declared end offsets and the rest-data section to its declared 613 bytes. Static LODs only: no skeleton, animation, proxy, sub-skeleton, named selection, keyframe or skinning data, at most one UV set, and faces that are triangles or quads | AST-012B | `4f5b988` |
+| `ODOL73_TANGENT_FRAME` | `CAPTURED_NOT_INTERPRETED` | packed ST pairs read and length-checked for all 48 vertices; no basis convention claimed and nothing downstream is given a tangent frame | AST-012B | `4f5b988` |
 | `PAA_COMPRESSED_MIP` | `PARTIAL` | 124/124 sample textures decode offline; Pactext decode still raw-only | AST-013 | `a800dc4` |
 | `PAA_FLAG` | `CAPTURED_NOT_INTERPRETED` | values 1 and 2 carried verbatim | AST-013 | `a800dc4` |
 | `PAA_SWIZ` | `CAPTURED_NOT_APPLIED` | 1,146 observed values; encoding unresolved, never guessed | AST-013 | `a800dc4` |
@@ -49,6 +54,12 @@ corpora*, not about a game.
 | `ARCHIVE_READ_THROUGH` | `UNSUPPORTED` | resolution names the owning PBO; no bytes read from it | AST-015 | `8a990e0` |
 | `SOURCE_TO_SHIPPED_SUBSTITUTION` | `VALIDATED` | tga/tif/tiff/png -> paa | AST-015 | `8a990e0` |
 | `VIRTUAL_PATH_CANONICAL` | `VALIDATED` | 12,680 references resolved across 512 PBO prefixes, 0 collisions | AST-015 | `8a990e0` |
+| `FLAG_BITS_KNOWN_VS_UNKNOWN` | `VALIDATED` | 12 of 12 shipped P3D fixtures surveyed, 0 carrying a vertex or face bit this build cannot name; the survey asserts it read every file it listed | AST-018 | `84d00a0` |
+| `LOD_PURPOSE_TYPED` | `VALIDATED` | 14 named sentinels plus the 3 crewed-view distances classify by type; a resolution at or above 1e5 matching no sentinel classifies Unknown rather than Visual, so it stays undrawable | AST-018 | `84d00a0` |
+| `MLOD_PROXIES` | `UNVERIFIED` | proxies now reach the IR from 3 fixtures with identity, selection and an orthonormal frame invariant under all 6 vertex permutations; 0 rendered, because retail CWA content is ODOL | AST-018 | `84d00a0` |
+| `MLOD_SELECTION_WEIGHTS` | `CAPTURED_NOT_INTERPRETED` | the source weight byte is preserved parallel to the vertex indices and was previously discarded entirely; its scale is not established, so NamedSelection::vertexWeights stays empty on the MLOD path and behaviour is unchanged | AST-018 | `84d00a0` |
+| `SECTION_FACE_RANGE` | `PARTIAL` | the ODOL 73 path publishes firstFace/faceCount in source face order, checked against the LOD's declared face-data size; the ODOL v7 path reports faceRangeKnown false rather than an unconverted number | AST-018 | `84d00a0` |
+| `SOURCE_GEOMETRY_BASIS` | `PARTIAL` | winding measured on the ODOL 73 path (16 of 16 faces, unanimous), established from the engine's own loader on SP3X, assumed on P3DM; tangent handedness and the centre-of-mass relationship are recorded as Unknown on every path | AST-018 | `84d00a0` |
 | `DERIVED_ASSET_KEY` | `VALIDATED` | content+version+options, order-independent | AST-020 | `040fc9f` |
 | `DERIVED_ASSET_STORE` | `UNSUPPORTED` | identity only; nothing written or reloaded | AST-020 | `040fc9f` |
 | `CAPABILITY_MATRIX` | `VALIDATED` | 28 claims across 10 tickets, each carrying its own denominator | AST-021 | `682e3ee` |
