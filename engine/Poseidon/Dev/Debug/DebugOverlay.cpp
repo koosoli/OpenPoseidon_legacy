@@ -1710,47 +1710,217 @@ void DrawInputContextDiagnostics()
 }
 } // namespace
 
+// Position diagnostics.
+//
+// "Where am I, where am I looking, and what am I looking at" was one line: the player's position
+// and heading. That answers the first question only, and the questions that actually come up while
+// debugging a render are the other two -- a cloud artifact, a material, a LOD pop all need the
+// CAMERA's position and the point it is aimed at, which is not the player's.
+//
+// Reported in SQF's axis order [east, north, elevation] throughout. mission.sqm stores
+// {east, elevation, north}; mixing the two up is an easy way to place something a long way from
+// where it was meant to go, so the order is stated in the UI rather than assumed.
+namespace
+{
+int  gPosPrecision = 2;
+bool gPosCompactHud = false;
+
+// The look-at point: where the view ray first meets the terrain. A camera readout that stops at
+// "facing 199.9 degrees" cannot tell you which hill you are pointed at, and the terrain hit is the
+// answer to that. Coarse fixed-step march then a bisection refine -- this runs once per frame for a
+// debug panel, so clarity beats a cleverer intersector.
+bool CameraTargetPoint(const Vector3& origin, const Vector3& dir, float maxDist, Vector3& hit, float& hitDist)
+{
+    if (!GLandscape)
+        return false;
+    const float step = 25.0f;
+    float       prev = 0.0f;
+    bool        prevAbove = true;
+    for (float t = step; t <= maxDist; t += step)
+    {
+        const Vector3 p = origin + dir * t;
+        const bool    above = p.Y() > GLandscape->SurfaceY(p.X(), p.Z());
+        if (!above && prevAbove && t > step)
+        {
+            float lo = prev, hi = t;
+            for (int i = 0; i < 24; ++i)
+            {
+                const float   mid = 0.5f * (lo + hi);
+                const Vector3 pm = origin + dir * mid;
+                if (pm.Y() > GLandscape->SurfaceY(pm.X(), pm.Z()))
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            hitDist = 0.5f * (lo + hi);
+            hit = origin + dir * hitDist;
+            return true;
+        }
+        prevAbove = above;
+        prev = t;
+    }
+    return false;
+}
+
+void FormatVec(char* out, size_t n, const char* label, const Vector3& v, int prec)
+{
+    // SQF order: [east, north, elevation] == [X, Z, Y] internally.
+    snprintf(out, n, "%s [%.*f, %.*f, %.*f]", label, prec, v.X(), prec, v.Z(), prec, v.Y());
+}
+
+struct PositionLines
+{
+    char player[192] = {};
+    char cam[192] = {};
+    char tgt[192] = {};
+    char time[128] = {};
+    bool valid = false;
+};
+
+PositionLines BuildPositionLines(int prec)
+{
+    PositionLines out;
+    if (!GWorld || !GWorld->CameraOn())
+        return out;
+    out.valid = true;
+    const Object* player = GWorld->PlayerOn();
+    const Object* camObj = GWorld->CameraOn();
+
+    // The RENDER camera where one exists: that is the transform the frame was drawn with, and it is
+    // not always the camera object's own (attached views, effects). Falls back to the object.
+    Vector3 camPos = camObj->Position();
+    Vector3 camDir = camObj->Direction();
+    const char* camSource = "object";
+    if (GScene && GScene->GetCamera())
+    {
+        camPos = GScene->GetCamera()->Position();
+        camDir = GScene->GetCamera()->Direction();
+        camSource = "scene";
+    }
+
+    if (player)
+    {
+        const Vector3 p = player->Position();
+        // Heading the same way getDir does it: atan2(dir.x, dir.z) in degrees, wrapped to [0,360)
+        // so it matches what the console reports.
+        const Vector3 d = player->Direction();
+        float         heading = atan2(d.X(), d.Z()) * (180.0f / H_PI);
+        if (heading < 0.0f)
+            heading += 360.0f;
+        char v[128];
+        FormatVec(v, sizeof(v), "player", p, prec);
+        snprintf(out.player, sizeof(out.player), "%s  dir %.1f", v, heading);
+    }
+    else
+    {
+        snprintf(out.player, sizeof(out.player), "player <none>");
+    }
+
+    // Azimuth on the same convention as the player heading; elevation is the signed angle out of the
+    // horizontal plane, positive looking up.
+    float az = atan2(camDir.X(), camDir.Z()) * (180.0f / H_PI);
+    if (az < 0.0f)
+        az += 360.0f;
+    const float horiz = sqrtf(camDir.X() * camDir.X() + camDir.Z() * camDir.Z());
+    const float el = atan2(camDir.Y(), horiz > 1e-6f ? horiz : 1e-6f) * (180.0f / H_PI);
+
+    {
+        char v[128];
+        FormatVec(v, sizeof(v), "cam", camPos, prec);
+        snprintf(out.cam, sizeof(out.cam), "%s  az %.1f  el %.1f  (%s)", v, az, el, camSource);
+    }
+
+    Vector3     tgt;
+    float       tgtDist = 0.0f;
+    const bool  hasTgt = CameraTargetPoint(camPos, camDir, 12000.0f, tgt, tgtDist);
+    if (hasTgt)
+    {
+        char v[128];
+        FormatVec(v, sizeof(v), "tgt", tgt, prec);
+        snprintf(out.tgt, sizeof(out.tgt), "%s  dist %.1f m", v, tgtDist);
+    }
+    else
+    {
+        snprintf(out.tgt, sizeof(out.tgt), "tgt <sky>  (no terrain within 12 km)");
+    }
+
+    // Seconds since mission epoch. Time has no direct accessor; differencing against a
+    // default-constructed Time is how the rest of the engine turns it into a float.
+    snprintf(out.time, sizeof(out.time), "t %.3f s", Glob.time - Foundation::Time());
+    return out;
+}
+
+void DrawPositionDiagnostics()
+{
+    ImGui::TextUnformatted("Position");
+    ImGui::Separator();
+    const PositionLines out = BuildPositionLines(gPosPrecision);
+    if (!out.valid)
+    {
+        ImGui::TextDisabled("no world loaded");
+        return;
+    }
+
+    ImGui::TextUnformatted(out.player);
+    ImGui::SameLine();
+    if (ImGui::Button("Copy##pl"))
+        ImGui::SetClipboardText(out.player);
+
+    ImGui::TextUnformatted(out.cam);
+    ImGui::SameLine();
+    if (ImGui::Button("Copy##cam"))
+        ImGui::SetClipboardText(out.cam);
+
+    ImGui::TextUnformatted(out.tgt);
+    ImGui::SameLine();
+    if (ImGui::Button("Copy##tgt"))
+        ImGui::SetClipboardText(out.tgt);
+
+    ImGui::TextUnformatted(out.time);
+
+    char all[768];
+    snprintf(all, sizeof(all), "%s | %s | %s | %s", out.player, out.cam, out.tgt, out.time);
+    if (ImGui::Button("Copy all##pos"))
+        ImGui::SetClipboardText(all);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110.0f);
+    ImGui::SliderInt("decimals", &gPosPrecision, 0, 4);
+    ImGui::Checkbox("Compact HUD overlay", &gPosCompactHud);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Draw the same numbers as a small always-on overlay,\nfor lining a shot up without the "
+                          "panel covering it.");
+}
+// The compact always-on readout, drawn on the foreground list when the panel is closed. Same
+// numbers, same builder — a second copy of the maths would be a second thing to keep correct.
+void DrawPositionHudOverlay()
+{
+    if (!gPosCompactHud)
+        return;
+    const PositionLines out = BuildPositionLines(gPosPrecision);
+    if (!out.valid)
+        return;
+    ImDrawList*   draw = ImGui::GetForegroundDrawList();
+    const ImU32   fg = IM_COL32(255, 255, 255, 220);
+    const ImU32   bg = IM_COL32(0, 0, 0, 110);
+    const char*   rows[4] = {out.player, out.cam, out.tgt, out.time};
+    const float   lh = ImGui::GetTextLineHeightWithSpacing();
+    float         wmax = 0.0f;
+    for (const char* r : rows)
+        wmax = std::max(wmax, ImGui::CalcTextSize(r).x);
+    const ImVec2 org(10.0f, 10.0f);
+    draw->AddRectFilled(ImVec2(org.x - 4.0f, org.y - 3.0f), ImVec2(org.x + wmax + 6.0f, org.y + lh * 4.0f + 3.0f), bg);
+    for (int i = 0; i < 4; ++i)
+        draw->AddText(ImVec2(org.x, org.y + lh * float(i)), fg, rows[i]);
+}
+} // namespace
+
 void DrawGameTab()
 {
     // Player/camera position, with a copy button. Reading coordinates out of the
     // SQF console meant `getPos player`, which returns an array — and until the
     // formatter above, arrays printed as nothing. A readout is also simply less
     // work than typing a command to answer "where am I".
-    ImGui::TextUnformatted("Position");
-    ImGui::Separator();
-    if (GWorld && GWorld->CameraOn())
-    {
-        char line[192] = {};
-        const Object* player = GWorld->PlayerOn();
-        const Object* cam = GWorld->CameraOn();
-        if (player)
-        {
-            const Vector3 p = player->Position();
-            // Reported as SQF sees it: [east, north, elevation]. mission.sqm
-            // stores {east, elevation, north}, and mixing the two up is an easy
-            // way to place something a long way from where it was meant to go.
-            // Heading the same way getDir does it: atan2(dir.x, dir.z) in degrees,
-            // wrapped to [0,360) so it matches what the console reports.
-            const Vector3 d = player->Direction();
-            float heading = atan2(d.X(), d.Z()) * (180.0f / H_PI);
-            if (heading < 0.0f)
-                heading += 360.0f;
-            snprintf(line, sizeof(line), "player [%.2f, %.2f, %.2f]  dir %.2f", p.X(), p.Z(), p.Y(), heading);
-        }
-        else
-        {
-            const Vector3 p = cam->Position();
-            snprintf(line, sizeof(line), "camera [%.2f, %.2f, %.2f]  (no player)", p.X(), p.Z(), p.Y());
-        }
-        ImGui::TextUnformatted(line);
-        ImGui::SameLine();
-        if (ImGui::Button("Copy##pos"))
-            ImGui::SetClipboardText(line);
-    }
-    else
-    {
-        ImGui::TextDisabled("no world loaded");
-    }
+    DrawPositionDiagnostics();
     ImGui::Spacing();
 
     ImGui::TextUnformatted("Language");
@@ -5154,6 +5324,7 @@ void NewFrame()
     if (!s_visible)
     {
         DrawZeusInteractionOverlay();
+        DrawPositionHudOverlay();
         if (s_zeusCursor)
             s_zeusCursor->DrawCursor();
     }
