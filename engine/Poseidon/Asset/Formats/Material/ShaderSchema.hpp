@@ -40,6 +40,7 @@ enum class MaterialSlot
     NormalMap,
     Detail,
     Macro,
+    MacroAmbient,
     AmbientShadow,
     SpecularDetail,
     Fresnel,
@@ -55,6 +56,7 @@ inline const char* ToString(MaterialSlot slot)
         case MaterialSlot::NormalMap: return "NormalMap";
         case MaterialSlot::Detail: return "Detail";
         case MaterialSlot::Macro: return "Macro";
+        case MaterialSlot::MacroAmbient: return "MacroAmbient";
         case MaterialSlot::AmbientShadow: return "AmbientShadow";
         case MaterialSlot::SpecularDetail: return "SpecularDetail";
         case MaterialSlot::Fresnel: return "Fresnel";
@@ -128,6 +130,7 @@ inline std::string SuffixRole(const std::string& raw)
     if (suffix == "nohq" || suffix == "no" || suffix == "novhq") return "NormalMap";
     if (suffix == "dt") return "Detail";
     if (suffix == "mc" || suffix == "mco") return "Macro";
+    if (suffix == "mca") return "MacroAmbient";
     if (suffix == "as" || suffix == "adshq") return "AmbientShadow";
     if (suffix == "smdi" || suffix == "sm") return "SpecularDetail";
     return {};
@@ -167,7 +170,42 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
             MaterialSlot::Fresnel,        // 6
             MaterialSlot::Environment,    // 7
         }};
-    static const ShaderSchema* kAll[] = {&kNormal, &kNormalMap, &kSuper};
+    // The Arma 3 vegetation families. MEASURED across the 547 TreeAdv-family
+    // materials in the four shipped vegetation PBOs (plants_f, vegetation_f_exp,
+    // vegetation_f_enoch, vegetation_f_argo), and corroborated by BI's "Arma 3:
+    // Trees" material documentation.
+    //
+    //   TreeAdv       n=369  Stage1 369/369 normal (301 _nohq, 62 procedural nohq,
+    //                                        2 _no, 1 procedural no; 3 _ca outliers)
+    //                        Stage2 369/369 MCA   (228 procedural mca, 129 _mca,
+    //                                        8 _mc, 3 procedural mc, 1 procedural dt)
+    //                        Stage0 absent in 369/369 -- the face texture is the colour
+    //   TreeAdvTrunk  n=172  Stage0   4/172 _co
+    //                        Stage1 172/172 normal (158 _nohq, 11 _no)
+    //                        Stage2 172/172 MCA   (65 procedural mca, 64 _mca, 39 _mc,
+    //                                        4 procedural mc)
+    //   TreeAdvTrans  n=6    same shape as TreeAdv
+    //
+    // Stage2 gets its own slot rather than being folded into Super's Macro. The
+    // families tag it MCA, not MC, in 357 of 547 procedural stages -- a distinct
+    // name the corpus keeps distinct -- and asserting the two are the same texture
+    // semantic is a claim with its own evidence requirement. The `_mc`-suffixed
+    // minority land here too and report a suffix disagreement rather than being
+    // rerouted, because the slot the family assigns is what decides the role.
+    //
+    // Nothing beyond Stage2 is mapped: exactly one TreeAdv material in the corpus
+    // declares Stage3..Stage7, and one witness does not describe a family.
+    static const ShaderSchema kTreeAdv{
+        "TreeAdv",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::MacroAmbient}};
+    static const ShaderSchema kTreeAdvTrunk{
+        "TreeAdvTrunk",
+        {MaterialSlot::BaseColour, MaterialSlot::NormalMap, MaterialSlot::MacroAmbient}};
+    static const ShaderSchema kTreeAdvTrans{
+        "TreeAdvTrans",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::MacroAmbient}};
+    static const ShaderSchema* kAll[] = {&kNormal,  &kNormalMap,    &kSuper,
+                                         &kTreeAdv, &kTreeAdvTrunk, &kTreeAdvTrans};
 
     for (const ShaderSchema* schema : kAll)
     {

@@ -101,6 +101,13 @@ inline SlotChannelMap ChannelsForSlot(MaterialSlot slot)
             map.alpha  = TextureChannel::A;
             break;
 
+        case MaterialSlot::MacroAmbient:
+            // MCA. BI's tree documentation describes a macro in RGB with ambient
+            // occlusion in alpha, but that packing has not been measured here the
+            // way NOHQ/SMDI/AS were, and a documented layout is not a measurement.
+            // No channel is claimed until it is sampled.
+            break;
+
         case MaterialSlot::Fresnel:
             // Generated, not sampled as colour: `#(ai,64,64,1)fresnel(2.0,0.1)` is a
             // lookup built from its parameters, so no channel map applies.
