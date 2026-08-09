@@ -1091,6 +1091,10 @@ class ShapeBank
 	LODShapeWithShadow *NewUnique(const char *name, bool reversed, bool shadow);
 
 	void OptimizeAll();
+	// Build one shape's vertex buffers, for a shape that arrived after the bulk
+	// OptimizeAll pass.  Without this a late-loaded shape has no _buffer, so
+	// Shape::Draw's T&L gate rejects it and it falls to the software path, which
+	// draws it unlit and with no material.
 	void OptimizeOneShape(LODShape *shape);
 	void ReleaseAllVBuffers();
 
@@ -1107,6 +1111,10 @@ class ShapeBank
 	private:
 	::Poseidon::AssetCache<LODShapeWithShadow, Link<LODShapeWithShadow>> _cache;
 	Foundation::MemoryDomainProbe _memProbe;
+	// True once OptimizeAll has run at least once, i.e. world load is past the
+	// point where it builds every cached shape's vertex buffers in bulk.  A shape
+	// created after that missed the bulk pass and must be optimized on its own.
+	bool _bulkOptimizeDone = false;
 };
 
 extern ShapeBank Shapes;

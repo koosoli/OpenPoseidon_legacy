@@ -371,6 +371,16 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
     }
     _cache.Insert(cacheKey, Link<LODShapeWithShadow>(shape));
 
+    // A shape loaded after world load missed OptimizeAll's bulk pass, so nothing
+    // would ever build its vertex buffers and Shape::Draw's T&L gate would reject
+    // it for the rest of its life.  Optimize it now.  Before the bulk pass this is
+    // deliberately skipped: OptimizeAll releases and rebuilds every buffer anyway,
+    // so doing it per shape during map load would be pure duplicated work.
+    if (_bulkOptimizeDone)
+    {
+        OptimizeOneShape(shape);
+    }
+
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);
     if (_perfShapeLoadMs >= 1.0)
     {
@@ -523,11 +533,24 @@ void ShapeBank::OptimizeAll()
         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
     }
     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
+    // From here on, a newly loaded shape has to build its own buffers (ShapeBank::New).
+    _bulkOptimizeDone = true;
+}
+
+void ShapeBank::OptimizeOneShape(LODShape* shape)
+{
+    if (shape)
+    {
+        shape->OptimizeRendering();
+    }
 }
 
 void ShapeBank::Clear()
 {
     _cache.Clear();
+    // The next world populates a fresh cache before its own bulk optimization
+    // pass.  Do not optimize every incoming shape individually in that window.
+    _bulkOptimizeDone = false;
 }
 
 ShapeBank Shapes;

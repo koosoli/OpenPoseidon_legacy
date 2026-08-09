@@ -3,7 +3,7 @@
 **Date:** 2026-08-09
 **Related:** supersedes the shadow-volume hypothesis in
 `RND-alpha-routing-misclassifies-a3-foliage-20260809.md`; bears on MAT-030 and MAT-020
-**Status:** Root cause established and confirmed by intervention. The fix is not yet chosen.
+**Status:** Root cause established, confirmed by intervention, and fixed (option 1 below).
 
 ## What was claimed before, and what is now disproved
 
@@ -108,7 +108,7 @@ load, not just `--test-model` fixtures — a mid-mission `createVehicle`, a dest
 Whether those are affected in normal play has not been tested, and should be before the fix is
 scoped.
 
-## Fix options (not yet chosen)
+## Decision: optimize every shape that arrives after the bulk pass
 
 1. **Define and call `ShapeBank::OptimizeOneShape`** from `ShapeBank::New` when the world is
    already loaded. Smallest change, matches the declaration someone already intended, but needs
@@ -122,5 +122,7 @@ scoped.
    `OptimizeRendering`'s special-level and light-hint exclusions, which is where the subtlety
    in that function lives.
 
-Option 1 is the closest fit to the existing design. Option 2 should not be taken without a
-world-load timing measurement.
+Option 1 is implemented. `ShapeBank::OptimizeOneShape` is defined and called from
+`ShapeBank::New` after `OptimizeAll()` has completed. `ShapeBank::Clear()` resets that lifecycle
+marker, so loading a subsequent world still uses its own single bulk pass rather than optimizing
+every shape twice. This applies to all late-loaded shapes, not only `--test-model`.
