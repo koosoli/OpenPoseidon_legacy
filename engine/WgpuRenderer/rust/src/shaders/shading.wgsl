@@ -101,6 +101,22 @@ fn shade(
         // world_pos is camera-relative (camera at the origin), so the front hemisphere faces it.
         nrm = select(n_geo, -n_geo, dot(n_geo, world_pos) > 0.0);
     }
+    // Two-sided foliage. A leaf card is a thin surface authored with ONE normal, and the canopy
+    // is built from cards facing every direction, so roughly half of any tree is seen from its
+    // back face. Those keep a normal pointing away from the viewer: N.L collapses to zero and the
+    // DIRECTIONAL sky-irradiance ambient below is sampled along a normal aimed at the ground, so
+    // the card renders near-black regardless of how lit the tree is. That is the dark wedge on a
+    // canopy, and it moves with the camera because which cards are back-facing moves with it.
+    //
+    // Flipping the normal toward the viewer is what "two-sided" means for a surface with no
+    // inside. Same idiom and same justification as the degenerate-normal fallback directly above,
+    // including its use of world_pos as the camera-relative view vector.
+    //
+    // Gated on is_foliage so it reaches only vegetation canopy cutouts (MapType-gated, alpha-
+    // tested) -- a fence, a road decal or a character must keep its authored facing.
+    if (is_foliage && dot(nrm, world_pos) > 0.0) {
+        nrm = -nrm;
+    }
     let ndotl = max(dot(nrm, -frame.sun_dir_world.xyz), 0.0);
     let sky_lit = frame.sun_diffuse.w > 0.5;
     // CSM shadow (near contact). Folded into the sun removal on the sky-lit path, kept as a
