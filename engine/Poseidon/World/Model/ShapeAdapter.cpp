@@ -10,6 +10,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <stdint.h>
 #include <string.h>
 #include <string>
@@ -540,6 +541,23 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 shapeSections[s].end = nativePos;
             }
             faceStream.SetSections(shapeSections.data(), nSections);
+            // Pair the explicit WGPU material trace with its model/LOD origin.
+            // Shape itself carries no source path at draw time, so this is the
+            // only reliable way to distinguish a visible LOD from its similarly
+            // numbered shadow LOD without changing runtime data structures.
+            if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"); trace && std::strcmp(trace, "__trace__") == 0)
+            {
+                for (int s = 0; s < nSections; ++s)
+                {
+                    const auto& sec = mesh.sections[s];
+                    const char* materialPath = sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size()
+                                                   ? mesh.materials[sec.materialIndex].materialPath.c_str()
+                                                   : "<unassigned>";
+                    LOG_INFO(Graphics, "ShapeAdapter material trace: model={} lod={} shape={} section={} material={}",
+                             model.sourcePath, i, static_cast<const void*>(shape->_lods[i]), s,
+                             materialPath && *materialPath ? materialPath : "<none>");
+                }
+            }
         }
         else
         {

@@ -1752,18 +1752,20 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // model/material production path uses. Only Stage1 is consumed in this first
     // slice; the remaining controls are intentionally diagnostic no-ops until
     // their contributions are implemented one at a time.
-    // The draw-time Shape intentionally has no source-model name.  Section RVMAT
-    // paths are stable production identities and are present on the test rock.
+    // The draw-time Shape has no source-model name.  Its address is nevertheless
+    // stable for the frame and correlates with the opt-in ShapeAdapter trace;
+    // section numbers alone repeat across unrelated visible and shadow LODs.
     const ShapeSection& debugSection = sMesh.GetSection(beg);
     const char* debugMaterialPath = debugSection.surfMat ? debugSection.surfMat->GetName().Data() : nullptr;
     if (_materialDebugRvmatMatch == "__trace__")
     {
-        const std::string traceKey = std::to_string(beg) + ":" +
+        const auto shapeId = reinterpret_cast<uintptr_t>(&sMesh);
+        const std::string traceKey = std::to_string(shapeId) + ":" + std::to_string(beg) + ":" +
                                      (debugMaterialPath ? debugMaterialPath : "<none>");
         static std::unordered_set<std::string> loggedSectionTraces;
         if (loggedSectionTraces.insert(traceKey).second)
-            LOG_INFO(Graphics, "Wgpu material trace: section={} RVMAT={}", beg,
-                     debugMaterialPath ? debugMaterialPath : "<none>");
+            LOG_INFO(Graphics, "Wgpu material trace: shape={} section={} RVMAT={}",
+                     static_cast<const void*>(&sMesh), beg, debugMaterialPath ? debugMaterialPath : "<none>");
     }
     const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
     const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
