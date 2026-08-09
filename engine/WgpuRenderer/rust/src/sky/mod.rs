@@ -278,6 +278,8 @@ pub struct Sky {
     cloud_shadow_strength: f32,
     cloud_shadow_map_params: [f32; 4],
     star_intensity: f32,
+    /// Lens-flare gain. 0 disables the effect outright (the shader early-outs).
+    lens_flare: f32,
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1135,6 +1137,7 @@ impl Sky {
             // complaint. Additive on top of the authored night floor, so it brightens nothing
             // during the day -- night_blend gates it to zero while the sun is up.
             star_intensity: 1.0,
+            lens_flare: 1.0,
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN, 0.85],
             froxel_view,
             froxel_shadow_layout,
@@ -1172,6 +1175,10 @@ impl Sky {
     /// the shaders that SAMPLE the map. Two independently computed mappings would drift.
     pub fn cloud_shadow_mapping_current(&self) -> [f32; 4] {
         self.cloud_shadow_map_params
+    }
+
+    pub fn set_lens_flare(&mut self, intensity: f32) {
+        self.lens_flare = intensity.clamp(0.0, 4.0);
     }
 
     pub fn set_star_intensity(&mut self, intensity: f32) {
@@ -1220,7 +1227,7 @@ impl Sky {
             cloud2: sky.cloud2,
             cloud3: sky.cloud3,
             cloud4: sky.cloud4,
-            output: [self.linear, self.star_intensity, 0.0, 0.0],
+            output: [self.linear, self.star_intensity, self.lens_flare, 0.0],
             cam_pos,
             cloud_shadow: self.cloud_shadow_mapping(cam_pos),
         };

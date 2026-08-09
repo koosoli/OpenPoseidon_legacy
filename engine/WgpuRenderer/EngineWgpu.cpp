@@ -3891,6 +3891,7 @@ void EngineWgpu::PushRenderParams()
     {
         wgr_set_cloud_shadow_strength(_renderer, std::clamp(_sky.cloudShadowStrength, 0.0f, 1.0f));
         wgr_set_star_intensity(_renderer, std::clamp(_sky.starIntensity, 0.0f, 4.0f));
+        wgr_set_lens_flare(_renderer, std::clamp(_sky.lensFlare, 0.0f, 4.0f));
     }
 
     // Long-distance terrain sun-shadow (wgpu-only); strength 0 = disabled. The renderer

@@ -2271,6 +2271,19 @@ pub unsafe extern "C" fn wgr_set_planar_reflection_pad(renderer: *mut WgrRendere
 /// Brightness of the procedural star field. 0 = none. Gated to night by sun altitude in the
 /// shader, so this never affects a daytime sky.
 ///
+/// Lens-flare gain. 0 disables the effect; the shader early-outs on it.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_lens_flare(renderer: *mut WgrRenderer, intensity: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_lens_flare(intensity);
+}
+
 /// # Safety
 /// `renderer` must be a live renderer from `wgr_create`.
 #[unsafe(no_mangle)]

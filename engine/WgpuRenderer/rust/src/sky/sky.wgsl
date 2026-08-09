@@ -869,6 +869,42 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     let bg = sky_radiance(dir); // local sky colour for the cloud ambient
     let cloud = march_clouds(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg,
                              CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
+
+    // ---- Lens flare -----------------------------------------------------------------------
+    // Written here rather than as its own pass because this shader already holds everything a
+    // correctly-occluded flare needs: the sun direction, this pixel's view ray, the cloud
+    // transmittance along it, and scene_dist -- the distance to the opaque surface, which IS the
+    // terrain-and-buildings occlusion test. A separate full-screen pass would have had to
+    // re-derive all four.
+    //
+    // Occlusion is therefore not approximated:
+    //   * geometry -- a pixel whose ray hits something before the sky has scene_dist < 1e11, and
+    //     the flare is cut there, so it cannot leak through a mountain or a wall;
+    //   * cloud -- cloud.trans is the transmittance this ray already measured through the deck, so
+    //     a thick cloud crossing the sun dims the flare by exactly what it dims the sun by, and it
+    //     does so continuously, with no pop at the cloud edge;
+    //   * horizon -- faded out as the sun sets rather than cut, so it does not blink at the moment
+    //     the disc touches the ground.
+    //
+    // Restrained on purpose: a tight core plus one wide halo, no ghost chain. The intensity rides
+    // sky.output.z so Dev Tools can turn it off entirely.
+    let flare_gain = sky.output.z;
+    if (flare_gain > 0.0 && scene_dist > 1e11) {
+        let cos_sun = dot(dir, sun);
+        if (cos_sun > 0.9) {
+            // Angular falloff, not a screen-space sprite: this stays correct at any FOV and needs
+            // no projection of the sun into screen space.
+            let core = pow(clamp((cos_sun - 0.9) / 0.1, 0.0, 1.0), 12.0);
+            let halo = pow(clamp((cos_sun - 0.9) / 0.1, 0.0, 1.0), 2.5) * 0.28;
+            // Below the horizon the sun is gone; fade over a few degrees so nothing snaps.
+            let horizon = smoothstep(-0.05, 0.05, sun.y);
+            let sun_col = sample_transmittance(pos, sun) * (sky.sun_dir.w * sky.params.y);
+            let strength = (core + halo) * horizon * cloud.trans * flare_gain;
+            // Added to the inscatter lane, which the composite already adds over the scene, so the
+            // flare needs no blend state of its own.
+            return vec4<f32>(cloud.inscatter + sun_col * strength * 0.02, cloud.trans);
+        }
+    }
     return vec4<f32>(cloud.inscatter, cloud.trans);
 }
 

@@ -253,7 +253,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // sampling inside non-uniform flow is undefined. The final base/normal samples below stay
     // implicit-mip and unconditional, so their derivatives remain valid.
     var uv = in.uv;
-    if (material.normal_map.z > 0.5) {
+    // NOT on alpha-tested surfaces. The parallax offset moves the uv the BASE colour is sampled
+    // at, and the cutout test below runs on that sample's alpha -- so on a cutout texture the
+    // shifted uv can land in a transparent region and discard the pixel, punching see-through
+    // holes in vehicles and foliage. Displacing a surface whose silhouette is defined by its alpha
+    // is wrong in any case: the hole would move with the view while its edge stayed put.
+    // alpha_ref is the existing cutout threshold, so this costs nothing to ask.
+    if (material.normal_map.z > 0.5 && alpha_ref <= 0.0) {
         // Tangent frame for the view vector, derived the same way the shading frame below is, so
         // the displacement runs along the surface's real UV directions.
         let duv_dx = dpdx(in.uv);

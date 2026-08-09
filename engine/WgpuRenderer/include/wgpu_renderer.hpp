@@ -1506,6 +1506,7 @@ extern "C"
 
     /* Brightness of the procedural star field. 0 = none. Gated to night by sun altitude in the
        shader, so it never affects a daytime sky. */
+    WGR_API void wgr_set_lens_flare(WgrRenderer* renderer, float intensity);
     WGR_API void wgr_set_star_intensity(WgrRenderer* renderer, float intensity);
 
     WGR_API void wgr_set_cloud_shadow_strength(WgrRenderer* renderer, float strength);

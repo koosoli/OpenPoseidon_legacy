@@ -1478,6 +1478,10 @@ class Engine : public IGraphicsEngine
         // altitude in the shader, and added before the cloud composite so a deck covers the stars
         // the way it covers the sky behind them.
         float starIntensity = 1.0f;
+        // Occlusion-aware lens flare. 0 turns it off entirely; the shader early-outs, so off
+        // costs nothing. Occluded by terrain and objects via the scene depth the cloud pass
+        // already reads, and dimmed by cloud through that ray's own transmittance.
+        float lensFlare = 1.0f;
     };
     // True on backends with a procedural sky pass (wgpu); gates the ImGui Sky tab.
     virtual bool SupportsSky() const { return false; }

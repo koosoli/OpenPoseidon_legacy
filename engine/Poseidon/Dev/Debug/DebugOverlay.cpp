@@ -3955,6 +3955,22 @@ void DrawSkyTab()
     ImGui::Separator();
     ImGui::TextUnformatted("Stars");
     changed |= ImGui::SliderFloat("Star brightness", &s.starIntensity, 0.0f, 4.0f, "%.2f");
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Lens flare");
+    bool flareOn = s.lensFlare > 0.0f;
+    if (ImGui::Checkbox("Lens Flare", &flareOn))
+    {
+        s.lensFlare = flareOn ? 1.0f : 0.0f;
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Occluded by terrain and objects via the scene depth the cloud pass already\n"
+                          "reads, and dimmed by cloud through that ray's own transmittance -- so a thick\n"
+                          "cloud crossing the sun fades it out continuously rather than popping.\n"
+                          "Off costs nothing: the shader early-outs on the gain.");
+    if (flareOn)
+        changed |= ImGui::SliderFloat("Flare intensity", &s.lensFlare, 0.05f, 4.0f, "%.2f");
     ImGui::TextDisabled("Procedural star field, gated to night by sun altitude -- it cannot affect a daytime sky. "
                         "Added before the cloud composite, so a deck covers the stars the way it covers the sky "
                         "behind them. It wheels with the sun's bearing, which is the celestial clock, so stars "

@@ -952,6 +952,10 @@ impl Renderer {
         self.sky.set_star_intensity(intensity);
     }
 
+    fn set_lens_flare(&mut self, intensity: f32) {
+        self.sky.set_lens_flare(intensity);
+    }
+
     fn set_cloud_shadow_strength(&mut self, strength: f32) {
         self.sky.set_cloud_shadow_strength(strength);
     }
