@@ -157,3 +157,54 @@ forwards from the loop.
 
 Until then the override remains correct and inert on this object, and none of the four
 reported symptoms has an established cause.
+
+---
+
+# Night brightness: located to a draw path, not to a material (same day)
+
+Traced by instrumenting `EngineWgpu::DrawSectionTL` directly, then reverted.
+
+**In daylight**, both of the pine's sections reach the material-aware path:
+
+```
+TRACEROUTE mat=...t_pinusp3s_f_lod1_noatlas.rvmat   alphaClass=0  filter=1
+TRACEROUTE mat=...t_pinusp3s_f_lod1_polyplane.rvmat alphaClass=2  filter=1
+```
+
+Two things fall out of that line alone. The foliage really is `alphaClass=2` (Blend), so
+the misclassification at the top of this document is confirmed at runtime; and it is being
+drawn during the `OpaqueAndCutout` pass (`filter=1`), which is only possible because the
+cutout-family override demoted it. The override works.
+
+**At night, no Arma 3 section reaches `DrawSectionTL` at all** — not the pine's, not any
+other. A probe widened to match any material or texture path containing `a3\` logged
+nothing for the whole frame.
+
+The tree is nevertheless drawn, and is the brightest thing in the frame. Removing
+`--test-model` from the same night capture drops the tree region's mean from **16.60 to
+0.60**, so that grey mass is unambiguously the pine.
+
+Eliminated along the way: the software-transform path (`EngineWgpu::DrawSection`) fires
+identically in both captures — the same three calls of 42,096 / 32,808 / 52 faces — so the
+tree is not being routed there.
+
+## Where that points
+
+Something draws the tree at night through a path that binds no material, which is exactly
+consistent with every earlier null result: no material means the default white `_curMaterial`,
+which is why zeroing `emmisive`, setting it to bright red, disabling the normal map and
+demoting the alpha route all changed nothing at night.
+
+The remaining candidate is the **shadow path**. `Shadow.cpp` draws shadow volumes through
+`GEngine->DrawSectionTL` under `IsShadow`, with no texture and no `surfMat` — which is
+precisely the shape of section every probe here was filtering out. A shadow volume rendered
+as visible unlit geometry would look like what the capture shows: a uniform grey silhouette
+with the tree's outline, brighter than an unlit night scene.
+
+If that is what is happening, it is the same defect as the owner's first report seen from
+the other side — the shadow is not missing, it is being drawn in the wrong place as visible
+geometry.
+
+**Next step**, and it is a small one: re-run the same trace filtered on sections with *no*
+texture and *no* material, comparing day and night, and check the `IsShadow` spec bit. That
+distinguishes "shadow volume drawn as geometry" from "some third path" in a single capture.
