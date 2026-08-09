@@ -195,10 +195,13 @@ fn vs_main(
         let gz = select(-d0111, d1000, triA) * s;
         normal_ws = vec3<f32>(normal_ws.x - gx * normal_ws.y, normal_ws.y, normal_ws.z - gz * normal_ws.y);
     }
-    // Legacy leaf cards have arbitrary authored normals: a visible card can point sideways or
-    // downward and receive almost no daylight or directional sky. The retained/GPU-driven path
-    // already bends cutout canopy normals toward a radial crown normal; mirror that on the direct
-    // path. sun_ambient.w carries 1=bush or 2=tree/forest, so only alpha-cut vegetation changes.
+    // REGRESSION GUARD (CWA stock-tree canopies): legacy leaf cards have arbitrary authored
+    // normals, so a visible card can point sideways or downward and receive almost no daylight
+    // or directional sky. Without this direct-path radial-crown correction, standard CWA trees
+    // such as `data3d\str buk.p3d` regress to large black canopy slabs in daylight, even though
+    // their PAC texture and alpha cutout are correct. The retained/GPU-driven path already bends
+    // cutout canopy normals this way; keep this direct-path equivalent. sun_ambient.w carries
+    // 1=bush or 2=tree/forest, so only alpha-cut vegetation changes.
     let foliage_kind = materials[instance].sun_ambient.w;
     if (alpha_ref > 0.0 && foliage_kind > 0.5) {
         let is_tree = foliage_kind > 1.5;
