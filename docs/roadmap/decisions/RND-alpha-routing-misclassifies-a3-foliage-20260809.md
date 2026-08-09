@@ -124,3 +124,36 @@ The next step is to determine which — by instrumenting where `GSectionFilter` 
 this object rather than where it is read. Until that is known, the change below is kept on
 its own merits (Arma 3 foliage *is* an alpha-tested cutout, and the histogram *is* the
 wrong authority) and is claimed to fix nothing.
+
+---
+
+# Investigation state (same day, after tracing the pass split)
+
+The two readings above have been narrowed but not closed, by instrumenting the section
+loop in `ShapeDraw.cpp` rather than reasoning about it.
+
+What the trace showed, at 01:00 with the pine placed and `WGR_GPU_DRIVEN=0`:
+
+- The section loop **does** run, and `GSectionFilter` is `OpaqueAndCutout` (1) there, so the
+  pass split is genuinely in effect on this path. Reading 1 as originally worded is wrong.
+- Every section observed early in the frame reports **`surfMat = <none>`** — no authored
+  material at all. Those are CWA world objects, which is expected, since CWA content has
+  no RVMATs.
+- A probe restricted to sections whose material path contains `polyplane` — the pine's
+  foliage material — **never fired**, across the whole frame, for any filter value.
+
+That last point is the live question and it is not yet explained. `EngineWgpu::DrawSectionTL`
+demonstrably receives the pine's `surfMat` (it logs the RVMAT path and resolves its slots),
+and `ShapeDraw` is what passes `secSurfMat` down to it. So the material reaches the
+renderer, but the section carrying it appears not to pass through the filter site being
+instrumented.
+
+The most likely explanation, untested: the A3 tree is submitted through a different section
+path than the one carrying the filter — the instanced run, the GPU-owned section skip
+(`GSkipGpuOwnedSections`), or a separate entry point in the same file — so the routing
+decision for it is taken somewhere the override does not sit. Confirming that means tracing
+from `EngineWgpu::DrawSectionTL` *backwards* to its caller for this object, rather than
+forwards from the loop.
+
+Until then the override remains correct and inert on this object, and none of the four
+reported symptoms has an established cause.
