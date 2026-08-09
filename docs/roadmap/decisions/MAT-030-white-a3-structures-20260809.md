@@ -60,3 +60,40 @@ support would not fix that model. Two different problems wear the same white.
 
 Instrument the failure branch of the Stage0 bind (handle == 0) and re-run the brick smoke.
 One capture distinguishes "slot missing at draw time" from "texture failed to upload".
+
+---
+
+# Answered: the section reaching the draw has no material (same day)
+
+Both candidate explanations above are wrong, and the instrumentation that settled it is
+now permanent — the bind's failure branches log instead of failing silently.
+
+Running the brick prop alone at 8 m, the only material that reaches the base-colour
+binding at all is `#RifleMetal`, the player's weapon:
+
+```
+Wgpu material: no bindable Stage0 for #RifleMetal (present=0 procedural=0 emptyPath=0)
+```
+
+The brick material never appears — not as a success, not as an upload failure, not as a
+missing slot. So `EnsureUploaded()` is not returning 0 and `Find(BaseColour)` is not
+returning null. The enclosing condition `materialBindingTarget && section.surfMat` is
+simply false, because **the section that reaches the draw carries no `surfMat`**.
+
+That is the same shape of result as the night trees, where no Arma 3 section reached
+`DrawSectionTL` either. Two symptoms, one underlying fact: the material the *harness*
+reads off the shape at load time is not the material the *draw* sees.
+
+The harness enumerates `shape->GetSection(i).surfMat` per LOD directly from the loaded
+shape, and reports `section 0 material a3\...\wip_mlod.rvmat exists=true`. The draw
+receives sections via the vertex buffer's section list. If those two disagree — different
+LOD, or a section list rebuilt without carrying `surfMat` across — everything observed
+here follows, including why the pine works (its drawn sections evidently do carry theirs)
+and the bricks do not.
+
+## Next step
+
+Log, once per shape, the drawn LOD's index alongside `section.surfMat` and the face
+texture name, and compare against what the harness enumerates for the same model. That
+identifies whether the draw is on a different LOD or on a section list that lost its
+material, and those need different fixes.

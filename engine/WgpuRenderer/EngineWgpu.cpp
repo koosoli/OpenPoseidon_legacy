@@ -1873,6 +1873,28 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             LOG_INFO(Graphics, "Wgpu material debug: Stage0 BaseColour resolved path={} uv={}",
                                      base->texture.path.canonical(), base->uvSource);
                     }
+                    else
+                    {
+                        // A model whose face texture is a `_mlod_co` placeholder has no usable
+                        // fallback: if this bind fails the section draws white, which is what the
+                        // Arma 3 castle and brick props do. Logging only the success path is why
+                        // that was invisible, so say so once per material.
+                        static std::unordered_set<std::string> loggedBaseFailures;
+                        if (loggedBaseFailures.insert(materialPath).second)
+                            LOG_WARN(Graphics,
+                                     "Wgpu material: Stage0 BaseColour did NOT bind for {} (path={} loaded={} "
+                                     "uploaded=0) -- section keeps its face texture",
+                                     materialPath, base->texture.path.canonical(), wgpuBaseTexture ? 1 : 0);
+                    }
+                }
+                else
+                {
+                    static std::unordered_set<std::string> loggedNoBaseSlot;
+                    if (loggedNoBaseSlot.insert(materialPath).second)
+                        LOG_INFO(Graphics,
+                                 "Wgpu material: no bindable Stage0 for {} (present={} procedural={} emptyPath={})",
+                                 materialPath, base ? 1 : 0, base && base->texture.isProcedural ? 1 : 0,
+                                 base && base->texture.path.empty() ? 1 : 0);
                 }
                 if (const auto* normal = translated.Find(Asset::Material::MaterialSlot::NormalMap))
                 {
