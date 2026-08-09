@@ -1148,9 +1148,10 @@ class Engine : public IGraphicsEngine
         // photo layers are present, which is the quickest way to tell whether a
         // look problem is the texture or the geometry.
         // The active photo atlas remains opt-in until its source-sheet unwrap
-        // passes visual acceptance; a bad opaque layer is worse than the stable
-        // procedural surface because geometry cannot hide its blurred background.
-        float bladeTextureStrength = 0.0f;
+        // The registered photo atlas is the normal near-grass surface. Keep this
+        // enabled by default: loading the atlas while leaving its strength at 0
+        // silently regresses to the old procedural look and hides asset QA.
+        float bladeTextureStrength = 1.0f;
         // Alpha cut-out cards: take the silhouette from the texture instead of
         // the quad, so one card can carry several blade shapes. This is the
         // Reforger-style approach and it buys shape variety without more

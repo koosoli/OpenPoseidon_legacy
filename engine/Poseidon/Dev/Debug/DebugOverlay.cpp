@@ -2919,7 +2919,7 @@ void DrawGrassTab()
         grass.shapeVariety = 1.0f;
         grass.taperJitter = 0.35f;
         grass.bendJitter = 0.30f;
-        grass.bladeTextureStrength = 0.0f;
+        grass.bladeTextureStrength = 1.0f;
         grass.alphaCards = false;
         grass.alphaCutoff = 0.5f;
         grass.cardWiden = 1.6f;
