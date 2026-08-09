@@ -1445,10 +1445,17 @@ class Engine : public IGraphicsEngine
         // sky; a domain warp breaks grid regularity. Sizes are world metres (scale = 1/size).
         float cloudShapeSize = 9300.0f;                    // base shape tile (m) — large = less tiling
         float cloudDetailSize = 1700.0f;                   // detail tile (m) — incommensurate with shape
-        float cloudWeatherSize = 16000.0f;                 // coverage-drift field size (m)
+        // 16 km was under four whole periods inside the 60 km march, and the repeats stack up into
+        // bands near the horizon where many periods share a few degrees of screen. 26 km puts ~2.3
+        // periods in view, and the warp below now displaces coverage as well as shape.
+        float cloudWeatherSize = 26000.0f;                 // coverage-drift field size (m)
         float cloudWeatherAmount = 0.4f;                   // how much weather varies local coverage (0 = uniform)
         float cloudWarpSize = 6000.0f;                     // domain-warp field size (m)
-        float cloudWarpAmount = 900.0f;                    // domain-warp displacement (m)
+        // A warp only hides a tile if it displaces by a real fraction of it. 900 m against a 9.3 km
+        // shape tile is under a tenth of a period -- enough to wobble an edge, not enough to stop
+        // the eye finding the repeat. 2200 m is a quarter of the shape tile and a twelfth of the
+        // coverage field, which breaks the grid without smearing the blobs into mush.
+        float cloudWarpAmount = 2200.0f;                   // domain-warp displacement (m)
         float cloudHgG = 0.35f;                            // forward-scatter anisotropy (silver lining)
         float cloudPowder = 1.0f;                          // Beer-Powder dark-edge strength (0..1)
         float cloudAmbient = 1.0f;                         // sky-ambient fill scale on the shadowed sides

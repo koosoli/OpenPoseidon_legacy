@@ -476,16 +476,28 @@ fn cloud_density(p: vec3<f32>) -> f32 {
         return 0.0;
     }
     var w = cloud_world(p);
+    // Domain warp FIRST, so the warped position feeds coverage as well as shape.
+    //
+    // Coverage used to be sampled at the unwarped position, and coverage is the field that carries
+    // the largest, most legible structure — where a bank is and where a gap is. Sampling one
+    // tileable volume on an unwarped grid means that structure repeats EXACTLY every weather tile,
+    // and the march runs to 60 km against a 16 km weather tile and a 9.3 km shape tile, so several
+    // whole periods are on screen at once and they compress into bands toward the horizon. Warping
+    // shape but not coverage broke the small structure's grid while leaving the big one's intact,
+    // which is the wrong way round: the eye finds the large repeat first.
+    //
+    // This costs no extra taps in cloudy regions — the warp tap was already being fetched here,
+    // just after the coverage test instead of before it. Clear regions pay one tap more before
+    // bailing, which the density-gradient early-out above already keeps off most of the sky.
+    let warp_n = textureSampleLevel(cloud_noise, cloud_samp, w * sky.cloud3.z, 0.0);
+    w.x += (warp_n.r - 0.5) * 2.0 * sky.cloud3.w;
+    w.z += (warp_n.g - 0.5) * 2.0 * sky.cloud3.w;
     // World-anchored coverage sampled at THIS sample (not once per ray) so the cloud field stays
     // locked in the world as the camera flies through it, instead of morphing with altitude/angle.
     let cov = cloud_coverage(w.xz);
     if (cov <= 0.001) {
         return 0.0; // clear patch -> skip the shape/detail taps (per-sample empty-space fast path)
     }
-    // Domain warp: offset the horizontal position by a low-frequency vector from the volume.
-    let warp_n = textureSampleLevel(cloud_noise, cloud_samp, w * sky.cloud3.z, 0.0);
-    w.x += (warp_n.r - 0.5) * 2.0 * sky.cloud3.w;
-    w.z += (warp_n.g - 0.5) * 2.0 * sky.cloud3.w;
     // Shape (large, incommensurate tile) drives the blobs; overcast floor + coverage remap.
     // Shape/detail sampled at a Y drifted by the evolution offset: the volume is 3D and tileable,
     // so walking the third axis walks through uncorrelated slices — the cheapest honest way to get
