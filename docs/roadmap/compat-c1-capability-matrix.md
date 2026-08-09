@@ -74,7 +74,7 @@ corpora*, not about a game.
 | `MCA_CHANNEL_SEMANTICS` | `VALIDATED` | n=181 _mca textures in the four shipped Arma 3 vegetation PBOs: RGB varies in 179/181 and is grey in 0/181; alpha is absent in the 128 DXT1 files (constant 255 decoded) and present in all 53 DXT5 files, varying in 47. Layout named, not consumed -- no renderer path samples the slot | MAT-030 | `67b4797` |
 | `SHADER_FAMILY_SCHEMA` | `VALIDATED` | 6 of 23 observed families have a schema: Super, Normal, NormalMap, TreeAdv, TreeAdvTrunk, TreeAdvTrans | MAT-030 | `67b4797` |
 | `SUPERMATERIAL` | `PARTIAL` | Super schema over 2,853 materials; of the 1,222 in 22 other families, those in the 17 still without a schema bind nothing | MAT-030 | `67b4797` |
-| `TREEADV_SHADER_FAMILY` | `VALIDATED` | stage table measured over all 547 TreeAdv-family materials in the four shipped Arma 3 vegetation PBOs (plants_f 100, vegetation_f_exp 204, vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547, Stage2 MCA 547/547; resolved through the production WGPU draw path on 2 models from 2 PBOs, a3\plants_f\tree\t_pinusp3s_f.p3d and a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d; only the first of the two draws correctly, for reasons outside this mapping | MAT-030 | `67b4797` |
+| `TREEADV_SHADER_FAMILY` | `VALIDATED` | stage table measured over all 547 TreeAdv-family materials in the four shipped Arma 3 vegetation PBOs (plants_f 100, vegetation_f_exp 204, vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547, Stage2 MCA 547/547; resolved through the production WGPU draw path on 2 models from 2 PBOs, a3\plants_f\tree\t_pinusp3s_f.p3d and a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d, both drawing correctly | MAT-030 | `67b4797` |
 
 ## What no row here claims
 

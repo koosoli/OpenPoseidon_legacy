@@ -2265,7 +2265,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: 2db4a9d9e9576fc11aa6feb7bcd90235ef875a74733bfa8fd9a3f495ccdfd5bc
+    evidence_hash: d85faa0406c51dc094badecab16190980e5f6a140f728848a8891afea5f1665b
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -2286,8 +2286,7 @@ tickets:
           vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547,
           Stage2 MCA 547/547; resolved through the production WGPU draw path on
           2 models from 2 PBOs, a3\plants_f\tree\t_pinusp3s_f.p3d and
-          a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d; only the first of the
-          two draws correctly, for reasons outside this mapping
+          a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d, both drawing correctly
       - capability: MCA_CHANNEL_SEMANTICS
         status: VALIDATED
         denominator: >-
@@ -2318,14 +2317,16 @@ tickets:
         Stage0 is recorded as unused by the family (absent in 369/369) rather than
         mapped, so a TreeAdv material that did declare one reports it unmapped.
       - >-
-        OPEN DEFECT, found here and not caused here: the Enoch birch
+        OPEN QUESTION, not caused here: the Enoch birch
         a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d resolves both TreeAdv
-        families correctly across all 13 LODs but draws with untextured white
-        trunk/branches and almost no leaf cards, identically with the normal map
-        disabled. Neither family binds a base colour for it -- the colour comes from
-        the legacy face texture, as before this change -- and the pine draws
-        correctly through the same path in the same mission. Base-texture binding
-        and/or alpha-cutout foliage geometry, not material translation.
+        families across all 13 LODs and draws correctly at 4 m -- green foliage and
+        white bark, which is the species' real bark colour -- but at 16 m its canopy
+        thins to a near-skeleton. Identical with the normal map disabled, so not this
+        mapping. Either correct LOD behaviour or alpha coverage lost to mip-averaging
+        a 1-bit cutout whose Stage0 is 87% fully transparent; unresolved, and a
+        plausible lead for the distance-dependent canopy artefacts reported earlier.
+        GL33 is no control for it: from the same camera it draws the tree as one
+        opaque dark mass with no cutout applied at all.
       - >-
         The canopy is not validated. Two-sided foliage lighting, the
         TreeAdvModNormals vertex-normal path, and alpha/cutout behaviour are

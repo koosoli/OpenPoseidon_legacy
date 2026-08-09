@@ -129,16 +129,23 @@ LODs, and unlike the pine its foliage section carries a *real* NOHQ file rather 
 procedural one — so the mapping is confirmed on independently authored content with a
 non-procedural Stage1 on both sections.
 
-That model does not, however, draw correctly, and the defect is worth naming precisely
-because it is *not* this mapping. Its trunk and branches render as untextured white and
-its leaf cards are almost entirely missing, identically with `WGR_MATERIAL_DISABLE_NORMAL`
-set and unset, which rules the normal map out. Nothing this ticket binds supplies a base
-colour for either family — TreeAdv declares no Stage0 at all and this TreeAdvTrunk
-material declares none either, so the colour comes from the legacy face texture exactly
-as it did before this change. Both face textures report `exists=true` and no texture
-load logs a warning. The pine, drawn through the same path in the same mission, is
-correctly textured. So the birch is an open defect in base-texture binding and/or
-alpha-cutout foliage geometry, found by this ticket and belonging to another.
+At 16 m that model looked wrong — white branches and a canopy thinned almost to
+nothing — and the first reading of it here was a base-texture failure. That reading was
+mistaken and is recorded because the correction is the useful part. At 4 m the same
+model through the same path draws correctly: green foliage, and white bark, which is
+what *Betula pendula* bark actually is. Nothing was falling back to white.
+
+What is left is a distance question, not a material one: at 16 m the canopy's leaf
+cards are sparse enough to read as a skeleton against bright sky. That is either
+correct LOD behaviour or an alpha-coverage problem — mip-averaging a 1-bit cutout
+whose Stage0 is 87% fully transparent drives alpha below the test threshold, and
+foliage thins with distance in exactly that way. It is unresolved, it is not caused by
+this mapping (identical with `WGR_MATERIAL_DISABLE_NORMAL` set and unset), and it is a
+plausible lead for the distance-dependent canopy artefacts reported earlier.
+
+GL33 is not a control for this. Asked the same question from the same camera it draws
+the birch as one opaque dark mass with no cutout applied at all, which is a worse answer
+than the one being questioned.
 
 Evidence kept out of the repository, per the local-asset rule:
 `C:\Users\mail\AppData\Local\Temp\poseidon-treeadv-trace\` (`tree-normal-on.png`,
