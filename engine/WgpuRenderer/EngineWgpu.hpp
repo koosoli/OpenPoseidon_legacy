@@ -462,6 +462,13 @@ class EngineWgpu : public EngineDummy
     // First-slice guard: Material Debug applies only to the explicit test RVMAT
     // identity supplied by automation, never incidentally to the rest of a map.
     std::string _materialDebugRvmatMatch;
+    // MAT-LEGACY: optional modern materials for original OFP/CWA assets, which carry no RVMAT at
+    // all. On when an enhancement pack may be present; every lookup simply misses without one.
+    bool _legacyEnhancement = true;
+    // Texture name -> enhancement normal handle, 0 meaning "no enhancement exists". Misses are
+    // cached too: stock content misses on every section, every frame.
+    std::unordered_map<std::string, uint64_t> _legacyEnhancementCache;
+    uint64_t LegacyEnhancementNormal(const char* textureName);
     // Source material semantics are immutable for a loaded mission. Cache them
     // by virtual path so production draws do not reopen and parse an RVMAT for
     // every section on every frame.

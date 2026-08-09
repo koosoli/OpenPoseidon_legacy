@@ -1939,6 +1939,34 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             }
         }
     }
+    else if (_legacyEnhancement)
+    {
+        // MAT-LEGACY: optional modern materials for original OFP/CWA assets.
+        //
+        // CWA content has no RVMATs at all -- a section names a texture and nothing else -- so the
+        // whole authored-material path above skips it and those surfaces render exactly as they did
+        // in 2001. This gives them the SAME modern material representation the Real Virtuality
+        // assets use, without touching a single original file: for a section's texture `X.pac`, if
+        // a sibling `X_nohq.paa` exists it is bound as that section's normal map, through the very
+        // same slot and the same NOHQ decode (X in A, Y in G, Z reconstructed) the RVMAT path uses.
+        //
+        // Deliberately a naming convention rather than a sidecar registry: it needs no index to
+        // load or keep in sync, an enhancement pack is just files dropped next to the originals (or
+        // ahead of them in the PBO search order), and an untouched installation has none of them so
+        // every lookup misses and rendering is bit-identical to before.
+        //
+        // Both answers are cached, because the miss is the common case on stock content and a
+        // filesystem probe per section per frame would be absurd.
+        if (const Texture* faceTex = sMesh.GetSection(beg).properties.GetTexture())
+        {
+            if (const char* texName = faceTex->Name(); texName && *texName)
+            {
+                const uint64_t handle = LegacyEnhancementNormal(texName);
+                if (handle != 0 && !_materialDebug.disableNormalMap)
+                    d.normal_texture_id = handle;
+            }
+        }
+    }
     std::memcpy(d.world.m, &_world, sizeof(d.world.m));
     // Terrain conform: publish this instance's bilinear plane so the vertex
     // shader conforms the (undeformed) shared mesh, matching ForestPlain::Animate. d is
@@ -3182,6 +3210,41 @@ int EngineWgpu::GetWaterGpuTimings(float* outMs, int maxCount) const
     if (!_renderer || !outMs || maxCount <= 0)
         return 0;
     return (int)wgr_get_gpu_timings(_renderer, outMs, (uint32_t)maxCount);
+}
+
+// MAT-LEGACY: resolve `<texture stem>_nohq.paa` for an original OFP/CWA texture, upload it, and
+// return its bindless handle -- or 0 when no enhancement exists, which is the stock-content case.
+//
+// Cached by texture name INCLUDING the misses. A stock install misses on every section of every
+// frame, and a filesystem probe per section per frame is not a thing to do; a miss costs one hash
+// lookup after the first.
+uint64_t EngineWgpu::LegacyEnhancementNormal(const char* textureName)
+{
+    const std::string key(textureName);
+    if (const auto found = _legacyEnhancementCache.find(key); found != _legacyEnhancementCache.end())
+        return found->second;
+
+    uint64_t handle = 0;
+    // Strip the extension, append the suffix. `.pac` and `.paa` both appear in CWA data; the
+    // enhancement is always a .paa because that is what the texture bank loads.
+    const size_t dot = key.find_last_of('.');
+    if (dot != std::string::npos && dot > 0)
+    {
+        const std::string candidate = key.substr(0, dot) + "_nohq.paa";
+        // Probe before loading: TextureBank::Load on a missing path yields a placeholder rather
+        // than nothing, and binding a placeholder as a normal map would flatten the surface
+        // instead of leaving it alone.
+        if (QIFStream::FileExists(candidate.c_str()))
+        {
+            Ref<Texture> tex = _wbank->Load(candidate.c_str());
+            if (auto* wgpuTex = static_cast<TextureWgpu*>(tex.GetRef()))
+                handle = wgpuTex->EnsureUploaded();
+            if (handle != 0)
+                LOG_INFO(Graphics, "Wgpu legacy material: {} enhanced by {}", key, candidate);
+        }
+    }
+    _legacyEnhancementCache.emplace(key, handle);
+    return handle;
 }
 
 const char* EngineWgpu::GetWaterGpuTimingName(int region) const
