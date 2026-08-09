@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Shared/SDLEventWindow.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
+#include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 
 #include <wgpu_renderer.hpp>
 
@@ -461,6 +462,10 @@ class EngineWgpu : public EngineDummy
     // First-slice guard: Material Debug applies only to the explicit test RVMAT
     // identity supplied by automation, never incidentally to the rest of a map.
     std::string _materialDebugRvmatMatch;
+    // Source material semantics are immutable for a loaded mission. Cache them
+    // by virtual path so production draws do not reopen and parse an RVMAT for
+    // every section on every frame.
+    std::unordered_map<std::string, Asset::Material::TranslatedMaterial> _materialBindings;
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
     GrassSettings _grass;

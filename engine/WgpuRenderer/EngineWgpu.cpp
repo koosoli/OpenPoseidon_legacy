@@ -1770,6 +1770,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
     const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
                                      ContainsNoCase(debugMaterialPath, _materialDebugRvmatMatch);
+    // Without a diagnostic selector, authored section RVMATs are production
+    // bindings. Unknown families and procedural stages remain intentionally
+    // unbound after translation; there is no suffix-based fallback here.
+    const bool productionMaterialTarget = _materialDebugRvmatMatch.empty() && debugSection.surfMat;
+    const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
     d._pad = materialDebugTarget ? static_cast<uint32_t>(_materialDebug.view) |
                                       (_materialDebug.invertNormalY ? 0x100u : 0u)
@@ -1811,24 +1816,45 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             }
         }
     }
-    else if (const ShapeSection& section = sMesh.GetSection(beg); materialDebugTarget && section.surfMat)
+    else if (const ShapeSection& section = sMesh.GetSection(beg); materialBindingTarget && section.surfMat)
     {
         const char* materialPath = section.surfMat->GetName().Data();
         if (materialPath && *materialPath)
         {
-            _materialDebugInfo.active = true;
-            _materialDebugInfo.rvmatPath = materialPath;
+            if (materialDebugTarget)
+            {
+                _materialDebugInfo.active = true;
+                _materialDebugInfo.rvmatPath = materialPath;
+            }
             // Keep screenshot automation evidence tied to the material actually
             // selected by the model.  This is deliberately emitted only for an
             // explicit debug match, so ordinary gameplay does not log sections.
             static std::unordered_set<std::string> loggedMaterialDebugTargets;
-            if (loggedMaterialDebugTargets.insert(materialPath).second)
+            if (materialDebugTarget && loggedMaterialDebugTargets.insert(materialPath).second)
                 LOG_INFO(Graphics, "Wgpu material debug: target RVMAT {}", materialPath);
             try
             {
-                const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
-                const auto translated = Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source));
-                _materialDebugInfo.shaderFamily = source.pixelShaderId.c_str();
+                auto cached = _materialBindings.find(materialPath);
+                if (cached == _materialBindings.end())
+                {
+                    try
+                    {
+                        const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
+                        cached = _materialBindings.emplace(
+                            materialPath, Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source))).first;
+                    }
+                    catch (...)
+                    {
+                        // An unavailable optional material must not reopen and
+                        // throw on every draw. Its inert cached entry preserves
+                        // the legacy section texture/fallback for this mission.
+                        _materialBindings.emplace(materialPath, Asset::Material::TranslatedMaterial{});
+                        throw;
+                    }
+                }
+                const auto& translated = cached->second;
+                if (materialDebugTarget)
+                    _materialDebugInfo.shaderFamily = translated.shaderFamily.c_str();
                 // A P3DM face may name only an RVMAT and leave its legacy
                 // texture field blank.  For the explicit material-debug slice,
                 // make Stage0 the draw's base texture so a normal-map smoke
