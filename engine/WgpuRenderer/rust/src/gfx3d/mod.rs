@@ -2788,7 +2788,10 @@ impl Gfx3d {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // The direct vertex path reads the foliage class from the free
+                        // sun_ambient.w lane to bend legacy canopy-card normals; fs_main
+                        // continues to read the same material record for shading.
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,

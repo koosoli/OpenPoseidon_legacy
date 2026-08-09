@@ -1030,10 +1030,14 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         // not glow). Set here — after DrawProxies (furniture is never vegetation) — and restored
         // below. GL33 ignores the flag.
         const bool savedVegetation = GCurrentIsVegetation;
+        const float savedFoliageKind = GCurrentFoliageKind;
         {
             const MapType mt = _shape->GetMapType();
-            GCurrentIsVegetation = mt == MapTree || mt == MapSmallTree || mt == MapBush || mt == MapForestBorder ||
-                                   mt == MapForestTriangle || mt == MapForestSquare;
+            const bool isTree = mt == MapTree || mt == MapSmallTree || mt == MapForestBorder ||
+                                mt == MapForestTriangle || mt == MapForestSquare;
+            const bool isBush = mt == MapBush;
+            GCurrentIsVegetation = isTree || isBush;
+            GCurrentFoliageKind = isTree ? 2.0f : (isBush ? 1.0f : 0.0f);
         }
 
         // if neccessary, split it
@@ -1051,6 +1055,7 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         }
 
         GCurrentIsVegetation = savedVegetation;
+        GCurrentFoliageKind = savedFoliageKind;
         GScene->SetConstantFog(-1);
     }
     Deanimate(forceLOD);

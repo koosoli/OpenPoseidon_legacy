@@ -160,6 +160,7 @@ SectionClassFilter GSectionFilter = SectionClassFilter::All;
 bool GSkipGpuOwnedSections = false;
 ConformPlane GCurrentConformPlane;
 bool GCurrentIsVegetation = false;
+float GCurrentFoliageKind = 0.0f;
 bool GGpuTerrainConform = false;
 
 void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,

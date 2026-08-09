@@ -267,6 +267,10 @@ extern ConformPlane GCurrentConformPlane;
 // Stage 2), so roads, characters, fences etc. don't pick up the leaf glow. Default false; GL33
 // ignores it.
 extern bool GCurrentIsVegetation;
+// Per-draw foliage class for the WGPU direct path: 0 = non-vegetation, 1 = bush,
+// 2 = tree/forest. The fragment-side vegetation gate only needs a boolean, while
+// the vertex shader needs the distinction to choose radial-crown normal settings.
+extern float GCurrentFoliageKind;
 
 // True only when the active graphics backend conforms terrain-clipped geometry on the
 // GPU (the wgpu backend sets it at init). Objects use it to decide whether to publish a

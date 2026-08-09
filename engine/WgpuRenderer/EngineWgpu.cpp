@@ -1237,6 +1237,27 @@ void EngineWgpu::NextFrame()
         float darkness = 1.0f - _smSunFactor * (1.0f - _smTuning.darkness);
         darkness = darkness + (1.0f - darkness) * cloudDim;
 
+        // One-shot companion to the TreeAdv material trace.  The HDR sky-lit
+        // path bypasses generic per-material lighting, so its frame inputs must
+        // be measured independently when diagnosing a night-bright tree.
+        if (std::getenv("WGR_TREEADV_LIGHT_TRACE") && GScene && GScene->MainLight() &&
+            GScene->MainLight()->NightEffect() > 0.9f)
+        {
+            static bool loggedTreeAdvNightFrame = false;
+            if (!loggedTreeAdvNightFrame)
+            {
+                loggedTreeAdvNightFrame = true;
+                LOG_INFO(Graphics,
+                         "TreeAdv night frame trace: night={:.3f} skyLit={} legacySun=[{:.4f},{:.4f},{:.4f}] "
+                         "legacyAmbient=[{:.4f},{:.4f},{:.4f}] skySun=[{:.4f},{:.4f},{:.4f}] "
+                         "skyAmbient=[{:.4f},{:.4f},{:.4f}] skyAmbientScale={:.3f} foliageAmbientBoost={:.3f}",
+                         GScene->MainLight()->NightEffect(), skyLit > 0.5f ? 1 : 0,
+                         sunDiffuse.R(), sunDiffuse.G(), sunDiffuse.B(), sunAmbient.R(), sunAmbient.G(), sunAmbient.B(),
+                         sunLin[0], sunLin[1], sunLin[2], ambLin[0], ambLin[1], ambLin[2], _sky.skyAmbient,
+                         _foliage.ambientBoost);
+            }
+        }
+
         std::vector<WgrCamera> cameras(_cameras.size());
         for (size_t i = 0; i < _cameras.size(); i++)
         {
@@ -1726,6 +1747,27 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         tex = t->EnsureUploaded();
         alphaClass = t->GetAlphaClass();
+        // One-shot, opt-in probe for the original CWA PAC/P8 vegetation route.  The material
+        // base-colour debug view must be allowed to identify whether a black canopy originates
+        // in the texture upload or in lighting, without changing either path.  Kept general so
+        // it can also diagnose other legacy-only content; keyed by the virtual texture path.
+        if (const char* trace = std::getenv("WGR_LEGACY_TEXTURE_TRACE"); trace && std::strcmp(trace, "0") != 0)
+        {
+            const char* name = t->Name();
+            if (name && *name)
+            {
+                static std::unordered_set<std::string> loggedLegacyTextures;
+                if (loggedLegacyTextures.insert(name).second)
+                {
+                    const PacLevelMem& mip = t->AMipmap(0);
+                    LOG_INFO(Graphics,
+                             "Legacy texture trace: path={} handle={} size={}x{} mips={} srcFormat={} dstFormat={} "
+                             "alpha={} transparent={} alphaClass={}",
+                             name, tex, t->AWidth(0), t->AHeight(0), t->ANMipmaps(), int(mip.SrcFormat()),
+                             int(mip.DstFormat()), t->IsAlpha(), t->IsTransparent(), int(alphaClass));
+                }
+            }
+        }
     }
 
     const int sectionSpec = sMesh.GetSection(beg).properties.Special();
@@ -1853,6 +1895,29 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     }
                 }
                 const auto& translated = cached->second;
+                // One-shot diagnostic for the TreeAdv-family night-lighting investigation.
+                // The source fields have family-specific meanings (not generic emissive), so
+                // capture them verbatim before a family shader starts consuming them.
+                if (std::getenv("WGR_TREEADV_LIGHT_TRACE") &&
+                    (translated.shaderFamily == "TreeAdv" || translated.shaderFamily == "TreeAdvTrunk" ||
+                     translated.shaderFamily == "TreeAdvTrans"))
+                {
+                    static std::unordered_set<std::string> loggedTreeAdvMaterials;
+                    if (loggedTreeAdvMaterials.insert(materialPath).second)
+                    {
+                        LOG_INFO(Graphics,
+                                 "TreeAdv material trace: path={} family={} ambient=[{:.3f},{:.3f},{:.3f},{:.3f}] "
+                                 "diffuse=[{:.3f},{:.3f},{:.3f},{:.3f}] forced=[{:.3f},{:.3f},{:.3f},{:.3f}] "
+                                 "emissive=[{:.3f},{:.3f},{:.3f},{:.3f}] specular=[{:.3f},{:.3f},{:.3f},{:.3f}] power={:.3f}",
+                                 materialPath, translated.shaderFamily,
+                                 translated.ambient[0], translated.ambient[1], translated.ambient[2], translated.ambient[3],
+                                 translated.diffuse[0], translated.diffuse[1], translated.diffuse[2], translated.diffuse[3],
+                                 translated.forcedDiffuse[0], translated.forcedDiffuse[1], translated.forcedDiffuse[2], translated.forcedDiffuse[3],
+                                 translated.emissive[0], translated.emissive[1], translated.emissive[2], translated.emissive[3],
+                                 translated.specular[0], translated.specular[1], translated.specular[2], translated.specular[3],
+                                 translated.specularPower);
+                    }
+                }
                 if (materialDebugTarget)
                     _materialDebugInfo.shaderFamily = translated.shaderFamily.c_str();
                 // A P3DM face may name only an RVMAT and leave its legacy
@@ -2001,10 +2066,16 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // so the geometry behind shows through the holes and MSAA A2C still anti-aliases the edges.
     render::BlendMode blend = desc.blend;
     float alphaRef = AlphaRefFromDesc(desc);
-    if (blend == render::BlendMode::AlphaBlend && alphaClass == Poseidon::AlphaStats::Cutout)
+    if (tex != 0 && alphaClass == Poseidon::AlphaStats::Cutout)
     {
+        // A cutout classification means the source has binary transparent texels, irrespective
+        // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
+        // authored as opaque over a DXT1/PAC cutout; they still need to discard transparent
+        // texels rather than sampling that texture's black background.  A hard discard is the
+        // appropriate common mode for every Cutout texture: keep the blend opaque and only
+        // raise the alpha reference to the binary midpoint.
         blend = render::BlendMode::Opaque;
-        alphaRef = 0.5f;
+        alphaRef = std::max(alphaRef, 0.5f);
     }
     else if (blend == render::BlendMode::AlphaBlend && tex != 0 && alphaClass == Poseidon::AlphaStats::Opaque &&
              MaterialIsFullyOpaque(_curMaterial))
@@ -2032,6 +2103,21 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.sampler = U32(SamplerForSpec(effectiveSpec));
     d.depth = DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
+    if (const char* trace = std::getenv("WGR_LEGACY_TEXTURE_TRACE"); trace && std::strcmp(trace, "0") != 0)
+    {
+        if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
+        {
+            const char* name = t->Name();
+            if (name && *name)
+            {
+                static std::unordered_set<std::string> loggedLegacyDrawModes;
+                if (loggedLegacyDrawModes.insert(name).second)
+                    LOG_INFO(Graphics,
+                             "Legacy texture draw trace: path={} vegetation={} alphaClass={} alphaRef={:.2f} blend={}",
+                             name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend));
+            }
+        }
+    }
     // Polygon-offset selection (ignored for shadows, which get their own offset):
     //  - OnSurface routing (roads / footprint decals): the light decal offset.
     //  - Otherwise ZBias overlay faces (traffic-sign decals etc.) flagged via
@@ -2086,11 +2172,10 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const float specPow = float(_curMaterial.specularPower);
     const float specEn = (specPow > 0.0f) ? sunEn : 0.0f;
     d.mat_specular = {specCol.R() * specEn, specCol.G() * specEn, specCol.B() * specEn, specPow};
-    // Vegetation flag for the foliage SSS gate (docs/foliage-translucency-plan.md Stage 2): only
-    // real plants (GCurrentIsVegetation, published from the object's MapType in Object::Draw) get
-    // the leaf subsurface look — roads, characters, fences etc. must not. Rides the free .w of the
-    // per-draw sun-ambient lane (only .rgb is read for shading); fs_main reads it back.
-    d.mat_sun_ambient.w = GCurrentIsVegetation ? 1.0f : 0.0f;
+    // Foliage class for the direct WGPU path: only real plants get the leaf look, and the vertex
+    // shader receives tree vs bush so it can use the matching radial-crown normal. This rides the
+    // otherwise unused .w lane; fs_main treats any positive value as vegetation.
+    d.mat_sun_ambient.w = GCurrentFoliageKind;
 
     _draws3d.push_back(d);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});

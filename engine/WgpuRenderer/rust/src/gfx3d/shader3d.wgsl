@@ -195,6 +195,21 @@ fn vs_main(
         let gz = select(-d0111, d1000, triA) * s;
         normal_ws = vec3<f32>(normal_ws.x - gx * normal_ws.y, normal_ws.y, normal_ws.z - gz * normal_ws.y);
     }
+    // Legacy leaf cards have arbitrary authored normals: a visible card can point sideways or
+    // downward and receive almost no daylight or directional sky. The retained/GPU-driven path
+    // already bends cutout canopy normals toward a radial crown normal; mirror that on the direct
+    // path. sun_ambient.w carries 1=bush or 2=tree/forest, so only alpha-cut vegetation changes.
+    let foliage_kind = materials[instance].sun_ambient.w;
+    if (alpha_ref > 0.0 && foliage_kind > 0.5) {
+        let is_tree = foliage_kind > 1.5;
+        let crown_y = select(frame.foliageb.z, frame.foliagec.z, is_tree);
+        let bend = select(frame.foliageb.y, frame.foliagec.y, is_tree);
+        let crown_center = world[3].xyz + vec3<f32>(0.0, crown_y, 0.0);
+        let radial = world_pos.xyz - crown_center;
+        if (dot(radial, radial) > 1e-6) {
+            normal_ws = normalize(mix(normal_ws, normalize(radial), clamp(bend, 0.0, 1.0)));
+        }
+    }
     return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance);
 }
 
