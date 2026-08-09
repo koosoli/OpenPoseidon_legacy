@@ -2265,7 +2265,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: a9b557338a0a92c004f4e725b658c73fe98cd2a4562447132a9d48d51159cbfe
+    evidence_hash: c3b6163aae014de6b87cd028ee0bfef54e5947ee0e5b2b00993069eadfa5d3c8
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -2276,8 +2276,8 @@ tickets:
       - capability: SHADER_FAMILY_SCHEMA
         status: VALIDATED
         denominator: >-
-          7 of 23 observed families have a schema: Super, Normal, NormalMap,
-          TreeAdv, TreeAdvTrunk, TreeAdvTrans, Skin
+          8 of 23 observed families have a schema: Super, Normal, NormalMap,
+          TreeAdv, TreeAdvTrunk, TreeAdvTrans, Skin, Multi (layer 0 + mask only)
       - capability: TREEADV_SHADER_FAMILY
         status: VALIDATED
         denominator: >-

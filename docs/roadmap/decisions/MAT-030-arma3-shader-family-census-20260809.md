@@ -78,6 +78,10 @@ requirement.
    occurrences are Super's `env_co.paa`, and 2 materials do not describe a family.
 2. `NormalMapSpecularDIMap` and the small `NormalMap*` family cluster — ~220 together,
    all the same two-or-three stage shape.
-3. `Multi` — the largest object gap, but blocked on a layered-material design decision.
+3. ~~`Multi`~~ — **partially done**, same day. Stage0 binds as layer 0 standing in for the
+   base colour and Stage4 as a named `Mask`; layers 1-3 and the `_dtsmdi` stages stay
+   unmapped. That is what turned the Arma 3 castle and brick props from untextured white
+   into textured geometry. The masked four-layer blend itself is still unimplemented and
+   still needs the design decision.
 4. `TerrainSNX` / `TerrainX` — only once it is settled whether object material
    translation is the right owner for them at all.

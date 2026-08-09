@@ -41,6 +41,9 @@ enum class MaterialSlot
     Detail,
     Macro,
     MacroAmbient,
+    // Multi's blend mask. Preserved so a layered material's blend control is visible
+    // rather than dropped; nothing samples it yet.
+    Mask,
     AmbientShadow,
     SpecularDetail,
     Fresnel,
@@ -57,6 +60,7 @@ inline const char* ToString(MaterialSlot slot)
         case MaterialSlot::Detail: return "Detail";
         case MaterialSlot::Macro: return "Macro";
         case MaterialSlot::MacroAmbient: return "MacroAmbient";
+        case MaterialSlot::Mask: return "Mask";
         case MaterialSlot::AmbientShadow: return "AmbientShadow";
         case MaterialSlot::SpecularDetail: return "SpecularDetail";
         case MaterialSlot::Fresnel: return "Fresnel";
@@ -131,6 +135,7 @@ inline std::string SuffixRole(const std::string& raw)
     if (suffix == "dt") return "Detail";
     if (suffix == "mc" || suffix == "mco") return "Macro";
     if (suffix == "mca") return "MacroAmbient";
+    if (suffix == "mask" || suffix == "maska") return "Mask";
     if (suffix == "as" || suffix == "adshq") return "AmbientShadow";
     if (suffix == "smdi" || suffix == "sm") return "SpecularDetail";
     return {};
@@ -223,6 +228,38 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     // Stage7 is left unmapped although its 2 occurrences are both a3\data_f\env_co.paa --
     // the same environment map Super's Stage7 carries, `_co` name and all. Two materials
     // do not describe a family, and the rule that held for TreeAdv's tail holds here.
+    // Multi is a LAYERED material and this schema is deliberately a fraction of it.
+    // MEASURED over all 1,628 Multi materials in the Arma 3 corpus:
+    //
+    //   Stage0 1624/1628  _co 1561, procedural co 37   -- layer 0
+    //   Stage1 1628/1628  _co 1592                     -- layer 1
+    //   Stage2 1628/1628  _co 1494                     -- layer 2
+    //   Stage3 1628/1628  _co 1264                     -- layer 3
+    //   Stage4 1628/1628  _mask 1576                   -- the blend mask
+    //   Stage5..8         _dtsmdi / procedural dtsmdi  -- per-layer detail+specular
+    //
+    // BI's Multimaterial documentation describes exactly that: four material layers, a
+    // mask at Stage4 that controls how they blend, and combined detail/specular beyond.
+    //
+    // Only Stage0 is bound, as the FIRST LAYER standing in for the surface's base colour.
+    // That is not a claim that layer 0 is the whole answer -- it is not, and a masked blend
+    // of four layers has no representation in this slot set. It is the difference between
+    // an Arma 3 structure rendering as its first layer and rendering as untextured white,
+    // and it is honest about being partial.
+    //
+    // Stages 1-3 stay unmapped because a second, third and fourth colour layer have no
+    // slots; Stage4 gets a named Mask slot so the blend control is preserved rather than
+    // silently dropped; Stages 5-8 stay unmapped because `_dtsmdi` is a combined
+    // detail+specular texture with no analogue here, and splitting it would be a guess.
+    static const ShaderSchema kMulti{
+        "Multi",
+        {
+            MaterialSlot::BaseColour, // 0 -- layer 0, standing in for the base
+            MaterialSlot::Count,      // 1 -- layer 1, no slot
+            MaterialSlot::Count,      // 2 -- layer 2, no slot
+            MaterialSlot::Count,      // 3 -- layer 3, no slot
+            MaterialSlot::Mask,       // 4 -- the blend mask, preserved unused
+        }};
     static const ShaderSchema kSkin{
         "Skin",
         {
@@ -236,7 +273,7 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
         }};
     static const ShaderSchema* kAll[] = {&kNormal,  &kNormalMap,    &kSuper,
                                          &kTreeAdv, &kTreeAdvTrunk, &kTreeAdvTrans,
-                                         &kSkin};
+                                         &kSkin,    &kMulti};
 
     for (const ShaderSchema* schema : kAll)
     {

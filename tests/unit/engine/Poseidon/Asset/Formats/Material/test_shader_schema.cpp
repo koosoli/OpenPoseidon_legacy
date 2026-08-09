@@ -375,3 +375,37 @@ class Stage9 { texture="ca\t\x_mask.tga"; uvSource="tex"; };
     REQUIRE(ir.unmappedStages.size() == 1);
     REQUIRE(ir.unmappedStages[0] == 9);
 }
+
+TEST_CASE("Multi schema: layer 0 stands in for the base colour, the mask is preserved", "[asset][material][mat-030][multi]")
+{
+    // Shaped like the shipped Arma 3 structure materials. Measured over all 1,628 Multi
+    // materials: Stage0 present 1624/1628, Stage4 is a `_mask` in 1576. BI's Multimaterial
+    // documentation describes four layers blended by a Stage4 mask.
+    auto ir = translate(R"CFG(
+PixelShaderID="Multi";
+class Stage0 { texture="a3\structures_f\civ\constructions\data\wip_bricks_co.paa"; };
+class Stage1 { texture="a3\structures_f\civ\constructions\data\wip_wood_co.paa"; };
+class Stage2 { texture="a3\structures_f\civ\constructions\data\wip_cinderblocks_co.paa"; };
+class Stage3 { texture="#(argb,8,8,3)color(0,0,0,1,CO)"; };
+class Stage4 { texture="a3\structures_f\civ\constructions\data\wip_mask.paa"; };
+class Stage5 { texture="a3\structures_f\civ\constructions\data\wip_cinderblocks_dtsmdi.paa"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+
+    // Layer 0 is bound so an Arma 3 structure renders as its first layer rather than as
+    // untextured white. This is explicitly partial, not a claim about the blend.
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).present);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 0);
+
+    // The blend control is named rather than dropped, and nothing samples it yet.
+    REQUIRE(ir.Slot(MaterialSlot::Mask).present);
+    REQUIRE(ir.Slot(MaterialSlot::Mask).sourceStage == 4);
+    REQUIRE(ir.Slot(MaterialSlot::Mask).suffixRole == "Mask");
+    REQUIRE(ir.Slot(MaterialSlot::Mask).suffixAgrees);
+
+    // Layers 1-3 have no slot, and `_dtsmdi` is a combined detail+specular texture with no
+    // analogue here. Preserved as unmapped rather than split by guesswork.
+    REQUIRE(ir.unmappedStages == std::vector<int>{1, 2, 3, 5});
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::Detail).present);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::SpecularDetail).present);
+}
