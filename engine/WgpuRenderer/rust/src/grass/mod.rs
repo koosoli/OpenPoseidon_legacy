@@ -151,6 +151,12 @@ pub struct Grass {
     mid_prepass_pipeline: wgpu::RenderPipeline,
     mid_color_pipeline: wgpu::RenderPipeline,
     mid_color_no_write_pipeline: wgpu::RenderPipeline,
+    // The photo-tuft path needs its own pipelines: entry points are immutable
+    // pipeline state, so rebinding a newly uploaded tuft alone must never leave
+    // the mid ring drawing the procedural shader (GRS-E regression guard).
+    mid_tuft_prepass_pipeline: wgpu::RenderPipeline,
+    mid_tuft_color_pipeline: wgpu::RenderPipeline,
+    mid_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
     far_color_pipeline: wgpu::RenderPipeline,
     far_color_no_write_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -709,6 +715,27 @@ impl Grass {
             surface_format,
             false,
         );
+        let mid_tuft_prepass_pipeline = make_pipeline(
+            "wgr_grass_mid_tuft_prepass",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft_prepass",
+            NORMAL_FORMAT,
+            true,
+        );
+        let mid_tuft_color_pipeline = make_pipeline(
+            "wgr_grass_mid_tuft_color",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft",
+            surface_format,
+            true,
+        );
+        let mid_tuft_color_no_write_pipeline = make_pipeline(
+            "wgr_grass_mid_tuft_color_no_write",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft",
+            surface_format,
+            false,
+        );
         let far_color_pipeline = make_pipeline(
             "wgr_grass_far_color",
             "vs_grass_far",
@@ -803,6 +830,9 @@ impl Grass {
             mid_prepass_pipeline,
             mid_color_pipeline,
             mid_color_no_write_pipeline,
+            mid_tuft_prepass_pipeline,
+            mid_tuft_color_pipeline,
+            mid_tuft_color_no_write_pipeline,
             far_color_pipeline,
             far_color_no_write_pipeline,
             shadow_pipeline,
@@ -854,6 +884,9 @@ impl Grass {
         };
         self.tuft_view = view;
         self.have_tuft = true;
+        // Uploads normally arrive after the game has pushed GrassSettings. Keep
+        // that opt-in live immediately instead of requiring a UI slider nudge.
+        self.tuft_enabled = self.last_params.use_photo_tuft != 0.0;
         let rebuild = |instances: &wgpu::Buffer, count: &wgpu::Buffer| {
             make_data_bind(
                 device,
@@ -1141,7 +1174,7 @@ impl Grass {
         }
         // Vertex counts mirror reset_indirect's per-LOD vertex-per-instance values.
         self.stats.near_vertices = self.stats.near_instances * 180;
-        self.stats.mid_vertices = self.stats.mid_instances * 108;
+        self.stats.mid_vertices = self.stats.mid_instances * if self.tuft_enabled { 12 } else { 108 };
         self.stats.far_vertices = self.stats.far_instances * 6;
     }
 
@@ -1163,10 +1196,10 @@ impl Grass {
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
         // Near LOD: six five-segment opaque ribbons per clump (6 * 5 * 6).
         queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[180u32, 0, 0, 0]));
-        // Mid LOD is six opaque, three-segment ribbons per clump. The legacy
-        // photographed alpha tuft remains loadable for ABI compatibility but is
-        // not selected: the clump geometry owns this silhouette.
-        let mid_verts: u32 = 108;
+        // Mid LOD is either six opaque three-segment ribbons per clump, or two
+        // crossed, alpha-tested photo cards (2 * 6 vertices) when a compatible
+        // tuft has been explicitly enabled.
+        let mid_verts: u32 = if self.tuft_enabled { 12 } else { 108 };
         queue.write_buffer(
             &self.mid_indirect,
             0,
@@ -1227,10 +1260,13 @@ impl Grass {
             pass.set_bind_group(2, &self.far_data_bind, &[]);
             pass.draw_indirect(&self.far_indirect, 0);
         }
-        let mid_pipeline = match kind {
-            GrassPass::Color => &self.mid_color_pipeline,
-            GrassPass::ColorNoWrite => &self.mid_color_no_write_pipeline,
-            GrassPass::Prepass => &self.mid_prepass_pipeline,
+        let mid_pipeline = match (kind, self.tuft_enabled) {
+            (GrassPass::Color, true) => &self.mid_tuft_color_pipeline,
+            (GrassPass::ColorNoWrite, true) => &self.mid_tuft_color_no_write_pipeline,
+            (GrassPass::Prepass, true) => &self.mid_tuft_prepass_pipeline,
+            (GrassPass::Color, false) => &self.mid_color_pipeline,
+            (GrassPass::ColorNoWrite, false) => &self.mid_color_no_write_pipeline,
+            (GrassPass::Prepass, false) => &self.mid_prepass_pipeline,
         };
         pass.set_pipeline(mid_pipeline);
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
