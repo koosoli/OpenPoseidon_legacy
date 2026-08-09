@@ -1939,7 +1939,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             }
         }
     }
-    else if (_legacyEnhancement)
+    else if (_materialDebug.legacyEnhancement)
     {
         // MAT-LEGACY: optional modern materials for original OFP/CWA assets.
         //

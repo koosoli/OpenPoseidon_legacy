@@ -3600,6 +3600,14 @@ void DrawMaterialDebugTab()
     ImGui::TextDisabled("Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
     ImGui::Separator();
     changed |= ImGui::Checkbox("Disable Normal Map", &settings.disableNormalMap);
+    changed |= ImGui::Checkbox("Legacy OFP/CWA enhancement", &settings.legacyEnhancement);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Original CWA assets have no RVMAT, so they normally render as they did in 2001.\n"
+                          "When a sibling <texture>_nohq.paa exists it is bound as that section's normal\n"
+                          "map through the same slot the Arma 3 materials use. Turn this off to see the\n"
+                          "unenhanced original in the same frame.\n"
+                          "Stock content has no such files, so this changes nothing without an\n"
+                          "enhancement pack present.");
     changed |= ImGui::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
     ImGui::TextDisabled("Compare only under fixed lighting; this does not edit the imported material.");
     changed |= ImGui::Checkbox("Disable Detail", &settings.disableDetail);

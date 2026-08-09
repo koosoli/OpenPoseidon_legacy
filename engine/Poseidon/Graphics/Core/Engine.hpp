@@ -948,6 +948,10 @@ class Engine : public IGraphicsEngine
         bool disableAmbientShadow = false;
         bool disableSpecularGloss = false;
         bool disableFresnelEnvironment = false;
+        // MAT-LEGACY: the optional `<texture>_nohq.paa` enhancement for original OFP/CWA assets,
+        // which have no RVMAT of their own. Off turns every legacy section back to its 2001
+        // shading, which is the only way to see the enhancement's actual contribution A/B.
+        bool legacyEnhancement = true;
     };
     struct MaterialDebugInfo
     {
