@@ -32,7 +32,8 @@ corpora*, not about a game.
 | `MLOD_PER_LOD_DISPATCH` | `VALIDATED` | 1,661 models routed; 1,659 loose models, 2 SP3X | AST-011A | `a72fbae` |
 | `UNKNOWN_LOD_SIGNATURE_REJECT` | `VALIDATED` | structured refusal naming the bytes found | AST-011A | `a72fbae` |
 | `P3DM_MATERIAL_REFERENCE` | `VALIDATED` | texture and RVMAT kept distinct, keyed as a pair | AST-011B | `8bb6afd` |
-| `P3DM_SOURCE_WINDING` | `UNVERIFIED` | recorded CW_REVERSED_ON_LOAD_ASSUMED; no P3DM rendered | AST-011B | `8bb6afd` |
+| `P3DM_RUNTIME_MATERIAL_BINDING` | `PARTIAL` | 1 official Arma 3 Samples P3DM lamp (138 visual-LOD faces, including quad-only material runs) reaches the WGPU path; 3 authored RVMAT references survive into runtime sections and a temporary local NOHQ Stage1 is resolved and bound on lamp_street_white.rvmat | AST-011B | `8bb6afd` |
+| `P3DM_SOURCE_WINDING` | `UNVERIFIED` | recorded CW_REVERSED_ON_LOAD_ASSUMED; one P3DM sample renders, but its winding has not yet been judged against a reference render | AST-011B | `8bb6afd` |
 | `P3DM_STATIC_GEOMETRY` | `VALIDATED` | 1,661 models, 0 refused, 0 mismatches vs independent reader | AST-011B | `8bb6afd` |
 | `MULTI_UV` | `VALIDATED` | 16,164 #UVSet# blocks in 1,640 models match 4+8*sum(face.n) | AST-011C | `08f3ac7` |
 | `UV1_NO_COLLAPSE` | `VALIDATED` | uv1 participates in vertex identity | AST-011C | `08f3ac7` |

@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -55,9 +56,34 @@ TexMaterial::TexMaterial(const char* name)
         // leading '#' -> name into the global material table
         entry = (Pars >> "CfgMaterials").FindEntry(name + 1);
     }
-    else if (cfg.ParseBinOrTxt(name))
+    else
     {
-        entry = &cfg;
+        // RVMAT references from model sections may be retail `\0raP` files.
+        // ParseBinOrTxt only understands Poseidon's serializer layout, so consume
+        // both text and retail material forms through the shared source IR.
+        try
+        {
+            const auto source = Asset::Material::ParseRvMaterialFile(name);
+            auto color = [](const std::array<float, 4>& value) {
+                return Color(value[0], value[1], value[2], value[3]);
+            };
+            _emmisive = color(source.emissive);
+            _ambient = color(source.ambient);
+            _diffuse = color(source.diffuse);
+            _forcedDiffuse = color(source.forcedDiffuse);
+            _specular = color(source.specular);
+            _specularPower = source.specularPower;
+            _bumpmapFactor = 1;
+            _detailmapFactor = 1;
+            return;
+        }
+        catch (const std::exception& error)
+        {
+            LOG_DEBUG(Graphics, "Material {} source parse failed: {}", name, error.what());
+        }
+
+        if (cfg.ParseBinOrTxt(name))
+            entry = &cfg;
     }
     if (!entry)
     {

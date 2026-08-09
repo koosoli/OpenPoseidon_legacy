@@ -7,6 +7,7 @@
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <stdint.h>
@@ -34,6 +35,72 @@ namespace Model
 {
 namespace ShapeAdapter
 {
+
+// A tangent basis is defined by geometry and UV0, not by the packed ST values
+// currently captured from the narrow ODOL-73 reader.  Generate it here, after
+// source vertices have been split at normal/UV seams, so a normal map receives
+// a stable per-vertex frame.  Degenerate UV triangles leave their vertices at
+// zero and the WGPU shader uses its derivative fallback for those cases.
+static std::vector<std::array<float, 3>> buildTangents(const Mesh& mesh,
+                                                        std::vector<std::array<float, 3>>& outBinormals)
+{
+    const size_t count = mesh.vertices.size();
+    std::vector<std::array<float, 3>> tangents(count, {0.f, 0.f, 0.f});
+    outBinormals.assign(count, {0.f, 0.f, 0.f});
+
+    const auto addTriangle = [&](uint32_t ia, uint32_t ib, uint32_t ic)
+    {
+        if (ia >= count || ib >= count || ic >= count)
+            return;
+
+        const Vertex& a = mesh.vertices[ia];
+        const Vertex& b = mesh.vertices[ib];
+        const Vertex& c = mesh.vertices[ic];
+        const float e1x = b.position.x - a.position.x;
+        const float e1y = b.position.y - a.position.y;
+        const float e1z = b.position.z - a.position.z;
+        const float e2x = c.position.x - a.position.x;
+        const float e2y = c.position.y - a.position.y;
+        const float e2z = c.position.z - a.position.z;
+        const float du1 = b.uv.u - a.uv.u;
+        const float dv1 = b.uv.v - a.uv.v;
+        const float du2 = c.uv.u - a.uv.u;
+        const float dv2 = c.uv.v - a.uv.v;
+        const float determinant = du1 * dv2 - du2 * dv1;
+        if (std::fabs(determinant) <= 1e-8f)
+            return;
+
+        const float reciprocal = 1.f / determinant;
+        const std::array<float, 3> tangent = {
+            (e1x * dv2 - e2x * dv1) * reciprocal,
+            (e1y * dv2 - e2y * dv1) * reciprocal,
+            (e1z * dv2 - e2z * dv1) * reciprocal,
+        };
+        const std::array<float, 3> binormal = {
+            (e2x * du1 - e1x * du2) * reciprocal,
+            (e2y * du1 - e1y * du2) * reciprocal,
+            (e2z * du1 - e1z * du2) * reciprocal,
+        };
+        for (uint32_t index : {ia, ib, ic})
+        {
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                tangents[index][axis] += tangent[axis];
+                outBinormals[index][axis] += binormal[axis];
+            }
+        }
+    };
+
+    for (const Triangle& triangle : mesh.triangles)
+        addTriangle(triangle.indices[0], triangle.indices[1], triangle.indices[2]);
+    for (const Quad& quad : mesh.quads)
+    {
+        addTriangle(quad.indices[0], quad.indices[1], quad.indices[2]);
+        addTriangle(quad.indices[0], quad.indices[2], quad.indices[3]);
+    }
+
+    return tangents;
+}
 
 static int convertFaceFlagsToSpecial(FaceFlags flags)
 {
@@ -96,6 +163,21 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         int triangleCount = static_cast<int>(mesh.triangles.size());
         int quadCount = static_cast<int>(mesh.quads.size());
         bool isODOL = (model.sourceFormat == "ODOL");
+        std::vector<std::array<float, 3>> generatedBinormals;
+        const std::vector<std::array<float, 3>> generatedTangents = buildTangents(mesh, generatedBinormals);
+        bool hasGeneratedTangentFrame = false;
+        for (size_t vertexIndex = 0; vertexIndex < generatedTangents.size(); ++vertexIndex)
+        {
+            const auto& tangent = generatedTangents[vertexIndex];
+            const auto& binormal = generatedBinormals[vertexIndex];
+            const float tangentLength2 = tangent[0] * tangent[0] + tangent[1] * tangent[1] + tangent[2] * tangent[2];
+            const float binormalLength2 = binormal[0] * binormal[0] + binormal[1] * binormal[1] + binormal[2] * binormal[2];
+            if (tangentLength2 > 1e-10f && binormalLength2 > 1e-10f)
+            {
+                hasGeneratedTangentFrame = true;
+                break;
+            }
+        }
 
         shape->_resolutions[i] = lodLevel.resolution;
         shape->_lods[i] = new Shape();
@@ -128,6 +210,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             const Vertex& vertex = mesh.vertices[v];
             shape->_lods[i]->SetPos(v) = ::Vector3(vertex.position.x, vertex.position.y, vertex.position.z);
             shape->_lods[i]->SetNorm(v) = ::Vector3(vertex.normal.x, vertex.normal.y, vertex.normal.z);
+            shape->_lods[i]->SetTangent(v) = ::Vector3(generatedTangents[v][0], generatedTangents[v][1], generatedTangents[v][2]);
+            shape->_lods[i]->SetBinormal(v) = ::Vector3(generatedBinormals[v][0], generatedBinormals[v][1], generatedBinormals[v][2]);
             shape->_lods[i]->SetU(v, vertex.uv.u);
             shape->_lods[i]->SetV(v, vertex.uv.v);
 
@@ -141,6 +225,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             }
             shape->_lods[i]->SetClip(v, c);
         }
+        shape->_lods[i]->SetHasTangentFrame(hasGeneratedTangentFrame);
 
         if (isODOL && !mesh.frames.empty())
         {
@@ -402,7 +487,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         // On x64 (sizeof==16) we derive face counts from those offsets then recompute
         // native offsets by walking the actual face stream.
         shape->_lods[i]->Faces().SetSections(nullptr, 0);
-        if (isODOL && !mesh.sections.empty())
+        if (!mesh.sections.empty())
         {
             int nSections = static_cast<int>(mesh.sections.size());
             int totalFaces = static_cast<int>(faceRefs.size());
@@ -415,14 +500,17 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
 
             std::vector<int> facesPerSection(nSections, 0);
             int fileBytePos = 0;
+            int faceStreamPos = 0;
             int curSec = 0;
             for (int f = 0; f < totalFaces; ++f)
             {
-                while (curSec < nSections - 1 && fileBytePos >= secEndFile[curSec])
+                const int sectionProgress = isODOL ? fileBytePos : faceStreamPos;
+                while (curSec < nSections - 1 && sectionProgress >= secEndFile[curSec])
                     curSec++;
                 facesPerSection[curSec]++;
                 int nVerts = faceRefs[f].isQuad ? 4 : 3;
                 fileBytePos += kFilePolyPropsSize + static_cast<int>(sizeof(VertexIndex)) * (1 + nVerts);
+                ++faceStreamPos;
             }
 
             std::vector<ShapeSection> shapeSections(nSections);

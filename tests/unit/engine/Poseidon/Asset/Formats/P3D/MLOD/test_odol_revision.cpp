@@ -2,7 +2,8 @@
 //
 // Architecture only. This routes on the exact revision and refuses everything it
 // cannot read; it claims support for no later revision. The revisions named are
-// those AST-007 found in the owner's corpora (7, 48, 49, 50, 52, 73) -- the only
+// those AST-007 found in the owner's corpora (7, 48, 49, 50, 52, 73), plus the
+// controlled official Binarize fixture revision 75 -- the only
 // population any claim here can honestly cover.
 
 #include <catch2/catch_approx.hpp>
@@ -50,6 +51,8 @@ TEST_CASE("ODOL revisions found in the corpora are described", "[p3d][odol][ast-
     // one direction or the other.
     REQUIRE(P3D::DescribeOdolRevision(73).support == P3D::OdolSupport::NarrowSubset);
     REQUIRE(std::string(P3D::DescribeOdolRevision(73).generation) == "Arma 3");
+    REQUIRE(P3D::DescribeOdolRevision(75).support == P3D::OdolSupport::Recognised);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(75).generation) == "Arma 3 Tools Binarize");
     REQUIRE(P3D::DescribeOdolRevision(9999).support == P3D::OdolSupport::Unknown);
 }
 
@@ -68,6 +71,22 @@ TEST_CASE("A recognised revision is refused, naming its generation", "[p3d][odol
         // A diagnostic that does not say which generation sends the reader nowhere.
         REQUIRE(std::string(error.what()).find("Arma 3") != std::string::npos);
         REQUIRE(std::string(error.what()).find("AST-012B") != std::string::npos);
+    }
+}
+
+TEST_CASE("The official Binarize revision is recognised but safely refused", "[p3d][odol][ast-012c]")
+{
+    auto data = odolHeader(75);
+    try
+    {
+        ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "official-sample-odol75.p3d");
+        FAIL("expected ODOL 75 to be refused");
+    }
+    catch (const P3D::UnsupportedOdolRevision& error)
+    {
+        REQUIRE(error.version() == 75);
+        REQUIRE(error.recognised());
+        REQUIRE(std::string(error.what()).find("Arma 3 Tools Binarize") != std::string::npos);
     }
 }
 

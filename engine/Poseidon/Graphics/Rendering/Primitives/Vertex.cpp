@@ -52,6 +52,10 @@ void VertexTable::AllocTables(int nPos)
     _clip.Resize(nPos);
     _norm.Realloc(nPos);
     _norm.Resize(nPos);
+    _tangent.Realloc(nPos);
+    _tangent.Resize(nPos);
+    _binormal.Realloc(nPos);
+    _binormal.Resize(nPos);
     _tex.Realloc(nPos);
     _tex.Resize(nPos);
 }
@@ -60,6 +64,8 @@ void VertexTable::Reserve(int nPos)
     _pos.Reserve(nPos, nPos);
     _clip.Reserve(nPos, nPos);
     _norm.Reserve(nPos, nPos);
+    _tangent.Reserve(nPos, nPos);
+    _binormal.Reserve(nPos, nPos);
     _tex.Reserve(nPos, nPos);
 }
 
@@ -68,6 +74,8 @@ void VertexTable::Resize(int nPos)
     _pos.Resize(nPos);
     _clip.Resize(nPos);
     _norm.Resize(nPos);
+    _tangent.Resize(nPos);
+    _binormal.Resize(nPos);
     _tex.Resize(nPos);
 }
 
@@ -76,6 +84,8 @@ void VertexTable::Compact()
     _pos.Compact();
     _clip.Compact();
     _norm.Compact();
+    _tangent.Compact();
+    _binormal.Compact();
     _tex.Compact();
 }
 
@@ -84,6 +94,9 @@ void VertexTable::ReleaseTables()
     _pos.Clear();
     _clip.Clear();
     _norm.Clear();
+    _tangent.Clear();
+    _binormal.Clear();
+    _hasTangentFrame = false;
     _orig.Clear();
     _origClip.Clear();
 }
@@ -96,6 +109,10 @@ void VertexTable::ReallocTable(int nPos)
     _clip.Resize(nPos);
     _norm.Realloc(nPos);
     _norm.Resize(nPos);
+    _tangent.Realloc(nPos);
+    _tangent.Resize(nPos);
+    _binormal.Realloc(nPos);
+    _binormal.Resize(nPos);
     _tex.Realloc(nPos);
     _tex.Resize(nPos);
 }
@@ -106,6 +123,8 @@ void VertexTable::Init(int nPos)
     _tex.Init(nPos), _tex.Resize(nPos);
     _clip.Init(nPos), _clip.Resize(nPos);
     _norm.Init(nPos), _norm.Resize(nPos);
+    _tangent.Init(nPos), _tangent.Resize(nPos);
+    _binormal.Init(nPos), _binormal.Resize(nPos);
 }
 
 void VertexTable::DoConstruct(const VertexTable& src)
@@ -114,6 +133,9 @@ void VertexTable::DoConstruct(const VertexTable& src)
     _pos = src._pos;
     _clip = src._clip;
     _norm = src._norm;
+    _tangent = src._tangent;
+    _binormal = src._binormal;
+    _hasTangentFrame = src._hasTangentFrame;
     _orHints = src._orHints;
     _andHints = src._andHints;
 

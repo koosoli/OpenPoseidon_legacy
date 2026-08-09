@@ -801,19 +801,8 @@ PF_API PF_HANDLE pf_material_load(const char* path)
     if (!path) { SetError("null path"); return nullptr; }
     try
     {
-        {
-            std::ifstream probe(path, std::ios::binary);
-            if (!probe) { SetError("cannot open material"); return nullptr; }
-        }
-        auto*     wrapper = new PFMaterial();
-        ParamFile config;
-        // Parse(path), not Parse(stream): the former runs the preprocessor first.
-        // RVMATs contain `//` comments -- one sits inside a commented-out texture
-        // line in the Arma 2 helicopter materials -- and the raw stream parser
-        // loses sync on them, silently reporting 4 stages where the file declares
-        // 7. That is invisible unless the count is checked against the source.
-        config.Parse(path);
-        wrapper->source = Poseidon::Asset::Material::ParseRvMaterial(config, path);
+        auto* wrapper = new PFMaterial();
+        wrapper->source = Poseidon::Asset::Material::ParseRvMaterialFile(path);
         return wrapper;
     }
     catch (const std::exception& e) { SetError(e.what()); return nullptr; }

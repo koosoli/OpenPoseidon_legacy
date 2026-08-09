@@ -172,7 +172,7 @@ const PALETTE_SIZE: usize = 128;
 // Per-draw material UBO size: six vec4 (emissive, sun_ambient, sun_diffuse,
 // light_diffuse, light_ambient, specular), matching the `Material` struct in
 // shader3d.wgsl.
-const MATERIAL_SIZE: u64 = 96;
+const MATERIAL_SIZE: u64 = 112;
 
 // Fixed capacity of the frame-global light storage buffer (group 0). The
 // active count per frame rides in WgrCamera::cam_pos.w; slots beyond it aren't read.
@@ -203,6 +203,7 @@ struct MaterialUbo {
     light_diffuse: [f32; 4],
     light_ambient: [f32; 4],
     specular: [f32; 4],
+    normal_map: [f32; 4], // x packed texture/sampler, y debug view, z enabled
 }
 
 // One indexed indirect draw command, the layout every backend's
@@ -266,7 +267,7 @@ struct BakeParamsGpu {
     _pad: [u32; 3],
 }
 
-// Bytes per baked vertex = one WgrMeshVertex (pos+norm+uv+conform, 9 words).
+// Bytes per baked vertex = one WgrMeshVertex (pos+norm+uv+conform+tangent/binormal).
 const BAKED_VERT_SIZE: u64 = std::mem::size_of::<WgrMeshVertex>() as u64;
 
 // Blocking copy of one D32 texture layer into `out` (row 0 = top).
@@ -2503,7 +2504,7 @@ pub struct Gfx3d {
     // alpha_ref > 0) colour + prepass pipelines enable alpha_to_coverage and emit a sharpened
     // coverage instead of a hard discard, antialiasing leaf/grass edges across the MSAA samples.
     foliage_a2c: bool,
-    vbuf_attrs: [wgpu::VertexAttribute; 4],
+    vbuf_attrs: [wgpu::VertexAttribute; 6],
     skin_attrs: [wgpu::VertexAttribute; 2],
     pipelines: FxHashMap<PipelineKey, wgpu::RenderPipeline>,
     // Depth+normal prepass variants (docs/depth-prepass-plan.md), built lazily
@@ -2835,11 +2836,13 @@ impl Gfx3d {
 
         // Vertex attributes stored on the struct so pipeline variants can be
         // (re)built lazily; VertexBufferLayout only borrows them at build time.
-        // Location 5 = per-vertex terrain-conform selector (0/1/2). Placed at 5 so it
-        // never collides with the skinned path's bone/weight attributes (3, 4). Offsets
-        // are assigned in order, so it lands at byte 32 (after pos/norm/uv) = conform.
+        // Location 5 = per-vertex terrain-conform selector (0/1/2). Locations 6/7 carry
+        // an optional authored tangent/binormal frame from ODOL; zero values retain the
+        // derivative fallback. They stay clear of the skinned path's bone/weight inputs
+        // at 3/4. Offsets are byte 32 (conform), 36 (tangent), and 48 (binormal).
         let vbuf_attrs =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32,
+                                     6 => Float32x3, 7 => Float32x3];
         // Skin buffer: 8 bytes/vertex — Uint8x4 bone indices + Unorm8x4 weights.
         let skin_attrs = wgpu::vertex_attr_array![3 => Uint8x4, 4 => Unorm8x4];
 
@@ -4505,6 +4508,8 @@ impl Gfx3d {
                 norm: glam::Vec3::ZERO,
                 uv: glam::Vec2::ZERO,
                 conform: 0,
+                tangent: glam::Vec3::ZERO,
+                binormal: glam::Vec3::ZERO,
             })
             .collect();
         let indices: Vec<u16> = (0..vert_count as u16).collect();
@@ -4897,6 +4902,8 @@ impl Gfx3d {
                     let packed = (slot << 3) | (d.sampler.index() as u32 & 0x7);
                     let mut emissive = d.mat_emissive;
                     emissive[3] = f32::from_bits(packed);
+                    let normal_slot = textures.texture_slot(d.normal_texture_id);
+                    let normal_packed = (normal_slot << 3) | (d.sampler.index() as u32 & 0x7);
                     bytemuck::cast::<MaterialUbo, [u8; MAT_SZ]>(MaterialUbo {
                         emissive,
                         sun_ambient: d.mat_sun_ambient,
@@ -4904,6 +4911,7 @@ impl Gfx3d {
                         light_diffuse: d.mat_light_diffuse,
                         light_ambient: d.mat_light_ambient,
                         specular: d.mat_specular,
+                        normal_map: [f32::from_bits(normal_packed), (d._pad & 0xff) as f32, if d.normal_texture_id != 0 { 1.0 } else { 0.0 }, if d._pad & 0x100 != 0 { 1.0 } else { 0.0 }],
                     })
                 }));
             }

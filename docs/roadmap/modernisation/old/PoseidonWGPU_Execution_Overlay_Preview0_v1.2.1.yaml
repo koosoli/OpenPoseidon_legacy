@@ -1,0 +1,355 @@
+schema_version: 2
+overlay_id: PREVIEW0-EXEC-001
+revision: "1.2.1"
+document_status: ACTIVATED
+template: false
+
+roadmap:
+  version: "4.4.1"
+  path: docs/roadmap/modernisation/PoseidonWGPU_Modernisation_Roadmap_v4.4.1.md
+  sha256: 08141413bc4617a796744e44e5f37c46e67fed6bce8a6edadc54daba1cd777d8
+  # The commit that produced the roadmap content this sha256 covers. The roadmap is
+  # deliberately NOT edited by the activation commit: a roadmap change in the same
+  # commit could never name its own hash here, so roadmap prose corrections land
+  # separately and update this field, the sha256 above, and the checksum manifest.
+  repository_commit: cc5000358a5006d8b633acefbf5537d26fbc7e90
+
+ledger:
+  path: docs/roadmap/status-ledger.yaml
+  create_if_missing: true
+  bootstrap_schema:
+    purpose: >-
+      Provide only the minimum lock and claim state needed before CORE-005
+      promotes the file into the complete authoritative ledger.
+    required_ticket_fields:
+      - id
+      - owner
+      - branch
+      - baseline_commit
+      - scheduling_state
+      - blocked_by
+    bootstrap_field_rules:
+      owner:
+        nullable_when: "scheduling_state != ACTIVE"
+        required_when: "scheduling_state == ACTIVE"
+      branch:
+        nullable_when: "scheduling_state != ACTIVE"
+        required_when: "scheduling_state == ACTIVE"
+      baseline_commit:
+        default_from: execution.baseline_commit
+        required_when: "scheduling_state == ACTIVE"
+      blocked_by:
+        default: []
+      active_claim_requirements:
+        - owner is non-null
+        - branch is non-null
+        - baseline_commit is non-null
+    creation_rules:
+      - Create a ticket record only when it does not already exist.
+      - Never overwrite a live owner, branch, scheduling state, or blocker list.
+      - Preserve every valid bootstrap claim during CORE-005 schema promotion.
+  full_schema_required_by: CORE-005
+  authoritative_for:
+    - owner
+    - branch
+    - baseline_commit
+    - verification_commit
+    - dependencies
+    - blocked_by
+    - scheduling_state
+    - lifecycle_status
+    - milestone_role
+    - evidence
+
+execution:
+  current_preview: PREVIEW_0
+  integration_target: new-renderer-infrastructure
+  baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+  baseline_semantics: PRE_ACTIVATION_CODE_BASELINE
+  integration_owner: Oliver Kay
+  authorization_policy: DENY_UNLESS_LISTED
+  activation_state: ACTIVE
+  updated_at: "2026-08-05T16:10:00+02:00"
+  review_after: "2026-08-12"
+
+bootstrap_policy:
+  implementation_forbidden_until_resolved: false
+  resolve_baseline_from_checkout: true
+  baseline_command: git rev-parse HEAD
+  integration_owner_source: launch_assignment
+  required_actions:
+    - Resolve execution.baseline_commit from the checked-out repository HEAD before modifying the overlay.
+    - Treat execution.baseline_commit as the pre-activation code baseline.
+    - Set execution.integration_target to the branch receiving reviewed Preview 0 work.
+    - Set execution.integration_owner from the launch assignment.
+    - Record the roadmap repository commit after the roadmap is committed.
+    - Create or validate the bootstrap lock ledger at ledger.path.
+    - Seed missing authorised ticket records from execution_queue initial values without overwriting live records.
+    - Confirm every authorised, candidate, and held ticket exists in the canonical roadmap.
+    - Confirm live ACTIVE records satisfy all WIP limits.
+    - Confirm every required bootstrap action and validation rule passes.
+    - Set bootstrap_policy.implementation_forbidden_until_resolved to false only after those checks pass.
+    - Change template to false and execution.activation_state to ACTIVE in the same reviewed commit.
+    - Write the resolved overlay and bootstrap ledger back to the repository before any claim or implementation begins.
+  failure_policy: STOP_WITH_DIAGNOSTIC
+  resolution:
+    resolved_at: "2026-08-05"
+    resolved_by: Oliver Kay
+    resolution_commit: 3723892dd1520ebe2a0ae0b561c1f915a97ebb4f
+    checks:
+      baseline_resolved_from_checkout: 513430ae392f60dfa3375ad1cba600bbbc082a39
+      roadmap_repository_commit_recorded: cc5000358a5006d8b633acefbf5537d26fbc7e90
+      roadmap_sha256_matches_tracked_file: true
+      ledger_exists_and_satisfies_full_schema: true
+      every_authorised_candidate_and_held_ticket_resolves_in_roadmap: true
+      wip_limits_satisfied: "0 ACTIVE records; limits vacuously satisfied"
+      validator: scripts/validate_preview0_ledger.py
+    note: >-
+      Activation is late rather than early: all six preview blockers were already
+      DONE and VALIDATED before this pass ran, so the flags below record work that
+      happened, they do not authorise work that had not. That is worth stating
+      plainly instead of leaving the overlay reading as though the gate held.
+
+      resolution_commit is null in the commit that writes this block, for the same
+      self-reference reason as roadmap.repository_commit above.
+
+wip_limits:
+  scope: INTEGRATION_TARGET
+  active_large_tickets_max: 2
+  active_small_tickets_max: 3
+  active_cross_system_tickets_max: 2
+  count_only_state: ACTIVE
+  size_values:
+    - SMALL
+    - LARGE
+
+preview_blockers:
+  - PERF-001
+  - CORE-005
+  - CORE-NEG-001
+  - CORE-NEG-002
+  - RND-005A
+  - TEST-002
+
+authorised_tickets:
+  - PERF-001
+  - CORE-005
+  - CORE-NEG-001
+  - CORE-NEG-002
+  - RND-005A
+  - TEST-002
+  - REL-000
+
+execution_queue:
+  - id: PERF-001
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: SMALL
+    cross_system: false
+    priority: 1
+    active_scope: >-
+      Declare one realistic Tier 1 configuration sufficient to define Preview 0
+      build, startup, capture, and release gates. Do not build a comprehensive
+      cross-platform hardware matrix during this activation.
+    completion_unlocks:
+      - CORE-NEG-001
+
+  - id: CORE-005
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: SMALL
+    cross_system: false
+    priority: 1
+    active_scope: >-
+      Promote the bootstrap lock ledger into the minimum complete authoritative
+      ledger schema; preserve valid claims; add ownership and branch records,
+      dependency validation, duplicate-ticket detection, evidence links, overlay
+      validation, and the independent SHIPPABLE approval rule required for
+      Preview 0.
+
+  - id: CORE-NEG-001
+    initial_scheduling_state: BLOCKED
+    initial_blocked_by:
+      - PERF-001
+    size: LARGE
+    cross_system: true
+    priority: 2
+    active_scope: >-
+      Produce reproducible Tier 1 C++ and Rust builds, validate composed WGSL,
+      prove that WGPU was actually selected, prevent silent GL33 fallback in the
+      WGPU test, and emit a build manifest and fingerprint.
+
+  - id: CORE-NEG-002
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: LARGE
+    cross_system: true
+    priority: 2
+    active_scope: >-
+      Add proportional C++/Rust ABI versioning, build identity, structure-size
+      checks, feature negotiation, panic and exception containment, ownership
+      documentation, and safe mismatched-binary refusal.
+
+  - id: RND-005A
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: LARGE
+    cross_system: true
+    priority: 2
+    active_scope: >-
+      Expose adapter, backend, capabilities, and fallback reasons; improve shader
+      and pipeline diagnostics; validate resize, minimise, device-loss detection,
+      and clean shutdown. Transparent in-process device recovery is outside this
+      activation.
+
+  - id: TEST-002
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: SMALL
+    cross_system: false
+    priority: 2
+    active_scope: >-
+      Implement only the Preview 0 subset: build and driver fingerprint, explicit
+      backend proof, timing export, and one reproducible reference capture with a
+      machine-readable result bundle.
+    completion_effect:
+      parent_ticket_lifecycle_ceiling: INTEGRATED
+      note: >-
+        Completing this scoped activation does not complete every full TEST-002
+        acceptance item scheduled for later milestones.
+
+  - id: REL-000
+    initial_scheduling_state: OPEN
+    initial_blocked_by: []
+    size: LARGE
+    cross_system: false
+    priority: 1
+    promoted_at: "2026-08-05"
+    promoted_by: Oliver Kay
+    promotion_reason: >-
+      All six technical preview blockers reached VALIDATED, and clean-checkout
+      reproducibility was verified end to end on 2026-08-05 (fresh clone ->
+      Build.ps1 -> full build -> complete dist/), which found and fixed four
+      silent defects. Both activation conditions recorded for this candidate are
+      therefore satisfied.
+    active_scope: >-
+      Package and publish the Preview 0 release: reproducible artifact, data and
+      startup instructions, build/driver fingerprint, Tier 1 configuration
+      statement, capability matrix derived from validated ledger records, known
+      limitations, reference capture and timing bundle, GL33/WGPU comparison
+      evidence, visual demonstration, and the independent-project disclaimer.
+    release_candidate_commit_policy: >-
+      Pin the packaged commit explicitly and record it. HEAD is NOT automatically
+      the candidate: renderer work has landed since the recorded manifest commit,
+      including the LIT-020 per-model sky bake, which is default ON and has no
+      disk cache or background scheduling, so it costs a measured ~18-22 ms per
+      model synchronously at load. Either pin a candidate that predates it, or
+      ship it default OFF, or complete the section 3d hardening first. Decide
+      this before building the artifact, not after.
+
+claim_protocol:
+  ledger_is_lock_source: true
+  queue_state_is_bootstrap_only: true
+  claim_requires:
+    - ticket is listed in authorised_tickets
+    - live ledger scheduling_state is OPEN
+    - live ledger has no unresolved blocked_by entries
+    - WIP limits remain satisfied using live ACTIVE ledger records and execution_queue size/cross_system metadata
+    - owner, branch, baseline_commit, and ACTIVE scheduling state are written atomically to the ledger
+    - owner, branch, and baseline_commit are non-null in the committed ACTIVE record
+    - baseline_commit equals execution.baseline_commit or is explicitly revalidated
+    - bootstrap_policy.implementation_forbidden_until_resolved is false
+  duplicate_claim_policy: FIRST_VALID_LEDGER_COMMIT_WINS
+  stale_claim_policy:
+    require_revalidation_when_baseline_not_ancestor: true
+    eligible_for_review_after_days_without_handoff: 7
+    automatic_release: false
+    release_requires:
+      - integration_owner_approval
+      - branch_and_worktree_preserved
+      - no_active_ci_or_handoff
+      - diagnostic_recorded
+
+next_candidates:
+  # REL-000 was promoted into authorised_tickets and execution_queue on
+  # 2026-08-05; its activation conditions are recorded on the queue entry.
+
+  - id: RND-030
+    activation_condition:
+      preview_shipped: PREVIEW_0
+    reason: >-
+      Reconcile existing renderer plans and implemented paths before authorising
+      overlapping renderer architecture work. Its canonical milestone role
+      remains BLOCKING before such overlapping work.
+
+named_holds:
+  - id: PHY-GATE-0
+    reason: External physics-backend evaluation is outside Preview 0.
+
+  - id: WTR-100
+    reason: WaterBody and unified-water expansion wait for ocean closure and WaterQuery migration.
+
+  - id: WTR-200
+    reason: Shallow-water research is outside Preview 0.
+
+  - id: TRN-010
+    reason: Terrain deformation is outside Preview 0.
+
+  - id: FAR-000
+    reason: Far-world research waits for its formal decision milestone.
+
+  - id: CLD-010
+    reason: Volumetric-cloud expansion is outside Preview 0.
+
+agent_startup_protocol:
+  - Read this overlay before the roadmap.
+  - Refuse implementation while template is true, activation_state is not ACTIVE, or implementation_forbidden_until_resolved is true.
+  - Read only the canonical roadmap definitions for the assigned ticket and its dependencies.
+  - Inspect and verify the current production path before proposing changes.
+  - Treat suggested mechanisms as replaceable; preserve required outcomes and constraints.
+  - Claim exactly one ticket unless the integration owner explicitly authorises more.
+  - Do not modify unlisted tickets or named holds.
+  - Treat execution_queue state fields as initial seed values, never as live truth.
+  - Record tests, measurements, changed paths, evidence, risks, and remaining work in the ledger.
+  - Do not self-approve SHIPPABLE status.
+
+validation_rules:
+  - Every preview_blocker must appear in authorised_tickets.
+  - Every authorised ticket must appear exactly once in execution_queue.
+  - Every execution_queue, next_candidates, and named_holds ticket must exist in the roadmap.
+  - Every execution_queue ticket must declare size and cross_system.
+  - Every initial_scheduling_state of BLOCKED must declare at least one initial_blocked_by entry.
+  - Initial queue values may create missing ledger records but must never overwrite existing live records.
+  - Before CORE-005 is complete, the ledger must satisfy ledger.bootstrap_schema.
+  - After CORE-005 is validated, the ledger must satisfy the complete canonical ledger schema.
+  - ACTIVE ticket counts must satisfy large, small, and cross-system WIP limits within execution.integration_target.
+  - Every ACTIVE ledger record must have non-null owner, branch, and baseline_commit.
+  - OPEN and BLOCKED bootstrap records may have null owner and branch; their baseline_commit defaults from execution.baseline_commit.
+  - No named hold may appear in authorised_tickets.
+  - No next candidate is authorised until it is explicitly promoted into authorised_tickets and execution_queue.
+  - Milestone roles must resolve from the roadmap and validated ledger; the overlay must not override them.
+  - implementation_forbidden_until_resolved must remain true while template is true or execution.activation_state is not ACTIVE.
+  - implementation_forbidden_until_resolved may become false only after every required bootstrap action and validation rule passes.
+  - template false, execution.activation_state ACTIVE, and implementation_forbidden_until_resolved false must be committed atomically before any claim or implementation.
+  - execution.baseline_semantics must remain PRE_ACTIVATION_CODE_BASELINE for this overlay revision.
+  - The roadmap hash must match the file supplied to agents or be updated with an approved decision record.
+
+notes:
+  - >-
+    preview_blockers describes what must be completed for Preview 0; it does not
+    mean all six tickets are simultaneously ACTIVE.
+  - >-
+    Tickets not listed in authorised_tickets are denied by default, even when they
+    appear elsewhere in the roadmap.
+  - >-
+    The live ledger is mutable execution truth. The overlay is the bounded
+    authorisation and bootstrap contract.
+  - >-
+    Milestone roles should change rarely and only through the canonical ledger
+    and an evidence-backed decision record.
+  - >-
+    Bootstrap OPEN and BLOCKED records may be unowned. Ownership, branch, and
+    baseline become mandatory only when a ticket is atomically claimed ACTIVE.
+  - >-
+    Stale claims are reviewed, never released automatically; the integration
+    owner must preserve work and record the release decision.

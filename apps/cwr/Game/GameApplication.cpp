@@ -1049,8 +1049,8 @@ void GameApplication::RunMainLoop()
     std::string screenshotTestPath;
     // --test-model rides on the mission screenshot mode: the model needs a world
     // to stand in, and that mode already waits for one.
-    const std::string testModelPath = AppConfig::Instance().GetTestModelPath();
-    const bool spawnTestModel = !testModelPath.empty();
+    const std::vector<std::string>& testModelPaths = AppConfig::Instance().GetTestModelPaths();
+    const bool spawnTestModel = !testModelPaths.empty();
     bool testModelSpawned = false;
     if (spawnTestModel && !screenshotTestMode)
         LOG_WARN(Core, "--test-model needs --test-mission to have a world to place the model in");
@@ -1199,17 +1199,27 @@ void GameApplication::RunMainLoop()
             Object* cameraOn = GWorld->CameraOn();
             if (!cameraOn || !GLandscape)
             {
-                LOG_ERROR(Core, "--test-model: no camera or landscape to place {} against", testModelPath);
+                LOG_ERROR(Core, "--test-model: no camera or landscape to place {} model(s) against", testModelPaths.size());
             }
             else
             {
+                for (size_t testModelIndex = 0; testModelIndex < testModelPaths.size(); ++testModelIndex)
+                {
+                    const std::string& testModelPath = testModelPaths[testModelIndex];
                 // Along the camera's own view direction, not a fixed offset:
                 // a constant +x/+z lands behind the camera as often as in front
                 // of it, and an invisible model reads as a render failure.
                 const Matrix4 view = cameraOn->WorldTransform();
-                const Vector3 ahead = view.Position() + view.Direction() * 10.0f;
-                const float x = ahead.X();
-                const float z = ahead.Z();
+                const float testModelDistance = AppConfig::Instance().GetTestModelDistance();
+                const Vector3 ahead = view.Position() + view.Direction() * testModelDistance;
+                // A multi-model smoke scene is laid out perpendicular to the view
+                // direction.  This preserves the same distance/LOD selection for
+                // every fixture and makes a normal-map comparison one screenshot.
+                const float lateralOffset = (static_cast<float>(testModelIndex) -
+                                             static_cast<float>(testModelPaths.size() - 1) * 0.5f) * 6.0f;
+                const Vector3 positioned = ahead + view.DirectionAside() * lateralOffset;
+                const float x = positioned.X();
+                const float z = positioned.Z();
                 // This is a render harness, not normal placement gameplay. Keep
                 // the test object on the camera's elevation: an empty dev scene
                 // can look out over water, where SurfaceY is the sea floor and
@@ -1228,6 +1238,17 @@ void GameApplication::RunMainLoop()
                 {
                     Matrix4 transform;
                     transform.SetIdentity();
+                    const float requestedScale = AppConfig::Instance().GetTestModelScale();
+                    // A house and a lamp have radically different authored units.
+                    // In a multi-model material smoke, normalize their bounds to a
+                    // two-metre inspection radius so a large fixture cannot hide
+                    // every other model.  A single requested model retains its
+                    // exact caller-selected scale for reproduction work.
+                    const float normalizedScale = testModelPaths.size() > 1 && shape->BoundingSphere() > 0.001f
+                        ? std::max(0.05f, std::min(20.0f, 2.0f / shape->BoundingSphere()))
+                        : 1.0f;
+                    const float effectiveScale = requestedScale * normalizedScale;
+                    transform.SetScale(effectiveScale);
                     transform.SetPosition(Vector3(x, y, z));
                     Object* placed = NewObject(shape, -1);
                     placed->SetTransform(transform);
@@ -1245,8 +1266,9 @@ void GameApplication::RunMainLoop()
                     LOG_INFO(Core, "--test-model: camera at {} {} {} dir {} {} {}", view.Position().X(),
                              view.Position().Y(), view.Position().Z(), view.Direction().X(), view.Direction().Y(),
                              view.Direction().Z());
-                    LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {}", placed->Position().X(),
-                             placed->Position().Y(), placed->Position().Z(), shape->BoundingSphere());
+                    LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {} effective scale {}",
+                             placed->Position().X(), placed->Position().Y(), placed->Position().Z(),
+                             shape->BoundingSphere(), effectiveScale);
                     // Resolutions decide which LOD is drawable at all: a shape
                     // whose levels are every one of them special (geometry,
                     // memory, shadow) has nothing to draw at any distance, which
@@ -1275,28 +1297,24 @@ void GameApplication::RunMainLoop()
                                 const char* materialPath = sec.surfMat->GetName().Data();
                                 LOG_INFO(Core, "--test-model:     section {} material {} exists={}", section,
                                          materialPath, QIFStream::FileExists(materialPath));
-                                ParamFile materialFile;
-                                // Match the established text-RVMAT production parser.
-                                // `ParamFile` is deliberately not treated as an Arma raP
-                                // decoder: its binary representation is Poseidon's own
-                                // serializer layout, while a retail Arma RVMAT begins
-                                // `\\0raP` and has a different body.
-                                if (materialFile.Parse(materialPath) != LSOK)
+                                Asset::Material::RvMaterialSource source;
+                                try
                                 {
-                                    LOG_ERROR(Core, "--test-model:     material parse failed {}", materialPath);
+                                    source = Asset::Material::ParseRvMaterialFile(materialPath);
+                                }
+                                catch (const std::exception& error)
+                                {
+                                    LOG_ERROR(Core, "--test-model:     material parse failed {}: {}", materialPath,
+                                              error.what());
                                     continue;
                                 }
-                                const auto source = Asset::Material::ParseRvMaterial(materialFile, materialPath);
+                                LOG_INFO(Core, "--test-model:     material source shader={} stages={} extras={} classes={}",
+                                         source.pixelShaderId, source.stages.size(), source.extra.size(),
+                                         source.otherClasses.size());
                                 if (source.pixelShaderId.empty() && source.stages.empty())
                                 {
-                                    std::ifstream raw(materialPath, std::ios::binary);
-                                    char header[4]{};
-                                    raw.read(header, sizeof(header));
-                                    const bool isArmaRap = raw.gcount() == sizeof(header) && header[0] == '\0' &&
-                                                           header[1] == 'r' && header[2] == 'a' && header[3] == 'P';
                                     LOG_WARN(Core,
-                                             "--test-model:     material yielded no entries{}; no stages are bound",
-                                             isArmaRap ? " (Arma raP decoding is not implemented)" : "");
+                                             "--test-model:     material yielded no entries; no stages are bound");
                                     continue;
                                 }
                                 const auto translated = Asset::Material::TranslateSemantics(
@@ -1316,6 +1334,7 @@ void GameApplication::RunMainLoop()
                     }
                     if (faces <= 0)
                         LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
+                }
                 }
             }
         }

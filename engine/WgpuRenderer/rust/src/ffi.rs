@@ -131,7 +131,8 @@ pub struct WgrDraw2DBatch {
     pub depth: u32,
 }
 
-// Object-space mesh vertex; matches the engine's SVertex (pos, normal, uv).
+// Object-space mesh vertex; matches the engine's SVertex (pos, normal, uv,
+// terrain conform selector, optional authored tangent/binormal).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WgrMeshVertex {
@@ -142,6 +143,8 @@ pub struct WgrMeshVertex {
     // read by vs_main at @location(5). Only meaningful when the draw's conform mode
     // selects the per-vertex heightmap path (individual ClipLand vegetation).
     pub conform: u32,
+    pub tangent: WgrVec3,
+    pub binormal: WgrVec3,
 }
 
 #[repr(C)]
@@ -151,6 +154,7 @@ pub struct WgrDraw3D {
     pub index_begin: u32,
     pub index_count: u32,
     pub texture_id: u64,
+    pub normal_texture_id: u64,
     pub world: WgrMat4,
     pub blend: WgrBlend,
     pub sampler: WgrSampler2D,
@@ -1131,8 +1135,8 @@ pub struct WgrFrame {
 // Layouts must match wgpu_renderer.hpp exactly (the C++ side static_asserts the same).
 const _: () = assert!(std::mem::size_of::<WgrVertex2D>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrDraw2DBatch>() == 32);
-const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 36);
-const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 264);
+const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 60);
+const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
 const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 80);

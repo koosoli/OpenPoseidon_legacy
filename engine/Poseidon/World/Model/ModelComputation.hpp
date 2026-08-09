@@ -115,6 +115,48 @@ inline std::vector<Section> generateSections(const std::vector<Triangle>& triang
     return sections;
 }
 
+// Source MLOD face streams freely mix triangles and quads.  A section is a run
+// in that original stream, not a run in either of the two convenience vectors
+// the canonical mesh uses.  Keeping the original face order is essential: it
+// is what carries an authored RVMAT through ShapeAdapter to the renderer.
+inline std::vector<Section> generateSections(const std::vector<Triangle>& triangles,
+                                             const std::vector<Quad>& quads) {
+    struct FaceMaterial {
+        uint32_t originalIndex;
+        uint32_t materialIndex;
+    };
+    std::vector<FaceMaterial> faces;
+    faces.reserve(triangles.size() + quads.size());
+    for (const auto& triangle : triangles)
+        faces.push_back({triangle.originalIndex, triangle.materialIndex});
+    for (const auto& quad : quads)
+        faces.push_back({quad.originalIndex, quad.materialIndex});
+    if (faces.empty())
+        return {};
+
+    std::stable_sort(faces.begin(), faces.end(),
+                     [](const FaceMaterial& left, const FaceMaterial& right) { return left.originalIndex < right.originalIndex; });
+
+    std::vector<Section> sections;
+    uint32_t currentMaterial = faces.front().materialIndex;
+    uint32_t sectionStart = 0;
+    for (uint32_t face = 1; face <= static_cast<uint32_t>(faces.size()); ++face) {
+        if (face != faces.size() && faces[face].materialIndex == currentMaterial)
+            continue;
+        Section section;
+        section.materialIndex = currentMaterial;
+        section.startTriangle = sectionStart; // historical field name; MLOD uses face-stream units.
+        section.triangleCount = face - sectionStart;
+        section.hints = RenderHints::None;
+        sections.push_back(section);
+        if (face < faces.size()) {
+            currentMaterial = faces[face].materialIndex;
+            sectionStart = face;
+        }
+    }
+    return sections;
+}
+
 // AST-018: the proxy frame, built the way the engine's own proxy code builds it.
 //
 // This previously took the three selection vertices in index order and made

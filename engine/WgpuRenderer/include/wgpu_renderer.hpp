@@ -174,7 +174,8 @@ struct WgrVertex2D
     WgrRgba8 color;
 };
 
-/* One object-space mesh vertex; matches the engine's SVertex (pos, normal, uv, conform). */
+/* One object-space mesh vertex; matches the engine's SVertex (pos, normal, uv, conform,
+ * optional authored tangent/binormal). */
 struct WgrMeshVertex
 {
     WgrVec3 pos;
@@ -184,6 +185,8 @@ struct WgrMeshVertex
      * read by vs_main at @location(5). Meaningful only when the draw's conform mode
      * selects the per-vertex heightmap path (individual ClipLand vegetation). */
     uint32_t conform;
+    WgrVec3 tangent;
+    WgrVec3 binormal;
 };
 
 // --- Draw records ------------------------------------------------------------
@@ -237,6 +240,7 @@ struct WgrDraw3D
     uint32_t index_begin;
     uint32_t index_count;
     WgrTexture texture_id;
+    WgrTexture normal_texture_id; /* RVMAT Stage1, 0 when unavailable or overridden */
     WgrMat4 world;
     WgrBlend blend;
     uint32_t sampler;
@@ -1239,9 +1243,9 @@ static_assert(sizeof(WgrSlice<WgrCamera>) == 16 && alignof(WgrSlice<WgrCamera>) 
               "WgrSlice must be a { pointer, u32 } with 8-byte alignment");
 static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust #[repr(u32)] enum");
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrMeshVertex) == 36, "WgrMeshVertex must match the engine SVertex layout");
+static_assert(sizeof(WgrMeshVertex) == 60, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDraw3D) == 264, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDraw3D) == 272, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 48, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");

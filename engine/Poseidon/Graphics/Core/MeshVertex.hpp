@@ -16,6 +16,10 @@ struct SVertex
     // shape's ClipLand hints: 0 = rigid, 1 = ClipLandKeep, 2 = ClipLandOn. Read by the
     // mesh vertex shader (with a per-instance conform mode) to conform to SurfaceY.
     uint32_t conform;
+    // Optional authored tangent/binormal, carried by ODOL into the production
+    // WGPU mesh. Zero means this source has no decoded tangent frame.
+    Vector3P tangent;
+    Vector3P binormal;
 };
 
 } // namespace Poseidon

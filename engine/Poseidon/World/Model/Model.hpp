@@ -83,6 +83,12 @@ struct BoundingSphere {
 struct Vertex {
     Vector3 position;
     Vector3 normal;
+    // Optional authored tangent frame.  ODOL stores its S/T pair separately
+    // from the normal stream; retaining it prevents normal-mapped assets from
+    // falling back to a derivative frame at coarse geometry LODs.
+    Vector3 tangent;
+    Vector3 binormal;
+    bool hasTangentFrame = false;
     Vector2 uv;
     // Second UV channel (AST-011C). P3DM models routinely carry more than one
     // #UVSet#, and folding the second into `uv` would destroy exactly the data a

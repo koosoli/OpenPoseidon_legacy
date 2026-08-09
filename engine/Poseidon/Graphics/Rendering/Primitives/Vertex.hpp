@@ -131,8 +131,11 @@ protected:
 	mutable AutoArray<Vector3> _orig; // some shapes may need to save original position
 	mutable AutoArray<Vector3> _origNorm;
 
-	AutoArray<Vector3> _pos;
-	AutoArray<Vector3> _norm;
+    AutoArray<Vector3> _pos;
+    AutoArray<Vector3> _norm;
+    AutoArray<Vector3> _tangent;
+    AutoArray<Vector3> _binormal;
+    bool _hasTangentFrame = false;
 
 	AutoArray<UVPair> _tex;
 
@@ -269,8 +272,14 @@ public:
 
 	Vector3Val Pos(int i) const { return _pos[i]; }
 	Vector3 &SetPos(int i) { return _pos[i]; }
-	Vector3Val Norm(int i) const { return _norm[i]; }
-	Vector3 &SetNorm(int i) { return _norm[i]; }
+    Vector3Val Norm(int i) const { return _norm[i]; }
+    Vector3 &SetNorm(int i) { return _norm[i]; }
+    Vector3Val Tangent(int i) const { return _tangent[i]; }
+    Vector3 &SetTangent(int i) { return _tangent[i]; }
+    Vector3Val Binormal(int i) const { return _binormal[i]; }
+    Vector3 &SetBinormal(int i) { return _binormal[i]; }
+    bool HasTangentFrame() const { return _hasTangentFrame; }
+    void SetHasTangentFrame(bool value) { _hasTangentFrame = value; }
 	Vector3Val OrigPos(int i) const { return _orig[i]; }
 	Vector3Val OrigNorm(int i) const { return _origNorm[i]; }
 

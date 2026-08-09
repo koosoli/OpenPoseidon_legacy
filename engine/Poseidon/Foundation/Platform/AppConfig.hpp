@@ -2,6 +2,7 @@
 
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <string>
+#include <vector>
 
 // Forward declaration for CLI11
 namespace CLI {
@@ -225,7 +226,9 @@ public:
     
     /// Test mission path (--test-mission)
     const std::string& GetTestMissionPath() const { return _testMissionPath; }
-    const std::string& GetTestModelPath() const { return _testModelPath; }
+    const std::vector<std::string>& GetTestModelPaths() const { return _testModelPaths; }
+    float GetTestModelDistance() const { return _testModelDistance; }
+    float GetTestModelScale() const { return _testModelScale; }
 
     /// True when --check and --test-mission are combined to run a bounded mission smoke boot.
     bool IsMissionSmokeCheck() const { return _checkInit && !_testMissionPath.empty(); }
@@ -426,7 +429,9 @@ private:
     float _confirmRevertTimeoutSeconds = 0.f; // 0 → engine default (15s)
     float _appTimeoutSeconds = 0.f;
     std::string _testMissionPath;
-    std::string _testModelPath;
+    std::vector<std::string> _testModelPaths;
+    float _testModelDistance = 10.0f;
+    float _testModelScale = 1.0f;
     /// --dev-map NAME: scratch map to boot, resolved against ./dev-missions/.
     std::string _devMapName;
     std::string _testType = "autotest";

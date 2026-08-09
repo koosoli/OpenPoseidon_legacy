@@ -219,6 +219,10 @@ class EngineWgpu : public EngineDummy
         _ao = s;
         PushRenderParams();
     }
+    bool SupportsMaterialDebug() const override { return _renderer != nullptr; }
+    MaterialDebugSettings GetMaterialDebugSettings() const override { return _materialDebug; }
+    void SetMaterialDebugSettings(const MaterialDebugSettings& s) override { _materialDebug = s; }
+    MaterialDebugInfo GetMaterialDebugInfo() const override { return _materialDebugInfo; }
     // Interior sky visibility (docs/interior-sky-visibility-plan.md) — same pattern: stored
     // here, folded into the consolidated render-params block by PushRenderParams.
     InteriorSkySettings GetInteriorSkySettings() const override { return _interiorSky; }
@@ -452,6 +456,11 @@ class EngineWgpu : public EngineDummy
     // Foliage lighting knobs (docs/foliage-translucency-plan.md), pushed via PushRenderParams.
     FoliageSettings _foliage;
     AoSettings _ao;
+    MaterialDebugSettings _materialDebug;
+    MaterialDebugInfo _materialDebugInfo;
+    // First-slice guard: Material Debug applies only to the explicit test RVMAT
+    // identity supplied by automation, never incidentally to the rest of a map.
+    std::string _materialDebugRvmatMatch;
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
     GrassSettings _grass;

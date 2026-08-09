@@ -136,8 +136,9 @@ class ODOLLoader
             lod.basis.windingConfidence  = Poseidon::Model::BasisConfidence::Measured;
             lod.basis.normals            = Poseidon::Model::NormalOrientation::StoredPerVertex;
             lod.basis.normalsConfidence  = Poseidon::Model::BasisConfidence::Measured;
-            // The format does carry packed ST pairs, but this build does not
-            // decode them into a handed tangent frame, so nothing may assume one.
+            // ODOL's packed S/T pair is preserved by the raw reader but its
+            // basis convention is not established. Rendering therefore derives
+            // a tangent frame from geometry and UV0 instead of guessing here.
             lod.basis.tangents           = Poseidon::Model::TangentHandedness::Unknown;
             lod.basis.tangentsConfidence = Poseidon::Model::BasisConfidence::Unknown;
             lod.basis.origin             = Poseidon::Model::SourceOrigin::ModelSpace;

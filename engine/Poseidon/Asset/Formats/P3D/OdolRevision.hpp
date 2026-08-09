@@ -28,6 +28,7 @@ namespace Poseidon::Asset::Formats::P3D
 //   50  Arma 2 OA / BAF / PMC    -- ~90 models
 //   52  Arma 2 OA / ACR          -- ~100 models
 //   73  Arma 3                   -- 162 PBOs, the newest
+//   75  Arma 3 Tools Binarize     -- official Samples differential fixture
 enum class OdolSupport
 {
     Parsed,       // this build reads it
@@ -57,6 +58,10 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
         // faces are triangles and quads. That is a narrow subset of Arma 3
         // content, not Arma 3 support, and everything outside it still refuses.
         case 73: return {73, OdolSupport::NarrowSubset, "Arma 3"};
+        // AST-012C observed this exact revision from BI Binarize 2.21 on an
+        // official editable Arma 3 Samples source model. It is a distinct
+        // layout family, not a fallback target for the revision-73 reader.
+        case 75: return {75, OdolSupport::Recognised, "Arma 3 Tools Binarize"};
         default: return {version, OdolSupport::Unknown, "unknown"};
     }
 }

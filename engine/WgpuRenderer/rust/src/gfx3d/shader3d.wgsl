@@ -42,6 +42,9 @@ struct Material {
     // Sun-only Blinn-Phong highlight (GL33's c18): rgb = sun diffuse x material
     // specular (sun-enable folded in), w = power. Added per-fragment when w > 0.
     specular: vec4<f32>,
+    // x = bindless Stage1 NOHQ texture/sampler, y = MaterialDebug View,
+    // z = Stage1 enabled. NOHQ is decoded strictly as X=A, Y=G, Z reconstructed.
+    normal_map: vec4<f32>,
 };
 
 // Per-draw world matrix + material as read-only storage arrays, indexed by
@@ -97,11 +100,18 @@ struct VsOut {
     // Draw slot, carried flat so fs_main can index its material. Equals the draw's
     // base_instance (see draw_one); both vertex paths pass it through.
     @location(4) @interpolate(flat) instance: u32,
+    // Authored ODOL tangent/binormal frame when supplied, otherwise zero. Kept
+    // separate from the normal so fs_main can retain its safe derivative fallback.
+    @location(5) tangent: vec3<f32>,
+    @location(6) binormal: vec3<f32>,
 };
 
 // world_pos is camera-relative (the world matrix / palette is offset by the
 // camera position on the C++ side), so its length is the camera distance.
-fn finish_vertex(world_pos: vec4<f32>, normal_ws: vec3<f32>, uv: vec2<f32>, instance: u32) -> VsOut {
+fn finish_vertex(
+    world_pos: vec4<f32>, normal_ws: vec3<f32>, tangent_ws: vec3<f32>, binormal_ws: vec3<f32>,
+    uv: vec2<f32>, instance: u32,
+) -> VsOut {
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
     // Bias toward the camera (larger reversed depth) so decals/overlays win the
@@ -110,6 +120,8 @@ fn finish_vertex(world_pos: vec4<f32>, normal_ws: vec3<f32>, uv: vec2<f32>, inst
     out.uv = uv;
     out.world_pos = world_pos.xyz;
     out.normal = normal_ws;
+    out.tangent = tangent_ws;
+    out.binormal = binormal_ws;
     out.fog = fog_factor(length(world_pos.xyz));
     out.instance = instance;
     return out;
@@ -122,6 +134,8 @@ fn vs_main(
     @location(1) norm: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(5) conform_sel: u32,   // per-vertex conform selector (mode 2): 0/1/2
+    @location(6) tangent: vec3<f32>,
+    @location(7) binormal: vec3<f32>,
 ) -> VsOut {
     let obj = objects[instance];
     let world = obj.world;
@@ -181,7 +195,7 @@ fn vs_main(
         let gz = select(-d0111, d1000, triA) * s;
         normal_ws = vec3<f32>(normal_ws.x - gx * normal_ws.y, normal_ws.y, normal_ws.z - gz * normal_ws.y);
     }
-    return finish_vertex(world_pos, normal_ws, uv, instance);
+    return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance);
 }
 
 // Linear-blend skinning (see the skin module). Vertices with no skin weight
@@ -201,7 +215,7 @@ fn vs_skinned(
     // uploads -OrigNorm), skin_normal rotates it into world space, and we light
     // with it as-is to match GL33 — no extra negation.
     let normal_ws = skin_normal(norm, bones, weights);
-    return finish_vertex(world_pos, normal_ws, uv, instance);
+    return finish_vertex(world_pos, normal_ws, vec3<f32>(0.0), vec3<f32>(0.0), uv, instance);
 }
 
 @fragment
@@ -225,6 +239,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let material = materials[in.instance];
     let packed = bitcast<u32>(material.emissive.w);
     let base = textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv);
+    let normal_packed = bitcast<u32>(material.normal_map.x);
+    let normal_sample = textureSample(textures[normal_packed >> 3u], samplers[normal_packed & 7u], in.uv);
+    var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
+    if (material.normal_map.w > 0.5) {
+        normal_ts_xy.y = -normal_ts_xy.y;
+    }
+    let normal_ts = vec3<f32>(normal_ts_xy, sqrt(max(0.0, 1.0 - dot(normal_ts_xy, normal_ts_xy))));
     // Cutout: A2C emits a sharpened coverage alpha (edge dithered across MSAA samples);
     // otherwise the classic hard discard. a2c is a compile-time override, so exactly one
     // path is compiled and control flow stays uniform for the derivatives above/below.
@@ -239,6 +260,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
     if (is_shadow > 0.5) {
         return vec4<f32>(0.0, 0.0, 0.0, frame.params.shadow_strength * base.a);
+    }
+    // Material Debug View: Base Color Only is the controlled reference; Normal Map
+    // displays decoded tangent-space X=A, Y=G, reconstructed Z, independent of lighting.
+    let material_view = u32(material.normal_map.y + 0.5);
+    if (material_view == 1u) {
+        return vec4<f32>(base.rgb, out_a);
+    }
+    if (material_view == 2u) {
+        return vec4<f32>(normal_ts * 0.5 + vec3<f32>(0.5), out_a);
     }
     // The material colours are already sun-FOLDED on the CPU (mat_sun_* = raw × sun); hand
     // them to the shared shading straight. The GPU-driven path folds raw × frame-sun instead,
@@ -257,8 +287,42 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // read for shading) — set from GCurrentIsVegetation in EngineWgpu::DrawSectionTL. The
     // alpha-test discard above stays keyed on alpha_ref (every cutout still discards).
     let veg_cutout = material.sun_ambient.w > 0.5 && alpha_ref > 0.0;
+    // The mesh has no authored tangent stream in this production path. Recover a
+    // tangent frame from the actual interpolated UV0/world-position derivatives;
+    // this is deterministic and lets Stage1 use its declared `tex` source without
+    // fabricating tangent handedness in the canonical model representation.
+    let geometric_normal = normalize(in.normal);
+    var shading_normal = geometric_normal;
+    if (material.normal_map.z > 0.5) {
+        let authored_frame = dot(in.tangent, in.tangent) > 1e-10 && dot(in.binormal, in.binormal) > 1e-10;
+        let duv_dx = dpdx(in.uv);
+        let duv_dy = dpdy(in.uv);
+        var tangent_raw = dwx * duv_dy.y - dwy * duv_dx.y;
+        var bitangent_raw = dwy * duv_dx.x - dwx * duv_dy.x;
+        if (authored_frame) {
+            tangent_raw = in.tangent;
+            bitangent_raw = in.binormal;
+        }
+        if (dot(tangent_raw, tangent_raw) > 1e-10 && dot(bitangent_raw, bitangent_raw) > 1e-10) {
+            // Coarser model LODs can have interpolated normals that are not quite
+            // perpendicular to their UV-derived tangent.  Orthonormalise before
+            // applying Stage 1: an oblique frame otherwise amplifies the normal map
+            // into distance-dependent dark facets.  Derive the handedness from the
+            // original bitangent so mirrored UV islands keep their correct lighting.
+            let tangent_ortho = tangent_raw - geometric_normal * dot(geometric_normal, tangent_raw);
+            if (dot(tangent_ortho, tangent_ortho) > 1e-10) {
+                let tangent = normalize(tangent_ortho);
+                var handedness = 1.0;
+                if (dot(cross(geometric_normal, tangent), bitangent_raw) < 0.0) {
+                    handedness = -1.0;
+                }
+                let bitangent = normalize(cross(geometric_normal, tangent)) * handedness;
+                shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
+            }
+        }
+    }
     let rgb = shade(
-        base.rgb, m, in.normal, in.world_pos, in.fog, dwx, dwy, linear,
+        base.rgb, m, shading_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // The per-draw path has no retained model id, so no baked volume applies.
         1.0, vec3<f32>(0.0), foliage_shadow_ao,
         veg_cutout, translucent > 0.5, veg_cutout, in.clip.xy,

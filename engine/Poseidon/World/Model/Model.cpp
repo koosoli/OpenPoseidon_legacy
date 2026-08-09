@@ -144,8 +144,8 @@ bool Model::compile()
         if (mesh.boundingSphere.radius <= 0.0f)
             mesh.boundingSphere = ModelComputation::computeBoundingSphere(mesh.boundingBox);
 
-        if (mesh.sections.empty() && !mesh.triangles.empty())
-            mesh.sections = ModelComputation::generateSections(mesh.triangles);
+        if (mesh.sections.empty() && (!mesh.triangles.empty() || !mesh.quads.empty()))
+            mesh.sections = ModelComputation::generateSections(mesh.triangles, mesh.quads);
 
         if (mesh.proxies.empty() && !mesh.selections.empty())
             mesh.proxies = ModelComputation::generateProxiesFromSelections(mesh.vertices, mesh.selections);

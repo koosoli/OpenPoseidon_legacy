@@ -466,8 +466,9 @@ systems:
     audited: 2026-08-05
     completeness: >-
       Ships and is on by default. Three compute-placed LOD rings — near (512² candidates,
-      real blade geometry, the only ring that casts shadows), mid (384², crossed cards
-      keeping a blade silhouette), far (384², terrain-conforming coverage quads, gated off
+      opaque six-blade, five-segment geometry clumps with mixed stable archetypes, the only
+      ring that casts shadows), mid (384², opaque six-blade
+      geometry clumps), far (384², terrain-conforming coverage quads, gated off
       by default). Wind, tracks, interactor and helicopter downwash all drive placement.
       Measured 2026-08-05 in the reference mission at 3441x1440: prepass 0.970 + colour
       1.053 + shadow 0.156 = 2.179 ms of a 24.178 ms frame, 9.0%, at 48 647 near and

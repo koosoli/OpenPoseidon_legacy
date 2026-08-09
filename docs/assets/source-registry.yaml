@@ -62,7 +62,8 @@ sources:
       a transparent background, which is the shape the existing 8-layer 64x256
       array wants.
     selection: >-
-      SELECTED. Compared against pbrpx-imperata-cylindrica-atlas-09 by inspecting
+      EVALUATING. Previously selected after comparison against
+      pbrpx-imperata-cylindrica-atlas-09 by inspecting
       both opacity masks rather than by name: this one is isolated leaf blades,
       tapering, with varying widths, and its albedo carries the exact structure
       blade_atlas.rs currently approximates -- midrib, lengthwise veins, edge
@@ -142,9 +143,9 @@ unregistered_local_assets: >-
 
 derived:
   - id: grass-near-blade-layers
-    from_source: pbrpx-echinochloa-crus-galli-leaf-01
+    from_source: pbrpx-grass-species-4k
     recipe: scripts/build_grass_blade_atlas.py
-    recipe_version: 4
+    recipe_version: 5
     output_dir: assets/grass
     consumed_by: >-
       TerrainWgpu::UploadGrassBladeAtlas, which loads the eight files as an
@@ -152,35 +153,90 @@ derived:
       one of them falls the whole set back to the procedural atlas in
       blade_atlas.rs -- the fallback is all-or-nothing by design.
     known_defect: >-
-      Layer 3 carries a brown diagonal near the tip: another stem crossed this
-      blade in the source photograph and sits inside its opacity mask, so the
-      unwrap samples it. Left in rather than hand-corrected, because hand
-      correction is exactly what this recipe exists to remove; it reads as
-      damage on one of eight species at gameplay distance. Fix belongs in the
-      recipe (reject rows whose colour deviates from the blade's own trend) if
-      it ever looks wrong in motion.
+      The source sheets include dense plant/seed-head atlases. The recipe only
+      admits isolated opacity components and excludes Imperata because it has no
+      usable leaf component under that rule. This is deliberate: no manual image
+      cleanup is permitted in a deterministic provenance path.
     files:
-      - name: meadow-grass-blade-0.png
-        bytes: 13938
-        sha256: 4a0d628cd0005f6e1e7b642bb4b26dffbf59e037ab9b2c8f5b37a98dd399ffc9
-      - name: meadow-grass-blade-1.png
-        bytes: 17930
-        sha256: 514855e7862996d6493065abdacc8f55bb9e560a7279bc62c5d69e5d9cdf321b
-      - name: meadow-grass-blade-2.png
-        bytes: 13796
-        sha256: 1799c531b19fcdea0fd8b42934008be579ae007a7e0cac3bd2a18b0a4a014b61
-      - name: meadow-grass-blade-3.png
-        bytes: 13831
-        sha256: 0606240161dce97d0dde99362b824531856c1856d2286ad83b28e38b1d1dc065
-      - name: meadow-grass-blade-4.png
-        bytes: 12017
-        sha256: 319b93e583b6ff6e8cd27a1ab78e8b04fe12f7495971fe2ff9dc5ad849efcc43
-      - name: meadow-grass-blade-5.png
-        bytes: 11215
-        sha256: f66f93050221037013fdae4eefda9dd2ff878d0c585aafbef4c1c65b5fb2876a
-      - name: meadow-grass-blade-6.png
-        bytes: 12722
-        sha256: d167dd5ae2e35a5575ec59f284622c441767fa9cbc052aab46f756f928a4c37c
-      - name: meadow-grass-blade-7.png
-        bytes: 11099
-        sha256: 073c4ff2e00260460c9cf9cd1734979cfe2c4aa0c5b631fc7c6b0e40e16e9eb8
+       - name: meadow-grass-blade-0.png
+         bytes: 16015
+         sha256: b8c76ce4906014b563f93b97723b56a93c98321dde0ff32636e5bd594e1d1b94
+       - name: meadow-grass-blade-1.png
+         bytes: 10353
+         sha256: b8dac5d7785930e08d317ad7af4a0efeec06c67798570082f547537152f18fcd
+       - name: meadow-grass-blade-2.png
+         bytes: 2192
+         sha256: 1c0897ec0c780fc54540db5bbff0d7d1b1674e00b5242cb12171ff337f786162
+       - name: meadow-grass-blade-3.png
+         bytes: 5584
+         sha256: 53b70ee9e3330c11843569a8da6780232a72af11b19dcc1bad809d806a25a68c
+       - name: meadow-grass-blade-4.png
+         bytes: 2263
+         sha256: bd0b1036e819e1d8600e91f94a61007aca2298b48aa2a185230b4dcc56b2d9bf
+       - name: meadow-grass-blade-5.png
+         bytes: 18805
+         sha256: 428a98959ac92c6ce8fb8295e0ebc5baa1b9a34c99f802c004009a920a578386
+       - name: meadow-grass-blade-6.png
+         bytes: 10757
+         sha256: d5b7c6a5dff49a61707841d44c6b3cd95fc14e35e7e28055cd9db6cf9aeeed80
+       - name: meadow-grass-blade-7.png
+         bytes: 2183
+         sha256: b325754ca2dd0de6225c590c625026aa9f48176f64cd63471adde9c6e4aadda2
+
+additional_sources:
+  - id: pbrpx-grass-species-4k
+    source_url: https://asset.pbrpx.com/Textures/
+    provider_url: https://pbrpx.com
+    product_name: pbrpx-grass-species-4k
+    local_path: assets/grass/more_grass
+    provider: PBRPX
+    author: PBRPX
+    licence: CC0-1.0
+    licence_url: https://pbrpx.com
+    licence_quote: >-
+      "You can use these assets for any purpose without worrying about copyright
+      issues. You can even sell these assets with your project." -- pbrpx.com,
+      describing its library as a CC0 asset library. Verified 2026-08-05.
+    downloaded_utc: "2026-08-07"
+    intended_use: >-
+      Additional photographed grass species for the deterministic near-LOD
+      opaque blade atlas. The recipe selects isolated blades from each sheet.
+    selection: SELECTED. The supplied 4K PBRPX sheets provide distinct grass
+      species and are processed deterministically into the active opaque atlas.
+    files:
+      - name: PX_Acorus_calamus_Atlas_02_4K/PX_Acorus_calamus_Atlas_02_albedo.jpg
+        bytes: 699073
+        sha256: a5626271ac579fde0c647cce9b37af10e6abbd95c4ec0938c9ad6dd67ebb3b60
+      - name: PX_Acorus_calamus_Atlas_02_4K/PX_Acorus_calamus_Atlas_02_opacity.jpg
+        bytes: 518350
+        sha256: 734d5a6f4f7fe9b7d5772a54c5e4311b1002c096f8dbfea0549e402d1395a148
+      - name: PX_Echinochloa_crus_galli_Leaf_01_4K/PX_Echinochloa_crus_galli_Leaf_01_albedo.jpg
+        bytes: 824149
+        sha256: efc356a09f7a1dcdedba7272ca92b65263a0b43e66a406955dfa0a0a3e1246b9
+      - name: PX_Echinochloa_crus_galli_Leaf_01_4K/PX_Echinochloa_crus_galli_Leaf_01_opacity.jpg
+        bytes: 604282
+        sha256: 620a78de8d74bf1d255848dcc438c5f9c9f8e6cc3666a8eafc9274b2da75c79d
+      - name: PX_Imperata_cylindrica_Atlas_09_4K/PX_Imperata_cylindrica_Atlas_09_albedo.jpg
+        bytes: 753501
+        sha256: 55997b61812cf901ab9d48d045264b52fa2fc4348eb2d7cd109fd3b083690c50
+      - name: PX_Imperata_cylindrica_Atlas_09_4K/PX_Imperata_cylindrica_Atlas_09_opacity.jpg
+        bytes: 685330
+        sha256: 5d197902237a292c05327bb1395f8f2271d02ffc547d3c3e9f5008b48848dbff
+      - name: PX_Nassella_tenuissima_Atlas_13_4K/PX_Nassella_tenuissima_Atlas_13_albedo.jpg
+        bytes: 777069
+        sha256: 4bf4341d3ccdbc7d38b75483a1b21de01d2a2dbd518e98a4a827483d5dff17ad
+      - name: PX_Nassella_tenuissima_Atlas_13_4K/PX_Nassella_tenuissima_Atlas_13_opacity.jpg
+        bytes: 1421051
+        sha256: 4ac22a8ce87b1b07c980a859725c932ac69211a892a339031085a9cab0d7cc07
+      - name: PX_Pennisetum_alopecuroides_Leaf_06_4K/PX_Pennisetum_alopecuroides_Leaf_06_albedo.jpg
+        bytes: 684502
+        sha256: 84980bb8ed62504f725fb7038284f58ef1c6dd46f579cc2d7a25f37c59c3eda8
+      - name: PX_Pennisetum_alopecuroides_Leaf_06_4K/PX_Pennisetum_alopecuroides_Leaf_06_opacity.jpg
+        bytes: 671299
+        sha256: 2901f932c40dee5bcdfe930131dcdd9f90035b4fb53158dea1ec5fb947aa4130
+      - name: PX_Zoysia_japonica_Atlas_04_4K/PX_Zoysia_japonica_Atlas_04_albedo.jpg
+        bytes: 595445
+        sha256: 17f141bd1c8fac7ceb9079af520ebd194772c2af4bf6c06468b8dd18b7d20913
+      - name: PX_Zoysia_japonica_Atlas_04_4K/PX_Zoysia_japonica_Atlas_04_opacity.jpg
+        bytes: 678712
+        sha256: 0e933847e76f53b374fb73db1fdf681e8e60d06e618cf5877541119d50447e1b

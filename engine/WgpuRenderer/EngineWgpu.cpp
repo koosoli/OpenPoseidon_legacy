@@ -20,6 +20,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp> // TexMaterial::Combine (GPU-driven material extract)
+#include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
@@ -75,6 +76,16 @@ constexpr uint32_t U32(T value)
 WgrSlice<WgrMeshVertex> AsMeshVerts(const std::vector<SVertex>& v)
 {
     return {reinterpret_cast<const WgrMeshVertex*>(v.data()), U32(v.size())};
+}
+
+bool ContainsNoCase(const char* text, const std::string& part)
+{
+    if (!text || part.empty()) return false;
+    std::string haystack(text);
+    std::string needle(part);
+    std::transform(haystack.begin(), haystack.end(), haystack.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+    std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+    return haystack.find(needle) != std::string::npos;
 }
 
 // By-eye tonemap/grade presets keyed by time of day (hours). Sorted ascending; the
@@ -706,6 +717,28 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _gpuDriven = std::strcmp(gd, "0") != 0;
     }
+
+    // Capture automation selects the same canonical MaterialDebugSettings used
+    // by Dev Tools. The test-model material slice presently runs through the
+    // direct production WGPU path (set WGR_GPU_DRIVEN=0 for deterministic model
+    // captures) while retained-material support remains a separate follow-up.
+    if (const char* view = std::getenv("WGR_MATERIAL_DEBUG_VIEW"))
+    {
+        if (std::strcmp(view, "base") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::BaseColorOnly;
+        else if (std::strcmp(view, "normal") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::FullMaterial;
+        else if (std::strcmp(view, "normalviz") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::NormalMap;
+        LOG_INFO(Graphics, "Wgpu: material debug view={}", view);
+    }
+    if (const char* disableNormal = std::getenv("WGR_MATERIAL_DISABLE_NORMAL"))
+        _materialDebug.disableNormalMap = std::strcmp(disableNormal, "0") != 0;
+
+    if (const char* invertNormalY = std::getenv("WGR_MATERIAL_INVERT_NORMAL_Y"))
+        _materialDebug.invertNormalY = std::strcmp(invertNormalY, "0") != 0;
+    if (const char* rvmatMatch = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"))
+        _materialDebugRvmatMatch = rvmatMatch;
 
     // Mirror the renderer's WGR_HDR gate so the ImGui Tonemap tab knows the HDR
     // resolve pass is live (the renderer owns the real gate; this is UI-only). The
@@ -1715,6 +1748,147 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.index_begin = U32(siBeg.beg);
     d.index_count = U32(indexCount);
     d.texture_id = tex;
+    // Resolve the real RVMAT through the same virtual-path-aware loader that the
+    // model/material production path uses. Only Stage1 is consumed in this first
+    // slice; the remaining controls are intentionally diagnostic no-ops until
+    // their contributions are implemented one at a time.
+    // The draw-time Shape intentionally has no source-model name.  Section RVMAT
+    // paths are stable production identities and are present on the test rock.
+    const ShapeSection& debugSection = sMesh.GetSection(beg);
+    const char* debugMaterialPath = debugSection.surfMat ? debugSection.surfMat->GetName().Data() : nullptr;
+    if (_materialDebugRvmatMatch == "__trace__")
+    {
+        const std::string traceKey = std::to_string(beg) + ":" +
+                                     (debugMaterialPath ? debugMaterialPath : "<none>");
+        static std::unordered_set<std::string> loggedSectionTraces;
+        if (loggedSectionTraces.insert(traceKey).second)
+            LOG_INFO(Graphics, "Wgpu material trace: section={} RVMAT={}", beg,
+                     debugMaterialPath ? debugMaterialPath : "<none>");
+    }
+    const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
+    const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
+                                     ContainsNoCase(debugMaterialPath, _materialDebugRvmatMatch);
+    d.normal_texture_id = 0;
+    d._pad = materialDebugTarget ? static_cast<uint32_t>(_materialDebug.view) |
+                                      (_materialDebug.invertNormalY ? 0x100u : 0u)
+                                 : 0;
+    _materialDebugInfo = {};
+    if (unassignedMaterialTarget)
+    {
+        // Some official source MLODs intentionally carry only per-face legacy
+        // textures on their visible LOD.  A controlled smoke needs to distinguish
+        // that missing RVMAT from a failed texture/normal binding, so permit a
+        // pair of explicit local fixture paths on those unassigned sections only.
+        const char* basePath = std::getenv("WGR_MATERIAL_DEBUG_BASE");
+        const char* normalPath = std::getenv("WGR_MATERIAL_DEBUG_NORMAL");
+        if (basePath && *basePath)
+        {
+            Ref<Texture> baseTexture = _wbank->Load(basePath);
+            auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
+            if (const uint64_t handle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0)
+            {
+                d.texture_id = handle;
+                static std::unordered_set<std::string> loggedUnassignedBaseFixtures;
+                if (loggedUnassignedBaseFixtures.insert(basePath).second)
+                    LOG_INFO(Graphics, "Wgpu material debug: unassigned Stage0 fixture resolved path={}", basePath);
+            }
+        }
+        const bool enableFixtureNormal = _materialDebug.view == MaterialDebugSettings::View::NormalMap ||
+                                         (_materialDebug.view == MaterialDebugSettings::View::FullMaterial &&
+                                          !_materialDebug.disableNormalMap);
+        if (enableFixtureNormal && normalPath && *normalPath)
+        {
+            Ref<Texture> normalTexture = _wbank->Load(normalPath);
+            auto* wgpuNormalTexture = static_cast<TextureWgpu*>(normalTexture.GetRef());
+            if (const uint64_t handle = wgpuNormalTexture ? wgpuNormalTexture->EnsureUploaded() : 0)
+            {
+                d.normal_texture_id = handle;
+                static std::unordered_set<std::string> loggedUnassignedNormalFixtures;
+                if (loggedUnassignedNormalFixtures.insert(normalPath).second)
+                    LOG_INFO(Graphics, "Wgpu material debug: unassigned Stage1 fixture resolved path={}", normalPath);
+            }
+        }
+    }
+    else if (const ShapeSection& section = sMesh.GetSection(beg); materialDebugTarget && section.surfMat)
+    {
+        const char* materialPath = section.surfMat->GetName().Data();
+        if (materialPath && *materialPath)
+        {
+            _materialDebugInfo.active = true;
+            _materialDebugInfo.rvmatPath = materialPath;
+            // Keep screenshot automation evidence tied to the material actually
+            // selected by the model.  This is deliberately emitted only for an
+            // explicit debug match, so ordinary gameplay does not log sections.
+            static std::unordered_set<std::string> loggedMaterialDebugTargets;
+            if (loggedMaterialDebugTargets.insert(materialPath).second)
+                LOG_INFO(Graphics, "Wgpu material debug: target RVMAT {}", materialPath);
+            try
+            {
+                const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
+                const auto translated = Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source));
+                _materialDebugInfo.shaderFamily = source.pixelShaderId.c_str();
+                // A P3DM face may name only an RVMAT and leave its legacy
+                // texture field blank.  For the explicit material-debug slice,
+                // make Stage0 the draw's base texture so a normal-map smoke
+                // exercises textured shading rather than a white fallback.
+                if (const auto* base = translated.Find(Asset::Material::MaterialSlot::BaseColour);
+                    base && !base->texture.isProcedural && !base->texture.path.empty())
+                {
+                    Ref<Texture> baseTexture = _wbank->Load(base->texture.path.canonical().c_str());
+                    auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
+                    const uint64_t baseHandle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0;
+                    if (baseHandle)
+                    {
+                        d.texture_id = baseHandle;
+                        static std::unordered_set<std::string> loggedBaseBindings;
+                        if (loggedBaseBindings.insert(materialPath).second)
+                            LOG_INFO(Graphics, "Wgpu material debug: Stage0 BaseColour resolved path={} uv={}",
+                                     base->texture.path.canonical(), base->uvSource);
+                    }
+                }
+                if (const auto* normal = translated.Find(Asset::Material::MaterialSlot::NormalMap))
+                {
+                    _materialDebugInfo.normalTexturePath = normal->texture.path.canonical().c_str();
+                    _materialDebugInfo.normalUvSource = normal->uvSource.c_str();
+                    const bool inspectNormal = _materialDebug.view == MaterialDebugSettings::View::NormalMap;
+                    const bool enableNormal = inspectNormal ||
+                        (_materialDebug.view == MaterialDebugSettings::View::FullMaterial && !_materialDebug.disableNormalMap);
+                    if (normal->texture.isProcedural)
+                    {
+                        _materialDebugInfo.normalStatus = "procedural Stage1 is not yet sampled";
+                    }
+                    else if (normal->texture.path.empty())
+                    {
+                        _materialDebugInfo.normalStatus = "Stage1 has no loadable texture path";
+                    }
+                    else
+                    {
+                        Ref<Texture> texture = _wbank->Load(normal->texture.path.canonical().c_str());
+                        auto* wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
+                        const uint64_t normalHandle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+                        _materialDebugInfo.normalResolved = normalHandle != 0;
+                        _materialDebugInfo.normalStatus = normalHandle ? "resolved and bound (NOHQ: X=A, Y=G, Z=reconstructed)"
+                                                                       : "texture failed to resolve/upload";
+                        if (normalHandle)
+                        {
+                            static std::unordered_set<std::string> loggedNormalBindings;
+                            if (loggedNormalBindings.insert(materialPath).second)
+                                LOG_INFO(Graphics, "Wgpu material debug: Stage1 NormalMap resolved path={} uv={} decode=X=A,Y=G,Z=reconstructed",
+                                         normal->texture.path.canonical(), normal->uvSource);
+                        }
+                        if (enableNormal)
+                            d.normal_texture_id = normalHandle;
+                    }
+                }
+                else
+                    _materialDebugInfo.normalStatus = "no translated NormalMap stage";
+            }
+            catch (const std::exception& error)
+            {
+                _materialDebugInfo.normalStatus = error.what();
+            }
+        }
+    }
     std::memcpy(d.world.m, &_world, sizeof(d.world.m));
     // Terrain conform: publish this instance's bilinear plane so the vertex
     // shader conforms the (undeformed) shared mesh, matching ForestPlain::Animate. d is
@@ -2470,6 +2644,25 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     if (!shape)
     {
         return;
+    }
+    // Material Debug's first slice deliberately exercises the ordinary direct
+    // WGPU section path. Keep only the explicit test RVMAT on that path while
+    // the rest of the scene, including foliage, retains its production GPU-driven
+    // submission. This avoids a diagnostic rock launch accidentally changing the
+    // renderer path for every tree in the map.
+    if (!_materialDebugRvmatMatch.empty())
+    {
+        for (int level = 0; level < shape->NLevels(); ++level)
+        {
+            const Shape* lod = shape->Level(level);
+            if (!lod) continue;
+            for (int section = 0; section < lod->NSections(); ++section)
+            {
+                const ShapeSection& sec = lod->GetSection(section);
+                if (sec.surfMat && ContainsNoCase(sec.surfMat->GetName().Data(), _materialDebugRvmatMatch))
+                    return;
+            }
+        }
     }
     const uint32_t model = RegisterGpuModel(shape);
     if (model == WGR_INVALID_MODEL)

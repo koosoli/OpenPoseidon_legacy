@@ -320,7 +320,7 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 3519f1365524c2d60d673f461c22aff10c9a1b645ae10baafac8b5883cda940e
+    evidence_hash: 66ff473fcfe244b09198b43edac7d8d14cca2e07094283e54f1f17d375a46b01
     decision_record: null
     known_failures: []
     fallback: C++ refuses an ABI mismatch before renderer creation.
@@ -366,7 +366,7 @@ tickets:
         verified_commit: null
     test_ids: [wgpu-capabilities-check, wgpu-windowed-resize-capture, wgpu-normal-loop-minimize-restore, wgpu-lifecycle-repeat-in-session, runtime-diagnostics-once]
     benchmark_artifacts: [docs/roadmap/evidence/preview0-manifest.json]
-    evidence_hash: c5c0fe2fedfef145e8ca8ba6e0ffc9c2c14d2cdf980a9c044987ad443e24593e
+    evidence_hash: 5d7d824ec8b384571b2b71ad0b383ec06c8a5f970c89956cc0ef1cbb8948e983
     decision_record: null
     known_failures: []
     fallback: Unsupported optional capabilities are reported and feature paths remain gated.
@@ -808,7 +808,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 19f9ac3b4260e12260a1e697fbc17f62c21f120b49c9e0e2834048bc3f7f088b
+    evidence_hash: d59dc1b7e2acaec00b37195d90e4da857b6e5c6055f5b860f7c630785b0b60d3
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
@@ -822,7 +822,15 @@ tickets:
       - capability: P3DM_SOURCE_WINDING
         status: UNVERIFIED
         denominator: >-
-          recorded CW_REVERSED_ON_LOAD_ASSUMED; no P3DM rendered
+          recorded CW_REVERSED_ON_LOAD_ASSUMED; one P3DM sample renders, but its
+          winding has not yet been judged against a reference render
+      - capability: P3DM_RUNTIME_MATERIAL_BINDING
+        status: PARTIAL
+        denominator: >-
+          1 official Arma 3 Samples P3DM lamp (138 visual-LOD faces, including
+          quad-only material runs) reaches the WGPU path; 3 authored RVMAT
+          references survive into runtime sections and a temporary local NOHQ
+          Stage1 is resolved and bound on lamp_street_white.rvmat
     known_failures:
       - >-
         #UVSet# payloads are counted, not decoded, so only the base UV channel from
@@ -846,12 +854,25 @@ tickets:
       resolutions are exact sentinels, so a desynchronised walk cannot match by
       chance.
 
-      NOT checked: nothing was rendered. No claim is made that the geometry is
-      visually correct, only that it round-trips consistently between two
-      implementations. Winding in particular is UNVERIFIED -- P3DM is assumed to
+      A self-run installed-game smoke on 2026-08-09 additionally loaded the
+      official Arma 3 Samples Test_Lamp_01 source MLOD through the production
+      ShapeBank path. It reported 8 LODs / 138 visual faces and preserved the
+      three authored lamp RVMAT section identities. A deliberately non-flat,
+      test-only local NOHQ PAA was resolved and bound for the selected lamp
+      section with normal mapping both enabled and disabled. The sample tree,
+      temporary PAA, and temporary RVMAT files are outside the repository and
+      are not Git evidence or distributable content.
+
+      NOT checked: the paired screenshots establish execution and Stage1 binding,
+      not a reference-quality visual judgment. Winding in particular is UNVERIFIED -- P3DM is assumed to
       share SP3X's convention and the LOD records that as
       CW_REVERSED_ON_LOAD_ASSUMED; confirming or refuting it needs a visual check
       the owner must make once a P3DM model reaches the screen. Material semantics
+      are also not yet established across all visual LODs: the official Test_scope3D_01
+      sample exposes authored RVMAT sections on its far visual LOD, while its near
+      visual LOD has no carried RVMAT. The scaled test-model harness makes that
+      distinction inspectable, but it is not evidence that a RVMAT applies to the
+      rendered near LOD.
       are untouched: the RVMAT path is carried through as an opaque string and
       nothing interprets it.
 
@@ -866,6 +887,13 @@ tickets:
       - engine/Poseidon/Asset/Formats/P3D/MLODStructures.hpp
       - engine/Poseidon/Asset/Formats/P3D/MLODLoader.hpp
       - engine/Poseidon/World/Model/Model.hpp
+      - engine/Poseidon/World/Model/ModelComputation.hpp
+      - engine/Poseidon/World/Model/ShapeAdapter.cpp
+      - engine/Poseidon/Graphics/Rendering/Shape/ShapeDraw.cpp
+      - engine/Poseidon/Foundation/Platform/AppConfig.hpp
+      - engine/Poseidon/Foundation/Platform/AppConfig.cpp
+      - apps/cwr/Game/GameApplication.cpp
+      - engine/WgpuRenderer/EngineWgpu.cpp
       - scripts/verify_p3dm_against_index.py
   - id: AST-011C
     overlay: COMPAT-C1-EXEC-001
@@ -895,7 +923,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: 19f9ac3b4260e12260a1e697fbc17f62c21f120b49c9e0e2834048bc3f7f088b
+    evidence_hash: eeac2b512dc55f997826d65bd9e54a8e6d87e7ab736f8fa351e9d35b040e0e8e
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: MULTI_UV
@@ -1015,9 +1043,9 @@ tickets:
         symbol: Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer
       - file: engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
         symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
-    test_ids: [ast-012a]
+    test_ids: [ast-012a, ast-012c]
     benchmark_artifacts: []
-    evidence_hash: eae5bb63ababa07fc3299081f4c934ca4c37c398119dc2f0c5fbd490caf8f7f9
+    evidence_hash: 2982808f9681bfea321040b0eab4f70b77b2236f5e70b81b6dc9597201cf18d7
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: ODOL_REVISION_DISPATCH
@@ -1056,6 +1084,14 @@ tickets:
       independently supplied by AST-007's PBO entry-table index: 48 (2 archives),
       49 (19), 50 (9), 52 (13), and 73 (162). No later revision body was parsed
       under this ticket, so this is dispatch validation only.
+
+      AST-012C adds the official Arma 3 Samples -> BI Binarize revision-75
+      fixture family. The `[ast-012c]` case proves that 75 is identified as
+      `Arma 3 Tools Binarize` and raises the same structured, recognised refusal
+      rather than being treated as an unknown revision or parsed as 73. The
+      focused `[p3d][odol][ast-012a],[p3d][odol][ast-012c]` run passes alongside
+      the tangent-frame regression (60 assertions / 9 cases). No revision-75
+      body is parsed by this build.
 
       NOT checked: nothing here reads a body. The dispatch decision is proven;
       whether any chosen parser then reads its revision correctly is not this
@@ -1101,7 +1137,7 @@ tickets:
                ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
                ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 80db0cbc494f83b02a03a539d30dbd1601acfd9f25843834aae4c2fec3481251
+    evidence_hash: 3889e261f21d0c5e116076f424d35ca2ca0f458316cf43138daa78ce6e93872e
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -1164,6 +1200,12 @@ tickets:
           0 bodies parsed across the 4 remaining corpus revisions
     known_failures:
       - >-
+        BI Binarize 2.21.0.152929 produces revision 75 from the official editable
+        Test_scope3D_01 sample (the controlled source/output fingerprints and
+        reproduction protocol are recorded in AST-012C). Revision 75 is not a
+        nearest-layout fallback for 73 and remains safely refused until its own
+        differential fixtures establish a reader.
+      - >-
         One shape of ODOL revision 73 reads: a static LOD with no skeleton,
         animation, proxy, sub-skeleton, named-selection, named-property, keyframe
         or skinning data, at most one UV set, and faces that are triangles or
@@ -1174,6 +1216,11 @@ tickets:
         Packed ST (tangent/binormal) pairs are read and length-checked but kept
         unconverted; their basis convention has not been verified against a
         render, so nothing downstream is given a tangent frame it could trust.
+        The production renderer instead derives a frame from each model's UV0
+        and geometry. Its ShapeAdapter regression test proves a wrong authored
+        frame is ignored, and the installed-game WGPU smoke captures without
+        the prior black distance patches; that is a smoke observation, not a
+        claim that the packed ST convention has been decoded.
       - >-
         One real revision-73 rock is visibly rendered in the game through WGPU.
         Its direct PAA albedo dependency was mounted in the game file namespace
@@ -1235,6 +1282,7 @@ tickets:
       - engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
       - engine/Poseidon/Asset/Formats/P3D/ODOLLoader.hpp
       - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+      - engine/Poseidon/World/Model/ShapeAdapter.cpp
       - apps/cwr/Game/GameApplication.cpp
       - tests/unit/engine/Poseidon/Asset/Formats/P3D/MLOD/test_odol_revision.cpp
       - docs/roadmap/evidence/compat-c1-odol73-wgpu-static-render-20260809.md
@@ -1386,7 +1434,7 @@ tickets:
         symbol: Preproc::Process
     test_ids: [ast-014]
     benchmark_artifacts: []
-    evidence_hash: d97c829ba3065127e305cc47dcc0930c7ee851251eafe8575af4b879d065d2c9
+    evidence_hash: e5902c7c43a82ae970748a4555f6f1d23828008b65f0d7d38528db095d51909d
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: RVMAT_SOURCE_IR
@@ -1656,7 +1704,7 @@ tickets:
                ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies,
                ast-018-section-face-range]
     benchmark_artifacts: []
-    evidence_hash: ca057bed46ebba7619e60a4a74efdfe539ade96bc053d3507b3654e7381f414b
+    evidence_hash: cdbe42a1e2fe9159a7d9f3dc59392967ce5c0fedd701e7a3e493a26c30cc1a22
     decision_record: null
     capability_claims:
       - capability: LOD_PURPOSE_TYPED
@@ -2014,7 +2062,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: a86d97e8f4671708ad6bd4c998b8c98329ff237d9cbdc3e46d802d463c33c750
+    evidence_hash: 865e8a03cbb45b4c0992f63e66533e1813824c940fb820f6c64ab914bbb9d708
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
@@ -2120,7 +2168,7 @@ tickets:
         symbol: Poseidon::Asset::Material::TranslateSemantics
     test_ids: [mat-020]
     benchmark_artifacts: []
-    evidence_hash: df334a7625903f663f73b980a2f0f2cccd56effa72e3dda17bf218efb24465ac
+    evidence_hash: 8a36793b84b5c3778574c21e122029e9f45d616b0c6c4f31015269e38aae9260
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: SMDI_CHANNEL_SEMANTICS
@@ -2215,7 +2263,7 @@ tickets:
         symbol: Poseidon::Asset::Material::TranslateMaterial
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: 985a3a2f83f1ce927a0e3831065c87424096665cb852c690f7060fe37f317c74
+    evidence_hash: c4fbcd70b86463a95e2aa2333d6b90229a9dd3d9157db59b2e00c2996c4eb545
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: SUPERMATERIAL

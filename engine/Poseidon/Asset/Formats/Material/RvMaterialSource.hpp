@@ -1,8 +1,13 @@
 #pragma once
 
 #include <Poseidon/Asset/Addon/VirtualPath.hpp>
+#include <Poseidon/Asset/Formats/Config/ArmaRap.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <array>
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -30,9 +35,9 @@ namespace Poseidon::Asset::Material
 // A texture reference as the material wrote it.
 struct RvTextureRef
 {
-    std::string raw;          // exactly as written, for diagnostics
-    VirtualPath path;         // canonical form; empty when procedural
-    bool        isProcedural = false;
+    std::string raw;  // exactly as written, for diagnostics
+    VirtualPath path; // canonical form; empty when procedural
+    bool isProcedural = false;
 
     // Procedural textures are generated, not loaded: `#(argb,8,8,3)color(0.5,...,DT)`
     // is a solid colour standing in for a detail map. They appear in 3 of the 7
@@ -43,7 +48,7 @@ struct RvTextureRef
     static RvTextureRef Parse(const std::string& text)
     {
         RvTextureRef ref;
-        ref.raw          = text;
+        ref.raw = text;
         ref.isProcedural = LooksProcedural(text);
         if (!ref.isProcedural && !text.empty())
             ref.path = VirtualPath::Parse(text);
@@ -53,7 +58,7 @@ struct RvTextureRef
 
 struct RvUvTransform
 {
-    bool                 present = false;
+    bool present = false;
     std::array<float, 3> aside{{1.0f, 0.0f, 0.0f}};
     std::array<float, 3> up{{0.0f, 1.0f, 0.0f}};
     std::array<float, 3> dir{{0.0f, 0.0f, 0.0f}};
@@ -62,12 +67,12 @@ struct RvUvTransform
 
 struct RvStage
 {
-    int          index = -1; // the N in StageN; -1 when the name had no number
+    int index = -1; // the N in StageN; -1 when the name had no number
     RvTextureRef texture;
     // Which UV channel feeds this stage. 3,793 of 4,070 indexed RVMATs declare one,
     // so TexGen is not optional -- and this is the value AST-011C's preserved
     // #UVSet# channels have to be selected by.
-    std::string   uvSource;
+    std::string uvSource;
     RvUvTransform uvTransform;
     std::vector<std::pair<std::string, std::string>> extra; // unrecognised keys
 };
@@ -81,8 +86,8 @@ struct RvStage
 // shader schema looked for the generator that had gone missing.
 struct RvTexGen
 {
-    int           index = -1;
-    std::string   uvSource;
+    int index = -1;
+    std::string uvSource;
     RvUvTransform uvTransform;
 };
 
@@ -101,7 +106,7 @@ struct RvMaterialSource
     std::array<float, 4> forcedDiffuse{{0, 0, 0, 0}};
     std::array<float, 4> emissive{{0, 0, 0, 1}};
     std::array<float, 4> specular{{1, 1, 1, 1}};
-    float                specularPower = 1.0f;
+    float specularPower = 1.0f;
 
     std::vector<RvStage> stages; // source order, index preserved, meaning not assigned
     std::vector<RvTexGen> texGens;
@@ -168,7 +173,99 @@ inline void ReadVec3(const ParamClass& owner, const char* name, std::array<float
 {
     ReadArray(owner, name, out.data(), 3);
 }
+
 } // namespace detail
+
+inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, std::string origin)
+{
+    RvMaterialSource material;
+    material.origin = std::move(origin);
+    const auto root = Config::ArmaRapReader(bytes).root();
+    auto assignArray = [](const Config::RapValue& value, std::array<float, 4>& out)
+    {
+        for (size_t i = 0; i < out.size() && i < value.array.size(); ++i)
+            if (value.array[i].type == 1 || value.array[i].type == 2)
+                out[i] = value.array[i].number;
+    };
+    for (const auto& entry : root)
+    {
+        if (entry.type == 1)
+        {
+            if (detail::EqualsNoCase(entry.name, "PixelShaderID"))
+                material.pixelShaderId = entry.value.text;
+            else if (detail::EqualsNoCase(entry.name, "VertexShaderID"))
+                material.vertexShaderId = entry.value.text;
+            else if (detail::EqualsNoCase(entry.name, "specularPower"))
+                material.specularPower = entry.value.number;
+            else
+                material.extra.emplace_back(entry.name, entry.value.text);
+        }
+        else if (entry.type == 2 || entry.type == 5)
+        {
+            if (detail::EqualsNoCase(entry.name, "ambient"))
+                assignArray(entry.value, material.ambient);
+            else if (detail::EqualsNoCase(entry.name, "diffuse"))
+                assignArray(entry.value, material.diffuse);
+            else if (detail::EqualsNoCase(entry.name, "forcedDiffuse"))
+                assignArray(entry.value, material.forcedDiffuse);
+            else if (detail::EqualsNoCase(entry.name, "emmisive"))
+                assignArray(entry.value, material.emissive);
+            else if (detail::EqualsNoCase(entry.name, "specular"))
+                assignArray(entry.value, material.specular);
+        }
+        else if (entry.type == 0)
+        {
+            std::string bare = entry.name;
+            while (!bare.empty() && bare.back() >= '0' && bare.back() <= '9')
+                bare.pop_back();
+            if (!detail::EqualsNoCase(bare, "Stage"))
+            {
+                material.otherClasses.push_back(entry.name);
+                continue;
+            }
+            RvStage stage;
+            stage.index = detail::TrailingNumber(entry.name);
+            for (const auto& field : entry.body)
+                if (field.type == 1 && detail::EqualsNoCase(field.name, "texture"))
+                    stage.texture = RvTextureRef::Parse(field.value.text);
+                else if (field.type == 1 && detail::EqualsNoCase(field.name, "uvSource"))
+                    stage.uvSource = field.value.text;
+            material.stages.push_back(std::move(stage));
+        }
+    }
+    return material;
+}
+
+inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string origin, bool embedded = false);
+
+inline RvMaterialSource ParseRvMaterialFile(const std::string& path)
+{
+    // RVMAT references are virtual game paths, often resolved from an add-on
+    // bank rather than the process working directory.  QIFStreamB follows the
+    // same resolver as model loading; std::ifstream would silently inspect the
+    // wrong source in that case.
+    QIFStreamB file;
+    file.AutoOpen(path.c_str());
+    if (file.fail())
+        throw std::runtime_error("failed to open RVMAT: " + path);
+    const int length = file.rest();
+    if (length < 0)
+        throw std::runtime_error("failed to size RVMAT: " + path);
+    std::vector<uint8_t> bytes(static_cast<size_t>(length));
+    if (length > 0)
+        file.read(bytes.data(), length);
+    if (file.fail())
+        throw std::runtime_error("failed to read RVMAT: " + path);
+    // The binary marker has a leading NUL. Test that byte first so a text parser
+    // can never swallow a raP stream if a platform's C-string helpers truncate
+    // the marker at the first byte.
+    if (bytes.size() >= 4 && bytes[0] == 0)
+        return ParseArmaRapMaterial(bytes, path);
+    ParamFile config;
+    if (config.Parse(path.c_str()) != LSOK)
+        throw std::runtime_error("failed to parse RVMAT: " + path);
+    return ParseRvMaterial(config, path);
+}
 
 // Build the IR from an already-parsed config class.
 //
@@ -181,10 +278,10 @@ inline void ReadVec3(const ParamClass& owner, const char* name, std::array<float
 // embedded material use the same code: the caller supplies whichever it has. It
 // also means this reuses the engine's own config parser -- including its binarized
 // support -- instead of a second, subtly different one.
-inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string origin, bool embedded = false)
+inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string origin, bool embedded)
 {
     RvMaterialSource material;
-    material.origin   = std::move(origin);
+    material.origin = std::move(origin);
     material.embedded = embedded;
 
     detail::ReadArray(root, "ambient", material.ambient.data(), 4);
@@ -267,8 +364,7 @@ inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string orig
             {
                 const ParamEntry& inner = stageClass->GetEntry(j);
                 const std::string key(inner.GetName().Data() ? inner.GetName().Data() : "");
-                if (inner.IsClass() || detail::EqualsNoCase(key, "texture") ||
-                    detail::EqualsNoCase(key, "uvSource"))
+                if (inner.IsClass() || detail::EqualsNoCase(key, "texture") || detail::EqualsNoCase(key, "uvSource"))
                     continue;
                 stage.extra.emplace_back(key, detail::Text(inner));
             }

@@ -256,21 +256,29 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
     // GlobLoadTexture).
     const auto _perfShapeLoadStart = ::Poseidon::Dev::Perf::Now();
 
-    // ODOL models: new pipeline (ShapeAdapter) handles x64 layout correctly.
-    // MLOD models: old pipeline — vertex expansion logic not yet matched in ShapeAdapter.
+    // The legacy LODShape loader only understands the old SP3X MLOD layout.
+    // Arma samples use P3DM MLOD, which the canonical Model loader decodes
+    // before ShapeAdapter expands it into the runtime vertex buffer.  Routing
+    // both recognised P3D encodings through that path keeps test-model (and
+    // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
     {
         Poseidon::ModelCache cache;
         auto model = cache.load(lowName);
-        if (model && model->sourceFormat == "ODOL")
+        if (model && (model->sourceFormat == "ODOL" || model->sourceFormat == "MLOD"))
         {
+            LOG_INFO(Graphics, "Shape loader: canonical {} adapter for {}", model->sourceFormat, lowName);
             // ShapeAdapter sets shape name from model.sourcePath — must use
             // the original backslash path to match ShapeBank lookup key
             model->sourcePath = lowName;
             shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed);
         }
         else
+        {
+            LOG_INFO(Graphics, "Shape loader: legacy path for {} (canonical format={})", lowName,
+                     model ? model->sourceFormat : "<unavailable>");
             shape = new LODShapeWithShadow(lowName, reversed);
+        }
     }
     if (!shape)
         shape = new LODShapeWithShadow();

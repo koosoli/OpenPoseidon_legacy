@@ -629,14 +629,22 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                           "Run mission folder or mission.sqm directly and exit"),
                    CliHelpVisibility::Dev);
 
-        // Spawn one model in front of the player once a --test-mission reaches
+        // Spawn one or more models in front of the player once a --test-mission reaches
         // gameplay. The point is to get an arbitrary P3D through the real
         // graphics backend: PoseidonTools and Studio both preview models with
         // the CPU rasteriser in ModelRenderer, so before this there was no way
         // to confirm a newly-supported format actually renders.
-        showOption(debugGroup->add_option("--test-model", _testModelPath,
-                                          "Load this P3D into a --test-mission world and report what it contains "
-                                          "(placement draws nothing yet -- see GameApplication)"),
+        showOption(debugGroup->add_option("--test-model", _testModelPaths,
+                                          "Load one or more P3Ds into a --test-mission world and report what they contain "
+                                          "(repeat --test-model for a side-by-side material smoke scene)"),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--test-model-distance", _testModelDistance,
+                                          "Distance in metres for --test-model placement (default: 10)")
+                       ->check(CLI::Range(0.05f, 100.0f)),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--test-model-scale", _testModelScale,
+                                          "Uniform scale for --test-model placement (default: 1)")
+                       ->check(CLI::Range(0.01f, 100.0f)),
                    CliHelpVisibility::Dev);
 
         // Convenience wrapper over --test-mission so a developer can boot straight into a

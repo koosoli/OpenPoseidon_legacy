@@ -3413,6 +3413,50 @@ void DrawPerfTab()
     if (ImGui::Button("Reset window"))
         perf.Reset();
 }
+void DrawMaterialDebugTab()
+{
+    if (!GEngine || !GEngine->SupportsMaterialDebug())
+    {
+        ImGui::TextDisabled("Material Debug is available on the WGPU renderer only.");
+        return;
+    }
+
+    Engine::MaterialDebugSettings settings = GEngine->GetMaterialDebugSettings();
+    bool changed = false;
+    int view = static_cast<int>(settings.view);
+    changed |= ImGui::Combo("Rendering mode", &view,
+                            "Full Material\0Base Color Only\0Visualize Normal Map\0");
+    settings.view = static_cast<Engine::MaterialDebugSettings::View>(view);
+    ImGui::TextDisabled("Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
+    ImGui::Separator();
+    changed |= ImGui::Checkbox("Disable Normal Map", &settings.disableNormalMap);
+    changed |= ImGui::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
+    ImGui::TextDisabled("Compare only under fixed lighting; this does not edit the imported material.");
+    changed |= ImGui::Checkbox("Disable Detail", &settings.disableDetail);
+    changed |= ImGui::Checkbox("Disable Macro", &settings.disableMacro);
+    changed |= ImGui::Checkbox("Disable Ambient Shadow", &settings.disableAmbientShadow);
+    changed |= ImGui::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
+    changed |= ImGui::Checkbox("Disable Fresnel / Environment", &settings.disableFresnelEnvironment);
+    ImGui::TextDisabled("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic state for their incremental implementation.");
+    if (changed)
+        GEngine->SetMaterialDebugSettings(settings);
+
+    const Engine::MaterialDebugInfo info = GEngine->GetMaterialDebugInfo();
+    ImGui::Separator();
+    ImGui::TextDisabled("Active production section");
+    if (!info.active)
+    {
+        ImGui::TextDisabled("No RVMAT-backed section has been drawn yet.");
+        return;
+    }
+    ImGui::Text("RVMAT: %s", info.rvmatPath.Data());
+    ImGui::Text("Shader: %s", info.shaderFamily.Data());
+    ImGui::Text("Stage1 role: NormalMap (source stage 1)");
+    ImGui::Text("Texture: %s", info.normalTexturePath.Data());
+    ImGui::Text("UV source: %s", info.normalUvSource.Data());
+    ImGui::Text("Resolution: %s", info.normalStatus.Data());
+}
+
 void DrawRenderTab()
 {
     if (!GEngine)
@@ -4658,6 +4702,11 @@ void DrawMainWindow()
         if (ImGui::BeginTabItem("Render"))
         {
             DrawRenderTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Material Debug"))
+        {
+            DrawMaterialDebugTab();
             ImGui::EndTabItem();
         }
         if (ImGui::BeginTabItem("Tonemap"))

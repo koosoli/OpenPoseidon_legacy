@@ -24,6 +24,7 @@ void BuildVertices(const Shape& src, SVertex* out)
     const UVPair* uv = &src.UV(0);
     const Vector3* pos = &src.Pos(0);
     const Vector3* norm = &src.Norm(0);
+    const bool hasTangentFrame = src.HasTangentFrame();
     for (int i = src.NVertex(); --i >= 0;)
     {
         out->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
@@ -33,6 +34,19 @@ void BuildVertices(const Shape& src, SVertex* out)
         // Non-conform path: the per-instance conform mode is 0, so the shader ignores
         // this. Only BuildOrigVertices (the conform path) sets a meaningful value.
         out->conform = 0;
+        if (hasTangentFrame)
+        {
+            const int vertexIndex = src.NVertex() - i - 1;
+            Vector3Val tangent = src.Tangent(vertexIndex);
+            Vector3Val binormal = src.Binormal(vertexIndex);
+            out->tangent = Vector3P(-tangent.X(), -tangent.Y(), -tangent.Z());
+            out->binormal = Vector3P(-binormal.X(), -binormal.Y(), -binormal.Z());
+        }
+        else
+        {
+            out->tangent = Vector3P(0, 0, 0);
+            out->binormal = Vector3P(0, 0, 0);
+        }
         pos++;
         norm++;
         uv++;
@@ -55,6 +69,18 @@ void BuildOrigVertices(const Shape& src, SVertex* out)
         // (SurfaceY + height above surface), 2 = On (pin to SurfaceY), 0 = rigid.
         ClipFlags clip = src.OrigClip(i);
         out->conform = (clip & ClipLandKeep) ? 1u : ((clip & ClipLandOn) ? 2u : 0u);
+        if (src.HasTangentFrame())
+        {
+            Vector3Val tangent = src.Tangent(i);
+            Vector3Val binormal = src.Binormal(i);
+            out->tangent = Vector3P(-tangent.X(), -tangent.Y(), -tangent.Z());
+            out->binormal = Vector3P(-binormal.X(), -binormal.Y(), -binormal.Z());
+        }
+        else
+        {
+            out->tangent = Vector3P(0, 0, 0);
+            out->binormal = Vector3P(0, 0, 0);
+        }
         out++;
     }
 }

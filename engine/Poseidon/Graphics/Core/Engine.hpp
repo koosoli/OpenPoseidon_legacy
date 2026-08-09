@@ -933,6 +933,37 @@ class Engine : public IGraphicsEngine
     /// LIT-020); its GPU cost is now measured — see the Amb. Occlusion tab's timer rows, which
     /// were added in the same change specifically so a default-on feature is not also an
     /// unmeasured one. See docs/screen-space-ao-plan.md.
+    // Debug-only controls for the incremental Arma RVMAT path. This canonical
+    // state is shared by Dev Tools and automation; it never mutates imported data.
+    struct MaterialDebugSettings
+    {
+        enum class View : int { FullMaterial = 0, BaseColorOnly, NormalMap, AmbientShadow, SpecularGloss, UvSource };
+        View view = View::FullMaterial;
+        bool disableNormalMap = false;
+        // Diagnostic only: compare the two tangent-space Y conventions under
+        // fixed lighting; this never redefines source material data.
+        bool invertNormalY = false;
+        bool disableDetail = false;
+        bool disableMacro = false;
+        bool disableAmbientShadow = false;
+        bool disableSpecularGloss = false;
+        bool disableFresnelEnvironment = false;
+    };
+    struct MaterialDebugInfo
+    {
+        bool active = false;
+        bool normalResolved = false;
+        RString rvmatPath;
+        RString shaderFamily;
+        RString normalTexturePath;
+        RString normalUvSource;
+        RString normalStatus;
+    };
+    virtual bool SupportsMaterialDebug() const { return false; }
+    virtual MaterialDebugSettings GetMaterialDebugSettings() const { return {}; }
+    virtual void SetMaterialDebugSettings(const MaterialDebugSettings& /*s*/) {}
+    virtual MaterialDebugInfo GetMaterialDebugInfo() const { return {}; }
+
     struct AoSettings
     {
         bool enabled = true;
