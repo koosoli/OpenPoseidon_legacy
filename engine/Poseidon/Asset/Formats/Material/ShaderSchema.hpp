@@ -149,6 +149,12 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     static const ShaderSchema kNormal{
         "Normal",
         {MaterialSlot::BaseColour}};
+    // BI's NormalMap material documentation identifies Stage1 as its tangent
+    // space normal map. Stage0 remains face-supplied colour and Stage3 is an
+    // irradiance lookup, neither of which is a MaterialSlot in this first slice.
+    static const ShaderSchema kNormalMap{
+        "NormalMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap}};
     static const ShaderSchema kSuper{
         "Super",
         {
@@ -161,7 +167,7 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
             MaterialSlot::Fresnel,        // 6
             MaterialSlot::Environment,    // 7
         }};
-    static const ShaderSchema* kAll[] = {&kNormal, &kSuper};
+    static const ShaderSchema* kAll[] = {&kNormal, &kNormalMap, &kSuper};
 
     for (const ShaderSchema* schema : kAll)
     {

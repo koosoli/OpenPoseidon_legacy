@@ -122,6 +122,22 @@ class Stage0 { texture="ca\t\panel_co.paa"; uvSource="tex1"; };
     REQUIRE(ir.unmappedStages.empty());
 }
 
+TEST_CASE("NormalMap schema: only documented Stage1 becomes a normal map", "[asset][material][mat-030]")
+{
+    auto ir = translate(R"CFG(
+PixelShaderID="NormalMap";
+class Stage1 { texture="ca\t\panel_nohq.paa"; uvSource="tex"; };
+class Stage3 { texture="#(ai,32,128,1)irradiance(8)"; uvSource="none"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).present);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::BaseColour).present);
+    // Irradiance has no semantic slot in this renderer yet: preserve its stage
+    // as unmapped rather than misclassifying it as Fresnel or specular data.
+    REQUIRE(ir.unmappedStages == std::vector<int>{3});
+}
+
 TEST_CASE("An unknown shader family binds nothing", "[asset][material][mat-030]")
 {
     // The roadmap forbids silently guessing unknown shader stages. A family with no
