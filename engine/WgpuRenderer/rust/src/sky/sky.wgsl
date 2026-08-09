@@ -415,7 +415,7 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
 // Max primary steps (the actual count is adaptive: derived from the ray's path length through the
 // shell so sampling density stays constant with thickness/angle, then clamped to this). Each step is
 // one cheap texture tap now, so a higher cap is affordable and needed for thick/grazing views.
-const CLOUD_STEPS: f32 = 64.0;
+const CLOUD_STEPS: f32 = 128.0;
 const CLOUD_LIGHT_STEPS: i32 = 4;
 // Volumetric march distance cap (m) along the view ray, measured from the shell entry. Grazing / in-
 // deck rays otherwise traverse tens of km of shell, which at the fixed step cap undersamples the
@@ -450,9 +450,19 @@ fn cloud_world(p: vec3<f32>) -> vec3<f32> {
 fn cloud_coverage(world_xz: vec2<f32>) -> f32 {
     // The 0.5 slice is now drifted: where the weather field says "more cloud here" moves slowly,
     // so banks build in one place and clear in another instead of the pattern being fixed forever.
+    // The slice this samples DRIFTS with world position, and that is what stops the coverage field
+    // repeating. The noise volume tiles in all three axes, so sampling a FIXED y slice means the
+    // moment world xz wraps the tile you get the identical pattern back -- a domain warp only
+    // displaces within that repeat, it cannot remove it. Advancing y with xz means a wrap in x
+    // lands on a DIFFERENT slice, so the true period becomes the lowest common multiple of the xz
+    // and y periods instead of the xz period. The drift rates are irrational multiples of the xz
+    // scale and of each other, so that multiple is effectively never reached in view.
+    //
+    // Costs nothing: same single tap, two extra multiply-adds on the coordinate.
+    let drift = (world_xz.x * 0.61803399 + world_xz.y * 0.41421356) * sky.cloud3.x * 0.27;
     let wc = vec3<f32>(
         world_xz.x * sky.cloud3.x,
-        0.5 + sky.cloud4.z * sky.cloud3.x,
+        0.5 + sky.cloud4.z * sky.cloud3.x + drift,
         world_xz.y * sky.cloud3.x,
     );
     let weather = textureSampleLevel(cloud_noise, cloud_samp, wc, 0.0).r;
@@ -503,7 +513,11 @@ fn cloud_density(p: vec3<f32>) -> f32 {
     // so walking the third axis walks through uncorrelated slices — the cheapest honest way to get
     // formation and dissolution without a second noise fetch or a simulation.
     var ws = w * sky.cloud1.z;
-    ws.y += sky.cloud4.x * sky.cloud1.z;
+    // Same slice drift as the coverage field, for the same reason: a fixed y slice makes the shape
+    // repeat exactly every shape tile, and at 9.3 km with a 60 km march that repeat is on screen
+    // several times over. Drifting y with world xz turns the period into the lcm of the xz and y
+    // periods. Rates differ from the coverage field's so the two do not come back into phase.
+    ws.y += sky.cloud4.x * sky.cloud1.z + (w.x * 0.31830989 + w.z * 0.53190563) * sky.cloud1.z * 0.31;
     let shape = textureSampleLevel(cloud_noise, cloud_samp, ws, 0.0).r;
     let n = max(shape, smoothstep(0.55, 1.0, cov));
     let base = clamp((n - (1.0 - cov)) / max(cov, 1e-3), 0.0, 1.0);
@@ -668,7 +682,12 @@ fn march_clouds(
     // structure to alias.)
     let thick = max(sky.cloud0.w - sky.cloud0.z, 1.0);
     let path = t1 - t0;
-    let target_step = max(thick / 24.0, 1.0);
+    // Sampling density. thick/24 put the step at ~96 m through a 2300 m deck while the DETAIL tile
+    // is 1700 m, so each step straddled several density features and the integral aliased -- that
+    // residual is the grain, and redistributing it with a different jitter cannot remove it. Only
+    // more samples can. The early-out on transmittance and the empty-space bails in cloud_density
+    // mean the extra steps are mostly paid inside cloud, not across the whole sky.
+    let target_step = max(thick / 56.0, 1.0);
     let n = clamp(ceil(path / target_step), 8.0, steps);
     let dt = path / n;
     let ext = sky.cloud0.y;
