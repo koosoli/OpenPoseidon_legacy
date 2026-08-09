@@ -2285,7 +2285,9 @@ tickets:
           shipped Arma 3 vegetation PBOs (plants_f 100, vegetation_f_exp 204,
           vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547,
           Stage2 MCA 547/547; resolved through the production WGPU draw path on
-          1 model, a3\plants_f\tree\t_pinusp3s_f.p3d
+          2 models from 2 PBOs, a3\plants_f\tree\t_pinusp3s_f.p3d and
+          a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d; only the first of the
+          two draws correctly, for reasons outside this mapping
       - capability: MCA_CHANNEL_SEMANTICS
         status: VALIDATED
         denominator: >-
@@ -2315,6 +2317,15 @@ tickets:
         declares them, and one witness does not describe a family. TreeAdv's
         Stage0 is recorded as unused by the family (absent in 369/369) rather than
         mapped, so a TreeAdv material that did declare one reports it unmapped.
+      - >-
+        OPEN DEFECT, found here and not caused here: the Enoch birch
+        a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d resolves both TreeAdv
+        families correctly across all 13 LODs but draws with untextured white
+        trunk/branches and almost no leaf cards, identically with the normal map
+        disabled. Neither family binds a base colour for it -- the colour comes from
+        the legacy face texture, as before this change -- and the pine draws
+        correctly through the same path in the same mission. Base-texture binding
+        and/or alpha-cutout foliage geometry, not material translation.
       - >-
         The canopy is not validated. Two-sided foliage lighting, the
         TreeAdvModNormals vertex-normal path, and alpha/cutout behaviour are
