@@ -2251,43 +2251,72 @@ tickets:
     owner: Oliver Kay
     branch: new-renderer-infrastructure
     baseline_commit: 34c44ac5e4894593b18ea1b47024745d386c5918
-    verification_commit: d4a312a
+    verification_commit: 67b4797
     milestone: 2C
     milestone_role: BLOCKING
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: [d4a312a]
+    implementation_commits: [d4a312a, c93fda9, 089ceba, 67b4797]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
         symbol: Poseidon::Asset::Material::TranslateMaterial
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: c4fbcd70b86463a95e2aa2333d6b90229a9dd3d9157db59b2e00c2996c4eb545
-    decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
+    evidence_hash: 7518b6f096bdcb997e473e95274a5dce314c65a1498e4082ca3d414e8a594832
+    decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
         status: PARTIAL
         denominator: >-
-          Super schema over 2,853 materials; 1,222 in 22 other families bind nothing
+          Super schema over 2,853 materials; of the 1,222 in 22 other families,
+          those in the 17 still without a schema bind nothing
       - capability: SHADER_FAMILY_SCHEMA
         status: VALIDATED
         denominator: >-
-          1 of 23 observed families has a schema
+          6 of 23 observed families have a schema: Super, Normal, NormalMap,
+          TreeAdv, TreeAdvTrunk, TreeAdvTrans
+      - capability: TREEADV_SHADER_FAMILY
+        status: VALIDATED
+        denominator: >-
+          stage table measured over all 547 TreeAdv-family materials in the four
+          shipped Arma 3 vegetation PBOs (plants_f 100, vegetation_f_exp 204,
+          vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547,
+          Stage2 MCA 547/547; resolved through the production WGPU draw path on
+          1 model, a3\plants_f\tree\t_pinusp3s_f.p3d
+      - capability: MCA_CHANNEL_SEMANTICS
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          0 textures sampled; the MCA slot is bound and carried, and claims no
+          channel. BI documents macro in RGB with AO in alpha; unlike NOHQ (n=40),
+          SMDI (n=40) and AS (n=25) that layout has not been measured here
     known_failures:
       - >-
-        SUPERMATERIAL: PARTIAL. Only the Super family has a schema. 1,222 materials
-        across 22 other families (NormalMapMacroASSpecularDIMap 195,
-        NormalMapSpecularDIMap 191, Normal 186, Detail 90, Skin 77, ...) bind
-        nothing and report every stage as unmapped, which is deliberate -- guessing
-        an unregistered family's stages is what the roadmap forbids.
+        SUPERMATERIAL: PARTIAL. Six families now have a schema. Materials in the
+        remaining 17 observed families (NormalMapMacroASSpecularDIMap 195,
+        NormalMapSpecularDIMap 191, Detail 90, Skin 77, ...) bind nothing and
+        report every stage as unmapped, which is deliberate -- guessing an
+        unregistered family's stages is what the roadmap forbids.
       - >-
         No value is reinterpreted. SMDI lands in SpecularDetail and stays SMDI;
         converting it to roughness is MAT-020's decision and needs its own
         evidence. Parallax/NOPX has no slot because Super does not use one.
       - >-
-        Nothing consumes MaterialIR yet -- no renderer path reads it, so no
-        material has been drawn through this mapping.
+        MCA_CHANNEL_SEMANTICS: the TreeAdv families' Stage2 is bound to its own
+        MacroAmbient slot and carried, but ChannelsForSlot claims no channel for
+        it, so no renderer path can read a macro or an ambient term out of it.
+      - >-
+        TreeAdv Stage3..Stage7 stay unmapped: exactly 1 of 547 corpus materials
+        declares them, and one witness does not describe a family. TreeAdv's
+        Stage0 is recorded as unused by the family (absent in 369/369) rather than
+        mapped, so a TreeAdv material that did declare one reports it unmapped.
+      - >-
+        The canopy is not validated. Two-sided foliage lighting, the
+        TreeAdvModNormals vertex-normal path, and alpha/cutout behaviour are
+        untouched by this mapping, and the dark-patch reports on canopy tops
+        remain unexplained by it.
     fallback: >-
       An unknown shader family leaves every slot empty rather than binding by
       guesswork, and the AST-014 source IR still carries everything the material
@@ -2312,15 +2341,45 @@ tickets:
       9,289 (2.5%). 9 Catch2 assertions... 7 cases, 37 assertions under [mat-030];
       full suite green apart from the 6 failures pre-existing at HEAD.
 
-      NOT checked: nothing was rendered and no material was drawn, so no claim is
-      made that a translated Super material looks correct -- only that stages land
-      in the slots the corpus says they occupy. The suffix agreement rate measures
-      self-consistency between two descriptions of the same file, not correctness
-      against an authored reference.
+      NOT checked for Super: nothing was rendered and no Super material was drawn,
+      so no claim is made that a translated Super material looks correct -- only
+      that stages land in the slots the corpus says they occupy. The suffix
+      agreement rate measures self-consistency between two descriptions of the same
+      file, not correctness against an authored reference.
+
+      TreeAdv/TreeAdvTrunk/TreeAdvTrans (67b4797) were measured the same way and
+      over their whole population rather than a sample: all 547 TreeAdv-family
+      materials in the four shipped Arma 3 vegetation PBOs. Stage1 is the normal
+      map in 547/547 (459 _nohq/_no files, 64 procedural nohq/no, 5 outliers whose
+      suffix disagrees and is reported); Stage2 is MCA in 547/547 (297 procedural
+      mca, 193 _mca files, 47 _mc, 8 procedural mc, 1 procedural dt, and every
+      disagreement reported rather than rerouted). Stage0 is absent in 369/369
+      TreeAdv and present in 4/172 TreeAdvTrunk, which is why only the trunk family
+      maps it. 8 Catch2 cases under [mat-030][treeadv]; [mat-030] now 15 cases /
+      91 assertions, all green.
+
+      Unlike the Super slice, this one was rendered. The shipped Arma 3 pine
+      (a3\plants_f\tree\t_pinusp3s_f.p3d, ODOL 73, 13 LODs, 5,931 faces at visual
+      LOD 0) was placed through --test-model into a live mission and drawn by the
+      production WGPU path with WGR_GPU_DRIVEN=0 and no debug material selector.
+      Both its sections resolve schema=true across all 13 LODs, the trunk's Stage1
+      resolves the real bark_pinussylvestris_l3_nohq.paa (procedural=false,
+      exists=true) and Stage2 the mca at uv=tex1, and the foliage section's two
+      procedural stages are correctly not sampled. Toggling
+      WGR_MATERIAL_DISABLE_NORMAL moves 35.2% of the trunk's pixels with a peak
+      per-pixel delta of 207 against a peak of 3 over a sky control, so the bark
+      normal reaches the shader rather than merely resolving.
+
+      NOT checked for TreeAdv: no MCA texture was sampled, so the slot's channels
+      are unclaimed; the canopy's lighting was not validated and its 6-unit peak
+      delta only shows a flat procedural normal behaving as one; and no Arma 1/2
+      vegetation family was in this corpus.
     supersedes: []
     evidence:
       - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
       - engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
+      - engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
+      - docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
   - id: CLD-015
     overlay: COMPAT-C1-EXEC-001
     is_example: false
