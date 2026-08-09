@@ -97,3 +97,49 @@ Log, once per shape, the drawn LOD's index alongside `section.surfMat` and the f
 texture name, and compare against what the harness enumerates for the same model. That
 identifies whether the draw is on a different LOD or on a section list that lost its
 material, and those need different fixes.
+
+---
+
+# Root cause: the drawn shape has no texture, no material and no vertex buffer
+
+Traced through `Shape::Draw`'s non-T&L fallback and then reverted. Running the brick prop
+alone at 8 m, it reaches that fallback as:
+
+```
+TRACEFALLBACK non-TL path tex=<NOTEX> surfMat=<NULL> tl=1 hwtl=1 tlAble=1 buffer=0
+```
+
+Every part of that line matters:
+
+- `buffer=0` — the shape has **no vertex buffer**. That is the only failing term in
+  `engine->GetTL() && EnableHWTLState && tlAble && _buffer`, which is why this model takes
+  the software fallback at all while the pine beside it takes the hardware path.
+- `tex=<NOTEX>` — the drawn section has **no texture**.
+- `surfMat=<NULL>` — and **no material**.
+
+So the model does not draw white because a material failed to bind. It draws white because
+there is nothing bound at all: no buffer, no texture, no RVMAT. Confirmed against the same
+capture, where the Arma 3 pine renders correctly and its sections reach `DrawSectionTL`
+with both their textures and their RVMATs intact.
+
+This also disposes of the `Multi` theory, the placeholder-face-texture theory, and the
+Stage0-bind theory in one go. None of them were the cause; all three were downstream
+observations of a shape that arrived empty.
+
+The white shapes being **boxy** is consistent: what is drawn has the silhouette of a
+coarse hull rather than the authored prop.
+
+## What this means for the other symptoms
+
+The night brightness has the same signature — no Arma 3 section reached `DrawSectionTL`,
+and the tree was drawn anyway, bright and untextured. The probe here shows exactly how
+that happens: a shape with no buffer falls to a path that binds no material, so the draw
+keeps the default white `_curMaterial`. That is very likely one bug, not two.
+
+## Next step
+
+Find why `_buffer` is null for these shapes while it is populated for the pine and the
+rock. Candidates, in order: the vertex buffer is never created for this shape (upload
+skipped or failed), or it is created on a different Shape instance than the one being
+drawn — the harness enumerates textures and RVMATs successfully off *its* instance, so the
+two are demonstrably not the same view of the model.
