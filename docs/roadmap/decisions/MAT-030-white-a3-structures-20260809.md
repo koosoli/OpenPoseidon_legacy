@@ -143,3 +143,48 @@ rock. Candidates, in order: the vertex buffer is never created for this shape (u
 skipped or failed), or it is created on a different Shape instance than the one being
 drawn — the harness enumerates textures and RVMATs successfully off *its* instance, so the
 two are demonstrably not the same view of the model.
+
+---
+
+# The empty shape is an empty LOD: `bricks_v1_f` loads LOD0 with no sections
+
+The previous section asked why `_buffer` is null and the drawn section has neither texture
+nor material. The answer is upstream of the renderer entirely.
+
+`bricks_v1_f.p3d`, ODOL 73, as read by this codebase's own loader:
+
+| LOD | resolution | points | faces | textures | sections/materials |
+|---|---|---:|---:|---:|---|
+| 0 | 1 | 766 | 458 | **0** | **none** |
+| 1 | 2 | 419 | 223 | **0** | **none** |
+| 2 | 3 | 24 | 12 | 1 | `wip_mlod.rvmat` (Super, 8 stages, all slots resolving) |
+| 3 | 10000 | 192 | 256 | 1 | — |
+
+LOD 0 has 458 faces and **no sections at all**. That is not a plausible authoring state:
+every face belongs to a section, and LOD 2 of the same model carries a complete Super
+material whose every stage resolves. The high-detail LODs are being loaded with their
+geometry intact and their section/texture tables empty.
+
+Everything downstream follows mechanically. `Shape::Draw`'s hardware path requires
+`NSections() > 0`; with none, the model falls to the non-T&L path, which is where the
+probe caught it as `tex=<NOTEX> surfMat=<NULL> buffer=0`. Nothing is bound because there
+is nothing to bind, and an untextured hull is white.
+
+The standalone `PoseidonTools model inspect` reports the same `Textures: 0` for LOD 0,
+which is expected — it shares this loader. So this measurement identifies *where* the data
+is lost, not yet whether the file or the reader is at fault.
+
+## Not a general ODOL 73 failure
+
+The Arma 3 pine is also ODOL 73 and its LOD 0 loads two textures and two sections, both
+with working RVMATs. So the loader reads ODOL 73 section tables correctly in general and
+fails on this file specifically — the same shape of defect as
+`research_house_v1_f.p3d`, which this loader refuses outright while `stonesharp_big.p3d`
+and `castle_01_house_ruin_f.p3d` load.
+
+## Next step
+
+Distinguish file from reader using the independent implementation already checked out
+locally (`.tmp-uksfta-bis/BIS.P3D`). If that reader finds sections on LOD 0, this is a
+reader bug with a specific trigger; if it finds none either, the model's high LODs really
+are section-less and the white is authored content the harness should skip.
