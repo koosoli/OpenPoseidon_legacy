@@ -13,7 +13,12 @@ namespace Poseidon
 class TextureBankWgpu : public AbstractTextBank
 {
   private:
-    LLinkArray<TextureWgpu> _texture;
+    // The bank is the owner of cached file-backed textures. LLinkArray only
+    // observes an object's lifetime; it does not retain it. That left a texture
+    // loaded for a one-frame material binding with no live owner after the local
+    // Ref returned by Load() was released, so its WGPU handle was destroyed and
+    // later draws silently sampled bindless slot 0 (white fallback).
+    RefArray<TextureWgpu> _texture;
     WgrRenderer* _renderer;
 
   public:
