@@ -283,9 +283,7 @@ impl Grass {
             shape_variety: 1.0,
             taper_jitter: 0.35,
             bend_jitter: 0.30,
-            // Match GrassSettings: authored near-blade detail is on unless a
-            // caller deliberately dials it out for an A/B comparison.
-            blade_texture_strength: 1.0,
+            blade_texture_strength: 0.0,
             // Alpha cards OFF by default: they cost early-Z and add overdraw, so
             // adopting them is a measured decision, not a default.
             alpha_cards: 0.0,

@@ -1118,10 +1118,9 @@ class Engine : public IGraphicsEngine
         // Species mix as fractions of all placed plants; grass takes whatever
         // these two leave. Chosen per clump, so weeds and flowers appear in
         // drifts rather than sprinkled evenly.
-        // Blade width multiplier. 1.0 is the long-standing look; the near-LOD
-        // photo texture only becomes visible above roughly 3.0, because a stock
-        // 3 cm blade is about 4 pixels wide on screen and a 64 px texture is
-        // averaged to flat colour before it reaches a pixel.
+        // Keep the stable ribbon width while the near rendering unit is a blade.
+        // Widening it only exposes the flat photo layer; it does not create a
+        // grass clump (GRS-030 regression guard).
         float bladeWidth = 1.0f;
         // Albedo saturation about luma. 1.0 = untouched; lower desaturates the
         // whole field. Brightness is preserved, so this only pulls colour out.
@@ -1143,15 +1142,9 @@ class Engine : public IGraphicsEngine
         float shapeVariety = 1.0f;
         float taperJitter = 0.35f;
         float bendJitter = 0.30f;
-        // Global multiplier on the near-LOD photo atlas, on top of its own
-        // distance fade. 0 keeps the procedural surface detail even when the
-        // photo layers are present, which is the quickest way to tell whether a
-        // look problem is the texture or the geometry.
-        // The active photo atlas remains opt-in until its source-sheet unwrap
-        // The registered photo atlas is the normal near-grass surface. Keep this
-        // enabled by default: loading the atlas while leaving its strength at 0
-        // silently regresses to the old procedural look and hides asset QA.
-        float bladeTextureStrength = 1.0f;
+        // Keep the stable procedural surface until a clump-based near path can
+        // present photographed detail without turning blades into flat cards.
+        float bladeTextureStrength = 0.0f;
         // Alpha cut-out cards: take the silhouette from the texture instead of
         // the quad, so one card can carry several blade shapes. This is the
         // Reforger-style approach and it buys shape variety without more
