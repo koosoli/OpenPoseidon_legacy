@@ -120,11 +120,24 @@ bool SaveNormalMap(const fs::path& input, const fs::path& output, float strength
             nx *= invLength;
             ny *= invLength;
             nz *= invLength;
+            // NOHQ channel layout, which is what the engine decodes: X in ALPHA, Y in GREEN, Z
+            // reconstructed, R unused. DXT5 is chosen for normal maps precisely because its alpha
+            // block is stored separately at higher quality than the colour endpoints, so the two
+            // channels that survive are A and G -- putting X in R throws it into the worst channel
+            // of the format and then the renderer reads alpha and finds nothing there.
+            //
+            // Writing X/Y/Z to R/G/B produced a constant-255 alpha, so every enhancement authored
+            // by this tool decoded with X pinned at 1.0 -- a normal leaning hard sideways, which
+            // reads as no relief at all. Measured against a shipped Arma NOHQ, which has alpha
+            // varying 0..255 with mean 118 while this wrote 255 everywhere.
             const size_t pixel = static_cast<size_t>(y * width + x) * 4;
-            normal[pixel] = static_cast<uint8_t>(std::clamp((nx * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
-            normal[pixel + 1] = static_cast<uint8_t>(std::clamp((ny * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
-            normal[pixel + 2] = static_cast<uint8_t>(std::clamp((nz * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
-            normal[pixel + 3] = rgba[pixel + 3];
+            const uint8_t ex = static_cast<uint8_t>(std::clamp((nx * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
+            const uint8_t ey = static_cast<uint8_t>(std::clamp((ny * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
+            const uint8_t ez = static_cast<uint8_t>(std::clamp((nz * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
+            normal[pixel] = 0;      // R: unused by the NOHQ decode
+            normal[pixel + 1] = ey; // G: Y
+            normal[pixel + 2] = ez; // B: carries Z for readability; the decode reconstructs it
+            normal[pixel + 3] = ex; // A: X
         }
     }
     Poseidon::Image generated = Poseidon::Image::FromRGBA(width, height, std::move(normal));
