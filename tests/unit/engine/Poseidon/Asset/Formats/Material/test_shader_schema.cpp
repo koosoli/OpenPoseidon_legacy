@@ -296,6 +296,54 @@ class Stage2 { texture="a3\plants_f\tree\data\t_x_mca.paa"; uvSource="tex1"; };
     REQUIRE(translated.Find(MaterialSlot::NormalMap)->channels.normalX == TextureChannel::A);
 }
 
+TEST_CASE("Skin schema: the base colour sits where Super puts macro", "[asset][material][mat-030][skin]")
+{
+    // Shaped like the shipped Arma 3 head materials. Measured over all 347 Skin
+    // materials: Stage2 is MC in 346, Stage3 is a `_co` albedo in 340. Reading this
+    // family as Super would put the head's albedo in Macro and its macro in Detail --
+    // plausible, silent, and wrong.
+    auto ir = translate(R"CFG(
+PixelShaderID="Skin";
+class Stage1 { texture="a3\characters_f\heads\data\m_white_01_nohq.paa"; uvSource="tex"; };
+class Stage2 { texture="a3\characters_f\heads\data\m_w1_mc.paa"; uvSource="tex"; };
+class Stage3 { texture="a3\characters_f\heads\data\m_greek_01_co.paa"; uvSource="tex"; };
+class Stage4 { texture="a3\characters_f\heads\data\m_white_01_as.paa"; uvSource="tex"; };
+class Stage5 { texture="a3\characters_f\heads\data\m_white_01_smdi.paa"; uvSource="tex"; };
+class Stage6 { texture="#(ai,64,64,1)fresnel(0.5,0.3)"; uvSource="none"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::Macro).sourceStage == 2);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 3);
+    REQUIRE(ir.Slot(MaterialSlot::AmbientShadow).sourceStage == 4);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).sourceStage == 5);
+    REQUIRE(ir.Slot(MaterialSlot::Fresnel).sourceStage == 6);
+
+    // Super's Stage2 is Detail and its Stage3 is Macro. Neither is true here, and the
+    // difference is the entire reason this family has its own table.
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::Detail).present);
+
+    // Every suffix corroborates the slot, unlike Super's lying Stage7.
+    REQUIRE(ir.suffixDisagreements.empty());
+    REQUIRE(ir.unmappedStages.empty());
+}
+
+TEST_CASE("Skin schema: Stage7 stays unmapped even though it looks like Super's", "[asset][material][mat-030][skin]")
+{
+    // Both Stage7 occurrences in 347 materials are a3\data_f\env_co.paa -- the same
+    // environment map Super carries there, `_co` name and all. Two materials still do
+    // not describe a family, so the stage is preserved as unmapped rather than borrowed.
+    auto ir = translate(R"CFG(
+PixelShaderID="Skin";
+class Stage1 { texture="a3\characters_f\heads\data\m_white_01_nohq.paa"; uvSource="tex"; };
+class Stage7 { texture="a3\data_f\env_co.paa"; uvSource="none"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).present);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::Environment).present);
+    REQUIRE(ir.unmappedStages == std::vector<int>{7});
+}
+
 TEST_CASE("An unknown shader family binds nothing", "[asset][material][mat-030]")
 {
     // The roadmap forbids silently guessing unknown shader stages. A family with no

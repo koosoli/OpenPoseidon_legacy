@@ -204,8 +204,39 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     static const ShaderSchema kTreeAdvTrans{
         "TreeAdvTrans",
         {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::MacroAmbient}};
+    // Skin is Super-shaped but SHIFTED, and that is the whole reason it needs its own
+    // entry rather than borrowing Super's table. MEASURED over all 347 Skin materials in
+    // the Arma 3 corpus:
+    //
+    //   Stage0    0/347  absent -- the face texture is the colour
+    //   Stage1  347/347  _nohq
+    //   Stage2  346/347  MC     (228 _mc files, 118 procedural mc; 1 procedural dt)
+    //   Stage3  340/347  _co    <-- BASE COLOUR, where Super puts Macro
+    //   Stage4  347/347  AS     (341 _as files, 6 procedural as)
+    //   Stage5  347/347  _smdi
+    //   Stage6  347/347  fresnel(...) procedural
+    //
+    // Stage3 is the trap. Reading this family as Super would bind a head's albedo into
+    // the Macro slot and its macro into Detail, which is exactly the kind of plausible,
+    // silent wrongness the per-family table exists to prevent.
+    //
+    // Stage7 is left unmapped although its 2 occurrences are both a3\data_f\env_co.paa --
+    // the same environment map Super's Stage7 carries, `_co` name and all. Two materials
+    // do not describe a family, and the rule that held for TreeAdv's tail holds here.
+    static const ShaderSchema kSkin{
+        "Skin",
+        {
+            MaterialSlot::Count,          // 0
+            MaterialSlot::NormalMap,      // 1
+            MaterialSlot::Macro,          // 2
+            MaterialSlot::BaseColour,     // 3
+            MaterialSlot::AmbientShadow,  // 4
+            MaterialSlot::SpecularDetail, // 5
+            MaterialSlot::Fresnel,        // 6
+        }};
     static const ShaderSchema* kAll[] = {&kNormal,  &kNormalMap,    &kSuper,
-                                         &kTreeAdv, &kTreeAdvTrunk, &kTreeAdvTrans};
+                                         &kTreeAdv, &kTreeAdvTrunk, &kTreeAdvTrans,
+                                         &kSkin};
 
     for (const ShaderSchema* schema : kAll)
     {

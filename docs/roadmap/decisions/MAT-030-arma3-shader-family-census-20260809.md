@@ -72,8 +72,10 @@ requirement.
 
 ## Suggested order
 
-1. `Skin` — 347 materials, Super-shaped, cheap, and its Stage3 colour is a concrete
-   trap worth closing.
+1. ~~`Skin`~~ — **done**, same day. Stage1 normal 347/347, Stage2 MC 346/347, Stage3
+   `_co` base colour 340/347, Stage4 AS 347/347, Stage5 SMDI 347/347, Stage6
+   `fresnel(...)` 347/347, Stage0 absent 347/347. Stage7 left unmapped: both its 2
+   occurrences are Super's `env_co.paa`, and 2 materials do not describe a family.
 2. `NormalMapSpecularDIMap` and the small `NormalMap*` family cluster — ~220 together,
    all the same two-or-three stage shape.
 3. `Multi` — the largest object gap, but blocked on a layered-material design decision.
