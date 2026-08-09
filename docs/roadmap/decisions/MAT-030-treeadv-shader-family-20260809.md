@@ -123,9 +123,27 @@ per-pixel delta of 207, against a peak of 3 over an unlit sky control region —
 normal map is reaching the shader, not merely resolving. The canopy's peak delta is 6,
 which is the expected non-response of a flat procedural normal.
 
+A second model from a different DLC, `a3\vegetation_f_enoch\tree\t_betula_pendula_3s.p3d`
+(ODOL 73, 13 LODs, 13,494 faces), resolves both families the same way across all 13
+LODs, and unlike the pine its foliage section carries a *real* NOHQ file rather than a
+procedural one — so the mapping is confirmed on independently authored content with a
+non-procedural Stage1 on both sections.
+
+That model does not, however, draw correctly, and the defect is worth naming precisely
+because it is *not* this mapping. Its trunk and branches render as untextured white and
+its leaf cards are almost entirely missing, identically with `WGR_MATERIAL_DISABLE_NORMAL`
+set and unset, which rules the normal map out. Nothing this ticket binds supplies a base
+colour for either family — TreeAdv declares no Stage0 at all and this TreeAdvTrunk
+material declares none either, so the colour comes from the legacy face texture exactly
+as it did before this change. Both face textures report `exists=true` and no texture
+load logs a warning. The pine, drawn through the same path in the same mission, is
+correctly textured. So the birch is an open defect in base-texture binding and/or
+alpha-cutout foliage geometry, found by this ticket and belonging to another.
+
 Evidence kept out of the repository, per the local-asset rule:
 `C:\Users\mail\AppData\Local\Temp\poseidon-treeadv-trace\` (`tree-normal-on.png`,
-`tree-normal-off.png`, and the matching `--test-model` logs).
+`tree-normal-off.png`, `birch-normal-on.png`, `birch-normal-off.png`, and the matching
+`--test-model` logs).
 
 ## What this does not establish
 

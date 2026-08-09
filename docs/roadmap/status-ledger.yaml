@@ -2265,7 +2265,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: a46edfdf2ab1d5afdfc1c150b413d41ce1852f28f71bbe5b8f27c2470280b99d
+    evidence_hash: 2db4a9d9e9576fc11aa6feb7bcd90235ef875a74733bfa8fd9a3f495ccdfd5bc
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
