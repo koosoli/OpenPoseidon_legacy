@@ -176,26 +176,52 @@ class ODOLLoader
         // The embedded RVMAT a section names is the shader description for the
         // texture that section draws with; recording it against the wrong slot
         // would be worse than leaving it empty.
-        for (const auto& section : source.sections)
-        {
-            if (section.textureIndex < 0 || static_cast<size_t>(section.textureIndex) >= mesh.materials.size())
-                continue;
-            if (section.materialIndex >= 0 && static_cast<size_t>(section.materialIndex) < source.materials.size())
+        // Which material slot each SECTION resolves to. A textured section resolves to the
+        // slot its texture created, which is what the loop below has always done. A section
+        // with NO texture used to resolve to nothing at all, and that is what made Arma 3
+        // structures render white: `bricks_v1_f` LOD0 has 458 faces, zero textures and one
+        // embedded RVMAT, and the material list was built purely from the texture list, so
+        // it came out empty and the section was skipped for having no texture index. The
+        // RVMAT naming its base colour was discarded, the section reached the draw with no
+        // texture and no material, and an unbound hull is white.
+        //
+        // A section that names a material is describing how it is shaded whether or not it
+        // also names a legacy texture, so give it a slot either way.
+        std::vector<uint32_t> sectionMaterialSlot(source.sections.size(), UINT32_MAX);
+        const auto            fillEmbedded = [&](Material& material, const auto& embedded) {
+            material.materialPath = embedded.name;
+            material.embeddedStages.clear();
+            material.embeddedStages.reserve(embedded.stageTextures.size());
+            for (size_t stage = 0; stage < embedded.stageTextures.size(); ++stage)
             {
-                Material& material = mesh.materials[section.textureIndex];
-                const auto& embedded = source.materials[section.materialIndex];
-                material.materialPath = embedded.name;
-                material.embeddedStages.clear();
-                material.embeddedStages.reserve(embedded.stageTextures.size());
-                for (size_t stage = 0; stage < embedded.stageTextures.size(); ++stage)
-                {
-                    MaterialStage entry;
-                    entry.sourceStage = static_cast<uint32_t>(stage);
-                    entry.texturePath = embedded.stageTextures[stage];
-                    if (stage < embedded.texGens.size())
-                        entry.uvSource = embedded.texGens[stage].uvSource;
-                    material.embeddedStages.push_back(std::move(entry));
-                }
+                MaterialStage entry;
+                entry.sourceStage = static_cast<uint32_t>(stage);
+                entry.texturePath = embedded.stageTextures[stage];
+                if (stage < embedded.texGens.size())
+                    entry.uvSource = embedded.texGens[stage].uvSource;
+                material.embeddedStages.push_back(std::move(entry));
+            }
+        };
+        for (size_t s = 0; s < source.sections.size(); ++s)
+        {
+            const auto& section     = source.sections[s];
+            const bool  hasTexture  = section.textureIndex >= 0 &&
+                                    static_cast<size_t>(section.textureIndex) < mesh.materials.size();
+            const bool  hasEmbedded = section.materialIndex >= 0 &&
+                                     static_cast<size_t>(section.materialIndex) < source.materials.size();
+            if (hasTexture)
+            {
+                sectionMaterialSlot[s] = static_cast<uint32_t>(section.textureIndex);
+                if (hasEmbedded)
+                    fillEmbedded(mesh.materials[section.textureIndex], source.materials[section.materialIndex]);
+            }
+            else if (hasEmbedded)
+            {
+                // Texture-less: append a slot that carries the RVMAT and no legacy texture.
+                // The renderer's authored Stage0 is what supplies this section's base colour.
+                sectionMaterialSlot[s] = static_cast<uint32_t>(mesh.materials.size());
+                mesh.materials.emplace_back(std::string(), std::string());
+                fillEmbedded(mesh.materials.back(), source.materials[section.materialIndex]);
             }
         }
 
@@ -233,11 +259,11 @@ class ODOLLoader
         }
 
         mesh.sections.reserve(source.sections.size());
-        for (const auto& source_section : source.sections)
+        for (size_t sectionIndex = 0; sectionIndex < source.sections.size(); ++sectionIndex)
         {
-            Section section;
-            section.materialIndex = source_section.textureIndex >= 0
-                                        ? static_cast<uint32_t>(source_section.textureIndex) : UINT32_MAX;
+            const auto& source_section = source.sections[sectionIndex];
+            Section     section;
+            section.materialIndex = sectionMaterialSlot[sectionIndex];
             section.specialMaterial = source_section.materialIndex;
             // Face-stream offsets, as on the v7 path: not triangle indices.
             section.startTriangle = static_cast<uint32_t>(source_section.faceLower);
