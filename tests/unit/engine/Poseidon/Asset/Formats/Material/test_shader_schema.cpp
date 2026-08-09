@@ -106,6 +106,22 @@ TEST_CASE("Super schema: procedural stages bind without a filename", "[asset][ma
     REQUIRE(detail.suffixAgrees);
 }
 
+TEST_CASE("Normal schema: Stage0 is the diffuse base colour", "[asset][material][mat-030]")
+{
+    // BI documents Normal as diffuse-colour modulation. It is not a one-stage
+    // normal-map family, so Stage0 must not be guessed as NormalMap.
+    auto ir = translate(R"CFG(
+PixelShaderID="Normal";
+class Stage0 { texture="ca\t\panel_co.paa"; uvSource="tex1"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).present);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 0);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).uvSource == "tex1");
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::NormalMap).present);
+    REQUIRE(ir.unmappedStages.empty());
+}
+
 TEST_CASE("An unknown shader family binds nothing", "[asset][material][mat-030]")
 {
     // The roadmap forbids silently guessing unknown shader stages. A family with no

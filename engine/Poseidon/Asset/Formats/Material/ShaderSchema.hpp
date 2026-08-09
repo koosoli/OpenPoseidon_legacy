@@ -144,6 +144,11 @@ struct ShaderSchema
 
 inline const ShaderSchema* FindShaderSchema(const std::string& family)
 {
+    // BI's RVMAT documentation describes Normal as "diffuse color modulate".
+    // It has one colour stage, unlike Super's multi-stage material program.
+    static const ShaderSchema kNormal{
+        "Normal",
+        {MaterialSlot::BaseColour}};
     static const ShaderSchema kSuper{
         "Super",
         {
@@ -156,7 +161,7 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
             MaterialSlot::Fresnel,        // 6
             MaterialSlot::Environment,    // 7
         }};
-    static const ShaderSchema* kAll[] = {&kSuper};
+    static const ShaderSchema* kAll[] = {&kNormal, &kSuper};
 
     for (const ShaderSchema* schema : kAll)
     {
