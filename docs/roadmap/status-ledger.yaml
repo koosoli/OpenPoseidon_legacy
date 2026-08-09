@@ -2265,7 +2265,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: 7518b6f096bdcb997e473e95274a5dce314c65a1498e4082ca3d414e8a594832
+    evidence_hash: a46edfdf2ab1d5afdfc1c150b413d41ce1852f28f71bbe5b8f27c2470280b99d
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -2287,11 +2287,12 @@ tickets:
           Stage2 MCA 547/547; resolved through the production WGPU draw path on
           1 model, a3\plants_f\tree\t_pinusp3s_f.p3d
       - capability: MCA_CHANNEL_SEMANTICS
-        status: CAPTURED_NOT_INTERPRETED
+        status: VALIDATED
         denominator: >-
-          0 textures sampled; the MCA slot is bound and carried, and claims no
-          channel. BI documents macro in RGB with AO in alpha; unlike NOHQ (n=40),
-          SMDI (n=40) and AS (n=25) that layout has not been measured here
+          n=181 _mca textures in the four shipped Arma 3 vegetation PBOs: RGB varies
+          in 179/181 and is grey in 0/181; alpha is absent in the 128 DXT1 files
+          (constant 255 decoded) and present in all 53 DXT5 files, varying in 47.
+          Layout named, not consumed -- no renderer path samples the slot
     known_failures:
       - >-
         SUPERMATERIAL: PARTIAL. Six families now have a schema. Materials in the
@@ -2304,9 +2305,11 @@ tickets:
         converting it to roughness is MAT-020's decision and needs its own
         evidence. Parallax/NOPX has no slot because Super does not use one.
       - >-
-        MCA_CHANNEL_SEMANTICS: the TreeAdv families' Stage2 is bound to its own
-        MacroAmbient slot and carried, but ChannelsForSlot claims no channel for
-        it, so no renderer path can read a macro or an ambient term out of it.
+        MCA is named but not consumed. Stage2 binds to its own MacroAmbient slot
+        and its channels are measured, but no renderer path samples it, so no macro
+        tint or occlusion term reaches a pixel. The alpha term is declared as
+        ambientShadow and deliberately not as alpha: read as transparency it would
+        punch holes through bark wherever the occlusion is dark.
       - >-
         TreeAdv Stage3..Stage7 stay unmapped: exactly 1 of 547 corpus materials
         declares them, and one witness does not describe a family. TreeAdv's
@@ -2370,8 +2373,17 @@ tickets:
       per-pixel delta of 207 against a peak of 3 over a sky control, so the bark
       normal reaches the shader rather than merely resolving.
 
-      NOT checked for TreeAdv: no MCA texture was sampled, so the slot's channels
-      are unclaimed; the canopy's lighting was not validated and its 6-unit peak
+      MCA's packing was then measured the same way the NOHQ/SMDI/AS maps were, over
+      all 181 _mca textures in those PBOs. RGB varies in 179/181 and is grey in
+      0/181, so it is a colour triple. Alpha splits exactly along the compression
+      format: the 128 DXT1 files carry no alpha and decode to a constant 255, and
+      all 53 DXT5 files carry a real one (47 varying over 0..255, 6 constant at
+      174). That is BI's documented "occlusion is optional" behaviour appearing in
+      the data, and it makes declaring the channel safe, since the majority decode
+      to an occlusion term of none.
+
+      NOT checked for TreeAdv: no renderer path samples MacroAmbient, so a named
+      channel is not a consumed one; the canopy's lighting was not validated and its 6-unit peak
       delta only shows a flat procedural normal behaving as one; and no Arma 1/2
       vegetation family was in this corpus.
     supersedes: []

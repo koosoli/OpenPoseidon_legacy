@@ -81,12 +81,28 @@ because the slot the family assigns decides the role; their suffix is recorded a
 disagreement rather than used to reroute them, the same way Super's `env_land_co.tga`
 is handled.
 
-### MCA channel packing is not claimed
+### MCA channel packing, measured
 
 BI's tree documentation describes MCA as a macro in RGB with ambient occlusion in
-alpha. That is documentation, and the NOHQ/SMDI/AS channel maps in this codebase were
-*measured* (n=40, n=40, n=25). Until MCA is measured the same way, `ChannelsForSlot`
-returns an empty map for it and a regression test asserts that it claims nothing.
+alpha. Documentation is not a measurement, and the NOHQ/SMDI/AS maps here were
+measured (n=40, n=40, n=25), so MCA was measured the same way: all 181 `_mca`
+textures in the four vegetation PBOs, decoded and scanned per channel.
+
+| | result |
+|---|---|
+| RGB | varies in 179/181; grey in 0/181; 40/181 chromatic by a channel-mean spread over 2 — a colour triple, not a replicated scalar |
+| alpha, DXT1 files | 128/181, no alpha channel; decodes to a constant 255 |
+| alpha, DXT5 files | 53/181, all carrying alpha: 47 varying over the full 0..255, 6 constant at 174 |
+
+The split is exact — every constant-255 alpha belongs to a DXT1 file and every DXT5
+file carries a real one. That is the documented behaviour showing up in the data: the
+occlusion term is optional, and it is absent by being an absent alpha channel rather
+than by a flag. Declaring the channel unconditionally is therefore safe, because the
+DXT1 majority decode to 255, which is an occlusion term of "none".
+
+`ChannelsForSlot(MacroAmbient)` sets `colour = R` (the RGB triple) and
+`ambientShadow = A`. It deliberately does **not** set `alpha`: a consumer that read
+this as transparency would punch holes through bark wherever the occlusion is dark.
 
 ## Runtime verification
 
@@ -113,7 +129,8 @@ Evidence kept out of the repository, per the local-asset rule:
 
 ## What this does not establish
 
-- MCA channel semantics, and therefore any use of the MCA texture in shading.
+- That anything *uses* MCA. The slot is bound and its channels are named; no renderer
+  path samples it, so no macro tint or occlusion term reaches a pixel yet.
 - That the canopy is lit correctly. Two-sided foliage lighting, `TreeAdvModNormals`
   vertex-normal modification, and the alpha/cutout path are separate questions this
   ticket does not touch; the previously reported dark patches on canopy tops are not

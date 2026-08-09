@@ -102,10 +102,21 @@ inline SlotChannelMap ChannelsForSlot(MaterialSlot slot)
             break;
 
         case MaterialSlot::MacroAmbient:
-            // MCA. BI's tree documentation describes a macro in RGB with ambient
-            // occlusion in alpha, but that packing has not been measured here the
-            // way NOHQ/SMDI/AS were, and a documented layout is not a measurement.
-            // No channel is claimed until it is sampled.
+            // MCA, measured over the 181 `_mca` textures in the four shipped Arma 3
+            // vegetation PBOs. RGB varies in 179 of 181 and is chromatic rather than
+            // grey, so it is a colour triple and not a replicated scalar.
+            //
+            // Alpha is the interesting half, and the corpus splits cleanly: 128 of
+            // the 181 are DXT1 and carry no alpha at all, while all 53 DXT5 files do
+            // -- 47 varying over the full 0..255 range, 6 constant at 174. The split
+            // is exact, with every constant-255 alpha belonging to a DXT1 file, which
+            // matches BI's documentation that the occlusion term is optional and
+            // simply absent when the alpha channel is.
+            //
+            // Declaring it here is safe for the DXT1 majority precisely because their
+            // decoded alpha is a constant 255: an occlusion term of "none".
+            map.colour        = TextureChannel::R; // RGB triple starting at R
+            map.ambientShadow = TextureChannel::A; // not transparency -- occlusion
             break;
 
         case MaterialSlot::Fresnel:

@@ -71,7 +71,7 @@ corpora*, not about a game.
 | `NORMAL_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R constant 0 in 40/40; X in A, Y in G | MAT-020 | `485ad2a` |
 | `SMDI_CHANNEL_SEMANTICS` | `VALIDATED` | n=40: R and A constant in 40/40; G specular, B gloss | MAT-020 | `485ad2a` |
 | `SMDI_TO_ROUGHNESS` | `NOT_PRODUCED` | gloss carried; conversion opt-in and unvalidated | MAT-020 | `485ad2a` |
-| `MCA_CHANNEL_SEMANTICS` | `CAPTURED_NOT_INTERPRETED` | 0 textures sampled; the MCA slot is bound and carried, and claims no channel. BI documents macro in RGB with AO in alpha; unlike NOHQ (n=40), SMDI (n=40) and AS (n=25) that layout has not been measured here | MAT-030 | `67b4797` |
+| `MCA_CHANNEL_SEMANTICS` | `VALIDATED` | n=181 _mca textures in the four shipped Arma 3 vegetation PBOs: RGB varies in 179/181 and is grey in 0/181; alpha is absent in the 128 DXT1 files (constant 255 decoded) and present in all 53 DXT5 files, varying in 47. Layout named, not consumed -- no renderer path samples the slot | MAT-030 | `67b4797` |
 | `SHADER_FAMILY_SCHEMA` | `VALIDATED` | 6 of 23 observed families have a schema: Super, Normal, NormalMap, TreeAdv, TreeAdvTrunk, TreeAdvTrans | MAT-030 | `67b4797` |
 | `SUPERMATERIAL` | `PARTIAL` | Super schema over 2,853 materials; of the 1,222 in 22 other families, those in the 17 still without a schema bind nothing | MAT-030 | `67b4797` |
 | `TREEADV_SHADER_FAMILY` | `VALIDATED` | stage table measured over all 547 TreeAdv-family materials in the four shipped Arma 3 vegetation PBOs (plants_f 100, vegetation_f_exp 204, vegetation_f_enoch 225, vegetation_f_argo 18); Stage1 normal 547/547, Stage2 MCA 547/547; resolved through the production WGPU draw path on 1 model, a3\plants_f\tree\t_pinusp3s_f.p3d | MAT-030 | `67b4797` |

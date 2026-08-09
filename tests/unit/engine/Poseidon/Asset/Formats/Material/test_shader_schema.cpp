@@ -271,11 +271,13 @@ class Stage2 { texture="a3\plants_f\tree\data\t_x_mca.paa"; uvSource="tex1"; };
     REQUIRE(ir.suffixDisagreements.empty());
 }
 
-TEST_CASE("TreeAdv schema: MCA channel semantics are not claimed", "[asset][material][mat-030][treeadv]")
+TEST_CASE("TreeAdv schema: MCA carries colour in RGB and occlusion in alpha", "[asset][material][mat-030][treeadv]")
 {
-    // BI's tree documentation describes MCA as a macro in RGB with ambient occlusion
-    // in alpha. That is documentation, not a measurement, and the AS/SMDI/NOHQ maps
-    // in this codebase were measured. Until MCA is too, it claims no channel.
+    // Measured over the 181 `_mca` textures in the shipped vegetation PBOs: RGB
+    // varies in 179 and is chromatic; alpha exists only in the 53 DXT5 files and
+    // varies in 47 of them, while the 128 DXT1 files decode to a constant 255 --
+    // an occlusion term of "none", which is why declaring the channel is safe for
+    // them. Alpha here is occlusion, not transparency, and must not be read as one.
     const auto translated = translateSemantics(R"CFG(
 PixelShaderID="TreeAdvTrunk";
 class Stage1 { texture="a3\plants_f\_bark\bark_x_nohq.paa"; uvSource="tex"; };
@@ -284,8 +286,10 @@ class Stage2 { texture="a3\plants_f\tree\data\t_x_mca.paa"; uvSource="tex1"; };
 
     const auto* mca = translated.Find(MaterialSlot::MacroAmbient);
     REQUIRE(mca != nullptr);
-    REQUIRE(mca->channels.colour == TextureChannel::None);
-    REQUIRE(mca->channels.ambientShadow == TextureChannel::None);
+    REQUIRE(mca->channels.colour == TextureChannel::R);
+    REQUIRE(mca->channels.ambientShadow == TextureChannel::A);
+    // Deliberately not `alpha`: a consumer that treated this as transparency would
+    // punch holes in bark wherever the occlusion term is dark.
     REQUIRE(mca->channels.alpha == TextureChannel::None);
 
     // The normal map beside it is measured, and still says so.
