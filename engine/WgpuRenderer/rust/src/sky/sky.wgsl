@@ -336,6 +336,19 @@ fn ign(p: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(dot(p, vec2<f32>(0.06711056, 0.00583715))));
 }
 
+// Unstructured per-pixel hash (Hoskins hash11-style). IGN is a fine dither for a 1-LSB write, but it
+// is a STRUCTURED diagonal pattern, and using it as the cloud march's start offset makes that
+// structure visible: residual undersampling error is modulated by the offset, so the diagonal stripes
+// print straight onto cloud silhouettes and are then magnified by the low-res march's upsample. This
+// file already records the same failure for the env map at line ~788 ("reads as a coarse
+// checkerboard"). White noise has the same mean and no orientation, so the identical amount of
+// residual error reads as fine grain instead of a herringbone.
+fn hash21(p: vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    p3 = p3 + dot(p3, vec3<f32>(p3.y, p3.z, p3.x) + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
 // Linear sky radiance along a world direction: the atmosphere march + night-faded horizon
 // haze + the authored night-sky floor, WITHOUT the sun disc (callers that want the disc add it
 // against the true, unfloored `dir`). Shared by the fullscreen sky (fs_sky) and the reflection
@@ -824,7 +837,7 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
 
     let bg = sky_radiance(dir); // local sky colour for the cloud ambient
     let cloud = march_clouds(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg,
-                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, ign(in.clip.xy), scene_dist);
+                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
     return vec4<f32>(cloud.inscatter, cloud.trans);
 }
 
