@@ -1451,11 +1451,14 @@ class Engine : public IGraphicsEngine
         float cloudWeatherSize = 26000.0f;                 // coverage-drift field size (m)
         float cloudWeatherAmount = 0.4f;                   // how much weather varies local coverage (0 = uniform)
         float cloudWarpSize = 6000.0f;                     // domain-warp field size (m)
-        // A warp only hides a tile if it displaces by a real fraction of it. 900 m against a 9.3 km
-        // shape tile is under a tenth of a period -- enough to wobble an edge, not enough to stop
-        // the eye finding the repeat. 2200 m is a quarter of the shape tile and a twelfth of the
-        // coverage field, which breaks the grid without smearing the blobs into mush.
-        float cloudWarpAmount = 2200.0f;                   // domain-warp displacement (m)
+        // 2200 m was set when the warp was the only thing fighting repetition, and it cost real
+        // noise: measured, it drove the high-frequency residual from 1.355 to 1.768, because a
+        // large warp adds structure the march then has to integrate. The slice drift in
+        // cloud_coverage/cloud_density now does the anti-repetition work -- it changes the PERIOD
+        // rather than displacing within it -- so the warp can go back to breaking up grid
+        // regularity without carrying the whole job. 1400 m is still over a tenth of the shape
+        // tile, which is what 900 m was short of.
+        float cloudWarpAmount = 1400.0f;                   // domain-warp displacement (m)
         float cloudHgG = 0.35f;                            // forward-scatter anisotropy (silver lining)
         float cloudPowder = 1.0f;                          // Beer-Powder dark-edge strength (0..1)
         float cloudAmbient = 1.0f;                         // sky-ambient fill scale on the shadowed sides
