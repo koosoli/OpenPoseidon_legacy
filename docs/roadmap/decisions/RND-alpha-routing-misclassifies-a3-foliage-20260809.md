@@ -1,9 +1,9 @@
-# Arma 3 foliage is routed to the translucent pass, and that is one bug behind four symptoms
+# Arma 3 foliage is routed to the translucent pass (and that did NOT turn out to explain the symptoms)
 
 **Date:** 2026-08-09
 **Related:** MAT-030 (TreeAdv), and the owner's 2026-08-09 reports on the new tree assets
-**Status:** Root cause established. Fix not yet implemented — it needs a decision about
-where the shader-family lookup lives.
+**Status:** Misclassification confirmed and corrected in code. The causal claim below was
+WRONG — see "Correction" at the end.
 
 ## The reports
 
@@ -90,3 +90,37 @@ Whether the four safe RVMAT render-state terms should also be wired through
 (`MAT-020-rvmat-render-state-unread-20260809.md`) is a separate defect with a separate
 cause. It is likely a contributing factor to the night brightness but cannot be the whole
 of it, and this routing bug is the larger term.
+
+
+---
+
+# Correction (same day, after implementing it)
+
+The misclassification is real: 44 of 50, and the shipped pine's foliage material now
+resolves `cutout-family=true` through the new override, traced in a live capture. But the
+causal story above is **not supported**, and it should not be repeated.
+
+With the override demonstrably firing on the pine's foliage section:
+
+- the 01:00 night capture is **byte-for-byte unchanged** — tree-region mean 16.60, max 35,
+  frame mean 4.12, identical to the run before the change;
+- the daytime capture is visually indistinguishable, with no shadow appearing and no
+  regression.
+
+So routing foliage out of the back-to-front pass changes nothing observable here. Every
+symptom this document attributed to it — the night glow, the missing shadows, the soft
+distant canopy, the moving dark patches — remains **unexplained**. Three separate
+candidate causes had now been eliminated for the night brightness: the normal-map
+binding, the RVMAT render state, and blend routing.
+
+Two readings remain, and they have not been separated:
+
+1. the blend pass split (`GSectionFilter`) is not actually reached for objects on this
+   draw path, so demoting a section changes which bucket it is put in but not how it is
+   drawn; or
+2. it is reached, and the translucent route was never what produced these symptoms.
+
+The next step is to determine which — by instrumenting where `GSectionFilter` is set for
+this object rather than where it is read. Until that is known, the change below is kept on
+its own merits (Arma 3 foliage *is* an alpha-tested cutout, and the histogram *is* the
+wrong authority) and is claimed to fix nothing.

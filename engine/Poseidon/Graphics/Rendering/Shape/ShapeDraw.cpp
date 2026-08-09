@@ -39,6 +39,10 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <mutex>
+#include <string>
+#include <unordered_map>
 
 extern bool DisableTextures;
 
@@ -56,6 +60,84 @@ inline bool IsSpec(float resolution, float spec)
 
 bool EnableHWTLState = true;
 
+// Alpha routing asks the decoded texture's histogram, and for anti-aliased cutouts the
+// histogram gives the wrong answer. `ClassifyAlpha` calls anything with >=2% partial
+// alpha a blend, and an alpha-TESTED leaf with soft edges is mostly partial alpha at the
+// edges: the shipped Arma 3 pine's leaf texture is 30.3% partial, the Enoch birch's 5.8%,
+// and 44 of 50 plants_f `_ca` textures classify as blend. A blend section leaves the
+// opaque pass for a back-to-front pass with no depth write, and every symptom follows --
+// no shadows (nothing occludes or casts), a canopy that accumulates instead of
+// depth-testing (measured mean 16.6 against a frame mean of 4.1 at 01:00), no crisp leaf
+// edge at distance, and dark patches that move because interpenetrating cards sort
+// order-dependently.
+//
+// CWA content is spared by accident of format: ClassifyTextureAlpha short-circuits 1-bit
+// alpha straight to Cutout, so the engine has never been asked about an anti-aliased
+// cutout before.
+//
+// The histogram is the wrong authority; the shader family is the right one. A family
+// whose alpha is measured to be a cutout demotes Blend -> Cutout here. This only ever
+// DEMOTES: a section the histogram already calls Opaque or Cutout is untouched, so
+// forcing this on an opaque bark section is a no-op rather than a new alpha test.
+//
+// Only the families actually measured are listed. Grass and SuperAToC are near-certain
+// members -- the latter says alpha-to-coverage in its own name -- but neither has been
+// measured here, and adding one is a single line once it has been.
+static bool ShaderFamilyIsCutout(const char* family)
+{
+    static const char* const kCutoutFamilies[] = {"TreeAdv", "TreeAdvTrunk", "TreeAdvTrans"};
+    for (const char* known : kCutoutFamilies)
+        if (strcmpi(known, family) == 0)
+            return true;
+    return false;
+}
+
+// Resolving this means opening and parsing an RVMAT, which cannot happen per draw, so the
+// answer is cached by material path -- including the negative answers, so a missing or
+// unparseable material is not retried on every frame.
+static bool SectionMaterialIsCutout(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path)
+        return false;
+
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex                            cacheMutex;
+    const std::string                            key(path);
+
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        const auto                  found = cache.find(key);
+        if (found != cache.end())
+            return found->second;
+    }
+
+    bool cutout = false;
+    try
+    {
+        cutout = ShaderFamilyIsCutout(Asset::Material::ParseRvMaterialFile(key).pixelShaderId.c_str());
+    }
+    catch (...)
+    {
+        cutout = false; // unavailable material: keep the histogram's answer
+    }
+
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = cutout;
+    return cutout;
+}
+
+// The single place that decides whether a section belongs in the back-to-front pass.
+static bool SectionIsBlend(const ShapeSectionInfo& sec)
+{
+    auto* tex = sec.properties.GetTexture();
+    if (!tex || tex->GetAlphaClass() != Poseidon::AlphaStats::Blend)
+        return false;
+    return !SectionMaterialIsCutout(sec.surfMat);
+}
+
 bool Shape::HasBlendSections() const
 {
     if (_hasBlendSections < 0)
@@ -63,8 +145,7 @@ bool Shape::HasBlendSections() const
         _hasBlendSections = 0;
         for (int i = 0; i < NSections(); i++)
         {
-            auto* tex = GetSection(i).properties.GetTexture();
-            if (tex && tex->GetAlphaClass() == Poseidon::AlphaStats::Blend)
+            if (SectionIsBlend(GetSection(i)))
             {
                 _hasBlendSections = 1;
                 break;
@@ -142,8 +223,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 // opaque+cutout sections, in the back-to-front pass only blend ones.
                 if (GSectionFilter != SectionClassFilter::All)
                 {
-                    auto* tex = sec.properties.GetTexture();
-                    const bool isBlend = tex && tex->GetAlphaClass() == Poseidon::AlphaStats::Blend;
+                    const bool isBlend = SectionIsBlend(sec);
                     if ((GSectionFilter == SectionClassFilter::BlendOnly) != isBlend)
                     {
                         continue;
