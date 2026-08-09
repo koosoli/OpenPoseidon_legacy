@@ -238,9 +238,86 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // textureSample stays legal.
     let material = materials[in.instance];
     let packed = bitcast<u32>(material.emissive.w);
-    let base = textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv);
     let normal_packed = bitcast<u32>(material.normal_map.x);
-    let normal_sample = textureSample(textures[normal_packed >> 3u], samplers[normal_packed & 7u], in.uv);
+
+    // Parallax occlusion mapping, carried in the normal map's RED channel.
+    //
+    // R is free and it is free by MEASUREMENT, not by hope: every shipped Arma NOHQ in this
+    // programme's corpus has R constant 0 (40 of 40), because the format stores X in alpha and Y in
+    // green and reconstructs Z. So a stock texture yields height 0, the loop below finds no
+    // displacement, and the offset is exactly zero -- this is self-gating and needs no uniform, no
+    // ABI change and no extra texture binding. An enhanced texture carries height there and gets
+    // relief. Both sample the SAME already-bound normal map.
+    //
+    // Height taps use textureSampleLevel: the march is per-pixel control flow, and implicit-mip
+    // sampling inside non-uniform flow is undefined. The final base/normal samples below stay
+    // implicit-mip and unconditional, so their derivatives remain valid.
+    var uv = in.uv;
+    if (material.normal_map.z > 0.5) {
+        // Tangent frame for the view vector, derived the same way the shading frame below is, so
+        // the displacement runs along the surface's real UV directions.
+        let duv_dx = dpdx(in.uv);
+        let duv_dy = dpdy(in.uv);
+        let n_geo = normalize(in.normal);
+        var t_raw = dwx * duv_dy.y - dwy * duv_dx.y;
+        var b_raw = dwy * duv_dx.x - dwx * duv_dy.x;
+        if (dot(in.tangent, in.tangent) > 1e-10 && dot(in.binormal, in.binormal) > 1e-10) {
+            t_raw = in.tangent;
+            b_raw = in.binormal;
+        }
+        let t_ortho = t_raw - n_geo * dot(n_geo, t_raw);
+        if (dot(t_ortho, t_ortho) > 1e-10 && dot(b_raw, b_raw) > 1e-10) {
+            let tan = normalize(t_ortho);
+            var hand = 1.0;
+            if (dot(cross(n_geo, tan), b_raw) < 0.0) {
+                hand = -1.0;
+            }
+            let bit = normalize(cross(n_geo, tan)) * hand;
+            // Surface -> eye. world_pos is camera-relative, so the eye is at the origin.
+            let v = normalize(-in.world_pos);
+            let v_ts = vec3<f32>(dot(v, tan), dot(v, bit), dot(v, n_geo));
+            // Distance fade: relief is a close-up cue and the march is the expensive part, so it
+            // fades out well before the texture does. Beyond the fade there is no march at all.
+            let dist_fade = 1.0 - smoothstep(35.0, 60.0, length(in.world_pos));
+            // Self-gating needs an explicit early-out, not just the maths working out. A FLAT R=0
+            // field is not "no displacement": the march would walk the ray to the bottom of the
+            // height range and apply the FULL offset, shifting the texture on every stock
+            // normal-mapped surface in the game. Stock NOHQ has R exactly 0, so one tap at the
+            // undisplaced uv separates "no height authored" from "height authored and dark here".
+            let h_probe = textureSampleLevel(textures[normal_packed >> 3u], samplers[normal_packed & 7u], in.uv, 0.0).r;
+            if (dist_fade > 0.001 && v_ts.z > 0.15 && h_probe > 0.004) {
+                // Step count falls off at grazing angles rather than rising: a grazing ray needs the
+                // most steps and is also where a bounded march looks worst, so this trades a little
+                // accuracy there for a hard cost ceiling.
+                let steps = mix(8.0, 20.0, clamp(v_ts.z, 0.0, 1.0)) ;
+                let amplitude = 0.02 * dist_fade;
+                let max_offset = (v_ts.xy / max(v_ts.z, 0.15)) * amplitude;
+                let dstep = 1.0 / steps;
+                var cur_h = 1.0;
+                var cur_uv = in.uv;
+                var h = textureSampleLevel(textures[normal_packed >> 3u], samplers[normal_packed & 7u], cur_uv, 0.0).r;
+                var i = 0.0;
+                loop {
+                    if (i >= steps || h >= cur_h) { break; }
+                    cur_h = cur_h - dstep;
+                    cur_uv = in.uv - max_offset * (1.0 - cur_h);
+                    h = textureSampleLevel(textures[normal_packed >> 3u], samplers[normal_packed & 7u], cur_uv, 0.0).r;
+                    i = i + 1.0;
+                }
+                // One linear refine between the last two steps: without it the silhouette of the
+                // relief stairsteps at exactly the step count, which is more obvious than the
+                // undersampling it comes from.
+                let prev_uv = cur_uv + max_offset * dstep;
+                let prev_h = textureSampleLevel(textures[normal_packed >> 3u], samplers[normal_packed & 7u], prev_uv, 0.0).r - (cur_h + dstep);
+                let this_h = h - cur_h;
+                let w = this_h / max(this_h - prev_h, 1e-5);
+                uv = mix(cur_uv, prev_uv, clamp(w, 0.0, 1.0));
+            }
+        }
+    }
+
+    let base = textureSample(textures[packed >> 3u], samplers[packed & 7u], uv);
+    let normal_sample = textureSample(textures[normal_packed >> 3u], samplers[normal_packed & 7u], uv);
     var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
     if (material.normal_map.w > 0.5) {
         normal_ts_xy.y = -normal_ts_xy.y;

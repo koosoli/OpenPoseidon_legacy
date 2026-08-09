@@ -134,7 +134,12 @@ bool SaveNormalMap(const fs::path& input, const fs::path& output, float strength
             const uint8_t ex = static_cast<uint8_t>(std::clamp((nx * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
             const uint8_t ey = static_cast<uint8_t>(std::clamp((ny * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
             const uint8_t ez = static_cast<uint8_t>(std::clamp((nz * 0.5f + 0.5f) * 255.0f, 0.0f, 255.0f));
-            normal[pixel] = 0;      // R: unused by the NOHQ decode
+            // R carries HEIGHT for the parallax path. Shipped Arma NOHQ has R constant 0 in 40 of
+            // 40 measured textures, so writing height there cannot disturb stock content: those
+            // read 0 and displace by nothing. Height is the source luma -- the same signal the
+            // gradient above is derived from, so bright reads as proud and dark as recessed, which
+            // is what mortar-versus-brick already looks like in an OFP albedo.
+            normal[pixel] = SampleLuma(rgba, width, height, x, y);
             normal[pixel + 1] = ey; // G: Y
             normal[pixel + 2] = ez; // B: carries Z for readability; the decode reconstructs it
             normal[pixel + 3] = ex; // A: X
