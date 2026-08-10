@@ -237,6 +237,9 @@ public:
 	int NVertex() const { return _pos.Size(); }
 	int NPos() const { return _pos.Size(); }
 	int NNorm() const { return _norm.Size(); }
+	int NTex() const { return _tex.Size(); }
+	int NTangent() const { return _tangent.Size(); }
+	int NBinormal() const { return _binormal.Size(); }
 
 	float U(int i) const { return _tex[i].u; }
 	float V(int i) const { return _tex[i].v; }

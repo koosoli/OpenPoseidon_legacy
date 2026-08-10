@@ -298,7 +298,7 @@ systems:
     plan: engine/WgpuRenderer/docs/procedural-sky-plan.md
     status: PARTIAL
     owner: null
-    audited: 2026-08-05
+    audited: 2026-08-10
     completeness: >-
       Considerably further than "stages 0 and 1 landed" (the RND-030 summary) and
       further than the plan's own "Stage 2 in progress".
@@ -466,10 +466,12 @@ systems:
     audited: 2026-08-05
     completeness: >-
       Ships and is on by default. Three compute-placed LOD rings — near (512² candidates,
-      opaque six-blade, five-segment geometry clumps with mixed stable archetypes, the only
-      ring that casts shadows), mid (384², opaque six-blade
-      geometry clumps), far (384², terrain-conforming coverage quads, gated off
-      by default). Wind, tracks, interactor and helicopter downwash all drive placement.
+      a clump-renderer toggle selects either legacy six-ribbon geometry or twelve-blade
+      alpha-tested photographed A3-style cards with four stable families; near is the only
+      ring that casts shadows), mid (384², procedural or photographed crossed cards), and
+      far (384² terrain-conforming coverage quads to 172 m). Wind, tracks, interactor and
+      helicopter downwash all drive placement; extending the far radius changes only the
+      far placement pass, not the near/mid grids.
       Measured 2026-08-05 in the reference mission at 3441x1440: prepass 0.970 + colour
       1.053 + shadow 0.156 = 2.179 ms of a 24.178 ms frame, 9.0%, at 48 647 near and
       14 165 mid instances.
@@ -480,6 +482,12 @@ systems:
 
       PARTIAL for provenance, not for rendering. See known_gap; the rendering half of
       GRS-GATE-1 is done and the asset half has not started.
+
+      A local-only A3 `tmp\\a3-grasstall.png` smoke on 2026-08-10 built and deployed the
+      game and renderer DLL, then captured the green photographed clumps through the WGPU
+      renderer. Near photo clumps now alpha-test into and receive the cascade map, giving
+      clump-to-clump shadowing. The selected test framing does not expose enough bare terrain
+      to accept the final ground-shadow/far-172m quality gate; those remain live-game checks.
     known_gap: >-
       GRS-GATE-1 unpassed: assets/ is gitignored, so the authored texture path is dead on
       any fresh clone and every user gets the procedural look. No ASSET-010 source

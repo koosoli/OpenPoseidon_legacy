@@ -21,22 +21,33 @@ int CountIndices(const Shape& src)
 
 void BuildVertices(const Shape& src, SVertex* out)
 {
-    const UVPair* uv = &src.UV(0);
-    const Vector3* pos = &src.Pos(0);
-    const Vector3* norm = &src.Norm(0);
-    const bool hasTangentFrame = src.HasTangentFrame();
-    for (int i = src.NVertex(); --i >= 0;)
+    // Some shadow LODs retain the tangent-frame flag after their optional
+    // tangent streams have been stripped. Treat that as no frame rather than
+    // indexing an absent stream while warming the shadow cache.
+    const bool hasTangentFrame = src.HasTangentFrame() && src.NTangent() >= src.NVertex() &&
+                                 src.NBinormal() >= src.NVertex();
+    // Shadow-volume LODs in legacy P3Ds may contain positions and faces but
+    // omit UVs and/or normals. The former pointer-based walk dereferenced both
+    // streams unconditionally and crashed while the shadow cache built its
+    // first WGPU vertex buffer. Supply neutral attributes for those valid,
+    // position-only meshes instead.
+    const int n = src.NVertex();
+    const int normals = src.NNorm();
+    const int texcoords = src.NTex();
+    for (int vertexIndex = 0; vertexIndex < n; ++vertexIndex)
     {
-        out->pos = Vector3P(pos->X(), pos->Y(), pos->Z());
+        Vector3Val pos = src.Pos(vertexIndex);
+        Vector3Val norm = vertexIndex < normals ? src.Norm(vertexIndex) : V3Up;
+        const UVPair uv = vertexIndex < texcoords ? src.UV(vertexIndex) : UVPair{0.0f, 0.0f};
+        out->pos = Vector3P(pos.X(), pos.Y(), pos.Z());
         // Normals are negated (matches the D3D convention).
-        out->norm = Vector3P(-norm->X(), -norm->Y(), -norm->Z());
-        out->t0 = *uv;
+        out->norm = Vector3P(-norm.X(), -norm.Y(), -norm.Z());
+        out->t0 = uv;
         // Non-conform path: the per-instance conform mode is 0, so the shader ignores
         // this. Only BuildOrigVertices (the conform path) sets a meaningful value.
         out->conform = 0;
         if (hasTangentFrame)
         {
-            const int vertexIndex = src.NVertex() - i - 1;
             Vector3Val tangent = src.Tangent(vertexIndex);
             Vector3Val binormal = src.Binormal(vertexIndex);
             out->tangent = Vector3P(-tangent.X(), -tangent.Y(), -tangent.Z());
@@ -47,9 +58,6 @@ void BuildVertices(const Shape& src, SVertex* out)
             out->tangent = Vector3P(0, 0, 0);
             out->binormal = Vector3P(0, 0, 0);
         }
-        pos++;
-        norm++;
-        uv++;
         out++;
     }
 }
