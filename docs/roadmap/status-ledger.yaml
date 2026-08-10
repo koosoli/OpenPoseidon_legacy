@@ -2466,3 +2466,165 @@ tickets:
     reviewer_method: null
     supersedes: []
     evidence: []
+  - id: WLD-010
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Arma 3 world container (OPRW revision 25)
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 5119a1160ad7f9d87f5c602d48960d7ecedbabe2
+    verification_commit: fdeca8b
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: []
+    blocks: [WLD-011]
+    implementation_commits: [428268e]
+    production_call_sites: []
+    test_ids: [oprw25-synthetic-world, oprw25-quadtree-cell-order,
+               oprw25-revision-dispatch, oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/WLD-010-oprw25-world-container-20260810.md
+    capability_claims:
+      - capability: OPRW25_WORLD_PARSE
+        status: PARTIAL
+        denominator: >-
+          Three local Arma 3 worlds parse to the byte: map_vr, map_stratis and
+          map_altis. Byte-exactness is enforced, not observed -- the reader
+          requires the road network to consume its declared size (VR 262,144;
+          Stratis 306,262), the trailing map-info block to match its declared
+          length (VR 0; Stratis 1,482,744; Altis 23,055,496), and the object
+          table size to divide evenly by the 60-byte record. Altis exercises a
+          different grid ratio and cell size (1024/4096 at 30 m) from the other
+          two (256/2048 at 32 m).
+    known_failures:
+      - Revisions other than 25 are refused; 3, 17, 24 and 26 are negative controls.
+      - The trailing map-info block is retained as bytes and not decoded.
+      - The sound-map, object-offset and map-info-offset quadtrees are consumed for
+        stream position only; their contents are discarded.
+      - Official Bohemia worlds only. No community world or mod has been tested.
+    fallback: >-
+      The legacy WrpReader is untouched and continues to handle RVW and OPRW 2/3.
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-010-oprw25-world-container-20260810.md
+      - engine/Poseidon/Asset/Formats/World/Oprw25.hpp
+      - tests/unit/engine/Poseidon/Asset/Formats/World/test_oprw25.cpp
+  - id: WLD-011
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: World compatibility census with denominators
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADOPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 5119a1160ad7f9d87f5c602d48960d7ecedbabe2
+    verification_commit: fdeca8b
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-010]
+    blocked_by: []
+    blocks: [WLD-012]
+    implementation_commits: [5344e5a]
+    production_call_sites:
+      - file: apps/tools/Tools/commands/TerrainCommand.cpp
+        symbol: PoseidonTools::TerrainCommand::Setup
+    test_ids: []
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/WLD-011-stratis-model-coverage-20260810.md
+    capability_claims:
+      - capability: WORLD_ASSET_RESOLUTION
+        status: PARTIAL
+        denominator: >-
+          `terrain census --addons` indexes 487 local Arma 3 archives (503,887
+          entries) and resolves every model path both Stratis and Altis
+          reference. Resolution requires the archive's declared prefix property:
+          measured directly, ignoring it resolves 0 of Stratis's 350 models and
+          applying it resolves 350.
+    known_failures:
+      - >-
+        BankList::Load derives a bank's mount prefix from the bank filename plus a
+        caller-supplied prefix, never from the archive's declared prefix property.
+        For OFP-era archives those coincide; for Arma 3 they do not (rocks_f vs
+        a3\rocks_f). Untested against a live A3 addon mount -- the census indexes
+        archives directly and does not exercise the mount path. Must be settled
+        before runtime A3 asset loading is attempted.
+      - Textures and RVMATs referenced by the models are not followed.
+      - The index takes the first archive providing a path; real load-order rules
+        for a mod list are not implemented.
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-011-stratis-model-coverage-20260810.md
+  - id: WLD-012
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: ODOL 73 coverage for the sections a real world contains
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 5119a1160ad7f9d87f5c602d48960d7ecedbabe2
+    verification_commit: fdeca8b
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [AST-012B, WLD-011]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [fdeca8b]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
+        symbol: Poseidon::Asset::Formats::P3D::ReadOdol73StaticModel
+    test_ids: [oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/WLD-012-odol73-world-prop-coverage-20260810.md
+    capability_claims:
+      - capability: ODOL73_STATIC_LOD_PARSE
+        status: PARTIAL
+        denominator: >-
+          Every model referenced by Stratis and Altis parses: 1,313 models over
+          1,943,861 placements, all revision 73, no failures and no unsupported
+          revisions. This widens AST-012B's recorded 503-of-515 measurement by
+          reading the sections that were previously refused -- model animations,
+          LOD proxies, sub-skeleton mapping and sets, and vertex and neighbour
+          bone references. It does not supersede AST-012B's claim, which remains
+          true at its own verification commit.
+    known_failures:
+      - >-
+        These are parse results only. Nothing asserts that geometry is correct,
+        that materials resolve, that renderer vertex buffers are built, or that
+        anything draws.
+      - No proxy is resolved, no animation is evaluated, no skinning is applied;
+        the corresponding data is retained but unused.
+      - Neighbour bone references are retained as raw 32-byte records, unconverted.
+      - Unrecognised animation types remain a refusal.
+    fallback: null
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-012-odol73-world-prop-coverage-20260810.md
