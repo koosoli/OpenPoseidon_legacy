@@ -319,9 +319,14 @@ TEST_CASE("OPRW25: probe accepts revision 25 and leaves the stream alone", "[For
 // are licensed local data, so the case reports itself skipped everywhere else.
 TEST_CASE("OPRW25: local Arma 3 world parses to its declared byte counts", "[Formats][WRP][OPRW25][GameData]")
 {
+    // Altis is here specifically because its grids differ from the other two
+    // (1024/4096 at 30 m, versus 256/2048 at 32 m). Two worlds of identical
+    // dimensions cannot tell a correct two-grid reader from one that happens to
+    // work at 8:1.
     const char* candidates[] = {
         "packages/a3-compat/world/stratis/stratis.wrp",
         "packages/a3-compat/world/vr/vr.wrp",
+        "packages/a3-compat/world/altis/altis.wrp",
     };
 
     int parsed = 0;
@@ -359,14 +364,25 @@ TEST_CASE("OPRW25: local Arma 3 world parses to its declared byte counts", "[For
 
         INFO("world " << path);
         REQUIRE(world.header.appId == 107410);
-        REQUIRE(world.header.landRangeX == 256);
-        REQUIRE(world.header.terrainRangeX == 2048);
-        REQUIRE(world.header.landCellSize == 32.0f);
-        REQUIRE(world.header.TerrainCellSize() == 4.0f);
-        REQUIRE(world.header.WorldExtent() == 8192.0f);
-        REQUIRE(world.elevation.size() == 2048u * 2048u);
-        REQUIRE(world.geography.size() == 256u * 256u);
+        // Asserted as relationships rather than literals, so the case covers any
+        // revision-25 world rather than the two it was first written against.
+        REQUIRE(world.header.landRangeX == world.header.landRangeY);
+        REQUIRE(world.header.terrainRangeX == world.header.terrainRangeY);
+        REQUIRE(world.header.terrainRangeX % world.header.landRangeX == 0);
+        REQUIRE(world.header.landCellSize > 0.0f);
+        REQUIRE(world.header.WorldExtent() ==
+                world.header.TerrainCellSize() * static_cast<float>(world.header.terrainRangeX));
+        REQUIRE(world.elevation.size() == static_cast<size_t>(world.header.terrainRangeX) * world.header.terrainRangeY);
+        REQUIRE(world.geography.size() == static_cast<size_t>(world.header.landRangeX) * world.header.landRangeY);
+        REQUIRE(world.materialIndex.size() == world.geography.size());
         REQUIRE(!world.materials.empty());
+        // Counted rather than asserted per object: Altis has 1.78 million of them,
+        // and a REQUIRE each would be 1.78 million Catch2 assertions.
+        size_t outOfRange = 0;
+        for (const auto& object : world.objects)
+            if (static_cast<size_t>(object.modelIndex) >= world.models.size())
+                ++outOfRange;
+        REQUIRE(outOfRange == 0);
         // ReadOprw25 already required the road network and trailing map info to
         // match their declared sizes, so reaching here is the byte-exact result.
     }

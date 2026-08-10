@@ -125,9 +125,12 @@ map info                1,482,744 bytes retained, not decoded
   stream position only; their contents are discarded.
 - The per-material "major" flag is read and dropped.
 - Revision 24 and earlier, and 26 (VBS), are not supported.
-- Two worlds is the entire corpus. Both are official Bohemia worlds of identical
+- ~~Two worlds is the entire corpus. Both are official Bohemia worlds of identical
   grid dimensions; a community world with different `landRange`/`terrainRange`
-  ratios has not been tested.
+  ratios has not been tested.~~ **Resolved the same day (WLD-012):** Altis parses
+  to the byte at 1024 land / 4096 terrain / 30 m cells / 30,720 m extent — a
+  different ratio and cell size. Still official Bohemia content only; no community
+  world or mod has been tested.
 
 ## Next blocker
 
