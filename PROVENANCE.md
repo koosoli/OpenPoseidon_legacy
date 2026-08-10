@@ -66,8 +66,9 @@ supported by Bohemia Interactive a.s.
   adapted for this interoperability work. (PoseidonWGPU as a whole derives from
   Bohemia's *publicly released* GPL Poseidon source; see
   [Licensing and naming](#licensing-and-naming).)
-- **No technical protection measure was circumvented.** Every file read was an
-  ordinary, unencrypted data file from a normal installation.
+- **No encryption, DRM, access control, or other technical protection measure was
+  bypassed** as part of this interoperability work. Files were accessed through the
+  normal local installation and ordinary local extraction/tooling.
 - **No Bohemia asset file was committed by this interoperability work** — no model,
   texture, world, archive, material, sound or config. Pre-existing binary fixtures
   are outside this scope and are identified under
@@ -80,9 +81,9 @@ interoperability as a software concern and provides rights concerning observatio
 study and testing by lawful users, as well as a separate conditional exception for
 decompilation when indispensable for interoperability. No decompilation is claimed
 to have been performed in this work. The CJEU's decision in *SAS Institute v World
-Programming* (C-406/10) held that a lawful licensee may, subject to the relevant
-conditions, study, observe and test a program to reproduce its functionality
-without access to its source code.
+Programming* (C-406/10) addressed independent reproduction of program
+functionality without access to the original source code, and the scope of a
+lawful user's right to observe, study and test the functioning of a program.
 
 This document does not assert that those provisions resolve every contractual or
 copyright question applicable to the project. Bohemia Interactive's Arma 3 EULA
@@ -145,11 +146,13 @@ reliable, not more:
      deliberately corrupt version fields and are named `fuzz_*`; exactly one is
      binarized ODOL — `tests/fixtures/p3d/animated_morph_odol.p3d`, at **713
      bytes**, orders of magnitude below any shipped model.
-   - **Textures:** every `.paa`/`.pac` is 4x4, 32x32 or 64x64. Shipped Arma
-     textures are 512x512 to 2048x2048.
-   - **Archives:** all are 169 to 5,585 bytes, named `*_fixture*`, and **none
-     declares a `product` or `prefix` property** — they carry no header-extension
-     block at all, whereas every Bohemia archive declares its product.
+   - **Textures:** every audited `.paa`/`.pac` fixture is only 4x4, 32x32 or
+     64x64. Their dimensions, names and contents are consistent with small
+     synthetic test fixtures; dimensions alone are not treated as proof of
+     provenance.
+   - **Archives:** all are 169 to 5,585 bytes, have fixture-oriented names, and
+     none contains the `product`/`prefix` metadata observed across the locally
+     tested Arma 3 archive corpus.
    - **Materials:** no `.rvmat` fixture is tracked.
 
    This is an inference from format, size, naming and metadata, not a documented
@@ -189,10 +192,11 @@ copy.
 
 PoseidonWGPU derives from Bohemia Interactive's GPL-3.0-or-later release of the
 Poseidon engine, with the Section 7 additional terms attached to that release. The
-"ARMA", "Operation Flashpoint" and "Bohemia Interactive" names and marks are not
-granted by that release and are not claimed here; a fork must be renamed. Any use
-of those names in this repository is nominative — identifying the formats and
-products this software interoperates with.
+`"ARMA"`, `"Operation Flashpoint"` and `"Bohemia Interactive"` names and marks are
+not granted by that release and are not claimed by this project; a fork must be
+renamed. References to those names are solely to identify the products, formats
+and compatibility being discussed. PoseidonWGPU is not affiliated with or endorsed
+by Bohemia Interactive.
 
 ## Contact
 
