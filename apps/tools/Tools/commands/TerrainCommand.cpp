@@ -66,6 +66,126 @@ std::string JsonEscape(const std::string& value)
     return out;
 }
 
+// -- revision-25 map rendering -----------------------------------------------
+//
+// The legacy preview normalises height across the file's own min and max, which
+// is right for OFP worlds and wrong for these: an Arma 3 world has a real sea
+// level at y = 0 and most of its terrain cells are seabed. Normalised that way,
+// Stratis renders as a smear with the coastline nowhere near the water line.
+//
+// So elevation is shaded against absolute zero, and the surface is hillshaded --
+// without a light the interior of an island is a flat colour field and nothing
+// about the terrain can be judged from it.
+Poseidon::PreviewImage RenderOprw25Map(const Poseidon::Asset::Formats::World::Oprw25World& world, bool withObjects)
+{
+    const int w = world.header.terrainRangeX;
+    const int h = world.header.terrainRangeY;
+    const float cell = world.header.TerrainCellSize();
+
+    Poseidon::PreviewImage image;
+    image.width = w;
+    image.height = h;
+    image.data.assign(static_cast<size_t>(w) * h * 4, 0);
+
+    float highest = 1.0f;
+    for (const float height : world.elevation)
+        if (height > highest)
+            highest = height;
+
+    auto heightAt = [&](int x, int z)
+    {
+        x = x < 0 ? 0 : (x >= w ? w - 1 : x);
+        z = z < 0 ? 0 : (z >= h ? h - 1 : z);
+        return world.elevation[static_cast<size_t>(z) * w + x];
+    };
+
+    for (int z = 0; z < h; ++z)
+    {
+        for (int x = 0; x < w; ++x)
+        {
+            const float height = heightAt(x, z);
+
+            float r, g, b;
+            if (height < 0.0f)
+            {
+                // Depth ramp. Stratis reaches -157 m, so a linear ramp puts the
+                // whole shelf in one shade; the square root keeps the shallows
+                // -- which is where the coastline actually reads -- separable.
+                const float depth = std::sqrt(std::min(1.0f, -height / 120.0f));
+                r = 12.0f + (1.0f - depth) * 40.0f;
+                g = 40.0f + (1.0f - depth) * 90.0f;
+                b = 70.0f + (1.0f - depth) * 110.0f;
+            }
+            else
+            {
+                const float t = std::min(1.0f, height / highest);
+                if (t < 0.45f)
+                {
+                    const float s = t / 0.45f;
+                    r = 74.0f + s * 84.0f;
+                    g = 118.0f + s * 32.0f;
+                    b = 52.0f + s * 18.0f;
+                }
+                else
+                {
+                    const float s = (t - 0.45f) / 0.55f;
+                    r = 158.0f + s * 62.0f;
+                    g = 150.0f + s * 70.0f;
+                    b = 70.0f + s * 130.0f;
+                }
+            }
+
+            // Water is decided by height alone, deliberately. The geography grid
+            // carries water-depth bits and they were tried here first; on both
+            // local worlds they change no pixel, because every cell they flag is
+            // already below zero (Stratis: 72.1% of land cells flagged, against
+            // 71.3% of terrain cells below sea level -- two grids agreeing).
+            // A world with genuine inland water would need them, but neither of
+            // these has any, so the branch would be untested code that looks
+            // supported. Altis's flat eastern basin is not a counterexample: it
+            // sits at 2.6-10.5 m, carries no placements, and is flagged as land
+            // because it is land -- a dry salt flat.
+
+            // Hillshade from the height gradient, light from the north-west.
+            const float dx = (heightAt(x + 1, z) - heightAt(x - 1, z)) / (2.0f * cell);
+            const float dz = (heightAt(x, z + 1) - heightAt(x, z - 1)) / (2.0f * cell);
+            float shade = (0.55f * -dx + 0.55f * dz + 1.0f) / std::sqrt(dx * dx + dz * dz + 1.0f);
+            shade = 0.55f + 0.45f * std::max(0.0f, std::min(1.6f, shade));
+            if (height < 0.0f)
+                shade = 1.0f; // water is flat; shading the seabed only adds noise
+
+            // Row 0 is north: the world's +Z runs north, images run downward.
+            const size_t pixel = (static_cast<size_t>(h - 1 - z) * w + x) * 4;
+            image.data[pixel + 0] = static_cast<uint8_t>(std::min(255.0f, r * shade));
+            image.data[pixel + 1] = static_cast<uint8_t>(std::min(255.0f, g * shade));
+            image.data[pixel + 2] = static_cast<uint8_t>(std::min(255.0f, b * shade));
+            image.data[pixel + 3] = 255;
+        }
+    }
+
+    if (withObjects)
+    {
+        // Additive, so density is the signal: one tree is barely visible, a
+        // treeline or a town saturates. Plotting them opaquely would just paint
+        // 163,953 identical dots over the terrain that gives them context.
+        for (const auto& object : world.objects)
+        {
+            const int x = static_cast<int>(object.transform.rows[3].x / cell);
+            const int z = static_cast<int>(object.transform.rows[3].z / cell);
+            if (x < 0 || x >= w || z < 0 || z >= h)
+                continue;
+            const size_t pixel = (static_cast<size_t>(h - 1 - z) * w + x) * 4;
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const int lift = channel == 2 ? 40 : 70;
+                image.data[pixel + channel] = static_cast<uint8_t>(std::min(255, image.data[pixel + channel] + lift));
+            }
+        }
+    }
+
+    return image;
+}
+
 // -- addon index -------------------------------------------------------------
 //
 // Maps a world's virtual asset paths onto the archives of a local install. The
@@ -363,6 +483,31 @@ void PrintWorldCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
               << " terrain cells\n";
     std::cout << "Mountains:        " << world.mountains.size() << "\n\n";
 
+    // The geography grid's own flags, reported because they are the only per-cell
+    // semantics the world carries besides elevation and surface material, and
+    // because a count of zero is itself a finding.
+    {
+        int water = 0, forest = 0, road = 0, objects = 0;
+        for (const int16_t bits : world.geography)
+        {
+            const Poseidon::Asset::Formats::World::Oprw25Geography cell{bits};
+            if (cell.MaxWaterDepth() > 0 || cell.MinWaterDepth() > 0)
+                ++water;
+            if (cell.Forest())
+                ++forest;
+            if (cell.Road())
+                ++road;
+            if (cell.SomeObjects())
+                ++objects;
+        }
+        std::cout << "-- geography flags (per land cell) --\n";
+        std::cout << "Cells:            " << world.geography.size() << "\n";
+        std::cout << "Water depth set:  " << water << "\n";
+        std::cout << "Forest:           " << forest << "\n";
+        std::cout << "Road:             " << road << "\n";
+        std::cout << "Some objects:     " << objects << "\n\n";
+    }
+
     std::cout << "-- surface materials --\n";
     std::cout << "Declared:         " << c.surfaceMaterials << "\n";
     std::cout << "Distinct in use:  " << c.surfaceMaterialsUsed << "\n\n";
@@ -641,12 +786,52 @@ void TerrainCommand::Setup(CLI::App& app)
     {
         static std::string inputFile;
         static std::string outputFile;
+        static bool renderObjects = false;
         auto* cmd = terrain->add_subcommand("render", "Render heightmap to PNG image");
         cmd->add_option("input", inputFile, "WRP terrain file")->required()->check(CLI::ExistingFile);
         cmd->add_option("-o,--output", outputFile, "Output PNG file path")->required();
+        cmd->add_flag("--objects", renderObjects, "Overlay object placement density (revision 25 only)");
         cmd->callback(
             []()
             {
+                // Revision 25 gets its own renderer; the legacy preview's
+                // relative height normalisation misplaces its coastline.
+                {
+                    QIFStream probe;
+                    probe.open(inputFile.c_str());
+                    if (!probe.fail())
+                    {
+                        Asset::Formats::BinaryReader reader(probe);
+                        if (Asset::Formats::World::IsOprw25(reader))
+                        {
+                            Asset::Formats::World::Oprw25World world;
+                            try
+                            {
+                                world = Asset::Formats::World::ReadOprw25(reader);
+                            }
+                            catch (const std::exception& e)
+                            {
+                                std::cerr << "Error: " << e.what() << "\n";
+                                std::exit(1);
+                            }
+                            const auto map = RenderOprw25Map(world, renderObjects);
+                            if (!map.saveToFile(outputFile))
+                            {
+                                std::cerr << "Error: Failed to write output\n";
+                                std::exit(1);
+                            }
+                            std::cout << "Rendered: " << outputFile << " (" << map.width << "x" << map.height << ")\n";
+                            std::cout << "Elevation: " << std::fixed << std::setprecision(1)
+                                      << *std::min_element(world.elevation.begin(), world.elevation.end()) << " - "
+                                      << *std::max_element(world.elevation.begin(), world.elevation.end()) << " m over "
+                                      << world.header.WorldExtent() << " m\n";
+                            if (renderObjects)
+                                std::cout << "Placements: " << world.objects.size() << "\n";
+                            std::exit(0);
+                        }
+                    }
+                }
+
                 auto preview = Poseidon::PreviewTerrain(inputFile);
                 if (!preview.valid())
                 {
