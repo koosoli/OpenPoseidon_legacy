@@ -114,7 +114,9 @@ pub struct SectionMaterialGpu {
     pub texture_slot: u32,
     pub sampler: u32,
     pub alpha_ref: f32,
-    pub _pad: u32,
+    // Bindless slot of the section's specular map (SMDI or a family equivalent), 0 = none.
+    // Occupies what was the struct's tail padding, so the layout is unchanged in size.
+    pub specular_slot: u32,
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

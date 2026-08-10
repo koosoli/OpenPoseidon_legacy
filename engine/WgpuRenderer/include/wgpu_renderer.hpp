@@ -328,6 +328,10 @@ struct WgrModelMaterial
     WgrVec4 diffuse;
     WgrVec4 specular; /* w = specular power */
     WgrTexture texture_id;
+    /* The section's per-texel specular map (RVMAT SpecularDetail: SMDI on Super/Skin, the
+     * equivalents on the NormalMap* families), 0 when the material names none. Its G channel
+     * scales `specular`, which is the constant that map was authored to modulate. */
+    WgrTexture specular_texture_id;
     uint32_t sampler;
     float alpha_ref;
 };
@@ -379,7 +383,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 80, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 88, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

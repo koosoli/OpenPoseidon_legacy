@@ -382,6 +382,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     m.light_ambient = material.light_ambient.rgb;
     m.specular = material.specular.rgb;
     m.spec_power = material.specular.w;
+    // The per-draw path carries no specular map: this is the ~7 sections a frame that reach
+    // DrawSectionTL, not the retained set. 1.0 leaves the flat constant exactly as before.
+    m.spec_mask = 1.0;
     // Stage 2 MapType gate: foliage lighting (leaf SSS + canopy AO) applies only to real
     // VEGETATION cutouts, so roads / characters / fences don't pick up the leaf look. The object's
     // MapType is published per draw in the free .w of the sun-ambient material lane (only .rgb is

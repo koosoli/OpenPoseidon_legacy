@@ -480,10 +480,14 @@ class EngineWgpu : public EngineDummy
     // always done this inline; the GPU-driven retained set needs the same answer,
     // so the lookup lives here rather than being duplicated.
     uint64_t ResolveMaterialBaseColour(const ShapeSection& section);
+    // A section's per-texel specular map (RVMAT SpecularDetail) when its RVMAT names
+    // a loadable one, or 0.
+    uint64_t ResolveMaterialSpecularMap(const ShapeSection& section);
     // Fraction of a translated RVMAT's flat specular constant to apply, standing in
-    // for the per-texel specular map this build does not bind. 1.0 for anything
-    // that is not a translated RVMAT.
-    float MaterialSpecularScale(const ShapeSection& section);
+    // for a per-texel specular map that is not bound. 1.0 for anything that is not a
+    // translated RVMAT, and 1.0 once `specularMap` is non-zero -- the map is what the
+    // constant was authored to be scaled by, so the approximation steps aside.
+    float MaterialSpecularScale(const ShapeSection& section, uint64_t specularMap);
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
     GrassSettings _grass;

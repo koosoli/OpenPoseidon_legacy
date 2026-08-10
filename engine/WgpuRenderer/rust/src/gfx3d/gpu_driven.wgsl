@@ -51,7 +51,10 @@ struct SectionMaterial {
     texture_slot: u32,
     sampler_idx: u32,
     alpha_ref: f32,
-    _pad: u32,
+    // SMDI (or a family equivalent), 0 = none. Slot 0 is the white fallback, so this must be
+    // tested rather than sampled blind: white would read as maximum specular everywhere,
+    // which is the blowout the flat constant was scaled down to avoid.
+    specular_slot: u32,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -365,6 +368,16 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     m.light_ambient = sm.ambient.rgb;
     m.specular = frame.sun_diffuse.rgb * sm.specular.rgb;
     m.spec_power = sm.specular.w;
+    // Per-texel specular. SMDI's G is the specular LEVEL and B is gloss -- measured, not
+    // folklore: across 40 sampled SMDI textures R and A are constant 255 while G and B vary
+    // (MaterialChannels.hpp). Only G is consumed. Turning B into a Blinn-Phong exponent is a
+    // conversion with its own evidence requirement, the same one that keeps
+    // GlossToRoughnessUnvalidated out of the translation path; the map is bound and the
+    // channel is there when that question is answered.
+    m.spec_mask = 1.0;
+    if (sm.specular_slot != 0u) {
+        m.spec_mask = textureSample(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv).g;
+    }
     // Foliage lighting (leaf SSS + canopy self-occlusion AO) applies only to real VEGETATION
     // cutouts (Stage 2 MapType gate, carried per-instance via the canopy flag) — other alpha-tested
     // cutouts (fences, grills, road/footprint decals) light normally. GPU-driven set is

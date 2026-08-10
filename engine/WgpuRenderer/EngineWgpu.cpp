@@ -2526,22 +2526,26 @@ static uint32_t BuildForestCrownComponents(const std::vector<SVertex>& verts, co
 // How much of a material's flat specular constant to apply.
 //
 // In Arma 3 that constant is what a per-texel specular map scales -- SMDI on the
-// Super family, and equivalents on Multi, TreeAdv and the NormalMap*Specular*
-// families. This build binds none of those maps, so applying the constant alone
-// is the maximum the material could ever reach on any texel, which lit whole
-// rooftops as if every point were a mirror.
+// Super and Skin families, and the equivalents the NormalMap*Specular* families
+// name. Applying the constant with no map is the maximum the material could ever
+// reach on any texel, which lit whole rooftops as if every point were a mirror.
 //
 // A real specular map averages well below white, so scaling the constant
 // approximates its mean far better than either extreme: applying it in full
 // blows out, and dropping it entirely removes glint the surfaces should have.
 // The factor is deliberately tunable (WGR_MATERIAL_SPEC_UNMAPPED) because the
-// right value is a look judgement, not a measurement; binding the maps replaces
-// this entirely.
+// right value is a look judgement, not a measurement.
+//
+// Once the map IS bound, this steps aside completely and returns 1.0: the map is
+// the thing the constant was authored to be scaled by, and an approximation of a
+// quantity applied on top of the quantity itself would darken it twice.
 //
 // Returns 1.0 for anything that is not a translated RVMAT, so OFP's CfgMaterials
 // surfaces are untouched.
-float EngineWgpu::MaterialSpecularScale(const ShapeSection& section)
+float EngineWgpu::MaterialSpecularScale(const ShapeSection& section, uint64_t specularMap)
 {
+    if (specularMap)
+        return 1.0f;
     if (!section.surfMat)
         return 1.0f;
     const char* materialPath = section.surfMat->GetName().Data();
@@ -2557,6 +2561,62 @@ float EngineWgpu::MaterialSpecularScale(const ShapeSection& section)
         return 0.25f;
     }();
     return scale;
+}
+
+// The per-texel specular map a section's RVMAT names, or 0 when it names none.
+//
+// Same shape as ResolveMaterialBaseColour and for the same reason: the retained
+// GPU-driven set owns essentially every Stratis section, so a lookup that lives
+// only in the per-draw path reaches almost nothing.
+//
+// A procedural SMDI stand-in is a genuine constant (`color(1,0,1,0,SMDI)` is a
+// specular level of zero) and is generated like any other, so it binds here too --
+// which matters, because on the Super family they outnumber the file maps.
+uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return 0;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 0;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return 0; // ResolveMaterialBaseColour fills the cache first
+
+    // Once per material, so the change is measurable the same way the albedo coverage
+    // was: how many materials carry a bright specular constant and still have no map
+    // is exactly the population the temporary approximation exists for.
+    const auto report = [&](uint64_t handle, const char* why, const std::string& detail)
+    {
+        static std::unordered_set<std::string> logged;
+        if (logged.insert(materialPath).second)
+        {
+            const auto& constant = cached->second.specular;
+            LOG_INFO(Graphics, "Wgpu material: specular map {} for {} family={} constant={:.2f} ({}{}{})",
+                     handle ? "bound" : "NONE", materialPath, cached->second.shaderFamily,
+                     std::max({constant[0], constant[1], constant[2]}), why, detail.empty() ? "" : " ", detail);
+        }
+        return handle;
+    };
+
+    const auto* spec = cached->second.Find(Asset::Material::MaterialSlot::SpecularDetail);
+    if (!spec)
+        return report(0, "no SpecularDetail slot", "");
+    std::string loadName = spec->texture.path.canonical();
+    if (spec->texture.isProcedural)
+    {
+        if (!render::procedural::Parse(spec->texture.raw.c_str()).generated)
+            return report(0, "procedural lookup", spec->texture.raw);
+        loadName = spec->texture.raw;
+    }
+    else if (loadName.empty())
+    {
+        return report(0, "empty path", "");
+    }
+    Ref<Texture> texture = _wbank->Load(loadName.c_str());
+    auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
+    const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+    return report(handle, handle ? "" : "upload failed", loadName);
 }
 
 // The albedo a section's RVMAT names, or 0 when it names none.
@@ -2831,11 +2891,14 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             {
                 mat.texture_id = baseColour;
             }
-            // Drop a specular constant whose map we do not bind. Keeping the
-            // exponent in .w costs nothing and leaves the term ready for when the
-            // SMDI map is bound. Ordering matters: ResolveMaterialBaseColour above
-            // is what populates the translation cache this reads.
-            if (const float specScale = MaterialSpecularScale(s->GetSection(i)); specScale < 1.0f)
+            // The per-texel specular map, when the material names one. With it bound
+            // the flat constant is applied in full and the map scales it per texel,
+            // which is what the constant means; without one the approximation below
+            // stands in. Ordering matters: ResolveMaterialBaseColour above is what
+            // populates the translation cache both of these read.
+            mat.specular_texture_id = ResolveMaterialSpecularMap(s->GetSection(i));
+            if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
+                specScale < 1.0f)
             {
                 mat.specular.x *= specScale;
                 mat.specular.y *= specScale;

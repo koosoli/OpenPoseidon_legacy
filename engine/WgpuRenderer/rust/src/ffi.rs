@@ -243,6 +243,10 @@ pub struct WgrModelMaterial {
     pub diffuse: WgrVec4,
     pub specular: WgrVec4, // w = specular power
     pub texture_id: u64,
+    // The section's per-texel specular map (RVMAT SpecularDetail: SMDI on Super/Skin, the
+    // equivalents on the NormalMap* families), 0 when the material names none. Its G channel
+    // scales `specular`, which is the constant that map was authored to modulate.
+    pub specular_texture_id: u64,
     pub sampler: u32,
     pub alpha_ref: f32,
 }
@@ -1210,7 +1214,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 60);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 80);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 88);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);

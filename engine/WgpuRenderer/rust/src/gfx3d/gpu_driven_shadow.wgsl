@@ -44,7 +44,9 @@ struct SectionMaterial {
     texture_slot: u32,
     sampler_idx: u32,
     alpha_ref: f32,
-    _pad: u32,
+    // The shadow pass needs only the cutout alpha, but the layout must match
+    // SectionMaterialGpu exactly or every field after this one reads the wrong bytes.
+    specular_slot: u32,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;

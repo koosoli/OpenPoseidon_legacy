@@ -26,6 +26,12 @@ struct ShadeMaterial {
     light_ambient: vec3<f32>,
     specular: vec3<f32>,
     spec_power: f32,
+    // Per-texel specular level, 1.0 when the material has no specular map. Kept apart from
+    // `specular` because it is a LINEAR mask and `specular` is a gamma-space colour: folding
+    // it in before the srgb decode below would put the mask through the sRGB curve, and at
+    // SMDI's measured mean (G ~ 47/255) that is 0.028 where 0.184 was meant -- a specular
+    // highlight roughly a seventh of its intended strength.
+    spec_mask: f32,
 };
 
 // world_pos is camera-relative; dwx/dwy = dpdx/dpdy(world_pos), computed in the entry point
@@ -86,6 +92,8 @@ fn shade(
         m_light_ambient = srgb_to_linear(m_light_ambient);
         m_specular = srgb_to_linear(m_specular);
     }
+    // After the decode, for the reason recorded on the field.
+    m_specular = m_specular * mat.spec_mask;
     // Decal / overlay sections (traffic-sign text, insignia) can carry ZERO vertex normals:
     // the legacy flat ambient (m_sun_ambient) never used the normal, so nobody noticed. The
     // sky-lit path's DIRECTIONAL sky_irradiance(nrm) does — and normalize((0,0,0)) is NaN, which
