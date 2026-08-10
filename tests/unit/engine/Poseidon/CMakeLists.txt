@@ -202,6 +202,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Formats tests (isolated format readers)
     Asset/Formats/Common/test_format_detector.cpp
     Asset/Formats/test_wrp.cpp
+    Asset/Formats/World/test_oprw25.cpp
     Asset/Formats/RTM/test_rtm_reader.cpp
     Asset/Formats/test_rtm.cpp
     Asset/Formats/test_paa.cpp
