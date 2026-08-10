@@ -10,7 +10,10 @@ commands.
 
 This is a factual record. It is not legal advice, and it is not a legal opinion.
 
-- **Verified at:** commit `5c28725`, 2026-08-10
+- **Last verified:** 2026-08-10, against commit `ad75f7d`. Commits after that one
+  touch this document only; re-run the commands in
+  [How to verify these claims](#how-to-verify-these-claims) to check any later
+  state for yourself.
 - **Scope:** the Arma 3 interoperability work only. It does not vouch for parts of
   the repository predating it, except where explicitly stated.
 
@@ -177,7 +180,9 @@ git log --all --pretty=format: --name-only | sort -u | grep '^packages/'
 # No Arma 3 captures tracked at HEAD
 git ls-files docs/roadmap/evidence | grep -iE 'a3-game|a3-sample'
 
-# Where Arma 3 appears in code at all (expect two string literals)
+# Where Arma 3 appears in code at all. At the verified commit this returns four
+# lines: two string literals (a revision label and one entry in the accepted
+# product list) and two comments recording the measurement behind that entry.
 grep -rn '"Arma 3"' engine/ apps/ --include=*.cpp --include=*.hpp
 ```
 
