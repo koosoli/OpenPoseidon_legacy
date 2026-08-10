@@ -72,7 +72,7 @@ pub enum Region {
     GtaoPrep = 28,    // depth resolve + normal resolve + the linear-Z mip chain
     GtaoCompute = 29, // the horizon-march itself
     GtaoBlur = 30,    // bilateral denoise
-    FrameTotal = 25,   // all submitted frame work; excludes acquire/present pacing
+    FrameTotal = 25,  // all submitted frame work; excludes acquire/present pacing
 }
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).

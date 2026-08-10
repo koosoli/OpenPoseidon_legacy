@@ -446,6 +446,27 @@ impl Renderer {
             // The lit mesh pipelines take a 5th bind group (group 4) for the terrain
             // heightmap used to conform vegetation on the GPU. Ample on desktop.
             max_bind_groups: 5,
+            // The geometry pool is one buffer for every resident mesh, and it is
+            // bound as STORAGE (the skin-bake reads it) as well as VERTEX. The
+            // defaults are 256 MB for a buffer and 128 MB for a storage binding,
+            // so the pool's doubling growth hit the storage limit at 4M vertices
+            // (4M * 36 B = 144 MB): create_buffer then returns an *invalid*
+            // buffer rather than failing loudly, and every later write_buffer and
+            // draw against it is rejected with "Buffer with 'wgr_geo_pool_vbuf'
+            // label is invalid". OFP's geometry never approaches this; one Arma 3
+            // world does.
+            //
+            // Unlike the binding-array limits above, buffer-size limits are
+            // reported reliably by the adapter, so ask for what the device
+            // actually supports. max() keeps the default as a floor.
+            max_buffer_size: adapter
+                .limits()
+                .max_buffer_size
+                .max(wgpu::Limits::default().max_buffer_size),
+            max_storage_buffer_binding_size: adapter
+                .limits()
+                .max_storage_buffer_binding_size
+                .max(wgpu::Limits::default().max_storage_buffer_binding_size),
             ..Default::default()
         };
 
@@ -1511,7 +1532,8 @@ impl Renderer {
         // knows where the map landed this frame. Publishing the SAME numbers the compute pass
         // used is the point: two independently derived mappings would disagree by a texel and the
         // shadows would sit slightly off from the clouds casting them.
-        shadow_mapping.cloud_shadow = glam::Vec4::from_array(self.sky.cloud_shadow_mapping_current());
+        shadow_mapping.cloud_shadow =
+            glam::Vec4::from_array(self.sky.cloud_shadow_mapping_current());
         // Lend the terrain heightmap to the mesh conform group (group 4) so object
         // vertex shaders conform ClipLand vegetation to SurfaceY without CPU rewrites.
         let heightmap_view = self.terrain.heightmap_view();
@@ -2652,8 +2674,13 @@ impl Renderer {
                         self.gtao_dbg_logged = true;
                     }
                 }
-                self.gfx3d
-                    .render_gtao(&self.device, &self.queue, &mut encoder, main_scene_cam, &self.gpu_timers);
+                self.gfx3d.render_gtao(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    main_scene_cam,
+                    &self.gpu_timers,
+                );
             }
 
             // Depth attachment for this segment's sub-passes. Post-tonemap (resolved) the target is
@@ -3167,16 +3194,15 @@ impl Renderer {
         sections: &[WgrModelSection],
         materials: &[WgrModelMaterial],
     ) -> u32 {
-        self.gfx3d
-            .register_model(
-                &self.device,
-                &self.queue,
-                bounding_sphere,
-                lods,
-                sections,
-                materials,
-                &self.textures,
-            )
+        self.gfx3d.register_model(
+            &self.device,
+            &self.queue,
+            bounding_sphere,
+            lods,
+            sections,
+            materials,
+            &self.textures,
+        )
     }
 
     fn register_crown_centres(&mut self, centres: &[WgrVec4]) -> u32 {
@@ -3302,7 +3328,8 @@ impl Renderer {
     }
 
     fn grass_set_tufts(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
-        self.grass.set_tufts(&self.device, &self.queue, width, height, layers, rgba);
+        self.grass
+            .set_tufts(&self.device, &self.queue, width, height, layers, rgba);
     }
 
     fn grass_have_photo_clumps(&self) -> bool {

@@ -267,7 +267,12 @@ pub fn create_tuft(
 /// Every layer gets independent coverage-corrected mips so mixing never makes
 /// the distant cards turn into an opaque dark sheet.
 pub fn create_tufts(
-    device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32, layers: u32, rgba: &[u8],
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    layers: u32,
+    rgba: &[u8],
 ) -> Option<wgpu::TextureView> {
     let layer_bytes = width as usize * height as usize * 4;
     if width == 0 || height == 0 || layers == 0 || rgba.len() < layer_bytes * layers as usize {
@@ -300,23 +305,27 @@ pub fn create_tufts(
         let (mut w, mut h) = (width, height);
         for mip in 0..mip_levels {
             queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: mip,
-                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(w * 4),
-                rows_per_image: Some(h),
-            },
-            wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &data,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(w * 4),
+                    rows_per_image: Some(h),
+                },
+                wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
             );
             if mip + 1 < mip_levels {
                 let (mut next, nw, nh) = downsample_cutout(&data, w, h);
@@ -327,7 +336,10 @@ pub fn create_tufts(
             }
         }
     }
-    Some(texture.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() }))
+    Some(texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    }))
 }
 
 /// Number of photo-clump layers the shader indexes. Layer 0 is the primary
@@ -354,11 +366,20 @@ const TRIM_ALPHA: u8 = 8;
 ///
 /// Sampled on a stride rather than every texel: this runs on 4K plates at load,
 /// and a mean does not need every sample to be accurate to three decimals.
-pub fn tuft_layer_means(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [[f32; 4]; TUFT_LAYERS] {
+pub fn tuft_layer_means(
+    width: u32,
+    height: u32,
+    layers: u32,
+    rgba: &[u8],
+) -> [[f32; 4]; TUFT_LAYERS] {
     // Linear-space, matching the Rgba8UnormSrgb view the shader samples through.
     fn srgb_to_linear(v: u8) -> f32 {
         let c = v as f32 / 255.0;
-        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     }
     let mut table = [[0.0f32; 256]; 1];
     for (i, slot) in table[0].iter_mut().enumerate() {

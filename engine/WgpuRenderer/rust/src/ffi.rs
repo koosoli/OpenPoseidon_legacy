@@ -660,15 +660,15 @@ pub struct WgrRenderParams {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq)]
 pub struct WgrSkyVis {
-    pub enabled: u32,    // 0 = no map rendered, no cull view, consumers read reach = 1
-    pub debug: u32,      // 1 = draw the reach factor as greyscale instead of lighting with it
-    pub resolution: u32, // depth-map edge in texels
-    pub extent: f32,     // HALF the world box, metres (1024 tex / 128 m half = 25 cm/texel)
-    pub height: f32,     // box half-height above/below the camera, metres
-    pub strength: f32,   // 0 = inert, 1 = full attenuation
-    pub floor: f32,      // minimum ambient multiplier in a sealed volume
-    pub kernel: f32,     // softening kernel radius, metres
-    pub bias: f32,       // depth bias, metres (stops open ground occluding itself)
+    pub enabled: u32,     // 0 = no map rendered, no cull view, consumers read reach = 1
+    pub debug: u32,       // 1 = draw the reach factor as greyscale instead of lighting with it
+    pub resolution: u32,  // depth-map edge in texels
+    pub extent: f32,      // HALF the world box, metres (1024 tex / 128 m half = 25 cm/texel)
+    pub height: f32,      // box half-height above/below the camera, metres
+    pub strength: f32,    // 0 = inert, 1 = full attenuation
+    pub floor: f32,       // minimum ambient multiplier in a sealed volume
+    pub kernel: f32,      // softening kernel radius, metres
+    pub bias: f32,        // depth bias, metres (stops open ground occluding itself)
     pub directional: f32, // 0 = uniform dimming, 1 = steer ambient fully along the open direction
     // Stage 2: APPLY the per-model baked volumes. Separate from `enabled` because the two are
     // different implementations of the same idea and the point of having both is to A/B them.
@@ -943,9 +943,9 @@ pub struct WgrGrassParams {
     /// How far a blade arcs over, scaled by its own height. 0 = rigid spikes.
     pub blade_arch: f32,
     pub clump_renderer: f32,
-      pub photo_tuft_brightness: f32,
-      pub photo_tuft_mix: f32,
-      pub photo_tuft_patch_size: f32,
+    pub photo_tuft_brightness: f32,
+    pub photo_tuft_mix: f32,
+    pub photo_tuft_patch_size: f32,
     // Photographed-clump look controls. These affect ONLY the photo card path
     // (near + mid when `use_photo_tuft` is on); procedural ribbons and the far
     // proxy are deliberately untouched so tuning cards cannot shift the field.
@@ -1237,10 +1237,10 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassTrack>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
-  // 1840 bytes; the photo-card look block, the placement block, the layer-mix
-  // block and eight per-layer weights complete five further vec4s
-  // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]).
-  const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4736);
+// 1840 bytes; the photo-card look block, the placement block, the layer-mix
+// block and eight per-layer weights complete five further vec4s
+// (GrassParams.photo / .place / .photo_mix / .layer_weights[2]).
+const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4736);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
@@ -2031,9 +2031,15 @@ pub unsafe extern "C" fn wgr_grass_set_tuft(
 /// layer per world-space patch; layer zero remains the primary A3 clump.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_grass_set_tufts(
-    renderer: *mut WgrRenderer, width: u32, height: u32, layers: u32, rgba: *const u8,
+    renderer: *mut WgrRenderer,
+    width: u32,
+    height: u32,
+    layers: u32,
+    rgba: *const u8,
 ) {
-    if renderer.is_null() || rgba.is_null() || width == 0 || height == 0 || layers == 0 { return; }
+    if renderer.is_null() || rgba.is_null() || width == 0 || height == 0 || layers == 0 {
+        return;
+    }
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         let bytes = width as usize * height as usize * layers as usize * 4;

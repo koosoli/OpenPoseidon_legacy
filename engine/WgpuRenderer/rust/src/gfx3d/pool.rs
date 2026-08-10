@@ -112,6 +112,21 @@ pub struct GeometryPool {
     ibuf: wgpu::Buffer,
     valloc: RangeAllocator, // over vertices
     ialloc: RangeAllocator, // over indices
+    // Buffers replaced by a growth, kept alive a few generations.
+    //
+    // Every draw site fetches vbuf()/ibuf() live, so nothing caches a stale
+    // handle -- but a growth can land *between* a pass recording
+    // set_vertex_buffer and the queue submit that consumes it. Dropping the old
+    // buffer there destroys it while a recorded command still references it, and
+    // wgpu rejects the submit with "Buffer with 'wgr_geo_pool_vbuf' label is
+    // invalid". OFP never hit this because its geometry fits the initial
+    // capacity; an Arma 3 world streams meshes in while frames are rendering and
+    // grows the pool repeatedly.
+    //
+    // Holding the last few generations covers the frames wgpu can have in flight
+    // and bounds the overhead: the doubling series means the retained tail is at
+    // most about the current capacity.
+    retired: Vec<wgpu::Buffer>,
     // Bumped whenever vbuf or ibuf is reallocated by a growth. Cached bind groups /
     // pass state referencing a pool buffer compare against this to know when to rebuild.
     epoch: u64,
@@ -130,6 +145,7 @@ impl GeometryPool {
             valloc: RangeAllocator::new(Self::INIT_VERTS),
             ialloc: RangeAllocator::new(Self::INIT_INDICES),
             epoch: 0,
+            retired: Vec::new(),
         }
     }
 
@@ -158,6 +174,19 @@ impl GeometryPool {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         })
+    }
+
+    // Keeps the replaced buffer alive for a few growths. Four covers more frames
+    // than wgpu will have in flight, and growths are rare enough that the tail
+    // never becomes the dominant allocation.
+    const RETIRED_KEPT: usize = 4;
+
+    fn retire(&mut self, old: wgpu::Buffer) {
+        self.retired.push(old);
+        if self.retired.len() > Self::RETIRED_KEPT {
+            let drop_count = self.retired.len() - Self::RETIRED_KEPT;
+            self.retired.drain(0..drop_count);
+        }
     }
 
     pub fn vbuf(&self) -> &wgpu::Buffer {
@@ -231,7 +260,8 @@ impl GeometryPool {
             cap as u64 * VERT_SIZE,
             "v",
         );
-        self.vbuf = new_buf;
+        let old_v = std::mem::replace(&mut self.vbuf, new_buf);
+        self.retire(old_v);
         self.valloc.grow(new_cap);
         self.epoch += 1;
         self.valloc.alloc(n).expect("post-grow vertex alloc")
@@ -252,7 +282,8 @@ impl GeometryPool {
             cap as u64 * INDEX_SIZE,
             "i",
         );
-        self.ibuf = new_buf;
+        let old_i = std::mem::replace(&mut self.ibuf, new_buf);
+        self.retire(old_i);
         self.ialloc.grow(new_cap);
         self.epoch += 1;
         self.ialloc.alloc(n).expect("post-grow index alloc")

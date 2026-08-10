@@ -316,13 +316,7 @@ impl SkyBake {
                     ),
                 ));
                 let (v, i) = owned.as_ref().unwrap();
-                (
-                    v,
-                    i,
-                    vec![(0u32, mesh.indices.len() as u32, 0i32)],
-                    lo,
-                    hi,
-                )
+                (v, i, vec![(0u32, mesh.indices.len() as u32, 0i32)], lo, hi)
             }
             // Straight out of the renderer's geometry pool: no CPU copy of the mesh, and no
             // second source of truth for what a model's geometry is. The AABB comes from the
@@ -686,7 +680,10 @@ mod tests {
         };
         let inside = at(&v, lo, hi, &s, [0.0, 1.5, 0.0]);
         let above = at(&v, lo, hi, &s, [0.0, 3.4, 0.0]);
-        assert!(inside < 0.15, "sealed interior should be dark, got {inside}");
+        assert!(
+            inside < 0.15,
+            "sealed interior should be dark, got {inside}"
+        );
         assert!(above > 0.7, "above the roof should be open, got {above}");
     }
 

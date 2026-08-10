@@ -2843,8 +2843,7 @@ impl Gfx3d {
         // an optional authored tangent/binormal frame from ODOL; zero values retain the
         // derivative fallback. They stay clear of the skinned path's bone/weight inputs
         // at 3/4. Offsets are byte 32 (conform), 36 (tangent), and 48 (binormal).
-        let vbuf_attrs =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32,
+        let vbuf_attrs = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32,
                                      6 => Float32x3, 7 => Float32x3];
         // Skin buffer: 8 bytes/vertex — Uint8x4 bone indices + Unorm8x4 weights.
         let skin_attrs = wgpu::vertex_attr_array![3 => Uint8x4, 4 => Unorm8x4];
@@ -4914,7 +4913,12 @@ impl Gfx3d {
                         light_diffuse: d.mat_light_diffuse,
                         light_ambient: d.mat_light_ambient,
                         specular: d.mat_specular,
-                        normal_map: [f32::from_bits(normal_packed), (d._pad & 0xff) as f32, if d.normal_texture_id != 0 { 1.0 } else { 0.0 }, if d._pad & 0x100 != 0 { 1.0 } else { 0.0 }],
+                        normal_map: [
+                            f32::from_bits(normal_packed),
+                            (d._pad & 0xff) as f32,
+                            if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
+                            if d._pad & 0x100 != 0 { 1.0 } else { 0.0 },
+                        ],
                     })
                 }));
             }
@@ -5623,9 +5627,9 @@ impl Gfx3d {
                 _pad: 0,
             })
             .collect();
-        let model = self
-            .cull
-            .register_model(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
+        let model =
+            self.cull
+                .register_model(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
         self.bake_model_sky_visibility(device, queue, model, lods, sections);
         model
     }
@@ -5960,7 +5964,8 @@ impl Gfx3d {
     ) -> (bool, bool, u32, u32) {
         // Read the ARGS, not the counters: the counter buffers carry no COPY_SRC, and the args
         // are the actual draw payload anyway. instance_count 0 is the unfilled tail.
-        let words = (cull::CULL_VARIANT_COUNT as u64 * self.cull.variant_capacity() as u64
+        let words = (cull::CULL_VARIANT_COUNT as u64
+            * self.cull.variant_capacity() as u64
             * (INDIRECT_ARG_SIZE / 4))
             .min(1 << 20);
         let survivors = self
@@ -6866,7 +6871,8 @@ fn interior_sky_steer_composes_with_the_bent_normal() {
         assert!(
             src.contains("interior_sky_ambient_normal(")
                 && !src.contains("interior_sky_ambient_normal(world_abs, nrm)")
-                && !src.contains("interior_sky_ambient_normal(in.world_pos + frame.cam_pos.xyz, n)"),
+                && !src
+                    .contains("interior_sky_ambient_normal(in.world_pos + frame.cam_pos.xyz, n)"),
             "{name} must feed the BENT normal into the interior steer, not the raw surface normal"
         );
     }

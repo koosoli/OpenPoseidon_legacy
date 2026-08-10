@@ -834,9 +834,27 @@ impl Grass {
             surface_format,
             false,
         );
-        let near_tuft_prepass_pipeline = make_pipeline("wgr_grass_near_tuft_prepass", "vs_grass_mid_tuft", "fs_grass_mid_tuft_prepass", NORMAL_FORMAT, true);
-        let near_tuft_color_pipeline = make_pipeline("wgr_grass_near_tuft_color", "vs_grass_mid_tuft", "fs_grass_mid_tuft", surface_format, true);
-        let near_tuft_color_no_write_pipeline = make_pipeline("wgr_grass_near_tuft_color_no_write", "vs_grass_mid_tuft", "fs_grass_mid_tuft", surface_format, false);
+        let near_tuft_prepass_pipeline = make_pipeline(
+            "wgr_grass_near_tuft_prepass",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft_prepass",
+            NORMAL_FORMAT,
+            true,
+        );
+        let near_tuft_color_pipeline = make_pipeline(
+            "wgr_grass_near_tuft_color",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft",
+            surface_format,
+            true,
+        );
+        let near_tuft_color_no_write_pipeline = make_pipeline(
+            "wgr_grass_near_tuft_color_no_write",
+            "vs_grass_mid_tuft",
+            "fs_grass_mid_tuft",
+            surface_format,
+            false,
+        );
         let far_color_pipeline = make_pipeline(
             "wgr_grass_far_color",
             "vs_grass_far",
@@ -916,7 +934,11 @@ impl Grass {
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
-                bias: wgpu::DepthBiasState { constant: 4, slope_scale: 2.5, clamp: 0.0 },
+                bias: wgpu::DepthBiasState {
+                    constant: 4,
+                    slope_scale: 2.5,
+                    clamp: 0.0,
+                },
             }),
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
@@ -1024,9 +1046,16 @@ impl Grass {
     }
 
     pub fn set_tufts(
-        &mut self, device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32, layers: u32, rgba: &[u8],
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+        layers: u32,
+        rgba: &[u8],
     ) {
-        let Some(view) = blade_atlas::create_tufts(device, queue, width, height, layers, rgba) else {
+        let Some(view) = blade_atlas::create_tufts(device, queue, width, height, layers, rgba)
+        else {
             return;
         };
         self.tuft_view = view;
@@ -1151,22 +1180,37 @@ impl Grass {
         let spacing = params.spacing.clamp(0.02, 0.75);
         let near_radius = params.near_radius.clamp(8.0, 200.0);
         // Must mirror cs_place's `near_spacing`.
-        let near_spacing = spacing * if params.clump_renderer != 0.0 { 3.20 } else { 1.72 };
+        let near_spacing = spacing
+            * if params.clump_renderer != 0.0 {
+                3.20
+            } else {
+                1.72
+            };
         // The grid has to span the whole disc, so its edge is the diameter. Round
         // up to the workgroup size and cap; at the cap the field is bounded by a
         // square smaller than the radius, which is visible but never a silent
         // density change.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
-        let near_grid_dim = want.div_ceil(8).saturating_mul(8).clamp(NEAR_GRID_MIN, NEAR_GRID_MAX);
+        let near_grid_dim = want
+            .div_ceil(8)
+            .saturating_mul(8)
+            .clamp(NEAR_GRID_MIN, NEAR_GRID_MAX);
         // Mirrors mid_ring_end() in grass.wgsl. Both must agree: the shader
         // decides which candidates to accept, this decides how many exist.
         let mid_radius = params.mid_radius.clamp(8.0, MID_RING_MAX);
         let mid_natural = (near_radius + 10.0).max((near_radius * 2.5).min(MID_RING_MAX));
-        let mid_end = if mid_radius > near_radius { mid_radius } else { mid_natural }
-            .clamp(near_radius + 10.0, MID_RING_MAX);
+        let mid_end = if mid_radius > near_radius {
+            mid_radius
+        } else {
+            mid_natural
+        }
+        .clamp(near_radius + 10.0, MID_RING_MAX);
         // MID_PLACEMENT_SPACING in grass.wgsl.
         let want_mid = (2.0 * mid_end / 0.82).ceil().max(0.0) as u32;
-        let mid_grid_dim = want_mid.div_ceil(8).saturating_mul(8).clamp(MID_GRID_MIN, MID_GRID_MAX);
+        let mid_grid_dim = want_mid
+            .div_ceil(8)
+            .saturating_mul(8)
+            .clamp(MID_GRID_MIN, MID_GRID_MAX);
         let params = GrassParams {
             density: params.density.clamp(0.0, 1.0),
             spacing,
@@ -1213,7 +1257,11 @@ impl Grass {
             alpha_cutoff: params.alpha_cutoff.clamp(0.05, 0.95),
             card_widen: params.card_widen.clamp(1.0, 4.0),
             blade_arch: params.blade_arch.clamp(0.0, 3.0),
-            clump_renderer: if params.clump_renderer != 0.0 { 1.0 } else { 0.0 },
+            clump_renderer: if params.clump_renderer != 0.0 {
+                1.0
+            } else {
+                0.0
+            },
             photo_tuft_brightness: params.photo_tuft_brightness.clamp(0.5, 2.5),
             photo_tuft_mix: params.photo_tuft_mix.clamp(0.0, 1.0),
             photo_tuft_patch_size: params.photo_tuft_patch_size.clamp(4.0, 80.0),
@@ -1389,8 +1437,16 @@ impl Grass {
         }
         // Vertex counts mirror reset_indirect's per-LOD vertex-per-instance values.
         let photo_near = self.tuft_enabled && self.last_params.clump_renderer != 0.0;
-        self.stats.near_vertices = self.stats.near_instances * if photo_near { 12 } else if self.last_params.clump_renderer != 0.0 { 360 } else { 180 };
-        self.stats.mid_vertices = self.stats.mid_instances * if self.tuft_enabled { 12 } else { 108 };
+        self.stats.near_vertices = self.stats.near_instances
+            * if photo_near {
+                12
+            } else if self.last_params.clump_renderer != 0.0 {
+                360
+            } else {
+                180
+            };
+        self.stats.mid_vertices =
+            self.stats.mid_instances * if self.tuft_enabled { 12 } else { 108 };
         self.stats.far_vertices = self.stats.far_instances * 6;
     }
 
@@ -1420,8 +1476,18 @@ impl Grass {
         queue.write_buffer(&self.mid_placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
         // GRS-030 doubles blades per clump and spaces centres farther apart.
-        let near_verts: u32 = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 { 12 } else if self.last_params.clump_renderer != 0.0 { 360 } else { 180 };
-        queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[near_verts, 0, 0, 0]));
+        let near_verts: u32 = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 {
+            12
+        } else if self.last_params.clump_renderer != 0.0 {
+            360
+        } else {
+            180
+        };
+        queue.write_buffer(
+            &self.indirect,
+            0,
+            bytemuck::cast_slice(&[near_verts, 0, 0, 0]),
+        );
         // Mid LOD is either six opaque three-segment ribbons per clump, or two
         // crossed, alpha-tested photo cards (2 * 6 vertices) when a compatible
         // tuft has been explicitly enabled.
@@ -1499,7 +1565,10 @@ impl Grass {
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.mid_data_bind, &[]);
         pass.draw_indirect(&self.mid_indirect, 0);
-        let near_pipeline = match (kind, self.tuft_enabled && self.last_params.clump_renderer != 0.0) {
+        let near_pipeline = match (
+            kind,
+            self.tuft_enabled && self.last_params.clump_renderer != 0.0,
+        ) {
             (GrassPass::Color, true) => &self.near_tuft_color_pipeline,
             (GrassPass::ColorNoWrite, true) => &self.near_tuft_color_no_write_pipeline,
             (GrassPass::Prepass, true) => &self.near_tuft_prepass_pipeline,

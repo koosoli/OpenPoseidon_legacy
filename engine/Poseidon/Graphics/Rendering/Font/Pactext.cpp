@@ -1347,14 +1347,29 @@ void PacLevelMem::SetDestFormat(PacFormat dFormat, int align)
         case PacARGB8888:
             _pitch = ((_w * 4 + align - 1) & ~(align - 1));
             break;
+        // Block-compressed pitch is bytes per row of 4x4 blocks: DXT1 stores 8
+        // bytes per block (half a byte per pixel), every other DXT stores 16
+        // (one byte per pixel).
         case PacDXT1:
-        case PacDXT2:
             _pitch = _w / 2;
             break;
+        // DXT3 and DXT4 set their pitch and then fell through into the failure
+        // case below -- they could never load. DXT5 was not handled at all, so
+        // it landed on `default` and failed too. Measured on the local Arma 3
+        // rock set, 36 of 114 textures are DXT5, so a third of the model
+        // textures in a single addon were unloadable.
+        //
+        // DXT2 moves here from the DXT1 group for the same reason: it is DXT3
+        // with premultiplied alpha and stores 16 bytes per block, so half the
+        // pitch was wrong. No local corpus contains a DXT2 texture, so nothing
+        // can have depended on the old value -- at half pitch it would have
+        // decoded to garbage, not to something correct.
+        case PacDXT2:
         case PacDXT3:
         case PacDXT4:
-            _pitch = _w;
         case PacDXT5:
+            _pitch = _w;
+            break;
         default:
             Fail("Texture format");
             break;
