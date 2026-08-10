@@ -17,6 +17,9 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Memtype.h>
 #include <Poseidon/Foundation/platform.hpp>
+#include <string>
+#include <unordered_set>
+#include <Poseidon/Foundation/Algorithms/Lzo1x.hpp>
 
 namespace Poseidon
 {
@@ -1116,14 +1119,59 @@ int PacLevelMem::LoadPaaDXT(QIStream& in, void* mem, const PacPalette* pal) cons
         return 1;
     } // mip-map list terminator
 
+    // Bit 15 of the stored width marks an LZO-compressed level; the real width is
+    // the low bits. Reading it raw produced widths like 34816 (0x8000 | 2048) and
+    // 33280 (0x8000 | 512), which the range check below then rejected -- so every
+    // compressed mip failed to load and its texture came out white. Arma 3 uses
+    // this heavily; the modern PAA decoder already handles it (AST-013), and this
+    // legacy path did not.
+    const bool lzoCompressed = (w & 0x8000) != 0;
+    w &= 0x7fff;
+
     // get compressed data size
     long dSize = fgeti24(in);
-    (void)dSize;
 
     if (w > 4096 || w < 2)
     {
+        // Say which size: "out of range" alone cannot distinguish a texture above
+        // the reader's ceiling from a mip tail below its floor.
+        char detail[64];
+        snprintf(detail, sizeof(detail), "%ldx%ld", w, h);
+        static std::unordered_set<std::string> loggedSizes;
+        if (loggedSizes.insert(detail).second)
+            LOG_WARN(Graphics, "Pactext: level size {} out of range (accepts 2..4096)", detail);
         Fail("Size out of range");
         return -1;
+    }
+
+    if (lzoCompressed)
+    {
+        // Block-compressed payload size from the level's own dimensions: DXT1
+        // stores 8 bytes per 4x4 block, the rest 16. This is the decompressed
+        // size the level must produce; anything else means the payload was not
+        // what its header claimed.
+        const long blockBytes = ENUM_CAST(PacFormat, _sFormat) == ENUM_CAST(PacFormat, PacDXT1) ? 8 : 16;
+        const long blocksW = (w + 3) / 4;
+        const long blocksH = (h + 3) / 4;
+        const size_t expected = static_cast<size_t>(blocksW) * blocksH * blockBytes;
+
+        AUTO_STATIC_ARRAY(char, packed, 256 * 256);
+        packed.Resize(dSize);
+        in.read(packed.Data(), dSize);
+        if (in.fail())
+        {
+            Fail("Compressed Read error");
+            return -1;
+        }
+        const size_t got =
+            Foundation::Lzo1x::Decompress(reinterpret_cast<const uint8_t*>(packed.Data()), static_cast<size_t>(dSize),
+                                          static_cast<uint8_t*>(mem), expected);
+        if (got != expected)
+        {
+            Fail("LZO level did not decompress to its declared size");
+            return -1;
+        }
+        return 0;
     }
 
     PoseidonAssert(_w == w);

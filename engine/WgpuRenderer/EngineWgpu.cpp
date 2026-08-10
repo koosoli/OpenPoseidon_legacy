@@ -80,11 +80,14 @@ WgrSlice<WgrMeshVertex> AsMeshVerts(const std::vector<SVertex>& v)
 
 bool ContainsNoCase(const char* text, const std::string& part)
 {
-    if (!text || part.empty()) return false;
+    if (!text || part.empty())
+        return false;
     std::string haystack(text);
     std::string needle(part);
-    std::transform(haystack.begin(), haystack.end(), haystack.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
-    std::transform(needle.begin(), needle.end(), needle.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+    std::transform(haystack.begin(), haystack.end(), haystack.begin(),
+                   [](unsigned char ch) { return char(std::tolower(ch)); });
+    std::transform(needle.begin(), needle.end(), needle.begin(),
+                   [](unsigned char ch) { return char(std::tolower(ch)); });
     return haystack.find(needle) != std::string::npos;
 }
 
@@ -974,8 +977,8 @@ float AlphaRefFromDesc(const render::RenderPassDescriptor& desc)
 bool MaterialIsFullyOpaque(const TLMaterial& material)
 {
     constexpr float kOpaque = 1.0f - 1.0f / 255.0f;
-    return material.diffuse.A() >= kOpaque && material.ambient.A() >= kOpaque &&
-           material.emmisive.A() >= kOpaque && material.forcedDiffuse.A() >= kOpaque;
+    return material.diffuse.A() >= kOpaque && material.ambient.A() >= kOpaque && material.emmisive.A() >= kOpaque &&
+           material.forcedDiffuse.A() >= kOpaque;
 }
 
 // Pack an engine PackedColor into the FFI's 0xAARRGGBB WgrRgba8.
@@ -1251,10 +1254,9 @@ void EngineWgpu::NextFrame()
                          "TreeAdv night frame trace: night={:.3f} skyLit={} legacySun=[{:.4f},{:.4f},{:.4f}] "
                          "legacyAmbient=[{:.4f},{:.4f},{:.4f}] skySun=[{:.4f},{:.4f},{:.4f}] "
                          "skyAmbient=[{:.4f},{:.4f},{:.4f}] skyAmbientScale={:.3f} foliageAmbientBoost={:.3f}",
-                         GScene->MainLight()->NightEffect(), skyLit > 0.5f ? 1 : 0,
-                         sunDiffuse.R(), sunDiffuse.G(), sunDiffuse.B(), sunAmbient.R(), sunAmbient.G(), sunAmbient.B(),
-                         sunLin[0], sunLin[1], sunLin[2], ambLin[0], ambLin[1], ambLin[2], _sky.skyAmbient,
-                         _foliage.ambientBoost);
+                         GScene->MainLight()->NightEffect(), skyLit > 0.5f ? 1 : 0, sunDiffuse.R(), sunDiffuse.G(),
+                         sunDiffuse.B(), sunAmbient.R(), sunAmbient.G(), sunAmbient.B(), sunLin[0], sunLin[1],
+                         sunLin[2], ambLin[0], ambLin[1], ambLin[2], _sky.skyAmbient, _foliage.ambientBoost);
             }
         }
 
@@ -1806,8 +1808,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                                      (debugMaterialPath ? debugMaterialPath : "<none>");
         static std::unordered_set<std::string> loggedSectionTraces;
         if (loggedSectionTraces.insert(traceKey).second)
-            LOG_INFO(Graphics, "Wgpu material trace: shape={} section={} RVMAT={}",
-                     static_cast<const void*>(&sMesh), beg, debugMaterialPath ? debugMaterialPath : "<none>");
+            LOG_INFO(Graphics, "Wgpu material trace: shape={} section={} RVMAT={}", static_cast<const void*>(&sMesh),
+                     beg, debugMaterialPath ? debugMaterialPath : "<none>");
     }
     const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
     const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
@@ -1818,9 +1820,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool productionMaterialTarget = _materialDebugRvmatMatch.empty() && debugSection.surfMat;
     const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
-    d._pad = materialDebugTarget ? static_cast<uint32_t>(_materialDebug.view) |
-                                      (_materialDebug.invertNormalY ? 0x100u : 0u)
-                                 : 0;
+    d._pad = materialDebugTarget
+                 ? static_cast<uint32_t>(_materialDebug.view) | (_materialDebug.invertNormalY ? 0x100u : 0u)
+                 : 0;
     _materialDebugInfo = {};
     if (unassignedMaterialTarget)
     {
@@ -1842,9 +1844,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     LOG_INFO(Graphics, "Wgpu material debug: unassigned Stage0 fixture resolved path={}", basePath);
             }
         }
-        const bool enableFixtureNormal = _materialDebug.view == MaterialDebugSettings::View::NormalMap ||
-                                         (_materialDebug.view == MaterialDebugSettings::View::FullMaterial &&
-                                          !_materialDebug.disableNormalMap);
+        const bool enableFixtureNormal =
+            _materialDebug.view == MaterialDebugSettings::View::NormalMap ||
+            (_materialDebug.view == MaterialDebugSettings::View::FullMaterial && !_materialDebug.disableNormalMap);
         if (enableFixtureNormal && normalPath && *normalPath)
         {
             Ref<Texture> normalTexture = _wbank->Load(normalPath);
@@ -1882,8 +1884,10 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     try
                     {
                         const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
-                        cached = _materialBindings.emplace(
-                            materialPath, Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source))).first;
+                        cached = _materialBindings
+                                     .emplace(materialPath, Asset::Material::TranslateSemantics(
+                                                                source, Asset::Material::TranslateMaterial(source)))
+                                     .first;
                     }
                     catch (...)
                     {
@@ -1908,13 +1912,15 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         LOG_INFO(Graphics,
                                  "TreeAdv material trace: path={} family={} ambient=[{:.3f},{:.3f},{:.3f},{:.3f}] "
                                  "diffuse=[{:.3f},{:.3f},{:.3f},{:.3f}] forced=[{:.3f},{:.3f},{:.3f},{:.3f}] "
-                                 "emissive=[{:.3f},{:.3f},{:.3f},{:.3f}] specular=[{:.3f},{:.3f},{:.3f},{:.3f}] power={:.3f}",
-                                 materialPath, translated.shaderFamily,
-                                 translated.ambient[0], translated.ambient[1], translated.ambient[2], translated.ambient[3],
-                                 translated.diffuse[0], translated.diffuse[1], translated.diffuse[2], translated.diffuse[3],
-                                 translated.forcedDiffuse[0], translated.forcedDiffuse[1], translated.forcedDiffuse[2], translated.forcedDiffuse[3],
-                                 translated.emissive[0], translated.emissive[1], translated.emissive[2], translated.emissive[3],
-                                 translated.specular[0], translated.specular[1], translated.specular[2], translated.specular[3],
+                                 "emissive=[{:.3f},{:.3f},{:.3f},{:.3f}] specular=[{:.3f},{:.3f},{:.3f},{:.3f}] "
+                                 "power={:.3f}",
+                                 materialPath, translated.shaderFamily, translated.ambient[0], translated.ambient[1],
+                                 translated.ambient[2], translated.ambient[3], translated.diffuse[0],
+                                 translated.diffuse[1], translated.diffuse[2], translated.diffuse[3],
+                                 translated.forcedDiffuse[0], translated.forcedDiffuse[1], translated.forcedDiffuse[2],
+                                 translated.forcedDiffuse[3], translated.emissive[0], translated.emissive[1],
+                                 translated.emissive[2], translated.emissive[3], translated.specular[0],
+                                 translated.specular[1], translated.specular[2], translated.specular[3],
                                  translated.specularPower);
                     }
                 }
@@ -1966,8 +1972,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     _materialDebugInfo.normalTexturePath = normal->texture.path.canonical().c_str();
                     _materialDebugInfo.normalUvSource = normal->uvSource.c_str();
                     const bool inspectNormal = _materialDebug.view == MaterialDebugSettings::View::NormalMap;
-                    const bool enableNormal = inspectNormal ||
-                        (_materialDebug.view == MaterialDebugSettings::View::FullMaterial && !_materialDebug.disableNormalMap);
+                    const bool enableNormal =
+                        inspectNormal || (_materialDebug.view == MaterialDebugSettings::View::FullMaterial &&
+                                          !_materialDebug.disableNormalMap);
                     if (normal->texture.isProcedural)
                     {
                         _materialDebugInfo.normalStatus = "procedural Stage1 is not yet sampled";
@@ -1982,13 +1989,16 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         auto* wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
                         const uint64_t normalHandle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
                         _materialDebugInfo.normalResolved = normalHandle != 0;
-                        _materialDebugInfo.normalStatus = normalHandle ? "resolved and bound (NOHQ: X=A, Y=G, Z=reconstructed)"
-                                                                       : "texture failed to resolve/upload";
+                        _materialDebugInfo.normalStatus = normalHandle
+                                                              ? "resolved and bound (NOHQ: X=A, Y=G, Z=reconstructed)"
+                                                              : "texture failed to resolve/upload";
                         if (normalHandle)
                         {
                             static std::unordered_set<std::string> loggedNormalBindings;
                             if (loggedNormalBindings.insert(materialPath).second)
-                                LOG_INFO(Graphics, "Wgpu material debug: Stage1 NormalMap resolved path={} uv={} decode=X=A,Y=G,Z=reconstructed",
+                                LOG_INFO(Graphics,
+                                         "Wgpu material debug: Stage1 NormalMap resolved path={} uv={} "
+                                         "decode=X=A,Y=G,Z=reconstructed",
                                          normal->texture.path.canonical(), normal->uvSource);
                         }
                         if (enableNormal)
@@ -2512,6 +2522,73 @@ static uint32_t BuildForestCrownComponents(const std::vector<SVertex>& verts, co
 
 } // namespace
 
+// The albedo a section's RVMAT names, or 0 when it names none.
+//
+// An Arma 3 structure commonly carries a placeholder face texture (`*_mlod_co`)
+// with the real albedo living in the material, so a draw that uses only the face
+// texture renders white. DrawSectionTL has always resolved this inline, but the
+// GPU-driven retained set is built by ClassifyGpuSection, which never did -- and
+// GPU-driven is on by default, so on Stratis essentially every object went down
+// the path without it. Measured: 6,066 sections reach the adapter with a material
+// attached, while only 7 sections a frame pass through DrawSectionTL.
+uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return 0;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 0;
+
+    auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+    {
+        try
+        {
+            const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
+            cached =
+                _materialBindings
+                    .emplace(materialPath,
+                             Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source)))
+                    .first;
+        }
+        catch (...)
+        {
+            // Cache the miss: an unavailable material must not reopen and throw
+            // once per section, every rebuild.
+            _materialBindings.emplace(materialPath, Asset::Material::TranslatedMaterial{});
+            return 0;
+        }
+    }
+
+    // Say why, once per material. There are four distinct ways to come back with
+    // nothing and they need different fixes: an unsupported shader family leaves
+    // no BaseColour slot at all, a procedural stage has no file to load, and a
+    // path that loads but uploads 0 is a texture-format problem.
+    const auto reject = [&](const char* why, const std::string& detail) -> uint64_t
+    {
+        static std::unordered_set<std::string> logged;
+        if (logged.insert(materialPath).second)
+            LOG_WARN(Graphics, "Wgpu material: no albedo for {} ({}{}{}) family={}", materialPath, why,
+                     detail.empty() ? "" : " ", detail, cached->second.shaderFamily);
+        return 0;
+    };
+
+    const auto* base = cached->second.Find(Asset::Material::MaterialSlot::BaseColour);
+    if (!base)
+        return reject("no BaseColour slot", "");
+    if (base->texture.isProcedural)
+        return reject("procedural", base->texture.path.canonical());
+    if (base->texture.path.empty())
+        return reject("empty path", "");
+
+    Ref<Texture> baseTexture = _wbank->Load(base->texture.path.canonical().c_str());
+    auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
+    const uint64_t handle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0;
+    if (!handle)
+        return reject(wgpuBaseTexture ? "uploaded 0" : "load failed", base->texture.path.canonical());
+    return handle;
+}
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
@@ -2676,6 +2753,14 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             {
                 continue;
             }
+            // The RVMAT's albedo wins over the section's face texture, which on
+            // Arma 3 structures is usually a `*_mlod_co` placeholder. Applied here
+            // rather than inside ClassifyGpuSection because that is a free
+            // function with no access to the material cache or texture bank.
+            if (const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i)))
+            {
+                mat.texture_id = baseColour;
+            }
             sections.push_back(sec);
             materials.push_back(mat);
             count++;
@@ -2818,7 +2903,8 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
         for (int level = 0; level < shape->NLevels(); ++level)
         {
             const Shape* lod = shape->Level(level);
-            if (!lod) continue;
+            if (!lod)
+                continue;
             for (int section = 0; section < lod->NSections(); ++section)
             {
                 const ShapeSection& sec = lod->GetSection(section);

@@ -88,7 +88,8 @@ class EngineWgpu : public EngineDummy
     void FlushPendingScreenshot() override;
 
     void Draw2D(const Draw2DPars& pars, const Rect2DAbs& rect, const Rect2DAbs& clip) override;
-    void DrawPoly(const MipInfo& mip, const Vertex2DAbs* vertices, int n, const Rect2DAbs& clip, int specFlags) override;
+    void DrawPoly(const MipInfo& mip, const Vertex2DAbs* vertices, int n, const Rect2DAbs& clip,
+                  int specFlags) override;
     void DrawPoly(const MipInfo& mip, const Vertex2DPixel* vertices, int n, const Rect2DPixel& clip,
                   int specFlags) override;
     void DrawLine(const Line2DAbs& line, PackedColor c0, PackedColor c1, const Rect2DAbs& clip) override;
@@ -98,8 +99,7 @@ class EngineWgpu : public EngineDummy
     bool UsesGpuSkinning() const override { return true; }
     VertexBuffer* CreateVertexBuffer(const Shape& src, VBType type) override;
     void UpdateFrameCamera() override;
-    void PrepareMeshTL(const LightList& lights, const Matrix4& modelToWorld,
-                       const render::LegacySpec& spec) override;
+    void PrepareMeshTL(const LightList& lights, const Matrix4& modelToWorld, const render::LegacySpec& spec) override;
     void BeginMeshTL(const Shape& sMesh, int spec, bool dynamic) override;
     void EndMeshTL(const Shape& sMesh) override;
     void DrawSectionTL(const Shape& sMesh, int beg, int end) override;
@@ -166,17 +166,17 @@ class EngineWgpu : public EngineDummy
     // signal instead of drawing over every opaque terrain cell.
     void SetGrassParams(float a1, float a2, float a3 = 0, float a4 = 0) override;
     void AddGrassImpact(Vector3Par position, float radius) override;
-      bool CanGrass() const override { return _renderer != nullptr; }
-      GrassSettings GetGrassSettings() const override { return _grass; }
-      void SetGrassSettings(const GrassSettings& settings) override;
-      bool HasGrassPhotoClumps() const override;
-      int GetGrassPhotoFamilyCount() const override;
-      const char* GetGrassPhotoFamilyName(int index) const override;
-      int GetGrassSurfaceCount() const override;
-      const char* GetGrassLoadedMapName() const override;
-      const char* GetGrassSurfaceName(int index) const override;
-      bool IsGrassSurfaceEnabled(int index) const override;
-      void SetGrassSurfaceEnabled(int index, bool enabled) override;
+    bool CanGrass() const override { return _renderer != nullptr; }
+    GrassSettings GetGrassSettings() const override { return _grass; }
+    void SetGrassSettings(const GrassSettings& settings) override;
+    bool HasGrassPhotoClumps() const override;
+    int GetGrassPhotoFamilyCount() const override;
+    const char* GetGrassPhotoFamilyName(int index) const override;
+    int GetGrassSurfaceCount() const override;
+    const char* GetGrassLoadedMapName() const override;
+    const char* GetGrassSurfaceName(int index) const override;
+    bool IsGrassSurfaceEnabled(int index) const override;
+    void SetGrassSurfaceEnabled(int index, bool enabled) override;
     // Live look, read by WaterWgpu::DrawWater when building the per-frame water UBO.
     const WaterSettings& WaterLook() const { return _waterLook; }
 
@@ -432,8 +432,8 @@ class EngineWgpu : public EngineDummy
     std::vector<CameraEntry> _cameras;
     uint32_t _currentCamera = 0;
     bool _haveCamera = false;
-    GfxMatrix _world{};   // camera-relative world for the current mesh
-    Matrix4 _worldM{};    // same, as an engine Matrix4 (for pre-multiplying into skin palettes)
+    GfxMatrix _world{}; // camera-relative world for the current mesh
+    Matrix4 _worldM{};  // same, as an engine Matrix4 (for pre-multiplying into skin palettes)
     // Object-level spec from BeginMeshTL (IsShadow / OnSurface / z-bias / fog);
     // combined with each section's material spec in DrawSectionTL.
     int _meshSpec = 0;
@@ -476,6 +476,10 @@ class EngineWgpu : public EngineDummy
     // by virtual path so production draws do not reopen and parse an RVMAT for
     // every section on every frame.
     std::unordered_map<std::string, Asset::Material::TranslatedMaterial> _materialBindings;
+    // A section's albedo when its RVMAT supplies one, or 0. The per-draw path has
+    // always done this inline; the GPU-driven retained set needs the same answer,
+    // so the lookup lives here rather than being duplicated.
+    uint64_t ResolveMaterialBaseColour(const ShapeSection& section);
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
     GrassSettings _grass;
