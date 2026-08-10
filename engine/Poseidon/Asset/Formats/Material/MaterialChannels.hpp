@@ -75,6 +75,11 @@ inline SlotChannelMap ChannelsForSlot(MaterialSlot slot)
     switch (slot)
     {
         case MaterialSlot::NormalMap:
+            // `_nopx` (the NormalMapDiffuse family's normal) shares this packing: G+A span
+            // the full range and satisfy x^2+y^2<=1 in 31 of 31 sampled textures, with B
+            // near-constant high. It differs in R, which is flat 0 on NOHQ but varies here
+            // -- the "PX" payload. So R is unused in the sense that matters (nothing below
+            // samples it) but is NOT dead data on every texture that lands in this slot.
             map.normalX              = TextureChannel::A;
             map.normalY              = TextureChannel::G;
             map.normalZReconstructed = true;

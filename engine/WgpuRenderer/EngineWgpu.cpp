@@ -2600,12 +2600,32 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
     // nothing and they need different fixes: an unsupported shader family leaves
     // no BaseColour slot at all, a procedural stage has no file to load, and a
     // path that loads but uploads 0 is a texture-format problem.
+    //
+    // The fallback is reported with it, because "no albedo" is only a DEFECT when
+    // the face texture cannot stand in. Most Arma 3 families never carry a Stage0:
+    // Super declares one in 43 of 2,853, and TreeAdv in none of 369 -- for those
+    // the face texture IS the colour and this path is the normal outcome, so
+    // counting them as failures overstates the gap by an order of magnitude.
+    //
+    // What decides it is whether the fallback UPLOADS, not what it is called. An
+    // `*_mlod_co` name reads like an author placeholder, and the ones Arma 3 ships
+    // are megabyte-sized baked textures that render perfectly well -- so the name
+    // is reported as a separate note and never as the verdict.
     const auto reject = [&](const char* why, const std::string& detail) -> uint64_t
     {
         static std::unordered_set<std::string> logged;
-        if (logged.insert(materialPath).second)
-            LOG_WARN(Graphics, "Wgpu material: no albedo for {} ({}{}{}) family={}", materialPath, why,
-                     detail.empty() ? "" : " ", detail, cached->second.shaderFamily);
+        if (!logged.insert(materialPath).second)
+            return 0;
+        auto*       face     = static_cast<TextureWgpu*>(section.properties.GetTexture());
+        const char* faceName = face && face->GetName().Data() ? face->GetName().Data() : "";
+        const char* fallback = "none";
+        if (*faceName)
+        {
+            fallback = face->EnsureUploaded() != 0 ? "face-ok" : "face-failed";
+        }
+        LOG_WARN(Graphics, "Wgpu material: no albedo for {} ({}{}{}) family={} fallback={} mlodName={} face={}",
+                 materialPath, why, detail.empty() ? "" : " ", detail, cached->second.shaderFamily, fallback,
+                 ContainsNoCase(faceName, "_mlod_") ? 1 : 0, faceName);
         return 0;
     };
 

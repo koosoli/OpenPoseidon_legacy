@@ -131,7 +131,11 @@ inline std::string SuffixRole(const std::string& raw)
         ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
 
     if (suffix == "co" || suffix == "ca") return "BaseColour";
-    if (suffix == "nohq" || suffix == "no" || suffix == "novhq") return "NormalMap";
+    // `_nopx` is DXT5nm exactly as `_nohq` is, MEASURED over the 31 `_nopx` textures in
+    // map_data: G and A span the full range and satisfy x^2+y^2<=1 in 31 of 31, and B sits
+    // near-constant high (mean 226-254) -- the NOHQ signature. It differs in R, which NOHQ
+    // holds flat at 0 and these vary over a narrow band: the "PX" payload, unsampled here.
+    if (suffix == "nohq" || suffix == "no" || suffix == "novhq" || suffix == "nopx") return "NormalMap";
     if (suffix == "dt") return "Detail";
     if (suffix == "mc" || suffix == "mco") return "Macro";
     if (suffix == "mca") return "MacroAmbient";
@@ -271,9 +275,85 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
             MaterialSlot::SpecularDetail, // 5
             MaterialSlot::Fresnel,        // 6
         }};
-    static const ShaderSchema* kAll[] = {&kNormal,  &kNormalMap,    &kSuper,
-                                         &kTreeAdv, &kTreeAdvTrunk, &kTreeAdvTrans,
-                                         &kSkin,    &kMulti};
+    // SuperAToC is Super with alpha-to-coverage, and the corpus says so stage for stage.
+    // MEASURED over all 8 (7 spelled `SuperAToC`, 1 `SuperAtoc`; the lookup below is
+    // case-insensitive so they are one family here):
+    //
+    //   Stage0 7/7  colour (6 `_ca`, 1 `_co`)   <-- unlike Super, essentially always present
+    //   Stage1 7/7  NOHQ    Stage2 7/7 DT/DTSMDI   Stage3 7/7 MC
+    //   Stage4 7/7  AS      Stage5 7/7 SMDI        Stage6 7/7 fresnelGlass
+    //   Stage7 7/7  a3\data_f\env_land_co.paa
+    //
+    // Stage0 is the point of adding it. These are the alpha-cutout surfaces -- wire fences,
+    // barbed wire, metal doors -- whose colour AND cutout alpha live in the material rather
+    // than on the face, so without a schema they draw as untextured white sheets.
+    static const ShaderSchema kSuperAToC{
+        "SuperAToC",
+        {
+            MaterialSlot::BaseColour,     // 0
+            MaterialSlot::NormalMap,      // 1
+            MaterialSlot::Detail,         // 2
+            MaterialSlot::Macro,          // 3
+            MaterialSlot::AmbientShadow,  // 4
+            MaterialSlot::SpecularDetail, // 5
+            MaterialSlot::Fresnel,        // 6
+            MaterialSlot::Environment,    // 7
+        }};
+    // The `NormalMap*` cluster. These families NAME their own stage list: everything after
+    // "NormalMap" is the stages that follow Stage1, in order. MEASURED across the whole
+    // Arma 3 corpus, and the four independent families corroborate each other:
+    //
+    //   NormalMapSpecularDIMap        n=111  S1 normal 111/111, S2 SMDI 108/111
+    //                                        (S0 `_co` in 13, absent in 98)
+    //   NormalMapDetailSpecularMap    n=42   S1 normal 42/42, S2 DT 42/42, S3 SM/SMDI 42/42
+    //   NormalMapSpecularMap          n=32   S1 normal 32/32, S2 SM/SMDI 32/32
+    //   NormalMapDiffuse              n=27   S1 `_nopx` 26/27, S2 `_co` 26/27
+    //   NormalMapDetailSpecularDIMap  n=12   S1 normal 12/12, S2 DT 12/12, S3 SMDI 12/12
+    //   NormalMapMacroASSpecularDIMap n=4    S1 normal 4/4, S2 MC 4/4, S3 AS 4/4, S4 SMDI 4/4
+    //
+    // Two are worth calling out. NormalMapDiffuse is the only one of the cluster that carries
+    // its albedo in the material, and it puts it at STAGE 2 -- reading it as any of its
+    // siblings would bind a ground colour into a specular slot. And its Stage1 `_nopx` decodes
+    // exactly like `_nohq` (see SuffixRole), so it earns the ordinary NormalMap slot.
+    //
+    // `NormalMapDetailMacroASSpecularDIMap` is deliberately absent: 2 materials do not
+    // describe a family, the same bar that left Super's and Skin's Stage7 tails unmapped.
+    static const ShaderSchema kNormalMapSpecularDIMap{
+        "NormalMapSpecularDIMap",
+        {MaterialSlot::BaseColour, MaterialSlot::NormalMap, MaterialSlot::SpecularDetail}};
+    // Stage0 stays unmapped in the four below: not one material in any of them declares one,
+    // so a BaseColour there would be a slot invented rather than measured.
+    static const ShaderSchema kNormalMapSpecularMap{
+        "NormalMapSpecularMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::SpecularDetail}};
+    static const ShaderSchema kNormalMapDetailSpecularMap{
+        "NormalMapDetailSpecularMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::Detail, MaterialSlot::SpecularDetail}};
+    static const ShaderSchema kNormalMapDetailSpecularDIMap{
+        "NormalMapDetailSpecularDIMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::Detail, MaterialSlot::SpecularDetail}};
+    static const ShaderSchema kNormalMapMacroASSpecularDIMap{
+        "NormalMapMacroASSpecularDIMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::Macro, MaterialSlot::AmbientShadow,
+         MaterialSlot::SpecularDetail}};
+    static const ShaderSchema kNormalMapDiffuse{
+        "NormalMapDiffuse",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::BaseColour}};
+    static const ShaderSchema* kAll[] = {&kNormal,
+                                         &kNormalMap,
+                                         &kSuper,
+                                         &kSuperAToC,
+                                         &kTreeAdv,
+                                         &kTreeAdvTrunk,
+                                         &kTreeAdvTrans,
+                                         &kSkin,
+                                         &kMulti,
+                                         &kNormalMapSpecularDIMap,
+                                         &kNormalMapSpecularMap,
+                                         &kNormalMapDetailSpecularMap,
+                                         &kNormalMapDetailSpecularDIMap,
+                                         &kNormalMapMacroASSpecularDIMap,
+                                         &kNormalMapDiffuse};
 
     for (const ShaderSchema* schema : kAll)
     {

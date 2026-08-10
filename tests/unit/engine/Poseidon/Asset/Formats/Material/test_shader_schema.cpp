@@ -409,3 +409,123 @@ class Stage5 { texture="a3\structures_f\civ\constructions\data\wip_cinderblocks_
     REQUIRE_FALSE(ir.Slot(MaterialSlot::Detail).present);
     REQUIRE_FALSE(ir.Slot(MaterialSlot::SpecularDetail).present);
 }
+
+TEST_CASE("SuperAToC schema: Super's table, and the cutout colour it carries at Stage0",
+          "[asset][material][mat-030][superatoc]")
+{
+    // Shaped like a3\structures_f\walls\data\wired_fence_wire.rvmat. Measured over all 8:
+    // Stage0 colour 7/7 (6 `_ca`), then Super's table stage for stage. Stage0 is why it
+    // matters -- these are wire fences whose colour and cutout alpha are in the material.
+    auto ir = translate(R"CFG(
+PixelShaderID="SuperAToC";
+class Stage0 { texture="a3\structures_f\walls\data\metal_fence_wire_ca.paa"; uvSource="tex"; };
+class Stage1 { texture="#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)"; uvSource="tex"; };
+class Stage2 { texture="#(argb,8,8,3)color(1,1,1,1,DTSMDI)"; uvSource="tex"; };
+class Stage3 { texture="#(argb,8,8,3)color(0,0,0,0,MC)"; uvSource="tex1"; };
+class Stage4 { texture="#(argb,8,8,3)color(1,1,1,1,AS)"; uvSource="tex1"; };
+class Stage5 { texture="#(argb,8,8,3)color(0,0,1,1,SMDI)"; uvSource="tex"; };
+class Stage6 { texture="#(ai,64,64,1)fresnelGlass()"; uvSource="tex"; };
+class Stage7 { texture="a3\data_f\env_land_co.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).present);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 0);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).suffixRole == "BaseColour");
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).sourceStage == 5);
+    REQUIRE(ir.Slot(MaterialSlot::Environment).sourceStage == 7);
+    REQUIRE(ir.unmappedStages.empty());
+}
+
+TEST_CASE("SuperAToC is matched however the corpus spells it", "[asset][material][mat-030][superatoc]")
+{
+    // 7 materials write `SuperAToC` and 1 writes `SuperAtoc`. Family lookup is
+    // case-insensitive, so they are one family rather than one schema and one hole.
+    REQUIRE(translate(R"CFG(
+PixelShaderID="SuperAtoc";
+class Stage1 { texture="a3\structures_f\walls\data\new_wirefence_wire_nohq.paa"; uvSource="tex"; };
+)CFG")
+                .schemaKnown);
+}
+
+TEST_CASE("NormalMapSpecularDIMap schema: normal and SMDI, with an optional Stage0 colour",
+          "[asset][material][mat-030][normalmap-cluster]")
+{
+    // a3\structures_f\walls\data\crash_barrier.rvmat, one of 111. Stage1 normal 111/111,
+    // Stage2 SMDI 108/111, Stage0 `_co` in 13.
+    auto ir = translate(R"CFG(
+PixelShaderID="NormalMapSpecularDIMap";
+class Stage0 { texture="a3\structures_f_enoch\industrial\mines\data\ind_coltan_hopper_co.paa"; uvSource="tex"; };
+class Stage1 { texture="a3\structures_f\walls\data\crash_barrier_nohq.paa"; uvSource="tex"; };
+class Stage2 { texture="a3\structures_f\walls\data\crash_barrier_smdi.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 0);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).sourceStage == 2);
+    REQUIRE(ir.suffixDisagreements.empty());
+}
+
+TEST_CASE("The NormalMap* cluster reads its stage list off its own name",
+          "[asset][material][mat-030][normalmap-cluster]")
+{
+    // Each family names the stages that follow Stage1, in order, and the corpus agrees for
+    // every one of them. This is the property that makes the cluster a family rather than
+    // four coincidences, so it is asserted as one.
+    auto detailSpec = translate(R"CFG(
+PixelShaderID="NormalMapDetailSpecularMap";
+class Stage1 { texture="a3\roads_f\decals\data\decal_path_nohq.paa"; uvSource="tex"; };
+class Stage2 { texture="#(argb,8,8,3)color(0.5,0.5,0.5,0.5,DT)"; uvSource="tex"; };
+class Stage3 { texture="a3\roads_f\roads\data\path_sm.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(detailSpec.schemaKnown);
+    REQUIRE(detailSpec.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(detailSpec.Slot(MaterialSlot::Detail).sourceStage == 2);
+    REQUIRE(detailSpec.Slot(MaterialSlot::SpecularDetail).sourceStage == 3);
+
+    auto macroAs = translate(R"CFG(
+PixelShaderID="NormalMapMacroASSpecularDIMap";
+class Stage1 { texture="a3\structures_f_enoch\cultural\orthodoxchurches\data\church_03_strecha_nohq.paa"; uvSource="tex"; };
+class Stage2 { texture="a3\structures_f_enoch\cultural\orthodoxchurches\data\church_03_mc.paa"; uvSource="tex1"; };
+class Stage3 { texture="a3\structures_f_enoch\cultural\orthodoxchurches\data\church_02a_as.paa"; uvSource="tex1"; };
+class Stage4 { texture="#(argb,8,8,3)color(0,0,1,1,SMDI)"; uvSource="tex"; };
+)CFG");
+    REQUIRE(macroAs.schemaKnown);
+    REQUIRE(macroAs.Slot(MaterialSlot::Macro).sourceStage == 2);
+    REQUIRE(macroAs.Slot(MaterialSlot::AmbientShadow).sourceStage == 3);
+    REQUIRE(macroAs.Slot(MaterialSlot::SpecularDetail).sourceStage == 4);
+}
+
+TEST_CASE("NormalMapDiffuse puts its albedo at Stage2, where its siblings put specular",
+          "[asset][material][mat-030][normalmap-cluster]")
+{
+    // The trap of the cluster, and the reason each family gets its own table. Measured over
+    // all 27: Stage1 `_nopx` 26/27, Stage2 `_co` 26/27. Reading this as
+    // NormalMapSpecularDIMap would bind a ground albedo into SpecularDetail.
+    auto ir = translate(R"CFG(
+PixelShaderID="NormalMapDiffuse";
+class Stage1 { texture="a3\map_data\gdt_concrete_nopx.paa"; uvSource="tex"; };
+class Stage2 { texture="a3\map_data\gdt_concrete_co.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 2);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::SpecularDetail).present);
+
+    // `_nopx` is DXT5nm like `_nohq` (measured over 31 textures), so it agrees with the
+    // NormalMap slot rather than reporting a suffix nobody recognises.
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).suffixRole == "NormalMap");
+    REQUIRE(ir.suffixDisagreements.empty());
+}
+
+TEST_CASE("NormalMapDetailMacroASSpecularDIMap stays unmapped at n=2", "[asset][material][mat-030][normalmap-cluster]")
+{
+    // Its name predicts its stages exactly like the rest of the cluster, which is precisely
+    // the temptation. Two materials do not describe a family -- the same bar that left
+    // Super's and Skin's Stage7 tails alone.
+    REQUIRE_FALSE(translate(R"CFG(
+PixelShaderID="NormalMapDetailMacroASSpecularDIMap";
+class Stage1 { texture="a3\structures_f_enoch\furniture\cases\case_d\data\case_d_nohq.paa"; uvSource="tex"; };
+)CFG")
+                      .schemaKnown);
+}
