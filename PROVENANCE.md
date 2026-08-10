@@ -83,16 +83,20 @@ Verified against the git history at the time of writing:
   no file under it appears in the history.
 - **No Arma 3 `.wrp`, `.pbo`, `.p3d`, `.paa` or `.rvmat` file is tracked.**
 
+- **Captures depicting Arma 3 content are not tracked.** 29 PNGs under
+  `docs/roadmap/evidence/` (`a3-game-*`, `a3-sample-*`) were renders of Bohemia
+  models and textures, committed during earlier material investigations. They have
+  been untracked and gitignored: they are renders of Bohemia's artwork rather than
+  our own work product, and no documentation referenced them. They remain on the
+  original developer's disk as local investigation evidence.
+
 Two qualifications:
 
-1. **Screenshots depicting Arma 3 content are tracked.** 29 PNG files under
-   `docs/roadmap/evidence/` (`a3-game-*`, `a3-sample-*`) are captures of Arma 3
-   models and textures rendered during earlier material investigations. They are
-   renders of Bohemia's artwork. They are not asset files, but a statement that
-   *no Bohemia game assets are distributed* is inaccurate while they are present.
-   Either remove them before publishing, or qualify the statement to say that no
-   asset *files* are redistributed and that evidence captures depicting game
-   content are included under the project's documentation.
+1. **Those captures are still present in git history.** Untracking removes them
+   from the working tree and from future commits, not from earlier ones — a clone
+   of this repository still receives them in its history. For the statement above
+   to hold for a *published* repository, publish either from a fresh export
+   containing no history, or from a history rewritten to drop those paths.
 
 2. **Binary test fixtures exist and their origin was not audited here.** 51 files
    under `tests/fixtures/` carry `.p3d`, `.paa`, `.pbo` or `.rvmat` extensions.

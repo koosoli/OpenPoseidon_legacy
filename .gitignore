@@ -94,3 +94,9 @@ target/
 
 # AST-007 local reference corpus paths (see .reference-corpora.json.example)
 .reference-corpora.json
+
+# Captures depicting Arma 3 game content. Kept locally as investigation
+# evidence, never redistributed: they are renders of Bohemia artwork, not our
+# own work product. See PROVENANCE.md.
+docs/roadmap/evidence/a3-game-*.png
+docs/roadmap/evidence/a3-sample-*.png
