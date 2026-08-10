@@ -403,11 +403,45 @@ class Stage5 { texture="a3\structures_f\civ\constructions\data\wip_cinderblocks_
     REQUIRE(ir.Slot(MaterialSlot::Mask).suffixRole == "Mask");
     REQUIRE(ir.Slot(MaterialSlot::Mask).suffixAgrees);
 
-    // Layers 1-3 have no slot, and `_dtsmdi` is a combined detail+specular texture with no
-    // analogue here. Preserved as unmapped rather than split by guesswork.
-    REQUIRE(ir.unmappedStages == std::vector<int>{1, 2, 3, 5});
+    // Layer 0's `_dtsmdi` is bound as the surface's specular, PAIRED with layer 0's colour
+    // at Stage0. Its specular half uses SMDI's channels (measured over 72 textures), so it
+    // needs no splitting guess -- the detail half is simply not sampled.
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).present);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).sourceStage == 5);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).suffixRole == "SpecularDetail");
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).suffixAgrees);
+
+    // Layers 1-3, colour and detail+specular alike, have no slots.
+    REQUIRE(ir.unmappedStages == std::vector<int>{1, 2, 3});
     REQUIRE_FALSE(ir.Slot(MaterialSlot::Detail).present);
-    REQUIRE_FALSE(ir.Slot(MaterialSlot::SpecularDetail).present);
+}
+
+TEST_CASE("Multi's normal, macro and ambient shadow are per-surface, not per-layer",
+          "[asset][material][mat-030][multi]")
+{
+    // Stages 9-11 were missed while the census stopped at Stage8. Measured over all 1,628:
+    // Stage9 macro 1626, Stage10 ambient shadow 1628, Stage11 normal 1628. None of them is
+    // layered, so no blending question arises -- a Multi material has a normal map like
+    // anything else, and not binding it left every Arma 3 structure without one.
+    auto ir = translate(R"CFG(
+PixelShaderID="Multi";
+class Stage0 { texture="a3\structures_f\data\wall_04_co.paa"; };
+class Stage4 { texture="a3\structures_f\data\wall_04_mask.paa"; };
+class Stage5 { texture="a3\structures_f\data\wall_04_dtsmdi.paa"; };
+class Stage9 { texture="a3\structures_f\data\wall_04_mc.paa"; };
+class Stage10 { texture="a3\structures_f\data\wall_04_ads.paa"; };
+class Stage11 { texture="a3\structures_f\data\wall_04_nohq.paa"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::Macro).sourceStage == 9);
+    REQUIRE(ir.Slot(MaterialSlot::AmbientShadow).sourceStage == 10);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 11);
+
+    // `_ads` is the majority spelling of the ambient-shadow suffix in this family (808 of
+    // 1,628), and went unrecognised until now -- so the second witness stayed silent on the
+    // commonest form of the commonest layered material.
+    REQUIRE(ir.Slot(MaterialSlot::AmbientShadow).suffixRole == "AmbientShadow");
+    REQUIRE(ir.suffixDisagreements.empty());
 }
 
 TEST_CASE("SuperAToC schema: Super's table, and the cutout colour it carries at Stage0",

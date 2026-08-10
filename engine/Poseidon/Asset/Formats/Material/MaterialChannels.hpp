@@ -93,6 +93,15 @@ inline SlotChannelMap ChannelsForSlot(MaterialSlot slot)
             break;
 
         case MaterialSlot::AmbientShadow:
+            // MEASURED on `_as` (n=25). `_ads`, the spelling the Multi family prefers, does
+            // NOT match: over 47 of them R is constant 255 in 46 and A in 47/47, but B
+            // varies in 47/47 as well as G, and its mean tracks G's within 2 in only 27 of
+            // 47 -- so B is a second quantity, not a copy. What it is has not been
+            // established, and the name (`ADS`, against plain `AS`) says the family thinks
+            // it carries something extra.
+            //
+            // Nothing samples this slot yet, so the declaration below is not wrong in
+            // effect -- but `unused` means "measured dead", and for `_ads` B is not.
             map.ambientShadow = TextureChannel::G;
             map.unused        = {TextureChannel::R, TextureChannel::B, TextureChannel::A};
             break;

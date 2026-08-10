@@ -140,8 +140,13 @@ inline std::string SuffixRole(const std::string& raw)
     if (suffix == "mc" || suffix == "mco") return "Macro";
     if (suffix == "mca") return "MacroAmbient";
     if (suffix == "mask" || suffix == "maska") return "Mask";
-    if (suffix == "as" || suffix == "adshq") return "AmbientShadow";
-    if (suffix == "smdi" || suffix == "sm") return "SpecularDetail";
+    // `_ads` is the majority spelling in the Multi family (808 of 1,628 Stage10 bindings,
+    // against 388 `_as` and 274 `_adshq`), so leaving it out made the commonest form of
+    // the commonest layered material report an unrecognised suffix.
+    if (suffix == "as" || suffix == "ads" || suffix == "adshq") return "AmbientShadow";
+    // `_dtsmdi` is a combined detail+specular texture whose specular half uses SMDI's own
+    // channels (measured over 72 of them; see the Multi schema). It claims the same role.
+    if (suffix == "smdi" || suffix == "sm" || suffix == "dtsmdi") return "SpecularDetail";
     return {};
 }
 } // namespace detail
@@ -235,34 +240,57 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     // Multi is a LAYERED material and this schema is deliberately a fraction of it.
     // MEASURED over all 1,628 Multi materials in the Arma 3 corpus:
     //
-    //   Stage0 1624/1628  _co 1561, procedural co 37   -- layer 0
-    //   Stage1 1628/1628  _co 1592                     -- layer 1
-    //   Stage2 1628/1628  _co 1494                     -- layer 2
-    //   Stage3 1628/1628  _co 1264                     -- layer 3
-    //   Stage4 1628/1628  _mask 1576                   -- the blend mask
-    //   Stage5..8         _dtsmdi / procedural dtsmdi  -- per-layer detail+specular
+    //   Stage0  1624/1628  _co 1561, procedural co 37       -- layer 0
+    //   Stage1  1628/1628  _co 1592                         -- layer 1
+    //   Stage2  1628/1628  _co 1494                         -- layer 2
+    //   Stage3  1628/1628  _co 1264                         -- layer 3
+    //   Stage4  1628/1628  _mask 1576                       -- the blend mask
+    //   Stage5  1628/1628  _dtsmdi 869, proc dtsmdi 694     -- layer 0 detail+specular
+    //   Stage6..8          _dtsmdi / procedural dtsmdi      -- layers 1-3
+    //   Stage9  1626/1628  _mc 1168, procedural mc 443      -- macro, WHOLE SURFACE
+    //   Stage10 1628/1628  _ads 808, _as 388, _adshq 274    -- ambient shadow, whole surface
+    //   Stage11 1628/1628  _nohq 1486, procedural nohq 141  -- normal map, whole surface
     //
-    // BI's Multimaterial documentation describes exactly that: four material layers, a
+    // BI's Multimaterial documentation describes the layered half: four material layers, a
     // mask at Stage4 that controls how they blend, and combined detail/specular beyond.
     //
-    // Only Stage0 is bound, as the FIRST LAYER standing in for the surface's base colour.
-    // That is not a claim that layer 0 is the whole answer -- it is not, and a masked blend
-    // of four layers has no representation in this slot set. It is the difference between
-    // an Arma 3 structure rendering as its first layer and rendering as untextured white,
-    // and it is honest about being partial.
+    // Stages 9-11 are the part that is NOT layered, and they were missed while the census
+    // stopped at Stage8. They are per-surface exactly as Super's equivalents are, so they
+    // take the ordinary slots and no layering question arises for them: a Multi material
+    // has a normal map, a macro and an ambient-shadow map like anything else.
     //
-    // Stages 1-3 stay unmapped because a second, third and fourth colour layer have no
+    // Stage0 and Stage5 bind as LAYER 0 standing in for the whole surface -- colour and its
+    // matching detail+specular. That is not a claim that layer 0 is the whole answer; a
+    // masked blend of four layers has no representation in this slot set. The pairing is
+    // the point: binding layer 0's colour but a different layer's specular would be worse
+    // than binding neither.
+    //
+    // `_dtsmdi` earns the SpecularDetail slot on measurement, not on its name. Decoding 72
+    // of them: A is constant 255 in 72/72, R sits centred on 128 in 64/72 (mean 135 -- a
+    // detail multiplier around 0.5), G floors at 0 in 70/72 and varies in 72/72 (mean 27),
+    // and B varies in 58/72 (mean 140). That is SMDI's channel assignment exactly -- G the
+    // specular level, B gloss -- with the detail occupying R, where SMDI is dead. So the
+    // combined texture needs no new channel map and no splitting guess: a consumer reading
+    // it as SMDI reads the right channels, and the detail half is simply not sampled.
+    //
+    // Stages 1-3 and 6-8 stay unmapped because a second, third and fourth layer have no
     // slots; Stage4 gets a named Mask slot so the blend control is preserved rather than
-    // silently dropped; Stages 5-8 stay unmapped because `_dtsmdi` is a combined
-    // detail+specular texture with no analogue here, and splitting it would be a guess.
+    // silently dropped.
     static const ShaderSchema kMulti{
         "Multi",
         {
-            MaterialSlot::BaseColour, // 0 -- layer 0, standing in for the base
-            MaterialSlot::Count,      // 1 -- layer 1, no slot
-            MaterialSlot::Count,      // 2 -- layer 2, no slot
-            MaterialSlot::Count,      // 3 -- layer 3, no slot
-            MaterialSlot::Mask,       // 4 -- the blend mask, preserved unused
+            MaterialSlot::BaseColour,     // 0  -- layer 0 colour, standing in for the base
+            MaterialSlot::Count,          // 1  -- layer 1, no slot
+            MaterialSlot::Count,          // 2  -- layer 2, no slot
+            MaterialSlot::Count,          // 3  -- layer 3, no slot
+            MaterialSlot::Mask,           // 4  -- the blend mask, preserved unused
+            MaterialSlot::SpecularDetail, // 5  -- layer 0 detail+specular, paired with Stage0
+            MaterialSlot::Count,          // 6  -- layer 1 detail+specular, no slot
+            MaterialSlot::Count,          // 7  -- layer 2 detail+specular, no slot
+            MaterialSlot::Count,          // 8  -- layer 3 detail+specular, no slot
+            MaterialSlot::Macro,          // 9  -- whole surface, not per layer
+            MaterialSlot::AmbientShadow,  // 10 -- whole surface
+            MaterialSlot::NormalMap,      // 11 -- whole surface
         }};
     static const ShaderSchema kSkin{
         "Skin",
