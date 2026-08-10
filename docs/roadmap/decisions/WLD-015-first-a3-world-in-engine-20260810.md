@@ -143,3 +143,56 @@ dropping these banks.
 every A3 bank *after* it opened successfully. That is a guess from reading the
 code, not a measurement; confirm it before changing anything. The `AutoBank`
 de-duplication note in WLD-013 remains a second candidate.
+
+## Addendum 2 — Stratis renders, textured
+
+Three further faults, each hiding the next, kept every A3 asset unreachable.
+All are fixed and recorded in the commit "Mount Arma 3 archives where they say
+they live, and find them again":
+
+1. `QFBank::open()` reads no header — properties arrive only via `Load()`, which
+   `Lock()` forces. `GetProperty("prefix")` at mount time was therefore always
+   empty, so WLD-013's fix never fired outside its unit test and every archive
+   mounted under its filename (`rocks_f\`, not `a3\rocks_f\`).
+2. `AutoBank` returned the **first** prefix match. Callers strip exactly
+   `GetPrefix().GetLength()` characters, so a shorter match hands the wrong
+   archive an impossible path. No OFP prefix is a prefix of another; A3 nests
+   them, and every lookup into `a3\map_stratis\data\layers\` was answered by
+   `a3\map_stratis\data\`. Longest match now wins.
+3. An addon whose config could not be parsed was discarded whole, conflating
+   "needs a newer engine" with "we cannot read this config". Measured: this
+   engine's raP reader cannot parse an A3 `config.bin` at all.
+
+**Result: 478 of 479 Stratis terrain materials resolve** (the miss is the empty
+slot at index 0), and the world renders with its real Arma 3 ground textures —
+`gdt_strconcrete_co`, `gdt_strbeach_co`, `gdt_strdrygrass_co`,
+`gdt_strgreengrass_co`, `gdt_strdirt_co`, `gdt_strrocky_co`,
+`gdt_strthistles_co`. Evidence: a capture from the Air Station Mike-26 runway.
+
+Note the RVMAT reduction picks the **detail/ground** `_co` layer rather than the
+satellite, which suits the engine's tiled per-cell texture model better than the
+satellite would have.
+
+## Addendum 3 — mounting A3 *models* renders everything black
+
+Isolated by A/B on one binary, same world, same camera:
+
+| mounted | result |
+| --- | --- |
+| no A3 archives | renders; terrain white, sky and UI correct |
+| A3 terrain archives only (`map_data`, `map_stratis_data`, `..._layers`) | **renders correctly, textured** |
+| A3 terrain + model archives (`structures_f`, `rocks_f`, `plants_f`, `roads_f`, …) | **entire frame black, including sky and UI** |
+
+The whole frame going black — not just the world — points at something global
+rather than at geometry. Ruled out so far: HDR auto-exposure (`WGR_HDR=0`
+reproduces it), the terrain ground-layer cap (512, and only 479 are supplied),
+and capture timing (a 120-frame delay reproduces it).
+
+The candidate is texture creation: the log carries repeated
+`Pactext.cpp(1125) : Size out of range` and `Pactext.cpp(1359) : Texture format`
+errors once model archives are mounted. If a failed texture still occupies a
+bindless slot with no valid view, the bind group is invalid and nothing draws.
+That is a hypothesis with supporting log evidence, not a confirmed diagnosis.
+
+Next: mount the model archives one at a time to find the first that turns the
+frame black, then read the failing texture rather than guessing at its format.
