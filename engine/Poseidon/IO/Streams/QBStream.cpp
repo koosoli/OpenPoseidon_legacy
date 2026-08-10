@@ -1264,6 +1264,15 @@ void BankList::Load(const RString& path, const RString& bankPrefix, const RStrin
     }
     Log("Open bank %s", (const char*)(bankPrefix + bName));
 
+    // open() only verifies the file exists and records its name -- it reads no
+    // header at all. The entry table, the properties, and the beforeOpen product
+    // check all happen inside Load(), which Lock() forces. Without this the
+    // archive's declared prefix is never available at mount time and every bank
+    // silently falls back to its filename, which is how Arma 3 archives came to
+    // mount as `rocks_f\` instead of the `a3\rocks_f\` they declare. Banks are
+    // locked by default anyway; only an app that wants one unloadable unlocks it.
+    bank.Lock();
+
     if (bank.error())
     {
         Resize(oldSize);
@@ -1403,15 +1412,34 @@ QFBank* QIFStreamB::AutoBank(const char* name)
     {
         return nullptr;
     }
+    // Longest matching prefix, not the first.
+    //
+    // Callers strip exactly GetPrefix().GetLength() characters and look the
+    // remainder up inside the bank, so picking a shorter prefix that also matches
+    // hands the wrong archive a path it cannot possibly contain, and the lookup
+    // fails instead of falling through to the right bank.
+    //
+    // No OFP-era prefix is a prefix of another -- they are all single addon names
+    // -- so first-match and longest-match agree there and this changes nothing.
+    // Arma 3 nests them: `a3\map_stratis\data` and `a3\map_stratis\data\layers`
+    // are both mounted, and every lookup into the layers archive was being
+    // answered by the shorter one.
+    QFBank* best = nullptr;
+    int bestLength = -1;
     for (int i = 0; i < GFileBanks.Size(); i++)
     {
         QFBank& bank = GFileBanks[i];
         if (!CmpStartStr(name, bank.GetPrefix()))
         {
-            return &bank;
+            const int length = bank.GetPrefix().GetLength();
+            if (length > bestLength)
+            {
+                bestLength = length;
+                best = &bank;
+            }
         }
     }
-    return nullptr;
+    return best;
 }
 
 QIFStreamB::QIFStreamB() : _bank(nullptr) {}

@@ -215,6 +215,25 @@ bool AddonSystem::ParseAddonConfig(const RString& prefixPath)
         {
             SRef<ParamFile> addon = new ParamFile;
             addon->ParseBin(filename);
+            // A config we cannot read is not a config that refuses us.
+            //
+            // CheckVersion returns false when it finds no CfgPatches, and a false
+            // return here makes BankList::Load discard the whole archive. That
+            // conflates two different things: "this addon declares it needs a
+            // newer engine" (a real refusal) and "we could not parse this addon's
+            // config at all" (our limitation). The second used to cost us every
+            // model and texture in the archive.
+            //
+            // Measured: this engine's raP reader cannot parse an Arma 3
+            // config.bin -- `PoseidonTools config debin` fails on them -- so every
+            // one of the 487 Arma 3 archives was mounted, then silently dropped.
+            // Its assets are still perfectly addressable without its config.
+            if (addon->GetEntryCount() == 0)
+            {
+                WarningMessage("Addon config '%s' could not be parsed; mounting its files without it",
+                               (const char*)filename);
+                return true;
+            }
             if (CheckVersion(prefixPath, *addon))
             {
                 addon->SetOwner(CheckAddonName(*addon));

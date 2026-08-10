@@ -1841,7 +1841,23 @@ bool Landscape::LoadOprw25(const char* path)
             QIFStreamB materialFile;
             materialFile.AutoOpen(materialPath.c_str());
             if (materialFile.fail() || materialFile.rest() <= 0)
+            {
+                // One-shot diagnostic. "0 of 479 resolved" says nothing about
+                // whether the path is wrong or the archive is absent, and those
+                // want opposite fixes.
+                static bool reported = false;
+                if (!reported)
+                {
+                    reported = true;
+                    // "0 of N resolved" says nothing about whether the path is
+                    // wrong, the archive is absent, or the archive is mounted
+                    // somewhere nobody looks -- and those want opposite fixes.
+                    LOG_WARN(World, "LoadOprw25: cannot open terrain material '{}' (FileExist={}, bank={}, {} banks)",
+                             materialPath, QIFStreamB::FileExist(materialPath.c_str()),
+                             QIFStreamB::AutoBank(materialPath.c_str()) != nullptr, GFileBanks.Size());
+                }
                 continue;
+            }
 
             std::vector<uint8_t> bytes(static_cast<size_t>(materialFile.rest()));
             materialFile.read(bytes.data(), static_cast<int>(bytes.size()));
