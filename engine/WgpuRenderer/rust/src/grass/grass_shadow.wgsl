@@ -11,12 +11,26 @@ struct GrassParams {
     density: f32, spacing: f32, near_radius: f32, enabled: f32,
     blade_height: f32, wind_strength: f32, wind_direction: f32, far_radius: f32,
     interactor_x: f32, interactor_z: f32, interactor_radius: f32, interactor_strength: f32,
-    tracks: array<GrassTrack, 96>, downwash: array<GrassDownwash, 4>, debug_flags: vec4<f32>, render_flags: vec4<f32>,
+    tracks: array<GrassTrack, 256>, downwash: array<GrassDownwash, 4>, debug_flags: vec4<f32>, render_flags: vec4<f32>,
     species_mix: vec4<f32>,
     // Layout must mirror grass.wgsl exactly -- same uniform buffer.
     look: vec4<f32>,
     shape_mix: vec4<f32>,
     cards: vec4<f32>,
+    // .x = clump renderer, .y = brightness, .z/.w = mixed-photo coverage / patch size.
+    renderer: vec4<f32>,
+    // .x contrast, .y contour, .z self-shadow, .w root AO -- colour-pass only.
+    photo: vec4<f32>,
+    // .x/.y near+mid grid edges, .z LOD dissolve band, .w photo alpha cutoff.
+    place: vec4<f32>,
+    // .x = forced layer, .y = card saturation, .z = imprint lifetime, .w = depth.
+    photo_mix: vec4<f32>,
+    layer_weights: array<vec4<f32>, 2>,
+    lod_density: vec4<f32>,
+    tint_procedural: vec4<f32>,
+    tint_photo: vec4<f32>,
+    layer_bounds: array<vec4<f32>, 9>,
+    layer_means: array<vec4<f32>, 9>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
@@ -32,6 +46,10 @@ struct GrassInstance {
 @group(2) @binding(0) var<uniform> grass: GrassParams;
 @group(2) @binding(1) var<storage, read_write> instances: array<GrassInstance>;
 @group(2) @binding(2) var<storage, read_write> placement_count: array<atomic<u32>>;
+// The photographed near clumps need the same cut-out silhouette in the depth
+// map as in the colour pass. These bindings share grass/mod.rs's data layout.
+@group(2) @binding(4) var blade_samp: sampler;
+@group(2) @binding(5) var tuft_tex: texture_2d_array<f32>;
 
 fn hash11(p: vec2<f32>) -> f32 { return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453123); }
 fn hash_u32(x_in: u32) -> u32 {
@@ -56,6 +74,47 @@ fn clump_noise(world_xz: vec2<f32>, frequency: f32, salt: u32) -> f32 {
     let c = hash_cell01(base + vec2<i32>(0, 1), salt);
     let d = hash_cell01(base + vec2<i32>(1, 1), salt);
     return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
+}
+
+// Mirrors grass.wgsl. A blade tapered by the LOD dissolve must cast the shadow
+// of the size actually drawn, or the join reappears in the shadow map.
+fn lod_height_scale(packed_z: u32) -> f32 {
+    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+}
+
+// Mirrors pick_photo_layer in grass.wgsl: the cut-out shadow must use the same
+// plate as the colour pass, or a forced or de-weighted family would still cast
+// the silhouette of a different one.
+// Mirrors photo_layer_bounds in grass.wgsl. The shadow card must be trimmed the
+// same way as the colour card, or the cascade would carry a silhouette larger
+// than the one drawn.
+fn photo_layer_bounds(layer: u32) -> vec4<f32> {
+    let b = grass.layer_bounds[min(layer, 8u)];
+    if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
+    return b;
+}
+
+fn photo_layer_weight(index: u32) -> f32 {
+    return max(grass.layer_weights[index / 4u][index % 4u], 0.0);
+}
+
+fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
+    let forced = grass.photo_mix.x;
+    if (forced > -0.5) { return min(u32(forced + 0.5), 8u); }
+    if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+        return 0u;
+    }
+    var total = 0.0;
+    for (var i = 0u; i < 8u; i = i + 1u) { total = total + photo_layer_weight(i); }
+    if (total <= 0.0001) { return 0u; }
+    var pick = hash11(patch_cell + vec2<f32>(43.0, 11.0)) * total;
+    var chosen = 8u;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let w = photo_layer_weight(i);
+        if (pick < w && chosen == 8u) { chosen = i; }
+        pick = pick - w;
+    }
+    return chosen + 1u;
 }
 
 // Mirrors grass.wgsl's world-space wind field. Shadow cascades now use the
@@ -127,6 +186,7 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         rotor_wash = max(cached_wash, live_wash);
     }
     let blade = vertex_index / 30u;
+    let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
     let packed = vertex_index % 30u;
     let segment = packed / 6u;
     let corner = packed % 6u;
@@ -138,21 +198,22 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     let clump_spread = select(select(select(0.10, 0.20, archetype == 1u), 0.28, archetype == 2u), 0.14, archetype == 3u);
     let clump_bend = select(select(select(0.70, 1.05, archetype == 1u), 1.45, archetype == 2u), 0.88, archetype == 3u);
     let blade_seed = hash11(inst.xz + vec2<f32>(f32(blade) * 17.0 + 3.0, f32(blade) * 29.0 + 11.0));
-    let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
+    let base_angle = seed * 6.2831853 + f32(blade) * (6.2831853 / blade_count) + (blade_seed - 0.5) * 0.55;
     let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
     let axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
     let base_offset = radial * (clump_spread * mix(0.18, 1.0, blade_seed));
-    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) * grass.blade_height * shape.y * clump_height;
+    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) * grass.blade_height * shape.y * clump_height * lod_height_scale(inst_packed.z);
     let bend_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 23.0, 57.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
     let static_bend = radial * mix(0.10, 0.34, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * bend_jitter * max(grass.cards.w, 0.0) * height * clump_bend;
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
+    let depth = clamp(grass.photo_mix.w, 0.0, 0.95);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    let crushed_height = height * (1.0 - depth * crush);
     let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
         (0.035 + 0.21 * wind.z + wind.w);
     let flutter_dir = rotor_flutter_direction(inst.xz + base_offset.xz, seed + blade_seed);
     let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
-    let bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_bend + crush_flutter;
+    let bend = (static_bend + wind_bend) * (1.0 - depth * crush) + crush_bend + crush_flutter;
     // species_mix.z mirrors the Grass-tab blade width multiplier, or a widened
     // blade would cast the shadow of a thin one.
     // Card widening and taper jitter mirror grass.wgsl: a shadow cast by the
@@ -165,4 +226,80 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     let lateral = select(axis * width, -axis * width, left);
     let world = inst.xyz + base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + bend * (t * t);
     return shadow.light_vp * vec4<f32>(world - shadow.cam_pos.xyz, 1.0);
+}
+
+struct TuftShadowOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec3<f32>,
+};
+
+// Mirrors vs_grass_mid_tuft in grass.wgsl, but projects through the cascade
+// matrix. Keeping the card geometry and UVs identical makes the alpha-tested
+// shadow conform to the photographed A3 clump instead of the legacy ribbons.
+@vertex
+fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) instance_index: u32) -> TuftShadowOut {
+    let inst = instances[instance_index].pos_seed;
+    let seed = inst.w;
+    let inst_packed = instances[instance_index].packed;
+    let field = clump_noise(inst.xz, 0.075, 0x48ac2f19u);
+    let angle = mix(seed * 6.2831853, field * 6.2831853, grass.debug_flags.y);
+    let card = vertex_index / 6u;
+    let card_angle = angle + select(0.0, 1.5707963, card != 0u);
+    let axis = vec3<f32>(cos(card_angle), 0.0, sin(card_angle));
+    let corner = vertex_index % 6u;
+    let right = corner == 1u || corner == 2u || corner == 4u;
+    let top = corner == 2u || corner == 4u || corner == 5u;
+    let quad_u = select(0.0, 1.0, right);
+    let quad_v = select(0.0, 1.0, top);
+    let patch_cell = floor(inst.xz / max(grass.renderer.w, 4.0));
+    let layer = pick_photo_layer(patch_cell);
+    let bounds = photo_layer_bounds(layer);
+    let u = mix(bounds.x, bounds.y, quad_u);
+    let img_v = mix(bounds.w, bounds.z, quad_v);
+    let vh = 1.0 - img_v;
+
+    let height_seed = mix(hash11(inst.xz + 13.0), clump_noise(inst.xz, 0.21, 0xa47f3cd1u), grass.debug_flags.y * 0.72);
+    let family = u32(seed * 4.0);
+    let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
+    let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
+    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+        lod_height_scale(inst_packed.z);
+    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
+    let crush_dir = unpack2x16snorm(inst_packed.x);
+    let crush_data = unpack2x16unorm(inst_packed.y);
+    let crush = crush_data.x;
+    let cached_wash = crush_data.y;
+    var rotor_wash = cached_wash;
+    if (grass.interactor_strength > 1.001 && grass.interactor_radius > 0.01) {
+        let delta = inst.xz - vec2<f32>(grass.interactor_x, grass.interactor_z);
+        let live_wash = (1.0 - smoothstep(grass.interactor_radius * 0.18, grass.interactor_radius, length(delta))) * crush;
+        rotor_wash = max(cached_wash, live_wash);
+    }
+    let card_depth = min(0.95, clamp(grass.photo_mix.w, 0.0, 0.95) * 1.45);
+    let crushed_height = height * (1.0 - card_depth * crush);
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (card_depth * 1.35 * crush);
+    let wind = sample_wind_field(inst.xz, vh, seed);
+    let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
+        (0.030 + 0.18 * wind.z + wind.w);
+    let flutter_dir = rotor_flutter_direction(inst.xz, seed);
+    let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
+    let lean = (wind_bend * (1.0 - card_depth * crush) + crush_bend + crush_flutter) * (vh * vh);
+    let lateral = axis * (u - 0.5) * 2.0 * half_width;
+    let world = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * vh, 0.0) + lean;
+    let mirror = hash11(inst.xz + 5.0) < 0.5;
+    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
+    if (mirror) { uu = bounds.x + bounds.y - uu; }
+    var out: TuftShadowOut;
+    out.clip = shadow.light_vp * vec4<f32>(world - shadow.cam_pos.xyz, 1.0);
+    out.uv = vec3<f32>(uu, img_v, f32(layer));
+    return out;
+}
+
+@fragment
+fn fs_grass_tuft_shadow(in: TuftShadowOut) {
+    // Same cutoff as the colour pass, or a trimmed card would still cast the
+    // untrimmed silhouette.
+    if (textureSampleBias(tuft_tex, blade_samp, in.uv.xy, i32(in.uv.z), 0.75).a <
+        clamp(grass.place.w, 0.05, 0.95)) { discard; }
 }

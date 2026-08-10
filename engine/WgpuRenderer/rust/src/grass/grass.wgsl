@@ -1,5 +1,6 @@
 #import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, cloud_sun_shadow}
 #import gbuffer::oct_encode
+#import shadow::shadow_strength
 
 struct TerrainParams {
     world_origin: vec2<f32>,
@@ -40,7 +41,7 @@ struct GrassParams {
     interactor_z: f32,
     interactor_radius: f32,
     interactor_strength: f32,
-    tracks: array<GrassTrack, 96>,
+    tracks: array<GrassTrack, 256>,
     downwash: array<GrassDownwash, 4>,
     debug_flags: vec4<f32>,
     // MUST match the tail of GrassParams in grass/mod.rs, four scalars per vec4:
@@ -60,6 +61,39 @@ struct GrassParams {
     //   .x = alpha cut-out cards on/off, .y = alpha cutoff
     //   .z = card widening applied when cards are on, .w spare
     cards: vec4<f32>,
+    // .x = GRS-030 multi-blade clump renderer; 0 retains legacy ribbons.
+    // .y = photographed A3 clump brightness; .z/.w = mixed-photo coverage / patch size.
+    renderer: vec4<f32>,
+    // PHOTOGRAPHED CLUMP CARDS ONLY. Nothing here touches procedural ribbons,
+    // the procedural mid ring or the far coverage proxy.
+    //   .x = contrast about the plate's own mid-luma (1 = the raw photograph)
+    //   .y = contour normal strength rebuilt from the plate's luma gradient
+    //   .z = grass-on-grass self-shadow strength, .w = root ambient occlusion
+    photo: vec4<f32>,
+    //   .x = near placement grid edge in cells, .y = mid grid edge (both sized
+    //        from their radius by the renderer, so density is radius-independent)
+    //   .z = LOD dissolve band in metres, .w = photo-card alpha cutoff
+    place: vec4<f32>,
+    //   .x = forced photo atlas layer (-1 = normal selection, 0..8 = that layer)
+    //   .y = photographed-card saturation about the plate's own luma
+    //   .z = walked-imprint lifetime in seconds, .w = imprint depth
+    photo_mix: vec4<f32>,
+    // Relative selection weights for atlas layers 1..8, four per vec4.
+    layer_weights: array<vec4<f32>, 2>,
+    //   .x/.y/.z = near / mid / far coverage multipliers on top of `density`
+    lod_density: vec4<f32>,
+    // Albedo tints applied before lighting. `tint_procedural` covers procedural
+    // blades, ribbons and the far proxy; `tint_photo` covers photographed cards.
+    tint_procedural: vec4<f32>,
+    tint_photo: vec4<f32>,
+    // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
+    // The card quad is trimmed to it: the margin outside can never survive the
+    // alpha test, so rasterising it was pure overdraw on a fill-bound path.
+    layer_bounds: array<vec4<f32>, 9>,
+    // Mean linear colour of each layer's covered texels. The contrast pivot: a
+    // fixed pivot made contrast a brightness change, and a DISTANCE-dependent
+    // one, because mips average each texel toward exactly this value.
+    layer_means: array<vec4<f32>, 9>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -95,14 +129,17 @@ struct WindField {
 @group(2) @binding(4) var blade_samp: sampler;
 // GRS-E: the game's own photographed grass tuft, used by the mid LOD's crossed
 // cards. Cutout alpha -- fs_grass_mid alpha-tests it.
-@group(2) @binding(5) var tuft_tex: texture_2d<f32>;
+@group(2) @binding(5) var tuft_tex: texture_2d_array<f32>;
 
-const GRID_DIM: u32 = 512u;
-const MAX_INSTANCES: u32 = 262144u;
+// The near grid edge is dynamic (grass.place.x); only its output cap is fixed.
+const MAX_INSTANCES: u32 = 1048576u;
 const FAR_GRID_DIM: u32 = 384u;
 const MAX_FAR_INSTANCES: u32 = 147456u;
-const MID_GRID_DIM: u32 = 384u;
-const MAX_MID_INSTANCES: u32 = 147456u;
+// The mid grid edge is dynamic (grass.place.y); this is its output cap, equal to
+// MID_GRID_MAX^2 in grass/mod.rs. It was 147456 -- a quarter of the buffer --
+// which capped mid coverage at high density for no reason.
+const MID_PLACEMENT_SPACING: f32 = 0.82;
+const MAX_MID_INSTANCES: u32 = 1048576u;
 const LAYERS: u32 = 8u;
 
 // Geography bits, mirroring GeographyInfo in engine/Poseidon/AI/Path/AITypes.hpp:
@@ -224,9 +261,84 @@ fn blade_texture_strength(world_rel: vec3<f32>) -> f32 {
 // and cs_place_mid's `mid_end <= near_radius` guard then rejected every mid
 // candidate -- turning the far ring off silently deleted the mid ring with it and
 // ended all grass at the near radius.
+// MID_RING_MAX matches GrassSettings::midRadius' upper bound. It used to be 160
+// here against a 210 m slider, so the top 50 m of that slider did nothing.
+const MID_RING_MAX: f32 = 1000.0;
 fn mid_ring_end() -> f32 {
-    let natural = max(grass.near_radius + 10.0, min(160.0, grass.near_radius * 2.5));
-    return clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, 160.0);
+    let natural = max(grass.near_radius + 10.0, min(MID_RING_MAX, grass.near_radius * 2.5));
+    return clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, MID_RING_MAX);
+}
+
+// LOD dissolve band, in metres. Each ring thins out across it while the next
+// thickens, so a ring no longer ends on a hard circle and swap to a different
+// representation in one step.
+fn lod_band() -> f32 {
+    return clamp(grass.place.z, 0.0, 40.0);
+}
+
+// Stochastic dissolve. `presence` is the ring's coverage at this distance; a
+// per-cell hash decides whether this particular candidate survives. Because the
+// hash is world-space deterministic, an individual clump does not blink in and
+// out as the camera moves -- it disappears once, at its own threshold distance.
+//
+// A DIFFERENT salt from the coverage hash on purpose: reusing the density seed
+// would remove exactly the same candidates the density test already thinned, so
+// the two would compound into a visible hole rather than a fade.
+fn lod_dissolve(cell_id: vec2<i32>, presence: f32) -> bool {
+    if (presence >= 0.999) { return true; }
+    if (presence <= 0.001) { return false; }
+    return hash_cell01(cell_id, 0x5a1c93b7u) <= presence;
+}
+
+// Cache the surviving fraction so the vertex shaders can also taper the blade,
+// which turns the last few metres of a ring into a shrink rather than a pop.
+fn pack_lod_fade(fade: f32) -> u32 {
+    return pack2x16unorm(vec2<f32>(clamp(fade, 0.0, 1.0), 0.0));
+}
+
+// Height multiplier from the cached fade. It deliberately stops at 0.45 rather
+// than 0: the dissolve removes the clump, so shrinking it to nothing as well
+// would thin the join twice over.
+fn lod_height_scale(packed_z: u32) -> f32 {
+    return mix(0.45, 1.0, unpack2x16unorm(packed_z).x);
+}
+
+// Which photographed atlas layer a clump uses. Layer 0 is the primary clump and
+// 1..8 are the local families, each with its own weight so a single suspect
+// plate can be removed -- or isolated with the force override -- without
+// touching the rest of the field.
+// Opaque box of a photo layer, (u0, u1, v0, v1). Defaults to the full quad, so
+// a layer with no transparent margin -- or no atlas at all -- is untrimmed.
+fn photo_layer_bounds(layer: u32) -> vec4<f32> {
+    let b = grass.layer_bounds[min(layer, 8u)];
+    // A degenerate or unset box would collapse the card; fall back to the quad.
+    if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
+    return b;
+}
+
+fn photo_layer_weight(index: u32) -> f32 {
+    return max(grass.layer_weights[index / 4u][index % 4u], 0.0);
+}
+
+fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
+    let forced = grass.photo_mix.x;
+    if (forced > -0.5) { return min(u32(forced + 0.5), 8u); }
+    if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+        return 0u;
+    }
+    var total = 0.0;
+    for (var i = 0u; i < 8u; i = i + 1u) { total = total + photo_layer_weight(i); }
+    // Every family switched off is a legitimate request for the primary clump
+    // only, not a reason to divide by zero.
+    if (total <= 0.0001) { return 0u; }
+    var pick = hash11(patch_cell + vec2<f32>(43.0, 11.0)) * total;
+    var chosen = 8u;
+    for (var i = 0u; i < 8u; i = i + 1u) {
+        let w = photo_layer_weight(i);
+        if (pick < w && chosen == 8u) { chosen = i; }
+        pick = pick - w;
+    }
+    return chosen + 1u;
 }
 
 // Coverage multiplier from a world-space noise map, so density is patchy rather
@@ -349,15 +461,20 @@ fn eval_flatten(world_xz: vec2<f32>) -> vec4<f32> {
         }
     }
     var direction = select(vec2<f32>(0.0), interactor_delta / interactor_distance, interactor_distance > 0.001);
-    // Recent contact stamps fade from strongly flattened to fully recovered
-    // between 25 and 60 seconds, leaving a readable trail.
-    for (var i = 0u; i < 96u; i = i + 1u) {
+    // Contact stamps hold their full imprint and then recover over the last
+    // third of their life, so a trail thins out instead of blinking away. The
+    // lifetime is a setting rather than the former fixed 25-60 s, and the ring
+    // is now consumed by distance walked rather than by elapsed time, so what
+    // survives is a length of trail.
+    let lifetime = max(grass.photo_mix.z, 5.0);
+    let recover_from = lifetime * 0.66;
+    for (var i = 0u; i < 256u; i = i + 1u) {
         let track = grass.tracks[i];
-        if (track.radius <= 0.01 || track.age >= 60.0) { continue; }
+        if (track.radius <= 0.01 || track.age >= lifetime) { continue; }
         let delta = world_xz - vec2<f32>(track.x, track.z);
         let distance = length(delta);
         let imprint = (1.0 - smoothstep(track.radius * 0.20, track.radius, distance)) *
-            (1.0 - smoothstep(25.0, 60.0, track.age));
+            (1.0 - smoothstep(recover_from, lifetime, track.age));
         if (imprint > strength) {
             strength = imprint;
             rotor_wash = 0.0;
@@ -381,6 +498,21 @@ fn eval_flatten(world_xz: vec2<f32>) -> vec4<f32> {
         }
     }
     return vec4<f32>(direction, strength, rotor_wash);
+}
+
+// How far a crushed plant is pressed down, as a fraction of its own height.
+// 0.55 is the constant this replaces, so the default is the long-standing look.
+fn imprint_depth() -> f32 {
+    return clamp(grass.photo_mix.w, 0.0, 0.95);
+}
+
+// The same, for a photographed clump card. A card needs a MUCH stronger response
+// than a blade to read as walked-on: one plate stands for a whole clump and is
+// nearly two metres across, so tipping it the ~30 degrees that flattens a blade
+// leaves an obviously upright bush. This lays it down and shortens it hard, which
+// is what makes a photo-grass trail look like the procedural one.
+fn imprint_depth_card() -> f32 {
+    return min(0.95, imprint_depth() * 1.45);
 }
 
 // Species layers in blade_atlas.rs: 0..4 grass, 4..6 weed, 6..8 flower.
@@ -498,11 +630,18 @@ fn active_rotor_wash(world_xz: vec2<f32>, crush: f32, cached_wash: f32) -> f32 {
 
 @compute @workgroup_size(8, 8, 1)
 fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= GRID_DIM || gid.y >= GRID_DIM || grass.enabled < 0.5) { return; }
+    let grid_dim = u32(max(grass.place.x, 8.0));
+    if (gid.x >= grid_dim || gid.y >= grid_dim || grass.enabled < 0.5) { return; }
     // Six ribbons replace the old two crossed ribbons, so one clump covers
     // roughly three former cells and stays within the established vertex budget.
-    let near_spacing = grass.spacing * 1.72;
-    let half = f32(GRID_DIM) * 0.5;
+    //
+    // This spacing is deliberately INDEPENDENT of near_radius: the grid is sized
+    // to the radius instead (see NEAR_GRID_MAX in grass/mod.rs). Deriving spacing
+    // from the radius kept the accepted count constant, so the slider only ever
+    // thinned the field -- and made the disc around the player sparser than the
+    // fixed-spacing mid ring beyond it.
+    let near_spacing = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
+    let half = f32(grid_dim) * 0.5;
     let snap = floor(frame.cam_pos.xz / near_spacing) * near_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
     let cell_world = snap + cell * near_spacing;
@@ -513,8 +652,14 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     let jitter = (hash_cell2(cell_id, 0x19a8b437u) - vec2<f32>(0.5)) * (near_spacing * 1.85);
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
-    let coverage = grass.density * density_field(world_xz);
-    if (dot(delta, delta) > grass.near_radius * grass.near_radius || seed > coverage) { return; }
+    let coverage = grass.density * clamp(grass.lod_density.x, 0.0, 1.0) * density_field(world_xz);
+    if (seed > coverage) { return; }
+    // Dissolve out over the last `band` metres instead of stopping dead on the
+    // near radius; cs_place_mid fades in across exactly the same band.
+    let band = lod_band();
+    let distance = length(delta);
+    let near_fade = 1.0 - smoothstep(max(grass.near_radius - band, 0.0), grass.near_radius, distance);
+    if (!lod_dissolve(cell_id, near_fade)) { return; }
     let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
@@ -536,9 +681,17 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
     if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
-    if (out_index >= MAX_INSTANCES) { return; }
+    if (out_index >= MAX_INSTANCES) {
+        // The counter is copied straight into the indirect instance count, so an
+        // overflowing count would ask the draw for instances the buffer does not
+        // hold. Pin it at capacity; only overflowing threads pay for this.
+        atomicMin(&placement_count[0], MAX_INSTANCES);
+        return;
+    }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    instances[out_index].packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    packed.z = pack_lod_fade(near_fade);
+    instances[out_index].packed = packed;
 }
 
 // The middle ring uses a stable half-density grid and opaque multi-blade clumps.
@@ -546,11 +699,14 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
 // camera-facing tile swap or frame-to-frame randomisation.
 @compute @workgroup_size(8, 8, 1)
 fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
-    if (gid.x >= MID_GRID_DIM || gid.y >= MID_GRID_DIM || grass.enabled < 0.5) { return; }
+    let mid_grid_dim = u32(max(grass.place.y, 8.0));
+    if (gid.x >= mid_grid_dim || gid.y >= mid_grid_dim || grass.enabled < 0.5) { return; }
     let mid_end = mid_ring_end();
     if (mid_end <= grass.near_radius) { return; }
-    let mid_spacing = max(grass.spacing * 2.0, mid_end / (f32(MID_GRID_DIM) * 0.5 - 1.0));
-    let half = f32(MID_GRID_DIM) * 0.5;
+    // Radius controls coverage only: this spacing is fixed and the grid is sized
+    // from the radius instead, so mid density is unchanged all the way to 400 m.
+    let mid_spacing = MID_PLACEMENT_SPACING;
+    let half = f32(mid_grid_dim) * 0.5;
     let snap = floor(frame.cam_pos.xz / mid_spacing) * mid_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
     let cell_world = snap + cell * mid_spacing;
@@ -560,10 +716,18 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let world_xz = cell_world + jitter;
     let delta = world_xz - frame.cam_pos.xz;
     let distance2 = dot(delta, delta);
-    let coverage = grass.density * 0.95 * density_field(world_xz);
-    // A small overlap avoids a bare annulus at the detailed/mid and mid/far joins.
-    let mid_start = max(0.0, grass.near_radius - mid_spacing * 1.5);
+    let coverage = grass.density * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
+    let band = lod_band();
+    // A small overlap avoids a bare annulus at the detailed/mid and mid/far
+    // joins; the dissolve band widens that overlap into a real crossfade.
+    let mid_start = max(0.0, grass.near_radius - mid_spacing * 1.5 - band);
     if (distance2 < mid_start * mid_start || distance2 > mid_end * mid_end || seed > coverage) { return; }
+    // Fade IN as the near ring fades out, and OUT as the far ring fades in.
+    let distance = sqrt(distance2);
+    let fade_in = smoothstep(mid_start, max(mid_start, grass.near_radius), distance);
+    let fade_out = 1.0 - smoothstep(max(mid_end - band, mid_start), mid_end, distance);
+    let mid_fade = min(fade_in, fade_out);
+    if (!lod_dissolve(cell_id, mid_fade)) { return; }
     let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
@@ -576,9 +740,14 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
     if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
-    if (out_index >= MAX_MID_INSTANCES) { return; }
+    if (out_index >= MAX_MID_INSTANCES) {
+        atomicMin(&placement_count[0], MAX_MID_INSTANCES);
+        return;
+    }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    instances[out_index].packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    packed.z = pack_lod_fade(mid_fade);
+    instances[out_index].packed = packed;
 }
 
 // Coarse outer ring: a terrain-conforming coverage field. This follows the
@@ -608,8 +777,13 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     let near_start = mid_end + far_spacing * 0.5;
     // Keep the outer ring visually continuous. It is still economical (one
     // triangle per tuft), but no longer becomes invisible just past 60 m.
-    let far_coverage = grass.density * density_field(world_xz);
+    let far_coverage = grass.density * clamp(grass.lod_density.z, 0.0, 1.0) * density_field(world_xz);
     if (distance2 <= near_start * near_start || distance2 > grass.far_radius * grass.far_radius || seed > far_coverage) { return; }
+    // Thicken in across the same band the mid ring thins out over, so the outer
+    // proxy does not appear as a complete disc edge at one distance.
+    let band = lod_band();
+    let far_fade = smoothstep(near_start, near_start + band, sqrt(distance2));
+    if (!lod_dissolve(cell_id, far_fade)) { return; }
     let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }
     let geocell = clamp(vec2<i32>(floor((world_xz - terrain.world_origin) / terrain.land_grid)), vec2<i32>(0), vec2<i32>(i32(terrain.land_range) - 1));
@@ -624,7 +798,10 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     let clip = frame.proj * frame.view * vec4<f32>(rel, 1.0);
     if (clip.w <= 0.0 || abs(clip.x) > clip.w * 1.15 || abs(clip.y) > clip.w * 1.15) { return; }
     let out_index = atomicAdd(&placement_count[0], 1u);
-    if (out_index >= MAX_FAR_INSTANCES) { return; }
+    if (out_index >= MAX_FAR_INSTANCES) {
+        atomicMin(&placement_count[0], MAX_FAR_INSTANCES);
+        return;
+    }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
     // The outer coverage proxy is a ground-conforming quad: nothing to flatten.
     instances[out_index].packed = vec4<u32>(0u);
@@ -654,6 +831,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
     let blade = vertex_index / VERTS_PER_NEAR_BLADE;
+    let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
     let packed = vertex_index % VERTS_PER_NEAR_BLADE;
     let segment = packed / 6u;
     let corner = packed % 6u;
@@ -668,17 +846,19 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let clump_spread = select(select(select(0.10, 0.20, archetype == 1u), 0.28, archetype == 2u), 0.14, archetype == 3u);
     let clump_bend = select(select(select(0.70, 1.05, archetype == 1u), 1.45, archetype == 2u), 0.88, archetype == 3u);
     let blade_seed = hash11(inst.xz + vec2<f32>(f32(blade) * 17.0 + 3.0, f32(blade) * 29.0 + 11.0));
-    let base_angle = seed * 6.2831853 + f32(blade) * 1.0471976 + (blade_seed - 0.5) * 0.55;
+    let base_angle = seed * 6.2831853 + f32(blade) * (6.2831853 / blade_count) + (blade_seed - 0.5) * 0.55;
     let radial = vec3<f32>(cos(base_angle), 0.0, sin(base_angle));
     let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
     let base_offset = radial * (clump_spread * mix(0.18, 1.0, blade_seed));
-    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) * grass.blade_height * shape.y * clump_height;
+    let height = mix(0.32, 0.81, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
+        grass.blade_height * shape.y * clump_height * lod_height_scale(inst_packed.z);
     let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
     let width = mix(0.016, 0.043, blade_seed) * shape.x * max(grass.species_mix.z, 0.05) * card_widen;
     let bend_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 23.0, 57.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.z, 0.0, 1.0);
     let static_bend = radial * mix(0.10, 0.34, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * bend_jitter * max(grass.cards.w, 0.0) * height * clump_bend;
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
+    let depth = imprint_depth();
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    let crushed_height = height * (1.0 - depth * crush);
     let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
         (0.035 + 0.21 * wind.gust + wind.turbulence);
@@ -693,7 +873,7 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let taper_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 13.0, 71.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
     let taper = pow(max(1.0 - t, 0.0), max(shape.z * taper_jitter, 0.05));
     let half_width = width * taper;
-    let standing_bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_flutter;
+    let standing_bend = (static_bend + wind_bend) * (1.0 - depth * crush) + crush_flutter;
     let curve = (standing_bend + crush_bend) * (t * t);
     let tangent = vec3<f32>(0.0, crushed_height, 0.0) + (standing_bend + crush_bend) * (2.0 * t);
     // Preserve a minimum apparent silhouette when a card is nearly edge-on
@@ -744,17 +924,18 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let blade_axis = vec3<f32>(-sin(base_angle), 0.0, cos(base_angle));
     let base_offset = radial * mix(0.025, 0.16, blade_seed);
     let height = mix(0.29, 0.71, hash11(inst.xz + vec2<f32>(f32(blade) * 7.0, f32(blade) * 13.0))) *
-        grass.blade_height * shape.y;
+        grass.blade_height * shape.y * lod_height_scale(inst_packed.z);
     let width = mix(0.016, 0.038, blade_seed) * shape.x * max(grass.species_mix.z, 0.05);
     let static_bend = radial * mix(0.10, 0.32, hash11(inst.xz + vec2<f32>(f32(blade) * 19.0, 31.0))) * height;
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
-    let crushed_height = height * (1.0 - 0.55 * crush);
+    let depth = imprint_depth();
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (depth * crush);
+    let crushed_height = height * (1.0 - depth * crush);
     let wind = sample_wind_field(inst.xz + base_offset.xz, t, seed + blade_seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
         (0.030 + 0.18 * wind.gust + wind.turbulence);
     let flutter_dir = rotor_flutter_direction(inst.xz + base_offset.xz, seed + blade_seed);
     let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
-    let bend = (static_bend + wind_bend) * (1.0 - 0.55 * crush) + crush_flutter;
+    let bend = (static_bend + wind_bend) * (1.0 - depth * crush) + crush_flutter;
     let curve = (bend + crush_bend) * (t * t);
     let tangent = vec3<f32>(0.0, crushed_height, 0.0) + (bend + crush_bend) * (2.0 * t);
     let blade_normal = normalize(cross(blade_axis, tangent));
@@ -799,21 +980,43 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     // Quad: (0,0) (1,0) (1,1) / (0,0) (1,1) (0,1) in (u, vertical) space.
     let right = corner == 1u || corner == 2u || corner == 4u;
     let top = corner == 2u || corner == 4u || corner == 5u;
-    let u = select(0.0, 1.0, right);
-    let vh = select(0.0, 1.0, top);
+    let quad_u = select(0.0, 1.0, right);
+    let quad_v = select(0.0, 1.0, top);
+    // Trim the quad to the plate's opaque box. The margin outside it is texels
+    // the alpha test always discarded -- but only after rasterising them and
+    // sampling the texture, on a path that is entirely fill-bound. Shrinking the
+    // geometry to the box removes that work and leaves the image identical,
+    // because the plant occupies exactly the same world space either way.
+    let patch_cell = floor(inst.xz / max(grass.renderer.w, 4.0));
+    let layer = pick_photo_layer(patch_cell);
+    let bounds = photo_layer_bounds(layer);
+    let u = mix(bounds.x, bounds.y, quad_u);
+    // Texture v runs downward, so the BOTTOM of the content is bounds.w and the
+    // top is bounds.z; vh is the fraction of full card height, as before.
+    let img_v = mix(bounds.w, bounds.z, quad_v);
+    let vh = 1.0 - img_v;
 
     let height_seed = mix(hash11(inst.xz + 13.0), clump_noise(inst.xz, 0.21, 0xa47f3cd1u), grass.debug_flags.y * 0.72);
     // A tuft is a clump, so it is wider and taller than the single blade this
     // instance used to represent.
-    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7;
-    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0));
+    // Four stable clump families stop one photographed silhouette repeating:
+    // compact, open, tall and low/splayed. All are world-space deterministic.
+    let family = u32(seed * 4.0);
+    let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
+    let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
+    let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
+        lod_height_scale(inst_packed.z);
+    let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
 
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
-    let crushed_height = height * (1.0 - 0.55 * crush);
-    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (0.55 * crush);
+    let card_depth = imprint_depth_card();
+    let crushed_height = height * (1.0 - card_depth * crush);
+    // 1.35x the vertical press as horizontal displacement, so a crushed card
+    // rotates toward the ground rather than merely shrinking in place.
+    let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (card_depth * 1.35 * crush);
 
     let wind = sample_wind_field(inst.xz, vh, seed);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
@@ -822,7 +1025,7 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     // The whole card leans; roots stay pinned. Quadratic in height, as the
     // procedural blades bend, so a clump does not shear against its neighbours.
-    let lean = (wind_bend * (1.0 - 0.55 * crush) + crush_bend + crush_flutter) * (vh * vh);
+    let lean = (wind_bend * (1.0 - card_depth * crush) + crush_bend + crush_flutter) * (vh * vh);
     let lateral = axis * (u - 0.5) * 2.0 * half_width;
     let rel = inst.xyz + lateral + vec3<f32>(0.0, crushed_height * vh, 0.0) + lean - frame.cam_pos.xyz;
 
@@ -839,13 +1042,13 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     // same stamp repeated: mirror half of them, and take a slightly different
     // horizontal slice per clump. Both are deterministic in world space, so a
     // clump keeps its identity as the camera moves.
+    // The slice inset works within the trimmed box, not the raw image, so a
+    // trimmed card still samples the same content it did untrimmed.
     let mirror = hash11(inst.xz + 5.0) < 0.5;
-    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0));
-    var uu = mix(slice, 1.0 - slice, u);
-    if (mirror) { uu = 1.0 - uu; }
-    // Texture v runs 0 at the top of the tuft image, so flip the vertical param.
-    // The source has its clump base on the bottom edge, so v maps straight.
-    out.blade_uv = vec4<f32>(uu, 1.0 - vh, 0.0, 1.0);
+    let slice = mix(0.0, 0.18, hash11(inst.xz + 41.0)) * (bounds.y - bounds.x);
+    var uu = clamp(mix(bounds.x + slice, bounds.y - slice, quad_u), bounds.x, bounds.y);
+    if (mirror) { uu = bounds.x + bounds.y - uu; }
+    out.blade_uv = vec4<f32>(uu, img_v, f32(layer), 1.0);
     return out;
 }
 
@@ -932,7 +1135,8 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.
     let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
-    let albedo = grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
+    let albedo = grass.tint_procedural.rgb *
+        grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
     // Bend card normals toward an upright rounded-blade normal. This avoids
     // the flat dark-side look of a raw ribbon while preserving its silhouette.
     let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), 0.24));
@@ -961,7 +1165,29 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     // field, not bright individual blades. The same aerial fog removes it
     // naturally at the horizon.
     let gust_highlight = 1.0 + in.wind_gust * clamp(grass.wind_strength, 0.0, 1.5) * 0.05;
-    let albedo = grass_saturation(dry_patch(mix(vec3<f32>(0.075, 0.135, 0.028), vec3<f32>(0.19, 0.27, 0.055), field_noise) * gust_highlight, world.xz, 0.65));
+    // The outer proxy's colour is DERIVED from the grass it stands in for, not
+    // authored separately. Two hardcoded greens were the reason this ring read as
+    // a different material painted on the ground: they were tuned against the
+    // 2001 palette and never moved when the field switched to photographed
+    // plates, so the far ring stayed dark olive while everything nearer went
+    // green. Take the primary plate's measured mean through the same correction
+    // chain as the cards when they are in use, and the procedural blade palette
+    // when they are not, so the join is a change of detail, not of material.
+    let photo_far = grass.species_mix.w > 0.5;
+    let mean_a3 = grass.layer_means[0].rgb * vec3<f32>(0.74, 1.22, 0.56) *
+        clamp(grass.renderer.y, 0.5, 2.5);
+    let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let photo_base = mix(vec3<f32>(mean_luma), mean_a3, clamp(grass.photo_mix.y, 0.0, 2.0));
+    // The procedural blades run root-to-tip base..tip; a ground proxy stands for
+    // the whole blade, so it uses the same pair averaged toward the tip.
+    let procedural_base = mix(vec3<f32>(0.055, 0.16, 0.025), vec3<f32>(0.32, 0.43, 0.10), 0.65);
+    let field_base = select(procedural_base, photo_base, photo_far);
+    // Keep the field-scale light/dark mottle the proxy always had, about the
+    // chosen base rather than between two constants.
+    let tint_source = select(grass.tint_procedural.rgb, grass.tint_photo.rgb, photo_far);
+    let albedo = tint_source *
+        grass_saturation(dry_patch(field_base * mix(0.72, 1.28, field_noise) * gust_highlight,
+                                   world.xz, 0.65));
     let macro_dx = clump_noise(world.xz + vec2<f32>(1.0, 0.0), 0.075, 0x4f93d71bu) -
         clump_noise(world.xz - vec2<f32>(1.0, 0.0), 0.075, 0x4f93d71bu);
     let macro_dz = clump_noise(world.xz + vec2<f32>(0.0, 1.0), 0.075, 0x4f93d71bu) -
@@ -982,12 +1208,78 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
 // GRS-E — photographed tuft card. Alpha-tested cutout, so it must discard in
 // BOTH the colour and prepass entries or the prepass would stamp opaque
 // rectangles into the depth/normal buffer.
-const TUFT_ALPHA_CUTOFF: f32 = 0.5;
+// The atlas mip chain preserves coverage against 0.5 (blade_atlas.rs), so that
+// stays the neutral value; the control exists because several local family
+// plates carry JPEG opacity maps whose compression noise around thin stems
+// flickers, and trimming those partial texels is the direct remedy.
+fn tuft_alpha_cutoff() -> f32 {
+    return clamp(grass.place.w, 0.05, 0.95);
+}
+
+// Near clumps already render into the cascade shadow map. Sample that same map
+// at the cut-out cards so one clump can shade another -- grass-on-grass
+// shadowing is most of what stops a field of photographed plates reading as
+// stickers. Strength is a Grass-tab control: terrain and cloud shadows remain
+// the authoritative long-range occluders, so this only has to supply contact
+// contrast, and solid-black cards are a worse error than a flat one.
+fn tuft_csm_shadow(world_rel: vec3<f32>, normal: vec3<f32>) -> f32 {
+    // Contact shadowing only. Past the first cascades a shadow texel is larger
+    // than a whole clump, so every card samples a map that its neighbours have
+    // filled and the result degenerates into a flat darkening of the distance --
+    // the second reason photographed grass got darker as it receded. Fade it out
+    // where it stops describing anything.
+    let range_fade = 1.0 - smoothstep(45.0, 95.0, length(world_rel));
+    return shadow_strength(world_rel, normal, 1.0, dpdx(world_rel), dpdy(world_rel)) *
+        clamp(grass.photo.z, 0.0, 1.0) * range_fade;
+}
+
+fn tuft_luma(uv: vec2<f32>, layer: i32) -> f32 {
+    let c = textureSampleBias(tuft_tex, blade_samp, uv, layer, 0.75);
+    // Weight by alpha so the transparent gaps BETWEEN stems read as background
+    // rather than as dark texels, which would invert the contour of every edge.
+    return dot(c.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) * c.a;
+}
+
+// Rebuild a per-texel surface normal from the photograph's own luma, so
+// individual stems inside one card catch the sun differently. The base stays
+// upright: the two crossed cards face different ways, and lighting their card
+// normal made the same clump brighten or darken as the camera orbited it.
+//
+// `card_normal` is what vs_grass_mid_tuft wrote, from which the card's
+// horizontal axis is recoverable exactly: n = normalize(-axis.z, 1.15, axis.x).
+fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec3<f32> {
+    let strength = clamp(grass.photo.y, 0.0, 2.0);
+    let up = vec3<f32>(0.0, 1.0, 0.0);
+    if (strength <= 0.001) { return up; }
+    let n = normalize(card_normal);
+    let tangent = normalize(vec3<f32>(n.z, 0.0, -n.x));
+    // Horizontal facing of the card, used for the vertical gradient's tilt.
+    let facing_xz = vec3<f32>(n.x, 0.0, n.z);
+    let facing = select(tangent, normalize(facing_xz), dot(facing_xz, facing_xz) > 0.0001);
+    // The tap offset TRACKS THE SAMPLED FOOTPRINT. A fixed two-texel offset is
+    // right at the top mip and useless further out: once a card is far enough
+    // that its footprint spans several texels, both taps land inside the same
+    // mip texel, the gradient collapses to zero and the contour lighting
+    // silently switches itself off with distance -- so distant cards flatten to
+    // one upright normal while near ones keep their relief. Widening the offset
+    // with the footprint keeps the same relief at every range, and costs
+    // nothing: the taps share the quad's derivatives, so they read the same mip.
+    let footprint = max(length(dpdx(uv)), length(dpdy(uv)));
+    let texel = max(2.0 / 1024.0, footprint * 1.5);
+    let du = tuft_luma(uv + vec2<f32>(texel, 0.0), layer) - tuft_luma(uv - vec2<f32>(texel, 0.0), layer);
+    // Texture v runs downward, so a positive dv means brighter BELOW.
+    let dv = tuft_luma(uv + vec2<f32>(0.0, texel), layer) - tuft_luma(uv - vec2<f32>(0.0, texel), layer);
+    let k = strength * 3.2;
+    return normalize(up + tangent * (-du * k) + facing * (dv * k * 0.6));
+}
 
 @fragment
 fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
-    let tex = textureSample(tuft_tex, blade_samp, in.blade_uv.xy);
-    if (tex.a < TUFT_ALPHA_CUTOFF) { discard; }
+    // Thin photographed stems otherwise flip alpha coverage between adjacent
+    // mip levels as the camera moves. A modest positive bias makes the card
+    // settle before it reaches sub-pixel size without softening close clumps.
+    let tex = textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75);
+    if (tex.a < tuft_alpha_cutoff()) { discard; }
     let world = in.world_rel + frame.cam_pos.xyz;
     // The photo already carries base-to-tip shading, so only the field-scale
     // tint and gust highlight are applied on top -- re-adding the procedural
@@ -1001,14 +1293,62 @@ fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
     // 2001 PAA fallback, whose hue is grey-teal. If that fallback is ever the
     // active texture the mid ring will look desaturated, which is why the
     // authored PNG is preferred at load time.
-    let albedo = grass_saturation(dry_patch(tex.rgb * variation * gust_highlight, world.xz, in.height_t));
-    let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), 0.35));
+    // A3's clutter albedo is authored warmer/duller than CWA's sunlit meadow
+    // palette. Calibrate only the photographed-tuft path, never legacy grass.
+    // The source plate is deliberately dry/brown and CWA's blue skylight makes
+    // its uncorrected shadowed stems read slate grey. Lift green enough for a
+    // meadow while retaining red/blue stem variation; the former 1.85 green
+    // multiplier made bright patches unnaturally saturated.
+    let photo_brightness = clamp(grass.renderer.y, 0.5, 2.5);
+    let a3_albedo = tex.rgb * vec3<f32>(0.74, 1.22, 0.56) * photo_brightness;
+    // The source plates have strong chlorophyll green. Keep their natural
+    // stem variation but pull this card-only correction toward luma before
+    // the user's global grass saturation is applied.
+    let photo_luma = dot(a3_albedo, vec3<f32>(0.2126, 0.7152, 0.0722));
+    // Saturation of the photographed cards about their own luma, exposed
+    // separately from the field-wide grass saturation so the plates can be
+    // matched to the procedural grass rather than moved with it.
+    let photo_sat = clamp(grass.photo_mix.y, 0.0, 2.0);
+    let photo_natural = mix(vec3<f32>(photo_luma), a3_albedo, photo_sat);
+    // Contour contrast. The source plates are flatly lit by design, so pushing
+    // contrast about their own mean is what separates individual stems from the
+    // mass behind them. 1.0 leaves the photograph exactly as authored.
+    //
+    // The pivot is the LAYER'S OWN mean, run through the same correction chain
+    // as the sample so the two are directly comparable. A constant pivot made
+    // contrast darken every plate whose mean fell below it -- and darken it MORE
+    // with distance, because mip averaging pulls each texel toward that mean, so
+    // the near-field cancellation between bright stems and dark gaps disappears.
+    let contrast = clamp(grass.photo.x, 0.5, 2.5);
+    let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 8u)].rgb *
+        vec3<f32>(0.74, 1.22, 0.56) * photo_brightness;
+    let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let plate_pivot = mix(vec3<f32>(mean_luma), mean_a3, photo_sat);
+    let shaped = max((photo_natural - plate_pivot) * contrast + plate_pivot, vec3<f32>(0.0));
+    // Light does not reach the base of a clump. Occluding it there gives the
+    // card a bottom, which is most of why an unoccluded plate floats.
+    let root_ao = mix(1.0 - clamp(grass.photo.w, 0.0, 1.0), 1.0, smoothstep(0.0, 0.55, in.height_t));
+    let albedo = grass.tint_photo.rgb *
+        grass_saturation(dry_patch(shaped * variation * gust_highlight * root_ao, world.xz, in.height_t));
+    // Photo cards are crossed billboards, so the base normal stays upright:
+    // lighting the card's own facing made one clump brighten or darken as the
+    // camera orbited it. The photograph's luma gradient then perturbs that
+    // upright normal per texel, which is view-stable and gives the silhouette
+    // real relief instead of one flat value across the whole plate.
+    let n = tuft_contour_normal(in.blade_uv.xy, i32(in.blade_uv.z), in.normal);
     let light_dir = normalize(frame.sun_dir_world.xyz);
     let ndl = max(dot(n, light_dir), 0.0);
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
+    // Grass shadowing grass. The cascade already contains these same cards
+    // (draw_shadow submits the near and mid tuft rings), so this is a real
+    // occlusion test, not a fake.
+    let clump_shadow = tuft_csm_shadow(in.world_rel, n);
     let cloud_lit = cloud_sun_shadow(world.xz);
-    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.5) * (1.0 - terrain_shadow) * cloud_lit;
+    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.5) *
+        (1.0 - max(terrain_shadow, clump_shadow)) * cloud_lit;
+    // Ambient keeps the softer half-upright normal: the contour detail belongs
+    // in the sun term, and applying it to skylight only flattens it again.
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
     let lit = albedo * (ambient + direct);
     let fogged = apply_fog(lit, in.world_rel);
@@ -1017,7 +1357,7 @@ fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_grass_mid_tuft_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    if (textureSample(tuft_tex, blade_samp, in.blade_uv.xy).a < TUFT_ALPHA_CUTOFF) { discard; }
+    if (textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75).a < tuft_alpha_cutoff()) { discard; }
     let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
     return oct_encode(normalize(normal_view));
 }

@@ -7,6 +7,7 @@
 #include <Poseidon/Core/Global.hpp> // Glob.time (coast wet-band animation clock)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <stb_image.h>
+#include <stb_image_resize2.h>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -20,7 +21,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <string_view>
+#include <system_error>
+#include <vector>
 
 namespace Poseidon
 {
@@ -399,6 +404,144 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
 // blue level with red, i.e. grey-teal rather than green. Falling back to that
 // would hand anyone without this asset a WORSE picture than no photo cards at
 // all, so it is reachable only by pointing WGR_GRASS_TUFT at a converted copy.
+namespace
+{
+// One discovered photographed grass family: a colour plate and the opacity plate
+// that carries its cut-out.
+struct PhotoGrassSource
+{
+    std::string name;
+    std::string colour;
+    std::string opacity;
+};
+
+// The shader indexes a fixed nine-layer array (primary + eight families), so
+// this is the number of families the atlas can carry, not a list of which ones.
+constexpr uint32_t MaxPhotoGrassFamilies = 8;
+
+bool HasSuffixToken(const std::string& stem, std::string_view token)
+{
+    return stem.find(token) != std::string::npos;
+}
+
+// Scan assets/grass/more_grass for colour/opacity plate pairs.
+//
+// The convention is only that the two files sit in the same directory and that
+// their names differ by a role token -- the shipped packs use albedo/opacity
+// (Poliigon-style) and diff/alpha (Poly Haven-style), and both are matched by
+// substituting the token. Anything following either convention works with no
+// code change, which is the point: the families are whatever is installed.
+std::vector<PhotoGrassSource> DiscoverPhotoGrassFamilies(uint32_t limit)
+{
+    namespace fs = std::filesystem;
+    static constexpr std::string_view kColourTokens[] = {"albedo", "diff", "color", "colour", "basecolor"};
+    static constexpr std::string_view kOpacityTokens[] = {"opacity", "alpha", "mask"};
+
+    std::vector<PhotoGrassSource> found;
+    std::error_code ec;
+    const fs::path root{"assets/grass/more_grass"};
+    if (!fs::is_directory(root, ec))
+    {
+        return found;
+    }
+    for (fs::recursive_directory_iterator it{root, fs::directory_options::skip_permission_denied, ec}, end;
+         it != end && found.size() < limit; it.increment(ec))
+    {
+        if (ec)
+        {
+            break;
+        }
+        if (!it->is_regular_file(ec))
+        {
+            continue;
+        }
+        const fs::path& colour = it->path();
+        std::string extension = colour.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (extension != ".jpg" && extension != ".jpeg" && extension != ".png" && extension != ".tga")
+        {
+            continue;
+        }
+        std::string stem = colour.stem().string();
+        std::string lower = stem;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        // Never treat an opacity plate as a colour plate: "..._alpha_4k" also
+        // contains no colour token, but "..._diff_alpha" style names could.
+        bool isOpacity = false;
+        for (std::string_view token : kOpacityTokens)
+        {
+            isOpacity = isOpacity || HasSuffixToken(lower, token);
+        }
+        if (isOpacity)
+        {
+            continue;
+        }
+        std::string_view matched;
+        for (std::string_view token : kColourTokens)
+        {
+            if (HasSuffixToken(lower, token))
+            {
+                matched = token;
+                break;
+            }
+        }
+        if (matched.empty())
+        {
+            continue;
+        }
+        // Find the sibling opacity plate by swapping the role token, trying each
+        // opacity spelling and each supported extension.
+        const size_t at = lower.find(matched);
+        PhotoGrassSource source;
+        for (std::string_view replacement : kOpacityTokens)
+        {
+            std::string candidateStem = stem;
+            candidateStem.replace(at, matched.size(), replacement);
+            for (const char* candidateExt : {".png", ".jpg", ".jpeg", ".tga"})
+            {
+                fs::path candidate = colour.parent_path() / (candidateStem + candidateExt);
+                if (fs::is_regular_file(candidate, ec))
+                {
+                    source.opacity = candidate.string();
+                    break;
+                }
+            }
+            if (!source.opacity.empty())
+            {
+                break;
+            }
+        }
+        if (source.opacity.empty())
+        {
+            continue;
+        }
+        source.colour = colour.string();
+        // Name the family after its own directory when that is descriptive (the
+        // packs each ship in one), otherwise after the plate itself.
+        std::string folder = colour.parent_path().filename().string();
+        source.name = (folder == "textures" || folder.empty()) ? stem : folder;
+        found.push_back(std::move(source));
+    }
+    // Directory iteration order is filesystem-defined; sorting keeps atlas layer
+    // indices stable between runs, so a weight slider means the same family
+    // every time and a saved setting is not silently reassigned.
+    std::sort(found.begin(), found.end(),
+              [](const PhotoGrassSource& a, const PhotoGrassSource& b) { return a.colour < b.colour; });
+    return found;
+}
+} // namespace
+
+const char* TerrainWgpu::GrassPhotoFamilyName(int index) const
+{
+    if (index < 0 || index >= static_cast<int>(_grassPhotoFamilies.size()))
+    {
+        return "";
+    }
+    return _grassPhotoFamilies[static_cast<size_t>(index)].c_str();
+}
+
 void TerrainWgpu::UploadGrassTuft()
 {
     if (!_renderer || _grassTuftUploaded)
@@ -407,28 +550,82 @@ void TerrainWgpu::UploadGrassTuft()
     }
     // Read straight off disk rather than the VFS: the file sits beside the
     // binaries, not in a PBO. stb_image is already vendored for the JPEG loader.
+    // The upload is a fixed nine-layer local texture array: primary A3 clump
+    // plus every available user-local grass family.
     const char* overridePath = std::getenv("WGR_GRASS_TUFT");
-    const char* candidates[] = {
-        overridePath,
-        "assets/grass/meadow-grass-clump-alpha-1024.png",
-    };
-    for (const char* authored : candidates)
+    const char* primary[] = {overridePath, "assets/grass/meadow-grass-clump-alpha-1024.png"};
+    constexpr int TargetSize = 1024;
+    std::vector<uint8_t> layers;
+    const auto appendLayer = [&](const char* colourPath, const char* opacityPath) -> bool
     {
-        if (authored == nullptr || *authored == '\0')
-        {
-            continue;
-        }
         int w = 0, h = 0, channels = 0;
-        uint8_t* pixels = stbi_load(authored, &w, &h, &channels, 4); // force RGBA
+        uint8_t* pixels = stbi_load(colourPath, &w, &h, &channels, 4);
         if (pixels == nullptr)
         {
-            continue;
+            return false;
         }
-        wgr_grass_set_tuft(_renderer, static_cast<uint32_t>(w), static_cast<uint32_t>(h), pixels);
+        std::vector<uint8_t> resized(static_cast<size_t>(TargetSize) * TargetSize * 4u);
+        stbir_resize_uint8_linear(pixels, w, h, w * 4, resized.data(), TargetSize, TargetSize, TargetSize * 4, STBIR_RGBA);
         stbi_image_free(pixels);
+        if (opacityPath != nullptr)
+        {
+            int aw = 0, ah = 0, ac = 0;
+            uint8_t* opacity = stbi_load(opacityPath, &aw, &ah, &ac, 4);
+            if (opacity == nullptr)
+                return false;
+            std::vector<uint8_t> alpha(static_cast<size_t>(TargetSize) * TargetSize * 4u);
+            stbir_resize_uint8_linear(opacity, aw, ah, aw * 4, alpha.data(), TargetSize, TargetSize, TargetSize * 4,
+                                      STBIR_RGBA);
+            stbi_image_free(opacity);
+            for (size_t i = 0; i < resized.size() / 4u; ++i)
+                resized[i * 4u + 3u] = alpha[i * 4u];
+        }
+        layers.insert(layers.end(), resized.begin(), resized.end());
+        return true;
+    };
+    for (const char* authored : primary)
+    {
+        if (authored != nullptr && *authored != '\0' && appendLayer(authored, nullptr))
+            break;
+    }
+    if (!layers.empty())
+    {
+        _grassPhotoFamilies.clear();
+        _grassPhotoFamilies.emplace_back("meadow-grass-clump (primary)");
+        // Local families are DISCOVERED, not listed: anything dropped into
+        // assets/grass/more_grass with a colour plate and a matching opacity
+        // plate becomes a family. Hardcoding the eight that happened to be on one
+        // machine meant the feature only worked on that machine.
+        const size_t primaryBytes = static_cast<size_t>(TargetSize) * TargetSize * 4u;
+        // Copy the primary layer out FIRST. Inserting a range that aliases the
+        // same vector is undefined behaviour the moment the insert reallocates --
+        // and it reallocates on every one of these appends. That fired precisely
+        // when the optional `more_grass` sources are absent, i.e. for anyone who
+        // has not installed the extra grass assets: the fallback path crashed.
+        const std::vector<uint8_t> primaryLayer(layers.begin(), layers.begin() + primaryBytes);
+        for (const PhotoGrassSource& variety : DiscoverPhotoGrassFamilies(MaxPhotoGrassFamilies))
+        {
+            if (appendLayer(variety.colour.c_str(), variety.opacity.c_str()))
+            {
+                _grassPhotoFamilies.push_back(variety.name);
+            }
+            else
+            {
+                LOG_WARN(Graphics, "Wgpu grass: photo family '{}' failed to decode; skipped", variety.name);
+            }
+        }
+        // The shader's layer indices are fixed, so unfilled slots repeat the
+        // primary clump rather than sampling uninitialised memory. They are not
+        // named, so the Grass tab only ever offers families that really exist.
+        const size_t named = _grassPhotoFamilies.size();
+        while (layers.size() < (MaxPhotoGrassFamilies + 1u) * primaryBytes)
+        {
+            layers.insert(layers.end(), primaryLayer.begin(), primaryLayer.end());
+        }
+        wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
         _grassTuftUploaded = true;
-        LOG_INFO(Graphics, "Wgpu grass: mid-LOD clump texture uploaded ({}x{}, {} src channels) from '{}'", w, h,
-                 channels, authored);
+        LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
+                 MaxPhotoGrassFamilies + 1u);
         return;
     }
     // Expected for anyone without the optional asset -- INFO, not a warning.

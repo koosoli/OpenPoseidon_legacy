@@ -7,8 +7,18 @@ use crate::ffi::{
 use crate::gfx3d::{DEPTH_FORMAT, NORMAL_FORMAT};
 use crate::terrain::Terrain;
 
-const GRID_DIM: u32 = 512;
-const MAX_INSTANCES: u32 = GRID_DIM * GRID_DIM;
+// The near placement grid is SIZED FROM THE RADIUS, not fixed. A fixed grid had
+// to widen its spacing to reach a longer radius, so moving the near-radius
+// slider thinned the field instead of extending it: past ~30 m the accepted
+// instance count is constant (pi*r^2 / (k*r)^2), which is exactly the reported
+// "the slider stops doing anything, and the disc around the player is thinner
+// than the mid ring beyond it". Spacing is now radius-independent and the grid
+// grows to cover whatever radius is asked for, up to this cap.
+const NEAR_GRID_MIN: u32 = 64;
+const NEAR_GRID_MAX: u32 = 1536;
+// Compacted output cap. Independent of the candidate grid: a 1536^2 grid only
+// reaches this if nearly every candidate is accepted.
+const MAX_INSTANCES: u32 = 1_048_576;
 // A separate coarse ring follows the reference project's distance LOD idea,
 // but stays GPU-generated and camera-snapped rather than using moving CPU tiles.
 const FAR_GRID_DIM: u32 = 384;
@@ -16,8 +26,26 @@ const MAX_FAR_INSTANCES: u32 = FAR_GRID_DIM * FAR_GRID_DIM;
 // The middle ring keeps a real blade silhouette between the dense cards and
 // the single-triangle distance field.  It is intentionally separate from the
 // far ring: a three-level field avoids the obvious 25-50 m quality cliff.
-const MID_GRID_DIM: u32 = 384;
-const MAX_MID_INSTANCES: u32 = MID_GRID_DIM * MID_GRID_DIM;
+// A fixed 768² grid lets the mid ring keep one placement spacing while its
+// radius is adjusted in the developer tools; changing the radius must change
+// coverage, not thin or thicken the field.
+// The mid grid is sized from the mid radius for the same reason as the near one,
+// except that here the spacing was already fixed: a 768-cell grid at 0.82 m spans
+// only +-315 m, so a 400 m mid radius would have been a 315 m square. Sizing it
+// from the radius also makes the common short-radius case cheaper than the old
+// fixed grid rather than more expensive.
+const MID_GRID_MIN: u32 = 64;
+// Enough cells to span the full mid reach at MID_PLACEMENT_SPACING (2 * 1000 /
+// 0.82), so the ring is never a square smaller than its radius.
+const MID_GRID_MAX: u32 = 2440;
+// Deliberately NOT the grid area: a 2440^2 candidate grid would imply a 190 MB
+// instance buffer permanently allocated for a radius almost nobody sets. The
+// compute pass pins its counter at this cap instead, so a mid ring asked for
+// more clumps than the buffer holds thins out rather than overruns.
+const MAX_MID_INSTANCES: u32 = 1_048_576;
+// Outer bound on the mid ring, mirroring MID_RING_MAX in grass.wgsl and
+// GrassSettings::midRadius' slider maximum.
+const MID_RING_MAX: f32 = 1000.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -67,6 +95,36 @@ struct GrassParams {
     alpha_cutoff: f32,
     card_widen: f32,
     blade_arch: f32,
+    clump_renderer: f32,
+    photo_tuft_brightness: f32,
+    photo_tuft_mix: f32,
+    photo_tuft_patch_size: f32,
+    // Photo-card look block; mirrors `photo` in grass.wgsl.
+    photo_contrast: f32,
+    photo_contour: f32,
+    photo_self_shadow: f32,
+    photo_root_ao: f32,
+    // Placement block; mirrors `place` in grass.wgsl.
+    near_grid_dim: f32,
+    mid_grid_dim: f32,
+    lod_blend: f32,
+    photo_alpha_cutoff: f32,
+    // Layer-mix block; mirrors `photo_mix` and `layer_weights` in grass.wgsl.
+    photo_force_layer: f32,
+    photo_saturation: f32,
+    track_lifetime: f32,
+    imprint_depth: f32,
+    photo_layer_weights: [f32; 8],
+    // Per-LOD coverage block; mirrors `lod_density` in grass.wgsl.
+    near_density: f32,
+    mid_density: f32,
+    far_density: f32,
+    _pad_density: f32,
+    tint_procedural: [f32; 4],
+    tint_photo: [f32; 4],
+    // Renderer-derived from the uploaded atlas, never from the caller.
+    photo_layer_bounds: [f32; 36],
+    photo_layer_means: [f32; 36],
 }
 
 /// Mirrors `GrassInstance` in grass.wgsl and grass_shadow.wgsl (32 B). `packed`
@@ -80,6 +138,7 @@ struct GrassInstance {
     packed: [u32; 4],
 }
 
+#[derive(Clone, Copy)]
 pub enum GrassPass {
     Color,
     ColorNoWrite,
@@ -157,9 +216,13 @@ pub struct Grass {
     mid_tuft_prepass_pipeline: wgpu::RenderPipeline,
     mid_tuft_color_pipeline: wgpu::RenderPipeline,
     mid_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
+    near_tuft_prepass_pipeline: wgpu::RenderPipeline,
+    near_tuft_color_pipeline: wgpu::RenderPipeline,
+    near_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
     far_color_pipeline: wgpu::RenderPipeline,
     far_color_no_write_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    tuft_shadow_pipeline: wgpu::RenderPipeline,
     stats_buffers: Vec<(wgpu::Buffer, StatsSlot)>,
     stats: GrassStats,
     // GRS-E: kept so the three data binds can be rebuilt when the tuft arrives
@@ -176,6 +239,16 @@ pub struct Grass {
     // have_tuft = the PAA loaded; tuft_enabled = the Grass tab also asked for it.
     // Default off: the procedural mid ribbons are the known-good look.
     tuft_enabled: bool,
+    // Near candidate grid edge in cells, derived in set_params from radius and
+    // spacing. Drives the compute dispatch, so a short radius costs less than a
+    // long one instead of every radius paying for one fixed 512^2 grid.
+    near_grid_dim: u32,
+    // Mid candidate grid edge, derived the same way from the mid ring's reach.
+    mid_grid_dim: u32,
+    // Opaque bounds of the uploaded photo atlas, (u0, u1, v0, v1) per layer.
+    tuft_bounds: [f32; 36],
+    // Mean covered colour per layer, the contrast pivot.
+    tuft_means: [f32; 36],
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
@@ -290,6 +363,31 @@ impl Grass {
             alpha_cutoff: 0.5,
             card_widen: 1.6,
             blade_arch: 1.0,
+            clump_renderer: 1.0,
+            photo_tuft_brightness: 1.25,
+            photo_tuft_mix: 1.0,
+            photo_tuft_patch_size: 18.0,
+            photo_contrast: 1.35,
+            photo_contour: 1.85,
+            photo_self_shadow: 1.0,
+            photo_root_ao: 0.45,
+            near_grid_dim: 256.0,
+            mid_grid_dim: 512.0,
+            lod_blend: 30.0,
+            photo_alpha_cutoff: 0.5,
+            photo_force_layer: -1.0,
+            photo_saturation: 0.62,
+            track_lifetime: 600.0,
+            imprint_depth: 0.55,
+            photo_layer_weights: [1.0; 8],
+            near_density: 1.0,
+            mid_density: 0.95,
+            far_density: 1.0,
+            _pad_density: 0.0,
+            tint_procedural: [1.0, 1.0, 1.0, 1.0],
+            tint_photo: [1.0, 1.0, 1.0, 1.0],
+            photo_layer_bounds: default_layer_bounds(),
+            photo_layer_means: default_layer_means(),
         };
         queue.write_buffer(&grass_params, 0, bytemuck::bytes_of(&params));
 
@@ -516,7 +614,7 @@ impl Grass {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -736,6 +834,9 @@ impl Grass {
             surface_format,
             false,
         );
+        let near_tuft_prepass_pipeline = make_pipeline("wgr_grass_near_tuft_prepass", "vs_grass_mid_tuft", "fs_grass_mid_tuft_prepass", NORMAL_FORMAT, true);
+        let near_tuft_color_pipeline = make_pipeline("wgr_grass_near_tuft_color", "vs_grass_mid_tuft", "fs_grass_mid_tuft", surface_format, true);
+        let near_tuft_color_no_write_pipeline = make_pipeline("wgr_grass_near_tuft_color_no_write", "vs_grass_mid_tuft", "fs_grass_mid_tuft", surface_format, false);
         let far_color_pipeline = make_pipeline(
             "wgr_grass_far_color",
             "vs_grass_far",
@@ -796,10 +897,42 @@ impl Grass {
             multiview_mask: None,
             cache: None,
         });
+        let tuft_shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_grass_tuft_shadow"),
+            layout: Some(&shadow_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some("vs_grass_tuft_shadow"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState { constant: 4, slope_scale: 2.5, clamp: 0.0 },
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_shader,
+                entry_point: Some("fs_grass_tuft_shadow"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self {
             enabled,
             casts_shadows: true,
-            // Matches the GrassSettings default (farRadius = 0, outer ring off).
+            // SetGrassSettings publishes GrassSettings' 800 m far ring on the
+            // first frame; start disabled only until that initial upload.
             far_enabled: false,
             terrain_params,
             grass_params,
@@ -833,9 +966,13 @@ impl Grass {
             mid_tuft_prepass_pipeline,
             mid_tuft_color_pipeline,
             mid_tuft_color_no_write_pipeline,
+            near_tuft_prepass_pipeline,
+            near_tuft_color_pipeline,
+            near_tuft_color_no_write_pipeline,
             far_color_pipeline,
             far_color_no_write_pipeline,
             shadow_pipeline,
+            tuft_shadow_pipeline,
             stats_buffers: (0..STATS_SLOTS)
                 .map(|i| {
                     (
@@ -850,8 +987,8 @@ impl Grass {
                 })
                 .collect(),
             stats: GrassStats {
-                near_candidates: MAX_INSTANCES,
-                mid_candidates: MAX_MID_INSTANCES,
+                near_candidates: 256 * 256,
+                mid_candidates: 512 * 512,
                 far_candidates: MAX_FAR_INSTANCES,
                 ..Default::default()
             },
@@ -865,6 +1002,10 @@ impl Grass {
             tuft_view,
             have_tuft: false,
             tuft_enabled: false,
+            near_grid_dim: 256,
+            mid_grid_dim: 512,
+            tuft_bounds: default_layer_bounds(),
+            tuft_means: default_layer_means(),
             last_params: params,
         }
     }
@@ -879,11 +1020,30 @@ impl Grass {
         height: u32,
         rgba: &[u8],
     ) {
-        let Some(view) = blade_atlas::create_tuft(device, queue, width, height, rgba) else {
+        self.set_tufts(device, queue, width, height, 1, rgba);
+    }
+
+    pub fn set_tufts(
+        &mut self, device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32, layers: u32, rgba: &[u8],
+    ) {
+        let Some(view) = blade_atlas::create_tufts(device, queue, width, height, layers, rgba) else {
             return;
         };
         self.tuft_view = view;
         self.have_tuft = true;
+        // Trim bounds are a property of the atlas, so they are computed here and
+        // republished with the params below -- never taken from the caller.
+        let bounds = blade_atlas::tuft_bounds(width, height, layers, rgba);
+        for (layer, b) in bounds.iter().enumerate() {
+            self.tuft_bounds[layer * 4..layer * 4 + 4].copy_from_slice(b);
+        }
+        let means = blade_atlas::tuft_layer_means(width, height, layers, rgba);
+        for (layer, m) in means.iter().enumerate() {
+            self.tuft_means[layer * 4..layer * 4 + 4].copy_from_slice(m);
+        }
+        self.last_params.photo_layer_bounds = self.tuft_bounds;
+        self.last_params.photo_layer_means = self.tuft_means;
+        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
         // Uploads normally arrive after the game has pushed GrassSettings. Keep
         // that opt-in live immediately instead of requiring a UI slider nudge.
         self.tuft_enabled = self.last_params.use_photo_tuft != 0.0;
@@ -985,10 +1145,32 @@ impl Grass {
     }
 
     pub fn set_params(&mut self, queue: &wgpu::Queue, params: WgrGrassParams) {
+        // Spacing and radius are now independent. The lower spacing bound is the
+        // real density ceiling ("boost the coverage far more"): 0.10 m limited a
+        // clump grid to 0.32 m centres no matter what the Grass tab asked for.
+        let spacing = params.spacing.clamp(0.02, 0.75);
+        let near_radius = params.near_radius.clamp(8.0, 200.0);
+        // Must mirror cs_place's `near_spacing`.
+        let near_spacing = spacing * if params.clump_renderer != 0.0 { 3.20 } else { 1.72 };
+        // The grid has to span the whole disc, so its edge is the diameter. Round
+        // up to the workgroup size and cap; at the cap the field is bounded by a
+        // square smaller than the radius, which is visible but never a silent
+        // density change.
+        let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
+        let near_grid_dim = want.div_ceil(8).saturating_mul(8).clamp(NEAR_GRID_MIN, NEAR_GRID_MAX);
+        // Mirrors mid_ring_end() in grass.wgsl. Both must agree: the shader
+        // decides which candidates to accept, this decides how many exist.
+        let mid_radius = params.mid_radius.clamp(8.0, MID_RING_MAX);
+        let mid_natural = (near_radius + 10.0).max((near_radius * 2.5).min(MID_RING_MAX));
+        let mid_end = if mid_radius > near_radius { mid_radius } else { mid_natural }
+            .clamp(near_radius + 10.0, MID_RING_MAX);
+        // MID_PLACEMENT_SPACING in grass.wgsl.
+        let want_mid = (2.0 * mid_end / 0.82).ceil().max(0.0) as u32;
+        let mid_grid_dim = want_mid.div_ceil(8).saturating_mul(8).clamp(MID_GRID_MIN, MID_GRID_MAX);
         let params = GrassParams {
             density: params.density.clamp(0.0, 1.0),
-            spacing: params.spacing.clamp(0.10, 0.75),
-            near_radius: params.near_radius.clamp(8.0, 128.0),
+            spacing,
+            near_radius,
             enabled: if params.enabled != 0.0 { 1.0 } else { 0.0 },
             blade_height: params.blade_height.clamp(0.10, 3.0),
             wind_strength: params.wind_strength.clamp(0.0, 3.0),
@@ -1020,7 +1202,7 @@ impl Grass {
             saturation: params.saturation.clamp(0.0, 2.0),
             dry_patches: params.dry_patches.clamp(0.0, 1.0),
             dry_patch_scale: params.dry_patch_scale.clamp(0.002, 0.3),
-            mid_radius: params.mid_radius.clamp(8.0, 160.0),
+            mid_radius,
             shape_variety: params.shape_variety.clamp(0.0, 1.0),
             taper_jitter: params.taper_jitter.clamp(0.0, 1.0),
             bend_jitter: params.bend_jitter.clamp(0.0, 1.0),
@@ -1031,7 +1213,40 @@ impl Grass {
             alpha_cutoff: params.alpha_cutoff.clamp(0.05, 0.95),
             card_widen: params.card_widen.clamp(1.0, 4.0),
             blade_arch: params.blade_arch.clamp(0.0, 3.0),
+            clump_renderer: if params.clump_renderer != 0.0 { 1.0 } else { 0.0 },
+            photo_tuft_brightness: params.photo_tuft_brightness.clamp(0.5, 2.5),
+            photo_tuft_mix: params.photo_tuft_mix.clamp(0.0, 1.0),
+            photo_tuft_patch_size: params.photo_tuft_patch_size.clamp(4.0, 80.0),
+            photo_contrast: params.photo_contrast.clamp(0.5, 2.5),
+            photo_contour: params.photo_contour.clamp(0.0, 2.0),
+            photo_self_shadow: params.photo_self_shadow.clamp(0.0, 1.0),
+            photo_root_ao: params.photo_root_ao.clamp(0.0, 1.0),
+            near_grid_dim: near_grid_dim as f32,
+            mid_grid_dim: mid_grid_dim as f32,
+            lod_blend: params.lod_blend.clamp(0.0, 40.0),
+            photo_alpha_cutoff: params.photo_alpha_cutoff.clamp(0.05, 0.95),
+            // Anything outside 0..8 means "no override"; the shader tests < -0.5.
+            photo_force_layer: if (0.0..=8.0).contains(&params.photo_force_layer) {
+                params.photo_force_layer.round()
+            } else {
+                -1.0
+            },
+            photo_saturation: params.photo_saturation.clamp(0.0, 2.0),
+            track_lifetime: params.track_lifetime.clamp(5.0, 3600.0),
+            imprint_depth: params.imprint_depth.clamp(0.0, 0.95),
+            photo_layer_weights: params.photo_layer_weights.map(|w| w.clamp(0.0, 1.0)),
+            near_density: params.near_density.clamp(0.0, 1.0),
+            mid_density: params.mid_density.clamp(0.0, 1.0),
+            far_density: params.far_density.clamp(0.0, 1.0),
+            _pad_density: 0.0,
+            tint_procedural: clamp_tint(params.tint_procedural),
+            tint_photo: clamp_tint(params.tint_photo),
+            // Always the renderer's own measurement of the loaded atlas.
+            photo_layer_bounds: self.tuft_bounds,
+            photo_layer_means: self.tuft_means,
         };
+        self.near_grid_dim = near_grid_dim;
+        self.mid_grid_dim = mid_grid_dim;
         self.last_params = params;
         self.enabled = params.enabled != 0.0;
         self.casts_shadows = params.cast_shadows != 0.0;
@@ -1085,7 +1300,7 @@ impl Grass {
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
-        pass.dispatch_workgroups(GRID_DIM / 8, GRID_DIM / 8, 1);
+        pass.dispatch_workgroups(self.near_grid_dim / 8, self.near_grid_dim / 8, 1);
         drop(pass);
         timers.end(encoder, Region::GrassPlaceNear);
         timers.begin(encoder, Region::GrassPlaceMid);
@@ -1097,7 +1312,7 @@ impl Grass {
         mid_pass.set_bind_group(0, camera_bind, &[camera_offset]);
         mid_pass.set_bind_group(1, &self.terrain_bind, &[]);
         mid_pass.set_bind_group(2, &self.mid_data_bind, &[]);
-        mid_pass.dispatch_workgroups(MID_GRID_DIM / 8, MID_GRID_DIM / 8, 1);
+        mid_pass.dispatch_workgroups(self.mid_grid_dim / 8, self.mid_grid_dim / 8, 1);
         drop(mid_pass);
         timers.end(encoder, Region::GrassPlaceMid);
         if self.far_enabled {
@@ -1173,29 +1388,40 @@ impl Grass {
             }
         }
         // Vertex counts mirror reset_indirect's per-LOD vertex-per-instance values.
-        self.stats.near_vertices = self.stats.near_instances * 180;
+        let photo_near = self.tuft_enabled && self.last_params.clump_renderer != 0.0;
+        self.stats.near_vertices = self.stats.near_instances * if photo_near { 12 } else if self.last_params.clump_renderer != 0.0 { 360 } else { 180 };
         self.stats.mid_vertices = self.stats.mid_instances * if self.tuft_enabled { 12 } else { 108 };
         self.stats.far_vertices = self.stats.far_instances * 6;
     }
 
     pub fn stats(&self) -> GrassStats {
+        // Candidate totals are the live dispatch sizes, not constants: both the
+        // near and mid grids are sized from their radius so density no longer
+        // varies with it.
+        let near_candidates = self.near_grid_dim * self.near_grid_dim;
+        let mid_candidates = self.mid_grid_dim * self.mid_grid_dim;
         if !self.enabled || !self.have_heightmap {
             return GrassStats {
-                near_candidates: MAX_INSTANCES,
-                mid_candidates: MAX_MID_INSTANCES,
+                near_candidates,
+                mid_candidates,
                 far_candidates: MAX_FAR_INSTANCES,
                 ..Default::default()
             };
         }
-        self.stats
+        GrassStats {
+            near_candidates,
+            mid_candidates,
+            ..self.stats
+        }
     }
 
     pub fn reset_indirect(&self, queue: &wgpu::Queue) {
         queue.write_buffer(&self.placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.mid_placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
-        // Near LOD: six five-segment opaque ribbons per clump (6 * 5 * 6).
-        queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[180u32, 0, 0, 0]));
+        // GRS-030 doubles blades per clump and spaces centres farther apart.
+        let near_verts: u32 = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 { 12 } else if self.last_params.clump_renderer != 0.0 { 360 } else { 180 };
+        queue.write_buffer(&self.indirect, 0, bytemuck::cast_slice(&[near_verts, 0, 0, 0]));
         // Mid LOD is either six opaque three-segment ribbons per clump, or two
         // crossed, alpha-tested photo cards (2 * 6 vertices) when a compatible
         // tuft has been explicitly enabled.
@@ -1273,7 +1499,13 @@ impl Grass {
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.mid_data_bind, &[]);
         pass.draw_indirect(&self.mid_indirect, 0);
-        pass.set_pipeline(pipeline);
+        let near_pipeline = match (kind, self.tuft_enabled && self.last_params.clump_renderer != 0.0) {
+            (GrassPass::Color, true) => &self.near_tuft_color_pipeline,
+            (GrassPass::ColorNoWrite, true) => &self.near_tuft_color_no_write_pipeline,
+            (GrassPass::Prepass, true) => &self.near_tuft_prepass_pipeline,
+            _ => pipeline,
+        };
+        pass.set_pipeline(near_pipeline);
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
@@ -1281,9 +1513,9 @@ impl Grass {
         timers.end_pass(pass, region);
     }
 
-    /// Dense near blades are the only grass LOD that casts. This keeps the
-    /// cascade cost bounded while matching the close-range silhouettes that
-    /// players can actually see moving in the wind.
+    /// Near grass always casts. When photographed clump cards are enabled, the
+    /// mid cards also enter the cascade: otherwise they look ungrounded and
+    /// cannot shade each other or the terrain at their visible range.
     pub fn draw_shadow(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
@@ -1296,17 +1528,73 @@ impl Grass {
         }
         use crate::gpu_timers::Region;
         timers.begin_pass(pass, Region::GrassShadow);
-        pass.set_pipeline(&self.shadow_pipeline);
+        let near_shadow_pipeline = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 {
+            &self.tuft_shadow_pipeline
+        } else {
+            &self.shadow_pipeline
+        };
+        pass.set_pipeline(near_shadow_pipeline);
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
         pass.draw_indirect(&self.indirect, 0);
+        if self.tuft_enabled {
+            pass.set_pipeline(&self.tuft_shadow_pipeline);
+            pass.set_bind_group(2, &self.mid_data_bind, &[]);
+            pass.draw_indirect(&self.mid_indirect, 0);
+        }
         timers.end_pass(pass, Region::GrassShadow);
+    }
+
+    /// Whether a photographed clump atlas was actually uploaded. The Grass tab
+    /// uses this to say so plainly instead of leaving the user with a ticked box
+    /// and procedural grass; the renderer falls back either way.
+    pub fn have_photo_clumps(&self) -> bool {
+        self.have_tuft
     }
 
     pub fn casts_shadows(&self) -> bool {
         self.casts_shadows && self.enabled && self.have_heightmap
     }
+}
+
+/// Tints multiply albedo, so a negative would flip a channel and a large value
+/// would blow the field out past anything the sun does. The alpha slot is unused
+/// and pinned to 1 so the vec4 stays predictable in the shader.
+fn clamp_tint(tint: [f32; 4]) -> [f32; 4] {
+    [
+        tint[0].clamp(0.0, 4.0),
+        tint[1].clamp(0.0, 4.0),
+        tint[2].clamp(0.0, 4.0),
+        1.0,
+    ]
+}
+
+/// Neutral contrast pivots until a real atlas arrives. 0.34 is the constant the
+/// pivot used to be hardcoded to, so an un-measured layer behaves as before.
+fn default_layer_means() -> [f32; 36] {
+    let mut out = [0.0f32; 36];
+    for layer in 0..blade_atlas::TUFT_LAYERS {
+        out[layer * 4] = 0.34;
+        out[layer * 4 + 1] = 0.34;
+        out[layer * 4 + 2] = 0.34;
+        out[layer * 4 + 3] = 1.0;
+    }
+    out
+}
+
+/// Untrimmed card bounds: (u0, u1, v0, v1) = the full quad for every layer. What
+/// the shader sees until a real atlas arrives, and what it falls back to for any
+/// layer whose plate has no transparent margin.
+fn default_layer_bounds() -> [f32; 36] {
+    let mut out = [0.0f32; 36];
+    for layer in 0..blade_atlas::TUFT_LAYERS {
+        out[layer * 4] = 0.0;
+        out[layer * 4 + 1] = 1.0;
+        out[layer * 4 + 2] = 0.0;
+        out[layer * 4 + 3] = 1.0;
+    }
+    out
 }
 
 fn make_geography_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {

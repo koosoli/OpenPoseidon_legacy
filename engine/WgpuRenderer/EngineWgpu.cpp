@@ -3656,21 +3656,25 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         return;
     }
     const float dt = std::clamp(static_cast<float>(GetLastFrameDuration()) * 0.001f, 0.001f, 0.100f);
+    const float trackLifetime = std::clamp(settings.trackLifetime, 5.0f, 3600.0f);
     for (WgrGrassTrack& track : _grassTracks)
     {
-        // Keep impressions for a full minute. They still recover, but a
-        // player can now look back over a meaningful walking trail instead
-        // of watching it vanish after a few seconds.
-        track.age = std::min(track.age + dt, 60.0f);
+        track.age = std::min(track.age + dt, trackLifetime);
     }
 
     WgrGrassParams params{};
     params.density = std::clamp(settings.density, 0.0f, 1.0f);
-    const float densityBoost = std::clamp(settings.densityBoost, 1.0f, 4.0f);
-    params.spacing = std::clamp(settings.spacing / std::sqrt(densityBoost), 0.10f, 0.75f);
-    // The dense 512x512 grid covers the inner ring. The coarse LOD uses the
-    // requested full radius (up to 5 km) with adaptive spacing.
-    params.near_radius = std::min(std::clamp(settings.radius, 8.0f, 5000.0f), params.spacing * 255.0f);
+    const float densityBoost = std::clamp(settings.densityBoost, 1.0f, 64.0f);
+    const float requestedNearRadius = std::clamp(settings.radius, 8.0f, 200.0f);
+    // Spacing is the density control and NOTHING else. It used to be floored at
+    // `radius / 255` so a fixed 512-cell grid could always span the radius, which
+    // meant every metre of extra reach thinned the field by the same factor it
+    // widened it: past ~30 m the near ring held a constant number of clumps, the
+    // slider appeared dead, and the disc around the player was visibly sparser
+    // than the fixed-spacing mid ring beyond it. The renderer now sizes the
+    // placement grid from the radius instead (see NEAR_GRID_MAX in grass/mod.rs).
+    params.spacing = std::clamp(settings.spacing / std::sqrt(densityBoost), 0.02f, 0.75f);
+    params.near_radius = requestedNearRadius;
     params.enabled = settings.enabled ? 1.0f : 0.0f;
     params.blade_height = std::clamp(settings.height, 0.10f, 3.00f);
     params.wind_strength = std::clamp(settings.windStrength, 0.0f, 3.0f);
@@ -3698,7 +3702,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // full candidate dispatch every frame and emitted nothing.
     // 0 disables the outer ring entirely (and skips its dispatch); any other
     // value is floored past the mid ring so it can never land in the dead band.
-    const float midReach = std::clamp(settings.midRadius, params.near_radius + 10.0f, 160.0f);
+    const float midReach = std::clamp(settings.midRadius, params.near_radius + 10.0f, 1000.0f);
     params.mid_radius = midReach;
     params.far_radius = settings.farRadius <= 0.0f ? 0.0f : std::clamp(settings.farRadius, midReach + 8.0f, 5000.0f);
     params.density_noise_scale = std::clamp(settings.densityNoiseScale, 0.002f, 0.5f);
@@ -3716,6 +3720,35 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.alpha_cutoff = std::clamp(settings.alphaCutoff, 0.05f, 0.95f);
     params.card_widen = std::clamp(settings.cardWiden, 1.0f, 4.0f);
     params.blade_arch = std::clamp(settings.bladeArch, 0.0f, 3.0f);
+    params.clump_renderer = settings.clumpRenderer ? 1.0f : 0.0f;
+    params.photo_tuft_brightness = std::clamp(settings.photoTuftBrightness, 0.5f, 2.5f);
+    params.photo_tuft_mix = std::clamp(settings.photoTuftMix, 0.0f, 1.0f);
+    params.photo_tuft_patch_size = std::clamp(settings.photoTuftPatchSize, 4.0f, 80.0f);
+    params.photo_contrast = std::clamp(settings.photoContrast, 0.5f, 2.5f);
+    params.photo_contour = std::clamp(settings.photoContour, 0.0f, 2.0f);
+    params.photo_self_shadow = std::clamp(settings.photoSelfShadow, 0.0f, 1.0f);
+    params.photo_root_ao = std::clamp(settings.photoRootAo, 0.0f, 1.0f);
+    params.photo_alpha_cutoff = std::clamp(settings.photoAlphaCutoff, 0.05f, 0.95f);
+    params.photo_saturation = std::clamp(settings.photoSaturation, 0.0f, 2.0f);
+    params.track_lifetime = trackLifetime;
+    params.imprint_depth = std::clamp(settings.imprintDepth, 0.0f, 0.95f);
+    params.photo_force_layer =
+        settings.photoForceLayer < 0 ? -1.0f : static_cast<float>(std::min(settings.photoForceLayer, 8));
+    for (size_t i = 0; i < std::size(params.photo_layer_weights); ++i)
+    {
+        params.photo_layer_weights[i] = std::clamp(settings.photoLayerWeights[i], 0.0f, 1.0f);
+    }
+    params.lod_blend = std::clamp(settings.lodBlend, 0.0f, 40.0f);
+    params.near_density = std::clamp(settings.nearDensity, 0.0f, 1.0f);
+    params.mid_density = std::clamp(settings.midDensity, 0.0f, 1.0f);
+    params.far_density = std::clamp(settings.farDensity, 0.0f, 1.0f);
+    for (int i = 0; i < 3; ++i)
+    {
+        params.tint_procedural[i] = std::clamp(settings.tintProcedural[i], 0.0f, 4.0f);
+        params.tint_photo[i] = std::clamp(settings.tintPhoto[i], 0.0f, 4.0f);
+    }
+    params.tint_procedural[3] = 1.0f;
+    params.tint_photo[3] = 1.0f;
     params.weed_percent = std::clamp(settings.weedPercent, 0.0f, 1.0f);
     params.flower_percent = std::clamp(settings.flowerPercent, 0.0f, 1.0f - params.weed_percent);
     // Everon/Eden's legacy geography marks normal terrain as excluded. The
@@ -3764,7 +3797,16 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         // the fixed GPU record budget.
         const float trackSpacing = std::max(0.75f, params.interactor_radius * 0.50f);
         const float moved2 = _haveGrassTrackPos ? (pos - _lastGrassTrackPos).SquareSizeXZ() : 1e9f;
-        if (!_haveGrassTrackPos || moved2 >= trackSpacing * trackSpacing || _grassTrackSampleTime >= 0.22f)
+        // Stamp on DISTANCE MOVED, not elapsed time. The old 0.22 s fallback
+        // fired while standing still, so a stationary player overwrote the whole
+        // ring in a few seconds and erased the trail they had just walked --
+        // which is why imprints appeared to expire far sooner than their stated
+        // lifetime. Where the player actually is now is covered by the live
+        // interactor; the ring only has to record where they have BEEN. The time
+        // term survives as a slow floor so a very slow crawl still leaves a mark.
+        const bool movedEnough = moved2 >= trackSpacing * trackSpacing;
+        const bool crawling = _grassTrackSampleTime >= 1.5f && moved2 >= 0.04f;
+        if (!_haveGrassTrackPos || movedEnough || crawling)
         {
             _grassTracks[_nextGrassTrack] = WgrGrassTrack{pos.X(), pos.Z(), params.interactor_radius, 0.0f};
             _nextGrassTrack = (_nextGrassTrack + 1) % _grassTracks.size();
@@ -3836,6 +3878,21 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
 const Helicopter* EngineWgpu::LastGrassRotor() const
 {
     return _lastGrassRotor;
+}
+
+bool EngineWgpu::HasGrassPhotoClumps() const
+{
+    return _renderer != nullptr && wgr_grass_have_photo_clumps(_renderer) != 0;
+}
+
+int EngineWgpu::GetGrassPhotoFamilyCount() const
+{
+    return _terrain ? _terrain->GrassPhotoFamilyCount() : 0;
+}
+
+const char* EngineWgpu::GetGrassPhotoFamilyName(int index) const
+{
+    return _terrain ? _terrain->GrassPhotoFamilyName(index) : "";
 }
 
 int EngineWgpu::GetGrassSurfaceCount() const

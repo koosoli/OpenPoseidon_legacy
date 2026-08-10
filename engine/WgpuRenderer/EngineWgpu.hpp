@@ -169,6 +169,9 @@ class EngineWgpu : public EngineDummy
       bool CanGrass() const override { return _renderer != nullptr; }
       GrassSettings GetGrassSettings() const override { return _grass; }
       void SetGrassSettings(const GrassSettings& settings) override;
+      bool HasGrassPhotoClumps() const override;
+      int GetGrassPhotoFamilyCount() const override;
+      const char* GetGrassPhotoFamilyName(int index) const override;
       int GetGrassSurfaceCount() const override;
       const char* GetGrassLoadedMapName() const override;
       const char* GetGrassSurfaceName(int index) const override;

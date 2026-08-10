@@ -3301,6 +3301,14 @@ impl Renderer {
             .set_tuft(&self.device, &self.queue, width, height, rgba);
     }
 
+    fn grass_set_tufts(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
+        self.grass.set_tufts(&self.device, &self.queue, width, height, layers, rgba);
+    }
+
+    fn grass_have_photo_clumps(&self) -> bool {
+        self.grass.have_photo_clumps()
+    }
+
     fn grass_set_blade_atlas(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
         self.grass
             .set_blade_atlas(&self.device, &self.queue, width, height, layers, rgba);

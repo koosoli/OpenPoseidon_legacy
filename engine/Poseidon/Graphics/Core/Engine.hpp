@@ -1095,56 +1095,59 @@ class Engine : public IGraphicsEngine
         // Ultra dense is the production default.  The outer GPU LOD keeps the
         // default 60 m field affordable while the inner cards remain detailed.
         float density = 1.0f;
-        float spacing = 0.20f;
+        float spacing = 0.10f;
         // Detail radius: dense near clumps only. Mid reach is independent so a
         // bad far proxy never forces the detailed grass to stop too close.
-        float radius = 30.0f;
-        // Opaque mid-clump reach. Clamped above the near ring and below the
-        // fixed grid's 160 m quality bound by the WGPU backend.
-        float midRadius = 100.0f;
+        float radius = 41.0f;
+        // Opaque mid-clump reach. Clamped above the near ring by the WGPU
+        // backend, which sizes the mid placement grid from this so its spacing --
+        // and therefore mid density -- stays fixed all the way to 400 m.
+        float midRadius = 210.0f;
         // Outer terrain-cover ring. 0 = off (the historical behaviour: grass
         // simply ends at the mid ring). When on it MUST stay above the mid
         // ring's reach or the far LOD's accept band is empty, so the mapping
         // in EngineWgpu floors it -- there is no silently-dead middle ground.
-        // Off by default: the flat coverage quads read as a second green
-        // surface over the terrain and look worse than no distant grass.
+        // Independent terrain-cover ring; does not alter near/mid placement.
         float farRadius = 0.0f;
         // Density noise: breaks the field into thicker and thinner patches so
         // coverage is not uniform. Scale is the noise frequency (1/metres);
         // strength 0 = flat density. 0.55 reproduces the previous hardcoded
         // 0.45..1.35 coverage range.
-        float densityNoiseScale = 0.075f;
-        float densityNoiseStrength = 0.55f;
+        float densityNoiseScale = 0.131f;
+        float densityNoiseStrength = 0.36f;
         // Species mix as fractions of all placed plants; grass takes whatever
         // these two leave. Chosen per clump, so weeds and flowers appear in
         // drifts rather than sprinkled evenly.
         // Keep the stable ribbon width while the near rendering unit is a blade.
         // Widening it only exposes the flat photo layer; it does not create a
         // grass clump (GRS-030 regression guard).
-        float bladeWidth = 1.0f;
+        float bladeWidth = 0.35f;
         // Albedo saturation about luma. 1.0 = untouched; lower desaturates the
         // whole field. Brightness is preserved, so this only pulls colour out.
         // 0.78 is the authored default -- the raw palette reads too vivid
         // against CWA's muted terrain.
-        float saturation = 0.78f;
+        float saturation = 1.02f;
         // Sun-bleached patches: fraction of the field that dries toward straw, and
         // the patch size (noise frequency, 1/metres). Its own noise field, so dry
         // ground does not line up with thin ground.
-        float dryPatches = 0.35f;
-        float dryPatchScale = 0.030f;
-        float weedPercent = 0.12f;
-        float flowerPercent = 0.05f;
+        float dryPatches = 0.52f;
+        float dryPatchScale = 0.207f;
+        float weedPercent = 0.37f;
+        float flowerPercent = 0.08f;
         // Blade silhouette variety. The four grass species shared ONE profile,
         // so a field read as the same blade repeated over and over -- the first
         // thing a tester notices standing in it. 0 reproduces that legacy look
         // exactly, 1 gives eight distinct width/height/taper profiles; the two
         // jitters spread taper and lean per blade on top of whichever is chosen.
         float shapeVariety = 1.0f;
-        float taperJitter = 0.35f;
-        float bendJitter = 0.30f;
+        float taperJitter = 0.36f;
+        float bendJitter = 0.26f;
         // Keep the stable procedural surface until a clump-based near path can
         // present photographed detail without turning blades into flat cards.
-        float bladeTextureStrength = 0.0f;
+        // The close field uses individual opaque blades. Give those blades their
+        // photographed surface detail by default; unlike tuft cards this keeps
+        // a stable geometric silhouette from every viewing angle.
+        float bladeTextureStrength = 1.0f;
         // Alpha cut-out cards: take the silhouette from the texture instead of
         // the quad, so one card can carry several blade shapes. This is the
         // Reforger-style approach and it buys shape variety without more
@@ -1157,27 +1160,100 @@ class Engine : public IGraphicsEngine
         // the stock bend moved a tip 5-19 cm on a ~0.8 m blade, roughly ten degrees, which is why
         // a field of them read as spikes standing to attention. Taller blades arc further, so this
         // scales with height rather than being an absolute distance. 0 = the old rigid look.
-        float bladeArch = 1.0f;
+        float bladeArch = 1.49f;
+        // GRS-030: sparse multi-blade clumps; false keeps the legacy ribbons.
+        bool clumpRenderer = true;
+        // Local exposure trim for the photographed A3 clump cards only. It
+        // deliberately leaves legacy ribbons, procedural mid grass and far LOD
+        // untouched so visual tuning cannot change field-wide lighting.
+        float photoTuftBrightness = 1.25f;
+        // 0 keeps the primary photographed clump; 1 assigns all local grass
+        // atlases in stable world-space patches.
+        float photoTuftMix = 0.0f;
+        float photoTuftPatchSize = 18.0f;
+        // Photographed-card look. These four apply ONLY while midPhotoTuft is on;
+        // procedural blades, the procedural mid ring and the far proxy ignore them.
+        // Contrast about the plate's own mid-luma. The source photographs are
+        // flatly lit, which is exactly why unmodified cards read as paper.
+        float photoContrast = 1.35f;
+        // Per-texel normal rebuilt from the plate's luma gradient, so stems inside
+        // one card catch the sun separately. 0 = one flat normal per plate.
+        float photoContour = 1.85f;
+        // Grass-on-grass shadowing from the cascade the grass itself writes.
+        // Requires castShadows; 0 disables it without disabling grass shadows.
+        float photoSelfShadow = 1.0f;
+        // Occlusion toward the clump root, which is what gives a card a bottom.
+        float photoRootAo = 0.45f;
+        // Alpha test for the photo cards only. The local family plates come from
+        // JPEG opacity maps, whose compression noise around thin stems is a real
+        // flicker source; raising this trims those partial texels away.
+        float photoAlphaCutoff = 0.5f;
+        // Force one atlas layer: -1 = normal selection, 0 = the primary clump,
+        // 1..8 = a single local family. Purely a diagnostic -- it is how you find
+        // which source plate is responsible for a flicker.
+        int photoForceLayer = -1;
+        // Saturation of the photographed cards about their own luma, separate
+        // from the field-wide `saturation` so the plates can be matched to the
+        // procedural grass rather than moved with it. 0.62 was the constant this
+        // replaces, so the default changes nothing.
+        float photoSaturation = 0.62f;
+        // How long a walked imprint survives, in seconds; it recovers over the
+        // last third so a trail thins out rather than blinking away. The record
+        // is a ring of 256 stamps consumed by DISTANCE walked, so the practical
+        // limit is trail length as much as time.
+        float trackLifetime = 600.0f;
+        // How far a crushed plant is pressed down, as a fraction of its own
+        // height. 0.55 is the long-standing value. Photographed cards scale this
+        // up internally: one plate stands for a whole clump nearly two metres
+        // across, so it has to rotate much further than a blade to read as
+        // walked-on.
+        float imprintDepth = 0.55f;
+        // Relative selection weights for atlas layers 1..8, i.e. the local
+        // families. Zeroing one removes it from the field without touching the
+        // others; all-zero falls back to the primary clump.
+        float photoLayerWeights[8] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+        // Width in metres of the stochastic dissolve at every LOD join. Each ring
+        // thins out across this band as the next thickens, so grass no longer
+        // changes representation on a hard circle. 0 = the former abrupt joins.
+        float lodBlend = 30.0f;
+        // Per-LOD coverage multipliers on top of `density`. The near ring is
+        // where photographed-card overdraw is paid: a card is roughly 1.8 m wide
+        // and they are placed every 0.16 m, so near coverage is the single most
+        // effective performance control on that path.
+        float nearDensity = 1.0f;
+        // 0.95 was the shader's former hardcoded mid coverage; keeping it as the
+        // default means exposing this control changes nothing on its own.
+        float midDensity = 0.95f;
+        float farDensity = 1.0f;
+        // Albedo tints, applied after the existing colour work and before
+        // lighting, so the sun still does what it did. White = untinted.
+        // Procedural covers near blades, mid ribbons and the far proxy together;
+        // the photographed cards have their own so the two can be matched.
+        float tintProcedural[3] = {1.0f, 1.0f, 1.0f};
+        float tintPhoto[3] = {1.0f, 1.0f, 1.0f};
         // Mid LOD geometry. Off = the procedural crossed ribbons. On = crossed
         // cards carrying a photographed grass clump.
         //
-        // On by default now that assets/grass/meadow-grass-clump-alpha-1024.png
+        // Off by default: the close field is individual textured blades. The
+        // optional cards are useful for comparing silhouettes, but their large
+        // alpha-tested clump plates are not the preferred production look.
+        // assets/grass/meadow-grass-clump-alpha-1024.png
         // ships: measured opaque mean (0.525, 0.622, 0.127) -- green on every
         // texel, hard binary alpha, no baked lighting. The legacy PAA fallback
         // (data\trava1_pmp2.pac) is grey-teal, so if only that is present the
         // mid ring looks desaturated and this is worth turning off.
-        bool midPhotoTuft = true;
+        bool midPhotoTuft = false;
         float densityBoost = 4.0f; // turns base spacing into a denser placement grid
-        float height = 1.25f;      // authored blade height multiplier
+        float height = 1.40f;      // authored blade height multiplier
         // The default follows the weather system that also drives smoke,
         // parachutes and cloth. The two wind sliders remain a multiplier and
         // manual fallback for controlled visual testing.
         bool useLiveWind = true;
-        float windStrength = 1.2f;
+        float windStrength = 1.07f;
         float windDirection = 0.0f; // degrees, 0 = +X / east
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
-        float clumping = 0.55f;
+        float clumping = 0.35f;
         float colorVariation = 0.35f;
         float transmission = 0.10f;
         // These are deliberately grass-only controls: terrain and other
@@ -1191,6 +1267,19 @@ class Engine : public IGraphicsEngine
     };
       virtual GrassSettings GetGrassSettings() const { return {}; }
       virtual void SetGrassSettings(const GrassSettings& /*settings*/) {}
+
+      /// Whether the optional photographed clump atlas is actually loaded. When it
+      /// is not, `midPhotoTuft` is inert and the renderer keeps procedural grass:
+      /// a missing asset is always a fallback, never a failure. The Grass tab
+      /// reports this rather than presenting a control that silently does nothing.
+      virtual bool HasGrassPhotoClumps() const { return false; }
+
+      /// The photographed clump families actually discovered on disk, in atlas
+      /// layer order (0 = the primary clump). Nothing about them is hardcoded:
+      /// the count and the names come from what is installed, so the Grass tab
+      /// only ever offers families that exist.
+      virtual int GetGrassPhotoFamilyCount() const { return 0; }
+      virtual const char* GetGrassPhotoFamilyName(int /*index*/) const { return ""; }
 
       // The active terrain's material layers.  WGPU exposes these so the dev
       // overlay can explicitly choose which painted surfaces receive blades.

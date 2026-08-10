@@ -2660,6 +2660,47 @@ void DrawGrassTab()
     Engine::GrassSettings grass = GEngine->GetGrassSettings();
     bool changed = false;
 
+    if (ImGui::Button("Copy grass settings"))
+    {
+        char copy[4096];
+        snprintf(copy, sizeof(copy),
+                 "Grass settings\n"
+                 "enabled=%d; photoClumpCards=%d; clumpRenderer=%d; castShadows=%d; applyFog=%d; ignoreExclusions=%d\n"
+                 "density=%.3f; densityBoost=%.3f; spacing=%.3f; nearRadius=%.3f; midRadius=%.3f; farRadius=%.3f\n"
+                 "densityNoiseScale=%.4f; densityNoiseStrength=%.3f; height=%.3f; bladeWidth=%.3f; "
+                 "bladeTextureStrength=%.3f\n"
+                 "saturation=%.3f; dryPatches=%.3f; dryPatchScale=%.4f; weedPercent=%.3f; flowerPercent=%.3f\n"
+                 "shapeVariety=%.3f; taperJitter=%.3f; bendJitter=%.3f; bladeArch=%.3f; clumping=%.3f; "
+                 "colorVariation=%.3f; transmission=%.3f\n"
+                 "alphaCards=%d; alphaCutoff=%.3f; cardWiden=%.3f\n"
+                 "photoBrightness=%.3f; photoMix=%.3f; photoPatchSize=%.3f\n"
+                 "photoContrast=%.3f; photoContour=%.3f; photoSelfShadow=%.3f; photoRootAo=%.3f\n"
+                 "photoAlphaCutoff=%.3f; photoSaturation=%.3f; photoForceLayer=%d; lodBlend=%.2f\n"
+                 "nearDensity=%.3f; midDensity=%.3f; farDensity=%.3f\n"
+                 "tintProcedural=%.2f/%.2f/%.2f; tintPhoto=%.2f/%.2f/%.2f\n"
+                 "photoLayerWeights=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f\n"
+                 "liveWind=%d; windStrength=%.3f; windDirection=%.3f",
+                 grass.enabled, grass.midPhotoTuft, grass.clumpRenderer, grass.castShadows, grass.applyFog,
+                 grass.ignoreGeographyExclusions, grass.density, grass.densityBoost, grass.spacing, grass.radius,
+                 grass.midRadius, grass.farRadius, grass.densityNoiseScale, grass.densityNoiseStrength, grass.height,
+                 grass.bladeWidth, grass.bladeTextureStrength, grass.saturation, grass.dryPatches, grass.dryPatchScale,
+                 grass.weedPercent, grass.flowerPercent, grass.shapeVariety, grass.taperJitter, grass.bendJitter,
+                 grass.bladeArch, grass.clumping, grass.colorVariation, grass.transmission, grass.alphaCards,
+                 grass.alphaCutoff, grass.cardWiden, grass.photoTuftBrightness, grass.photoTuftMix,
+                 grass.photoTuftPatchSize, grass.photoContrast, grass.photoContour, grass.photoSelfShadow,
+                 grass.photoRootAo, grass.photoAlphaCutoff, grass.photoSaturation, grass.photoForceLayer,
+                 grass.lodBlend, grass.nearDensity,
+                 grass.midDensity, grass.farDensity, grass.tintProcedural[0], grass.tintProcedural[1],
+                 grass.tintProcedural[2], grass.tintPhoto[0], grass.tintPhoto[1], grass.tintPhoto[2],
+                 grass.photoLayerWeights[0], grass.photoLayerWeights[1], grass.photoLayerWeights[2],
+                 grass.photoLayerWeights[3], grass.photoLayerWeights[4], grass.photoLayerWeights[5],
+                 grass.photoLayerWeights[6], grass.photoLayerWeights[7], grass.useLiveWind, grass.windStrength,
+                 grass.windDirection);
+        ImGui::SetClipboardText(copy);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Copies a pasteable snapshot for sharing with Codex.");
+
     ImGui::TextUnformatted("Map and terrain surface");
     ImGui::SetNextItemWidth(220.0f);
     if (ImGui::BeginCombo("Map", maps[selectedMap].label))
@@ -2773,25 +2814,55 @@ void DrawGrassTab()
                         "Water, roads, tracks and buildings stay excluded either way -- there is no setting that "
                         "puts grass on a road.");
     changed |= ImGui::SliderFloat("Coverage", &grass.density, 0.05f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Retained fraction of procedural candidate blades. 1.00 uses every candidate.");
-    changed |= ImGui::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 4.0f, "%.1fx");
-    ImGui::TextDisabled("Raises density beyond the base grid. Very high values reduce the maximum usable radius.");
-    changed |= ImGui::SliderFloat("Base spacing (m)", &grass.spacing, 0.10f, 0.75f, "%.2f");
+    ImGui::TextDisabled("Retained fraction of procedural candidate blades, applied to every LOD. 1.00 uses every "
+                        "candidate.");
+    changed |= ImGui::SliderFloat("Coverage: near", &grass.nearDensity, 0.02f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Multiplies the master coverage for the near ring only. This is the most effective "
+                        "performance control on the photographed-card path: a card is roughly 1.8 m wide and they "
+                        "are placed every 0.16 m, so the near ring rasterises on the order of twenty overlapping "
+                        "card layers per square metre of ground. Most of them are hidden.");
+    changed |= ImGui::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 1.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
+    ImGui::TextDisabled("0.95 was the mid ring's former built-in coverage, so these defaults change nothing on "
+                        "their own -- they exist to rebalance the rings against each other.");
+    changed |= ImGui::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 64.0f, "%.1fx");
+    ImGui::TextDisabled("Divides the base spacing by its square root, so this is the coverage multiplier: 4x is the "
+                        "old ceiling, 64x is eight times finer placement again. Cost scales with it -- watch the "
+                        "benchmark table below, and note that the near instance buffer caps at 1,048,576 clumps.");
+    changed |= ImGui::SliderFloat("Base spacing (m)", &grass.spacing, 0.02f, 0.75f, "%.3f");
     ImGui::TextDisabled(
-        "Distance between candidates before the density boost; lower values make grass substantially denser.");
+        "Distance between candidates before the density boost; lower values make grass substantially denser. "
+        "This is the ONLY near-density control -- it is independent of the radius below.");
     changed |= ImGui::SliderFloat("Near clump radius (m)", &grass.radius, 8.0f, 200.0f, "%.0f");
-    ImGui::TextDisabled("Dense six-blade clumps. The fixed near placement grid limits its effective reach.");
-    changed |= ImGui::SliderFloat("Mid clump radius (m)", &grass.midRadius, 18.0f, 160.0f, "%.0f");
-    ImGui::TextDisabled("Opaque mid-clump reach. Extend this before enabling the far terrain-cover proxy.");
+    ImGui::TextDisabled("Close-field reach. Density is unaffected: the placement grid is sized from this radius "
+                        "rather than the spacing being stretched to fit a fixed grid, which is what used to make "
+                        "this slider look dead past ~30 m while quietly thinning the field.");
+    changed |= ImGui::SliderFloat("Mid clump radius (m)", &grass.midRadius, 18.0f, 1000.0f, "%.0f");
+    ImGui::TextDisabled("Opaque mid-clump reach, at one fixed placement spacing, so this is also coverage-only: "
+                        "the mid placement grid is sized from this radius, and mid density is identical at 400 m "
+                        "and at 60 m.");
     changed |= ImGui::SliderFloat("Far radius (m)", &grass.farRadius, 0.0f, 5000.0f, "%.0f");
-    ImGui::TextDisabled("Outer terrain-cover proxy. 0 = off (default). Any other value is floored "
+    ImGui::TextDisabled("Outer terrain-cover proxy. 0 = off. Any other value is floored "
                         "past the mid ring, and its dispatch is skipped entirely when off.");
+    changed |= ImGui::SliderFloat("LOD dissolve (m)", &grass.lodBlend, 0.0f, 40.0f, "%.1f");
+    ImGui::TextDisabled("Width of the crossfade at EVERY LOD join. Each ring thins out stochastically across this "
+                        "band while the next thickens, and blades shrink as they go, so grass no longer changes "
+                        "representation on a hard circle. The dissolve is world-space deterministic, so a clump "
+                        "vanishes once at its own distance rather than blinking as the camera moves. 0 restores "
+                        "the abrupt joins. Wider bands overlap two rings over more ground, which costs "
+                        "proportionally more instances.");
     changed |= ImGui::SliderFloat("Density noise scale", &grass.densityNoiseScale, 0.002f, 0.5f, "%.3f");
     ImGui::TextDisabled(
         "Patch frequency in 1/metres. 0.075 gives ~13 m patches; lower = broader sweeps, higher = finer mottling.");
     changed |= ImGui::SliderFloat("Density noise strength", &grass.densityNoiseStrength, 0.0f, 1.0f, "%.2f");
     ImGui::TextDisabled("0 = perfectly uniform coverage; 1 = bare ground between dense clumps. Applies to every LOD.");
 
+    changed |= ImGui::ColorEdit3("Tint: procedural grass", grass.tintProcedural);
+    ImGui::TextDisabled("Multiplies albedo before lighting, so the sun still does what it did. Covers near blades, "
+                        "mid ribbons and the far proxy together. White = untinted.");
+    changed |= ImGui::ColorEdit3("Tint: photographed cards", grass.tintPhoto);
+    ImGui::TextDisabled("The same, for the photographed clump cards only. Separate from the procedural tint so the "
+                        "two paths can be matched to each other rather than moving together.");
     changed |= ImGui::SliderFloat("Colour saturation", &grass.saturation, 0.0f, 2.0f, "%.2f");
     ImGui::TextDisabled("1.00 = untouched, 0.00 = greyscale. Pushed about the luma axis, so brightness is "
                         "unchanged -- this pulls colour out without darkening. Applies to near blades, mid "
@@ -2809,13 +2880,8 @@ void DrawGrassTab()
                         "texture is averaged down to flat colour before it is ever drawn. Wider blades read as "
                         "broad leaves rather than fine grass, so this is a look choice, not a fix.");
 
-    changed |= ImGui::Checkbox("Mid LOD: photographed tuft cards", &grass.midPhotoTuft);
-    ImGui::TextDisabled("Off = procedural crossed ribbons (default). On = crossed cards using the game's own "
-                        "trava1_pmp2 texture; that 2001 photo is grey-teal rather than green, so it needs "
-                        "colour correction to sit right next to the near grass.");
-
     ImGui::Separator();
-    ImGui::TextUnformatted("Blade shape");
+    ImGui::TextUnformatted("Blade shape (procedural blades only -- ignored by photographed clump cards)");
     changed |= ImGui::SliderFloat("Shape variety", &grass.shapeVariety, 0.0f, 1.0f, "%.2f");
     ImGui::TextDisabled("0 = the legacy look, where all FOUR grass species shared one silhouette and the field "
                         "read as the same blade repeated. 1 = eight distinct width/height/taper profiles. This "
@@ -2829,6 +2895,8 @@ void DrawGrassTab()
                         "to attention, which is what the stock bend gave: it moved a tip 5-19 cm on a ~0.8 m "
                         "blade, about ten degrees. Taller blades arc further, so this scales with height rather "
                         "than being a fixed distance. Costs nothing -- it is a vertex-shader curve.");
+    changed |= ImGui::Checkbox("GRS-030 clump renderer", &grass.clumpRenderer);
+    ImGui::TextDisabled("On = sparse twelve-blade meadow clumps. Off restores legacy six-ribbon grass.");
     changed |= ImGui::SliderFloat("Bend jitter", &grass.bendJitter, 0.0f, 1.0f, "%.2f");
     ImGui::TextDisabled("Per-blade spread on the resting lean. Also multiplicative about the stock range, so "
                         "turning it up widens the spread in both directions instead of leaning the whole field "
@@ -2838,8 +2906,143 @@ void DrawGrassTab()
                         "surface even when photo layers are installed -- the quickest way to tell whether a look "
                         "problem is the texture or the geometry. No effect when no photo atlas is loaded.");
 
+    // ------------------------------------------------------------------------
+    // Everything below the header up to the next separator applies ONLY while
+    // photographed clump cards are on. They were previously mixed in with the
+    // procedural blade-shape controls, where there was no way to tell which
+    // sliders were inert for the look actually on screen.
     ImGui::Separator();
-    ImGui::TextUnformatted("Alpha cut-out cards (experimental)");
+    ImGui::TextUnformatted("PHOTOGRAPHED CLUMP CARDS");
+    const bool photoClumpsAvailable = GEngine->HasGrassPhotoClumps();
+    if (!photoClumpsAvailable)
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+                           "Photo clump assets are not installed -- procedural grass is in use.");
+        ImGui::TextDisabled("assets/grass/meadow-grass-clump-alpha-1024.png (or $WGR_GRASS_TUFT) was not found. "
+                            "This is a supported configuration, not an error: the near ring keeps its individual "
+                            "textured blades and the mid ring its procedural ribbons. The toggle and the settings "
+                            "below stay editable, and take effect the moment the assets are present.");
+    }
+    if (ImGui::Checkbox("Use photographed clump cards (near + mid)", &grass.midPhotoTuft))
+    {
+        // Switching the cards on changes what one near instance COSTS, not just
+        // how it looks: a card is roughly 1.8 m wide where a procedural clump is
+        // centimetres, so the same placement density that is free for blades is
+        // ~20 layers of alpha-tested overdraw for cards. Move near coverage to a
+        // sane starting point for the mode being entered, and put it back on the
+        // way out. Only when it is still at the other mode's default, so a
+        // deliberate setting is never overwritten.
+        if (grass.midPhotoTuft && grass.nearDensity == 1.0f)
+            grass.nearDensity = 0.40f;
+        else if (!grass.midPhotoTuft && grass.nearDensity == 0.40f)
+            grass.nearDensity = 1.0f;
+        changed = true;
+    }
+    ImGui::TextDisabled("Alpha-tested clump plates for close and mid grass. Off (default) uses stable individual "
+                        "textured blades nearby and procedural mid grass. Everything in THIS section does nothing "
+                        "unless this is on.");
+    ImGui::BeginDisabled(!grass.midPhotoTuft);
+    changed |= ImGui::SliderFloat("Photo clump brightness", &grass.photoTuftBrightness, 0.50f, 2.50f, "%.2fx");
+    ImGui::TextDisabled("1.00 = the calibrated source plate; raise it to lift dark clumps.");
+    changed |= ImGui::SliderFloat("Photo clump saturation", &grass.photoSaturation, 0.0f, 2.0f, "%.2f");
+    ImGui::TextDisabled("Saturation of the photographed cards about their own luma. 0.62 is the long-standing "
+                        "value, 0 is greyscale, above 1 pushes past the source plate. Separate from the field-wide "
+                        "Colour saturation above so the cards can be matched to the procedural grass rather than "
+                        "moving with it -- the global control still applies on top.");
+    changed |= ImGui::SliderFloat("Photo clump contrast", &grass.photoContrast, 0.5f, 2.5f, "%.2f");
+    ImGui::TextDisabled("Contrast about each plate's own mean colour, which is what separates individual stems from "
+                        "the mass behind them. The source photographs are flatly lit by design, so 1.00 (the raw "
+                        "photograph) is exactly the flat look; higher gives the silhouette contour. The pivot is "
+                        "measured per plate at load, so this cannot double as a brightness change.");
+    changed |= ImGui::SliderFloat("Photo clump contour lighting", &grass.photoContour, 0.0f, 2.0f, "%.2f");
+    ImGui::TextDisabled("Rebuilds a per-texel surface normal from the plate's luma gradient, so stems inside one "
+                        "card catch the sun separately instead of the whole plate taking one value. 0 = the former "
+                        "single flat upright normal. Costs four extra texture taps on card fragments.");
+    changed |= ImGui::SliderFloat("Photo clump self-shadowing", &grass.photoSelfShadow, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Grass shadowing grass: the cards are already in the cascade the grass writes, so this is a "
+                        "real occlusion test rather than a fake. Needs 'Cast close grass shadows' on. 1.00 is a "
+                        "full-strength shadow; foliage usually wants contact contrast, not solid-black cards.");
+    changed |= ImGui::SliderFloat("Photo clump root occlusion", &grass.photoRootAo, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Darkens the base of each clump, where light does not reach. This is what gives a card a "
+                        "bottom -- without it a plate reads as floating on the terrain.");
+    changed |= ImGui::SliderFloat("Photo card alpha cutoff", &grass.photoAlphaCutoff, 0.05f, 0.95f, "%.2f");
+    ImGui::TextDisabled("Texels below this alpha are discarded. 0.50 is neutral -- the atlas mip chain preserves "
+                        "coverage against it. Several local family plates carry JPEG opacity maps, whose "
+                        "compression noise around thin stems is a genuine flicker source; raising this trims "
+                        "those partial texels away. The shadow pass uses the same value.");
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Photographed family mix");
+    changed |= ImGui::SliderFloat("Photo grass mix", &grass.photoTuftMix, 0.0f, 1.0f, "%.0f%%");
+    changed |= ImGui::SliderFloat("Photo grass patch size (m)", &grass.photoTuftPatchSize, 4.0f, 80.0f, "%.0f");
+    ImGui::TextDisabled("0%% keeps the primary A3 clump everywhere. Above that, each world-space patch draws a "
+                        "family from the weights below.");
+    // Isolating one plate is the fastest way to identify a flickering source, so
+    // the override comes before the weights rather than being buried under them.
+    {
+        // Names come from what the renderer actually discovered in
+        // assets/grass/more_grass, so a machine with a different grass pack
+        // installed gets that pack's families here, and one with none gets only
+        // the primary clump. Nothing about the list is fixed in code.
+        const int familyCount = std::min(GEngine->GetGrassPhotoFamilyCount(), 9);
+        std::vector<std::string> labels;
+        labels.reserve(static_cast<size_t>(familyCount) + 1);
+        labels.emplace_back("Off (weighted mix)");
+        for (int i = 0; i < familyCount; ++i)
+        {
+            labels.push_back(std::to_string(i) + ": " + GEngine->GetGrassPhotoFamilyName(i));
+        }
+        std::vector<const char*> labelPtrs;
+        labelPtrs.reserve(labels.size());
+        for (const std::string& label : labels)
+            labelPtrs.push_back(label.c_str());
+
+        if (familyCount <= 1)
+        {
+            ImGui::TextDisabled("No additional grass families installed. Drop a pack into "
+                                "assets/grass/more_grass -- any colour plate with a matching opacity plate beside "
+                                "it (albedo/opacity or diff/alpha naming) is picked up automatically, up to eight.");
+        }
+        int forced = std::clamp(grass.photoForceLayer, -1, familyCount - 1) + 1;
+        ImGui::SetNextItemWidth(390.0f);
+        if (ImGui::Combo("Force one family", &forced, labelPtrs.data(), static_cast<int>(labelPtrs.size())))
+        {
+            grass.photoForceLayer = forced - 1;
+            changed = true;
+        }
+        ImGui::TextDisabled("Draws every photographed clump from a single atlas layer, ignoring the mix and the "
+                            "weights. Step through the families to find which plate flickers, then zero its "
+                            "weight below to remove just that one.");
+        // Weights cover layers 1..8; layer 0 is reached through the mix slider.
+        for (int i = 1; i < familyCount; ++i)
+        {
+            changed |= ImGui::SliderFloat(labelPtrs[i + 1], &grass.photoLayerWeights[i - 1], 0.0f, 1.0f, "%.2f");
+        }
+        if (familyCount > 1)
+        {
+            ImGui::TextDisabled("Relative selection weights, not percentages: they are normalised against each "
+                                "other. 0 removes a family entirely. All at 0 falls back to the primary clump.");
+        }
+        if (ImGui::Button("All families on"))
+        {
+            for (float& w : grass.photoLayerWeights)
+                w = 1.0f;
+            grass.photoForceLayer = -1;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Primary clump only"))
+        {
+            for (float& w : grass.photoLayerWeights)
+                w = 0.0f;
+            grass.photoForceLayer = -1;
+            changed = true;
+        }
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::TextUnformatted("Alpha cut-out cards (experimental, procedural blades only)");
     changed |= ImGui::Checkbox("Silhouette from texture alpha", &grass.alphaCards);
     ImGui::TextDisabled("Off = the blade outline is geometry (default). On = the quad is widened and the outline "
                         "is cut out of the texture's alpha, so one card can carry several blade shapes. This is "
@@ -2877,9 +3080,29 @@ void DrawGrassTab()
     changed |= ImGui::SliderFloat("Field clumping", &grass.clumping, 0.0f, 1.0f, "%.2f");
     changed |= ImGui::SliderFloat("Colour variation", &grass.colorVariation, 0.0f, 1.0f, "%.2f");
     changed |= ImGui::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
-    const float effectiveSpacing = std::max(0.10f, grass.spacing / std::sqrt(std::max(1.0f, grass.densityBoost)));
-    const float nearDetailRadius = std::min(grass.radius, effectiveSpacing * 255.0f);
-    const float midReach = std::clamp(grass.midRadius, nearDetailRadius + 10.0f, 160.0f);
+    const float requestedNearRadius = std::clamp(grass.radius, 8.0f, 200.0f);
+    // Mirrors EngineWgpu::SetGrassSettings. Deliberately NOT a function of the
+    // radius any more: near density is radius-independent.
+    const float effectiveSpacing =
+        std::clamp(grass.spacing / std::sqrt(std::clamp(grass.densityBoost, 1.0f, 64.0f)), 0.02f, 0.75f);
+    const float nearDetailRadius = requestedNearRadius;
+    const float midReach = std::clamp(grass.midRadius, nearDetailRadius + 10.0f, 1000.0f);
+    {
+        // Mirrors the renderer's grid sizing so the panel can say plainly when a
+        // radius/density pair has hit the 1536-cell candidate grid, which is the
+        // one case where the field stops short of the requested radius.
+        const float clumpSpacing = effectiveSpacing * (grass.clumpRenderer ? 3.20f : 1.72f);
+        const float wantCells = std::ceil(2.0f * nearDetailRadius / clumpSpacing);
+        const float cells = std::clamp(wantCells, 64.0f, 1536.0f);
+        const float reach = cells * clumpSpacing * 0.5f;
+        ImGui::TextDisabled("Near placement: %.0f cm clump spacing, %.0f x %.0f candidate grid.", clumpSpacing * 100.0f,
+                            cells, cells);
+        if (wantCells > 1536.0f)
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+                               "Candidate grid capped: near grass reaches ~%.0f m of the requested %.0f m at this "
+                               "density. Lower the density boost to reach further.",
+                               reach, nearDetailRadius);
+    }
     if (grass.farRadius <= 0.0f)
         ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, no far ring.", nearDetailRadius,
                             midReach);
@@ -2889,8 +3112,20 @@ void DrawGrassTab()
         ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, far cover %.0f-%.0f m.",
                             nearDetailRadius, midReach, midReach, farReach);
     }
-    ImGui::TextDisabled("Wind: travelling direction field plus local gusts; roots stay pinned and player/vehicle "
-                        "tracks persist for one minute.");
+    ImGui::Separator();
+    ImGui::TextUnformatted("Walked imprints (both grass modes)");
+    changed |= ImGui::SliderFloat("Imprint lifetime (s)", &grass.trackLifetime, 5.0f, 3600.0f, "%.0f");
+    ImGui::TextDisabled("How long a footprint survives; it recovers over the last third, so a trail thins out "
+                        "rather than blinking away. The record is a ring of 256 stamps consumed by DISTANCE "
+                        "walked, not by time, so standing still no longer erases the trail you just made -- which "
+                        "is what used to make imprints expire far sooner than their stated lifetime.");
+    changed |= ImGui::SliderFloat("Imprint depth", &grass.imprintDepth, 0.0f, 0.95f, "%.2f");
+    ImGui::TextDisabled("How far a crushed plant is pressed down, as a fraction of its own height. 0.55 is the "
+                        "long-standing value. Photographed clump cards scale this up internally by 1.45x and "
+                        "rotate 1.35x further: one plate stands for a whole clump nearly two metres across, so "
+                        "tipping it the ~30 degrees that flattens a blade would leave an obviously upright bush. "
+                        "The shadow pass uses the same numbers, so a flattened clump casts a flattened shadow.");
+    ImGui::TextDisabled("Wind: travelling direction field plus local gusts; roots stay pinned.");
 
     ImGui::Separator();
     if (ImGui::Button("Reset ultra dense"))
@@ -2907,7 +3142,7 @@ void DrawGrassTab()
         grass.spacing = 0.20f;
         grass.radius = 30.0f;
         grass.midRadius = 100.0f;
-        grass.farRadius = 0.0f;
+        grass.farRadius = 172.0f;
         grass.densityNoiseScale = 0.075f;
         grass.densityNoiseStrength = 0.55f;
         grass.bladeWidth = 1.0f;
@@ -2919,11 +3154,35 @@ void DrawGrassTab()
         grass.shapeVariety = 1.0f;
         grass.taperJitter = 0.35f;
         grass.bendJitter = 0.30f;
-        grass.bladeTextureStrength = 0.0f;
+        grass.bladeTextureStrength = 1.0f;
         grass.alphaCards = false;
         grass.alphaCutoff = 0.5f;
         grass.cardWiden = 1.6f;
         grass.bladeArch = 1.0f;
+        grass.photoTuftBrightness = 1.25f;
+        grass.midPhotoTuft = false;
+        grass.photoTuftMix = 0.0f;
+        grass.photoTuftPatchSize = 18.0f;
+        grass.photoContrast = 1.35f;
+        grass.photoContour = 1.85f;
+        grass.photoSelfShadow = 1.0f;
+        grass.photoRootAo = 0.45f;
+        grass.photoAlphaCutoff = 0.5f;
+        grass.photoSaturation = 0.62f;
+        grass.trackLifetime = 600.0f;
+        grass.imprintDepth = 0.55f;
+        grass.photoForceLayer = -1;
+        for (float& w : grass.photoLayerWeights)
+            w = 1.0f;
+        grass.lodBlend = 30.0f;
+        grass.nearDensity = 1.0f;
+        grass.midDensity = 0.95f;
+        grass.farDensity = 1.0f;
+        for (int i = 0; i < 3; ++i)
+        {
+            grass.tintProcedural[i] = 1.0f;
+            grass.tintPhoto[i] = 1.0f;
+        }
         grass.height = 1.25f;
         grass.useLiveWind = true;
         grass.windStrength = 1.2f;
@@ -2932,6 +3191,27 @@ void DrawGrassTab()
         grass.transmission = 0.10f;
         grass.castShadows = true;
         grass.applyFog = true;
+        changed = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Max coverage"))
+    {
+        // Deliberately expensive: the top of every coverage control, so the cost
+        // of the new density ceiling can be measured in the table below rather
+        // than guessed at. Radius is short because the candidate grid is finite --
+        // at this spacing a longer radius is what hits the cap.
+        grass.enabled = true;
+        grass.density = 1.0f;
+        grass.densityBoost = 16.0f;
+        grass.spacing = 0.10f;
+        grass.radius = 60.0f;
+        grass.midRadius = 400.0f;
+        grass.farRadius = 1200.0f;
+        grass.densityNoiseStrength = 0.20f;
+        grass.lodBlend = 30.0f;
+        grass.nearDensity = 1.0f;
+        grass.midDensity = 1.0f;
+        grass.farDensity = 1.0f;
         changed = true;
     }
     ImGui::SameLine();

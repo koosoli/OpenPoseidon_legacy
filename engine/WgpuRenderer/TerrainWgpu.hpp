@@ -35,6 +35,11 @@ class TerrainWgpu : public ITerrainRenderer
     // terrain as excluded. Keep this map-specific compatibility decision next
     // to the uploaded terrain data, not in UI state.
     bool GrassNeedsCompatibilityOverride() const { return _grassNeedsCompatibilityOverride; }
+    // Photographed clump families actually found on disk, in atlas-layer order
+    // (index 0 = the primary clump). Discovered, never hardcoded, so dropping a
+    // grass pack into assets/grass/more_grass is all it takes to get one.
+    int GrassPhotoFamilyCount() const { return static_cast<int>(_grassPhotoFamilies.size()); }
+    const char* GrassPhotoFamilyName(int index) const;
 
   private:
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
@@ -87,6 +92,8 @@ class TerrainWgpu : public ITerrainRenderer
     // kept outside GeographyInfo so the dev panel can reclassify a surface live.
     std::vector<std::string> _grassSurfaceNames;
     bool _grassTuftUploaded = false;
+    // Display names of the uploaded photo layers, index-aligned with the atlas.
+    std::vector<std::string> _grassPhotoFamilies;
     bool _grassBladeAtlasUploaded = false;
     std::vector<bool> _grassSurfaceEnabled;
     bool _grassNeedsCompatibilityOverride = false;

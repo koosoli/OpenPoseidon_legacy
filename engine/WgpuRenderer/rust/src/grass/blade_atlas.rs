@@ -260,7 +260,17 @@ pub fn create_tuft(
     height: u32,
     rgba: &[u8],
 ) -> Option<wgpu::TextureView> {
-    if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
+    create_tufts(device, queue, width, height, 1, rgba)
+}
+
+/// Creates a texture-array of same-sized, alpha-tested photographed clumps.
+/// Every layer gets independent coverage-corrected mips so mixing never makes
+/// the distant cards turn into an opaque dark sheet.
+pub fn create_tufts(
+    device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32, layers: u32, rgba: &[u8],
+) -> Option<wgpu::TextureView> {
+    let layer_bytes = width as usize * height as usize * 4;
+    if width == 0 || height == 0 || layers == 0 || rgba.len() < layer_bytes * layers as usize {
         return None;
     }
     let mip_levels = 32 - width.max(height).leading_zeros();
@@ -269,32 +279,31 @@ pub fn create_tuft(
         size: wgpu::Extent3d {
             width,
             height,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: layers,
         },
         mip_level_count: mip_levels,
         sample_count: 1,
-        // Rgba8Unorm, NOT ...Srgb. The engine feeds every legacy game texture to
-        // lighting with its stored values used directly (see textures.rs and
-        // terrain/mod.rs), because these 2001 assets were authored for a
-        // renderer that was not gamma-correct. Decoding this one as sRGB made it
-        // 0.322 -> 0.090, roughly 3.6x darker than the terrain beside it, which
-        // is what turned the mid ring into a near-black band.
+        // Photo-tuft inputs are ordinary colour images. Decode their stored sRGB
+        // albedo before lighting; treating A3's colour data as legacy linear
+        // values washes the clumps into the grey-white regression seen in GRS-030.
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let mut data = rgba[..(width as usize * height as usize * 4)].to_vec();
     // Must match TUFT_ALPHA_CUTOFF in grass.wgsl (0.5 * 255).
     const CUTOFF: u8 = 128;
-    let base_coverage = coverage(&data, CUTOFF);
-    let (mut w, mut h) = (width, height);
-    for mip in 0..mip_levels {
-        queue.write_texture(
+    for layer in 0..layers {
+        let start = layer as usize * layer_bytes;
+        let mut data = rgba[start..start + layer_bytes].to_vec();
+        let base_coverage = coverage(&data, CUTOFF);
+        let (mut w, mut h) = (width, height);
+        for mip in 0..mip_levels {
+            queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: mip,
-                origin: wgpu::Origin3d::ZERO,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: layer },
                 aspect: wgpu::TextureAspect::All,
             },
             &data,
@@ -308,16 +317,134 @@ pub fn create_tuft(
                 height: h,
                 depth_or_array_layers: 1,
             },
-        );
-        if mip + 1 < mip_levels {
-            let (mut next, nw, nh) = downsample_cutout(&data, w, h);
-            preserve_coverage(&mut next, base_coverage, CUTOFF);
-            data = next;
-            w = nw;
-            h = nh;
+            );
+            if mip + 1 < mip_levels {
+                let (mut next, nw, nh) = downsample_cutout(&data, w, h);
+                preserve_coverage(&mut next, base_coverage, CUTOFF);
+                data = next;
+                w = nw;
+                h = nh;
+            }
         }
     }
-    Some(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    Some(texture.create_view(&wgpu::TextureViewDescriptor { dimension: Some(wgpu::TextureViewDimension::D2Array), ..Default::default() }))
+}
+
+/// Number of photo-clump layers the shader indexes. Layer 0 is the primary
+/// clump; 1..8 are the local families.
+pub const TUFT_LAYERS: usize = 9;
+
+/// The alpha threshold the trim is computed against. Deliberately far below the
+/// 0.5 alpha test: the card is shrunk to this box, so anything the runtime
+/// cutoff could ever keep must be inside it. Measured across the shipped plates,
+/// the box is within 0.5% of the same size at alpha 8, 64 and 128, so the low
+/// threshold costs nothing.
+const TRIM_ALPHA: u8 = 8;
+
+/// Mean LINEAR colour of each layer's covered texels, as (r, g, b, 1).
+///
+/// This is the pivot the card contrast turns about. A fixed pivot is wrong here:
+/// the plates' means span 0.05 to 0.45 luma, so one constant made contrast a
+/// brightness change for every plate but one. Worse, it was a DISTANCE-dependent
+/// brightness change -- up close, stems above the pivot brighten and gaps below
+/// it darken and roughly cancel, but as mips average each texel toward the plate
+/// mean, that cancellation disappears and the whole card shifts. Pivoting on the
+/// layer's own mean makes contrast brightness-neutral at every mip, so a clump
+/// keeps its tone as it recedes.
+///
+/// Sampled on a stride rather than every texel: this runs on 4K plates at load,
+/// and a mean does not need every sample to be accurate to three decimals.
+pub fn tuft_layer_means(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [[f32; 4]; TUFT_LAYERS] {
+    // Linear-space, matching the Rgba8UnormSrgb view the shader samples through.
+    fn srgb_to_linear(v: u8) -> f32 {
+        let c = v as f32 / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    }
+    let mut table = [[0.0f32; 256]; 1];
+    for (i, slot) in table[0].iter_mut().enumerate() {
+        *slot = srgb_to_linear(i as u8);
+    }
+    let lut = table[0];
+    let mut out = [[0.34, 0.34, 0.34, 1.0]; TUFT_LAYERS];
+    let layer_bytes = width as usize * height as usize * 4;
+    if width == 0 || height == 0 {
+        return out;
+    }
+    let stride = 4usize;
+    for layer in 0..(layers as usize).min(TUFT_LAYERS) {
+        let start = layer * layer_bytes;
+        let Some(data) = rgba.get(start..start + layer_bytes) else {
+            break;
+        };
+        let (mut sum, mut count) = ([0.0f64; 3], 0u64);
+        for texel in (0..data.len() / 4).step_by(stride) {
+            let i = texel * 4;
+            if data[i + 3] < 128 {
+                continue;
+            }
+            sum[0] += lut[data[i] as usize] as f64;
+            sum[1] += lut[data[i + 1] as usize] as f64;
+            sum[2] += lut[data[i + 2] as usize] as f64;
+            count += 1;
+        }
+        if count == 0 {
+            continue;
+        }
+        let n = count as f64;
+        out[layer] = [
+            (sum[0] / n) as f32,
+            (sum[1] / n) as f32,
+            (sum[2] / n) as f32,
+            1.0,
+        ];
+    }
+    out
+}
+
+/// Opaque bounding box of every layer, as (u0, u1, v0, v1) in texture space.
+///
+/// The card quads are trimmed to these, which is pure fill saved: the plates
+/// carry transparent margins the alpha test was discarding anyway, but only
+/// AFTER rasterising them and paying a texture sample. This path is dominated by
+/// overdraw, so removing geometry that can never produce a texel is free
+/// performance with an identical image. Layers with no margin get the full
+/// (0,1,0,1) box and are unchanged.
+pub fn tuft_bounds(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [[f32; 4]; TUFT_LAYERS] {
+    let mut out = [[0.0, 1.0, 0.0, 1.0]; TUFT_LAYERS];
+    let layer_bytes = width as usize * height as usize * 4;
+    if width == 0 || height == 0 {
+        return out;
+    }
+    for layer in 0..(layers as usize).min(TUFT_LAYERS) {
+        let start = layer * layer_bytes;
+        let Some(data) = rgba.get(start..start + layer_bytes) else {
+            break;
+        };
+        let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
+        for y in 0..height {
+            let row = (y * width * 4) as usize;
+            for x in 0..width {
+                if data[row + (x * 4) as usize + 3] >= TRIM_ALPHA {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x + 1);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y + 1);
+                }
+            }
+        }
+        // A fully transparent layer has no box; leave it at the full quad rather
+        // than collapsing the card to a degenerate triangle.
+        if x0 == u32::MAX {
+            continue;
+        }
+        out[layer] = [
+            x0 as f32 / width as f32,
+            x1 as f32 / width as f32,
+            y0 as f32 / height as f32,
+            y1 as f32 / height as f32,
+        ];
+    }
+    out
 }
 
 /// A 1x1 opaque stand-in so the bind group is always complete before the game

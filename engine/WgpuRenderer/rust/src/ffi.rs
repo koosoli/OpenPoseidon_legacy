@@ -882,7 +882,10 @@ pub struct WgrGrassTrack {
     pub age: f32,
 }
 
-pub const WGR_GRASS_TRACK_COUNT: usize = 96;
+// Walked-trail history. Each slot is one stamped footprint; the ring is
+// consumed by DISTANCE walked, not time, so this is the length of trail that
+// survives rather than a number of seconds.
+pub const WGR_GRASS_TRACK_COUNT: usize = 256;
 pub const WGR_GRASS_DOWNWASH_COUNT: usize = 4;
 
 #[repr(C)]
@@ -939,6 +942,74 @@ pub struct WgrGrassParams {
     pub card_widen: f32,
     /// How far a blade arcs over, scaled by its own height. 0 = rigid spikes.
     pub blade_arch: f32,
+    pub clump_renderer: f32,
+      pub photo_tuft_brightness: f32,
+      pub photo_tuft_mix: f32,
+      pub photo_tuft_patch_size: f32,
+    // Photographed-clump look controls. These affect ONLY the photo card path
+    // (near + mid when `use_photo_tuft` is on); procedural ribbons and the far
+    // proxy are deliberately untouched so tuning cards cannot shift the field.
+    /// Contrast about the plate's own mid-luma. 1.0 = the raw photograph.
+    pub photo_contrast: f32,
+    /// Strength of the per-texel normal rebuilt from the plate's luma gradient.
+    /// 0 = the old flat upright normal, which is what made cards read as paper.
+    pub photo_contour: f32,
+    /// How strongly a clump is shadowed by the cascade the grass itself writes,
+    /// i.e. grass-on-grass shadowing. 0 = none.
+    pub photo_self_shadow: f32,
+    /// Ambient occlusion toward the clump root, where light does not reach.
+    pub photo_root_ao: f32,
+    /// Near placement grid edge, in cells. The renderer derives it from radius
+    /// and spacing so near DENSITY is radius-independent; ignored on input.
+    pub near_grid_dim: f32,
+    /// Mid placement grid edge, in cells. Also renderer-derived; ignored on input.
+    pub mid_grid_dim: f32,
+    /// Width in metres of the stochastic dissolve band at every LOD join. Each
+    /// ring thins out across the band as the next thickens, instead of one ring
+    /// stopping on a hard circle. 0 restores the abrupt joins.
+    pub lod_blend: f32,
+    /// Alpha test for the photographed cards. Separate from `alpha_cutoff`
+    /// (which belongs to the procedural cut-out path) because the photo plates
+    /// come from JPEG opacity maps whose noisy edges are a flicker source worth
+    /// being able to trim at runtime.
+    pub photo_alpha_cutoff: f32,
+    /// Force every photographed clump to one atlas layer: -1 = normal selection,
+    /// 0 = the primary clump, 1..8 = one local family. The direct way to find
+    /// which source plate is responsible for a flicker.
+    pub photo_force_layer: f32,
+    /// Saturation of the photographed cards about their own luma. Separate from
+    /// the field-wide `saturation` so the plates can be matched to the
+    /// procedural grass instead of moving with it. 0.62 = the former constant.
+    pub photo_saturation: f32,
+    /// How long a walked imprint survives, in seconds. It recovers over the last
+    /// third of this, so the trail thins out rather than vanishing.
+    pub track_lifetime: f32,
+    /// How far a crushed plant is pressed down, as a fraction of its own height.
+    /// 0.55 is the long-standing value. Photographed cards scale this up
+    /// internally: a clump plate has to rotate much further than a blade before
+    /// it reads as flattened.
+    pub imprint_depth: f32,
+    /// Selection weights for atlas layers 1..8 (the local families). Relative,
+    /// not normalised; all-zero falls back to the primary clump.
+    pub photo_layer_weights: [f32; 8],
+    /// Per-LOD coverage multipliers on top of `density`, so the three rings can
+    /// be balanced independently. The near ring is where card overdraw is paid.
+    pub near_density: f32,
+    pub mid_density: f32,
+    pub far_density: f32,
+    pub _pad_density: f32,
+    /// Albedo tints, applied after the existing colour work and before lighting.
+    /// `tint_procedural` covers procedural blades, ribbons and the far proxy;
+    /// `tint_photo` covers the photographed cards. White = untinted.
+    pub tint_procedural: [f32; 4],
+    pub tint_photo: [f32; 4],
+    /// Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
+    /// Renderer-derived from the uploaded atlas; ignored on input.
+    pub photo_layer_bounds: [f32; 36],
+    /// Mean linear colour of each photo layer's covered texels, (r, g, b, 1).
+    /// The pivot the card contrast turns about, so contrast cannot double as a
+    /// brightness change. Renderer-derived; ignored on input.
+    pub photo_layer_means: [f32; 36],
 }
 
 // Per-map + per-frame water parameters (a small UBO). See wgpu_renderer.hpp.
@@ -1166,8 +1237,10 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassBatch>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassTrack>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
-// 1744 = 109 * 16: mid_radius consumes the former reserved scalar so the UBO ABI stays stable.
-const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 1744);
+  // 1840 bytes; the photo-card look block, the placement block, the layer-mix
+  // block and eight per-layer weights complete five further vec4s
+  // (GrassParams.photo / .place / .photo_mix / .layer_weights[2]).
+  const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4736);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);
@@ -1952,6 +2025,40 @@ pub unsafe extern "C" fn wgr_grass_set_tuft(
         let rgba = unsafe { std::slice::from_raw_parts(rgba, bytes) };
         renderer.grass_set_tuft(width, height, rgba);
     }));
+}
+
+/// Upload matching photographed clump layers. The renderer selects a stable
+/// layer per world-space patch; layer zero remains the primary A3 clump.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_tufts(
+    renderer: *mut WgrRenderer, width: u32, height: u32, layers: u32, rgba: *const u8,
+) {
+    if renderer.is_null() || rgba.is_null() || width == 0 || height == 0 || layers == 0 { return; }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let bytes = width as usize * height as usize * layers as usize * 4;
+        let rgba = unsafe { std::slice::from_raw_parts(rgba, bytes) };
+        renderer.grass_set_tufts(width, height, layers, rgba);
+    }));
+}
+
+/// Whether a photographed clump atlas was actually uploaded. Returns 0 when the
+/// optional assets are absent, in which case the renderer keeps procedural grass
+/// no matter what `use_photo_tuft` asks for -- the Grass tab reports that rather
+/// than leaving a ticked box that does nothing.
+///
+/// # Safety
+/// `renderer` must be a live renderer pointer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_have_photo_clumps(renderer: *const WgrRenderer) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        u32::from(renderer.grass_have_photo_clumps())
+    }))
+    .unwrap_or(0)
 }
 
 /// Upload the opaque, photographed blade-surface texture array used by the
