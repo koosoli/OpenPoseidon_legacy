@@ -3,6 +3,7 @@
 
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -107,6 +108,18 @@ TextureWgpu::~TextureWgpu()
 
 int TextureWgpu::Init()
 {
+    // A procedural texture has no file behind it: `#(argb,8,8,3)color(...)` is
+    // generated from its own name. Nothing in the file-source chain can open one,
+    // so without this every such reference fails to upload -- which is why Arma 3's
+    // landing and warning lights, whose whole appearance is an authored flat
+    // colour, had nothing to draw.
+    if (const auto generated = render::procedural::Parse(Name()); generated.generated)
+    {
+        InitDynamic(generated.width, generated.height, generated.rgba.data(),
+                    static_cast<uint32_t>(generated.rgba.size()));
+        return _gpuHandle ? 0 : -1;
+    }
+
     PacFormat format = BasicFormat(Name());
 
     ITextureSourceFactory* factory = SelectTextureSourceFactory(Name());

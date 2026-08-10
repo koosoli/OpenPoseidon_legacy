@@ -133,6 +133,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_shadowmap_math.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
+    Graphics/test_procedural_texture.cpp
     Graphics/test_shape_loader.cpp
     Graphics/test_pixel_format.cpp
     Graphics/test_image.cpp

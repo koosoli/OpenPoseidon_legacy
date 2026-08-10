@@ -31,6 +31,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>                // GLandscape->SurfaceY (GPU-driven conform bcSurfaceY)
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
+#include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/World/Simulation/Animation/RtAnimation.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -2632,16 +2633,29 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
     const auto* base = cached->second.Find(Asset::Material::MaterialSlot::BaseColour);
     if (!base)
         return reject("no BaseColour slot", "");
-    if (base->texture.isProcedural)
-        return reject("procedural", base->texture.path.canonical());
-    if (base->texture.path.empty())
-        return reject("empty path", "");
 
-    Ref<Texture> baseTexture = _wbank->Load(base->texture.path.canonical().c_str());
+    // A procedural stage is generated from its own name rather than loaded. The
+    // constant-colour ones are a real albedo -- `mil_wallbig_multi` names its whole
+    // surface that way -- so they are handed to the bank like any other texture.
+    // The lookup-table generators (fresnel, irradiance) still have no
+    // implementation and are reported as such rather than lumped together.
+    std::string loadName = base->texture.path.canonical();
+    if (base->texture.isProcedural)
+    {
+        if (!render::procedural::Parse(base->texture.raw.c_str()).generated)
+            return reject("procedural lookup", base->texture.raw);
+        loadName = base->texture.raw;
+    }
+    else if (base->texture.path.empty())
+    {
+        return reject("empty path", "");
+    }
+
+    Ref<Texture> baseTexture = _wbank->Load(loadName.c_str());
     auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
     const uint64_t handle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0;
     if (!handle)
-        return reject(wgpuBaseTexture ? "uploaded 0" : "load failed", base->texture.path.canonical());
+        return reject(wgpuBaseTexture ? "uploaded 0" : "load failed", loadName);
     return handle;
 }
 
