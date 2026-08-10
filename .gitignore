@@ -100,3 +100,6 @@ target/
 # own work product. See PROVENANCE.md.
 docs/roadmap/evidence/a3-game-*.png
 docs/roadmap/evidence/a3-sample-*.png
+
+# CI run output committed by accident (Trident integration-test working dirs).
+.tmp-ci-*/

@@ -21,17 +21,18 @@ interoperability effort. No Arma 3 executable code has been decompiled,
 disassembled, copied, or incorporated into PoseidonWGPU. Format information was
 obtained from publicly available documentation and independently validated against
 files from a legally installed copy of Arma 3. No Bohemia Interactive game asset
-files are distributed with this project.
+files are known to be distributed with this project; binary fixtures predating
+this work are identified below and have not yet been provenance-audited.
 
 PoseidonWGPU is an independent project. It is not affiliated with, endorsed by, or
 supported by Bohemia Interactive a.s.
 
 ## What was done
 
-- **File formats were read; programs were not.** This work parses Bohemia *data*
-  files: `.wrp` worlds, `.pbo` archives, `.p3d` models, `.paa` textures, `.rvmat`
-  materials, and binarized configs. These are data consumed by a program, not
-  program code.
+- **Compatibility information was derived from documented data-file formats and
+  validation against data files, not from analysis of the Arma 3 executable.** The
+  files parsed are `.wrp` worlds, `.pbo` archives, `.p3d` models, `.paa` textures,
+  `.rvmat` materials, and binarized configs.
 - **Layouts came from public documentation.** The OPRW revision-25 world layout,
   and the ODOL revision-73 sections added here, were taken from
   [`bis-file-formats`](#third-party-documentation), an MIT-licensed open-source
@@ -58,32 +59,38 @@ supported by Bohemia Interactive a.s.
 
 ## What was not done
 
-- **No Arma 3 executable was decompiled, disassembled, debugged, or analysed.** The
-  Arma 3 program binary was never read by this work.
-- **No Bohemia source code** was consulted, copied, or adapted.
+- **No Arma 3 executable was decompiled, disassembled, instrumented, patched, or
+  inspected to derive compatibility information.**
+- **No Arma 3 source code, non-public Bohemia source code, or
+  decompiled/disassembled Arma 3 executable code** was consulted, copied, or
+  adapted for this interoperability work. (PoseidonWGPU as a whole derives from
+  Bohemia's *publicly released* GPL Poseidon source; see
+  [Licensing and naming](#licensing-and-naming).)
 - **No technical protection measure was circumvented.** Every file read was an
   ordinary, unencrypted data file from a normal installation.
-- **No Bohemia asset file** — model, texture, world, archive, material, sound or
-  config — is committed to this repository.
+- **No Bohemia asset file was committed by this interoperability work** — no model,
+  texture, world, archive, material, sound or config. Pre-existing binary fixtures
+  are outside this scope and are identified under
+  [What this repository contains](#what-this-repository-contains).
 
 ## Basis
 
-This work was carried out as software interoperability: enabling an independent
-program to read file formats so that it can work with data the user already owns.
-The project understands that activity to fall within:
+This work was undertaken for interoperability. Directive 2009/24/EC recognises
+interoperability as a software concern and provides rights concerning observation,
+study and testing by lawful users, as well as a separate conditional exception for
+decompilation when indispensable for interoperability. No decompilation is claimed
+to have been performed in this work. The CJEU's decision in *SAS Institute v World
+Programming* (C-406/10) held that a lawful licensee may, subject to the relevant
+conditions, study, observe and test a program to reproduce its functionality
+without access to its source code.
 
-- Directive 2009/24/EC Art. 5(3) — a lawful user may observe, study and test a
-  program's functioning to determine the ideas and principles underlying it;
-- Directive 2009/24/EC Art. 6 — decompilation is permitted where indispensable to
-  achieve interoperability of an independently created program (not relied on
-  here, since no decompilation took place);
-- the equivalent interoperability reasoning in *Sega v. Accolade* and *Sony v.
-  Connectix*.
-
-This is stated as the basis the work was conducted on. It is not a legal
-conclusion, and no lawyer has reviewed it. Terms in an end-user licence agreement
-may address reverse engineering separately from copyright law, and the interaction
-between such terms and statutory interoperability rights varies by jurisdiction.
+This document does not assert that those provisions resolve every contractual or
+copyright question applicable to the project. Bohemia Interactive's Arma 3 EULA
+contains a general prohibition on reverse engineering, decompilation and
+disassembly; the interaction between such contractual terms and statutory
+interoperability provisions varies by jurisdiction. This is precisely why this
+document records exactly what was and was not done rather than arguing over
+terminology. No lawyer has reviewed it.
 
 ## Third-party documentation
 
@@ -93,9 +100,13 @@ between such terms and statutory interoperability rights varies by jurisdiction.
 
 MIT is GPL-compatible. The implementations here are written against PoseidonWGPU's
 own reader idioms, containers, error model and bounds checking rather than
-translated from that library. **If any part is closer to a port than to an
-independent implementation, MIT's attribution requirement applies, and this notice
-is that attribution.**
+translated from that library.
+
+This document records the reference for provenance. **If any PoseidonWGPU
+implementation contains copied or substantially translated portions of the
+MIT-licensed reference implementation, the applicable MIT copyright and permission
+notice must additionally be preserved in the appropriate third-party notices
+and/or source files.**
 
 The reference library is present in the working tree during development under
 `.tmp-uksfta-bis/`. It is untracked and is not part of this repository.
@@ -104,10 +115,12 @@ The reference library is present in the working tree during development under
 
 Verified against the full git history at the commit named above:
 
-- **No Bohemia game asset files are tracked.** `packages/` — where locally
-  extracted Arma 3 worlds, models and textures live during development — is
-  gitignored, and no file under it appears anywhere in the history.
-- **No Arma 3 `.wrp`, `.pbo`, `.p3d`, `.paa` or `.rvmat` file is tracked.**
+- **No Bohemia game asset files are known to be tracked as part of the Arma 3
+  compatibility work.** `packages/` — where locally extracted Arma 3 worlds, models
+  and textures live during development — is gitignored, and no file under it
+  appears anywhere in the history. Binary fixtures predating this work are
+  separately identified below and have not yet been provenance-audited; until that
+  audit is complete this statement is deliberately not categorical.
 - **Captures depicting Arma 3 content are not tracked.** 29 PNGs under
   `docs/roadmap/evidence/` (`a3-game-*`, `a3-sample-*`) were renders of Bohemia
   models and textures, committed during earlier material investigations. They are
@@ -123,17 +136,30 @@ reliable, not more:
    receives them. For the statement above to hold for a *published* repository,
    publish from a fresh export carrying no history, or from a history rewritten to
    drop those paths.
-2. **Binary test fixtures exist whose origin was not audited here.** 55 files
-   tracked at this commit carry `.p3d`, `.paa`, `.pbo`, `.pac` or `.rvmat`
-   extensions: 53 under `tests/fixtures/` and 2 under
-   `.tmp-ci-91499679288/trident-output/`. The `tests/fixtures/` names indicate
-   synthetic and generated content (`fuzz_*`, `camera_path_*`, `*_mlod.p3d`) and
-   the project documents them as test data, but this document does not assert
-   their provenance because it was not verified. The `.tmp-ci-*` pair appears to
-   be CI run output committed by accident and should probably be removed
-   regardless. Git history additionally contains further fixtures under
-   `tests/integration/` that are no longer present at HEAD. All of this predates
-   the Arma 3 work and should be confirmed before publishing.
+2. **Binary test fixtures were audited by inspection, not by chain of custody.**
+   53 files under `tests/fixtures/` carry `.p3d`, `.paa`, `.pbo` or `.pac`
+   extensions. Every one was opened and examined; the results are consistent
+   throughout with project-authored test data rather than shipped game content:
+
+   - **Models:** 22 are MLOD (the editable source format) at version 257; 3 carry
+     deliberately corrupt version fields and are named `fuzz_*`; exactly one is
+     binarized ODOL — `tests/fixtures/p3d/animated_morph_odol.p3d`, at **713
+     bytes**, orders of magnitude below any shipped model.
+   - **Textures:** every `.paa`/`.pac` is 4x4, 32x32 or 64x64. Shipped Arma
+     textures are 512x512 to 2048x2048.
+   - **Archives:** all are 169 to 5,585 bytes, named `*_fixture*`, and **none
+     declares a `product` or `prefix` property** — they carry no header-extension
+     block at all, whereas every Bohemia archive declares its product.
+   - **Materials:** no `.rvmat` fixture is tracked.
+
+   This is an inference from format, size, naming and metadata, not a documented
+   chain of custody, and it is recorded as such. Nothing found contradicts the
+   conclusion that these are generated by the project's own tools.
+
+   Git history additionally contains fixtures under `tests/integration/` that are
+   no longer present at HEAD, and a `.tmp-ci-91499679288/` directory of Trident
+   integration-test output that was committed by accident and has now been
+   untracked and gitignored. Both predate the Arma 3 work.
 
 ## How to verify these claims
 
