@@ -2522,6 +2522,42 @@ static uint32_t BuildForestCrownComponents(const std::vector<SVertex>& verts, co
 
 } // namespace
 
+// How much of a material's flat specular constant to apply.
+//
+// In Arma 3 that constant is what a per-texel specular map scales -- SMDI on the
+// Super family, and equivalents on Multi, TreeAdv and the NormalMap*Specular*
+// families. This build binds none of those maps, so applying the constant alone
+// is the maximum the material could ever reach on any texel, which lit whole
+// rooftops as if every point were a mirror.
+//
+// A real specular map averages well below white, so scaling the constant
+// approximates its mean far better than either extreme: applying it in full
+// blows out, and dropping it entirely removes glint the surfaces should have.
+// The factor is deliberately tunable (WGR_MATERIAL_SPEC_UNMAPPED) because the
+// right value is a look judgement, not a measurement; binding the maps replaces
+// this entirely.
+//
+// Returns 1.0 for anything that is not a translated RVMAT, so OFP's CfgMaterials
+// surfaces are untouched.
+float EngineWgpu::MaterialSpecularScale(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return 1.0f;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 1.0f;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end() || !cached->second.schemaKnown)
+        return 1.0f; // ResolveMaterialBaseColour fills the cache first
+    static const float scale = []
+    {
+        if (const char* v = std::getenv("WGR_MATERIAL_SPEC_UNMAPPED"))
+            return std::clamp(std::strtof(v, nullptr), 0.0f, 1.0f);
+        return 0.25f;
+    }();
+    return scale;
+}
+
 // The albedo a section's RVMAT names, or 0 when it names none.
 //
 // An Arma 3 structure commonly carries a placeholder face texture (`*_mlod_co`)
@@ -2760,6 +2796,16 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             if (const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i)))
             {
                 mat.texture_id = baseColour;
+            }
+            // Drop a specular constant whose map we do not bind. Keeping the
+            // exponent in .w costs nothing and leaves the term ready for when the
+            // SMDI map is bound. Ordering matters: ResolveMaterialBaseColour above
+            // is what populates the translation cache this reads.
+            if (const float specScale = MaterialSpecularScale(s->GetSection(i)); specScale < 1.0f)
+            {
+                mat.specular.x *= specScale;
+                mat.specular.y *= specScale;
+                mat.specular.z *= specScale;
             }
             sections.push_back(sec);
             materials.push_back(mat);
