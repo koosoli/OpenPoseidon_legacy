@@ -19,6 +19,7 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/UI/Locale/Stringtable/test_localized_date.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Foundation/Time/test_clock_timeofday.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/PreprocC/test_preprocC.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_bank_mount_prefix.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_findbank_x64.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_banks.cpp

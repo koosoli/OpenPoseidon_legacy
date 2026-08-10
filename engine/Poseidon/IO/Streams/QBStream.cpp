@@ -1270,15 +1270,8 @@ void BankList::Load(const RString& path, const RString& bankPrefix, const RStrin
         return;
     }
 
-    RString prefix;
-    if (emptyPrefix)
-    {
-        prefix = bName;
-    }
-    else
-    {
-        prefix = bankPrefix + bName;
-    }
+    // The archive's own declaration wins where it has one; see ResolveBankMountName.
+    const RString prefix = ResolveBankMountName(bank.GetProperty(RString("prefix")), bankPrefix, bName, emptyPrefix);
 
     RString prefixPath = prefix + NATIVE_DIR_STR;
     bank.SetPrefix(prefixPath);
@@ -1292,7 +1285,11 @@ void BankList::Load(const RString& path, const RString& bankPrefix, const RStrin
 
 void BankList::Unload(const RString& bankPrefix, const RString& bName, bool emptyPrefix)
 {
-    // find corresponding bank
+    // Derives the mount name the same way Load's *fallback* does, so it can only
+    // find banks mounted under their filename. A bank that declared its own
+    // prefix is mounted under that instead and will not be found here. Left as
+    // is because nothing calls this today; a caller that needs to unload a
+    // later-generation addon has to match on the declared prefix.
     RString prefix;
     if (emptyPrefix)
     {

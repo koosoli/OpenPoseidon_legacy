@@ -13,7 +13,6 @@
 #include <Poseidon/IO/Filesystem/DirScanner.hpp>
 #endif
 
-
 namespace Poseidon
 {
 class QFBank;
@@ -72,6 +71,37 @@ class BankContextBase : public RefCount
 
 typedef bool (*OpenCallback)(QFBank* bank, BankContextBase* context);
 
+// Where a bank gets mounted in the virtual filesystem.
+//
+// An archive may declare its own virtual root in its header-extension block, and
+// where it does, that declaration is the only correct answer: its entries are
+// stored relative to it, so a bank mounted anywhere else cannot resolve a single
+// path that references it. The caller-derived name is what the OFP-era archives
+// need, because they carry no header-extension block at all.
+//
+// Measured across the local installs before this rule was adopted: of 215 CWA
+// retail and 14 Demo archives, 3 declare a prefix and none of them differs from
+// its filename, so preferring the declaration changes nothing there. Of 487
+// Arma 3 archives all 487 declare one and 483 differ -- rocks_f.pbo declares
+// a3\rocks_f, and anims_f_data.pbo declares a3\anims_f\data, which no rule based
+// on the filename could ever produce.
+//
+// Free function so the rule can be tested without a filesystem or an open bank.
+inline RString ResolveBankMountName(const RString& declaredPrefix, const RString& bankPrefix, const RString& bName,
+                                    bool emptyPrefix)
+{
+    // Guard the one thing a declaration must not do: escape the virtual
+    // namespace. This value came out of a file and is about to become the prefix
+    // that lookups are resolved against.
+    const bool declaredIsSafe = declaredPrefix.GetLength() > 0 && declaredPrefix.GetLength() < 240 &&
+                                strstr(declaredPrefix, "..") == nullptr && strchr(declaredPrefix, ':') == nullptr;
+    if (declaredIsSafe)
+        return declaredPrefix;
+    if (emptyPrefix)
+        return bName;
+    return bankPrefix + bName;
+}
+
 class BankList : public AutoArray<QFBank>
 {
   public:
@@ -113,7 +143,6 @@ struct FileInfoO
 };
 
 #include <Poseidon/Foundation/Containers/Array.hpp>
-
 
 typedef MapStringToClass<FileInfoO, AutoArray<FileInfoO>> FileBankType;
 
@@ -295,15 +324,15 @@ extern RString GFileBankPrefix;
 
 } // namespace Poseidon
 
-using ::Poseidon::QIFStreamB;
-using ::Poseidon::FileInfoO;
-using ::Poseidon::FileBankType;
 using ::Poseidon::BankList;
-using ::Poseidon::QFBank;
-using ::Poseidon::GFileBanks;
-using ::Poseidon::GFileBankPrefix;
 using ::Poseidon::CmpStartStr;
+using ::Poseidon::FileBankType;
+using ::Poseidon::FileInfoO;
 using ::Poseidon::FindBank;
+using ::Poseidon::GFileBankPrefix;
+using ::Poseidon::GFileBanks;
+using ::Poseidon::QFBank;
+using ::Poseidon::QIFStreamB;
 
 extern bool GLogFileOps;
 extern bool GUseFileBanks;

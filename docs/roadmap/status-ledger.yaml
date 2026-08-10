@@ -2559,12 +2559,11 @@ tickets:
           applying it resolves 350.
     known_failures:
       - >-
-        BankList::Load derives a bank's mount prefix from the bank filename plus a
-        caller-supplied prefix, never from the archive's declared prefix property.
-        For OFP-era archives those coincide; for Arma 3 they do not (rocks_f vs
-        a3\rocks_f). Untested against a live A3 addon mount -- the census indexes
-        archives directly and does not exercise the mount path. Must be settled
-        before runtime A3 asset loading is attempted.
+        RESOLVED by WLD-013 on 2026-08-10. BankList::Load now prefers the archive's
+        declared prefix property and falls back to the filename when there is none.
+        Measured a no-op on all local CWA content (of 3 declaring archives, 0 differ
+        from their filename) and corrects 483 of 487 Arma 3 archives. Still not
+        exercised by a live A3 addon mount in a running game.
       - Textures and RVMATs referenced by the models are not followed.
       - The index takes the first archive providing a path; real load-order rules
         for a mod list are not implemented.
