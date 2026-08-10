@@ -53,7 +53,15 @@ using Poseidon::LoadBanksContext;
 #endif
 
 using namespace Poseidon;
-static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS", nullptr};
+// Archives declaring a product outside this list are refused at mount. "Arma 3"
+// is accepted because loading Arma 3 content is the point of the compatibility
+// work: every one of the 487 archives in a local Arma 3 install declares it, and
+// without it not one of them mounts -- which is why an Arma 3 world loaded but
+// drew white, with neither its terrain materials nor its object models resolving.
+//
+// Measured spellings in that install: "Arma 3" on 485 archives and "ArmA 3" on
+// one. StringInList compares case-insensitively, so a single entry covers both.
+static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS", "Arma 3", nullptr};
 static bool StringInList(const char* str, const char** list);
 
 namespace Poseidon

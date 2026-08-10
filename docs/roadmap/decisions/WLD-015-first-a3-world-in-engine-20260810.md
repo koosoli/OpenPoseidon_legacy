@@ -111,3 +111,35 @@ untouched.
 2. Then re-measure: how many of 479 terrain materials and 350 models resolve at
    runtime, as a census like WLD-011's rather than a screenshot.
 3. Then plan the multi-resolution `Landscape` migration in measured steps.
+
+## Addendum — why nothing resolves (partly answered)
+
+Traced the "0 of 479 terrain materials resolved" to bank mounting, and found the
+first gate. Every addon bank passes `CheckProductCallback` →
+`IsAddonMetadataAccepted`, which refuses any archive whose declared `product` is
+not in `ProductList`. That list was:
+
+```cpp
+{"OFP: Cold War Crisis", "OFP: Resistance", "VBS", nullptr}
+```
+
+Measured across the local Arma 3 install: **485 archives declare `Arma 3` and one
+declares `ArmA 3`** — so all 487 were refused at mount. (`StringInList` compares
+case-insensitively, so one entry covers both spellings. No archive anywhere sets
+`pboVersion`, so that gate in the same function is inert.) `Arma 3` is now
+accepted, since loading Arma 3 content is the point of the work.
+
+**This was necessary but not sufficient.** With the product gate open, the count is
+still `0 of 479`. The mod directory is confirmed being scanned
+(`-> Checking mod directory: ...\@a3stratis`), and `map_stratis_data_layers.pbo`
+is confirmed to declare prefix `a3\map_stratis\data\layers` and to contain exactly
+the RVMAT paths the world names. So something after the product check is still
+dropping these banks.
+
+**Unverified hypothesis for the next session:** addon banks are loaded with
+`afterOpen = ParseAddonConfigCallback`, and `BankList::Load` calls
+`Resize(oldSize)` — dropping the bank — when that callback returns false. An Arma 3
+`config.bin` is unlikely to parse through CWA's `ParamFile`, which would discard
+every A3 bank *after* it opened successfully. That is a guess from reading the
+code, not a measurement; confirm it before changing anything. The `AutoBank`
+de-duplication note in WLD-013 remains a second candidate.
