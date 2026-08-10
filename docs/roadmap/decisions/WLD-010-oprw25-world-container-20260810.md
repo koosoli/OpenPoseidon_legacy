@@ -134,3 +134,8 @@ map info                1,482,744 bytes retained, not decoded
 Model-path resolution: turning the 350 model strings into loadable P3Ds through the
 addon/PBO lookup, and classifying the failures. That is the measurement that turns
 "163,953 placements" into a renderable-coverage denominator.
+
+**Answered in WLD-011:** all 350 resolve and 304 parse as static revision-73
+models, covering 163,059 of 163,953 placements. The remaining gap is three named
+unimplemented ODOL 73 features, largest first: model-directory animations,
+LOD proxies, vertex bone references.

@@ -354,6 +354,10 @@ PboInfo InspectPbo(const std::string& path)
         return info;
     }
 
+    // The archive's own declared root, from the header-extension block -- not
+    // QFBank::GetPrefix(), which is the mount point the *caller* assigned and is
+    // empty for a bank merely opened for inspection.
+    info.prefix = static_cast<const char*>(bank.GetProperty(RString("prefix")));
     bank.ForEach(CollectPboEntries, &info.entries);
 
     for (const auto& e : info.entries)

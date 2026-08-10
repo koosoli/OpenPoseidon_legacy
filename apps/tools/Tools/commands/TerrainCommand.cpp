@@ -2,12 +2,21 @@
 #include "../SDLPreview.hpp"
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
+#include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/Asset/Probes/AssetPreview.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
+#include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <algorithm>
+#include <cctype>
+#include <cstring>
 #include <exception>
+#include <filesystem>
+#include <map>
 #include <set>
+#include <utility>
 #include <iostream>
 #include <iomanip>
 #include <cstdlib>
@@ -55,6 +64,186 @@ std::string JsonEscape(const std::string& value)
         }
     }
     return out;
+}
+
+// -- addon index -------------------------------------------------------------
+//
+// Maps a world's virtual asset paths onto the archives of a local install. The
+// world names its models as `a3\rocks_f\water\x.p3d`; the archive stores that
+// entry as `water\x.p3d` under a bank whose prefix is `a3\rocks_f`. Ignoring the
+// prefix makes every Arma 3 path miss -- measured as 0 of Stratis's 350 models
+// resolving, versus 350 of 350 once the prefix is applied.
+struct AddonEntry
+{
+    std::string pboPath;
+    std::string entryName; // as stored in the bank, prefix removed
+};
+
+std::string CanonicalAssetPath(std::string path)
+{
+    for (char& c : path)
+    {
+        if (c == '\\')
+            c = '/';
+        else
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return path;
+}
+
+using AddonIndex = std::map<std::string, AddonEntry>;
+
+AddonIndex BuildAddonIndex(const std::string& root, int& archivesRead)
+{
+    AddonIndex index;
+    archivesRead = 0;
+    std::error_code ec;
+    for (std::filesystem::recursive_directory_iterator it(root, ec), end; it != end; it.increment(ec))
+    {
+        if (ec)
+            break;
+        if (!it->is_regular_file(ec))
+            continue;
+        std::string extension = it->path().extension().string();
+        for (char& c : extension)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (extension != ".pbo")
+            continue;
+
+        const std::string pboPath = it->path().string();
+        const auto info = Poseidon::InspectPbo(pboPath);
+        if (!info.valid)
+            continue;
+        ++archivesRead;
+
+        std::string prefix = CanonicalAssetPath(info.prefix);
+        if (!prefix.empty() && prefix.back() != '/')
+            prefix.push_back('/');
+        for (const auto& entry : info.entries)
+        {
+            // First archive wins, which is the load order the engine would apply
+            // in the absence of an explicit mod list. Both worlds' assets are
+            // unambiguous, but recording the rule keeps a later duplicate honest.
+            index.emplace(prefix + CanonicalAssetPath(entry.name), AddonEntry{pboPath, entry.name});
+        }
+    }
+    return index;
+}
+
+// What happened when a referenced model was actually opened and parsed. Ordered
+// worst-to-best so the report reads as a ladder.
+enum class ModelOutcome
+{
+    Missing,             // no archive in the install provides this path
+    Unreadable,          // the archive has it but the entry would not read
+    NotP3D,              // the bytes are not a model container at all
+    MlodSource,          // unbinarized source geometry, not a runtime asset
+    UnsupportedRevision, // recognised ODOL, revision this build does not read
+    ParseFailed,         // supported revision, but the file did not parse
+    Static,              // parsed as static geometry
+};
+
+const char* ModelOutcomeName(ModelOutcome outcome)
+{
+    switch (outcome)
+    {
+        case ModelOutcome::Missing:
+            return "missing";
+        case ModelOutcome::Unreadable:
+            return "unreadable";
+        case ModelOutcome::NotP3D:
+            return "not_p3d";
+        case ModelOutcome::MlodSource:
+            return "mlod_source";
+        case ModelOutcome::UnsupportedRevision:
+            return "unsupported_revision";
+        case ModelOutcome::ParseFailed:
+            return "parse_failed";
+        case ModelOutcome::Static:
+            return "static";
+    }
+    return "unknown";
+}
+
+struct ModelResult
+{
+    ModelOutcome outcome = ModelOutcome::Missing;
+    uint32_t revision = 0;
+    std::string detail;
+};
+
+ModelResult ClassifyModel(const std::string& virtualPath, const AddonIndex& index)
+{
+    ModelResult result;
+    const auto found = index.find(CanonicalAssetPath(virtualPath));
+    if (found == index.end())
+        return result;
+
+    QFBank bank;
+    std::string bankName = found->second.pboPath;
+    if (bankName.size() > 4)
+        bankName.resize(bankName.size() - 4); // QFBank wants the name without .pbo
+    if (!bank.open(RString(bankName.c_str())))
+    {
+        result.outcome = ModelOutcome::Unreadable;
+        result.detail = "cannot open archive";
+        return result;
+    }
+    bank.Lock();
+    Ref<IFileBuffer> buffer = bank.error() ? Ref<IFileBuffer>() : bank.Read(found->second.entryName.c_str());
+    if (!buffer || buffer->GetSize() < 8)
+    {
+        bank.Unlock();
+        result.outcome = ModelOutcome::Unreadable;
+        result.detail = "entry did not read";
+        return result;
+    }
+
+    const auto* bytes = static_cast<const char*>(buffer->GetData());
+    const int size = static_cast<int>(buffer->GetSize());
+
+    if (std::memcmp(bytes, "P3DM", 4) == 0 || std::memcmp(bytes, "MLOD", 4) == 0)
+    {
+        bank.Unlock();
+        result.outcome = ModelOutcome::MlodSource;
+        return result;
+    }
+    if (std::memcmp(bytes, "ODOL", 4) != 0)
+    {
+        bank.Unlock();
+        result.outcome = ModelOutcome::NotP3D;
+        return result;
+    }
+
+    QIStream stream(bytes, size);
+    Asset::Formats::BinaryReader reader(stream);
+    try
+    {
+        const auto revision = Asset::Formats::P3D::PeekOdolRevision(reader);
+        result.revision = revision.version;
+        const bool readable = revision.support == Asset::Formats::P3D::OdolSupport::Parsed ||
+                              revision.support == Asset::Formats::P3D::OdolSupport::NarrowSubset;
+        if (!readable)
+        {
+            bank.Unlock();
+            result.outcome = ModelOutcome::UnsupportedRevision;
+            return result;
+        }
+        // A revision this build reads is only a claim about the container. The
+        // census wants the file actually parsed, because "revision 73 is
+        // supported" and "this revision-73 file reads" are different facts --
+        // 73 is a NarrowSubset, so most of the difference is the point.
+        const auto model = Asset::Formats::P3D::ReadOdol73StaticModel(reader, size);
+        (void)model;
+        result.outcome = ModelOutcome::Static;
+    }
+    catch (const std::exception& e)
+    {
+        result.outcome = ModelOutcome::ParseFailed;
+        result.detail = e.what();
+    }
+    bank.Unlock();
+    return result;
 }
 
 // Counts every dimension the world exposes today. Anything not yet implemented is
@@ -192,6 +381,139 @@ void PrintWorldCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
     std::cout << "-- not yet measured --\n";
     std::cout << "Map info:         " << c.mapInfoBytes << " bytes retained, not decoded\n";
     std::cout << "Model resolution, material families, and renderable state are not part of this census yet.\n";
+}
+
+// Weighted by placement count as well as by distinct model, because those two
+// denominators answer different questions. 349 of 350 models parsing sounds like
+// near-complete coverage; if the one failure is the model placed 40,000 times, the
+// world is still mostly missing.
+void PrintModelCensus(const Poseidon::Asset::Formats::World::Oprw25World& world, const AddonIndex& index,
+                      int archivesRead, bool asJson)
+{
+    std::vector<int> placementsPerModel(world.models.size(), 0);
+    for (const auto& object : world.objects)
+        ++placementsPerModel[static_cast<size_t>(object.modelIndex)];
+
+    std::map<ModelOutcome, int> byModel;
+    std::map<ModelOutcome, long long> byPlacement;
+    std::map<uint32_t, int> revisions;
+    std::vector<std::pair<std::string, ModelResult>> notStatic;
+
+    for (size_t i = 0; i < world.models.size(); ++i)
+    {
+        const ModelResult result = ClassifyModel(world.models[i], index);
+        ++byModel[result.outcome];
+        byPlacement[result.outcome] += placementsPerModel[i];
+        if (result.revision != 0)
+            ++revisions[result.revision];
+        if (result.outcome != ModelOutcome::Static)
+            notStatic.emplace_back(world.models[i], result);
+    }
+
+    // Most-placed failures first: that is the order the work should be done in.
+    std::sort(notStatic.begin(), notStatic.end(),
+              [&](const auto& a, const auto& b)
+              {
+                  const auto count = [&](const std::string& name)
+                  {
+                      for (size_t i = 0; i < world.models.size(); ++i)
+                          if (world.models[i] == name)
+                              return placementsPerModel[i];
+                      return 0;
+                  };
+                  return count(a.first) > count(b.first);
+              });
+
+    const auto modelsOf = [&](ModelOutcome o) { return byModel.count(o) ? byModel.at(o) : 0; };
+    const auto placementsOf = [&](ModelOutcome o) { return byPlacement.count(o) ? byPlacement.at(o) : 0LL; };
+    const ModelOutcome all[] = {ModelOutcome::Static,     ModelOutcome::ParseFailed, ModelOutcome::UnsupportedRevision,
+                                ModelOutcome::MlodSource, ModelOutcome::NotP3D,      ModelOutcome::Unreadable,
+                                ModelOutcome::Missing};
+
+    if (asJson)
+    {
+        std::cout << "{\n  \"archives_indexed\": " << archivesRead << ",\n  \"index_entries\": " << index.size()
+                  << ",\n  \"models\": {";
+        bool first = true;
+        for (const ModelOutcome outcome : all)
+        {
+            std::cout << (first ? "\n" : ",\n") << "    \"" << ModelOutcomeName(outcome)
+                      << "\": {\"models\": " << modelsOf(outcome) << ", \"placements\": " << placementsOf(outcome)
+                      << "}";
+            first = false;
+        }
+        std::cout << "\n  },\n  \"odol_revisions\": {";
+        first = true;
+        for (const auto& [revision, count] : revisions)
+        {
+            std::cout << (first ? "\n" : ",\n") << "    \"" << revision << "\": " << count;
+            first = false;
+        }
+        std::cout << "\n  }\n}\n";
+        return;
+    }
+
+    std::cout << "\n-- referenced models --\n";
+    std::cout << "Archives indexed: " << archivesRead << " (" << index.size() << " entries)\n";
+    std::cout << std::left << std::setw(22) << "outcome" << std::right << std::setw(8) << "models" << std::setw(12)
+              << "placements" << "\n";
+    std::cout << std::string(42, '-') << "\n";
+    for (const ModelOutcome outcome : all)
+    {
+        if (modelsOf(outcome) == 0)
+            continue;
+        std::cout << std::left << std::setw(22) << ModelOutcomeName(outcome) << std::right << std::setw(8)
+                  << modelsOf(outcome) << std::setw(12) << placementsOf(outcome) << "\n";
+    }
+    std::cout << std::left << std::setw(22) << "TOTAL" << std::right << std::setw(8) << world.models.size()
+              << std::setw(12) << world.objects.size() << "\n";
+
+    if (!revisions.empty())
+    {
+        std::cout << "\nODOL revisions seen: ";
+        for (const auto& [revision, count] : revisions)
+            std::cout << revision << " (" << count << " models) ";
+        std::cout << "\n";
+    }
+
+    // The whole reason histogram, not just the head of the list: the point of the
+    // census is to say which missing capability unlocks the most, and a truncated
+    // listing cannot answer that.
+    if (!notStatic.empty())
+    {
+        std::map<std::string, std::pair<int, long long>> reasons;
+        for (const auto& [name, result] : notStatic)
+        {
+            const std::string reason = result.detail.empty() ? ModelOutcomeName(result.outcome) : result.detail;
+            auto& tally = reasons[reason];
+            ++tally.first;
+            for (size_t i = 0; i < world.models.size(); ++i)
+                if (world.models[i] == name)
+                    tally.second += placementsPerModel[i];
+        }
+        std::cout << "\nBlocking reasons (all failures):\n";
+        std::vector<std::pair<std::string, std::pair<int, long long>>> ordered(reasons.begin(), reasons.end());
+        std::sort(ordered.begin(), ordered.end(),
+                  [](const auto& a, const auto& b) { return a.second.second > b.second.second; });
+        for (const auto& [reason, tally] : ordered)
+            std::cout << "  " << std::setw(4) << tally.first << " models, " << std::setw(7) << tally.second
+                      << " placements  " << reason << "\n";
+    }
+
+    if (!notStatic.empty())
+    {
+        std::cout << "\nNot yet static, most-placed first:\n";
+        const size_t shown = notStatic.size() < 20 ? notStatic.size() : 20;
+        for (size_t i = 0; i < shown; ++i)
+        {
+            std::cout << "  [" << ModelOutcomeName(notStatic[i].second.outcome) << "] " << notStatic[i].first;
+            if (!notStatic[i].second.detail.empty())
+                std::cout << "\n      " << notStatic[i].second.detail;
+            std::cout << "\n";
+        }
+        if (notStatic.size() > shown)
+            std::cout << "  ... and " << (notStatic.size() - shown) << " more\n";
+    }
 }
 
 } // namespace
@@ -391,9 +713,13 @@ void TerrainCommand::Setup(CLI::App& app)
         // models, of which N resolve" is one that can go up or down between runs.
         static std::string inputFile;
         static bool asJson = false;
+        static std::string addonRoot;
         auto* cmd = terrain->add_subcommand("census", "Report compatibility coverage for a later-generation world");
         cmd->add_option("input", inputFile, "WRP terrain file")->required()->check(CLI::ExistingFile);
         cmd->add_flag("--json", asJson, "Emit the census as JSON");
+        cmd->add_option("--addons", addonRoot,
+                        "Game install to resolve referenced models against (searched recursively for PBOs)")
+            ->check(CLI::ExistingDirectory);
         cmd->callback(
             []()
             {
@@ -431,6 +757,12 @@ void TerrainCommand::Setup(CLI::App& app)
                 }
 
                 PrintWorldCensus(world, inputFile, asJson);
+                if (!addonRoot.empty())
+                {
+                    int archives = 0;
+                    const auto index = BuildAddonIndex(addonRoot, archives);
+                    PrintModelCensus(world, index, archives, asJson);
+                }
                 std::exit(0);
             });
     }
