@@ -5,8 +5,9 @@
 #include <vector>
 
 // Forward declaration for CLI11
-namespace CLI {
-    class App;
+namespace CLI
+{
+class App;
 }
 
 namespace Poseidon::Foundation
@@ -17,8 +18,9 @@ namespace Poseidon::Foundation
 /// Usage: AppConfig::Instance().IsWindowMode()
 ///
 /// All getters are const and thread-safe after ParseCommandLine() completes.
-class AppConfig {
-public:
+class AppConfig
+{
+  public:
     static AppConfig& Instance();
 
     /// Call early in main(), before any subsystem initializes.
@@ -37,40 +39,40 @@ public:
 
     /// Check if --window / --fullscreen was explicitly provided on the CLI
     bool IsWindowFlagExplicit() const { return _windowFlagExplicit; }
-    
+
     /// Get display mode string: "windowed", "borderless", "exclusive"
     const std::string& GetDisplayMode() const { return _displayMode; }
-    
+
     /// Check if display mode was explicitly set on command line
     bool IsDisplayModeExplicit() const { return _displayModeExplicit; }
-    
+
     int GetWindowWidth() const { return _windowWidth; }
 
     int GetWindowHeight() const { return _windowHeight; }
-    
+
     /// Check if width was explicitly set on command line
     bool IsWidthExplicit() const { return _widthExplicit; }
-    
+
     /// Check if height was explicitly set on command line
     bool IsHeightExplicit() const { return _heightExplicit; }
-    
+
     bool NoSplash() const { return _noSplash; }
 
     /// Check if the ASCII-art dedicated-server startup banner should be skipped
     bool NoBanner() const { return _noBanner; }
-    
-        const std::string& GetRenderBackend() const { return _renderBackend; }
-    
+
+    const std::string& GetRenderBackend() const { return _renderBackend; }
+
     /// Enable Pentium III optimizations (flush-to-zero mode)
     bool EnablePIII() const { return _enablePIII; }
-    
+
     /// Enable hardware transform & lighting (T&L, default on unless --sw-tl)
     bool EnableHWTL() const { return !_disableHWTL; }
-    
-        bool DualMonitorMode() const { return _dualMonitor; }
-    
+
+    bool DualMonitorMode() const { return _dualMonitor; }
+
     bool NoTextures() const { return _noTextures; }
-    
+
     /// Whether mouse grab (cursor confinement + hiding) is disabled
     bool NoMouseGrab() const { return _noMouseGrab; }
 
@@ -82,16 +84,16 @@ public:
 
     /// Server configuration file path
     const RString& GetServerConfig() const { return _serverConfig; }
-    
+
     /// PID file path (for dedicated server process management)
     const RString& GetPidFile() const { return _pidFile; }
-    
+
     /// IP address to connect to
     const RString& GetConnectIP() const { return _connectIP; }
-    
+
     /// Network port (0 = use default)
     int GetNetworkPort() const { return _networkPort; }
-    
+
     /// Remote connect port (0 = use GetNetworkPort)
     int GetConnectPort() const { return _connectPort; }
 
@@ -112,31 +114,31 @@ public:
 
     /// True when this dedicated server should publish itself to the master server.
     bool IsPublicServer() const { return _publicServer; }
-    
+
     /// Server password
     const RString& GetPassword() const { return _password; }
-    
+
     /// Player name
     const RString& GetPlayerName() const { return _playerName; }
-    
+
     /// Ranking log file path
     const RString& GetRankingLog() const { return _rankingLog; }
-    
+
     /// Auto-start server when N human players are ready (--mp-auto-start N, 0=disabled)
     int GetMPAutoStart() const { return _mpAutoStart; }
-    
+
     /// Force JIP on all missions regardless of mission config (--force-jip)
     bool GetForceJIP() const { return _forceJIP; }
-    
+
     /// Auto-assign client to side:slot (--mp-assign WEST:1), empty=disabled
     const std::string& GetMPAssign() const { return _mpAssign; }
-    
+
     // Audio
 
     bool NoSound() const { return _noSound; }
-    
+
     const std::string& GetAudioBackend() const { return _audioBackend; }
-    
+
     // Configuration files
 
     /// Mod directory paths (semicolon-separated)
@@ -195,7 +197,7 @@ public:
     /// Debug only; off in RelWithDebInfo and shipping (the build players run).
     /// Automated tests pass --strict explicitly. --no-strict / --strict overrides.
     bool Strict() const { return _strict; }
-    
+
     bool NoLandscape() const { return _noLandscape; }
 
     /// Frame validation stats — log per-frame pass/draw counts every
@@ -205,7 +207,6 @@ public:
     /// summary log line.
     bool RenderFrameLog() const { return _renderFrameLog; }
 
-    
     // Debug & Testing
 
     bool BenchmarkMode() const { return _benchmark; }
@@ -223,10 +224,18 @@ public:
 
     /// Generic app auto-exit timeout in seconds. 0 = disabled.
     float AppTimeoutSeconds() const { return _appTimeoutSeconds; }
-    
+
     /// Test mission path (--test-mission)
     const std::string& GetTestMissionPath() const { return _testMissionPath; }
     const std::vector<std::string>& GetTestModelPaths() const { return _testModelPaths; }
+    // Overrides the .wrp the landscape loads, whatever world the mission asked
+    // for. The only way to point the engine at an Arma 3 world today: those live
+    // in CfgWorlds entries this build has no configs for.
+    const std::string& GetTestWorldPath() const { return _testWorldPath; }
+    // Where to stand once the substituted world is up. A mission written for one
+    // world puts the player at coordinates that mean nothing in another -- the
+    // OFP training start lands in open sea on Stratis.
+    const std::vector<float>& GetTestWorldPos() const { return _testWorldPos; }
     float GetTestModelDistance() const { return _testModelDistance; }
     float GetTestModelScale() const { return _testModelScale; }
 
@@ -235,23 +244,23 @@ public:
 
     /// True when --check and --simulate are combined to run a bounded MP smoke boot.
     bool IsSimulateSmokeCheck() const { return _checkInit && _simulateMode; }
-    
+
     /// Test type: "autotest" (mission self-terminates) or "screenshot" (capture first frame and exit)
     const std::string& GetTestType() const { return _testType; }
     bool IsScreenshotTest() const { return _testType == "screenshot"; }
-    
+
     /// Stats interval in seconds (--stats N), 0 = disabled
     int GetStatsInterval() const { return _statsInterval; }
-    
+
     /// Time scale for simulate mode (--time-scale N), 1 = realtime
     int GetTimeScale() const { return _timeScale; }
-    
+
     /// Simulate mode (--simulate): headless mission execution without players
     bool IsSimulateMode() const { return _simulateMode; }
-    
+
     /// Simulation duration in seconds (--duration N, 0 = run until endGame or Ctrl+C)
     int GetSimulateDuration() const { return _simulateDuration; }
-    
+
     bool LogFileOps() const { return _logFileOps; }
 
     bool NetLog() const { return _netLog; }
@@ -260,10 +269,10 @@ public:
     bool WriteMPReport() const { return _writeMPReport; }
 
     bool AutoTest() const { return _autoTest; }
-    
+
     /// Auto-keys specification for scripted input injection (--auto-keys "frame:scancode,...")
     const std::string& GetAutoKeys() const { return _autoKeys; }
-    
+
     /// Auto-screenshot specification (--auto-screenshot "frame:path")
     const std::string& GetAutoScreenshot() const { return _autoScreenshot; }
 
@@ -271,40 +280,40 @@ public:
     /// — fires api->TriggerCapture() on the matching frame, captures
     /// next swap.  No-op if game wasn't launched from RenderDoc.
     const std::string& GetRdcTrigger() const { return _rdcTrigger; }
-    
+
     /// Number of gameplay frames to wait before capturing screenshot (--screenshot-delay N, default 10)
     int GetScreenshotDelay() const { return _screenshotDelay; }
-    
+
     /// UI test scenario name (--ui-test "exit")
     const std::string& GetUITest() const { return _uiTest; }
 
     /// TCP harness server port (--harness <port>): -1 = disabled, 0 = auto-assign, >0 = explicit
     int GetHarnessPort() const { return _harnessPort; }
-    
+
     // Logging
 
     /// Get log level (trace, debug, info, warn, error, critical, off)
-	const std::string& GetLogLevel() const { return _logLevel; }
-	const std::string& GetLogCategories() const { return _logCategories; }
-	const std::string& GetLogFormat() const { return _logFormat; }
-	const std::string& GetAppTag() const { return _appTag; }
-	bool GetLegacyLogs() const { return _legacyLogs; }
+    const std::string& GetLogLevel() const { return _logLevel; }
+    const std::string& GetLogCategories() const { return _logCategories; }
+    const std::string& GetLogFormat() const { return _logFormat; }
+    const std::string& GetAppTag() const { return _appTag; }
+    bool GetLegacyLogs() const { return _legacyLogs; }
 
-	/// Log file path (--log-file), empty = no file logging
-	const std::string& GetLogFile() const { return _logFile; }
+    /// Log file path (--log-file), empty = no file logging
+    const std::string& GetLogFile() const { return _logFile; }
 
-	/// Chrome trace JSON output path (--perf-trace), empty = disabled.
-	/// File loads in https://ui.perfetto.dev/ or chrome://tracing.
-	const std::string& GetPerfTracePath() const { return _perfTracePath; }
-	
-	/// Get working directory (game data directory)
-	const std::string& GetWorkingDirectory() const { return _workingDirectory; }
+    /// Chrome trace JSON output path (--perf-trace), empty = disabled.
+    /// File loads in https://ui.perfetto.dev/ or chrome://tracing.
+    const std::string& GetPerfTracePath() const { return _perfTracePath; }
+
+    /// Get working directory (game data directory)
+    const std::string& GetWorkingDirectory() const { return _workingDirectory; }
 
     // Mission file
 
     /// Mission file to load (positional argument)
     const std::string& GetMissionFile() const { return _missionFile; }
-    
+
     // Viewer mode
 
     /// True when launched with --viewer (single-model preview mode).
@@ -336,11 +345,11 @@ public:
 
     /// CLI view distance override (--vd N, 0 = use config file value)
     float GetViewDistanceOverride() const { return _viewDistanceOverride; }
-    
-private:
+
+  private:
     AppConfig();
     ~AppConfig() = default;
-    
+
     AppConfig(const AppConfig&) = delete;
     AppConfig& operator=(const AppConfig&) = delete;
 
@@ -390,11 +399,11 @@ private:
     int _mpAutoStart = 0;
     bool _forceJIP = false;
     std::string _mpAssign;
-    
+
     // Audio
     bool _noSound = false;
     std::string _audioBackend;
-    
+
     // Configuration files (parsed in Pass 1 - early init)
     RString _modPaths;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)
@@ -417,7 +426,7 @@ private:
     bool _strict = false;
     bool _noLandscape = false;
     bool _noTerrainCache = false;
-    bool _renderFrameLog  = false;
+    bool _renderFrameLog = false;
 
     // Debug & Testing
     bool _benchmark = false;
@@ -430,6 +439,8 @@ private:
     float _appTimeoutSeconds = 0.f;
     std::string _testMissionPath;
     std::vector<std::string> _testModelPaths;
+    std::string _testWorldPath;
+    std::vector<float> _testWorldPos;
     float _testModelDistance = 10.0f;
     float _testModelScale = 1.0f;
     /// --dev-map NAME: scratch map to boot, resolved against ./dev-missions/.
@@ -446,18 +457,18 @@ private:
     int _screenshotDelay = 10;
     std::string _uiTest;
     int _harnessPort = -1; // -1 = disabled, 0 = auto-assign, >0 = explicit
-    
+
     // Logging
- 	std::string _logLevel = "info";
-	std::string _logCategories = "";  // Empty = all categories
-	std::string _logFormat = "text"; // Log format: text (default) or jsonl
-	std::string _appTag = "";        // App identifier tag for log lines (--app-tag)
-	bool _legacyLogs = false;         // Show legacy bridge logs (--legacy-logs)
-	std::string _logFile = "";        // Log file path (--log-file), empty = no file
-	std::string _perfTracePath = "";  // Chrome trace JSON path (--perf-trace), empty = disabled
+    std::string _logLevel = "info";
+    std::string _logCategories = ""; // Empty = all categories
+    std::string _logFormat = "text"; // Log format: text (default) or jsonl
+    std::string _appTag = "";        // App identifier tag for log lines (--app-tag)
+    bool _legacyLogs = false;        // Show legacy bridge logs (--legacy-logs)
+    std::string _logFile = "";       // Log file path (--log-file), empty = no file
+    std::string _perfTracePath = ""; // Chrome trace JSON path (--perf-trace), empty = disabled
     // Mission file
     std::string _missionFile;
-    
+
     // Viewer mode
     bool _viewerMode = false;
     std::string _viewerModelPath;
@@ -472,11 +483,11 @@ private:
     std::string _captureMetricsPath;
 
     // Working directory
-    std::string _workingDirectory;  // Game data directory (empty = current directory)
+    std::string _workingDirectory; // Game data directory (empty = current directory)
 
     // View distance override
     float _viewDistanceOverride = 0;
-    
+
     // Flag to ensure ParseCommandLine is only called once
     bool _parsed = false;
     int _parseFatalExitCode = 0;

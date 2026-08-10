@@ -634,16 +634,29 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         // graphics backend: PoseidonTools and Studio both preview models with
         // the CPU rasteriser in ModelRenderer, so before this there was no way
         // to confirm a newly-supported format actually renders.
-        showOption(debugGroup->add_option("--test-model", _testModelPaths,
-                                          "Load one or more P3Ds into a --test-mission world and report what they contain "
-                                          "(repeat --test-model for a side-by-side material smoke scene)"),
+        showOption(
+            debugGroup->add_option("--test-model", _testModelPaths,
+                                   "Load one or more P3Ds into a --test-mission world and report what they contain "
+                                   "(repeat --test-model for a side-by-side material smoke scene)"),
+            CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--test-world", _testWorldPath,
+                                          "Load this .wrp as the landscape instead of the one the mission names "
+                                          "(the only way to reach an Arma 3 world without its configs)"),
                    CliHelpVisibility::Dev);
-        showOption(debugGroup->add_option("--test-model-distance", _testModelDistance,
-                                          "Distance in metres for --test-model placement (default: 10)")
+        showOption(debugGroup
+                       ->add_option("--test-world-pos", _testWorldPos,
+                                    "Move the player to world X Z once the mission reaches gameplay "
+                                    "(use with --test-world; height comes from the terrain)")
+                       ->expected(2),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup
+                       ->add_option("--test-model-distance", _testModelDistance,
+                                    "Distance in metres for --test-model placement (default: 10)")
                        ->check(CLI::Range(0.05f, 100.0f)),
                    CliHelpVisibility::Dev);
-        showOption(debugGroup->add_option("--test-model-scale", _testModelScale,
-                                          "Uniform scale for --test-model placement (default: 1)")
+        showOption(debugGroup
+                       ->add_option("--test-model-scale", _testModelScale,
+                                    "Uniform scale for --test-model placement (default: 1)")
                        ->check(CLI::Range(0.01f, 100.0f)),
                    CliHelpVisibility::Dev);
 

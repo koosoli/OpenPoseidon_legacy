@@ -23,6 +23,10 @@
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 
 #include <Poseidon/World/Terrain/LandFile.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw25.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include <Poseidon/IO/Serialization/SerializeBinExt.hpp>
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
@@ -260,6 +264,23 @@ int Landscape::LoadData(const char* name, float landGrid)
     Log("Load landscape %s", name);
     _name = name; // remmember name
     LSError ret = LSUnknownError;
+
+    // --test-world substitutes a landscape the mission never asked for. Arma 3
+    // worlds are only reachable this way: they are named by CfgWorlds entries
+    // this build has no configs for, so nothing would ever route to them.
+    const std::string& override = AppConfig::Instance().GetTestWorldPath();
+    if (!override.empty())
+    {
+        Log("--test-world: loading %s instead of %s", override.c_str(), name);
+        if (LoadOprw25(override.c_str()))
+        {
+            LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);
+            return LSOK;
+        }
+        Poseidon::Foundation::ErrorMessage("Cannot load --test-world '%s'", override.c_str());
+        return LSUnknownError;
+    }
+
     // FIX - allow worlds in banks
     QIFStreamB f;
     f.AutoOpen(name);
@@ -1677,6 +1698,257 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
             o2->SetID(newID++);
         }
     }
+
+    ProgressFinish();
+    return true;
+}
+
+// Arma 3 worlds (OPRW revision 25) carry two grids: a coarse "land" grid for the
+// per-cell semantics and a fine "terrain" grid for elevation. Stratis is 256 land
+// against 2048 terrain, Altis 1024 against 4096. Landscape has never supported
+// that -- Dim() asserts the two are equal, LandRange is referenced 125 times
+// against TerrainRange's 6, and the header warns that many functions assume
+// ObjRange==LandRange (WLD-014).
+//
+// So this mounts the world at *terrain* resolution and gives Landscape a single
+// grid, which is the shape it already knows. That discards nothing: a land cell's
+// geography applies to every terrain cell inside it, so replicating its value
+// across the ratio is what the format means, not an invention. Elevation keeps its
+// full authored detail because it was already at terrain resolution.
+//
+// The alternative -- teaching Landscape the split properly -- is the better
+// long-term answer and a much larger change across the terrain core that
+// rendering, AI pathing, occlusion and roads all sit on. This gets a real world
+// running first so that change has something to be measured against.
+bool Landscape::LoadOprw25(const char* path)
+{
+    namespace Fmt = Poseidon::Asset::Formats;
+
+    QIFStream file;
+    file.open(path);
+    if (file.fail())
+    {
+        RptF("LoadOprw25: cannot open %s", path);
+        return false;
+    }
+
+    Fmt::BinaryReader reader(file);
+    if (!Fmt::World::IsOprw25(reader))
+    {
+        RptF("LoadOprw25: %s is not an OPRW revision 25 world", path);
+        return false;
+    }
+
+    Fmt::World::Oprw25World world;
+    try
+    {
+        world = Fmt::World::ReadOprw25(reader);
+    }
+    catch (const std::exception& e)
+    {
+        RptF("LoadOprw25: %s failed to parse: %s", path, e.what());
+        return false;
+    }
+
+    const int terrain = world.header.terrainRangeX;
+    const int land = world.header.landRangeX;
+    const float terrainGrid = world.header.TerrainCellSize();
+    // Terrain cells per land cell on each axis. Both local ratios are powers of
+    // two (8 for Stratis and VR, 4 for Altis); anything else would mean the
+    // replication below does not tile the grid exactly.
+    const int ratio = terrain / land;
+    if (ratio < 1 || land * ratio != terrain)
+    {
+        RptF("LoadOprw25: terrain %d is not a whole multiple of land %d", terrain, land);
+        return false;
+    }
+
+    LOG_DEBUG(World, "LoadOprw25 {}: land {} terrain {} ratio {} cell {}m extent {}m", path, land, terrain, ratio,
+              terrainGrid, world.header.WorldExtent());
+
+    ProgressReset();
+    ProgressStart(LocalizeString(IDS_LOAD_WORLD));
+    Init();
+
+    Dim(terrain, terrain, terrain, terrain, terrainGrid);
+    SetLandGrid(terrainGrid);
+    FlushCache();
+
+    // Elevation is already per terrain cell, so it transfers one to one.
+    for (int z = 0; z < terrain; ++z)
+        for (int x = 0; x < terrain; ++x)
+            SetData(x, z, world.elevation[static_cast<size_t>(z) * terrain + x]);
+    ProgressRefresh();
+
+    // The per-land-cell grids, replicated across the cells they cover.
+    //
+    // Geography is translated field by field, not copied. The two layouts are not
+    // the same 16 bits: Arma 3 carries a min and a max water depth where the
+    // engine has one, and the engine has forestInner/forestOuter/track/slow where
+    // Arma 3 has a single forest bit and no equivalent for the rest. Blitting the
+    // word across would silently land a max-water-depth in the engine's forest and
+    // road bits. The fields with no counterpart are left zero rather than guessed;
+    // geography drives AI pathing, so a wrong bit here is a wrong path, and none
+    // of it affects whether the world draws.
+    for (int z = 0; z < terrain; ++z)
+    {
+        const int lz = z / ratio;
+        for (int x = 0; x < terrain; ++x)
+        {
+            const int lx = x / ratio;
+            const size_t landIndex = static_cast<size_t>(lz) * land + lx;
+            const Fmt::World::Oprw25Geography source{world.geography[landIndex]};
+
+            GeographyInfo info;
+            info.packed = 0;
+            info.u.waterDepth = source.MaxWaterDepth();
+            info.u.full = source.Full() ? 1 : 0;
+            info.u.road = source.Road() ? 1 : 0;
+            info.u.howManyObjects = source.ObjectCount();
+            info.u.howManyHardObjects = source.HardObjectCount();
+            info.u.gradient = source.Gradient();
+            _geography(x, z) = info;
+
+            _tex(x, z) = static_cast<short>(world.materialIndex[landIndex]);
+        }
+    }
+    ProgressRefresh();
+
+    _mountains.Realloc(static_cast<int>(world.mountains.size()));
+    _mountains.Resize(static_cast<int>(world.mountains.size()));
+    for (size_t i = 0; i < world.mountains.size(); ++i)
+        _mountains[static_cast<int>(i)] = Vector3(world.mountains[i].x, world.mountains[i].y, world.mountains[i].z);
+
+    // Terrain surface materials are RVMATs, not the plain textures the OFP path
+    // wants: `_texture` holds one texture per cell, while an Arma 3 terrain tile
+    // is a satellite layer plus a mask plus detail layers. Registering the RVMAT
+    // path itself resolves to nothing and the ground draws white.
+    //
+    // So each RVMAT is parsed and its satellite colour layer taken as the cell's
+    // texture. That is a reduction, not a translation -- the mask and detail
+    // layers are dropped, so the ground gets its large-scale colour and none of
+    // its close-up detail. It is the honest half of the material that the current
+    // single-texture terrain path can actually carry.
+    {
+        int resolved = 0;
+        _texture.Resize(static_cast<int>(world.materials.size()));
+        for (size_t i = 0; i < world.materials.size(); ++i)
+        {
+            const std::string& materialPath = world.materials[i];
+            if (materialPath.empty())
+                continue;
+
+            QIFStreamB materialFile;
+            materialFile.AutoOpen(materialPath.c_str());
+            if (materialFile.fail() || materialFile.rest() <= 0)
+                continue;
+
+            std::vector<uint8_t> bytes(static_cast<size_t>(materialFile.rest()));
+            materialFile.read(bytes.data(), static_cast<int>(bytes.size()));
+
+            Poseidon::Asset::Material::RvMaterialSource material;
+            try
+            {
+                material = Poseidon::Asset::Material::ParseArmaRapMaterial(bytes, materialPath);
+            }
+            catch (const std::exception&)
+            {
+                continue;
+            }
+
+            // The satellite layer is the one named `_co`; the mask is `_lca` and
+            // the detail layers are `_nopx`/`_co` pairs further down. Taking the
+            // first `_co` that is not a detail layer picks the tile's own colour.
+            for (const auto& stage : material.stages)
+            {
+                const std::string& texture = stage.texture.raw;
+                if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
+                    continue;
+                std::string lower = texture;
+                for (char& c : lower)
+                    c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                if (lower.find("_co.paa") == std::string::npos || lower.find("detail") != std::string::npos)
+                    continue;
+                SetTexture(static_cast<int>(i), RStringB(texture.c_str()));
+                ++resolved;
+                break;
+            }
+        }
+        LOG_DEBUG(World, "LoadOprw25 {}: {} of {} terrain materials resolved to a satellite texture", path, resolved,
+                  world.materials.size());
+    }
+    ProgressRefresh();
+
+    AutoArray<InitPtr<Object>> idCache;
+    AutoArray<AutoArray<InitPtr<Object>>> conflicts;
+
+    int created = 0;
+    int refused = 0;
+    for (const auto& placement : world.objects)
+    {
+        const RStringB name(world.models[placement.modelIndex].c_str());
+
+        // Rows are [aside, up, dir, pos] in both representations, which is why
+        // this is a straight construction and not a basis change.
+        const auto& rows = placement.transform.rows;
+        Matrix4 transform;
+        transform.SetDirectionAside(Vector3(rows[0].x, rows[0].y, rows[0].z));
+        transform.SetDirectionUp(Vector3(rows[1].x, rows[1].y, rows[1].z));
+        transform.SetDirection(Vector3(rows[2].x, rows[2].y, rows[2].z));
+        transform.SetPosition(Vector3(rows[3].x, rows[3].y, rows[3].z));
+
+        int x = 0, z = 0;
+        Object* object = nullptr;
+        try
+        {
+            object = ObjectCreate(placement.objectId, name, transform, &x, &z);
+        }
+        catch (const std::exception&)
+        {
+            // One unreadable model must not cost the whole world. The census
+            // reports which models parse; this is the runtime equivalent.
+            ++refused;
+            continue;
+        }
+        if (!object)
+        {
+            ++refused;
+            continue;
+        }
+        ++created;
+
+        idCache.Access(placement.objectId);
+        if (idCache[placement.objectId])
+        {
+            conflicts.Access(placement.objectId);
+            conflicts[placement.objectId].Add(object);
+        }
+        else
+        {
+            idCache[placement.objectId] = object;
+        }
+
+        if ((created & 0x3ff) == 0)
+            ProgressRefresh();
+    }
+
+    int newID = idCache.Size();
+    for (int i = 0; i < conflicts.Size(); i++)
+    {
+        if (conflicts[i].Size() == 0)
+            continue;
+        Object* o1 = idCache[i];
+        for (int j = 0; j < conflicts[i].Size(); j++)
+        {
+            Object* o2 = conflicts[i][j];
+            if (dyn_cast<ForestPlain>(o1))
+                swap(o1, o2);
+            o2->SetID(newID++);
+        }
+    }
+
+    LOG_DEBUG(World, "LoadOprw25 {}: {} objects created, {} refused, of {} placements", path, created, refused,
+              world.objects.size());
 
     ProgressFinish();
     return true;

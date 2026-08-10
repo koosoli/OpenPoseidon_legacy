@@ -308,7 +308,13 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
             {
                 grassLayerNames += ", ";
             }
-            grassLayerNames += land.GetTexture(i)->Name();
+            // Null-guarded, unlike the original: a layer slot can carry no
+            // texture at all, and the "no named grass" fallback above enables
+            // every slot including those. On a world whose terrain materials do
+            // not resolve, that made this line dereference null for layer 0 and
+            // took the renderer down inside DrawGround. The same call is already
+            // guarded where the names are first collected.
+            grassLayerNames += land.GetTexture(i) ? land.GetTexture(i)->Name() : "<null>";
             ++grassLayerCount;
         }
     }
@@ -565,7 +571,8 @@ void TerrainWgpu::UploadGrassTuft()
             return false;
         }
         std::vector<uint8_t> resized(static_cast<size_t>(TargetSize) * TargetSize * 4u);
-        stbir_resize_uint8_linear(pixels, w, h, w * 4, resized.data(), TargetSize, TargetSize, TargetSize * 4, STBIR_RGBA);
+        stbir_resize_uint8_linear(pixels, w, h, w * 4, resized.data(), TargetSize, TargetSize, TargetSize * 4,
+                                  STBIR_RGBA);
         stbi_image_free(pixels);
         if (opacityPath != nullptr)
         {

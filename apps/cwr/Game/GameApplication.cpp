@@ -1052,6 +1052,7 @@ void GameApplication::RunMainLoop()
     const std::vector<std::string>& testModelPaths = AppConfig::Instance().GetTestModelPaths();
     const bool spawnTestModel = !testModelPaths.empty();
     bool testModelSpawned = false;
+    bool testWorldRepositioned = false;
     if (spawnTestModel && !screenshotTestMode)
         LOG_WARN(Core, "--test-model needs --test-mission to have a world to place the model in");
 
@@ -1193,148 +1194,183 @@ void GameApplication::RunMainLoop()
         // landscape grid. This matters for external models: a valid Arma 3 rock
         // has no CWA CfgVehicles entry, so wrapping it in the generic "Building"
         // vehicle type is not the lifecycle a normal static world object follows.
+        // --test-world-pos: a mission written for one world starts the player at
+        // coordinates that mean nothing in another. The OFP training start is
+        // open sea on Stratis, so without this the first A3 world render is a
+        // picture of water.
+        if (!testWorldRepositioned && !AppConfig::Instance().GetTestWorldPos().empty() &&
+            GWorld->GetMode() == GModeArcade)
+        {
+            testWorldRepositioned = true;
+            const std::vector<float>& target = AppConfig::Instance().GetTestWorldPos();
+            Object* cameraOn = GWorld->CameraOn();
+            if (!cameraOn || !GLandscape)
+            {
+                LOG_ERROR(Core, "--test-world-pos: no camera or landscape to reposition against");
+            }
+            else
+            {
+                const float x = target[0];
+                const float z = target[1];
+                // Stand on the terrain, not at whatever height was requested:
+                // the point is to see the world, and the surface is the only
+                // height that is guaranteed to be above it.
+                const float y = GLandscape->SurfaceY(x, z) + 1.8f;
+                cameraOn->SetPosition(Vector3(x, y, z));
+                LOG_INFO(Core, "--test-world-pos: moved player to {}, {}, {}", x, y, z);
+            }
+        }
+
         if (spawnTestModel && !testModelSpawned && GWorld->GetMode() == GModeArcade)
         {
             testModelSpawned = true; // one attempt: a retry loop would spam the log every frame
             Object* cameraOn = GWorld->CameraOn();
             if (!cameraOn || !GLandscape)
             {
-                LOG_ERROR(Core, "--test-model: no camera or landscape to place {} model(s) against", testModelPaths.size());
+                LOG_ERROR(Core, "--test-model: no camera or landscape to place {} model(s) against",
+                          testModelPaths.size());
             }
             else
             {
                 for (size_t testModelIndex = 0; testModelIndex < testModelPaths.size(); ++testModelIndex)
                 {
                     const std::string& testModelPath = testModelPaths[testModelIndex];
-                // Along the camera's own view direction, not a fixed offset:
-                // a constant +x/+z lands behind the camera as often as in front
-                // of it, and an invisible model reads as a render failure.
-                const Matrix4 view = cameraOn->WorldTransform();
-                const float testModelDistance = AppConfig::Instance().GetTestModelDistance();
-                const Vector3 ahead = view.Position() + view.Direction() * testModelDistance;
-                // A multi-model smoke scene is laid out perpendicular to the view
-                // direction.  This preserves the same distance/LOD selection for
-                // every fixture and makes a normal-map comparison one screenshot.
-                const float lateralOffset = (static_cast<float>(testModelIndex) -
-                                             static_cast<float>(testModelPaths.size() - 1) * 0.5f) * 6.0f;
-                const Vector3 positioned = ahead + view.DirectionAside() * lateralOffset;
-                const float x = positioned.X();
-                const float z = positioned.Z();
-                // This is a render harness, not normal placement gameplay. Keep
-                // the test object on the camera's elevation: an empty dev scene
-                // can look out over water, where SurfaceY is the sea floor and
-                // would put a perfectly valid fixture tens of metres below view.
-                const float y = view.Position().Y();
-                // Match Landscape::ObjectCreate precisely up to the unique object
-                // id: Shapes.New is the production ModelCache/detector route and
-                // NewObject chooses the normal static-object class (ObjectPlain
-                // for an unconfigured external model).
-                Ref<LODShapeWithShadow> shape = Shapes.New(testModelPath.c_str(), false, true);
-                if (!shape)
-                {
-                    LOG_ERROR(Core, "--test-model: failed to load {}", testModelPath);
-                }
-                else
-                {
-                    Matrix4 transform;
-                    transform.SetIdentity();
-                    const float requestedScale = AppConfig::Instance().GetTestModelScale();
-                    // A house and a lamp have radically different authored units.
-                    // In a multi-model material smoke, normalize their bounds to a
-                    // two-metre inspection radius so a large fixture cannot hide
-                    // every other model.  A single requested model retains its
-                    // exact caller-selected scale for reproduction work.
-                    const float normalizedScale = testModelPaths.size() > 1 && shape->BoundingSphere() > 0.001f
-                        ? std::max(0.05f, std::min(20.0f, 2.0f / shape->BoundingSphere()))
-                        : 1.0f;
-                    const float effectiveScale = requestedScale * normalizedScale;
-                    transform.SetScale(effectiveScale);
-                    transform.SetPosition(Vector3(x, y, z));
-                    Object* placed = NewObject(shape, -1);
-                    placed->SetTransform(transform);
-                    // Landscape owns the object and walks this grid every frame.
-                    // Unlike the dynamic vehicle path, no CfgVehicles type or
-                    // simulation list is involved for a normal static object.
-                    GLandscape->AddObject(placed);
-                    // Report what actually loaded. Shapes.New hands back a
-                    // usable object even when the model behind it is empty, so
-                    // "placed" alone does not mean there is anything to draw.
-                    const int levels = shape->NLevels();
-                    const int faces = levels > 0 ? shape->Level(0)->NFaces() : 0;
-                    LOG_INFO(Core, "--test-model: placed {} at {} {} {} (lods={} faces={})", testModelPath, x, y, z,
-                             levels, faces);
-                    LOG_INFO(Core, "--test-model: camera at {} {} {} dir {} {} {}", view.Position().X(),
-                             view.Position().Y(), view.Position().Z(), view.Direction().X(), view.Direction().Y(),
-                             view.Direction().Z());
-                    LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {} effective scale {}",
-                             placed->Position().X(), placed->Position().Y(), placed->Position().Z(),
-                             shape->BoundingSphere(), effectiveScale);
-                    // Resolutions decide which LOD is drawable at all: a shape
-                    // whose levels are every one of them special (geometry,
-                    // memory, shadow) has nothing to draw at any distance, which
-                    // looks identical to a rendering failure.
-                    for (int level = 0; level < levels; ++level)
+                    // Along the camera's own view direction, not a fixed offset:
+                    // a constant +x/+z lands behind the camera as often as in front
+                    // of it, and an invisible model reads as a render failure.
+                    const Matrix4 view = cameraOn->WorldTransform();
+                    const float testModelDistance = AppConfig::Instance().GetTestModelDistance();
+                    const Vector3 ahead = view.Position() + view.Direction() * testModelDistance;
+                    // A multi-model smoke scene is laid out perpendicular to the view
+                    // direction.  This preserves the same distance/LOD selection for
+                    // every fixture and makes a normal-map comparison one screenshot.
+                    const float lateralOffset =
+                        (static_cast<float>(testModelIndex) - static_cast<float>(testModelPaths.size() - 1) * 0.5f) *
+                        6.0f;
+                    const Vector3 positioned = ahead + view.DirectionAside() * lateralOffset;
+                    const float x = positioned.X();
+                    const float z = positioned.Z();
+                    // This is a render harness, not normal placement gameplay. Keep
+                    // the test object on the camera's elevation: an empty dev scene
+                    // can look out over water, where SurfaceY is the sea floor and
+                    // would put a perfectly valid fixture tens of metres below view.
+                    const float y = view.Position().Y();
+                    // Match Landscape::ObjectCreate precisely up to the unique object
+                    // id: Shapes.New is the production ModelCache/detector route and
+                    // NewObject chooses the normal static-object class (ObjectPlain
+                    // for an unconfigured external model).
+                    Ref<LODShapeWithShadow> shape = Shapes.New(testModelPath.c_str(), false, true);
+                    if (!shape)
                     {
-                        LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
-                                 shape->Resolution(level), shape->Level(level)->NFaces());
-                        // The P3D may be drawable even if its companion assets
-                        // are absent. List the loader's resolved references here
-                        // so a white fallback is not later presented as a material
-                        // or texture compatibility result.
-                        const Shape* lod = shape->Level(level);
-                        for (int texture = 0; texture < lod->NTextures(); ++texture)
+                        LOG_ERROR(Core, "--test-model: failed to load {}", testModelPath);
+                    }
+                    else
+                    {
+                        Matrix4 transform;
+                        transform.SetIdentity();
+                        const float requestedScale = AppConfig::Instance().GetTestModelScale();
+                        // A house and a lamp have radically different authored units.
+                        // In a multi-model material smoke, normalize their bounds to a
+                        // two-metre inspection radius so a large fixture cannot hide
+                        // every other model.  A single requested model retains its
+                        // exact caller-selected scale for reproduction work.
+                        const float normalizedScale =
+                            testModelPaths.size() > 1 && shape->BoundingSphere() > 0.001f
+                                ? std::max(0.05f, std::min(20.0f, 2.0f / shape->BoundingSphere()))
+                                : 1.0f;
+                        const float effectiveScale = requestedScale * normalizedScale;
+                        transform.SetScale(effectiveScale);
+                        transform.SetPosition(Vector3(x, y, z));
+                        Object* placed = NewObject(shape, -1);
+                        placed->SetTransform(transform);
+                        // Landscape owns the object and walks this grid every frame.
+                        // Unlike the dynamic vehicle path, no CfgVehicles type or
+                        // simulation list is involved for a normal static object.
+                        GLandscape->AddObject(placed);
+                        // Report what actually loaded. Shapes.New hands back a
+                        // usable object even when the model behind it is empty, so
+                        // "placed" alone does not mean there is anything to draw.
+                        const int levels = shape->NLevels();
+                        const int faces = levels > 0 ? shape->Level(0)->NFaces() : 0;
+                        LOG_INFO(Core, "--test-model: placed {} at {} {} {} (lods={} faces={})", testModelPath, x, y, z,
+                                 levels, faces);
+                        LOG_INFO(Core, "--test-model: camera at {} {} {} dir {} {} {}", view.Position().X(),
+                                 view.Position().Y(), view.Position().Z(), view.Direction().X(), view.Direction().Y(),
+                                 view.Direction().Z());
+                        LOG_INFO(Core, "--test-model: object pos {} {} {} bounding radius {} effective scale {}",
+                                 placed->Position().X(), placed->Position().Y(), placed->Position().Z(),
+                                 shape->BoundingSphere(), effectiveScale);
+                        // Resolutions decide which LOD is drawable at all: a shape
+                        // whose levels are every one of them special (geometry,
+                        // memory, shadow) has nothing to draw at any distance, which
+                        // looks identical to a rendering failure.
+                        for (int level = 0; level < levels; ++level)
                         {
-                            const Texture* tex = lod->GetTexture(texture);
-                            if (tex)
-                                LOG_INFO(Core, "--test-model:     texture {} {} exists={}", texture, tex->Name(),
-                                         QIFStream::FileExists(tex->Name()));
-                        }
-                        for (int section = 0; section < lod->NSections(); ++section)
-                        {
-                            const ShapeSection& sec = lod->GetSection(section);
-                            if (sec.surfMat)
+                            LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
+                                     shape->Resolution(level), shape->Level(level)->NFaces());
+                            // The P3D may be drawable even if its companion assets
+                            // are absent. List the loader's resolved references here
+                            // so a white fallback is not later presented as a material
+                            // or texture compatibility result.
+                            const Shape* lod = shape->Level(level);
+                            for (int texture = 0; texture < lod->NTextures(); ++texture)
                             {
-                                const char* materialPath = sec.surfMat->GetName().Data();
-                                LOG_INFO(Core, "--test-model:     section {} material {} exists={}", section,
-                                         materialPath, QIFStream::FileExists(materialPath));
-                                Asset::Material::RvMaterialSource source;
-                                try
+                                const Texture* tex = lod->GetTexture(texture);
+                                if (tex)
+                                    LOG_INFO(Core, "--test-model:     texture {} {} exists={}", texture, tex->Name(),
+                                             QIFStream::FileExists(tex->Name()));
+                            }
+                            for (int section = 0; section < lod->NSections(); ++section)
+                            {
+                                const ShapeSection& sec = lod->GetSection(section);
+                                if (sec.surfMat)
                                 {
-                                    source = Asset::Material::ParseRvMaterialFile(materialPath);
-                                }
-                                catch (const std::exception& error)
-                                {
-                                    LOG_ERROR(Core, "--test-model:     material parse failed {}: {}", materialPath,
-                                              error.what());
-                                    continue;
-                                }
-                                LOG_INFO(Core, "--test-model:     material source shader={} stages={} extras={} classes={}",
-                                         source.pixelShaderId, source.stages.size(), source.extra.size(),
-                                         source.otherClasses.size());
-                                if (source.pixelShaderId.empty() && source.stages.empty())
-                                {
-                                    LOG_WARN(Core,
-                                             "--test-model:     material yielded no entries; no stages are bound");
-                                    continue;
-                                }
-                                const auto translated = Asset::Material::TranslateSemantics(
-                                    source, Asset::Material::TranslateMaterial(source));
-                                LOG_INFO(Core, "--test-model:     material shader={} schema={}",
-                                         translated.shaderFamily, translated.schemaKnown);
-                                for (const auto& slot : translated.slots)
-                                {
-                                    const bool procedural = !slot.texture.raw.empty() && slot.texture.raw[0] == '#';
-                                    LOG_INFO(Core, "--test-model:       slot {} stage {} uv={} texture={} exists={} procedural={}",
-                                             Asset::Material::ToString(slot.slot), slot.sourceStage, slot.uvSource,
-                                             slot.texture.raw, procedural || QIFStream::FileExists(slot.texture.raw.c_str()),
-                                             procedural);
+                                    const char* materialPath = sec.surfMat->GetName().Data();
+                                    LOG_INFO(Core, "--test-model:     section {} material {} exists={}", section,
+                                             materialPath, QIFStream::FileExists(materialPath));
+                                    Asset::Material::RvMaterialSource source;
+                                    try
+                                    {
+                                        source = Asset::Material::ParseRvMaterialFile(materialPath);
+                                    }
+                                    catch (const std::exception& error)
+                                    {
+                                        LOG_ERROR(Core, "--test-model:     material parse failed {}: {}", materialPath,
+                                                  error.what());
+                                        continue;
+                                    }
+                                    LOG_INFO(
+                                        Core,
+                                        "--test-model:     material source shader={} stages={} extras={} classes={}",
+                                        source.pixelShaderId, source.stages.size(), source.extra.size(),
+                                        source.otherClasses.size());
+                                    if (source.pixelShaderId.empty() && source.stages.empty())
+                                    {
+                                        LOG_WARN(Core,
+                                                 "--test-model:     material yielded no entries; no stages are bound");
+                                        continue;
+                                    }
+                                    const auto translated = Asset::Material::TranslateSemantics(
+                                        source, Asset::Material::TranslateMaterial(source));
+                                    LOG_INFO(Core, "--test-model:     material shader={} schema={}",
+                                             translated.shaderFamily, translated.schemaKnown);
+                                    for (const auto& slot : translated.slots)
+                                    {
+                                        const bool procedural = !slot.texture.raw.empty() && slot.texture.raw[0] == '#';
+                                        LOG_INFO(Core,
+                                                 "--test-model:       slot {} stage {} uv={} texture={} exists={} "
+                                                 "procedural={}",
+                                                 Asset::Material::ToString(slot.slot), slot.sourceStage, slot.uvSource,
+                                                 slot.texture.raw,
+                                                 procedural || QIFStream::FileExists(slot.texture.raw.c_str()),
+                                                 procedural);
+                                    }
                                 }
                             }
                         }
+                        if (faces <= 0)
+                            LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
                     }
-                    if (faces <= 0)
-                        LOG_ERROR(Core, "--test-model: {} has no faces to draw", testModelPath);
-                }
                 }
             }
         }
