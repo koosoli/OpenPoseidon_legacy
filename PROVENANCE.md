@@ -24,8 +24,10 @@ interoperability effort. No Arma 3 executable code has been decompiled,
 disassembled, copied, or incorporated into PoseidonWGPU. Format information was
 obtained from publicly available documentation and independently validated against
 files from a legally installed copy of Arma 3. No Bohemia Interactive game asset
-files are known to be distributed with this project; binary fixtures predating
-this work are identified below and have not yet been provenance-audited.
+files are known to be distributed with this project. Pre-existing binary fixtures
+were separately audited by inspection; their provenance cannot be established by
+chain of custody, but nothing found is consistent with shipped Bohemia game
+content.
 
 PoseidonWGPU is an independent project. It is not affiliated with, endorsed by, or
 supported by Bohemia Interactive a.s.
@@ -122,9 +124,8 @@ Verified against the full git history at the commit named above:
 - **No Bohemia game asset files are known to be tracked as part of the Arma 3
   compatibility work.** `packages/` — where locally extracted Arma 3 worlds, models
   and textures live during development — is gitignored, and no file under it
-  appears anywhere in the history. Binary fixtures predating this work are
-  separately identified below and have not yet been provenance-audited; until that
-  audit is complete this statement is deliberately not categorical.
+  appears anywhere in the history. Pre-existing binary fixtures were audited
+  separately, as described below.
 - **Captures depicting Arma 3 content are not tracked.** 29 PNGs under
   `docs/roadmap/evidence/` (`a3-game-*`, `a3-sample-*`) were renders of Bohemia
   models and textures, committed during earlier material investigations. They are
@@ -170,9 +171,9 @@ reliable, not more:
 ## How to verify these claims
 
 ```bash
-# No Arma 3 asset file anywhere in history
+# List asset-format paths ever added; inspect results for provenance
 git log --all --pretty=format: --name-only --diff-filter=A | sort -u \
-  | grep -iE '\.(wrp|pbo|p3d|paa|rvmat)$'
+  | grep -iE '\.(wrp|pbo|p3d|paa|pac|rvmat)$'
 
 # Nothing under packages/ has ever been tracked
 git log --all --pretty=format: --name-only | sort -u | grep '^packages/'
