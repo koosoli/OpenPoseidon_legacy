@@ -3,6 +3,7 @@
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 
 #include <Poseidon/Foundation/Math/Math3D.hpp>
+#include <Poseidon/World/Model/LodPurpose.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Vertex.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -1005,9 +1006,22 @@ class LODShape: public RefCountWithLinks
 
 	// A normal (graphical, drawn) LOD, as opposed to any of the special levels
 	// (geometry / memory / view / land-contact / roadway / paths / hitpoints).
+	//
+	// The index comparisons below can only reject a level that ScanShapes gave an
+	// index to, and it has one index per PURPOSE -- so a purpose with no member,
+	// or a second LOD sharing a purpose, slips through. Arma 3's authored shadow
+	// LODs are both: nothing here has ever held a shadow index, and a model
+	// carries two of them (10000 and 10010). They classified as ordinary visual
+	// LODs at a 10 km viewing distance and were drawn as untextured silhouettes
+	// whenever the object was far enough away for a distance-based chooser to
+	// reach them. Asking the purpose closes the whole class, not just that case.
 	bool IsNormalLevel( int level ) const
 	{
-		return level >= 0 && level != _memory && level != _geometry && level != _geometryFire &&
+		if (level < 0)
+			return false;
+		if (!Model::IsDrawableLod(Model::ClassifyLodResolution(_resolutions[level])))
+			return false;
+		return level != _memory && level != _geometry && level != _geometryFire &&
 		       level != _geometryView && level != _geometryViewPilot && level != _geometryViewGunner &&
 		       level != _geometryViewCommander && level != _geometryViewCargo && level != _landContact &&
 		       level != _roadway && level != _paths && level != _hitpoints;

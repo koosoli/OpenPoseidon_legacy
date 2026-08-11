@@ -41,6 +41,18 @@ enum class LodPurpose : uint8_t
     ViewPilotGeometry,     // 1e15 * 13
     ViewGunnerGeometry,    // 1e15 * 15
     FireGunnerGeometry,    // 1e15 * 16
+    // Arma 3's authored shadow LODs, banded rather than single-valued: the shadow
+    // volumes are 10000, 10010, 10020... and the shadow buffers 11000, 11010...
+    //
+    // These are the reason this enum's "a consumer will draw it" warning was not
+    // enough on its own. They sit BELOW the 1e5 cut-off that catches the other
+    // sentinels, so they classified as ordinary visual LODs at a 10 km viewing
+    // distance -- which is exactly what a distance-based LOD chooser reaches for
+    // when an object is far away. Measured: 36 of 45 sampled Arma 3 structure
+    // models carry a 10000 LOD and 36 carry an 11000, against 0 of 120 sampled
+    // CWA models, so this is an Arma 3 shape the original engine never met.
+    ShadowVolume,     // [10000, 11000)
+    ShadowBuffer,     // [11000, 12000)
     Unknown,          // outside the visual range and not a sentinel this build names
 };
 
@@ -80,6 +92,11 @@ inline LodPurpose ClassifyLodResolution(float resolution)
     if (resolution >= 1099.5f && resolution <= 1100.5f) return LodPurpose::ViewPilot;
     if (resolution >= 1199.5f && resolution <= 1200.5f) return LodPurpose::ViewCargo;
 
+    // The shadow bands. Tested before the 1e5 cut-off because they are below it,
+    // which is precisely how they used to escape as Visual.
+    if (resolution >= 10000.0f && resolution < 11000.0f) return LodPurpose::ShadowVolume;
+    if (resolution >= 11000.0f && resolution < 12000.0f) return LodPurpose::ShadowBuffer;
+
     // Anything beyond a plausible draw distance is a sentinel of some kind. Do
     // not call it Visual: a consumer would then treat it as drawable geometry.
     if (resolution >= 1e5f) return LodPurpose::Unknown;
@@ -106,6 +123,31 @@ inline bool IsGeometryOnlyLod(LodPurpose purpose)
         case LodPurpose::ViewPilotGeometry:
         case LodPurpose::ViewGunnerGeometry:
         case LodPurpose::FireGunnerGeometry:
+        // Shadow geometry is drawn by the shadow path or not at all. As ordinary
+        // visual geometry it is an untextured closed silhouette -- a grey blob
+        // where the object should be.
+        case LodPurpose::ShadowVolume:
+        case LodPurpose::ShadowBuffer:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Can this LOD be drawn in the colour pass?
+//
+// Not simply !IsGeometryOnlyLod: `Unknown` is neither drawable nor geometry. It is a
+// sentinel outside the visual range that this table does not name, and the whole point
+// of keeping it distinct from Visual is that a consumer must not draw it.
+inline bool IsDrawableLod(LodPurpose purpose)
+{
+    switch (purpose)
+    {
+        case LodPurpose::Visual:
+        case LodPurpose::ViewGunner:
+        case LodPurpose::ViewPilot:
+        case LodPurpose::ViewCargo:
+        case LodPurpose::ViewCommander:
             return true;
         default:
             return false;
@@ -134,6 +176,8 @@ inline const char* LodPurposeName(LodPurpose purpose)
         case LodPurpose::ViewPilotGeometry:     return "Geometry (Pilot)";
         case LodPurpose::ViewGunnerGeometry:    return "Geometry (Gunner)";
         case LodPurpose::FireGunnerGeometry:    return "Geometry (Gunner Fire)";
+        case LodPurpose::ShadowVolume:          return "Shadow Volume";
+        case LodPurpose::ShadowBuffer:          return "Shadow Buffer";
         case LodPurpose::Unknown:               return "Unknown special LOD";
     }
     return "Unknown special LOD";

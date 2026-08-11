@@ -10,18 +10,57 @@
 #include <string>
 
 using Poseidon::Model::ClassifyLodResolution;
+using Poseidon::Model::IsDrawableLod;
 using Poseidon::Model::IsGeometryOnlyLod;
 using Poseidon::Model::LodPurpose;
 using Poseidon::Model::LodPurposeName;
 
 TEST_CASE("Ordinary viewing distances are visual LODs", "[model][lod][ast-018]")
 {
-    for (float resolution : {0.0f, 1.0f, 50.0f, 500.0f, 2000.0f, 10000.0f})
+    // 10000 used to be in this list. It is Arma 3's shadow-volume band, not a
+    // viewing distance -- see the shadow-LOD case below for what that cost.
+    for (float resolution : {0.0f, 1.0f, 50.0f, 500.0f, 2000.0f, 9999.0f})
     {
         CAPTURE(resolution);
         REQUIRE(ClassifyLodResolution(resolution) == LodPurpose::Visual);
         REQUIRE_FALSE(IsGeometryOnlyLod(ClassifyLodResolution(resolution)));
     }
+}
+
+TEST_CASE("Arma 3's shadow LODs are not viewing distances", "[model][lod][ast-018][shadow]")
+{
+    // The bands, not single values: shadow volumes are 10000, 10010, 10020... and
+    // shadow buffers 11000, 11010... A model carries several.
+    for (float resolution : {10000.0f, 10010.0f, 10020.0f, 10990.0f})
+    {
+        CAPTURE(resolution);
+        REQUIRE(ClassifyLodResolution(resolution) == LodPurpose::ShadowVolume);
+    }
+    for (float resolution : {11000.0f, 11010.0f, 11990.0f})
+    {
+        CAPTURE(resolution);
+        REQUIRE(ClassifyLodResolution(resolution) == LodPurpose::ShadowBuffer);
+    }
+
+    // This is the property that matters. These sit BELOW the 1e5 cut-off that
+    // catches every other sentinel, so they read as ordinary LODs at a 10 km
+    // viewing distance -- which is exactly what a distance-based LOD chooser
+    // reaches for when an object is far away, and it drew the shadow silhouette.
+    REQUIRE(IsGeometryOnlyLod(LodPurpose::ShadowVolume));
+    REQUIRE(IsGeometryOnlyLod(LodPurpose::ShadowBuffer));
+    REQUIRE_FALSE(IsDrawableLod(LodPurpose::ShadowVolume));
+    REQUIRE_FALSE(IsDrawableLod(LodPurpose::ShadowBuffer));
+}
+
+TEST_CASE("An unnamed sentinel is not drawable either", "[model][lod][ast-018]")
+{
+    // `Unknown` is neither drawable nor geometry-only, so a consumer asking only
+    // "is this geometry?" would draw it. Measured case: Arma 3 models carry a
+    // 4e13 LOD this table does not name, and the penetration materials on it
+    // reached the colour pass.
+    REQUIRE(ClassifyLodResolution(4e13f) == LodPurpose::Unknown);
+    REQUIRE_FALSE(IsGeometryOnlyLod(LodPurpose::Unknown));
+    REQUIRE_FALSE(IsDrawableLod(LodPurpose::Unknown));
 }
 
 TEST_CASE("Special-LOD sentinels are classified by purpose", "[model][lod][ast-018]")
@@ -195,7 +234,8 @@ TEST_CASE("Special-LOD slot assignment is unchanged by the typed table", "[model
     // assigned a slot, because a slot means "made alpha transparent" for
     // _geometry, _geometryView and _geometryFire.
     for (float resolution : {0.5f, 1.0f, 100.0f, 901.0f, 999.0f, 1000.0f, 1100.0f, 1200.0f,
-                             1999.0f, 2000.0f, 5000.0f, 9999.0f, 10000.0f, 50000.0f, 99999.0f})
+                             1999.0f, 2000.0f, 5000.0f, 9999.0f, 10000.0f, 11000.0f, 50000.0f,
+                             99999.0f})
     {
         CAPTURE(resolution);
         REQUIRE(oldSlot(resolution) == newSlot(resolution));
