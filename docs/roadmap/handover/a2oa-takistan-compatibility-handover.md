@@ -19,28 +19,23 @@ repository.** The existing reference-corpus mechanism is local-only by design.
 
 ## Git and workspace safety — do this first
 
-The root worktree is intentionally dirty with active A3 lighting, pine, terrain,
-and capture work. Do not switch branches, stage, commit, reset, clean, delete,
-or reformat anything in that worktree.
+The compatibility path is deliberately not a separate renderer or a stale
+worktree. Work in the current shared source branch: revision-specific readers
+feed one common World, Model, Material and WGPU renderer path. Do not replace
+the installed-game executable with a binary from another branch or worktree.
 
-1. Confirm `git status --short` is dirty and leave it untouched.
-2. Create a separate sibling worktree from the known committed baseline:
-
-   ```powershell
-   git worktree add ..\PoseidonWGPU-a2oa -b codex/a2oa-takistan-compat c51ea85
-   ```
-
-3. Work only in `..\PoseidonWGPU-a2oa`.
-4. Make small, focused commits. Push the resulting branch when its first
-   validated slice is ready:
+1. Preserve unrelated dirty work; do not reset, clean, delete, or reformat it.
+2. Make focused commits only after the relevant build and regression checks.
+3. Push commits only to the private safety mirror, never to `origin`,
+   `poseidon-wgpu`, or `upstream`:
 
    ```powershell
-   git push -u origin codex/a2oa-takistan-compat
-   git push -u safety codex/a2oa-takistan-compat
+   git push safety HEAD:refs/heads/<current-branch>
    ```
 
-Do not create a pull request unless the owner requests one. Before a future
-merge, rebase onto the then-current A3 work and rerun the A3 regression gates.
+4. Do not create a pull request unless the owner requests one. Keep temporary
+   extraction/inspection folders untracked; licensed reference assets must
+   remain local.
 
 ## Architectural rules
 
