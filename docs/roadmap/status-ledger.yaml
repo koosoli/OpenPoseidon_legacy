@@ -2706,3 +2706,65 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-016-takistan-model-coverage-20260812.md
+
+  - id: WLD-017
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Terrain materials and ground layers are separate index spaces
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: c536015
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-016]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: Poseidon::TerrainWgpu::UploadGroundTextures
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: Poseidon::TerrainWgpu::UploadIndexMap
+    test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/WLD-017-terrain-materials-are-not-ground-layers-20260812.md
+    capability_claims:
+      - capability: TERRAIN_GROUND_LAYER_DEDUPLICATION
+        status: COMPLETE
+        denominator: >-
+          Takistan: 3,293 terrain materials resolve to 499 distinct ground layers,
+          0 dropped (was 3,033 dropped at the 1,024-layer binding_array cap), and
+          2,999 of 2,999 authored LCA blends now bind completely (was 0). Stratis:
+          479 materials over 76 layers, 419 of 419 authored blends complete.
+      - capability: TERRAIN_CELL_INDEXES_MATERIAL_NOT_LAYER
+        status: COMPLETE
+        denominator: >-
+          UploadIndexMap clamped each cell's material index to the ground-layer
+          cap, collapsing 2,269 of Takistan's 3,293 materials onto index 1,023. It
+          now clamps to the material count, bounded by CELL_LAYER_MASK's 15 bits.
+    known_failures:
+      - >-
+        The authored LCA composition is bound but not blended: the shader still
+        gates it behind a3_surface_blend, off by default. Takistan takes the
+        correct per-cell texture, not the mask-driven detail composition.
+      - >-
+        No unit test covers this; the path needs a Landscape and a live renderer.
+        The gate is the measured before/after on two worlds plus the OFP smoke.
+    fallback: >-
+      A texture that will not upload still resolves to layer 0, the renderer's
+      white fallback, and materials past the layer cap are still counted and
+      reported rather than silently dropped.
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-017-terrain-materials-are-not-ground-layers-20260812.md
