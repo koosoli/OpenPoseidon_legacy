@@ -169,6 +169,10 @@ struct Odol73Polygons
     // kept under its own name and cross-checked rather than assumed.
     uint32_t faceDataSize = 0;
     uint16_t unused = 0;
+    // Face-section bounds use revision-specific units. v73 uses four bytes for
+    // the count and each index; v49 uses the aligned 16-bit form.
+    uint32_t faceStreamHeaderBytes = 4;
+    uint32_t faceStreamIndexBytes = 4;
     std::vector<std::vector<uint32_t>> faces;
 };
 
@@ -1049,7 +1053,7 @@ inline std::vector<uint32_t> Odol73FaceStreamOffsets(const Odol73Polygons& polyg
     for (const auto& face : polygons.faces)
     {
         offsets.push_back(offset);
-        offset += 4 + 4 * static_cast<uint32_t>(face.size());
+        offset += polygons.faceStreamHeaderBytes + polygons.faceStreamIndexBytes * static_cast<uint32_t>(face.size());
     }
     offsets.push_back(offset);
     return offsets;

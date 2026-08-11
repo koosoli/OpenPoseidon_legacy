@@ -63,18 +63,18 @@ int BcFormatFor(PacFormat fmt)
 // PBO-packed textures) and decodes via the shared DecodePAABuffer, which handles every
 // PAA/PAC pixel format. Top mip on purpose: a smaller mip blurs a cutout's crisp 0/255 holes
 // into false partial-alpha, mis-routing a pole/fence to the blend pass.
-AlphaStats::Kind ScanTopMipAlphaClass(const char* name)
+AlphaStats ScanTopMipAlphaStats(const char* name)
 {
     if (!name)
     {
-        return AlphaStats::Opaque;
+        return {};
     }
     QIFStream in;
     GFileServer->Open(in, name);
     const int size = in.fail() ? 0 : in.rest();
     if (size <= 0)
     {
-        return AlphaStats::Opaque;
+        return {};
     }
     AUTO_STATIC_ARRAY(char, fileData, 256 * 1024);
     fileData.Realloc(size);
@@ -86,9 +86,9 @@ AlphaStats::Kind ScanTopMipAlphaClass(const char* name)
     const DecodedImage img = DecodePAABuffer(fileData.Data(), static_cast<size_t>(size), isPaa);
     if (!img.valid())
     {
-        return AlphaStats::Opaque;
+        return {};
     }
-    return ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height)).kind;
+    return ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
 }
 
 } // namespace
@@ -181,13 +181,30 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         const AlphaStats* decodedPtr = nullptr;
         if (hasAlpha && !oneBit)
         {
-            decoded.kind = ScanTopMipAlphaClass(Name());
+            if (!_alphaStatsScanned)
+            {
+                _alphaStats = ScanTopMipAlphaStats(Name());
+                _alphaStatsScanned = true;
+            }
+            decoded = _alphaStats;
             decodedPtr = &decoded;
         }
         kind = ClassifyTextureAlpha(hasAlpha, chroma, oneBit, decodedPtr);
     }
     _alphaClass = static_cast<signed char>(kind);
     return kind;
+}
+
+bool TextureWgpu::HasAlphaHoles()
+{
+    // The cutout decision is reached only for a decoded multi-bit-alpha texture in the
+    // TreeAdv path. A 2% floor matches ClassifyAlpha's clear-coverage threshold and keeps
+    // harmless compression noise from turning a solid bark map into a masked draw.
+    if (!_alphaStatsScanned)
+    {
+        (void)GetAlphaClass();
+    }
+    return _alphaStatsScanned && _alphaStats.pctClear >= 2.0;
 }
 
 void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size)

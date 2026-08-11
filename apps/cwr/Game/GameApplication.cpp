@@ -34,6 +34,8 @@
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/World/Scene/Camera/CamEffects.hpp>
+#include <Poseidon/World/Scene/Camera/CameraHold.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <Poseidon/UI/Multiplayer/MultiplayerModule.hpp>
 #include <Poseidon/UI/Editor/EditorModule.hpp>
@@ -45,6 +47,7 @@
 #include <SDL3/SDL_scancode.h>
 #include <cjson/cJSON.h>
 #include <stdint.h>
+#include <cmath>
 #include <fstream>
 #include <stdlib.h>
 #include <optional>
@@ -1088,6 +1091,10 @@ void GameApplication::RunMainLoop()
     }
     int mainFrameCounter = 0;
     size_t nextAutoScreenshot = 0;
+    // Screenshot readback is asynchronous in WGPU. Keep two ordinary game
+    // frames alive after requesting it; otherwise the shutdown screen becomes
+    // the captured frame.
+    int screenshotCloseAfterFrame = -1;
     DWORD loopStartTick = GetTickCount();
 
     // Display tracker — Trident clients wait for `ready` before issuing
@@ -1198,13 +1205,24 @@ void GameApplication::RunMainLoop()
         // coordinates that mean nothing in another. The OFP training start is
         // open sea on Stratis, so without this the first A3 world render is a
         // picture of water.
-        if (!testWorldRepositioned && !AppConfig::Instance().GetTestWorldPos().empty() &&
+        const std::vector<float>& testWorldFreeFly = AppConfig::Instance().GetTestWorldFreeFly();
+        const std::vector<float>& testWorldPos = AppConfig::Instance().GetTestWorldPos();
+        if (!testWorldRepositioned && (!testWorldFreeFly.empty() || !testWorldPos.empty()) &&
             GWorld->GetMode() == GModeArcade)
         {
             testWorldRepositioned = true;
-            const std::vector<float>& target = AppConfig::Instance().GetTestWorldPos();
+            const bool freeFlyPose = !testWorldFreeFly.empty();
+            const std::vector<float>& target = freeFlyPose ? testWorldFreeFly : testWorldPos;
+            const float testWorldHour = AppConfig::Instance().GetTestWorldHour();
+            if (testWorldHour >= 0.0f)
+            {
+                const int hour = static_cast<int>(testWorldHour);
+                const int minute = static_cast<int>((testWorldHour - hour) * 60.0f + 0.5f);
+                GWorld->SetDate(1985, 5, 11, hour, minute);
+                LOG_INFO(Core, "--test-world-hour: set world time to {:02d}:{:02d}", hour, minute);
+            }
             Object* cameraOn = GWorld->CameraOn();
-            if (!cameraOn || !GLandscape)
+            if (!freeFlyPose && (!cameraOn || !GLandscape))
             {
                 LOG_ERROR(Core, "--test-world-pos: no camera or landscape to reposition against");
             }
@@ -1212,12 +1230,70 @@ void GameApplication::RunMainLoop()
             {
                 const float x = target[0];
                 const float z = target[1];
-                // Stand on the terrain, not at whatever height was requested:
-                // the point is to see the world, and the surface is the only
-                // height that is guaranteed to be above it.
-                const float y = GLandscape->SurfaceY(x, z) + 1.8f;
-                cameraOn->SetPosition(Vector3(x, y, z));
-                LOG_INFO(Core, "--test-world-pos: moved player to {}, {}, {}", x, y, z);
+                const std::vector<float>& lookAt = AppConfig::Instance().GetTestWorldLookAt();
+                const float yawDegrees = AppConfig::Instance().GetTestWorldYaw();
+                if (freeFlyPose)
+                {
+                    // A high player would fall before a delayed capture. Use the
+                    // same native CameraVehicle as the developer's free-fly tool:
+                    // it is an independent manual camera effect, so it preserves
+                    // the captured pose without moving or disturbing the player.
+                    const Vector3 position(x, target[2], z);
+                    Vector3 direction;
+                    if (!lookAt.empty())
+                    {
+                        direction = (Vector3(lookAt[0], lookAt[2], lookAt[1]) - position).Normalized();
+                    }
+                    else
+                    {
+                        const float azimuth = target[3] * (H_PI / 180.0f);
+                        const float elevation = target[4] * (H_PI / 180.0f);
+                        const float horizontal = std::cos(elevation);
+                        direction = Vector3(horizontal * std::sin(azimuth), std::sin(elevation),
+                                            horizontal * std::cos(azimuth));
+                    }
+                    auto* camera = new CameraVehicle();
+                    camera->SetPosition(position);
+                    camera->SetDirectionAndUp(direction, VUp);
+                    camera->SetManual(true);
+                    camera->SetAltitudeSpeedScaling(true);
+                    camera->SetMouseLookRequiresRightButton(true);
+                    camera->SetCrossHairs(false);
+                    camera->ResetTargets();
+                    GWorld->AddAnimal(camera);
+                    GWorld->SetCameraEffect(CreateCameraEffect(camera, "Internal", CamEffectTop, true));
+                    LOG_INFO(Core,
+                             "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
+                             target[2], z, target[3], target[4],
+                             lookAt.empty() ? "" : " (aimed using --test-world-look-at)");
+                }
+                else
+                {
+                    const float y = GLandscape->SurfaceY(x, z) + 1.8f;
+                    // Move, rather than SetPosition: the player is already registered
+                    // in Landscape's spatial grid. Directly changing the transform left
+                    // it in the old cell and caused a recoverable but noisy full-grid
+                    // search on every subsequent movement.
+                    cameraOn->Move(Vector3(x, y, z));
+                    if (!lookAt.empty())
+                    {
+                        const Vector3 target(lookAt[0], lookAt[2], lookAt[1]);
+                        cameraOn->SetOrient((target - cameraOn->Position()).Normalized(), VUp);
+                        LOG_INFO(Core, "--test-world-pos: moved player to {}, {}, {}; looking at {}, {}, {}", x, y, z,
+                                 lookAt[0], lookAt[2], lookAt[1]);
+                    }
+                    else if (yawDegrees != 0.0f)
+                    {
+                        const Matrix3 yaw(MRotationY, HDegree(yawDegrees));
+                        cameraOn->SetOrient(yaw * cameraOn->Direction(), VUp);
+                        LOG_INFO(Core, "--test-world-pos: moved player to {}, {}, {}; yaw {} degrees", x, y, z,
+                                 yawDegrees);
+                    }
+                    else
+                    {
+                        LOG_INFO(Core, "--test-world-pos: moved player to {}, {}, {}", x, y, z);
+                    }
+                }
             }
         }
 
@@ -1390,7 +1466,7 @@ void GameApplication::RunMainLoop()
                 LOG_INFO(Core, "Screenshot test: saved to {}", screenshotTestPath);
                 LOG_INFO(Core, "AUTO-TEST SUCCESS");
                 screenshotCaptured = true;
-                m_closeRequest = true;
+                screenshotCloseAfterFrame = mainFrameCounter + 2;
             }
         }
 
@@ -1411,7 +1487,7 @@ void GameApplication::RunMainLoop()
                      as.path);
             nextAutoScreenshot++;
             if (nextAutoScreenshot >= autoScreenshots.size())
-                m_closeRequest = true;
+                screenshotCloseAfterFrame = mainFrameCounter + 2;
         }
 
         // RenderDoc trigger — single shot.  TriggerCapture() captures
@@ -1459,6 +1535,8 @@ void GameApplication::RunMainLoop()
         }
 
         mainFrameCounter++;
+        if (screenshotCloseAfterFrame >= 0 && mainFrameCounter >= screenshotCloseAfterFrame)
+            m_closeRequest = true;
     }
     if (harnessServer)
     {
@@ -1484,6 +1562,7 @@ void GameApplication::RunMainLoop()
     DWORD loopStartTick = Poseidon::Foundation::GlobalTickCount();
 
     int mainFrameCounter = 0;
+    int screenshotCloseAfterFrame = -1;
 
     UITestEngine displayTracker;
     displayTracker.SetFrameCounter(&mainFrameCounter);
@@ -1611,7 +1690,7 @@ void GameApplication::RunMainLoop()
                          it->path);
                 autoScreenshotList.erase(it);
                 if (autoScreenshotList.empty())
-                    m_closeRequest = true;
+                    screenshotCloseAfterFrame = mainFrameCounter + 2;
             }
         }
 
@@ -1674,9 +1753,11 @@ void GameApplication::RunMainLoop()
                 LOG_INFO(Core, "Screenshot test: saved to {}", screenshotTestPath);
                 LOG_INFO(Core, "AUTO-TEST SUCCESS");
                 screenshotCaptured = true;
-                m_closeRequest = true;
+                screenshotCloseAfterFrame = mainFrameCounter + 2;
             }
         }
+        if (screenshotCloseAfterFrame >= 0 && mainFrameCounter >= screenshotCloseAfterFrame)
+            m_closeRequest = true;
     }
 
     if (harnessServer)

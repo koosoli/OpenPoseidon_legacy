@@ -216,7 +216,7 @@ class LightPointVisible: public LightPoint
 		ColorVal diffuse, ColorVal ambient, float size=1
 	);
 	void ToDraw( ClipFlags clipFlags=ClipAll, bool dimmed=false ) override;
-	void SetSize( float size ){size=_size;}
+	void SetSize( float size ){_size=size;}
 
 	void Load(const ParamEntry &cls);
 };
@@ -249,7 +249,7 @@ class LightReflector: public LightPositionedColored
 	void SetAmbient( ColorVal ambient ){_ambient=ambient;}
 	ColorVal Ambient() const {return _ambient;}
 
-	void SetSize( float size ){size=_size;}
+	void SetSize( float size ){_size=size;}
 
 	void SetAngle( float angle ){_angle=angle;}
 	float Angle() const {return _angle;}

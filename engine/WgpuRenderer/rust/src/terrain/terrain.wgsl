@@ -55,6 +55,25 @@ const GRID_N: f32 = 32.0;
 @group(2) @binding(3) var detail: texture_2d<f32>;
 @group(2) @binding(4) var ground_clamp_samp: sampler;
 @group(2) @binding(5) var jitter_map: texture_2d<f32>;
+struct TerrainUv {
+    u: vec4<f32>,
+    v: vec4<f32>,
+};
+struct TerrainMaterial {
+    legacy: u32,
+    satellite: u32,
+    mask: u32,
+    base: u32,
+    overlays: array<u32, 4>,
+    overlay_count: u32,
+    uv_source_mask: u32,
+    padding: array<u32, 2>,
+    satellite_uv: TerrainUv,
+    mask_uv: TerrainUv,
+    base_uv: TerrainUv,
+    overlay_uvs: array<TerrainUv, 4>,
+};
+@group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
 fn hm_load(ix: i32, iz: i32) -> f32 {
     let cx = clamp(ix, 0, i32(tp.hm_width) - 1);
@@ -127,6 +146,79 @@ fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     return textureSampleGrad(ground[layer], ground_samp, tile_uv, ddx, ddy).rgb;
 }
 
+fn terrain_uv(transform: TerrainUv, source_bit: u32, source_mask: u32,
+              world_pos: vec3<f32>, tile_uv: vec2<f32>) -> vec2<f32> {
+    let source = select(vec3<f32>(tile_uv, 0.0), world_pos, (source_mask & (1u << source_bit)) != 0u);
+    return vec2<f32>(dot(source, transform.u.xyz) + transform.u.w,
+                     dot(source, transform.v.xyz) + transform.v.w);
+}
+
+fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
+                       world_gradient: vec3<f32>, tile_gradient: vec2<f32>) -> vec2<f32> {
+    let source = select(vec3<f32>(tile_gradient, 0.0), world_gradient, (source_mask & (1u << source_bit)) != 0u);
+    return vec2<f32>(dot(source, transform.u.xyz), dot(source, transform.v.xyz));
+}
+
+// OPRW25 TerrainSNX is authored as a satellite colour plus an LCA RGBA mask
+// selecting a base surface and up to four overlays.  The satellite retains its
+// low-frequency tile variation; the mask controls the high-frequency surfaces.
+// Legacy terrain descriptors have overlay_count == 0 and take the original
+// single-texture route exactly.
+fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
+                        ddx: vec2<f32>, ddy: vec2<f32>, world_pos: vec3<f32>,
+                        world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> vec3<f32> {
+    let material = terrain_materials[entry & CELL_LAYER_MASK];
+    let authored_weight = clamp(a3_surface_blend, 0.0, 0.35);
+    // The normal renderer must remain byte-for-byte on the established cell
+    // path while the authored TerrainSNX composition is evaluated and compared.
+    // This also avoids applying an unavailable texgen to legacy descriptors.
+    if (material.overlay_count == 0u || authored_weight == 0.0) {
+        return sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
+    }
+    // RVMAT's worldPos is terrain-local X/Z/Y, whereas the renderer carries
+    // world coordinates as X/Y/Z. Preserve height in the third component but
+    // put the planar Z axis where TerrainSNX TexGen expects it.
+    let material_pos = vec3<f32>(world_pos.x, world_pos.z, world_pos.y);
+    let material_dwx = vec3<f32>(world_dwx.x, world_dwx.z, world_dwx.y);
+    let material_dwy = vec3<f32>(world_dwy.x, world_dwy.z, world_dwy.y);
+    let satellite_uv = terrain_uv(material.satellite_uv, 0u, material.uv_source_mask, material_pos, tile_uv);
+    let mask_uv = terrain_uv(material.mask_uv, 1u, material.uv_source_mask, material_pos, tile_uv);
+    let base_uv = terrain_uv(material.base_uv, 2u, material.uv_source_mask, material_pos, tile_uv);
+    let satellite_dwx = terrain_uv_gradient(material.satellite_uv, 0u, material.uv_source_mask, material_dwx, ddx);
+    let satellite_dwy = terrain_uv_gradient(material.satellite_uv, 0u, material.uv_source_mask, material_dwy, ddy);
+    let mask_dwx = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwx, ddx);
+    let mask_dwy = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwy, ddy);
+    let base_dwx = terrain_uv_gradient(material.base_uv, 2u, material.uv_source_mask, material_dwx, ddx);
+    let base_dwy = terrain_uv_gradient(material.base_uv, 2u, material.uv_source_mask, material_dwy, ddy);
+    let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
+    // TerrainSNX has one implicit base and up to four masked detail layers:
+    // Stage4 is the base, stages 6/8/10/12 map to mask RGBA respectively.
+    // The unpainted mask remainder belongs to the base layer.
+    let mask_weight = min(dot(mask, vec4<f32>(1.0)), 1.0);
+    var surface = textureSampleGrad(ground[material.base], ground_samp, base_uv, base_dwx, base_dwy).rgb * (1.0 - mask_weight);
+    for (var i = 0u; i < min(material.overlay_count, 4u); i = i + 1u) {
+        let overlay_uv = terrain_uv(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_pos, tile_uv);
+        let overlay_dwx = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwx, ddx);
+        let overlay_dwy = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwy, ddy);
+        surface += textureSampleGrad(ground[material.overlays[i]], ground_samp, overlay_uv, overlay_dwx, overlay_dwy).rgb * mask[i];
+    }
+    // Preserve the satellite as the low-frequency colour authority. The LCA
+    // stack is close-range detail, not a second satellite: leaving it visible
+    // at long range exposes its per-material colour blocks. Fade that detail
+    // from 25 to 120 metres, exactly where the continuous satellite texture is
+    // the useful anti-tiling signal. Zero remains the exact legacy fallback;
+    // the pipeline override is intentionally capped while this authored path
+    // is compared against the established renderer.
+    // Stage 0 is not a repeating close-detail texture: TerrainSNX provides a
+    // separate TexGen for its continuous, low-frequency satellite colour.
+    // Sampling it through the old cell frame is what made a genuine layered
+    // A3 material look like a tiled single texture.
+    let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
+                                      satellite_uv, satellite_dwx, satellite_dwy).rgb;
+    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(world_pos));
+    return mix(satellite, surface, authored_weight * detail_fade);
+}
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world_xz: vec2<f32>,  // absolute world-xz
@@ -184,6 +276,10 @@ fn vs_terrain(
 // smears a wide muddy seam; narrowing it to a band near the boundary keeps cell
 // interiors crisp. 0 -> hard edges (GL33-like); 0.5 -> full-cell blend.
 override blend_width: f32 = 0.15;
+// TerrainSNX's authored LCA base/overlay detail contribution. Kept opt-in while
+// it is verified against the legacy cell fallback; it is capped in
+// sample_authored_cell so the satellite base remains continuous.
+override a3_surface_blend: f32 = 0.0;
 // HDR path (docs/hdr-pipeline-plan.md): 1 = decode ground albedo + sun/light/fog
 // colours from sRGB to linear and drop the [0,1] radiance clamp. 0 = gamma-naive.
 override linear: f32 = 0.0;
@@ -237,10 +333,11 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let w10 = fx * (1.0 - fy);
     let w01 = (1.0 - fx) * fy;
     let w11 = fx * fy;
-    var rgb = w00 * sample_cell(e00, base, tile_uv, duvdx, duvdy)
-            + w10 * sample_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy)
-            + w01 * sample_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy)
-            + w11 * sample_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy);
+    let absolute_world_pos = in.world_pos + frame.cam_pos.xyz;
+    var rgb = w00 * sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
+            + w10 * sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
+            + w01 * sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
+            + w11 * sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).

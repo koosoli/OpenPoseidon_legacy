@@ -434,6 +434,11 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         std::string modPathsStr;
         configGroup->add_option("--mod", modPathsStr, "Mod directory paths (semicolon-separated; legacy alias: -mod)");
 
+        std::string addonArchiveRootsStr;
+        showOption(configGroup->add_option("--addon-root", addonArchiveRootsStr,
+                                           "PBO archive directories (semicolon-separated; mounted read-only ahead of mods)"),
+                   CliHelpVisibility::Full);
+
         // Optional base directory for relative --mod names. Lets mods be referenced
         // by name (e.g. --mods-dir packages/mods --mod @fixturemod) so test/CI
         // invocations carry no machine-specific absolute path.
@@ -648,6 +653,28 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                     "Move the player to world X Z once the mission reaches gameplay "
                                     "(use with --test-world; height comes from the terrain)")
                        ->expected(2),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup
+                       ->add_option("--test-world-yaw", _testWorldYaw,
+                                    "Turn the test-world camera horizontally by this many degrees after repositioning "
+                                    "(negative is left; default: 0)")
+                       ->check(CLI::Range(-180.0f, 180.0f)),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup
+                       ->add_option("--test-world-look-at", _testWorldLookAt,
+                                    "Aim the repositioned test-world camera at X Z Y (overrides --test-world-yaw)")
+                       ->expected(3),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup
+                       ->add_option("--test-world-freefly", _testWorldFreeFly,
+                                    "Set the substituted-world camera to free-fly X Z Y azimuth elevation; "
+                                    "overrides --test-world-pos and --test-world-yaw")
+                       ->expected(5),
+                   CliHelpVisibility::Dev);
+        showOption(debugGroup
+                       ->add_option("--test-world-hour", _testWorldHour,
+                                    "Set the substituted-world capture time (0-23.99; preserves mission time when omitted)")
+                       ->check(CLI::Range(0.0f, 23.99f)),
                    CliHelpVisibility::Dev);
         showOption(debugGroup
                        ->add_option("--test-model-distance", _testModelDistance,
@@ -964,6 +991,19 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                 }
 
                 _modPaths = RString(resolvedMods.mountPath.c_str());
+            }
+            if (!addonArchiveRootsStr.empty())
+            {
+                const AddonArchiveRootResolveResult resolvedRoots = ResolveAddonArchiveRootList(
+                    addonArchiveRootsStr, std::filesystem::current_path().string());
+                if (!resolvedRoots.Ok())
+                {
+                    std::string msg = "Invalid --addon-root value:";
+                    for (const std::string& error : resolvedRoots.errors)
+                        msg += "\n  " + error;
+                    throw std::runtime_error(msg);
+                }
+                _addonArchivePaths = RString(resolvedRoots.mountPath.c_str());
             }
         }
         catch (const CLI::CallForHelp&)

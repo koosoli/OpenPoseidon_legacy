@@ -359,7 +359,9 @@ class Scene
     void ObjectsDrawn();               // release all temporary information
 
     // light color and position
-    void DrawFlare(ColorVal color, Vector3Par pos, bool secondary = true);
+    // `sizeScale` keeps local emitters visually distinct from the solar disc.
+    // The legacy code used the same full-screen flare sprite for both.
+    void DrawFlare(ColorVal color, Vector3Par pos, bool secondary = true, float sizeScale = 1.0f);
     void DrawFlares();
 
     void DrawRainLevel(float alpha, float yDensity, float xOffset, float yOffset, float z);

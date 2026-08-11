@@ -55,7 +55,9 @@
 #include <map>
 #include <memory>
 #include <limits>
+#include <mutex>
 #include <span>
+#include <unordered_map>
 
 namespace Poseidon
 {
@@ -66,6 +68,12 @@ extern bool EnableObjOcc;
 
 namespace
 {
+
+// Defined with the retained-section classifier below. The direct path needs the
+// same authored TreeAdv alpha authority before it decides its per-pixel discard.
+bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
+bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
+bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
 
 // Narrowing conversion to the 32-bit width the FFI uses for counts / indices.
 template <typename T>
@@ -90,6 +98,24 @@ bool ContainsNoCase(const char* text, const std::string& part)
     std::transform(needle.begin(), needle.end(), needle.begin(),
                    [](unsigned char ch) { return char(std::tolower(ch)); });
     return haystack.find(needle) != std::string::npos;
+}
+
+// Small imported lamp meshes use an emissive material as a legacy visibility marker. In HDR the
+// same value is physical radiance and blooms into a sun-sized disc. Their physical illumination
+// comes from paired static marker lights; keep the mesh itself at compact visible radiance. A3's
+// halogen floodlights use a much hotter material than the tiny runway markers, hence their lower
+// visible-only cap. Neither value affects the paired point light's terrain spill.
+float StaticEmitterRadianceScale(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return 1.0f;
+    const char* path = surfMat->GetName().Data();
+    if (ContainsNoCase(path, "\\lamps\\") || ContainsNoCase(path, "lamphalogen"))
+        return 0.015f;
+    return ContainsNoCase(path, "\\lights\\") || ContainsNoCase(path, "\\runwaylights\\") ||
+                   ContainsNoCase(path, "warninglight")
+               ? 0.08f
+               : 1.0f;
 }
 
 // By-eye tonemap/grade presets keyed by time of day (hours). Sorted ascending; the
@@ -1189,17 +1215,25 @@ void EngineWgpu::NextFrame()
         // per-draw selection: gather the scene's point/spot lights, colours
         // pre-scaled by NightEffect (so they vanish by day, like GL33's local
         // lights), positions in ABSOLUTE world space (the shader rebases per
-        // camera). Clamped to the GPU buffer capacity. Per-fragment attenuation
-        // discards out-of-range lights, so no distance culling is needed here yet
-        // (that arrives with Forward+).
+        // camera). Imported worlds can have hundreds of static markers, so select
+        // the best-fitting lights around the active camera before the fixed GPU
+        // capacity is applied; insertion order is not a useful visibility proxy.
         _lights.clear();
         if (GScene && GScene->MainLight())
         {
             const float night = GScene->MainLight()->NightEffect();
             if (night > 0.0f)
             {
+                struct LightCandidate
+                {
+                    float score;
+                    WgrLight light;
+                };
+                std::vector<LightCandidate> candidates;
+                const Vector3 cameraPos = GScene->GetCamera() ? GScene->GetCamera()->Position() : VZero;
                 const int n = GScene->NLights();
-                for (int i = 0; i < n && _lights.size() < WGR_MAX_LIGHTS; i++)
+                candidates.reserve(n);
+                for (int i = 0; i < n; i++)
                 {
                     Light* light = GScene->GetLight(i);
                     if (!light || !light->IsOn())
@@ -1223,8 +1257,23 @@ void EngineWgpu::NextFrame()
                     pl.diffuse = {dif.R(), dif.G(), dif.B(), 0.0f};
                     pl.ambient = {amb.R(), amb.G(), amb.B(), 0.0f};
                     pl.dir = {beam.X(), beam.Y(), beam.Z(), isSpot ? 1.0f : 0.0f};
-                    _lights.push_back(pl);
+                    // Prefer a light whose attenuation volume contains the camera. This
+                    // stable, range-normalised score keeps nearby runway/flood lights in
+                    // the shared terrain/object list even if a world loaded far-away lights
+                    // first. Terrain fragments still apply their exact per-pixel falloff.
+                    const float range = std::max(desc.startAtten * 10.0f, 1.0f);
+                    const float score = desc.pos.Distance2(cameraPos) / (range * range);
+                    candidates.push_back({score, pl});
                 }
+                std::sort(candidates.begin(), candidates.end(),
+                          [](const LightCandidate& a, const LightCandidate& b) { return a.score < b.score; });
+                const size_t selected = std::min(candidates.size(), size_t(WGR_MAX_LIGHTS));
+                _lights.reserve(selected);
+                for (size_t i = 0; i < selected; ++i)
+                    _lights.push_back(candidates[i].light);
+                if (std::getenv("WGR_STATIC_LIGHT_TRACE"))
+                    LOG_INFO(Graphics, "Wgpu local-light selection: candidates={} selected={} night={:.3f}",
+                             candidates.size(), selected, night);
             }
         }
         const float lightCount = static_cast<float>(_lights.size());
@@ -1765,9 +1814,10 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     const PacLevelMem& mip = t->AMipmap(0);
                     LOG_INFO(Graphics,
                              "Legacy texture trace: path={} handle={} size={}x{} mips={} srcFormat={} dstFormat={} "
-                             "alpha={} transparent={} alphaClass={}",
+                             "alpha={} transparent={} alphaClass={} holes={}",
                              name, tex, t->AWidth(0), t->AHeight(0), t->ANMipmaps(), int(mip.SrcFormat()),
-                             int(mip.DstFormat()), t->IsAlpha(), t->IsTransparent(), int(alphaClass));
+                             int(mip.DstFormat()), t->IsAlpha(), t->IsTransparent(), int(alphaClass),
+                             t->HasAlphaHoles());
                 }
             }
         }
@@ -2077,7 +2127,33 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // so the geometry behind shows through the holes and MSAA A2C still anti-aliases the edges.
     render::BlendMode blend = desc.blend;
     float alphaRef = AlphaRefFromDesc(desc);
-    if (tex != 0 && alphaClass == Poseidon::AlphaStats::Cutout)
+    // TreeAdv leaf cards are authored with antialiased alpha, which the texture
+    // histogram calls Blend. Their RVMAT family is nevertheless alpha-tested;
+    // without this matching discard the black transparent texels depth-write in
+    // the opaque fallback and completely hide the pine's trunk behind its cards.
+    // TreeAdvTrunk is intentionally excluded: its bark map has non-coverage alpha
+    // and must remain a solid, untested draw.
+    auto* texture = static_cast<TextureWgpu*>(sMesh.GetSection(beg).properties.GetTexture());
+    const bool materialUsesLeafCards =
+        alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialUsesLeafCards(debugSection.surfMat);
+    const bool materialCutout = materialUsesLeafCards && GpuSectionMaterialIsCutout(debugSection.surfMat, texture);
+    if (GpuTextureIsBarkOrTrunk(texture))
+    {
+        // The common legacy section descriptor itself can carry a stale alpha
+        // reference even for TreeAdvTrunk.  Texture role is authoritative for
+        // these bark maps, so remove that inherited discard unconditionally.
+        blend = render::BlendMode::Opaque;
+        alphaRef = 0.0f;
+    }
+    else if (materialUsesLeafCards && !materialCutout)
+    {
+        // A close tree LOD may use the generic TreeAdv material for BOTH its needle cards and
+        // its bark. The bark texture has a non-coverage alpha channel, so a leaf alpha test
+        // removes it. It still belongs in the opaque pass, just without the discard.
+        blend = render::BlendMode::Opaque;
+        alphaRef = 0.0f;
+    }
+    else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout))
     {
         // A cutout classification means the source has binary transparent texels, irrespective
         // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
@@ -2166,8 +2242,23 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const float sunEn = render::Has(splitSpec.material, render::Material::DisableSun) ? 0.0f : 1.0f;
     const Color diffuse = sunDif * _curMaterial.diffuse;
     const Color ambient = sunAmb * _curMaterial.ambient + sunDif * _curMaterial.forcedDiffuse;
-    const Color emissive = _curMaterial.emmisive;
-    d.mat_emissive = {emissive.R(), emissive.G(), emissive.B(), emissive.A()};
+    // Imported plant materials used the legacy emissive lane as fixed-function
+    // brightness compensation. In the HDR path that becomes real radiance and
+    // leaves forests visibly glowing at night. Retain only a small starlight
+    // residual, matching the retained path; authored emissive on fixtures stays.
+    if (GCurrentIsVegetation)
+    {
+        constexpr float vegetationLegacyEmissive = 0.10f;
+        const Color emissive = _curMaterial.emmisive;
+        d.mat_emissive = {emissive.R() * vegetationLegacyEmissive, emissive.G() * vegetationLegacyEmissive,
+                          emissive.B() * vegetationLegacyEmissive, emissive.A()};
+    }
+    else
+    {
+        const Color emissive = _curMaterial.emmisive;
+        const float scale = StaticEmitterRadianceScale(debugSection.surfMat);
+        d.mat_emissive = {emissive.R() * scale, emissive.G() * scale, emissive.B() * scale, emissive.A()};
+    }
     d.mat_sun_ambient = {ambient.R() * sunEn, ambient.G() * sunEn, ambient.B() * sunEn, ambient.A() * sunEn};
     d.mat_sun_diffuse = {diffuse.R() * sunEn, diffuse.G() * sunEn, diffuse.B() * sunEn, diffuse.A() * sunEn};
     // Point/spot-light material modulation (GL33's matDif/matAmb): the raw material
@@ -2204,6 +2295,69 @@ namespace
 // DrawSectionTL's texture/sampler/alpha/material derivation, minus the sun fold (done
 // in-shader) and the per-object/mesh spec (registration is per-shape, object spec ~0 for
 // static clutter).
+//
+// Texture alpha statistics cannot distinguish a blended surface from an anti-aliased
+// alpha-tested leaf card. Shape::Draw resolves that ambiguity from the authored RVMAT shader
+// family; retained sections must use the same authority or TreeAdv pines become solid cards.
+bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+    {
+        return false;
+    }
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path)
+    {
+        return false;
+    }
+
+    static std::unordered_map<std::string, bool> cache;
+    static std::mutex cacheMutex;
+    const std::string key(path);
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        if (const auto found = cache.find(key); found != cache.end())
+        {
+            return found->second;
+        }
+    }
+
+    bool cutout = false;
+    try
+    {
+        const std::string& family = Asset::Material::ParseRvMaterialFile(key).pixelShaderId;
+        cutout = family == "TreeAdv" || family == "TreeAdvTrans";
+    }
+    catch (...)
+    {
+        // Preserve the texture classification when an optional authored material is unavailable.
+    }
+
+    std::lock_guard<std::mutex> lock(cacheMutex);
+    cache[key] = cutout;
+    return cutout;
+}
+
+// A3's closest pine LOD uses TreeAdv for both the crown cards and the real bark
+// section.  The bark's alpha is a packed/non-coverage channel, and happens to
+// contain clear texels, so alpha statistics alone cannot tell those two roles
+// apart.  The texture's authored role can: every A3 bark map lives in _bark or
+// carries a bark/trunk name.  Keep it opaque while the actual polyplane cards
+// retain the TreeAdv alpha test.
+bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture)
+{
+    const char* path = texture ? texture->Name() : nullptr;
+    return path && (ContainsNoCase(path, "\\_bark\\") || ContainsNoCase(path, "bark_") ||
+                    ContainsNoCase(path, "_bark") || ContainsNoCase(path, "\\trunk") ||
+                    ContainsNoCase(path, "_trunk"));
+}
+
+bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture)
+{
+    return texture != nullptr && !GpuTextureIsBarkOrTrunk(texture) && texture->HasAlphaHoles() &&
+           GpuSectionMaterialUsesLeafCards(surfMat);
+}
+
 bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::mesh::MeshSection>& secs, int i,
                         WgrModelSection& secOut, WgrModelMaterial& matOut)
 {
@@ -2236,15 +2390,34 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     secOut.mesh = mesh;
     secOut.index_begin = U32(ms.beg);
     secOut.index_count = U32(indexCount);
-    const float alphaRef = AlphaRefFromDesc(desc);
+    uint64_t tex = 0;
+    Poseidon::AlphaStats::Kind alphaClass = Poseidon::AlphaStats::Opaque;
+    auto* texture = static_cast<TextureWgpu*>(sec.properties.GetTexture());
+    if (texture)
+    {
+        tex = texture->EnsureUploaded();
+        alphaClass = texture->GetAlphaClass();
+    }
+    const bool materialCutout =
+        alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialIsCutout(sec.surfMat, texture);
+    // Genuine blended surfaces stay on the CPU's back-to-front complement. Only foliage whose
+    // authored shader explicitly identifies it as alpha-tested can stay in the retained pass.
+    if (alphaClass == Poseidon::AlphaStats::Blend && !materialCutout)
+    {
+        return false;
+    }
+    // Retained sections must use the same texture-derived cutout rule as
+    // DrawSectionTL.  Arma vegetation often stores punch-through alpha in a
+    // DXT1/PAC texture while its P3D section itself is marked opaque.  Without
+    // this override the retained path draws each leaf card's dark background as
+    // a solid rectangle, even though the CPU path correctly discards it.
+    float alphaRef = AlphaRefFromDesc(desc);
+    if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout))
+    {
+        alphaRef = std::max(alphaRef, 0.5f);
+    }
     secOut.variant = alphaRef > 0.0f ? 1u : 0u;
     secOut._pad = 0;
-
-    uint64_t tex = 0;
-    if (auto* t = static_cast<TextureWgpu*>(sec.properties.GetTexture()))
-    {
-        tex = t->EnsureUploaded();
-    }
     // Raw per-section material (folded with the sun in the GPU-driven FS). Base = the
     // shading-type material at neutral accommodation (HDR auto-exposure handles adaptation),
     // then modulated by the section surface material. forcedDiffuse is dropped (the FS has no
@@ -2257,7 +2430,9 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         sec.surfMat->Combine(mod, m);
         m = mod;
     }
-    matOut.emissive = {m.emmisive.R(), m.emmisive.G(), m.emmisive.B(), m.emmisive.A()};
+    const float emitterScale = StaticEmitterRadianceScale(sec.surfMat);
+    matOut.emissive = {m.emmisive.R() * emitterScale, m.emmisive.G() * emitterScale,
+                       m.emmisive.B() * emitterScale, m.emmisive.A()};
     matOut.ambient = {m.ambient.R(), m.ambient.G(), m.ambient.B(), m.ambient.A()};
     matOut.diffuse = {m.diffuse.R(), m.diffuse.G(), m.diffuse.B(), m.diffuse.A()};
     matOut.specular = {m.specular.R(), m.specular.G(), m.specular.B(), float(m.specularPower)};
@@ -2776,6 +2951,30 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             {
                 continue;
             }
+            // TreeAdv leaf cards have antialiased alpha, so their texture histogram is Blend
+            // even though the authored family uses alpha-tested foliage. The retained pipeline
+            // has no transparent foliage variant yet; forcing that data into its opaque/cutout
+            // path produced either solid sheets or black holes. Leave the entire model on the
+            // established direct path until retained alpha-to-coverage matches it exactly. A
+            // whole-model fallback is necessary: CPU partial suppression is spec-based and
+            // cannot safely hand off the trunk while keeping these opaque-spec leaf cards.
+            if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
+                texture && texture->GetAlphaClass() == Poseidon::AlphaStats::Blend &&
+                GpuSectionMaterialIsCutout(shSec.surfMat, texture))
+            {
+                eligible = false;
+                break;
+            }
+            // The retained material buffer currently carries imported lamp emissive values through a
+            // separate update path, so its HDR result can bypass the compact-emitter cap applied by
+            // DrawSectionTL. These are tiny static helper meshes (not general scenery); retaining
+            // the complete model on the direct path keeps the presentation cap authoritative while
+            // the paired WGPU point light continues to illuminate the surroundings.
+            if (StaticEmitterRadianceScale(shSec.surfMat) < 1.0f)
+            {
+                eligible = false;
+                break;
+            }
             if (render::IsGpuOwnedSectionSpec(shSec.properties.Special()))
             {
                 levelHasOwned = true;
@@ -2784,6 +2983,10 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             {
                 hasComplement = true; // a visible non-owned section => CPU complement draw
             }
+        }
+        if (!eligible)
+        {
+            break;
         }
         if (!levelHasOwned)
         {

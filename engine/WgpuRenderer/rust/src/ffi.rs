@@ -847,6 +847,30 @@ pub struct WgrTerrainParams {
     pub _pad1: f32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrTerrainUv {
+    pub u: [f32; 4],
+    pub v: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrTerrainMaterial {
+    pub legacy: u32,
+    pub satellite: u32,
+    pub mask: u32,
+    pub base: u32,
+    pub overlays: [u32; 4],
+    pub overlay_count: u32,
+    pub uv_source_mask: u32,
+    pub _padding: [u32; 2],
+    pub satellite_uv: WgrTerrainUv,
+    pub mask_uv: WgrTerrainUv,
+    pub base_uv: WgrTerrainUv,
+    pub overlay_uvs: [WgrTerrainUv; 4],
+}
+
 // One terrain node (shared grid mesh at world-xz `origin`, `size` wide, level
 // `lod`). Uploaded as instance-step vertex data.
 #[repr(C)]
@@ -1982,6 +2006,26 @@ pub unsafe extern "C" fn wgr_terrain_set_index_map(
         let count = width as usize * height as usize;
         let slice = unsafe { std::slice::from_raw_parts(indices, count) };
         renderer.terrain_set_index_map(width, height, slice);
+    }));
+}
+
+/// Upload authored OPRW25 terrain material descriptors. See wgpu_renderer.hpp.
+///
+/// # Safety
+/// `materials` must point to at least `count` descriptors.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_terrain_set_materials(
+    renderer: *mut WgrRenderer,
+    materials: *const WgrTerrainMaterial,
+    count: u32,
+) {
+    if renderer.is_null() || materials.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let slice = unsafe { std::slice::from_raw_parts(materials, count as usize) };
+        renderer.terrain_set_materials(slice);
     }));
 }
 

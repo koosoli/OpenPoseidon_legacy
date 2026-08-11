@@ -1137,7 +1137,9 @@ impl Sky {
             // complaint. Additive on top of the authored night floor, so it brightens nothing
             // during the day -- night_blend gates it to zero while the sun is up.
             star_intensity: 1.0,
-            lens_flare: 1.0,
+            // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
+            // the first frame, but keep the renderer's own initial state safe as well.
+            lens_flare: 0.0,
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN, 0.85],
             froxel_view,
             froxel_shadow_layout,

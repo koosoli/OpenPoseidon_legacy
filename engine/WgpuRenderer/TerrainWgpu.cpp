@@ -192,14 +192,113 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
     // textures stay handle 0 = the renderer's white fallback.
     const int layers = std::max(1, land.GetNTextures());
     std::vector<uint64_t> handles(static_cast<size_t>(layers), 0);
+    std::vector<Texture*> boundTextures(static_cast<size_t>(layers), nullptr);
     for (int i = 0; i < layers; i++)
     {
         if (auto* tex = static_cast<TextureWgpu*>(land.GetTexture(i)))
         {
             handles[i] = tex->EnsureUploaded();
+            boundTextures[static_cast<size_t>(i)] = tex;
+        }
+    }
+
+    // Each index-map value is a terrain-material index, not merely a colour
+    // texture.  Legacy worlds have one descriptor per colour texture; OPRW25
+    // descriptors additionally select an LCA mask and base/overlay surfaces.
+    std::vector<WgrTerrainMaterial> materials(static_cast<size_t>(layers));
+    _a3TerrainTextures.clear();
+    size_t authored = 0;
+    size_t complete = 0;
+    size_t dropped = 0;
+    const auto bindTexture = [&](const RStringB& name, uint32_t fallback) -> uint32_t
+    {
+        if (name.GetLength() == 0)
+        {
+            return fallback;
+        }
+        Ref<Texture> texture = GlobLoadTexture(name);
+        Texture* raw = texture;
+        if (raw == nullptr)
+        {
+            return fallback;
+        }
+        const auto found = std::find(boundTextures.begin(), boundTextures.end(), raw);
+        if (found != boundTextures.end())
+        {
+            return static_cast<uint32_t>(found - boundTextures.begin());
+        }
+        if (handles.size() >= WGR_TERRAIN_MAX_GROUND_LAYERS)
+        {
+            ++dropped;
+            return fallback;
+        }
+        const uint64_t handle = static_cast<TextureWgpu*>(raw)->EnsureUploaded();
+        if (handle == 0)
+        {
+            return fallback;
+        }
+        _a3TerrainTextures.push_back(texture);
+        boundTextures.push_back(raw);
+        handles.push_back(handle);
+        return static_cast<uint32_t>(handles.size() - 1);
+    };
+    for (int i = 0; i < layers; ++i)
+    {
+        WgrTerrainMaterial& material = materials[static_cast<size_t>(i)];
+        material.legacy = static_cast<uint32_t>(i);
+        material.satellite = material.legacy;
+        material.base = static_cast<uint32_t>(i);
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+        if (source == nullptr || source->overlayCount == 0 || source->mask.GetLength() == 0)
+        {
+            continue;
+        }
+        ++authored;
+        // Preserve the legacy cell texture solely as a safe fallback. A
+        // TerrainSNX Stage0 is its own low-frequency satellite image and has
+        // its own TexGen; sampling the cell's close-detail texture through
+        // Stage0's coordinates makes an authored material look corrupted.
+        const uint32_t fallback = material.legacy;
+        material.satellite = bindTexture(source->satellite, fallback);
+        material.mask = bindTexture(source->mask, material.satellite);
+        material.base = bindTexture(source->base, material.satellite);
+        const auto setUvSource = [&](uint32_t slot, const A3TerrainUv& uv)
+        {
+            if (uv.worldPos)
+                material.uv_source_mask |= 1u << slot;
+        };
+        setUvSource(0, source->satelliteUv);
+        setUvSource(1, source->maskUv);
+        setUvSource(2, source->baseUv);
+        std::copy(source->satelliteUv.u.begin(), source->satelliteUv.u.end(), material.satellite_uv.u);
+        std::copy(source->satelliteUv.v.begin(), source->satelliteUv.v.end(), material.satellite_uv.v);
+        std::copy(source->maskUv.u.begin(), source->maskUv.u.end(), material.mask_uv.u);
+        std::copy(source->maskUv.v.begin(), source->maskUv.v.end(), material.mask_uv.v);
+        std::copy(source->baseUv.u.begin(), source->baseUv.u.end(), material.base_uv.u);
+        std::copy(source->baseUv.v.begin(), source->baseUv.v.end(), material.base_uv.v);
+        material.overlay_count = source->overlayCount;
+        for (uint32_t overlay = 0; overlay < material.overlay_count; ++overlay)
+        {
+            material.overlays[overlay] = bindTexture(source->overlays[overlay], material.base);
+            setUvSource(3 + overlay, source->overlayUvs[overlay]);
+            std::copy(source->overlayUvs[overlay].u.begin(), source->overlayUvs[overlay].u.end(),
+                      material.overlay_uvs[overlay].u);
+            std::copy(source->overlayUvs[overlay].v.begin(), source->overlayUvs[overlay].v.end(),
+                      material.overlay_uvs[overlay].v);
+        }
+        // A failed image load falls back locally; this count says how many
+        // materials still retain the authored mask-driven composition.
+        if (material.mask != material.satellite && material.base != material.satellite)
+        {
+            ++complete;
         }
     }
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
+    wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
+    LOG_INFO(Graphics,
+             "Wgpu terrain materials: {} of {} authored LCA blends bound; {} complete, {} texture bindings dropped "
+             "at {}-layer limit",
+             authored, layers, complete, dropped, WGR_TERRAIN_MAX_GROUND_LAYERS);
 }
 
 void TerrainWgpu::UploadIndexMap(const Landscape& land)

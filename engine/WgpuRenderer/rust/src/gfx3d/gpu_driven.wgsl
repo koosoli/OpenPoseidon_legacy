@@ -361,7 +361,22 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // material (local lights), specular = sun_diffuse x material specular. On the sky-lit HDR
     // path shade() ignores sun_*, so the emissive/light/specular terms are what carry.
     var m: ShadeMaterial;
-    m.emissive = sm.emissive.rgb;
+    // Imported OFP/A3 materials use the legacy emissive lane for a mixture of
+    // real signal lamps and fixed-function brightness compensation. The latter
+    // was baked into plant materials to survive OFP's old lighting model; in
+    // HDR it becomes source radiance and makes entire forests glow at night.
+    // A real fixture, however, still needs a visible emissive core. Keep that
+    // core bounded to a sensible scene-linear value, while vegetation receives
+    // no legacy emissive compensation at all.
+    let emissive_peak = max(sm.emissive.r, max(sm.emissive.g, sm.emissive.b));
+    if (in.is_veg != 0u) {
+        // Legacy vegetation emissive was a fixed-function visibility boost, not
+        // source radiance. Preserve only a small starlight residual so foliage
+        // is dark at night without collapsing to an entirely black silhouette.
+        m.emissive = sm.emissive.rgb * 0.10;
+    } else {
+        m.emissive = sm.emissive.rgb * min(1.0, 0.50 / max(emissive_peak, 1e-4));
+    }
     m.sun_ambient = frame.sun_ambient.rgb * sm.ambient.rgb;
     m.sun_diffuse = frame.sun_diffuse.rgb * sm.diffuse.rgb;
     m.light_diffuse = sm.diffuse.rgb;

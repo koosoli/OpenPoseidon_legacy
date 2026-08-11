@@ -1,5 +1,7 @@
 
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>

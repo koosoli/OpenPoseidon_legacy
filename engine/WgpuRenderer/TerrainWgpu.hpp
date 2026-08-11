@@ -64,6 +64,10 @@ class TerrainWgpu : public ITerrainRenderer
     // Keeps the detail texture's GPU handle registered for the renderer's
     // lifetime (releasing the last Ref destroys the registry entry).
     Ref<Texture> _detailNoise;
+    // OPRW25 TerrainSNX materials name extra LCA/base/overlay images outside
+    // Landscape::_texture.  Keep references alive while their bindless handles
+    // are resident in the renderer.
+    std::vector<Ref<Texture>> _a3TerrainTextures;
 
     std::vector<CdlodNode> _tree;
     int _rootIndex = -1;

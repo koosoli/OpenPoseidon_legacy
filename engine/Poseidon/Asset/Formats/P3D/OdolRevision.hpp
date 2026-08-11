@@ -50,9 +50,9 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
     {
         case 7:  return {7,  OdolSupport::Parsed,     "Operation Flashpoint / Cold War Assault"};
         case 48: return {48, OdolSupport::Recognised, "Arma 2"};
-        case 49: return {49, OdolSupport::Recognised, "Arma 2"};
-        case 50: return {50, OdolSupport::Recognised, "Arma 2 Operation Arrowhead"};
-        case 52: return {52, OdolSupport::Recognised, "Arma 2 Operation Arrowhead"};
+        case 49: return {49, OdolSupport::NarrowSubset, "Arma 2 / Arma 2 Operation Arrowhead"};
+        case 50: return {50, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};
+        case 52: return {52, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};
         // AST-012B reads exactly one shape of revision 73: a static LOD with no
         // skeleton, animation, proxy, named selection or skinning data, whose
         // faces are triangles and quads. That is a narrow subset of Arma 3

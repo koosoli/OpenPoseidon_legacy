@@ -1490,7 +1490,11 @@ extern "C"
      * used; the index-map upload must clamp cell indices to the same bound. */
     WGR_API void wgr_terrain_set_ground_layers(WgrRenderer* renderer, const uint64_t* handles, uint32_t count);
 
-    constexpr uint32_t WGR_TERRAIN_MAX_GROUND_LAYERS = 512;
+    // Stratis alone resolves 706 distinct TerrainSNX images (satellite, LCA,
+    // base and overlays).  512 silently discarded 194 of them, which turns an
+    // authored blend into a partial fallback.  This remains comfortably below
+    // the renderer's 8,192 bindless-texture device requirement.
+    constexpr uint32_t WGR_TERRAIN_MAX_GROUND_LAYERS = 1024;
 
     /* Upload the per-land-cell texture index map: a `width` x `height` (= land
      * range per axis) R16Uint texture where each texel's bits 0-14 are the
@@ -1500,6 +1504,36 @@ extern "C"
      * `indices` is width*height uint16s. */
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);
+
+    /* One authored OPRW25 terrain material. Slots are indices into the ground
+     * binding array: satellite, LCA mask, base surface, then RGBA overlays.
+     * `overlay_count` is 0 for legacy single-texture terrain. */
+    struct WgrTerrainUv
+    {
+        float u[4];
+        float v[4];
+    };
+    struct WgrTerrainMaterial
+    {
+        // Original per-cell colour texture. This remains the default renderer
+        // route; `satellite` below is the authored TerrainSNX Stage0 image.
+        uint32_t legacy;
+        uint32_t satellite;
+        uint32_t mask;
+        uint32_t base;
+        uint32_t overlays[4];
+        uint32_t overlay_count;
+        // Bit N selects worldPos for UV N; clear selects the terrain mesh's
+        // local `tex` coordinates. Slots: satellite, mask, base, overlays.
+        uint32_t uv_source_mask;
+        uint32_t _padding[2];
+        WgrTerrainUv satellite_uv;
+        WgrTerrainUv mask_uv;
+        WgrTerrainUv base_uv;
+        WgrTerrainUv overlay_uvs[4];
+    };
+    WGR_API void wgr_terrain_set_materials(WgrRenderer* renderer, const WgrTerrainMaterial* materials,
+                                           uint32_t count);
 
     /* Upload the per-grid-point ground UV jitter map: a `width` x `height`
      * (= land range per axis) Rg8Snorm texture holding each land grid point's

@@ -6,6 +6,8 @@
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
+#include <array>
+
 namespace Poseidon
 {
 class TaskPool;
@@ -383,6 +385,28 @@ namespace Poseidon
 
 struct GroundLayerInfo;
 
+struct A3TerrainUv
+{
+    std::array<float, 4> u{{1.0f, 0.0f, 0.0f, 0.0f}};
+    std::array<float, 4> v{{0.0f, 1.0f, 0.0f, 0.0f}};
+    bool worldPos = false;
+};
+
+// Lossless authored terrain description used by the WGPU terrain path for an
+// OPRW25 material. The legacy path continues to use Landscape::_texture.
+struct A3TerrainMaterial
+{
+    RStringB satellite;
+    RStringB mask;
+    RStringB base;
+    std::array<RStringB, 4> overlays;
+    A3TerrainUv satelliteUv;
+    A3TerrainUv maskUv;
+    A3TerrainUv baseUv;
+    std::array<A3TerrainUv, 4> overlayUvs;
+    unsigned char overlayCount = 0;
+};
+
 #define USE_SWIZZLED_ARRAYS 0
 
 // terrain and scene database storage
@@ -439,6 +463,12 @@ class Landscape : public SerializeClass
     };
     AutoArray<TextureInfo> _texture;
 
+    // OPRW25 terrain RVMATs are not a single texture: TerrainSNX carries a
+    // satellite colour, an LCA mask, then one base and up to four overlay
+    // surface colours. The legacy renderer still uses _texture's satellite
+    // entry; the WGPU path consumes this lossless authored description.
+    AutoArray<A3TerrainMaterial> _a3TerrainMaterials;
+
     Array2D<short> _tex;
     Array2D<ObjectList> _objects;
 
@@ -490,6 +520,10 @@ class Landscape : public SerializeClass
     // id to data conversion
 
     RefArray<Object> _arrows;
+    // Scene keeps non-owning links to lights. Imported static A3 marker lights
+    // therefore need landscape-owned references for their entire loaded-world
+    // lifetime, just like vehicle marker lights own their LightPoint instances.
+    RefArray<LightPoint> _staticMarkerLights;
     LandCache _segCache;
 
     // AutoArray<WaterLevel> _waters; // reflection levels in current scene
@@ -561,9 +595,10 @@ class Landscape : public SerializeClass
     void SaveSubdivCache(int targetSubdivLog);
 
     bool LoadOptimized(QIStream& f, float landGrid); // wrapper around SerializeBin - true if OK
-    // Loads an Arma 3 (OPRW revision 25) world. See LandSave.cpp for why it mounts
-    // at terrain resolution rather than teaching Landscape the two-grid split.
-    bool LoadOprw25(const char* path);
+    // Loads an Arma 2/OA (OPRW 24) or Arma 3 (OPRW 25) world. See LandSave.cpp
+    // for why it mounts at terrain resolution rather than teaching Landscape the
+    // two-grid split.
+    bool LoadOprwModern(const char* path);
     void SaveOptimized(QOStream& f);
     void SaveOptimized(const char* name);
 
@@ -616,6 +651,10 @@ class Landscape : public SerializeClass
     Texture* GetTexture(int id) const;
     int GetNTextures() const { return _texture.Size(); }
     bool TextureIsSimple(int txt) const { return _texture[txt].offsetUV; }
+    const A3TerrainMaterial* GetA3TerrainMaterial(int id) const
+    {
+        return id >= 0 && id < _a3TerrainMaterials.Size() ? &_a3TerrainMaterials[id] : nullptr;
+    }
 
     // data access
     GeographyInfo GetGeography(int x, int z) const;
@@ -653,7 +692,7 @@ class Landscape : public SerializeClass
     void TextureChange(int x, int z, int id);
 
     Object* ObjectCreate(int id, const char* shape, const Matrix4& transform, int* x = nullptr, int* z = nullptr,
-                         bool avoidRecalculation = false);
+                         bool avoidRecalculation = false, bool preserveAuthoredElevation = false);
     void ObjectDestroy(int id);
     void ObjectMove(int id, const Matrix4& transform);
     void ObjectTypeChange(int id, const char* shape);

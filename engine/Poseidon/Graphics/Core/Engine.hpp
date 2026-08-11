@@ -1561,10 +1561,11 @@ class Engine : public IGraphicsEngine
         // altitude in the shader, and added before the cloud composite so a deck covers the stars
         // the way it covers the sky behind them.
         float starIntensity = 1.0f;
-        // Occlusion-aware lens flare. 0 turns it off entirely; the shader early-outs, so off
-        // costs nothing. Occluded by terrain and objects via the scene depth the cloud pass
-        // already reads, and dimmed by cloud through that ray's own transmittance.
-        float lensFlare = 1.0f;
+        // Experimental procedural lens flare.  The current WGPU implementation can project a
+        // sun-strength blob through an imported world's horizon, so keep it opt-in until its
+        // sun-direction and depth-occlusion contract is validated.  0 early-outs in the shader;
+        // local emitters and the sun's lighting are independent of this setting.
+        float lensFlare = 0.0f;
     };
     // True on backends with a procedural sky pass (wgpu); gates the ImGui Sky tab.
     virtual bool SupportsSky() const { return false; }

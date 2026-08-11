@@ -13,10 +13,11 @@
 namespace Poseidon::Asset::Formats::World
 {
 
-// The first later-generation world reader, in the same deliberately narrow spirit
-// as Odol73: it reads exactly one revision of one container and refuses anything
-// else, rather than widening the legacy WrpReader (which handles RVW and OPRW 2/3,
-// a layout this shares almost nothing with beyond its four magic bytes).
+// The shared later-generation world reader. OPRW 24 (Arma 2 / Operation Arrowhead)
+// and OPRW 25 (Arma 3) have the same payload layout; revision 25 only inserts an
+// app id after the revision. Keeping that fact here, rather than teaching the
+// OFP-era WrpReader about a structurally unrelated container, makes the generation
+// boundary explicit and keeps the two profile entry points independently strict.
 //
 // Revision 25 is what Arma 3 ships. It differs from the OFP-era OPRW the legacy
 // reader knows in every structural respect that matters: the per-cell grids are
@@ -35,7 +36,7 @@ struct Oprw25Header
 {
     int32_t version = 0;
     // Revision 25's distinguishing addition: the Steam app or DLC id the world
-    // belongs to. Both local worlds carry 107410 (Arma 3).
+    // belongs to. It is zero for revision 24 because the field is not stored.
     int32_t appId = 0;
     // "Land" is the coarse grid the geography/material/object-offset quadtrees are
     // indexed by; "terrain" is the fine elevation grid. On both local worlds these
@@ -397,7 +398,7 @@ constexpr size_t kOprw25ObjectRecordSize = 60;
 // Reads a revision-25 world. Throws std::runtime_error on anything it does not
 // recognise; it never returns a partially-populated world, because a world whose
 // object table came from a desynchronised stream is worse than no world at all.
-inline Oprw25World ReadOprw25(BinaryReader& reader)
+inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25)
 {
     Oprw25World world;
 
@@ -407,11 +408,12 @@ inline Oprw25World ReadOprw25(BinaryReader& reader)
         throw std::runtime_error("Not an OPRW world");
 
     world.header.version = reader.read<int32_t>();
-    if (world.header.version != 25)
+    if (world.header.version != expectedVersion)
         throw std::runtime_error("OPRW revision " + std::to_string(world.header.version) +
-                                 " is not handled here; only 25 is");
+                                 " is not the requested profile revision " + std::to_string(expectedVersion));
 
-    world.header.appId = reader.read<int32_t>();
+    if (world.header.version >= 25)
+        world.header.appId = reader.read<int32_t>();
     world.header.landRangeX = reader.read<int32_t>();
     world.header.landRangeY = reader.read<int32_t>();
     world.header.terrainRangeX = reader.read<int32_t>();
@@ -572,7 +574,7 @@ inline Oprw25World ReadOprw25(BinaryReader& reader)
 }
 
 // Cheap probe for dispatch, leaving the stream where it found it.
-inline bool IsOprw25(BinaryReader& reader)
+inline bool IsOprwRevision(BinaryReader& reader, int32_t expectedVersion)
 {
     const int start = reader.tell();
     char signature[4] = {};
@@ -582,7 +584,7 @@ inline bool IsOprw25(BinaryReader& reader)
     {
         reader.readBytes(signature, sizeof(signature));
         version = reader.read<int32_t>();
-        result = std::memcmp(signature, "OPRW", 4) == 0 && version == 25;
+        result = std::memcmp(signature, "OPRW", 4) == 0 && version == expectedVersion;
     }
     catch (const std::exception&)
     {
@@ -590,6 +592,11 @@ inline bool IsOprw25(BinaryReader& reader)
     }
     reader.seek(start);
     return result;
+}
+
+inline bool IsOprw25(BinaryReader& reader)
+{
+    return IsOprwRevision(reader, 25);
 }
 
 } // namespace Poseidon::Asset::Formats::World

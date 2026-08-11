@@ -24,7 +24,7 @@ use crate::ffi::{
     WgrCamera, WgrCmd, WgrDraw2DBatch, WgrDraw3D, WgrGrassBatch, WgrGrassParams, WgrInstance,
     WgrLight, WgrMat4, WgrMeshVertex, WgrModelLod, WgrModelMaterial, WgrModelSection,
     WgrOverlayDraw, WgrOverlayVertex, WgrShadowCaster, WgrShadowPass, WgrTerrainBatch,
-    WgrTerrainNode, WgrTerrainParams, WgrVec4, WgrVertex2D, WgrWaterBatch, WgrWaterCascadeConfig,
+    WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams, WgrVec4, WgrVertex2D, WgrWaterBatch, WgrWaterCascadeConfig,
     WgrWaterInteractionEvent, WgrWaterInteractionParams, WgrWaterNode, WgrWaterParams,
 };
 use crate::gfx2d::Gfx2d;
@@ -3314,6 +3314,10 @@ impl Renderer {
     fn terrain_set_index_map(&mut self, width: u32, height: u32, indices: &[u16]) {
         self.terrain
             .set_index_map(&self.device, &self.queue, width, height, indices);
+    }
+
+    fn terrain_set_materials(&mut self, materials: &[WgrTerrainMaterial]) {
+        self.terrain.set_materials(&self.device, &self.queue, materials);
     }
 
     fn grass_set_geography(&mut self, width: u32, height: u32, values: &[u32]) {

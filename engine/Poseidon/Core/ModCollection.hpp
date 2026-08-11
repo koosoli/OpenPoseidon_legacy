@@ -113,6 +113,21 @@ struct ModPathResolveResult
 /// reported as errors instead of silently mounting dead paths.
 ModPathResolveResult ResolveModPathList(const ModPathResolveRequest& request);
 
+/// Result of resolving a semicolon-separated set of archive directories passed
+/// through --addon-root. Each directory must contain at least one PBO directly;
+/// the option is for legal archive bundles that are intentionally distributed
+/// flat rather than as a conventional <mod>/addons tree.
+struct AddonArchiveRootResolveResult
+{
+    std::string mountPath;           ///< Semicolon-separated absolute archive directories
+    std::vector<std::string> errors; ///< One entry per empty, missing, or non-archive directory
+
+    bool Ok() const { return errors.empty(); }
+};
+
+AddonArchiveRootResolveResult ResolveAddonArchiveRootList(const std::string& archiveRoots,
+                                                          const std::string& currentDir);
+
 /// Loads mods from one or more roots on disk into a ModCollection. Registering
 /// roots and loading are separate steps so the scan stays a pure, testable unit.
 class ModLoader

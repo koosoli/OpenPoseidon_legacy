@@ -323,7 +323,7 @@ void Scene::EndObjects()
     // sort by screen size
 }
 
-void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary)
+void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary, float sizeScale)
 {
     Color lightColor = color * GEngine->GetAccomodateEye();
     float oldA = lightColor.A();
@@ -354,7 +354,7 @@ void Scene::DrawFlare(ColorVal color, Vector3Par lightPos, bool secondary)
         Vector3 lightPos(project(0, 2) + project(0, 0) * pos[0] * invW, project(1, 2) + project(1, 1) * pos[1] * invW,
                          1);
 
-        float size = 0.1f;
+        float size = 0.1f * std::clamp(sizeScale, 0.01f, 1.0f);
         float sizeX = +project(0, 0) * size * GetCamera()->InvLeft();
         float sizeY = -project(1, 1) * size * GetCamera()->InvTop();
 
@@ -410,7 +410,12 @@ void Scene::DrawFlares()
 
     Vector3Val cPos = GetCamera()->Position();
 
-    if (vis > 0.05 && night < 0.95)
+    // WGPU's procedural sky owns its occlusion-aware sun flare.  Drawing the
+    // legacy screen decal as well stacks two bright sources at the sun and
+    // produces the oversized white orb seen with imported worlds.  Keep the
+    // legacy path for GL33, and keep the separate night-time local-light
+    // flares below: those are not represented by the procedural sky.
+    if (vis > 0.05 && night < 0.95 && !GEngine->ProceduralSkyActive())
     {
         // draw sun flare
         CameraType camType = GWorld->GetCameraType();
@@ -500,12 +505,18 @@ void Scene::DrawFlares()
             if (visLand > 0)
             {
                 Color lightColor = light->GetObjectColor();
-                float a = visLand * intensity * 2;
+                // A point/spot emitter is not a second sun. The legacy decal was
+                // authored for the fixed-function renderer; on WGPU its large opaque
+                // core reads as a solar disc even at a low alpha. Keep it as a compact
+                // emitter marker while WGPU's physical point/spot contribution lights
+                // nearby surfaces. GL33 retains the original tuned sprite.
+                const bool wgpu = AppConfig::Instance().GetRenderBackend() == "wgpu";
+                float a = visLand * intensity * (wgpu ? 0.18f : 0.35f);
                 float occ = GetOcclusions()->TestSphereWSpace(light->Position(), 0.4);
                 a *= occ;
-                saturateMin(a, 0.5);
+                saturateMin(a, wgpu ? 0.10f : 0.2f);
                 lightColor.SetA(a);
-                DrawFlare(lightColor, light->Position(), false);
+                DrawFlare(lightColor, light->Position(), false, wgpu ? 0.030f : 0.22f);
             }
         }
     }
@@ -2109,6 +2120,18 @@ void Scene::DrawVolumeLight(LODShapeWithShadow* shape, PackedColor color, const 
             warned = true;
         }
         return;
+    }
+
+    // StreetLamp creates a HalfLight object for the legacy fixed-function
+    // "volume" around a bulb.  At its original world-space size WGPU's HDR
+    // blend turns that helper into a sun-sized white disc (particularly for
+    // imported A3 halogen lamps).  It is only an emitter marker: the actual
+    // LightPoint still provides the terrain/geometry illumination.  Keep a
+    // compact, readable marker on WGPU instead of discarding it entirely so
+    // ordinary CWA street lamps do not vanish.
+    if (AppConfig::Instance().GetRenderBackend() == "wgpu" && shape == Preloaded(HalfLight))
+    {
+        size *= 0.035f;
     }
 
     Ref<Object> object = new ObjectColored(shape, -1);

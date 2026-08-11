@@ -24,6 +24,7 @@
 
 #include <Poseidon/World/Terrain/LandFile.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <stdexcept>
@@ -272,7 +273,7 @@ int Landscape::LoadData(const char* name, float landGrid)
     if (!override.empty())
     {
         Log("--test-world: loading %s instead of %s", override.c_str(), name);
-        if (LoadOprw25(override.c_str()))
+        if (LoadOprwModern(override.c_str()))
         {
             LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);
             return LSOK;
@@ -1720,7 +1721,7 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
 // long-term answer and a much larger change across the terrain core that
 // rendering, AI pathing, occlusion and roads all sit on. This gets a real world
 // running first so that change has something to be measured against.
-bool Landscape::LoadOprw25(const char* path)
+bool Landscape::LoadOprwModern(const char* path)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
@@ -1728,25 +1729,27 @@ bool Landscape::LoadOprw25(const char* path)
     file.open(path);
     if (file.fail())
     {
-        RptF("LoadOprw25: cannot open %s", path);
+        RptF("LoadOprwModern: cannot open %s", path);
         return false;
     }
 
     Fmt::BinaryReader reader(file);
-    if (!Fmt::World::IsOprw25(reader))
+    const bool isOprw24 = Fmt::World::IsOprw24(reader);
+    const bool isOprw25 = Fmt::World::IsOprw25(reader);
+    if (!isOprw24 && !isOprw25)
     {
-        RptF("LoadOprw25: %s is not an OPRW revision 25 world", path);
+        RptF("LoadOprwModern: %s is not an OPRW revision 24 or 25 world", path);
         return false;
     }
 
     Fmt::World::Oprw25World world;
     try
     {
-        world = Fmt::World::ReadOprw25(reader);
+        world = isOprw24 ? Fmt::World::ReadOprw24(reader) : Fmt::World::ReadOprw25(reader);
     }
     catch (const std::exception& e)
     {
-        RptF("LoadOprw25: %s failed to parse: %s", path, e.what());
+        RptF("LoadOprwModern: %s failed to parse: %s", path, e.what());
         return false;
     }
 
@@ -1759,12 +1762,12 @@ bool Landscape::LoadOprw25(const char* path)
     const int ratio = terrain / land;
     if (ratio < 1 || land * ratio != terrain)
     {
-        RptF("LoadOprw25: terrain %d is not a whole multiple of land %d", terrain, land);
+        RptF("LoadOprwModern: terrain %d is not a whole multiple of land %d", terrain, land);
         return false;
     }
 
-    LOG_DEBUG(World, "LoadOprw25 {}: land {} terrain {} ratio {} cell {}m extent {}m", path, land, terrain, ratio,
-              terrainGrid, world.header.WorldExtent());
+    LOG_DEBUG(World, "LoadOprwModern {} (OPRW {}): land {} terrain {} ratio {} cell {}m extent {}m", path,
+              world.header.version, land, terrain, ratio, terrainGrid, world.header.WorldExtent());
 
     ProgressReset();
     ProgressStart(LocalizeString(IDS_LOAD_WORLD));
@@ -1832,8 +1835,10 @@ bool Landscape::LoadOprw25(const char* path)
     {
         int resolved = 0;
         _texture.Resize(static_cast<int>(world.materials.size()));
+        _a3TerrainMaterials.Resize(static_cast<int>(world.materials.size()));
         for (size_t i = 0; i < world.materials.size(); ++i)
         {
+            _a3TerrainMaterials[static_cast<int>(i)] = A3TerrainMaterial{};
             const std::string& materialPath = world.materials[i];
             if (materialPath.empty())
                 continue;
@@ -1870,6 +1875,70 @@ bool Landscape::LoadOprw25(const char* path)
             catch (const std::exception&)
             {
                 continue;
+            }
+
+            // TerrainSNX is an authored composition, not a generic object
+            // material. Stage0 is the satellite colour; Stage1 is the LCA
+            // RGBA blend mask; even stages from 4 onward are the base surface
+            // colour followed by up to four overlay colours (their preceding
+            // odd stages are normals). Preserve the exact references here;
+            // TerrainWgpu uploads and composites them instead of inventing a
+            // cell-boundary fade.
+            A3TerrainMaterial& authored = _a3TerrainMaterials[static_cast<int>(i)];
+            const auto uvForStage = [&](const Poseidon::Asset::Material::RvStage& stage)
+            {
+                const auto* transform = &stage.uvTransform;
+                const std::string* uvSource = &stage.uvSource;
+                if (!transform->present && stage.texGen >= 0)
+                {
+                    for (const auto& texGen : material.texGens)
+                    {
+                        if (texGen.index == stage.texGen)
+                        {
+                            transform = &texGen.uvTransform;
+                            uvSource = &texGen.uvSource;
+                            break;
+                        }
+                    }
+                }
+                A3TerrainUv uv;
+                uv.u = {transform->aside[0], transform->aside[1], transform->aside[2], transform->pos[0]};
+                uv.v = {transform->up[0], transform->up[1], transform->up[2], transform->pos[1]};
+                uv.worldPos = *uvSource == "worldPos";
+                return uv;
+            };
+            for (const auto& stage : material.stages)
+            {
+                const std::string& texture = stage.texture.raw;
+                if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
+                    continue;
+                std::string lower = texture;
+                for (char& c : lower)
+                    c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                if (stage.index == 0 && lower.find("_co.paa") != std::string::npos)
+                {
+                    authored.satellite = RStringB(texture.c_str());
+                    authored.satelliteUv = uvForStage(stage);
+                }
+                else if (stage.index == 1 && lower.find("_lca.paa") != std::string::npos)
+                {
+                    authored.mask = RStringB(texture.c_str());
+                    authored.maskUv = uvForStage(stage);
+                }
+                else if (stage.index >= 4 && (stage.index & 1) == 0 && lower.find("_co.paa") != std::string::npos)
+                {
+                    if (authored.base.GetLength() == 0)
+                    {
+                        authored.base = RStringB(texture.c_str());
+                        authored.baseUv = uvForStage(stage);
+                    }
+                    else if (authored.overlayCount < authored.overlays.size())
+                    {
+                        const size_t overlay = authored.overlayCount++;
+                        authored.overlays[overlay] = RStringB(texture.c_str());
+                        authored.overlayUvs[overlay] = uvForStage(stage);
+                    }
+                }
             }
 
             // The satellite layer is the one named `_co`; the mask is `_lca` and
@@ -1917,7 +1986,11 @@ bool Landscape::LoadOprw25(const char* path)
         Object* object = nullptr;
         try
         {
-            object = ObjectCreate(placement.objectId, name, transform, &x, &z);
+            // OPRW25 placements encode final world elevation. Do not apply the
+            // legacy bounds-centre grounding adjustment used by OFP islands.
+            object = ObjectCreate(placement.objectId, name, transform, &x, &z,
+                                  /* avoidRecalculation = */ false,
+                                  /* preserveAuthoredElevation = */ true);
         }
         catch (const std::exception&)
         {

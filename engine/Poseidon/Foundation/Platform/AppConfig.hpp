@@ -144,6 +144,9 @@ class AppConfig
     /// Mod directory paths (semicolon-separated)
     const RString& GetModPaths() const { return _modPaths; }
 
+    /// PBO archive directories from --addon-root, mounted ahead of conventional mods.
+    const RString& GetAddonArchivePaths() const { return _addonArchivePaths; }
+
     /// Resolved absolute --mods-dir, or "" when not given. The mods root the MODS
     /// screen scans for local @<mod> folders (else GamePaths::ModsDir()).
     const RString& GetModsDir() const { return _modsDir; }
@@ -236,6 +239,18 @@ class AppConfig
     // world puts the player at coordinates that mean nothing in another -- the
     // OFP training start lands in open sea on Stratis.
     const std::vector<float>& GetTestWorldPos() const { return _testWorldPos; }
+    // Deterministic horizontal camera turn for a substituted-world capture.
+    // Positive values rotate right; negative values rotate left.
+    float GetTestWorldYaw() const { return _testWorldYaw; }
+    // Exact camera target for a substituted-world capture. Coordinates are X Z Y,
+    // matching the developer camera readout and --test-world-pos ordering.
+    const std::vector<float>& GetTestWorldLookAt() const { return _testWorldLookAt; }
+    // Exact elevated developer-camera pose for a substituted-world capture:
+    // X Z Y azimuth elevation, in the same order the free-fly readout reports.
+    const std::vector<float>& GetTestWorldFreeFly() const { return _testWorldFreeFly; }
+    // Optional deterministic time of day for substituted-world captures.
+    // Negative means retain the mission's configured date and time.
+    float GetTestWorldHour() const { return _testWorldHour; }
     float GetTestModelDistance() const { return _testModelDistance; }
     float GetTestModelScale() const { return _testModelScale; }
 
@@ -406,6 +421,7 @@ class AppConfig
 
     // Configuration files (parsed in Pass 1 - early init)
     RString _modPaths;
+    RString _addonArchivePaths;
     RString _modsDir;     // resolved --mods-dir base ("" if unset)
     RString _workshopDir; // resolved --workshop-dir base ("" if unset)
     std::string _language;
@@ -441,6 +457,10 @@ class AppConfig
     std::vector<std::string> _testModelPaths;
     std::string _testWorldPath;
     std::vector<float> _testWorldPos;
+    float _testWorldYaw = 0.0f;
+    std::vector<float> _testWorldLookAt;
+    std::vector<float> _testWorldFreeFly;
+    float _testWorldHour = -1.0f;
     float _testModelDistance = 10.0f;
     float _testModelScale = 1.0f;
     /// --dev-map NAME: scratch map to boot, resolved against ./dev-missions/.

@@ -1,6 +1,7 @@
 use wgpu::util::DeviceExt;
+use bytemuck::Zeroable;
 
-use crate::ffi::{WgrTerrainNode, WgrTerrainParams};
+use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
 use crate::gfx3d::{DEPTH_FORMAT, NORMAL_FORMAT};
 
 mod skyvis;
@@ -19,7 +20,7 @@ const GRID_N: u32 = 32;
 
 // Capacity of the ground binding_array (and the device binding-array limit we
 // request). Must match WGR_TERRAIN_MAX_GROUND_LAYERS in wgpu_renderer.hpp.
-pub const TERRAIN_MAX_GROUND_LAYERS: u32 = 512;
+pub const TERRAIN_MAX_GROUND_LAYERS: u32 = 1024;
 
 // Recompute the terrain sun-shadow mask only once the sun has moved past this
 // angular threshold (cos of ~0.25°), so the amortized sweep skips most frames.
@@ -188,6 +189,7 @@ pub struct Terrain {
     index_map: wgpu::Texture,
     detail_view: wgpu::TextureView,
     jitter_map: wgpu::Texture,
+    materials: wgpu::Buffer,
     ground_sampler: wgpu::Sampler,
     ground_clamp_sampler: wgpu::Sampler,
     group2_bind: wgpu::BindGroup,
@@ -371,6 +373,16 @@ impl Terrain {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<WgrTerrainMaterial>() as u64),
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -505,6 +517,11 @@ impl Terrain {
         // shared 1x1 white; detail alpha = 0.5 (so the shader's 2*alpha
         // modulation is a no-op); index map = layer 0.
         let ground_views = vec![white_view.clone()];
+        let materials = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_terrain_materials"),
+            contents: bytemuck::bytes_of(&WgrTerrainMaterial::zeroed()),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
         let index_map = create_index_map(device, 1, 1);
         queue.write_texture(
             texel_copy(&index_map),
@@ -601,6 +618,7 @@ impl Terrain {
             &index_map,
             &detail_view,
             &jitter_map,
+            &materials,
             &ground_sampler,
             &ground_clamp_sampler,
         );
@@ -631,6 +649,10 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(4.0);
+        let a3_surface_blend = std::env::var("WGR_TERRAIN_A3_SURFACES")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
         let vs_constants = [("skirt_k", skirt_k)];
         // HDR path: the color target is Rgba16Float only when HDR is on (see gfx3d),
         // so it signals linear shading (albedo/sun/fog decode + no clamp).
@@ -639,7 +661,11 @@ impl Terrain {
         } else {
             0.0
         };
-        let fs_constants = [("blend_width", blend_width), ("linear", linear)];
+        let fs_constants = [
+            ("blend_width", blend_width),
+            ("a3_surface_blend", a3_surface_blend),
+            ("linear", linear),
+        ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_terrain_pipeline_layout"),
             bind_group_layouts: &[
@@ -793,6 +819,7 @@ impl Terrain {
             index_map,
             detail_view,
             jitter_map,
+            materials,
             ground_sampler,
             ground_clamp_sampler,
             group2_bind,
@@ -1183,6 +1210,17 @@ impl Terrain {
         self.rebuild_group2(device);
     }
 
+    pub fn set_materials(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, materials: &[WgrTerrainMaterial]) {
+        let upload = if materials.is_empty() { &[WgrTerrainMaterial::zeroed()][..] } else { materials };
+        self.materials = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("wgr_terrain_materials"),
+            contents: bytemuck::cast_slice(upload),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+        let _ = queue;
+        self.rebuild_group2(device);
+    }
+
     pub fn set_jitter_map(
         &mut self,
         device: &wgpu::Device,
@@ -1232,6 +1270,7 @@ impl Terrain {
             &self.index_map,
             &self.detail_view,
             &self.jitter_map,
+            &self.materials,
             &self.ground_sampler,
             &self.ground_clamp_sampler,
         );
@@ -1503,6 +1542,7 @@ fn make_group2(
     index_map: &wgpu::Texture,
     detail_view: &wgpu::TextureView,
     jitter_map: &wgpu::Texture,
+    materials: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     clamp_sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
@@ -1541,6 +1581,10 @@ fn make_group2(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::TextureView(&jitter_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: materials.as_entire_binding(),
             },
         ],
     })

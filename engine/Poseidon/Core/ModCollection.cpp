@@ -166,6 +166,58 @@ bool LooksLikeMod(const std::string& dir)
     return false;
 }
 
+AddonArchiveRootResolveResult ResolveAddonArchiveRootList(const std::string& archiveRoots,
+                                                          const std::string& currentDir)
+{
+    namespace fs = std::filesystem;
+
+    AddonArchiveRootResolveResult result;
+    std::size_t start = 0;
+    while (start <= archiveRoots.size())
+    {
+        const std::size_t end = archiveRoots.find(';', start);
+        const std::string segment = Trim(archiveRoots.substr(start, end - start));
+        if (segment.empty())
+        {
+            result.errors.emplace_back("empty --addon-root segment");
+        }
+        else
+        {
+            std::error_code ec;
+            fs::path candidate(segment);
+            if (candidate.is_relative())
+                candidate = fs::path(currentDir) / candidate;
+            candidate = fs::weakly_canonical(fs::absolute(candidate, ec), ec);
+
+            bool hasPbo = false;
+            if (fs::is_directory(candidate, ec))
+            {
+                for (fs::directory_iterator it(candidate, ec), finish; !ec && it != finish; it.increment(ec))
+                {
+                    std::error_code fileEc;
+                    if (it->is_regular_file(fileEc) && LowerAscii(it->path().extension().string()) == ".pbo")
+                    {
+                        hasPbo = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!hasPbo)
+                result.errors.emplace_back("'" + segment + "' is not a directory containing PBO archives");
+            else
+            {
+                if (!result.mountPath.empty()) result.mountPath += ';';
+                result.mountPath += candidate.string();
+            }
+        }
+
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return result;
+}
+
 std::vector<Mod> ScanModsRoot(const std::string& root, ModSource source)
 {
     namespace fs = std::filesystem;

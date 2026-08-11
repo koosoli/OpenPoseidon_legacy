@@ -38,6 +38,11 @@ class TextureWgpu : public Texture
     // every wgpu section in the opaque pass, so alpha-blended sections composited against the
     // sky fill (see-through grills/badges).
     signed char _alphaClass = -1;
+    // Preserve the decoded coverage summary alongside the three-way class. TreeAdv's close LOD
+    // can bind both needles and solid bark through the same foliage material; only the former
+    // has clear alpha texels and may receive an alpha test.
+    bool _alphaStatsScanned = false;
+    AlphaStats _alphaStats;
 
     int Init();
     void InitDynamic(int w, int h, const void* rgba, uint32_t size);
@@ -60,6 +65,7 @@ class TextureWgpu : public Texture
     bool IsAlpha() const override { return _dynamic || (_src && _src->IsAlpha()); }
     Color GetColor() override { return _src ? _src->GetAverageColor() : HBlack; }
     AlphaStats::Kind GetAlphaClass() override;
+    bool HasAlphaHoles();
 
     bool VerifyChecksum(const MipInfo&) const override { return true; }
     bool IsGpuResident() const override { return _gpuHandle != 0; }

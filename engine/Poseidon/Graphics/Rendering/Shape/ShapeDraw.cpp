@@ -77,36 +77,45 @@ bool EnableHWTLState = true;
 // cutout before.
 //
 // The histogram is the wrong authority; the shader family is the right one. A family
-// whose alpha is measured to be a cutout demotes Blend -> Cutout here. This only ever
-// DEMOTES: a section the histogram already calls Opaque or Cutout is untouched, so
-// forcing this on an opaque bark section is a no-op rather than a new alpha test.
+// whose alpha is measured to be a cutout demotes Blend -> Cutout here. TreeAdvTrunk
+// is deliberately different: its bark colour map carries a non-coverage alpha channel
+// (the Stratis pinus nigra bark classifies as Blend), but it is solid geometry. Route it
+// through the opaque pass without an alpha test; treating it as a leaf cutout can discard
+// the entire trunk.
 //
 // Only the families actually measured are listed. Grass and SuperAToC are near-certain
 // members -- the latter says alpha-to-coverage in its own name -- but neither has been
 // measured here, and adding one is a single line once it has been.
-static bool ShaderFamilyIsCutout(const char* family)
+enum class AuthoredAlphaRoute : uint8_t
 {
-    static const char* const kCutoutFamilies[] = {"TreeAdv", "TreeAdvTrunk", "TreeAdvTrans"};
-    for (const char* known : kCutoutFamilies)
-        if (strcmpi(known, family) == 0)
-            return true;
-    return false;
+    Default,
+    Cutout,
+    Opaque,
+};
+
+static AuthoredAlphaRoute ShaderFamilyAlphaRoute(const char* family)
+{
+    if (strcmpi("TreeAdv", family) == 0 || strcmpi("TreeAdvTrans", family) == 0)
+        return AuthoredAlphaRoute::Cutout;
+    if (strcmpi("TreeAdvTrunk", family) == 0)
+        return AuthoredAlphaRoute::Opaque;
+    return AuthoredAlphaRoute::Default;
 }
 
 // Resolving this means opening and parsing an RVMAT, which cannot happen per draw, so the
 // answer is cached by material path -- including the negative answers, so a missing or
 // unparseable material is not retried on every frame.
-static bool SectionMaterialIsCutout(const Ref<TexMaterial>& surfMat)
+static AuthoredAlphaRoute SectionMaterialAlphaRoute(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
-        return false;
+        return AuthoredAlphaRoute::Default;
     const char* path = surfMat->GetName().Data();
     if (!path || !*path)
-        return false;
+        return AuthoredAlphaRoute::Default;
 
-    static std::unordered_map<std::string, bool> cache;
-    static std::mutex                            cacheMutex;
-    const std::string                            key(path);
+    static std::unordered_map<std::string, AuthoredAlphaRoute> cache;
+    static std::mutex                                           cacheMutex;
+    const std::string                                           key(path);
 
     {
         std::lock_guard<std::mutex> lock(cacheMutex);
@@ -115,19 +124,19 @@ static bool SectionMaterialIsCutout(const Ref<TexMaterial>& surfMat)
             return found->second;
     }
 
-    bool cutout = false;
+    AuthoredAlphaRoute route = AuthoredAlphaRoute::Default;
     try
     {
-        cutout = ShaderFamilyIsCutout(Asset::Material::ParseRvMaterialFile(key).pixelShaderId.c_str());
+        route = ShaderFamilyAlphaRoute(Asset::Material::ParseRvMaterialFile(key).pixelShaderId.c_str());
     }
     catch (...)
     {
-        cutout = false; // unavailable material: keep the histogram's answer
+        // Unavailable material: keep the texture histogram's route.
     }
 
     std::lock_guard<std::mutex> lock(cacheMutex);
-    cache[key] = cutout;
-    return cutout;
+    cache[key] = route;
+    return route;
 }
 
 // The single place that decides whether a section belongs in the back-to-front pass.
@@ -136,7 +145,7 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     auto* tex = sec.properties.GetTexture();
     if (!tex || tex->GetAlphaClass() != Poseidon::AlphaStats::Blend)
         return false;
-    return !SectionMaterialIsCutout(sec.surfMat);
+    return SectionMaterialAlphaRoute(sec.surfMat) == AuthoredAlphaRoute::Default;
 }
 
 bool Shape::HasBlendSections() const

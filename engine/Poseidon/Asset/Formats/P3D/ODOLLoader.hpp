@@ -3,6 +3,7 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/P3D/P3DStructures.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -71,6 +72,12 @@ class ODOLLoader
         // same unsupported-revision failure, carrying the constraint that broke.
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 73)
             return loadOdol73Static(reader, size, sourcePath, revision);
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 49)
+            return loadOdol49Static(reader, size, sourcePath, revision);
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 50)
+            return loadOdol50Static(reader, size, sourcePath, revision);
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 52)
+            return loadOdol52Static(reader, size, sourcePath, revision);
         if (revision.support != P3D::OdolSupport::Parsed)
             throw P3D::UnsupportedOdolRevision(revision);
 
@@ -84,7 +91,7 @@ class ODOLLoader
     {
         try
         {
-            return convertOdol73(P3D::ReadOdol73StaticModel(reader, size), sourcePath);
+            return convertOdolStatic(P3D::ReadOdol73StaticModel(reader, size), sourcePath, 73, "ODOL73", true);
         }
         catch (const P3D::UnsupportedOdolRevision&)
         {
@@ -96,13 +103,34 @@ class ODOLLoader
         }
     }
 
-    static Model convertOdol73(const P3D::Odol73StaticModel& source, const std::string& sourcePath)
+    static Model loadOdol49Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        try { return convertOdolStatic(P3D::ReadOdol49StaticModel(reader, size), sourcePath, 49, "ODOL49", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
+    }
+
+    static Model loadOdol50Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        try { return convertOdolStatic(P3D::ReadOdol50StaticModel(reader, size), sourcePath, 50, "ODOL50", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
+    }
+
+    static Model loadOdol52Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        try { return convertOdolStatic(P3D::ReadOdol52StaticModel(reader, size), sourcePath, 52, "ODOL52", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
+    }
+
+    static Model convertOdolStatic(const P3D::Odol73StaticModel& source, const std::string& sourcePath, uint32_t sourceVersion, const char* sourceEncoding, bool measuredBasis)
     {
         const auto& info = source.directory.model;
         Model model;
         model.sourcePath    = sourcePath;
         model.sourceFormat  = "ODOL";
-        model.sourceVersion = 73;
+        model.sourceVersion = sourceVersion;
         model.special       = static_cast<float>(info.special);
         model.boundingSphere.radius = info.boundingSphere;
         model.geometrySphere.radius = info.geometrySphere;
@@ -121,7 +149,7 @@ class ODOLLoader
             LODLevel lod;
             lod.resolution     = info.resolutions[i];
             lod.purpose        = Poseidon::Model::ClassifyLodResolution(lod.resolution);
-            lod.sourceEncoding = "ODOL73";
+            lod.sourceEncoding = sourceEncoding;
             // AST-018. Measured, not assumed: for all 16 faces of the reference
             // fixture the cross product of the first two edges in index order
             // points opposite the model's own stored vertex normal, unanimously.
@@ -132,10 +160,10 @@ class ODOLLoader
             // factor being negative (DecodeOdol73Normal); flip that sign and the
             // conclusion flips with it. No render has confirmed which way the
             // faces actually point on screen.
-            lod.basis.winding            = Poseidon::Model::SourceWinding::ClockwiseRelativeToStoredNormals;
-            lod.basis.windingConfidence  = Poseidon::Model::BasisConfidence::Measured;
+            lod.basis.winding            = measuredBasis ? Poseidon::Model::SourceWinding::ClockwiseRelativeToStoredNormals : Poseidon::Model::SourceWinding::Unknown;
+            lod.basis.windingConfidence  = measuredBasis ? Poseidon::Model::BasisConfidence::Measured : Poseidon::Model::BasisConfidence::Unknown;
             lod.basis.normals            = Poseidon::Model::NormalOrientation::StoredPerVertex;
-            lod.basis.normalsConfidence  = Poseidon::Model::BasisConfidence::Measured;
+            lod.basis.normalsConfidence  = measuredBasis ? Poseidon::Model::BasisConfidence::Measured : Poseidon::Model::BasisConfidence::Assumed;
             // ODOL's packed S/T pair is preserved by the raw reader but its
             // basis convention is not established. Rendering therefore derives
             // a tangent frame from geometry and UV0 instead of guessing here.

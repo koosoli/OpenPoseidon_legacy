@@ -86,3 +86,26 @@ The `dev-missions/devtest*.abel` missions have one stationary soldier and no scr
 and two runs of one differ by **mean 0.054/255**. A/B by pixel diff is therefore
 available after all, provided the dev mission is used. That is how the "19 pixels"
 number above was obtained, and it is the better harness for any future look question.
+
+## 2026-08-11 follow-up â€” independent causes found and fixed
+
+The two reports above were subsequently reproduced in the installed-game Stratis
+dev mission, but neither was related to shadow LOD classification:
+
+1. **White orb:** WGPU's experimental procedural lens-flare pass added a
+   sun-strength screen-space flare whenever its ray saw open sky. This is separate
+   from point/spot illumination and from emissive tower lamps. It is now disabled
+   by default (`SkySettings::lensFlare = 0`) until its sun-direction and occlusion
+   contract is validated. WGPU still owns the procedural sky, so the old legacy sun
+   decal is also suppressed on that backend rather than stacking two solar flares.
+2. **Flat green vegetation cards:** the CPU WGPU draw path classified binary
+   DXT1/PAC alpha as cutout, but retained GPU-driven registration did not. Imported
+   foliage sections marked opaque in the P3D therefore drew their texture's dark
+   background as full cards. `ClassifyGpuSection` now applies the same
+   `AlphaStats::Cutout` -> `alpha_ref >= 0.5` rule as `DrawSectionTL`.
+
+Both changes were rebuilt, passed `run_preview0_wgpu_check.ps1`, and were captured
+with `--render=wgpu`, `WGR_GPU_DRIVEN=1`, `@a3stratis`, `devtest.abel`, world position
+`2062 5572`, frame 400. The resulting installed-game capture contains neither the
+white flare blob nor opaque green cards. The red tower lamps remain on their model/
+emissive path and are unaffected.

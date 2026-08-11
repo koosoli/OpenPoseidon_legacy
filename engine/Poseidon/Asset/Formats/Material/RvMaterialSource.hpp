@@ -69,6 +69,10 @@ struct RvStage
 {
     int index = -1; // the N in StageN; -1 when the name had no number
     RvTextureRef texture;
+    // A TerrainSNX stage normally selects a named TexGenN block rather than
+    // carrying its own transform.  Keep that link explicit so terrain callers
+    // do not collapse every authored image into one arbitrary UV frame.
+    int texGen = -1;
     // Which UV channel feeds this stage. 3,793 of 4,070 indexed RVMATs declare one,
     // so TexGen is not optional -- and this is the value AST-011C's preserved
     // #UVSet# channels have to be selected by.
@@ -181,6 +185,51 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
     RvMaterialSource material;
     material.origin = std::move(origin);
     const auto root = Config::ArmaRapReader(bytes).root();
+    const auto findMember = [](const std::vector<Config::RapMember>& members, const char* name)
+        -> const Config::RapMember*
+    {
+        for (const auto& member : members)
+            if (detail::EqualsNoCase(member.name, name))
+                return &member;
+        return nullptr;
+    };
+    const auto memberText = [](const Config::RapMember* member) -> std::string
+    {
+        return member ? member->value.text : std::string{};
+    };
+    const auto memberInt = [](const Config::RapMember* member, int fallback = -1) -> int
+    {
+        return member && (member->value.type == 1 || member->value.type == 2)
+                   ? static_cast<int>(member->value.number)
+                   : fallback;
+    };
+    const auto readRapVec3 = [](const std::vector<Config::RapMember>& members, const char* name,
+                                std::array<float, 3>& out)
+    {
+        for (const auto& member : members)
+        {
+            if (!detail::EqualsNoCase(member.name, name) || member.value.type != 3)
+                continue;
+            for (size_t i = 0; i < out.size() && i < member.value.array.size(); ++i)
+            {
+                const auto& value = member.value.array[i];
+                if (value.type == 1 || value.type == 2)
+                    out[i] = value.number;
+            }
+            return;
+        }
+    };
+    const auto readRapTransform = [&](const std::vector<Config::RapMember>& members, RvUvTransform& transform)
+    {
+        const Config::RapMember* uv = findMember(members, "uvTransform");
+        if (!uv || uv->type != 0)
+            return;
+        transform.present = true;
+        readRapVec3(uv->body, "aside", transform.aside);
+        readRapVec3(uv->body, "up", transform.up);
+        readRapVec3(uv->body, "dir", transform.dir);
+        readRapVec3(uv->body, "pos", transform.pos);
+    };
     auto assignArray = [](const Config::RapValue& value, std::array<float, 4>& out)
     {
         for (size_t i = 0; i < out.size() && i < value.array.size(); ++i)
@@ -218,6 +267,15 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
             std::string bare = entry.name;
             while (!bare.empty() && bare.back() >= '0' && bare.back() <= '9')
                 bare.pop_back();
+            if (detail::EqualsNoCase(bare, "TexGen"))
+            {
+                RvTexGen texGen;
+                texGen.index = detail::TrailingNumber(entry.name);
+                texGen.uvSource = memberText(findMember(entry.body, "uvSource"));
+                readRapTransform(entry.body, texGen.uvTransform);
+                material.texGens.push_back(std::move(texGen));
+                continue;
+            }
             if (!detail::EqualsNoCase(bare, "Stage"))
             {
                 material.otherClasses.push_back(entry.name);
@@ -225,11 +283,10 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
             }
             RvStage stage;
             stage.index = detail::TrailingNumber(entry.name);
-            for (const auto& field : entry.body)
-                if (field.type == 1 && detail::EqualsNoCase(field.name, "texture"))
-                    stage.texture = RvTextureRef::Parse(field.value.text);
-                else if (field.type == 1 && detail::EqualsNoCase(field.name, "uvSource"))
-                    stage.uvSource = field.value.text;
+            stage.texture = RvTextureRef::Parse(memberText(findMember(entry.body, "texture")));
+            stage.uvSource = memberText(findMember(entry.body, "uvSource"));
+            stage.texGen = memberInt(findMember(entry.body, "texGen"));
+            readRapTransform(entry.body, stage.uvTransform);
             material.stages.push_back(std::move(stage));
         }
     }
@@ -347,6 +404,8 @@ inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string orig
                 stage.texture = RvTextureRef::Parse(detail::Text(*texture));
             if (const ParamEntry* uvSource = stageClass->FindEntry("uvSource"))
                 stage.uvSource = detail::Text(*uvSource);
+            if (const ParamEntry* texGen = stageClass->FindEntry("texGen"))
+                stage.texGen = texGen->GetInt();
 
             if (const ParamEntry* transform = stageClass->FindEntry("uvTransform"))
             {
@@ -364,7 +423,8 @@ inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string orig
             {
                 const ParamEntry& inner = stageClass->GetEntry(j);
                 const std::string key(inner.GetName().Data() ? inner.GetName().Data() : "");
-                if (inner.IsClass() || detail::EqualsNoCase(key, "texture") || detail::EqualsNoCase(key, "uvSource"))
+                if (inner.IsClass() || detail::EqualsNoCase(key, "texture") || detail::EqualsNoCase(key, "uvSource") ||
+                    detail::EqualsNoCase(key, "texGen"))
                     continue;
                 stage.extra.emplace_back(key, detail::Text(inner));
             }

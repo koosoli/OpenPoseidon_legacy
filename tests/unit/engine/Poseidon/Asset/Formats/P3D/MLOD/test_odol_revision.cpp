@@ -39,13 +39,19 @@ static std::vector<char> odolHeader(uint32_t version)
 TEST_CASE("ODOL revisions found in the corpora are described", "[p3d][odol][ast-012a]")
 {
     REQUIRE(P3D::DescribeOdolRevision(7).support == P3D::OdolSupport::Parsed);
-    for (uint32_t version : {48u, 49u, 50u, 52u})
+    for (uint32_t version : {48u})
     {
         const auto info = P3D::DescribeOdolRevision(version);
         // Recognised means "present in the corpora", never "supported".
         REQUIRE(info.support == P3D::OdolSupport::Recognised);
         REQUIRE(std::string(info.generation) != "unknown");
     }
+    REQUIRE(P3D::DescribeOdolRevision(49).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(49).generation).find("Arma 2") != std::string::npos);
+    REQUIRE(P3D::DescribeOdolRevision(50).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(50).generation).find("Arrowhead") != std::string::npos);
+    REQUIRE(P3D::DescribeOdolRevision(52).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(52).generation).find("Arrowhead") != std::string::npos);
     // AST-012B reads one shape of revision 73 and refuses the rest, which is a
     // third state: claiming either Parsed or Recognised for it would be a lie in
     // one direction or the other.
@@ -109,7 +115,7 @@ TEST_CASE("An unrecognised revision is refused without speculating", "[p3d][odol
 TEST_CASE("The refusal stays a runtime_error", "[p3d][odol][ast-012a]")
 {
     // ModelCache and ShapeAdapter catch broadly; the new type must not escape them.
-    auto data = odolHeader(49);
+    auto data = odolHeader(48);
     REQUIRE_THROWS_AS(ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "a2.p3d"),
                       std::runtime_error);
 }

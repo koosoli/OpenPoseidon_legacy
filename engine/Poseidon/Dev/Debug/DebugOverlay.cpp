@@ -274,6 +274,60 @@ void DisableZeusCamera()
     s_zeusStatus = "Free-fly ended; returned to the normal camera.";
 }
 
+// Put the real player exactly where the free-fly camera is, but keep the
+// character physically valid: standing on the terrain/road rather than at the
+// camera's arbitrary altitude.  This is deliberately a separate action from
+// spawning so it cannot accidentally replace or duplicate the player.
+void BeamPlayerToZeusCamera()
+{
+    if (!s_zeusCamera || !GWorld || !GLandscape)
+    {
+        s_zeusStatus = "Beam requires an active free-fly camera and a loaded landscape.";
+        return;
+    }
+
+    Person* player = GWorld->GetRealPlayer();
+    if (!player)
+    {
+        s_zeusStatus = "No real player character is available to beam.";
+        return;
+    }
+
+    Vector3 position = s_zeusCamera->Position();
+    position[1] = GLandscape->RoadSurfaceYAboveWater(position[0], position[2]);
+    Vector3 direction = s_zeusCamera->Direction();
+    direction[1] = 0.0f;
+    if (direction.SquareSize() < 1e-4f)
+        direction = player->Direction();
+    direction.Normalize();
+
+    Matrix4 transform = player->Transform();
+    transform.SetPosition(position);
+    transform.SetDirectionAndUp(direction, VUp);
+    Vector3 normal;
+    if (EntityAI* entity = dyn_cast<EntityAI>(player))
+        AIUnit::FindFreePosition(position, normal, true, entity);
+    transform.SetPosition(position);
+    player->PlaceOnSurface(transform);
+    player->SetTransform(transform);
+
+    // The camera must be released before switching back to the player.  This
+    // returns input and view control in the same operation, rather than
+    // leaving the user in a detached camera after the teleport.
+    GWorld->SetCameraEffect(nullptr);
+    ShowCinemaBorder(s_zeusPrevCinemaBorder);
+    s_zeusCamera->SetDelete();
+    s_zeusCamera = nullptr;
+    s_zeusClickPlacement = false;
+    s_zeusRotateDrag = false;
+    s_zeusMoveDrag = false;
+    s_zeusLassoDrag = false;
+    s_zeusCursor = nullptr;
+    GWorld->SwitchCameraTo(player, CamInternal);
+    ApplyDevPanelMouseState();
+    s_zeusStatus = "Player beamed to the free-fly position; free-fly ended.";
+}
+
 // --- Zeus cursor coordinates ------------------------------------------------
 //
 // The focused Zeus viewport draws the engine's own cursor sprite
@@ -988,8 +1042,15 @@ void DrawZeusTab()
         if (ImGui::Button("Enable free-fly"))
             EnableZeusCamera();
     }
-    else if (ImGui::Button("Exit free-fly"))
-        DisableZeusCamera();
+    else
+    {
+        if (ImGui::Button("Exit free-fly"))
+            DisableZeusCamera();
+        ImGui::SameLine();
+        if (ImGui::Button("Beam player here"))
+            Defer([] { BeamPlayerToZeusCamera(); });
+        ImGui::SetItemTooltip("Places the real player at the current free-fly X/Z position on the terrain, then exits free-fly.");
+    }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("WASD moves, Q/Z changes altitude, and the mouse looks around.\nKeypad +/- changes zoom.");
@@ -1772,9 +1833,11 @@ struct PositionLines
 {
     char player[192] = {};
     char cam[192] = {};
+    char freefly[192] = {};
     char tgt[192] = {};
     char time[128] = {};
     bool valid = false;
+    bool hasFreefly = false;
 };
 
 PositionLines BuildPositionLines(int prec)
@@ -1830,6 +1893,28 @@ PositionLines BuildPositionLines(int prec)
         snprintf(out.cam, sizeof(out.cam), "%s  az %.1f  el %.1f  (%s)", v, az, el, camSource);
     }
 
+    // Zeus free-fly deliberately leaves CameraOn() on the player while a
+    // camera effect drives the rendered view.  Keep the player row above for
+    // teleport/debug context, but expose the independently-moving free-fly
+    // vehicle as its own copyable coordinate line.  Reading it directly also
+    // avoids any ambiguity from effects that may temporarily offset the scene
+    // camera (for example a cutscene shake).
+    if (s_zeusCamera)
+    {
+        const Vector3 freeflyPos = s_zeusCamera->Position();
+        const Vector3 freeflyDir = s_zeusCamera->Direction();
+        float freeflyAz = atan2(freeflyDir.X(), freeflyDir.Z()) * (180.0f / H_PI);
+        if (freeflyAz < 0.0f)
+            freeflyAz += 360.0f;
+        const float freeflyHoriz = sqrtf(freeflyDir.X() * freeflyDir.X() + freeflyDir.Z() * freeflyDir.Z());
+        const float freeflyEl =
+            atan2(freeflyDir.Y(), freeflyHoriz > 1e-6f ? freeflyHoriz : 1e-6f) * (180.0f / H_PI);
+        char v[128];
+        FormatVec(v, sizeof(v), "freefly", freeflyPos, prec);
+        snprintf(out.freefly, sizeof(out.freefly), "%s  az %.1f  el %.1f  (active)", v, freeflyAz, freeflyEl);
+        out.hasFreefly = true;
+    }
+
     Vector3     tgt;
     float       tgtDist = 0.0f;
     const bool  hasTgt = CameraTargetPoint(camPos, camDir, 12000.0f, tgt, tgtDist);
@@ -1871,6 +1956,14 @@ void DrawPositionDiagnostics()
     if (ImGui::Button("Copy##cam"))
         ImGui::SetClipboardText(out.cam);
 
+    if (out.hasFreefly)
+    {
+        ImGui::TextUnformatted(out.freefly);
+        ImGui::SameLine();
+        if (ImGui::Button("Copy##freefly"))
+            ImGui::SetClipboardText(out.freefly);
+    }
+
     ImGui::TextUnformatted(out.tgt);
     ImGui::SameLine();
     if (ImGui::Button("Copy##tgt"))
@@ -1878,8 +1971,11 @@ void DrawPositionDiagnostics()
 
     ImGui::TextUnformatted(out.time);
 
-    char all[768];
-    snprintf(all, sizeof(all), "%s | %s | %s | %s", out.player, out.cam, out.tgt, out.time);
+    char all[960];
+    if (out.hasFreefly)
+        snprintf(all, sizeof(all), "%s | %s | %s | %s | %s", out.player, out.cam, out.freefly, out.tgt, out.time);
+    else
+        snprintf(all, sizeof(all), "%s | %s | %s | %s", out.player, out.cam, out.tgt, out.time);
     if (ImGui::Button("Copy all##pos"))
         ImGui::SetClipboardText(all);
     ImGui::SameLine();
@@ -1902,14 +1998,21 @@ void DrawPositionHudOverlay()
     ImDrawList*   draw = ImGui::GetForegroundDrawList();
     const ImU32   fg = IM_COL32(255, 255, 255, 220);
     const ImU32   bg = IM_COL32(0, 0, 0, 110);
-    const char*   rows[4] = {out.player, out.cam, out.tgt, out.time};
+    const char* rows[5] = {out.player, out.cam, out.freefly, out.tgt, out.time};
+    const int   rowCount = out.hasFreefly ? 5 : 4;
+    if (!out.hasFreefly)
+    {
+        rows[2] = out.tgt;
+        rows[3] = out.time;
+    }
     const float   lh = ImGui::GetTextLineHeightWithSpacing();
     float         wmax = 0.0f;
-    for (const char* r : rows)
-        wmax = std::max(wmax, ImGui::CalcTextSize(r).x);
+    for (int i = 0; i < rowCount; ++i)
+        wmax = std::max(wmax, ImGui::CalcTextSize(rows[i]).x);
     const ImVec2 org(10.0f, 10.0f);
-    draw->AddRectFilled(ImVec2(org.x - 4.0f, org.y - 3.0f), ImVec2(org.x + wmax + 6.0f, org.y + lh * 4.0f + 3.0f), bg);
-    for (int i = 0; i < 4; ++i)
+    draw->AddRectFilled(ImVec2(org.x - 4.0f, org.y - 3.0f),
+                        ImVec2(org.x + wmax + 6.0f, org.y + lh * float(rowCount) + 3.0f), bg);
+    for (int i = 0; i < rowCount; ++i)
         draw->AddText(ImVec2(org.x, org.y + lh * float(i)), fg, rows[i]);
 }
 } // namespace

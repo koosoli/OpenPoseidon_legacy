@@ -9,6 +9,7 @@
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
+#include <cstring>
 #include <string>
 
 using Poseidon::Asset::Material::ParseRvMaterial;
@@ -40,7 +41,7 @@ std::vector<uint8_t> minimalRap()
 {
     std::vector<uint8_t> out{0, 'r', 'a', 'P', 0, 0, 0, 0, 8, 0, 0, 0, 0x0a, 0x06, 0, 0};
     appendString(out, ""); // Root's binary parent-reference field.
-    out.push_back(3);
+    out.push_back(4);
 
     out.push_back(1);
     out.push_back(0);
@@ -54,14 +55,32 @@ std::vector<uint8_t> minimalRap()
     out.push_back(0);
     appendString(out, "variable");
     out.push_back(0);
+    appendString(out, "TexGen3");
+    const size_t texGenOffset = out.size();
+    appendU32(out, 0);
+
+    out.push_back(0);
     appendString(out, "Stage1");
     const size_t stageOffset = out.size();
     appendU32(out, 0);
 
-    const uint32_t bodyOffset = static_cast<uint32_t>(out.size());
-    writeU32(out, stageOffset, bodyOffset);
+    const uint32_t texGenBodyOffset = static_cast<uint32_t>(out.size());
+    writeU32(out, texGenOffset, texGenBodyOffset);
     appendString(out, "");
     out.push_back(2);
+    out.push_back(1);
+    out.push_back(0);
+    appendString(out, "uvSource");
+    appendString(out, "worldPos");
+    out.push_back(0);
+    appendString(out, "uvTransform");
+    const size_t transformOffset = out.size();
+    appendU32(out, 0);
+
+    const uint32_t stageBodyOffset = static_cast<uint32_t>(out.size());
+    writeU32(out, stageOffset, stageBodyOffset);
+    appendString(out, "");
+    out.push_back(3);
     out.push_back(1);
     out.push_back(0);
     appendString(out, "texture");
@@ -70,6 +89,35 @@ std::vector<uint8_t> minimalRap()
     out.push_back(0);
     appendString(out, "uvSource");
     appendString(out, "tex");
+    out.push_back(1);
+    out.push_back(2);
+    appendString(out, "texGen");
+    appendU32(out, 3);
+
+    const uint32_t transformBodyOffset = static_cast<uint32_t>(out.size());
+    writeU32(out, transformOffset, transformBodyOffset);
+    appendString(out, "");
+    out.push_back(2);
+    out.push_back(2);
+    appendString(out, "aside");
+    out.push_back(3);
+    for (const float value : {2.0f, 0.0f, 0.0f})
+    {
+        out.push_back(1);
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        appendU32(out, bits);
+    }
+    out.push_back(2);
+    appendString(out, "up");
+    out.push_back(3);
+    for (const float value : {0.0f, 3.0f, 0.0f})
+    {
+        out.push_back(1);
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        appendU32(out, bits);
+    }
     return out;
 }
 } // namespace
@@ -77,17 +125,19 @@ std::vector<uint8_t> minimalRap()
 TEST_CASE("ArmaRapReader retains literal, array, and class members", "[asset][config][rap]")
 {
     const auto root = Poseidon::Asset::Config::ArmaRapReader(minimalRap()).root();
-    REQUIRE(root.size() == 3);
+    REQUIRE(root.size() == 4);
     REQUIRE(root[0].name == "PixelShaderID");
     REQUIRE(root[0].value.text == "Super");
     REQUIRE(root[1].name == "numbers");
     REQUIRE(root[1].value.array.size() == 2);
     REQUIRE(root[1].value.array[0].number == 42.0f);
     REQUIRE(root[1].value.array[1].text == "variable");
-    REQUIRE(root[2].name == "Stage1");
+    REQUIRE(root[2].name == "TexGen3");
     REQUIRE(root[2].body.size() == 2);
-    REQUIRE(root[2].body[0].name == "texture");
-    REQUIRE(root[2].body[1].value.text == "tex");
+    REQUIRE(root[3].name == "Stage1");
+    REQUIRE(root[3].body.size() == 3);
+    REQUIRE(root[3].body[0].name == "texture");
+    REQUIRE(root[3].body[1].value.text == "tex");
 }
 
 TEST_CASE("RVMAT conversion is a narrow view over generic ArmaRapReader", "[asset][material][rap]")
@@ -98,6 +148,13 @@ TEST_CASE("RVMAT conversion is a narrow view over generic ArmaRapReader", "[asse
     REQUIRE(material.stages[0].index == 1);
     REQUIRE(material.stages[0].texture.path.canonical() == "a3\\rocks_f\\data\\stone_nohq.paa");
     REQUIRE(material.stages[0].uvSource == "tex");
+    REQUIRE(material.stages[0].texGen == 3);
+    REQUIRE(material.texGens.size() == 1);
+    REQUIRE(material.texGens[0].index == 3);
+    REQUIRE(material.texGens[0].uvSource == "worldPos");
+    REQUIRE(material.texGens[0].uvTransform.present);
+    REQUIRE(material.texGens[0].uvTransform.aside[0] == 2.0f);
+    REQUIRE(material.texGens[0].uvTransform.up[1] == 3.0f);
 }
 
 static const char* kSuper = R"CFG(

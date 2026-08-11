@@ -2294,6 +2294,13 @@ tickets:
           in 179/181 and is grey in 0/181; alpha is absent in the 128 DXT1 files
           (constant 255 decoded) and present in all 53 DXT5 files, varying in 47.
           Layout named, not consumed -- no renderer path samples the slot
+      - capability: RETAINED_CUTOUT_ALPHA_PARITY
+        status: VALIDATED
+        denominator: >-
+          The installed Stratis WGPU scene exercises GPU-driven retained vegetation.
+          Its binary DXT1/PAC foliage alpha now takes the same AlphaStats::Cutout
+          alpha_ref >= 0.5 path as the direct WGPU draw path; the prior retained
+          path drew opaque dark-green leaf cards.
     known_failures:
       - >-
         SUPERMATERIAL: PARTIAL. Six families now have a schema. Materials in the
@@ -2404,6 +2411,8 @@ tickets:
       - engine/Poseidon/Asset/Formats/Material/RvMaterialSource.hpp
       - engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
       - docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
+      - docs/roadmap/decisions/MAT-035-shadow-lods-were-drawable-20260811.md
+      - engine/WgpuRenderer/EngineWgpu.cpp
   - id: CLD-015
     overlay: COMPAT-C1-EXEC-001
     is_example: false

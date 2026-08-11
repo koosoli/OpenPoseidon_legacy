@@ -61,11 +61,16 @@ using namespace Poseidon;
 //
 // Measured spellings in that install: "Arma 3" on 485 archives and "ArmA 3" on
 // one. StringInList compares case-insensitively, so a single entry covers both.
-static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS", "Arma 3", nullptr};
+static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS", "Arma 3", "ArmA 2 OA", nullptr};
 static bool StringInList(const char* str, const char** list);
 
 namespace Poseidon
 {
+const char** SupportedAddonProducts()
+{
+    return ProductList;
+}
+
 bool IsAddonMetadataAccepted(const char* product, const char* encryption, const char* formatVersion,
                              bool encryptionRequired, const char** productList)
 {
@@ -270,6 +275,21 @@ static void LoadBanksEx(const char* path, bool emptyPrefix, bool parseConfig = f
     EnumModDirectories(LoadBanksCallback, &ctx);
 }
 
+static void LoadAddonArchiveRoots()
+{
+    const RString& archivePaths = AppConfig::Instance().GetAddonArchivePaths();
+    if (archivePaths.GetLength() == 0) return;
+
+    Temp<char> buffer((const char*)archivePaths, archivePaths.GetLength() + 1);
+    char* entry = buffer;
+    while (char* separator = strrchr(entry, ';'))
+    {
+        *separator = 0;
+        LoadBanks("addons", separator + 1, true, true);
+    }
+    LoadBanks("addons", entry, true, true);
+}
+
 void Globals::Init()
 {
     if (GUseFileBanks)
@@ -283,6 +303,7 @@ void Globals::Init()
             LoadBanksEx(RString("dta\\") + GFileBankPrefix, true);
             LoadBanksEx(RString("addons\\") + GFileBankPrefix, true, true);
         }
+        LoadAddonArchiveRoots();
         LoadBanksEx("dta", true);
         LoadBanksEx("addons", true, true);
         LoadBanksEx("Campaigns", false);

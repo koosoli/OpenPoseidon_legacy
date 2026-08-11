@@ -735,6 +735,57 @@ void TerrainCommand::Setup(CLI::App& app)
         cmd->callback(
             []()
             {
+                // Later-generation worlds carry their anonymous props in the
+                // OPRW-25 object table, not WrpReader's legacy OPRW 2/3 table.
+                QIFStream file;
+                file.open(inputFile.c_str());
+                if (!file.fail())
+                {
+                    Asset::Formats::BinaryReader probe(file);
+                    if (Asset::Formats::World::IsOprw25(probe))
+                    {
+                        Asset::Formats::World::Oprw25World world;
+                        try
+                        {
+                            world = Asset::Formats::World::ReadOprw25(probe);
+                        }
+                        catch (const std::exception& e)
+                        {
+                            std::cerr << "Error: " << e.what() << "\n";
+                            std::exit(1);
+                        }
+
+                        const bool filter = nearArg.size() == 3;
+                        const double nx = filter ? nearArg[0] : 0.0;
+                        const double nz = filter ? nearArg[1] : 0.0;
+                        const double r2 = filter ? nearArg[2] * nearArg[2] : -1.0;
+                        std::cout << std::left << std::setw(8) << "ID" << std::setw(64) << "Model" << std::setw(12)
+                                  << "X" << std::setw(12) << "Y" << std::setw(12) << "Z" << "\n";
+                        std::cout << std::string(108, '-') << "\n";
+                        int shown = 0;
+                        for (const auto& obj : world.objects)
+                        {
+                            const auto& position = obj.transform.rows[3];
+                            if (filter)
+                            {
+                                const double dx = position.x - nx;
+                                const double dz = position.z - nz;
+                                if (dx * dx + dz * dz > r2)
+                                    continue;
+                            }
+                            std::cout << std::left << std::setw(8) << obj.objectId << std::setw(64)
+                                      << world.models[static_cast<size_t>(obj.modelIndex)] << std::fixed
+                                      << std::setprecision(1) << std::setw(12) << position.x << std::setw(12)
+                                      << position.y << std::setw(12) << position.z << "\n";
+                            shown++;
+                        }
+                        if (filter)
+                            std::cout << "\n" << shown << " object(s) within " << nearArg[2] << " m of (" << nx
+                                      << ", " << nz << ").\n";
+                        std::exit(0);
+                    }
+                }
+
                 WrpReader reader;
                 if (!reader.Load(inputFile.c_str()))
                 {

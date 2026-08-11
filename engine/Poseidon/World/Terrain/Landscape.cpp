@@ -24,6 +24,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
+#include <cctype>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <typeinfo>
@@ -242,6 +244,7 @@ void Landscape::Init()
     _weather.Init(); // reinit weather
 
     _texture.Clear();
+    _a3TerrainMaterials.Clear();
     SetTexture(0, "landtext\\mo.pac");
     // empty landscape
     for (x = 0; x < _landRange; x++)
@@ -2479,8 +2482,85 @@ Object* Landscape::AddObject(Vector3Par pos, float head, LODShapeWithShadow* sha
     return obj;
 }
 
+namespace
+{
+
+// A world-marker light has no standalone visual sprite. Its model material is the emitter;
+// this class supplies only physical illumination. Returning no flare prevents Scene::DrawFlares
+// from turning a nearby runway marker back into a sun-sized white billboard.
+class StaticMarkerLight final : public LightPoint
+{
+  public:
+    StaticMarkerLight(ColorVal diffuse, ColorVal ambient) : LightPoint(diffuse, ambient) {}
+    float FlareIntensity(Vector3Par, Vector3Par) const override { return 0.0f; }
+};
+
+bool ContainsNoCase(const char* text, const char* needle)
+{
+    if (!text || !needle || !*needle)
+        return false;
+    const size_t needleLen = std::strlen(needle);
+    for (const char* at = text; *at; ++at)
+    {
+        size_t i = 0;
+        for (; i < needleLen && at[i]; ++i)
+        {
+            if (std::tolower(static_cast<unsigned char>(at[i])) !=
+                std::tolower(static_cast<unsigned char>(needle[i])))
+                break;
+        }
+        if (i == needleLen)
+            return true;
+    }
+    return false;
+}
+
+// Imported A3 world objects do not instantiate CfgVehicles' MarkerLights yet. Their models
+// nevertheless retain the authored light_*_pos memory points. Turn those into invisible point
+// lights so the existing WGPU local-light path illuminates terrain and nearby geometry; the
+// model's own emissive cap/flare remains the visible source. This is deliberately limited to
+// static A3 placements and point names explicitly ending in a position-like token, so ordinary
+// CWA objects and model helper points cannot gain unexpected lighting.
+void AddA3StaticMarkerLights(Object* obj, LODShapeWithShadow* shape, const char* modelName,
+                             RefArray<LightPoint>& ownedLights)
+{
+    if (!obj || !shape || !modelName || !ContainsNoCase(modelName, "a3\\"))
+        return;
+    Shape* memory = shape->MemoryLevel();
+    if (!memory || !GLOB_SCENE)
+        return;
+
+    const bool redBeacon = ContainsNoCase(modelName, "tower") || ContainsNoCase(modelName, "beacon");
+    const Color diffuse = redBeacon ? Color(0.95f, 0.02f, 0.02f) : Color(1.0f, 0.80f, 0.52f);
+    const Color ambient = redBeacon ? Color(0.01f, 0.0f, 0.0f) : Color(0.04f, 0.03f, 0.02f);
+    const float brightness = redBeacon ? 0.20f : 0.25f; // start 10/12.5m, smooth tail to 100/125m
+    int emitted = 0;
+    for (int i = 0; i < memory->NNamedSel() && emitted < 8; ++i)
+    {
+        const char* pointName = memory->NamedSel(i).Name();
+        if (!ContainsNoCase(pointName, "light") ||
+            !(ContainsNoCase(pointName, "_pos") || ContainsNoCase(pointName, "position")))
+            continue;
+        if (!shape->MemoryPointExists(pointName))
+            continue;
+
+        Ref<LightPoint> light = new StaticMarkerLight(diffuse, ambient);
+        light->SetPosition(obj->Transform().FastTransform(shape->MemoryPoint(pointName)));
+        light->SetBrightness(brightness);
+        GLOB_SCENE->AddLight(light);
+        // Scene::AddLight deliberately stores a non-owning Link. Retain the
+        // point light on Landscape so it survives past this creation call.
+        ownedLights.Add(light);
+        ++emitted;
+    }
+    if (emitted > 0 && std::getenv("WGR_STATIC_LIGHT_TRACE"))
+        LOG_INFO(World, "A3 static marker lights: model={} emitted={}", modelName, emitted);
+}
+
+} // namespace
+
 Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transform, int* x, int* z,
-                                bool avoidRecalculation)
+                                bool avoidRecalculation, bool preserveAuthoredElevation)
 {
     // create object based on Class hint in LOD 0
     Ref<LODShapeWithShadow> shape = Shapes.New(name, false, true);
@@ -2527,7 +2607,11 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 
 #if 1
 
-    if (!ENGINE_CONFIG.landEditor)
+    // Legacy island transforms were historically normalised so a model's
+    // bounding centre rests on the heightfield. OPRW25's Matrix4x3 is already
+    // an authored A3 world transform; applying that legacy correction lowers
+    // many buildings by the model-centre offset (often an entire storey).
+    if (!preserveAuthoredElevation && !ENGINE_CONFIG.landEditor)
     {
         // auto-correct values
         Vector3 oPos = obj->Position();
@@ -2543,6 +2627,7 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 #endif
 
     AddObject(obj, x, z, avoidRecalculation);
+    AddA3StaticMarkerLights(obj, shape, name, _staticMarkerLights);
     return obj;
 }
 
