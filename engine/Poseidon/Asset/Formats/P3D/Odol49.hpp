@@ -118,7 +118,12 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
     (void)reader.read<uint32_t>(); (void)reader.read<bool>(); (void)ReadBoundedAsciiz(reader, "class name");
     (void)ReadBoundedAsciiz(reader, "damage name"); (void)reader.read<bool>(); (void)reader.read<uint32_t>();
     result.hasAnimations = reader.read<bool>();
-    if (result.hasAnimations) throw std::runtime_error("ODOL A2 model animation tables are not implemented");
+    // The animation block is the same Real Virtuality structure revision 73 reads,
+    // minus the fields revisions 55 and 56 added. Reading it rather than refusing it
+    // is what lets an animated prop contribute its static geometry: on Takistan that
+    // is 54 of the world's 534 referenced models -- houses, minarets, street lamps --
+    // ordinary static meshes whose only sin is declaring a door or a light source.
+    if (result.hasAnimations) result.animations = ReadOdol73Animations(reader, expectedRevision);
     result.starts.resize(lodCount); result.ends.resize(lodCount); result.permanent.resize(lodCount);
     for (uint32_t& offset : result.starts) offset = reader.read<uint32_t>();
     for (uint32_t& offset : result.ends) offset = reader.read<uint32_t>();

@@ -2636,3 +2636,73 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-012-odol73-world-prop-coverage-20260810.md
+
+  - id: WLD-016
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Takistan model coverage through the shared ODOL animation reader
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: e22a7b7
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-012]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
+        symbol: Poseidon::Asset::Formats::P3D::ReadOdol73Animations
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol49.hpp
+        symbol: Poseidon::Asset::Formats::P3D::ReadOdol49StaticDirectory
+      - file: apps/tools/Tools/commands/TerrainCommand.cpp
+        symbol: PoseidonTools::TerrainCommand::Setup
+    test_ids: [odol-local-fixture, oprw24-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/WLD-016-takistan-model-coverage-20260812.md
+    capability_claims:
+      - capability: ODOL_A2_STATIC_LOD_PARSE
+        status: PARTIAL
+        denominator: >-
+          Official Operation Arrowhead Takistan, OPRW revision 24: 534 referenced
+          models over 438,906 placements. 470 of 470 resolvable models parse, all
+          ODOL revision 49 (was 416 of 470; the 54 failures were one structure,
+          the model animation table, now read through the shared revision-gated
+          reader). The remaining 64 models over 4,058 placements are base Arma 2
+          paths absent from the supplied licensed corpus -- 0 of 64 found by
+          basename across 58 archives and 67,417 entries.
+      - capability: OPRW24_WORLD_CENSUS
+        status: COMPLETE
+        denominator: >-
+          PoseidonTools terrain census and terrain objects now accept OPRW
+          revision 24 as well as 25, matching Landscape::LoadOprwModern. Model
+          classification dispatches by ODOL revision instead of routing every
+          readable revision to the revision-73 reader.
+    known_failures:
+      - >-
+        Parse results only. Nothing here asserts geometry correctness, material
+        resolution, or that anything draws. Takistan terrain materials, normal
+        maps, vegetation cutouts and road appearance remain open.
+      - >-
+        CORPUS-INCOMPLETE: 64 base Arma 2 models (ca\structures, ca\misc,
+        ca\misc2, ca\misc3, ca\buildings, ca\buildings2, ca\wheeled, ca\wheeled2)
+        cannot be resolved. The base Arma 2 licensed data package is required.
+      - ODOL revision 48 remains unsupported; Takistan references none.
+      - Animations are retained, never evaluated.
+    fallback: >-
+      Unknown animation types remain a refusal, and an unknown OPRW revision is
+      still rejected explicitly rather than guessed at.
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-016-takistan-model-coverage-20260812.md

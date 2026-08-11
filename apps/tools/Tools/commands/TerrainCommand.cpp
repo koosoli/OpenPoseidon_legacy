@@ -1,7 +1,9 @@
 #include "TerrainCommand.hpp"
 #include "../SDLPreview.hpp"
 #include <Poseidon/World/Terrain/WrpReader.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
@@ -353,8 +355,25 @@ ModelResult ClassifyModel(const std::string& virtualPath, const AddonIndex& inde
         // census wants the file actually parsed, because "revision 73 is
         // supported" and "this revision-73 file reads" are different facts --
         // 73 is a NarrowSubset, so most of the difference is the point.
-        const auto model = Asset::Formats::P3D::ReadOdol73StaticModel(reader, size);
-        (void)model;
+        //
+        // Dispatch by revision the way ODOLLoader does. Feeding an Arma 2 model to
+        // the revision-73 reader reports a parse failure that is really a census
+        // defect, and that misclassification is invisible in the histogram.
+        switch (result.revision)
+        {
+            case 49:
+            case 50:
+            case 52:
+                (void)Asset::Formats::P3D::ReadOdolA2StaticModel(reader, size, result.revision);
+                break;
+            case 73:
+                (void)Asset::Formats::P3D::ReadOdol73StaticModel(reader, size);
+                break;
+            default:
+                // OFP revision 7 has no static-subset reader; the container is all
+                // this census can honestly claim for it.
+                break;
+        }
         result.outcome = ModelOutcome::Static;
     }
     catch (const std::exception& e)
@@ -594,7 +613,24 @@ void PrintModelCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
             std::cout << (first ? "\n" : ",\n") << "    \"" << revision << "\": " << count;
             first = false;
         }
-        std::cout << "\n  }\n}\n";
+        // Every failure, not the head of the list. The text report truncates so a
+        // human can read it; the JSON exists precisely so the backlog can be worked
+        // through, and a truncated backlog is not one.
+        std::cout << "\n  },\n  \"failures\": [";
+        first = true;
+        for (const auto& [name, result] : notStatic)
+        {
+            int placements = 0;
+            for (size_t i = 0; i < world.models.size(); ++i)
+                if (world.models[i] == name)
+                    placements = placementsPerModel[i];
+            std::cout << (first ? "\n" : ",\n") << "    {\"model\": \"" << JsonEscape(name) << "\", \"outcome\": \""
+                      << ModelOutcomeName(result.outcome) << "\", \"revision\": " << result.revision
+                      << ", \"placements\": " << placements << ", \"detail\": \"" << JsonEscape(result.detail)
+                      << "\"}";
+            first = false;
+        }
+        std::cout << (first ? "" : "\n") << "  ]\n}\n";
         return;
     }
 
@@ -742,12 +778,14 @@ void TerrainCommand::Setup(CLI::App& app)
                 if (!file.fail())
                 {
                     Asset::Formats::BinaryReader probe(file);
-                    if (Asset::Formats::World::IsOprw25(probe))
+                    const bool objectsAreOprw24 = Asset::Formats::World::IsOprw24(probe);
+                    if (objectsAreOprw24 || Asset::Formats::World::IsOprw25(probe))
                     {
                         Asset::Formats::World::Oprw25World world;
                         try
                         {
-                            world = Asset::Formats::World::ReadOprw25(probe);
+                            world = objectsAreOprw24 ? Asset::Formats::World::ReadOprw24(probe)
+                                                     : Asset::Formats::World::ReadOprw25(probe);
                         }
                         catch (const std::exception& e)
                         {
@@ -967,10 +1005,16 @@ void TerrainCommand::Setup(CLI::App& app)
                     std::exit(1);
                 }
 
+                // The census covers every later-generation container the engine
+                // itself loads, and the runtime (Landscape::LoadOprwModern) reads
+                // revision 24 as well as 25. A census that only accepted 25 could
+                // not measure the generation whose coverage is least known.
                 Asset::Formats::BinaryReader reader(file);
-                if (!Asset::Formats::World::IsOprw25(reader))
+                const bool isOprw24 = Asset::Formats::World::IsOprw24(reader);
+                const bool isOprw25 = Asset::Formats::World::IsOprw25(reader);
+                if (!isOprw24 && !isOprw25)
                 {
-                    std::cerr << "Error: " << inputFile << " is not an OPRW revision 25 world.\n"
+                    std::cerr << "Error: " << inputFile << " is not an OPRW revision 24 or 25 world.\n"
                               << "The census covers the later-generation container only; use "
                                  "'terrain inspect' for RVW and OPRW 2/3.\n";
                     std::exit(1);
@@ -979,7 +1023,8 @@ void TerrainCommand::Setup(CLI::App& app)
                 Asset::Formats::World::Oprw25World world;
                 try
                 {
-                    world = Asset::Formats::World::ReadOprw25(reader);
+                    world = isOprw24 ? Asset::Formats::World::ReadOprw24(reader)
+                                     : Asset::Formats::World::ReadOprw25(reader);
                 }
                 catch (const std::exception& e)
                 {

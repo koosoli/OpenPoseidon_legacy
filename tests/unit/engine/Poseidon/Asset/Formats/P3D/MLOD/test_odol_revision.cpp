@@ -348,6 +348,141 @@ TEST_CASE("An ODOL 73 model outside the implemented shape is still refused", "[p
     }
 }
 
+// WLD-016: the animation block is a shared Real Virtuality structure, and the two
+// fields later revisions added are the whole difference between the Arma 2 and the
+// Arma 3 layout. Both directions are tested from bytes rather than from a licensed
+// model, because the property that matters is the block's exact width: it sits
+// immediately before the LOD byte-offset table, so an over- or under-read shifts
+// every offset in the file.
+namespace
+{
+void appendU32(std::vector<char>& data, uint32_t value)
+{
+    for (int i = 0; i < 4; ++i)
+        data.push_back(static_cast<char>((value >> (i * 8)) & 0xff));
+}
+
+void appendFloat(std::vector<char>& data, float value)
+{
+    char bytes[sizeof(float)];
+    std::memcpy(bytes, &value, sizeof(bytes));
+    data.insert(data.end(), bytes, bytes + sizeof(bytes));
+}
+
+void appendAsciiz(std::vector<char>& data, const char* text)
+{
+    data.insert(data.end(), text, text + std::strlen(text));
+    data.push_back('\0');
+}
+
+// One rotation class and one hide class, then the two lookup tables for a single
+// resolution whose one bone drives nothing, then a sentinel. `revision` selects
+// only which optional fields are written.
+std::vector<char> animationBlock(uint32_t revision)
+{
+    std::vector<char> data;
+    appendU32(data, 2); // class count
+
+    appendU32(data, 0); // type 0: rotation
+    appendAsciiz(data, "door");
+    appendAsciiz(data, "user");
+    for (int i = 0; i < 4; ++i)
+        appendFloat(data, 0.0f); // min/max phase, min/max value
+    if (revision >= 56)
+    {
+        appendFloat(data, 0.0f); // animPeriod
+        appendFloat(data, 0.0f); // initPhase
+    }
+    appendU32(data, 0);          // sourceAddress
+    appendFloat(data, 0.0f);     // angle0
+    appendFloat(data, 1.5f);     // angle1
+
+    appendU32(data, 9); // type 9: hide
+    appendAsciiz(data, "damage");
+    appendAsciiz(data, "damage");
+    for (int i = 0; i < 4; ++i)
+        appendFloat(data, 0.0f);
+    if (revision >= 56)
+    {
+        appendFloat(data, 0.0f);
+        appendFloat(data, 0.0f);
+    }
+    appendU32(data, 0);      // sourceAddress
+    appendFloat(data, 0.5f); // hideValue
+    if (revision >= 55)
+        appendFloat(data, 0.0f); // unHideValue
+
+    appendU32(data, 1); // one resolution
+    appendU32(data, 1); // one bone in it
+    appendU32(data, 0); // that bone drives no animation
+
+    // Reverse table: one entry per (resolution, class), neither bound to a bone,
+    // so neither is followed by an axis pair.
+    appendU32(data, 0xffffffff);
+    appendU32(data, 0xffffffff);
+
+    data.push_back(0x7f); // sentinel: the LOD offset table would start here
+    return data;
+}
+} // namespace
+
+TEST_CASE("The Arma 2 animation block omits the fields revisions 55 and 56 added",
+          "[p3d][odol][wld-016]")
+{
+    for (const uint32_t revision : {49u, 50u, 52u})
+    {
+        const auto data = animationBlock(revision);
+        QIStream stream(data.data(), static_cast<int>(data.size()));
+        Poseidon::Asset::Formats::BinaryReader reader(stream);
+        const auto animations = P3D::ReadOdol73Animations(reader, revision);
+
+        REQUIRE(animations.classes.size() == 2);
+        REQUIRE(animations.classes[0].name == "door");
+        REQUIRE(animations.classes[0].angle1 == Catch::Approx(1.5f));
+        REQUIRE(animations.classes[1].type == 9);
+        REQUIRE(animations.classes[1].hideValue == Catch::Approx(0.5f));
+        REQUIRE(animations.bonesToAnimations.size() == 1);
+        REQUIRE(animations.animationsToBones[0][0] == -1);
+        // The block ended exactly where the LOD directory begins.
+        REQUIRE(reader.read<uint8_t>() == 0x7f);
+    }
+}
+
+TEST_CASE("The Arma 3 animation block still reads its later fields", "[p3d][odol][wld-016]")
+{
+    const auto data = animationBlock(73);
+    QIStream stream(data.data(), static_cast<int>(data.size()));
+    Poseidon::Asset::Formats::BinaryReader reader(stream);
+    const auto animations = P3D::ReadOdol73Animations(reader);
+
+    REQUIRE(animations.classes.size() == 2);
+    REQUIRE(animations.classes[0].angle1 == Catch::Approx(1.5f));
+    REQUIRE(animations.classes[1].hideValue == Catch::Approx(0.5f));
+    REQUIRE(reader.read<uint8_t>() == 0x7f);
+}
+
+TEST_CASE("Reading an Arma 2 animation block as Arma 3 desynchronises it", "[p3d][odol][wld-016]")
+{
+    // The guard on the whole change: if the version gates were ignored, the block
+    // would be read at the wrong width and the sentinel would not be where the LOD
+    // directory expects it. This documents that the difference is real, not
+    // defensive coding against a difference that does not exist.
+    const auto data = animationBlock(49);
+    QIStream stream(data.data(), static_cast<int>(data.size()));
+    Poseidon::Asset::Formats::BinaryReader reader(stream);
+    bool desynchronised = false;
+    try
+    {
+        (void)P3D::ReadOdol73Animations(reader, 73);
+        desynchronised = reader.read<uint8_t>() != 0x7f;
+    }
+    catch (const std::exception&)
+    {
+        desynchronised = true;
+    }
+    REQUIRE(desynchronised);
+}
+
 TEST_CASE("ODOL 73 face winding is measured against the model's own normals",
           "[p3d][odol][ast-012b][ast-018][corpus]")
 {

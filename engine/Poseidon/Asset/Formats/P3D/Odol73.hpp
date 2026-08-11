@@ -397,7 +397,12 @@ inline Odol73Preamble ReadOdol73Preamble(BinaryReader& reader)
 // The block sits immediately before the LOD byte-offset table, so a layout mistake
 // here cannot pass silently: the very next thing the directory reader does is
 // require every LOD range to be ordered and inside the file.
-inline Odol73Animations ReadOdol73Animations(BinaryReader& reader)
+//
+// The table itself is a shared Real Virtuality structure rather than a revision-73
+// one: the Arma 2 revisions carry the same classes and the same two lookup tables,
+// and differ only in two fields that later revisions added. `revision` selects
+// those, so the A2-family reader shares this code instead of copying it.
+inline Odol73Animations ReadOdol73Animations(BinaryReader& reader, uint32_t revision = 73)
 {
     Odol73Animations result;
 
@@ -415,11 +420,15 @@ inline Odol73Animations ReadOdol73Animations(BinaryReader& reader)
         animation.maxPhase = reader.read<float>();
         animation.minValue = reader.read<float>();
         animation.maxValue = reader.read<float>();
-        // Revision 73 is well past both of the version gates these fields sit
-        // behind (56 and 55), so they are unconditional here rather than carried
-        // as dead branches for revisions this reader refuses anyway.
-        animation.animPeriod = reader.read<float>();
-        animation.initPhase = reader.read<float>();
+        // Two version gates: revision 56 added the period/phase pair, revision 55
+        // the hide animation's second value. Revision 73 is past both; the Arma 2
+        // revisions (49, 50, 52) are before both, and reading the later fields
+        // there would shift every subsequent offset in the file.
+        if (revision >= 56)
+        {
+            animation.animPeriod = reader.read<float>();
+            animation.initPhase = reader.read<float>();
+        }
         animation.sourceAddress = reader.read<uint32_t>();
 
         switch (animation.type)
@@ -446,7 +455,8 @@ inline Odol73Animations ReadOdol73Animations(BinaryReader& reader)
                 break;
             case 9: // hide
                 animation.hideValue = reader.read<float>();
-                animation.unused = reader.read<float>();
+                if (revision >= 55)
+                    animation.unused = reader.read<float>();
                 break;
             default:
                 // Every later offset depends on this payload's width, so an
