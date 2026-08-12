@@ -18,6 +18,11 @@
 struct SDL_Window;
 union SDL_Event;
 
+namespace Poseidon
+{
+class CameraVehicle;
+}
+
 namespace Poseidon::Dev {
 namespace DebugOverlay
 {
@@ -59,5 +64,14 @@ namespace DebugOverlay
     // ImGui standard pattern), since events are queried before NewFrame.
     bool WantsKeyboard();
     bool WantsMouse();
+
+    /// Adopt a free-fly camera the panel did not create, so the Game tab's
+    /// coordinate readout and the Zeus tab's "Beam player here" work with it.
+    /// `--test-world-freefly` builds the same CameraVehicle the Zeus tab does;
+    /// without this the panel simply cannot see it, and the developer flying a
+    /// world from the command line has neither the coordinates nor the beam.
+    /// Takes no ownership: the camera stays owned by whoever created it, and
+    /// clearing is the caller's business (pass nullptr).
+    void AdoptFreeFlyCamera(CameraVehicle* camera);
 } // namespace DebugOverlay
 } // namespace Poseidon::Dev

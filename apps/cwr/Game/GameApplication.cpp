@@ -1262,6 +1262,10 @@ void GameApplication::RunMainLoop()
                     camera->ResetTargets();
                     GWorld->AddAnimal(camera);
                     GWorld->SetCameraEffect(CreateCameraEffect(camera, "Internal", CamEffectTop, true));
+                    // Hand it to the dev panel. Without this the panel cannot see a
+                    // camera it did not create, so a command-line flight had neither
+                    // a coordinate readout on the Game tab nor "Beam player here".
+                    Dev::DebugOverlay::AdoptFreeFlyCamera(camera);
                     LOG_INFO(Core,
                              "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
                              target[2], z, target[3], target[4],

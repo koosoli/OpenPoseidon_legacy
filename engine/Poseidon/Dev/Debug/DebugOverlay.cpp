@@ -254,6 +254,28 @@ void EnableZeusCamera()
     SetVisible(false);
 }
 
+// Take over a free-fly camera someone else built. `--test-world-freefly` creates
+// exactly the CameraVehicle EnableZeusCamera does and then forgets it, so the panel
+// had no idea a free-fly camera was flying: the Game tab showed no free-fly
+// coordinates and the Zeus tab offered to enable a camera that was already active.
+// Adopting it makes both work, and makes "Beam player here" available from a
+// command-line flight -- which is the case where knowing where you are and being
+// able to stand there matters most.
+//
+// The cinema-border state is captured now rather than assumed, so ending the
+// flight restores what was actually on screen when it started.
+void AdoptFreeFlyCameraImpl(CameraVehicle* camera)
+{
+    if (s_zeusCamera == camera)
+        return;
+    s_zeusCamera = camera;
+    if (camera)
+    {
+        s_zeusPrevCinemaBorder = showCinemaBorder;
+        s_zeusStatus = "Free-fly camera adopted from --test-world-freefly. Coordinates are on the Game tab.";
+    }
+}
+
 void DisableZeusCamera()
 {
     if (!s_zeusCamera)
@@ -5815,6 +5837,11 @@ bool WantsMouse()
     // Claim every mouse event while the panel is open to prevent the camera from moving.
     // Zeus claims only a placement click; motion still reaches the free-fly camera.
     return s_initialized && (s_visible || s_zeusConsumeMouseEvent);
+}
+
+void AdoptFreeFlyCamera(CameraVehicle* camera)
+{
+    AdoptFreeFlyCameraImpl(camera);
 }
 
 } // namespace DebugOverlay
