@@ -102,20 +102,40 @@ bool ContainsNoCase(const char* text, const std::string& part)
 
 // Small imported lamp meshes use an emissive material as a legacy visibility marker. In HDR the
 // same value is physical radiance and blooms into a sun-sized disc. Their physical illumination
-// comes from paired static marker lights; keep the mesh itself at compact visible radiance. A3's
-// halogen floodlights use a much hotter material than the tiny runway markers, hence their lower
-// visible-only cap. Neither value affects the paired point light's terrain spill.
-float StaticEmitterRadianceScale(const Ref<TexMaterial>& surfMat)
+// comes from paired static marker lights; keep the mesh itself at compact visible radiance.
+// Neither value affects the paired point light's terrain spill.
+//
+// This is a TARGET PEAK, not a multiplier. Arma 2 and 3 author the emissive lane on a legacy
+// 1e2..1e6 scale -- measured across data_f's 66 light materials, `lamp_searchlight.rvmat`
+// (the material every A3 floodlight actually emits through) is 600000, and half the family
+// sits above 1e4. No absolute multiplier can bring that into HDR range: even 600000 * 0.015
+// overflows the f16 scene target and clears the 1.0 bloom knee by orders of magnitude. The
+// retained path already clamps by peak (gpu_driven.wgsl, emissive * min(1, 0.50/peak)); this
+// gives the direct path the same shape, per family.
+float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return 1.0f;
     const char* path = surfMat->GetName().Data();
-    if (ContainsNoCase(path, "\\lamps\\") || ContainsNoCase(path, "lamphalogen"))
+    // The lamp HOUSINGS (`\lamps\`, `lamphalogen`) all measure emissive 0, so this arm only
+    // ever bites through the searchlight lens the fixtures share.
+    if (ContainsNoCase(path, "\\lamps\\") || ContainsNoCase(path, "lamphalogen") ||
+        ContainsNoCase(path, "lamp_searchlight"))
         return 0.015f;
     return ContainsNoCase(path, "\\lights\\") || ContainsNoCase(path, "\\runwaylights\\") ||
                    ContainsNoCase(path, "warninglight")
                ? 0.08f
                : 1.0f;
+}
+
+// Scale that lands a material's emissive at its family's target peak. Materials already at or
+// under the target are untouched -- which is every stock CWA material, all of whose CfgMaterials
+// emissive values measure {0,0,0,0}.
+float StaticEmitterRadianceScale(const Ref<TexMaterial>& surfMat, const Color& emissive)
+{
+    const float target = StaticEmitterRadianceTarget(surfMat);
+    const float peak = std::max({emissive.R(), emissive.G(), emissive.B()});
+    return peak > target ? target / peak : 1.0f;
 }
 
 // By-eye tonemap/grade presets keyed by time of day (hours). Sorted ascending; the
@@ -2256,7 +2276,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     else
     {
         const Color emissive = _curMaterial.emmisive;
-        const float scale = StaticEmitterRadianceScale(debugSection.surfMat);
+        const float scale = StaticEmitterRadianceScale(debugSection.surfMat, emissive);
         d.mat_emissive = {emissive.R() * scale, emissive.G() * scale, emissive.B() * scale, emissive.A()};
     }
     d.mat_sun_ambient = {ambient.R() * sunEn, ambient.G() * sunEn, ambient.B() * sunEn, ambient.A() * sunEn};
@@ -2430,7 +2450,7 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         sec.surfMat->Combine(mod, m);
         m = mod;
     }
-    const float emitterScale = StaticEmitterRadianceScale(sec.surfMat);
+    const float emitterScale = StaticEmitterRadianceScale(sec.surfMat, m.emmisive);
     matOut.emissive = {m.emmisive.R() * emitterScale, m.emmisive.G() * emitterScale,
                        m.emmisive.B() * emitterScale, m.emmisive.A()};
     matOut.ambient = {m.ambient.R(), m.ambient.G(), m.ambient.B(), m.ambient.A()};
@@ -3122,7 +3142,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // DrawSectionTL. These are tiny static helper meshes (not general scenery); retaining
             // the complete model on the direct path keeps the presentation cap authoritative while
             // the paired WGPU point light continues to illuminate the surroundings.
-            if (StaticEmitterRadianceScale(shSec.surfMat) < 1.0f)
+            if (StaticEmitterRadianceTarget(shSec.surfMat) < 1.0f)
             {
                 eligible = false;
                 break;
