@@ -153,6 +153,17 @@ class EngineWgpu : public EngineDummy
     bool SupportsSky() const override { return _renderer != nullptr; }
     SkySettings GetSkySettings() const override { return _sky; }
     void SetSkySettings(const SkySettings& s) override;
+    // Second cloud layer (high cirrus at ~7 km): on/off and flat-vs-volumetric. Defined here
+    // rather than folded into PushRenderParams because it is its own FFI entry point, not a lane
+    // in WgrSkyLook — growing that struct changes a size the ABI handshake checks (same reasoning
+    // as wgr_set_cloud_shadow_strength). _sky is updated too so GetSkySettings keeps round-tripping.
+    void SetSkyCirrus(bool enabled, bool volumetric) override
+    {
+        _sky.cirrusEnabled = enabled;
+        _sky.cirrusVolumetric = volumetric;
+        if (_renderer != nullptr)
+            wgr_set_cirrus_mode(_renderer, enabled ? (volumetric ? 2u : 1u) : 0u);
+    }
     // Suppress the legacy skydome on wgpu while the procedural sky is drawing.
     bool ProceduralSkyActive() const override { return _renderer != nullptr && _sky.enabled; }
 

@@ -981,6 +981,10 @@ impl Renderer {
         self.sky.set_cloud_shadow_strength(strength);
     }
 
+    fn set_cirrus_mode(&mut self, mode: u32) {
+        self.sky.set_cirrus_mode(mode);
+    }
+
     fn set_sky_runtime(&mut self, rt: ffi::WgrSkyRuntime) {
         let s = &mut self.sky_params;
         s.sun_dir[0] = rt.sun_dir[0]; // keep sun_dir.w (sunIntensity, a look field)

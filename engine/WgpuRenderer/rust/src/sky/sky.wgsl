@@ -31,7 +31,9 @@ struct Sky {
     // so the field MORPHS in place instead of sliding, i.e. clouds form and dissolve rather than
     // merely translating with the wind.
     cloud4: vec4<f32>,
-    output: vec4<f32>,        // x = linear output (1) vs self-tonemap (0)
+    // x = linear output (1) vs self-tonemap (0), y = star intensity, z = lens-flare gain,
+    // w = second cloud layer (high cirrus): 0 = off, 1 = flat sheet, 2 = volumetric shell march.
+    output: vec4<f32>,
     cam_pos: vec4<f32>,       // xyz = ABSOLUTE world camera position (froxel -> terrain-mask lookup)
     // CLD-020 cloud sun-transmittance map. xy = world-xz of the map's min corner (SNAPPED to the
     // texel grid on the CPU, so the field does not crawl as the camera moves), z = 1/span in
@@ -843,15 +845,24 @@ fn march_clouds(
 }
 
 // ---- Second cloud layer: high cirrus -----------------------------------------
-// ONE ray/sphere intersection against a thin sheet ~7 km up and two noise taps. No march: that is
-// the entire cost, on sky pixels only. A second VOLUMETRIC deck was not an option — it would have
-// doubled the most expensive pass in the sky for a layer that is barely three-dimensional.
+// Cloud at a completely different altitude, so the sky has depth instead of one populated slab.
+// Two modes, selected by sky.output.w (0 = off, 1 = flat sheet, 2 = thin-shell march):
 //
-// It buys what a single deck cannot: cloud at a completely different altitude, so the sky has
-// depth instead of one populated slab. And the flat-sheet approximation, which would be the wrong
-// model for cumulus, is very nearly right here — cirrus IS a thin fibrous sheet of ice crystals,
-// so it is streaky and strongly forward-scattering rather than puffy and self-shadowing.
-const CIRRUS_ALT: f32 = 7000.0;          // m ASL — well clear of the cumulus deck below
+//   FLAT       one ray/sphere intersection against a sheet at CIRRUS_ALT, one field evaluation.
+//   VOLUMETRIC CIRRUS_STEPS samples through a CIRRUS_THICK shell. Cirrus is optically thin, so a
+//              handful of steps is enough to give it real vertical extent: the field walks the
+//              noise volume's third axis with height, so top and bottom of the shell are different
+//              cloud, and a grazing ray travels kilometres THROUGH it instead of piercing a plane.
+//
+// Either way this is sky pixels only, occluded by terrain via `max_dist`.
+const CIRRUS_ALT: f32 = 7000.0;          // m ASL — shell CENTRE; well clear of the cumulus deck
+const CIRRUS_THICK: f32 = 900.0;         // m — shell thickness for the volumetric mode
+const CIRRUS_STEPS: i32 = 6;             // march samples through the shell (thin layer, few steps)
+// Longest path the march will integrate, in metres. At grazing elevations the slant path through a
+// thin shell diverges as 1/sin, so without this the far sheet becomes a solid white band AND dt
+// grows to tens of kilometres. 900/0.15 = 6000 matches exactly the clamp(dir.y, 0.15, 1) the flat
+// path uses, so the two modes agree on the horizon rather than disagreeing at the worst angle.
+const CIRRUS_MAX_PATH: f32 = CIRRUS_THICK / 0.15;
 // Horizontal noise scale (1/m). This is the number that decides whether the layer reads as cirrus
 // or as one enormous smear: the sheet tap below stretches it 4x along world X, so at 1/7000 a
 // streak is roughly 7 km across and 28 km long — a few degrees wide from 8 km below, which is what
@@ -865,46 +876,121 @@ const CIRRUS_DENSITY: f32 = 2.8;         // optical depth straight up through fu
 // deletes the layer rather than texturing it, which is exactly what the first version did.
 const CIRRUS_ERODE: f32 = 0.45;
 const CIRRUS_FADE: f32 = 150000.0;       // m — dissolve into haze beyond this slant distance
+// Domain-warp displacement (m, peak-to-peak). See cirrus_warp.
+const CIRRUS_WARP: f32 = 6000.0;
+// How far the field walks the noise volume's THIRD axis between the bottom and the top of the
+// shell. The R channel's coarsest octave has 4 cells across the volume, so 0.12 is roughly half a
+// coarse cell: the big shapes survive the crossing (it still reads as ONE cloud with depth) while
+// everything finer changes, which is what stops the marched shell looking like an extruded plane.
+const CIRRUS_SLICE_H: f32 = 0.12;
+
+// Rotate a 2D lookup coordinate.
+//
+// The anisotropic stretch that makes cirrus read as fibres is applied in WORLD space BEFORE this,
+// so rotating here changes only WHICH part of the tiling volume is read — the streaks still run
+// along world X. That is exactly the point: it takes the tile lattice off the streak axis, so when
+// a repeat does occur it lands on a diagonal instead of stacking into the horizontal rows the
+// owner photographed. Costs two multiply-adds.
+fn cirrus_rot(p: vec2<f32>, c: f32, s: f32) -> vec2<f32> {
+    return vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+}
+
+// Low-frequency DOMAIN WARP for the cirrus field: one tap at ~1/9 the sheet frequency (a ~64 km
+// period), rotated off-axis, displacing the sheet lookup by up to +-CIRRUS_WARP/2 metres.
+//
+// This is the single strongest of the four anti-repetition measures, because it is the one that
+// attacks what the EYE actually locks onto. A tiling texture's repeat is legible not because the
+// values recur but because the recurrence is on a straight, axis-aligned lattice: the same wisp
+// appears at the same screen height, over and over, in a row. Bending the lookup by a large
+// fraction of a tile means the tile boundary is no longer a straight line anywhere in the sky, so
+// there is no repeating landmark left to find.
+//
+// Hoisted OUT of the volumetric march (evaluated once, at the shell midpoint) — the field varies
+// over ~64 km and the marched column spans at most CIRRUS_MAX_PATH horizontally, so reusing it
+// across the shell is a slow shear, not a seam, and it saves five taps per pixel.
+fn cirrus_warp(world_xz: vec2<f32>) -> vec2<f32> {
+    let q = cirrus_rot(world_xz * CIRRUS_SCALE * 0.11, 0.87630, 0.48178);
+    let n = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(q.x, 0.17 + sky.cloud4.z * CIRRUS_SCALE * 0.5, q.y), 0.0).rg;
+    return (n - vec2<f32>(0.5, 0.5)) * CIRRUS_WARP;
+}
+
+// Cirrus density fraction [0,1] at a world XZ, at normalised height `h` through the shell.
+//
+// WHY THIS IS NOT ONE TAP ANY MORE. The previous version took the sheet from a single lookup at
+// (x*s*0.25, const, z*s) and the fibres from a single lookup at (x*s*0.9, const, z*s*3.5). The
+// noise volume tiles with period 1 on every axis, so that sheet repeated EXACTLY every 28 km in
+// world X and every 7 km in world Z, the fibres every 7.8 km and 2 km — and 7000/2000 = 7/2 is
+// rational, so the two agreed on a common period of 14 km in Z. Seen from 6.5 km below, 14 km of
+// sheet subtends a few degrees, which put four or five identical copies of the same wisp in one
+// frame, stacked in rows. That is the reported artefact, and it was arithmetic, not bad luck.
+//
+// Four measures, none of which is "make the tile bigger" (that only pushes the repeat further out
+// and costs resolution):
+//   1. domain warp, above — bends the lattice so it is not straight;
+//   2. TWO sheet octaves whose scales are in the golden ratio. An irrational ratio has NO common
+//      period, so their sum never recurs, at any distance;
+//   3. rotation, different per octave — the lattices are not even parallel to each other;
+//   4. slice drift on the volume's third axis, proportional to world position. Two points a whole
+//      tile apart in X/Z now read DIFFERENT slices, so the repeat would have to align in three
+//      axes at once. Free: it is an add on a coordinate the tap already carries.
+fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec2<f32>) -> f32 {
+    let s = CIRRUS_SCALE;
+    let drift = sky.cloud4.z * s;
+    let p = world_xz + warp;
+    // Slice drift (4). The two weights are irrational multiples of each other so the x and z
+    // contributions do not come back into phase either. `h` walks the same axis, which is what
+    // gives the marched shell genuine vertical structure.
+    let slice = (p.x * 0.61803399 + p.y * 0.41421356) * s * 0.043 + h * CIRRUS_SLICE_H;
+    // Octave A: the sheet itself. 4x stretched along world X, so a streak is ~7 km across and
+    // ~28 km long — the aspect a real cirrus field has.
+    let qa = cirrus_rot(vec2<f32>(p.x * 0.25, p.y) * s, 0.95534, 0.29552);
+    let a = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(qa.x, 0.5 + slice + drift, qa.y), 0.0).r;
+    // Octave B (2): same channel, same stretch, scale x1.618 and a different rotation.
+    let qb = cirrus_rot(vec2<f32>(p.x * 0.25, p.y) * s * 1.61803399, -0.54030, 0.84147);
+    let b = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(qb.x, 0.29 - slice * 1.7 + drift, qb.y), 0.0).r;
+    // Summing two independent fields shrinks the variance (0.62^2 + 0.38^2 = 0.53 of one tap), and
+    // the coverage remap below is a CONTRAST operation — left alone, the layer would come out
+    // uniformly thin and hazy instead of having gaps. Re-expand about the mean by 1/sqrt(0.53).
+    let mixed = a * 0.62 + b * 0.38;
+    let sheet = clamp(0.5 + (mixed - 0.5) * 1.37, 0.0, 1.0);
+    let d0 = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
+    if (d0 <= 0.0) {
+        return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)
+    }
+    // Fibre erosion. z ratio 3.301 rather than the old 3.5: 3.5 = 7/2 shares a period with the
+    // sheet, 3.301 does not.
+    let qf = cirrus_rot(vec2<f32>(p.x * 0.9, p.y * 3.301) * s, 0.26236, -0.96496);
+    let fibre = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(qf.x, 0.25 + drift * 2.0 - slice * 0.9, qf.y), 0.0).g;
+    return clamp(d0 - (1.0 - d0) * fibre * CIRRUS_ERODE, 0.0, 1.0);
+}
+
+// Vertical profile through the shell: soft on both faces so the marched layer has no hard lid or
+// floor. Its integral over h is 1 - 0.3/2 - 0.35/2 = 0.675, which is what CIRRUS_SIGMA divides by
+// so a full-density column has the SAME total optical depth as the flat sheet.
+fn cirrus_profile(h: f32) -> f32 {
+    return smoothstep(0.0, 0.30, h) * (1.0 - smoothstep(0.65, 1.0, h));
+}
+const CIRRUS_SIGMA: f32 = CIRRUS_DENSITY / (CIRRUS_THICK * 0.675); // extinction per metre
 
 fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, bg: vec3<f32>,
                 max_dist: f32) -> CloudResult {
     var res: CloudResult;
     res.inscatter = vec3<f32>(0.0);
     res.trans = 1.0;
+    // sky.output.w: 0 = layer off entirely (Sky tab), 1 = flat, 2 = volumetric.
+    let mode = sky.output.w;
     // Follows the deck's on/off so "clear weather" stays clear, and skips downward rays outright:
     // from inside the shell every direction has a far intersection with the sheet, including ones
     // pointing at the ground, and drawing those would paint cirrus under the horizon.
-    if (sky.cloud0.x <= 0.001 || dir.y <= 0.01) {
+    if (mode < 0.5 || sky.cloud0.x <= 0.001 || dir.y <= 0.01) {
         return res;
     }
-    let hit = ray_sphere(pos, dir, sky.params.z + CIRRUS_ALT);
-    let t = hit.y;
-    if (t <= 0.0 || t >= max_dist) {
-        return res; // no intersection, or the opaque scene is nearer — terrain occludes it
-    }
-    let p = pos + dir * t;
-    // Same world anchoring and wind offset as the deck (cloud1.xy is CPU-wrapped for precision, so
-    // it must be used as given, not rescaled to fake a different wind speed aloft).
-    let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
-    // Anisotropic sampling — ~4x stretched along world X — is what makes this read as cirrus
-    // FIBRES rather than a flat smear. Free: it is only a scale on the lookup coordinate.
-    let s = CIRRUS_SCALE;
-    let sheet = textureSampleLevel(cloud_noise, cloud_samp,
-        vec3<f32>(world_xz.x * s * 0.25, 0.5 + sky.cloud4.z * s, world_xz.y * s), 0.0).r;
-    let fibre = textureSampleLevel(cloud_noise, cloud_samp,
-        vec3<f32>(world_xz.x * s * 0.9, 0.25 + sky.cloud4.z * s * 2.0, world_xz.y * s * 3.5), 0.0).g;
+    let planet_r = sky.params.z;
     let cover = CIRRUS_COVER * smoothstep(0.02, 0.35, sky.cloud0.x);
-    var d = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
-    d = clamp(d - (1.0 - d) * fibre * CIRRUS_ERODE, 0.0, 1.0);
-    // Fade in off the horizon (where the sheet is hundreds of km away and haze owns the sky) and
-    // out with slant distance, so neither edge of the sheet is ever a line.
-    d = d * smoothstep(0.015, 0.07, dir.y) * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
-    if (d <= 0.001) {
-        return res;
-    }
-    // Slant path through a thin sheet goes as 1/sin(elevation); clamped because the horizon limit
-    // is unbounded and would turn the far sheet into a solid white band.
-    let trans = exp(-d * CIRRUS_DENSITY / clamp(dir.y, 0.15, 1.0));
     let cos_t = dot(dir, sun);
     // Ice: a strong forward lobe (the halo/silver look) over an isotropic floor. Thin enough that
     // self-shadowing is not worth a light march, so no sun-transmittance term through the sheet.
@@ -912,7 +998,73 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     let sun_col = sample_transmittance(pos, sun) * radiance;
     let luma = dot(bg, vec3<f32>(0.2126, 0.7152, 0.0722));
     let ambient = mix(bg, vec3<f32>(luma), 0.3) * sky.cloud2.z * 0.8;
-    res.inscatter = (sun_col * phase + ambient) * (1.0 - trans);
+    let lit = sun_col * phase + ambient;
+    // Fade in off the horizon, where the sheet is hundreds of km away and haze owns the sky.
+    let horizon_fade = smoothstep(0.015, 0.07, dir.y);
+
+    if (mode < 1.5) {
+        // ---- FLAT: one intersection with the sheet at the shell centre, one field evaluation.
+        let hit = ray_sphere(pos, dir, planet_r + CIRRUS_ALT);
+        let t = hit.y;
+        if (t <= 0.0 || t >= max_dist) {
+            return res; // no intersection, or the opaque scene is nearer — terrain occludes it
+        }
+        let p = pos + dir * t;
+        // Same world anchoring and wind offset as the deck (cloud1.xy is CPU-wrapped for precision,
+        // so it must be used as given, not rescaled to fake a different wind speed aloft).
+        let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+        var d = cirrus_field(world_xz, 0.5, cover, cirrus_warp(world_xz));
+        d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
+        if (d <= 0.001) {
+            return res;
+        }
+        // Slant path through a thin sheet goes as 1/sin(elevation); clamped because the horizon
+        // limit is unbounded and would turn the far sheet into a solid white band.
+        let trans = exp(-d * CIRRUS_DENSITY / clamp(dir.y, 0.15, 1.0));
+        res.inscatter = lit * (1.0 - trans);
+        res.trans = trans;
+        return res;
+    }
+
+    // ---- VOLUMETRIC: march the shell between its bottom and top spheres.
+    let r_bot = planet_r + CIRRUS_ALT - CIRRUS_THICK * 0.5;
+    let r_top = planet_r + CIRRUS_ALT + CIRRUS_THICK * 0.5;
+    let hb = ray_sphere(pos, dir, r_bot);
+    let ht = ray_sphere(pos, dir, r_top);
+    if (ht.y <= 0.0) {
+        return res; // above the shell, or no intersection at all
+    }
+    // Below the shell: hb.y is the entry. Inside it (or above r_bot): hb misses on an upward ray
+    // and returns the (1,-1) sentinel, so max(.,0) correctly starts the march at the camera.
+    let t0 = max(hb.y, 0.0);
+    let t1 = min(min(ht.y, max_dist), t0 + CIRRUS_MAX_PATH);
+    if (t1 <= t0) {
+        return res;
+    }
+    let dt = (t1 - t0) / f32(CIRRUS_STEPS);
+    // ONE warp tap for the whole column (see cirrus_warp) — evaluated at the shell midpoint.
+    let mid = pos + dir * (t0 + (t1 - t0) * 0.5);
+    let warp = cirrus_warp(sky.cam_pos.xz + mid.xz + sky.cloud1.xy);
+    var col = vec3<f32>(0.0);
+    var trans = 1.0;
+    var t = t0 + dt * 0.5;
+    for (var i: i32 = 0; i < CIRRUS_STEPS; i = i + 1) {
+        let p = pos + dir * t;
+        let h = (length(p) - r_bot) / CIRRUS_THICK;
+        let prof = cirrus_profile(h);
+        if (prof > 0.0) {
+            let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+            var d = cirrus_field(world_xz, h, cover, warp) * prof;
+            d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
+            if (d > 0.0005) {
+                let seg = exp(-d * CIRRUS_SIGMA * dt);
+                col += trans * lit * (1.0 - seg);
+                trans *= seg;
+            }
+        }
+        t += dt;
+    }
+    res.inscatter = col;
     res.trans = trans;
     return res;
 }
@@ -999,8 +1151,10 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // result is what the SH projection + reflection want.
     let radiance = sky.sun_dir.w * sky.params.y;
     let deck = march_clouds(pos, dir, sun, radiance, color, 12.0, 2, 0.0, 1e12);
-    // The cirrus sheet goes into the env bake too, so the water reflects — and the SH ambient sees —
-    // the same two-layer sky the camera does. It costs two taps per env texel.
+    // The cirrus layer goes into the env bake too, so the water reflects — and the SH ambient sees —
+    // the same two-layer sky the camera does. It runs in whatever mode the Sky tab selected, and
+    // the env map is only 256x128, so even the volumetric path is a rounding error here; the
+    // measured cost of the layer as a whole is dominated by the full-resolution cloud pass.
     let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, color, 1e12));
     return vec4<f32>(color * cloud.trans + cloud.inscatter, 1.0);
 }

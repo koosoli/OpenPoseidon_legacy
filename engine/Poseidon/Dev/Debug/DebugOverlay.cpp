@@ -4358,6 +4358,21 @@ void DrawSkyTab()
     ImGui::SetItemTooltip("March / visibility cap; the far deck dissolves into the horizon haze");
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Second layer (high cirrus, ~7 km)");
+    ImGui::TextDisabled("ice cloud ABOVE the deck, so the sky has two altitudes instead of one slab");
+    changed |= ImGui::Checkbox("Cirrus layer", &s.cirrusEnabled);
+    ImGui::SetItemTooltip("Off = bare upper sky. It follows the deck's coverage, so clear weather is "
+                          "still clear with this on.");
+    ImGui::BeginDisabled(!s.cirrusEnabled);
+    changed |= ImGui::Checkbox("Volumetric (thin shell march)", &s.cirrusVolumetric);
+    ImGui::SetItemTooltip("On: 6 samples through a 900 m shell, the noise field walking its third axis "
+                          "with height, so the top and bottom of the layer are different cloud and a "
+                          "grazing ray travels kilometres THROUGH it.\n"
+                          "Off: one ray/sheet intersection at 7 km -- cheaper, but a sheet is pierced, "
+                          "never travelled through, so it has no parallax and no soft grazing edge.");
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Ground shadows (CLD-020)");
     changed |= ImGui::SliderFloat("Cloud shadow strength", &s.cloudShadowStrength, 0.0f, 1.0f, "%.2f");
     ImGui::TextDisabled("How much the deck dims direct sun on terrain, objects, grass and water. 0 = off, and "
@@ -4416,7 +4431,13 @@ void DrawSkyTab()
     ImGui::EndDisabled();
 
     if (changed)
+    {
         GEngine->SetSkySettings(s);
+        // The two cirrus flags do NOT ride the sky look block (its size is part of the renderer's
+        // ABI handshake), so they need their own push. Unconditional inside `changed` rather than
+        // gated on the checkboxes, so "Reset to defaults" restores them too.
+        GEngine->SetSkyCirrus(s.cirrusEnabled, s.cirrusVolumetric);
+    }
 
     // Copy the full authored sky state so it can be pasted into per-ToD keyframes
     // (no auto-interpolation for the sky yet; this is the hand-authoring hook).

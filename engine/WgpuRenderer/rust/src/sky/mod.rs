@@ -192,8 +192,10 @@ struct SkyUniform {
     // where the shader expects M" on every 3D draw at once.
     cloud4: [f32; 4],
     // x = linear output (1 = write linear radiance for the tonemap resolve; 0 =
-    // self-tonemap for the LDR-direct path). y/z/w reserved. (The full-vs-cheap cloud
-    // split is by entry point — fs_sky vs fs_sky_env — not a runtime flag.)
+    // self-tonemap for the LDR-direct path). y = star intensity, z = lens-flare gain,
+    // w = second cloud layer (cirrus) mode: 0 off, 1 flat sheet, 2 volumetric shell march.
+    // (The full-vs-cheap cloud split is by entry point — fs_sky vs fs_sky_env — not a
+    // runtime flag.)
     output: [f32; 4],
     // xyz = absolute world camera position, so cs_froxel can turn a marched camera-
     // relative offset into a world position for the terrain sun-shadow mask lookup.
@@ -239,6 +241,29 @@ fn lut_key(sky: &WgrSky) -> LutKey {
 const CLOUD_SHADOW_DIM: u32 = 512;
 const CLOUD_SHADOW_SPAN: f32 = 4096.0;
 
+/// Initial second-cloud-layer (cirrus) mode: 0 = off, 1 = flat sheet, 2 = thin-shell volumetric.
+///
+/// Default 2, matching `Engine::SkySettings`. `WGR_CIRRUS` overrides it, and exists because the
+/// only honest way to price the volumetric path is a `--benchmark` run — which runs `--no-dev`,
+/// so the Sky tab's toggle is not reachable. It prints what it selected so a benchmark log is
+/// self-describing rather than something you have to take on trust.
+fn cirrus_mode_from_env() -> f32 {
+    match std::env::var("WGR_CIRRUS")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        Some(v) => {
+            let m = v.clamp(0.0, 2.0);
+            eprintln!(
+                "[wgr] sky: cirrus mode {} from WGR_CIRRUS (0 off, 1 flat, 2 volumetric)",
+                m
+            );
+            m
+        }
+        None => 2.0,
+    }
+}
+
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
@@ -280,6 +305,11 @@ pub struct Sky {
     star_intensity: f32,
     /// Lens-flare gain. 0 disables the effect outright (the shader early-outs).
     lens_flare: f32,
+    /// Second cloud layer (high cirrus) mode, written to the sky UBO's `output.w`:
+    /// 0 = off, 1 = flat sheet, 2 = thin-shell volumetric march. Rides the spare lane of an
+    /// existing vec4 rather than growing WgrSkyLook, for the reason stated on
+    /// `wgr_set_cloud_shadow_strength`: the look struct's size is part of the ABI handshake.
+    cirrus_mode: f32,
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1140,6 +1170,10 @@ impl Sky {
             // Matches Engine::SkySettings' safe default.  The C++ side normally pushes this on
             // the first frame, but keep the renderer's own initial state safe as well.
             lens_flare: 0.0,
+            // Second cloud layer on, volumetric, matching Engine::SkySettings' defaults. The env
+            // override exists so the two modes can be A/B'd from a --benchmark run, which has no
+            // dev panel: WGR_CIRRUS=0 off, 1 flat, 2 volumetric.
+            cirrus_mode: cirrus_mode_from_env(),
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN, 0.85],
             froxel_view,
             froxel_shadow_layout,
@@ -1191,6 +1225,11 @@ impl Sky {
         self.cloud_shadow_strength = strength.clamp(0.0, 1.0);
     }
 
+    /// Second cloud layer (high cirrus): 0 = off, 1 = flat sheet, 2 = thin-shell volumetric march.
+    pub fn set_cirrus_mode(&mut self, mode: u32) {
+        self.cirrus_mode = (mode.min(2)) as f32;
+    }
+
     pub fn cloud_shadow_view(&self) -> &wgpu::TextureView {
         &self.cloud_shadow_view
     }
@@ -1229,7 +1268,12 @@ impl Sky {
             cloud2: sky.cloud2,
             cloud3: sky.cloud3,
             cloud4: sky.cloud4,
-            output: [self.linear, self.star_intensity, self.lens_flare, 0.0],
+            output: [
+                self.linear,
+                self.star_intensity,
+                self.lens_flare,
+                self.cirrus_mode,
+            ],
             cam_pos,
             cloud_shadow: self.cloud_shadow_mapping(cam_pos),
         };
@@ -1585,6 +1629,82 @@ mod cloud_evolution_tests {
 }
 
 #[cfg(test)]
+mod cirrus_tests {
+    // The second cloud layer read as tiled bands of near-identical wisps marching in rows, and the
+    // cause was arithmetic: ONE tap for the sheet and ONE for the fibres, both axis-aligned, both
+    // at fixed slices of a volume that tiles with period 1 on every axis. That put the sheet's
+    // repeat at 28 km in world X and 7 km in world Z; the fibres repeated at 2 km in Z, and
+    // 7000/2000 = 7/2 is RATIONAL, so the two agreed on a common period of 14 km. From 6.5 km
+    // below, 14 km of sheet is a few degrees of sky — four or five identical copies per frame.
+    //
+    // Pinned in the source because every one of these measures is invisible from outside: remove
+    // any of them and the shader still compiles, still validates, still renders cirrus, and the
+    // rows come back. Only a screenshot would tell you, and only if someone looked.
+    #[test]
+    fn the_cirrus_field_cannot_repeat_on_a_short_period() {
+        let src = include_str!("sky.wgsl");
+        let body = src
+            .split_once("fn cirrus_field(")
+            .expect("sky.wgsl declares cirrus_field")
+            .1
+            .split_once("\nfn ")
+            .expect("cirrus_field is followed by another function")
+            .0;
+        // 1. Two sheet octaves whose scales are in the GOLDEN RATIO. An irrational ratio has no
+        //    common period at all, so their sum never recurs at any distance. This is the measure
+        //    that makes the repeat impossible rather than merely distant.
+        assert!(
+            body.contains("1.61803399"),
+            "the sheet must be two octaves at an irrational scale ratio"
+        );
+        // 2. Every lookup rotated, and by DIFFERENT angles, so the octaves' lattices are not even
+        //    parallel to each other -- and none of them parallel to the streaks.
+        assert_eq!(
+            body.matches("cirrus_rot(").count(),
+            3,
+            "each of the three field lookups must rotate its own domain"
+        );
+        // 3. Slice drift: the volume's third axis advances with world position, so two points a
+        //    whole tile apart in X/Z read DIFFERENT slices.
+        assert!(
+            body.contains("let slice = (p.x * 0.61803399 + p.y * 0.41421356)"),
+            "the field must walk the noise volume's third axis with world position"
+        );
+        // 4. The fibre lookup must not share a period with the sheet. 3.5 = 7/2 did; 3.301 does
+        //    not. A rational ratio here is what let the two fields agree on a 14 km repeat.
+        assert!(
+            body.contains("p.y * 3.301"),
+            "the fibre lookup's z ratio must be irrational against the sheet's"
+        );
+        assert!(
+            !body.contains("* 3.5"),
+            "3.5 = 7/2 shares a period with the sheet -- that was the original bug"
+        );
+        // And the domain warp, which is what stops the lattice being a straight line anywhere.
+        assert!(
+            src.contains("fn cirrus_warp("),
+            "the cirrus field must be domain-warped"
+        );
+    }
+
+    // The Sky tab's two toggles ride output.w rather than a new WgrSkyLook lane (that struct's
+    // size is part of the ABI handshake). If the shader stops reading the lane the checkboxes go
+    // dead silently -- the layer just renders whatever it renders.
+    #[test]
+    fn the_layer_mode_is_read_from_the_uniform() {
+        let src = include_str!("sky.wgsl");
+        assert!(
+            src.contains("let mode = sky.output.w"),
+            "cirrus_layer must read its mode (0 off / 1 flat / 2 volumetric) from output.w"
+        );
+        assert!(
+            src.contains("if (mode < 0.5 || sky.cloud0.x <= 0.001 || dir.y <= 0.01)"),
+            "mode 0 must return before any work -- the toggle has to cost nothing when off"
+        );
+    }
+}
+
+#[cfg(test)]
 mod sky_uniform_layout_tests {
     // SkyUniform and sky.wgsl's `struct Sky` are the same buffer seen from two languages, and
     // nothing checks that they agree. Inserting a field in one and not the other is not a compile
@@ -1642,12 +1762,16 @@ mod sky_uniform_layout_tests {
             "cloud4",
             "output",
             "cam_pos",
+            // CLD-020's cloud sun-transmittance mapping. It was added to BOTH structs but not to
+            // this list, so the check that is supposed to catch a layout skew was itself skewed
+            // and had been failing since.
+            "cloud_shadow",
         ];
         assert_eq!(
             wgsl, rust,
             "sky.wgsl's Sky and Rust's SkyUniform must declare identical fields in identical order"
         );
-        // 16 vec4 lanes + one mat4. If this moves, both lists above must have moved with it.
+        // 19 vec4 lanes + one mat4. If this moves, both lists above must have moved with it.
         assert_eq!(
             std::mem::size_of::<super::SkyUniform>(),
             64 + (rust.len() - 1) * 16

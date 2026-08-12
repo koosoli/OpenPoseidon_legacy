@@ -2495,6 +2495,21 @@ pub unsafe extern "C" fn wgr_set_cloud_shadow_strength(renderer: *mut WgrRendere
     renderer.set_cloud_shadow_strength(strength);
 }
 
+/// Second cloud layer (high cirrus at ~7 km): 0 = off, 1 = flat sheet, 2 = thin-shell volumetric
+/// march. Its own entry point for the same reason as `wgr_set_cloud_shadow_strength` above —
+/// WgrSkyLook's size is part of the ABI handshake, and this is one enum. Values above 2 clamp.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_cirrus_mode(renderer: *mut WgrRenderer, mode: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_cirrus_mode(mode);
+}
+
 /// Read one cascade layer of the shadow depth map back as row-major floats
 /// (row 0 = top). Returns the map resolution (side length), or 0 when no map
 /// exists / `layer` is out of range / `out_len` is too small.

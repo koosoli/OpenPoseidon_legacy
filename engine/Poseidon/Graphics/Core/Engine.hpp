@@ -1555,6 +1555,20 @@ class Engine : public IGraphicsEngine
         float cloudPowder = 1.0f;                          // Beer-Powder dark-edge strength (0..1)
         float cloudAmbient = 1.0f;                         // sky-ambient fill scale on the shadowed sides
         float cloudMaxDist = 60000.0f;                     // march / visibility cap (m); keep <= ~80 km
+        // SECOND CLOUD LAYER — high cirrus at ~7 km, above the cumulus deck. It is what stops the
+        // sky reading as one populated slab with clear air above it. Off = the upper sky is bare.
+        bool cirrusEnabled = true;
+        // Flat sheet (one ray/sheet intersection + one field evaluation) vs a thin-shell march.
+        // Cirrus IS nearly a sheet, so the flat model is not wrong — but a sheet is pierced, never
+        // travelled through, so it has no parallax and no soft edge where a grazing ray leaves it.
+        // The shell march is 6 samples through 900 m and the field walks the noise volume's third
+        // axis with height, so the top and the bottom of the layer are different cloud.
+        // Default ON because it was measured, not assumed: interleaved GPU-frame-total samples on
+        // the OFP devtest sky (800x600) read 8.895 ms with the layer off, 8.932 flat, 9.068
+        // volumetric -- +0.136 ms over flat, +0.173 ms over no second layer at all. With the
+        // camera above the deck and the sky filling the frame the two modes are level (5.865 vs
+        // 5.869 ms), because the shell march bounds its path and bails in the gaps.
+        bool cirrusVolumetric = true;
         // CLD-020 cloud shadows: the deck dims the direct sun on terrain, objects, grass and
         // water through a world-anchored transmittance map rebuilt each frame around the camera.
         // 0 = off (every surface reads fully lit, and the compute pass early-outs per texel).
@@ -1885,6 +1899,14 @@ class Engine : public IGraphicsEngine
     // Live WGPU adapter/runtime flags for the Profile diagnostic tab. Appended to
     // preserve existing vtable slots; zero means unavailable/non-WGPU.
     virtual uint32_t GetRuntimeCapabilityFlags() const { return 0; }
+
+    // SECOND CLOUD LAYER (high cirrus) on/off + flat-vs-volumetric, from the Sky tab.
+    // SkySettings carries the two flags so they round-trip through Get/SetSkySettings and the
+    // "Reset to defaults" button; this pushes them to the backend. A separate entry point rather
+    // than another lane in the sky look block, because that block's size is part of the renderer's
+    // ABI handshake (the same reason cloud-shadow strength, stars and lens flare have their own).
+    // APPENDED at the class end (vtable-slot note above).
+    virtual void SetSkyCirrus(bool /*enabled*/, bool /*volumetric*/) {}
 
     // GetWaterGpuTimings returns ONE shared region array covering every timed
     // subsystem; each debug tab slices its own range. Mirrors WgrGpuTimerRegion

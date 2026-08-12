@@ -1676,6 +1676,14 @@ extern "C"
 
     WGR_API void wgr_set_cloud_shadow_strength(WgrRenderer* renderer, float strength);
 
+    /* Second cloud layer (the high cirrus sheet at ~7 km): 0 = off, 1 = flat sheet (one
+       ray/sheet intersection), 2 = thin-shell volumetric march. Values above 2 clamp.
+       Its own entry point rather than a WgrSkyLook lane for the same reason as the cloud
+       shadow above: that struct's size is part of the ABI handshake. Overridable at startup
+       with the WGR_CIRRUS environment variable, which is how the two modes get priced from a
+       --benchmark run (that runs --no-dev, so the Sky tab is not reachable). */
+    WGR_API void wgr_set_cirrus_mode(WgrRenderer* renderer, uint32_t mode);
+
     /* Push the per-frame sky runtime (celestial dir/phase, night factor, fog colour, camera
      * altitude, fog range) — the runtime half of the sky UBO; the look half comes from
      * wgr_set_render_params. */
