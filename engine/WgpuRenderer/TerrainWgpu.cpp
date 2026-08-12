@@ -74,6 +74,62 @@ static bool IsGrassTexture(const Texture* texture)
            ContainsNoCase(name, "meadow") || ContainsNoCase(name, "pasture");
 }
 
+static bool EqualsNoCase(const char* a, const char* b)
+{
+    if (a == nullptr || b == nullptr)
+    {
+        return false;
+    }
+    for (; *a != '\0' && *b != '\0'; ++a, ++b)
+    {
+        if (tolower(static_cast<unsigned char>(*a)) != tolower(static_cast<unsigned char>(*b)))
+        {
+            return false;
+        }
+    }
+    return *a == *b;
+}
+
+// Does this terrain texture resolve to a surface the GAME ITSELF calls grass?
+//
+// Operation Flashpoint's own CfgSurfaces answers this exactly, and names three
+// grass classes and no others: Grass (`tn??????`), GrassAbel (`tt??????`) and
+// GrassHigh (`tv??????`) -- measured over the retail CONFIG.BIN's 23 surface
+// classes. Everon's terrain is pre-blended four-quadrant tiles of two-character
+// codes, so `GetTextureQuadrants` gives a per-quadrant answer; a tile counts as
+// grass-capable if any quadrant is one of the three.
+//
+// This exists because the name heuristic above matches NOTHING on Everon
+// (`eden\tn`, `eden\pl`), which used to trip an "enable every layer" fallback and
+// made sand, rock, forest floor and shore all grass-capable. `outResolved` reports
+// whether the surface catalogue said anything at all about this texture, so that
+// fallback can be kept for genuinely unclassifiable data instead of for data we
+// simply were not reading.
+static bool IsGrassSurfaceClass(const SurfaceInfo* const* quadrants, bool& outResolved)
+{
+    outResolved = false;
+    if (quadrants == nullptr)
+    {
+        return false;
+    }
+    bool grass = false;
+    for (int q = 0; q < 4; ++q)
+    {
+        const SurfaceInfo* surface = quadrants[q];
+        if (surface == nullptr || surface->_class.GetLength() == 0)
+        {
+            continue;
+        }
+        outResolved = true;
+        const char* cls = surface->_class.Data();
+        if (EqualsNoCase(cls, "Grass") || EqualsNoCase(cls, "GrassAbel") || EqualsNoCase(cls, "GrassHigh"))
+        {
+            grass = true;
+        }
+    }
+    return grass;
+}
+
 static float EnvFloat(const char* name, float fallback)
 {
     const char* v = std::getenv(name);
@@ -408,30 +464,49 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         _grassSurfaceEnabled.clear();
         _grassSurfaceNames.reserve(static_cast<size_t>(layerCount));
         _grassSurfaceEnabled.reserve(static_cast<size_t>(layerCount));
+        // Two independent signals, because the generations classify differently.
+        // The authored CfgSurfaces class is the authority wherever it resolves --
+        // that is what covers OFP, whose texture names carry no semantics at all.
+        // The name heuristic covers the Arma generations, whose surfaces resolve to
+        // `Default` here (their own CfgSurfaces lives in a config.bin this engine
+        // cannot yet parse) but whose texture names ARE semantic: Takistan's
+        // `tk_trava_co` is matched by "trava".
+        int classGrass = 0, nameGrass = 0, resolvedLayers = 0;
         for (int i = 0; i < layerCount; ++i)
         {
             const Texture* texture = land.GetTexture(i);
             _grassSurfaceNames.emplace_back(texture ? texture->Name() : "<null>");
-            _grassSurfaceEnabled.push_back(IsGrassTexture(texture));
+            bool resolved = false;
+            const bool byClass = IsGrassSurfaceClass(land.GetTextureQuadrants(i), resolved);
+            const bool byName = IsGrassTexture(texture);
+            classGrass += byClass;
+            nameGrass += byName;
+            resolvedLayers += resolved;
+            _grassSurfaceEnabled.push_back(byClass || byName);
         }
 
-        // The original CWA islands (including Everon/Eden) store their
-        // terrain materials under two-character codes such as eden\\pl and
-        // eden\\tn. They contain no semantic "grass" word, so the strict
-        // detector above selected *zero* surfaces and made grass impossible
-        // to load. Fall back to every terrain layer only when nothing could
-        // be named; water, roads, forests, buildings, cliffs, and shore are
-        // still rejected by the authoritative geography/slope checks in the
-        // grass shader. The Grass tab remains able to narrow this selection.
-        const bool noNamedGrass = std::none_of(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(),
+        // Fall back to every terrain layer ONLY when neither signal said anything
+        // and the surface catalogue did not recognise a single layer -- i.e. data
+        // we genuinely cannot classify. It used to fire on Everon, where the name
+        // heuristic matches nothing, and made sand, rock, forest floor and shore
+        // all grass-capable; the class signal now answers that world from its own
+        // config instead. Water, roads, forests, cliffs and shore are still
+        // rejected by the authoritative geography/slope checks in the grass
+        // shader, and the Grass tab can still narrow the selection.
+        const bool noneSelected = std::none_of(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(),
                                                [](bool enabled) { return enabled; });
-        if (noNamedGrass && layerCount > 0)
+        if (noneSelected && resolvedLayers == 0 && layerCount > 0)
         {
             std::fill(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(), true);
             LOG_INFO(Graphics,
-                     "Wgpu grass: no named grass textures on this legacy world; enabling all {} terrain layers",
+                     "Wgpu grass: no surface class and no named grass on this world; enabling all {} terrain layers",
                      layerCount);
         }
+        LOG_INFO(Graphics,
+                 "Wgpu grass surfaces: {} of {} layers grass-capable ({} by CfgSurfaces class, {} by name, {} layers "
+                 "the surface catalogue recognised)",
+                 std::count(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(), true), layerCount, classGrass,
+                 nameGrass, resolvedLayers);
     }
 
     std::vector<bool> grassLayer(static_cast<size_t>(layerCount), false);

@@ -373,16 +373,21 @@ AbstractTextBank::AbstractTextBank()
             {
                 SurfaceInfo info;
                 info._name = entry >> "files";
+                // Keep the class name, not just its file pattern: it is the only
+                // authored statement of what the surface is, and callers that need
+                // to ask "is this grass" must not have to guess from spelling.
+                info._class = entry.GetName();
                 info._roughness = entry >> "rough";
                 info._dustness = entry >> "dust";
                 info._soundEnv = entry >> "soundEnviron";
-#if _ENABLE_CHEATS
+                // Read unconditionally. This used to be gated behind _ENABLE_CHEATS,
+                // which is 0 in every build, so the field was never populated; it is
+                // the map's own clutter character and costs one string per surface.
                 const ParamEntry* character = entry.FindEntry("character");
                 if (character)
                 {
                     info._character = *character;
                 }
-#endif
                 _surfaces.Add(info);
             }
         }

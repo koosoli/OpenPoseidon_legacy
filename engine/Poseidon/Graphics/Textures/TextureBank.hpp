@@ -121,13 +121,21 @@ class Texture : public RemoveLLinks
 
 struct SurfaceInfo
 {
+    // The `files=` pattern this surface matches (e.g. "tn??????"), which is what
+    // FindSurface tests against a texture name.
     RStringB _name;
+    // The authored CfgSurfaces CLASS name (e.g. "Grass", "GrassHigh", "TKTrava").
+    // The pattern says which textures are this surface; the class says what the
+    // surface IS, and only the class can answer "should grass grow here" without
+    // guessing from the texture's spelling.
+    RStringB _class;
     float _roughness;
     float _dustness;
     RStringB _soundEnv;
-#if _ENABLE_CHEATS
+    // Arma-generation CfgSurfaces name a CfgSurfaceCharacters class here, which is
+    // the entry point to the map's own clutter. Empty on Operation Flashpoint data,
+    // which defines no characters at all.
     RStringB _character;
-#endif
     bool operator==(const SurfaceInfo& with) const { return _name == with._name; }
 };
 

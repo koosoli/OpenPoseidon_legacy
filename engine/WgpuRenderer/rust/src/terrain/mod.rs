@@ -649,10 +649,20 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(4.0);
+        // Strength of the authored terrain composition (WLD-019): the satellite is the
+        // colour authority and the decoded surface stack modulates it. ON by default as of
+        // 2026-08-12, on the owner's look call across Takistan, Chernarus and Stratis.
+        //
+        // This cannot touch Operation Flashpoint. OFP worlds carry no authored terrain
+        // materials at all -- `_a3TerrainMaterials` is only ever filled by LoadOprwModern --
+        // so their `surface_count` is 0 and sample_authored_cell early-returns to the legacy
+        // cell path byte for byte, whatever this value is.
+        //
+        // `WGR_TERRAIN_A3_SURFACES=0` restores the pre-decode look on Arma worlds.
         let a3_surface_blend = std::env::var("WGR_TERRAIN_A3_SURFACES")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(0.0);
+            .unwrap_or(1.0);
         // MAT-040: authored-surface parallax depth, in the surface's own UV units. Height
         // is `_nopx` red, which only terrain surfaces carry, so this is inert on any
         // material whose normals are `_nohq`.

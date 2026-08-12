@@ -674,6 +674,14 @@ class Landscape : public SerializeClass
     Texture* GetTexture(int id) const;
     int GetNTextures() const { return _texture.Size(); }
     bool TextureIsSimple(int txt) const { return _texture[txt].offsetUV; }
+    // The four CfgSurfaces entries (TL, TR, BL, BR) this terrain texture resolves
+    // to, already decoded at load. A pre-blended OFP tile such as `tntntvtn` names
+    // a different surface per quadrant; a plain texture repeats one across all
+    // four. Entries may be null if the texture matched nothing.
+    const SurfaceInfo* const* GetTextureQuadrants(int id) const
+    {
+        return id >= 0 && id < _texture.Size() ? _texture[id].quadrants : nullptr;
+    }
     const A3TerrainMaterial* GetA3TerrainMaterial(int id) const
     {
         return id >= 0 && id < _a3TerrainMaterials.Size() ? &_a3TerrainMaterials[id] : nullptr;

@@ -5,43 +5,43 @@
 	"gpu_timestamps_available":	true,
 	"gpu_timings_ms":	[{
 			"name":	"Spectrum init",
-			"milliseconds":	0.3399679958820343
+			"milliseconds":	0.733183979988098
 		}, {
 			"name":	"Spectrum evolve",
-			"milliseconds":	0.11059200018644333
+			"milliseconds":	0.10444799810647964
 		}, {
 			"name":	"FFT horizontal",
-			"milliseconds":	0.21094399690628052
+			"milliseconds":	0.21811200678348541
 		}, {
 			"name":	"FFT vertical",
-			"milliseconds":	0.20479999482631683
+			"milliseconds":	0.2099200040102005
 		}, {
 			"name":	"FFT compose",
-			"milliseconds":	0.11161600053310394
+			"milliseconds":	0.11366400122642517
 		}, {
 			"name":	"Interaction (inject+propagate)",
 			"milliseconds":	0.010239999741315842
 		}, {
 			"name":	"Foam update",
-			"milliseconds":	0.17817600071430206
+			"milliseconds":	0.18943999707698822
 		}, {
 			"name":	"Whitewater",
 			"milliseconds":	-1
 		}, {
 			"name":	"Planar: sky",
-			"milliseconds":	0.26214399933815
+			"milliseconds":	0.27750399708747864
 		}, {
 			"name":	"Planar: terrain",
-			"milliseconds":	1.1263999938964844
+			"milliseconds":	1.9804160594940186
 		}, {
 			"name":	"Planar: objects",
-			"milliseconds":	0.2099200040102005
+			"milliseconds":	0.2170879989862442
 		}, {
 			"name":	"Planar: clouds",
-			"milliseconds":	0.15564799308776855
+			"milliseconds":	0.16281600296497345
 		}, {
 			"name":	"Planar: mips",
-			"milliseconds":	0.033792000263929367
+			"milliseconds":	0.034816000610589981
 		}, {
 			"name":	"Water SSR",
 			"milliseconds":	-1
@@ -50,7 +50,7 @@
 			"milliseconds":	-1
 		}, {
 			"name":	"Water draw",
-			"milliseconds":	0.766975998878479
+			"milliseconds":	0.835583984851837
 		}, {
 			"name":	"Underwater froxel",
 			"milliseconds":	-1
@@ -62,40 +62,40 @@
 			"milliseconds":	-1
 		}, {
 			"name":	"Place near (compute)",
-			"milliseconds":	0.081919997930526733
+			"milliseconds":	0.0880640000104904
 		}, {
 			"name":	"Place mid (compute)",
-			"milliseconds":	0.0716800019145012
+			"milliseconds":	0.074752002954483032
 		}, {
 			"name":	"Place far (compute)",
-			"milliseconds":	0.34201601147651672
+			"milliseconds":	0.014336000196635723
 		}, {
 			"name":	"Grass prepass",
-			"milliseconds":	1.486847996711731
+			"milliseconds":	1.1571199893951416
 		}, {
 			"name":	"Grass colour",
-			"milliseconds":	1.9189759492874146
+			"milliseconds":	2.1114881038665771
 		}, {
 			"name":	"Grass shadow",
-			"milliseconds":	0.65433597564697266
+			"milliseconds":	0.70143997669219971
 		}, {
 			"name":	"GPU frame total",
-			"milliseconds":	27.111423492431641
+			"milliseconds":	29.309951782226562
 		}, {
 			"name":	"Interior sky: cull",
-			"milliseconds":	0.40652799606323242
+			"milliseconds":	0.41574400663375854
 		}, {
 			"name":	"Interior sky: depth maps",
-			"milliseconds":	0.15462400019168854
+			"milliseconds":	0.16281600296497345
 		}, {
 			"name":	"AO prep (resolve + mips)",
-			"milliseconds":	0.52531200647354126
+			"milliseconds":	0.300031989812851
 		}, {
 			"name":	"AO horizon march",
-			"milliseconds":	5.98425579071045
+			"milliseconds":	6.33139181137085
 		}, {
 			"name":	"AO bilateral blur",
-			"milliseconds":	1.0301439762115479
+			"milliseconds":	1.0987520217895508
 		}],
 	"grass":	{
 		"near_instances":	20905,
