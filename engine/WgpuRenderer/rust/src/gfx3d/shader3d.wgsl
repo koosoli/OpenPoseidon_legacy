@@ -401,28 +401,28 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let authored_frame = dot(in.tangent, in.tangent) > 1e-10 && dot(in.binormal, in.binormal) > 1e-10;
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);
-        var tangent_raw = dwx * duv_dy.y - dwy * duv_dx.y;
-        var bitangent_raw = dwy * duv_dx.x - dwx * duv_dy.x;
+        // Scale-invariant cotangent frame; see the matching block in gpu_driven.wgsl.
+        // The previous form multiplied the world-space and UV footprints together and
+        // tested the result against an absolute epsilon, so the frame was rejected --
+        // and the normal map silently dropped -- once a surface came close enough that
+        // both footprints were small. Crossing with the geometric normal first also
+        // makes the frame perpendicular to it by construction, which is what the
+        // orthonormalisation step used to be for.
+        var tangent_raw = cross(dwy, geometric_normal) * duv_dx.x + cross(geometric_normal, dwx) * duv_dy.x;
+        var bitangent_raw = cross(dwy, geometric_normal) * duv_dx.y + cross(geometric_normal, dwx) * duv_dy.y;
         if (authored_frame) {
-            tangent_raw = in.tangent;
-            bitangent_raw = in.binormal;
+            // An authored frame is already the right shape; only make it perpendicular.
+            let tangent_ortho = in.tangent - geometric_normal * dot(geometric_normal, in.tangent);
+            tangent_raw = tangent_ortho;
+            bitangent_raw = cross(geometric_normal, tangent_ortho) *
+                            select(-1.0, 1.0, dot(cross(geometric_normal, tangent_ortho), in.binormal) >= 0.0);
         }
-        if (dot(tangent_raw, tangent_raw) > 1e-10 && dot(bitangent_raw, bitangent_raw) > 1e-10) {
-            // Coarser model LODs can have interpolated normals that are not quite
-            // perpendicular to their UV-derived tangent.  Orthonormalise before
-            // applying Stage 1: an oblique frame otherwise amplifies the normal map
-            // into distance-dependent dark facets.  Derive the handedness from the
-            // original bitangent so mirrored UV islands keep their correct lighting.
-            let tangent_ortho = tangent_raw - geometric_normal * dot(geometric_normal, tangent_raw);
-            if (dot(tangent_ortho, tangent_ortho) > 1e-10) {
-                let tangent = normalize(tangent_ortho);
-                var handedness = 1.0;
-                if (dot(cross(geometric_normal, tangent), bitangent_raw) < 0.0) {
-                    handedness = -1.0;
-                }
-                let bitangent = normalize(cross(geometric_normal, tangent)) * handedness;
-                shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
-            }
+        let frame_scale2 = max(dot(tangent_raw, tangent_raw), dot(bitangent_raw, bitangent_raw));
+        if (frame_scale2 > 0.0) {
+            let inv_scale = inverseSqrt(frame_scale2);
+            let tangent = tangent_raw * inv_scale;
+            let bitangent = bitangent_raw * inv_scale;
+            shading_normal = normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
         }
     }
     let rgb = shade(

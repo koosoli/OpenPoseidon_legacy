@@ -423,24 +423,29 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         let normal_ts = vec3<f32>(normal_ts_xy, sqrt(max(0.0, 1.0 - dot(normal_ts_xy, normal_ts_xy))));
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);
-        let tangent_raw = dwx * duv_dy.y - dwy * duv_dx.y;
-        let bitangent_raw = dwy * duv_dx.x - dwx * duv_dy.x;
-        if (dot(tangent_raw, tangent_raw) > 1e-10 && dot(bitangent_raw, bitangent_raw) > 1e-10) {
-            // Coarser LODs interpolate normals that are not quite perpendicular to the
-            // UV-derived tangent; an oblique frame amplifies the map into distance-dependent
-            // dark facets. Orthonormalise, and take handedness from the original bitangent so
-            // mirrored UV islands keep their lighting.
-            let tangent_ortho = tangent_raw - geometric_normal * dot(geometric_normal, tangent_raw);
-            if (dot(tangent_ortho, tangent_ortho) > 1e-10) {
-                let tangent = normalize(tangent_ortho);
-                var handedness = 1.0;
-                if (dot(cross(geometric_normal, tangent), bitangent_raw) < 0.0) {
-                    handedness = -1.0;
-                }
-                let bitangent = normalize(cross(geometric_normal, tangent)) * handedness;
-                shading_normal =
-                    normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
-            }
+        // Scale-invariant cotangent frame. Building the tangent from a raw product of
+        // derivatives does not survive close range: the world-space footprint and the
+        // UV footprint both shrink as the surface approaches, so their product shrinks
+        // quadratically and any absolute epsilon eventually rejects a perfectly good
+        // frame -- the normal map visibly vanishing as you walk up to a wall.
+        //
+        // Crossing the position derivatives with the geometric normal first gives a
+        // frame that is perpendicular to it by construction (so no orthonormalisation
+        // step, and no oblique-frame facets on coarse LODs), and normalising both axes
+        // by their shared maximum makes the result depend only on the frame's shape,
+        // never on its magnitude. Handedness falls out of the construction, so mirrored
+        // UV islands still light correctly.
+        let dp_perp_y = cross(dwy, geometric_normal);
+        let dp_perp_x = cross(geometric_normal, dwx);
+        let tangent_raw = dp_perp_y * duv_dx.x + dp_perp_x * duv_dy.x;
+        let bitangent_raw = dp_perp_y * duv_dx.y + dp_perp_x * duv_dy.y;
+        let frame_scale2 = max(dot(tangent_raw, tangent_raw), dot(bitangent_raw, bitangent_raw));
+        if (frame_scale2 > 0.0) {
+            let inv_scale = inverseSqrt(frame_scale2);
+            let tangent = tangent_raw * inv_scale;
+            let bitangent = bitangent_raw * inv_scale;
+            shading_normal =
+                normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
         }
     }
     let rgb = shade(
