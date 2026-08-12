@@ -453,3 +453,16 @@ add_custom_target(FileSize
     COMMENT "Checking source file sizes (warn > 3000, error > 5000)"
     VERBATIM
 )
+
+# Simulation/renderer boundary check (ARCH-001). Simulation must reach rendering
+# only through the Engine interface, and the dedicated server must link no backend.
+# Both already hold; this is what stops them being lost one #include at a time.
+add_custom_target(ArchBoundary
+    COMMAND ${CMAKE_COMMAND} -DREPO=${CMAKE_SOURCE_DIR} -P ${CMAKE_SOURCE_DIR}/cmake/CheckSimRenderBoundary.cmake
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Checking the simulation/renderer boundary (ARCH-001)"
+    VERBATIM
+)
+# Part of the normal lint run: it is a file glob and a string search, so it costs
+# nothing, and a boundary check nobody runs protects nothing.
+add_dependencies(Lint ArchBoundary)
