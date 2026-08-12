@@ -1934,17 +1934,44 @@ bool Landscape::LoadOprwModern(const char* path)
                 }
                 else if (stage.index >= 4 && (stage.index & 1) == 0 && lower.find("_co.paa") != std::string::npos)
                 {
+                    // The surface's normal is the odd stage immediately before its
+                    // colour -- that pairing is the whole convention, so it is read
+                    // by position rather than by matching names, which differ
+                    // between generations (`_nopx` here, `_nohq` elsewhere).
+                    const auto normalFor = [&](int colourStage) -> RStringB
+                    {
+                        for (const auto& candidate : material.stages)
+                        {
+                            if (candidate.index != colourStage - 1)
+                                continue;
+                            const std::string& normalTexture = candidate.texture.raw;
+                            if (normalTexture.empty() ||
+                                Poseidon::Asset::Material::RvTextureRef::LooksProcedural(normalTexture))
+                                return RStringB();
+                            return RStringB(normalTexture.c_str());
+                        }
+                        return RStringB();
+                    };
                     if (authored.base.GetLength() == 0)
                     {
                         authored.base = RStringB(texture.c_str());
                         authored.baseUv = uvForStage(stage);
+                        authored.baseNormal = normalFor(stage.index);
                     }
                     else if (authored.overlayCount < authored.overlays.size())
                     {
                         const size_t overlay = authored.overlayCount++;
                         authored.overlays[overlay] = RStringB(texture.c_str());
                         authored.overlayUvs[overlay] = uvForStage(stage);
+                        authored.overlayNormals[overlay] = normalFor(stage.index);
                     }
+                }
+                else if (stage.index > 12 && lower.find("_no.paa") != std::string::npos)
+                {
+                    // Arma 3's whole-tile terrain normal (Stage14). It sits past the
+                    // surface stack, shares the satellite's frame, and Arma 2 has no
+                    // equivalent -- so it is captured, not required.
+                    authored.tileNormal = RStringB(texture.c_str());
                 }
             }
 
@@ -1976,6 +2003,24 @@ bool Landscape::LoadOprwModern(const char* path)
         }
         LOG_DEBUG(World, "LoadOprw25 {}: {} of {} terrain materials resolved to a satellite texture", path, resolved,
                   world.materials.size());
+        // Authored coverage, per field, so a generation that stops supplying one is
+        // visible as a number rather than as a look nobody can attribute.
+        int withSatellite = 0, withMask = 0, withBaseNormal = 0, withOverlayNormals = 0, withTileNormal = 0;
+        for (int m = 0; m < _a3TerrainMaterials.Size(); ++m)
+        {
+            const A3TerrainMaterial& authored = _a3TerrainMaterials[m];
+            withSatellite += authored.satellite.GetLength() != 0;
+            withMask += authored.mask.GetLength() != 0;
+            withBaseNormal += authored.baseNormal.GetLength() != 0;
+            withTileNormal += authored.tileNormal.GetLength() != 0;
+            for (unsigned char o = 0; o < authored.overlayCount; ++o)
+                withOverlayNormals += authored.overlayNormals[o].GetLength() != 0;
+        }
+        LOG_INFO(World,
+                 "Terrain materials {}: {} satellite, {} mask, {} base normal, {} overlay normals, {} tile normal, "
+                 "of {}",
+                 path, withSatellite, withMask, withBaseNormal, withOverlayNormals, withTileNormal,
+                 _a3TerrainMaterials.Size());
     }
     ProgressRefresh();
 

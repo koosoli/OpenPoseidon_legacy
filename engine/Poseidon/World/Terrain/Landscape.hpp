@@ -392,14 +392,26 @@ struct A3TerrainUv
     bool worldPos = false;
 };
 
-// Lossless authored terrain description used by the WGPU terrain path for an
-// OPRW25 material. The legacy path continues to use Landscape::_texture.
+// Lossless authored terrain description used by the WGPU terrain path for a
+// later-generation material. The legacy path continues to use Landscape::_texture.
+//
+// Both generations author terrain normals and neither had anywhere to put them:
+// the surface stack is `_nopx`/`_co` pairs on the odd/even stages, so every
+// colour here has a normal beside it in the source. Arma 3 additionally carries
+// one normal for the whole tile at Stage14 (`n_<x>_<y>_no.paa`), which Arma 2
+// does not. Preserved whether or not the renderer consumes them yet.
 struct A3TerrainMaterial
 {
     RStringB satellite;
     RStringB mask;
     RStringB base;
     std::array<RStringB, 4> overlays;
+    // Parallel to `base` and `overlays`: the `_nopx` map authored on the odd stage
+    // immediately before each colour. Empty where the source names none.
+    RStringB baseNormal;
+    std::array<RStringB, 4> overlayNormals;
+    // The whole tile's normal, sharing the satellite's frame. Arma 3 Stage14.
+    RStringB tileNormal;
     A3TerrainUv satelliteUv;
     A3TerrainUv maskUv;
     A3TerrainUv baseUv;
