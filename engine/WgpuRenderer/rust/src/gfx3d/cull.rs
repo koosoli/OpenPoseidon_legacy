@@ -117,6 +117,11 @@ pub struct SectionMaterialGpu {
     // Bindless slot of the section's specular map (SMDI or a family equivalent), 0 = none.
     // Occupies what was the struct's tail padding, so the layout is unchanged in size.
     pub specular_slot: u32,
+    // Bindless slot of the section's tangent-space normal map (RVMAT Stage1), 0 = none.
+    // This one does grow the struct: WGSL rounds the stride up to the vec4 alignment, so the
+    // padding is explicit on both sides rather than left to each language's own rules.
+    pub normal_slot: u32,
+    pub _pad_normal: [u32; 3],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

@@ -5625,6 +5625,8 @@ impl Gfx3d {
                 sampler: m.sampler,
                 alpha_ref: m.alpha_ref,
                 specular_slot: textures.texture_slot(m.specular_texture_id),
+                normal_slot: textures.texture_slot(m.normal_texture_id),
+                _pad_normal: [0; 3],
             })
             .collect();
         let model =

@@ -2835,3 +2835,65 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/MAT-037-shapeadapter-section-split-assumed-one-stride-20260812.md
+
+  - id: MAT-038
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Normal maps in the GPU-driven retained path
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 01dfa6d
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-033, MAT-037]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: Poseidon::EngineWgpu::ResolveMaterialNormalMap
+      - file: engine/WgpuRenderer/rust/src/gfx3d/gpu_driven.wgsl
+        symbol: fs_gpu
+    test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/MAT-038-retained-path-had-no-normal-maps-20260812.md
+    capability_claims:
+      - capability: RETAINED_PATH_NORMAL_MAPS
+        status: COMPLETE
+        denominator: >-
+          The retained GPU-driven material had no normal slot at all, so with
+          GPU-driven on by default essentially no world section was normal-mapped
+          on any generation. Adding it: 358 of 362 Takistan materials and 299 of
+          334 Stratis materials bind a normal map, every remaining one because it
+          declares no NormalMap slot -- no upload failures, no procedural misses.
+          Decode and tangent recovery are the per-draw path's verbatim (NOHQ X=A,
+          Y=G, Z reconstructed; frame from UV0/world-position derivatives), so no
+          vertex-format change was needed.
+    known_failures:
+      - >-
+        Terrain normals are not covered. Arma 3 authors a per-tile terrain normal
+        at Stage14 and Arma 2 per-surface _nopx maps at odd stages; neither
+        reaches A3TerrainMaterial or the terrain shader.
+      - >-
+        The WgrModelMaterial ABI grows 88 -> 96 bytes. Both size assertions were
+        updated; they are what caught the change at compile time.
+    fallback: >-
+      A material with no NormalMap slot, an unloadable path or a failed upload
+      binds slot 0 and the shader tests for it, keeping the geometric normal --
+      slot 0 is the white fallback and would otherwise decode to a normal leaning
+      hard in +X. OFP surfaces come from CfgMaterials with no RVMAT and resolve to
+      0, so that path is untouched.
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-038-retained-path-had-no-normal-maps-20260812.md

@@ -55,6 +55,12 @@ struct SectionMaterial {
     // tested rather than sampled blind: white would read as maximum specular everywhere,
     // which is the blowout the flat constant was scaled down to avoid.
     specular_slot: u32,
+    // RVMAT Stage1, 0 = none. Same reason as specular_slot: slot 0 is the white fallback,
+    // which would decode to a normal leaning hard in +X and light every surface wrongly.
+    normal_slot: u32,
+    _pad_normal0: u32,
+    _pad_normal1: u32,
+    _pad_normal2: u32,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -405,8 +411,40 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     if (frame.skyvisc.x > 0.5 && frame.skyvisc.w > 0.5) {
         return vec4<f32>(vec3<f32>(baked_sky_visibility(in.model_id, in.model_pos)), out_a);
     }
+    // Stage1 normal mapping. The retained mesh carries no authored tangent stream, so the
+    // frame comes from the interpolated UV0 / world-position derivatives -- the same
+    // recovery the per-draw path uses, and the reason this needs no vertex-format change.
+    // Decode matches it too: NOHQ stores X in A and Y in G, Z is reconstructed.
+    let geometric_normal = normalize(in.normal);
+    var shading_normal = geometric_normal;
+    if (sm.normal_slot != 0u) {
+        let normal_sample = textureSample(textures[sm.normal_slot], samplers[sm.sampler_idx], in.uv);
+        let normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
+        let normal_ts = vec3<f32>(normal_ts_xy, sqrt(max(0.0, 1.0 - dot(normal_ts_xy, normal_ts_xy))));
+        let duv_dx = dpdx(in.uv);
+        let duv_dy = dpdy(in.uv);
+        let tangent_raw = dwx * duv_dy.y - dwy * duv_dx.y;
+        let bitangent_raw = dwy * duv_dx.x - dwx * duv_dy.x;
+        if (dot(tangent_raw, tangent_raw) > 1e-10 && dot(bitangent_raw, bitangent_raw) > 1e-10) {
+            // Coarser LODs interpolate normals that are not quite perpendicular to the
+            // UV-derived tangent; an oblique frame amplifies the map into distance-dependent
+            // dark facets. Orthonormalise, and take handedness from the original bitangent so
+            // mirrored UV islands keep their lighting.
+            let tangent_ortho = tangent_raw - geometric_normal * dot(geometric_normal, tangent_raw);
+            if (dot(tangent_ortho, tangent_ortho) > 1e-10) {
+                let tangent = normalize(tangent_ortho);
+                var handedness = 1.0;
+                if (dot(cross(geometric_normal, tangent), bitangent_raw) < 0.0) {
+                    handedness = -1.0;
+                }
+                let bitangent = normalize(cross(geometric_normal, tangent)) * handedness;
+                shading_normal =
+                    normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
+            }
+        }
+    }
     let rgb = shade(
-        base.rgb, m, in.normal, in.world_pos, in.fog, dwx, dwy, linear,
+        base.rgb, m, shading_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // Per-model baked sky visibility (LIT-020 Stage 2), 1 when the model has no volume.
         baked_sky_visibility(in.model_id, in.model_pos),
         baked_sky_direction(in.model_id, in.model_pos,

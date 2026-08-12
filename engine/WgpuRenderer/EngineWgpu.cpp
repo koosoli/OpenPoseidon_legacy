@@ -2794,6 +2794,58 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
+// The tangent-space normal map a section's RVMAT names, or 0 when it names none.
+//
+// Third of the same shape, and the same asymmetry: DrawSectionTL has bound Stage1
+// since the normal-map work landed, while ClassifyGpuSection never did. GPU-driven
+// is on by default and the retained set owns essentially every world section, so
+// until now almost nothing in a rendered world was normal-mapped -- on any
+// generation. The Arma 2 corpus made it obvious because its surfaces are rougher,
+// but Stratis was equally flat.
+//
+// A procedural Stage1 is a genuine constant (`#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)`
+// is a flat normal) and generates like any other, so it binds here too.
+uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return 0;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 0;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return 0; // ResolveMaterialBaseColour fills the cache first
+
+    const auto report = [&](uint64_t handle, const char* why, const std::string& detail)
+    {
+        static std::unordered_set<std::string> logged;
+        if (logged.insert(materialPath).second)
+            LOG_INFO(Graphics, "Wgpu material: normal map {} for {} family={} ({}{}{})",
+                     handle ? "bound" : "NONE", materialPath, cached->second.shaderFamily, why,
+                     detail.empty() ? "" : " ", detail);
+        return handle;
+    };
+
+    const auto* normal = cached->second.Find(Asset::Material::MaterialSlot::NormalMap);
+    if (!normal)
+        return report(0, "no NormalMap slot", "");
+    std::string loadName = normal->texture.path.canonical();
+    if (normal->texture.isProcedural)
+    {
+        if (!render::procedural::Parse(normal->texture.raw.c_str()).generated)
+            return report(0, "procedural lookup", normal->texture.raw);
+        loadName = normal->texture.raw;
+    }
+    else if (loadName.empty())
+    {
+        return report(0, "empty path", "");
+    }
+    Ref<Texture> texture = _wbank->Load(loadName.c_str());
+    auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
+    const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+    return report(handle, handle ? "" : "upload failed", loadName);
+}
+
 // The albedo a section's RVMAT names, or 0 when it names none.
 //
 // An Arma 3 structure commonly carries a placeholder face texture (`*_mlod_co`)
@@ -3100,6 +3152,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // stands in. Ordering matters: ResolveMaterialBaseColour above is what
             // populates the translation cache both of these read.
             mat.specular_texture_id = ResolveMaterialSpecularMap(s->GetSection(i));
+            // Stage1. Same ordering dependency: the translation cache is populated
+            // by ResolveMaterialBaseColour above.
+            mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i));
             if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
                 specScale < 1.0f)
             {

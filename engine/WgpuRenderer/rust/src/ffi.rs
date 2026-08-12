@@ -247,6 +247,9 @@ pub struct WgrModelMaterial {
     // equivalents on the NormalMap* families), 0 when the material names none. Its G channel
     // scales `specular`, which is the constant that map was authored to modulate.
     pub specular_texture_id: u64,
+    // The section's tangent-space normal map (RVMAT Stage1), 0 when the material names none.
+    // Decoded the same way the per-draw path decodes it: X from A, Y from G, Z reconstructed.
+    pub normal_texture_id: u64,
     pub sampler: u32,
     pub alpha_ref: f32,
 }
@@ -1238,7 +1241,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 60);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 88);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 96);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);

@@ -332,6 +332,9 @@ struct WgrModelMaterial
      * equivalents on the NormalMap* families), 0 when the material names none. Its G channel
      * scales `specular`, which is the constant that map was authored to modulate. */
     WgrTexture specular_texture_id;
+    /* The section's tangent-space normal map (RVMAT Stage1), 0 when the material names none.
+     * Decoded the same way the per-draw path decodes it: X from A, Y from G, Z reconstructed. */
+    WgrTexture normal_texture_id;
     uint32_t sampler;
     float alpha_ref;
 };
@@ -383,7 +386,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 88, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 96, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

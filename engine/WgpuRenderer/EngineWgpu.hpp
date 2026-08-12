@@ -483,6 +483,10 @@ class EngineWgpu : public EngineDummy
     // A section's per-texel specular map (RVMAT SpecularDetail) when its RVMAT names
     // a loadable one, or 0.
     uint64_t ResolveMaterialSpecularMap(const ShapeSection& section);
+    // A section's tangent-space normal map (RVMAT Stage1) when its RVMAT names a
+    // loadable one, or 0. Same reason as the two above: the per-draw path bound it
+    // and the retained set, which owns nearly every world section, did not.
+    uint64_t ResolveMaterialNormalMap(const ShapeSection& section);
     // Fraction of a translated RVMAT's flat specular constant to apply, standing in
     // for a per-texel specular map that is not bound. 1.0 for anything that is not a
     // translated RVMAT, and 1.0 once `specularMap` is non-zero -- the map is what the
