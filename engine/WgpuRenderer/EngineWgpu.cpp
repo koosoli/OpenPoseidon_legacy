@@ -2807,6 +2807,11 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
 // is a flat normal) and generates like any other, so it binds here too.
 uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
 {
+    // Honoured here rather than in the shader so the toggle needs no per-frame
+    // uniform: SetMaterialDebugSettings drops the retained model cache when it
+    // changes, and each shape re-registers with this answer.
+    if (_materialDebug.disableNormalMap)
+        return 0;
     if (!section.surfMat)
         return 0;
     const char* materialPath = section.surfMat->GetName().Data();

@@ -4005,6 +4005,11 @@ void DrawMaterialDebugTab()
     ImGui::TextDisabled("Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
     ImGui::Separator();
     changed |= ImGui::Checkbox("Disable Normal Map", &settings.disableNormalMap);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Applies to the retained GPU-driven set as well as the per-draw path, which is\n"
+                          "what makes it an A/B of the whole world rather than of a handful of sections.\n"
+                          "Toggling drops the retained model cache, so shapes re-register as you look at\n"
+                          "them; expect a brief hitch, and nothing else.");
     changed |= ImGui::Checkbox("Legacy OFP/CWA enhancement", &settings.legacyEnhancement);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Original CWA assets have no RVMAT, so they normally render as they did in 2001.\n"

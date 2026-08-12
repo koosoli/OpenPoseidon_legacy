@@ -225,7 +225,19 @@ class EngineWgpu : public EngineDummy
     }
     bool SupportsMaterialDebug() const override { return _renderer != nullptr; }
     MaterialDebugSettings GetMaterialDebugSettings() const override { return _materialDebug; }
-    void SetMaterialDebugSettings(const MaterialDebugSettings& s) override { _materialDebug = s; }
+    void SetMaterialDebugSettings(const MaterialDebugSettings& s) override
+    {
+        // The retained set resolves its textures once, when a shape is first
+        // registered, so a toggle that only changes shading state would never
+        // reach it -- and the retained set is what draws essentially every world
+        // section, which is why "Disable Normal Map" appeared to do nothing.
+        // Dropping the cache re-registers each shape on next sight with the new
+        // answer. It is a developer A/B, so rebuilding is the right cost.
+        const bool rebuildRetained = s.disableNormalMap != _materialDebug.disableNormalMap;
+        _materialDebug = s;
+        if (rebuildRetained)
+            _gpuModels.clear();
+    }
     MaterialDebugInfo GetMaterialDebugInfo() const override { return _materialDebugInfo; }
     // Interior sky visibility (docs/interior-sky-visibility-plan.md) — same pattern: stored
     // here, folded into the consolidated render-params block by PushRenderParams.
