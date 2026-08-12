@@ -166,16 +166,59 @@ fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
 // low-frequency tile variation; the mask controls the high-frequency surfaces.
 // Legacy terrain descriptors have overlay_count == 0 and take the original
 // single-texture route exactly.
+// Colour plus the tangent-space normal the authored surfaces carry. `normal_ts` is
+// (0,0,1) -- flat -- for a legacy descriptor or when the material names no normal, so a
+// caller can blend it unconditionally.
+struct AuthoredCell {
+    rgb: vec3<f32>,
+    normal_ts: vec3<f32>,
+};
+
+// Tangent-space view direction for the terrain's world-aligned frame (T = +X, B = +Z,
+// N = up). Terrain surface UVs are world-aligned by construction, so this needs no
+// per-vertex tangent stream. `world_pos` is camera-relative, so the camera is at the
+// origin and the view vector is simply -world_pos.
+fn terrain_view_ts(world_pos: vec3<f32>) -> vec3<f32> {
+    let v = normalize(-world_pos);
+    return vec3<f32>(v.x, v.z, max(abs(v.y), 1e-3));
+}
+
+// One authored surface: its colour, its tangent-space normal, and the parallax offset its
+// own height asks for. `_nopx` packs all three -- Y in green, X in alpha, and the PX height
+// in red, which `_nohq` leaves at zero (MAT-040). So the height costs no extra fetch beyond
+// the normal, and the colour is then sampled at the displaced coordinate.
+fn authored_surface(colour_tex: u32, normal_tex: u32, uv: vec2<f32>,
+                    dwx: vec2<f32>, dwy: vec2<f32>, view_ts: vec3<f32>,
+                    parallax: f32, out_normal: ptr<function, vec3<f32>>) -> vec3<f32> {
+    var uv_shifted = uv;
+    if (normal_tex != 0u) {
+        let n_sample = textureSampleGrad(ground[normal_tex], ground_samp, uv, dwx, dwy);
+        // Single-step parallax offset. A full occlusion march would multiply this
+        // function's fetches by its step count on a surface that is already four-way
+        // blended; one step recovers most of the depth cue at one fetch, and the fetch
+        // was needed for the normal regardless.
+        if (parallax > 0.0) {
+            uv_shifted = uv + (n_sample.r - 0.5) * parallax * view_ts.xy / view_ts.z;
+        }
+        let n_xy = vec2<f32>(n_sample.a, n_sample.g) * 2.0 - vec2<f32>(1.0);
+        *out_normal = vec3<f32>(n_xy, sqrt(max(0.0, 1.0 - dot(n_xy, n_xy))));
+    } else {
+        *out_normal = vec3<f32>(0.0, 0.0, 1.0);
+    }
+    return textureSampleGrad(ground[colour_tex], ground_samp, uv_shifted, dwx, dwy).rgb;
+}
+
 fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         ddx: vec2<f32>, ddy: vec2<f32>, world_pos: vec3<f32>,
-                        world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> vec3<f32> {
+                        world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     let material = terrain_materials[entry & CELL_LAYER_MASK];
     let authored_weight = clamp(a3_surface_blend, 0.0, 0.35);
     // The normal renderer must remain byte-for-byte on the established cell
     // path while the authored TerrainSNX composition is evaluated and compared.
     // This also avoids applying an unavailable texgen to legacy descriptors.
     if (material.overlay_count == 0u || authored_weight == 0.0) {
-        return sample_cell(material.legacy, cell, tile_uv, ddx, ddy);
+        return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
+                            vec3<f32>(0.0, 0.0, 1.0));
     }
     // RVMAT's worldPos is terrain-local X/Z/Y, whereas the renderer carries
     // world coordinates as X/Y/Z. Preserve height in the third component but
@@ -197,12 +240,24 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // Stage4 is the base, stages 6/8/10/12 map to mask RGBA respectively.
     // The unpainted mask remainder belongs to the base layer.
     let mask_weight = min(dot(mask, vec4<f32>(1.0)), 1.0);
-    var surface = textureSampleGrad(ground[material.base], ground_samp, base_uv, base_dwx, base_dwy).rgb * (1.0 - mask_weight);
+    let view_ts = terrain_view_ts(world_pos);
+    // Parallax fades out with the detail it belongs to and is off entirely beyond it:
+    // displacing a surface that has already faded into the satellite moves nothing.
+    let parallax = terrain_parallax * (1.0 - smoothstep(10.0, 45.0, length(world_pos)));
+    var base_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+    var surface = authored_surface(material.base, material.base_normal, base_uv,
+                                   base_dwx, base_dwy, view_ts, parallax,
+                                   &base_normal_ts) * (1.0 - mask_weight);
+    var normal_ts = base_normal_ts * (1.0 - mask_weight);
     for (var i = 0u; i < min(material.overlay_count, 4u); i = i + 1u) {
         let overlay_uv = terrain_uv(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_pos, tile_uv);
         let overlay_dwx = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwx, ddx);
         let overlay_dwy = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwy, ddy);
-        surface += textureSampleGrad(ground[material.overlays[i]], ground_samp, overlay_uv, overlay_dwx, overlay_dwy).rgb * mask[i];
+        var overlay_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        surface += authored_surface(material.overlays[i], material.overlay_normals[i], overlay_uv,
+                                    overlay_dwx, overlay_dwy, view_ts, parallax,
+                                    &overlay_normal_ts) * mask[i];
+        normal_ts += overlay_normal_ts * mask[i];
     }
     // Preserve the satellite as the low-frequency colour authority. The LCA
     // stack is close-range detail, not a second satellite: leaving it visible
@@ -218,7 +273,11 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
                                       satellite_uv, satellite_dwx, satellite_dwy).rgb;
     let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(world_pos));
-    return mix(satellite, surface, authored_weight * detail_fade);
+    let blend = authored_weight * detail_fade;
+    // The normal follows the same fade as the colour it belongs to: a surface that has
+    // faded back to the satellite must not keep perturbing the lighting.
+    return AuthoredCell(mix(satellite, surface, blend),
+                        normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, blend)));
 }
 
 struct VsOut {
@@ -281,6 +340,10 @@ override blend_width: f32 = 0.15;
 // TerrainSNX's authored LCA base/overlay detail contribution. Kept opt-in while
 // it is verified against the legacy cell fallback; it is capped in
 // sample_authored_cell so the satellite base remains continuous.
+// Parallax depth for the authored terrain surfaces, in UV units of the surface's own
+// TexGen. Height comes from `_nopx` red (MAT-040); `_nohq` holds that channel at zero, so
+// a surface without one simply does not displace. Tunable via WGR_TERRAIN_PARALLAX.
+override terrain_parallax: f32 = 0.02;
 override a3_surface_blend: f32 = 0.0;
 // HDR path (docs/hdr-pipeline-plan.md): 1 = decode ground albedo + sun/light/fog
 // colours from sRGB to linear and drop the [0,1] radiance clamp. 0 = gamma-naive.
@@ -336,10 +399,15 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let w01 = (1.0 - fx) * fy;
     let w11 = fx * fy;
     let absolute_world_pos = in.world_pos + frame.cam_pos.xyz;
-    var rgb = w00 * sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
-            + w10 * sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
-            + w01 * sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy)
-            + w11 * sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    var rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
+    // The authored surface normal, blended across the same four cells as the colour so it
+    // stays continuous over a cell boundary.
+    let authored_normal_ts = w00 * c00.normal_ts + w10 * c10.normal_ts
+                           + w01 * c01.normal_ts + w11 * c11.normal_ts;
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
@@ -352,7 +420,30 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     // Per-pixel normal at a fixed heightmap step (independent of patch LOD/morph).
-    let n = sample_normal(in.world_xz, tp.terrain_grid);
+    let geometric_n = sample_normal(in.world_xz, tp.terrain_grid);
+    // Apply the authored surfaces' own normal on top of the heightfield's. The terrain
+    // frame is world-aligned by construction -- T = +X, B = +Z -- so this needs no tangent
+    // stream, and a flat (0,0,1) from an unauthored cell leaves the geometric normal
+    // exactly as it was.
+    var n = geometric_n;
+    // Only build a frame when there is actually a perturbation to apply. Guarding on the
+    // tangent components rather than doing the maths and multiplying by zero is not an
+    // optimisation: cross((0,0,1), n) is degenerate for a slope whose normal lies along Z,
+    // normalize() of that is NaN, and NaN * 0 is still NaN -- so the unauthored path was
+    // not the no-op it looked like.
+    if (abs(authored_normal_ts.x) + abs(authored_normal_ts.y) > 1e-5) {
+        // Pick the reference axis furthest from the normal so the cross stays well
+        // conditioned on any slope.
+        var reference = vec3<f32>(0.0, 0.0, 1.0);
+        if (abs(geometric_n.z) > 0.9) {
+            reference = vec3<f32>(1.0, 0.0, 0.0);
+        }
+        let t_axis = normalize(cross(reference, geometric_n));
+        let b_axis = cross(geometric_n, t_axis);
+        n = normalize(t_axis * authored_normal_ts.x
+                    + b_axis * authored_normal_ts.y
+                    + geometric_n * max(authored_normal_ts.z, 1e-3));
+    }
 
     // Combined sun shadow: CSM (objects + near contact) and the long-range
     // heightfield mask (terrain-on-terrain) compose by max() — whichever occludes

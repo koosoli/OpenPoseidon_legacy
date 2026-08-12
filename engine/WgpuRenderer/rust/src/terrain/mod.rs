@@ -653,6 +653,13 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.0);
+        // MAT-040: authored-surface parallax depth, in the surface's own UV units. Height
+        // is `_nopx` red, which only terrain surfaces carry, so this is inert on any
+        // material whose normals are `_nohq`.
+        let terrain_parallax = std::env::var("WGR_TERRAIN_PARALLAX")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.02);
         let vs_constants = [("skirt_k", skirt_k)];
         // HDR path: the color target is Rgba16Float only when HDR is on (see gfx3d),
         // so it signals linear shading (albedo/sun/fog decode + no clamp).
@@ -664,6 +671,7 @@ impl Terrain {
         let fs_constants = [
             ("blend_width", blend_width),
             ("a3_surface_blend", a3_surface_blend),
+            ("terrain_parallax", terrain_parallax),
             ("linear", linear),
         ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
