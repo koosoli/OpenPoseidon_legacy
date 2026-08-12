@@ -80,3 +80,43 @@ the same way this record disproved the emitter: stub the call and re-capture.
 - Stratis night, wide airbase framing: no orbs, correct light pools.
 - Stratis night, 35 m framing: unchanged (still the reported orb) — stated
   plainly because the fix does not address it.
+
+---
+
+# Amendment — two more hypotheses killed, and the reproduction is suspect
+
+Continued after the owner reported the orb still present on the Arma 3 map.
+
+**Not the light flare either.** `SceneDraw.cpp`'s `DrawFlare` (drawn for any light
+whose `FlareIntensity` is non-zero, multiplied by `GetAccomodateEye()` and
+composited additively with `NoZBuf`) was the standing lead and looked strong for a
+night artefact. Stubbed behind a scratch env gate and re-captured at the same
+framing: **pixel-identical, the orb is untouched.** So it is neither the emitter
+mesh (proved earlier by zeroing all direct-path emissive) nor the flare sprite.
+
+**And the reproduction itself is now in doubt**, which matters more than either
+result. Two further captures at the same framing:
+
+- **In DAYLIGHT (hour 12) the orb is still there**, the same size and place. So it
+  is not night lighting, not eye accommodation, and not bloom-on-an-emitter.
+- **From ~140 m the airbase renders cleanly** — no orb at all, and the
+  `lamphalogen_f` post is visible as an ordinary thin pole.
+
+A lamp lens is a few tens of centimetres; it cannot fill the frame at 36 m. The
+far capture shows large pale concrete structures (a fuel tank, hangar aprons)
+around that spot, and a bright surface a few metres from the camera blowing out
+under auto-exposure explains a day-and-night, distance-dependent white disc
+exactly.
+
+**Conclusion: the framing used here — camera (1707, 5044, 14) looking at object
+76383 at (1677.4, 11.5, 5024.7) — is very probably NOT reproducing the owner's
+bug.** Chasing it further without a known-good reproduction is guesswork, and two
+sound ablations have already been spent on it.
+
+**What is needed next is the owner's own viewpoint**: a screenshot, or the
+free-fly coordinates from the Dev Tools Game tab (which has a copy button), taken
+where he actually sees the orbs. With that, the same ablation method settles it in
+one build. The remaining candidates, in order: a light-volume cone mesh from the
+lamp model drawn additively; the local point/spot contribution in `lights_contrib`
+at very close range; or auto-exposure/bloom on an ordinary bright surface, which
+is not a lamp bug at all.

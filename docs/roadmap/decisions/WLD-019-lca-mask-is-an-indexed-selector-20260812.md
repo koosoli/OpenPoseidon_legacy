@@ -237,3 +237,38 @@ So the satellite is now the colour authority at every range and the decoded stac
 enters as a gain around mid-grey (`×2`, keeping a ~0.5-average detail neutral).
 The distance fade fades that gain to 1.0 rather than fading the colour back to
 the satellite, so the long-range result the owner accepted is unchanged.
+
+---
+
+# Amendment 3 — the near-ground complaint, and what the `tex` TexGen actually means
+
+The owner played the build and reported the near ground "not getting more detailed
+as I get closer, almost like it remains a far LOD". Three things came out of it.
+
+**The parallax offset was destroying it.** `terrain_view_ts` floored the
+tangent-space Z at 1e-3, and the single-step offset scales with `xy/z`. At a
+grazing view — standing and looking out along the ground, which is most of the
+time — that multiplies the offset by up to a thousand and samples the surface at
+essentially random coordinates. It was LATENT until the detail fade started
+measuring camera distance correctly: before that `parallax` was zero everywhere,
+so the blowup never ran, and fixing the fade switched it on. Now floored at 0.3
+and the offset is clamped to the parallax depth itself.
+
+**The `tex` UV is per LAND cell, measured.** The rvmats scale the surface TexGen
+by 6 (Stratis) or 10 (Takistan), and it was not obvious whether that multiplies a
+per-land-cell or a per-terrain-cell coordinate — 50 m vs 6.25 m on Takistan, an
+8x difference in tiling. Tested directly with a temporary scale override:
+
+- 1x (land cell, ~5 m repeat): individual pebbles and stones resolve.
+- 4x and 8x: fine uniform noise, no discernible structure, flatter than legacy.
+
+So the existing per-land-cell reading is correct and the override was removed
+again.
+
+**And the authored near ground is genuinely sharper than the legacy path** — a
+steep close-up A/B at 2 m shows pebbles, small stones and grass flecks where the
+legacy cell texture is a soft low-frequency blur. What remains, and what most
+likely drove the report, is that a 5 m repeat with no per-instance variation reads
+as wallpaper: high-frequency content that does not change as you approach. Nothing
+here is wrong; breaking that repeat is a look question and costs fetches, so it is
+left for the owner to judge against the frame budget rather than guessed at.
