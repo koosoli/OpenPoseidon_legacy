@@ -116,3 +116,54 @@ cannot be uniformly distributed per channel.
 The satellite-frame hypothesis is separately eliminated: forcing the satellite
 through the legacy cell frame tiles it into a repeating grid across the terrain,
 so its own worldPos TexGen is correct and is not the fault.
+
+---
+
+# Amendment 2 — the LCA mask is not a weight field
+
+The histogram the previous amendment called for, run on a shipped mask from each
+generation:
+
+```
+A3  m_003_000_lca  1024x1024
+  R  distinct=2    0 (664,699)  255 (383,877)
+  G  distinct=2    0 (954,693)  255 (93,883)
+  B  distinct=3    0 (792,401)  255 (255,283)  8 (892)
+  A  distinct=2  255 (948,809)  128 (99,767)     <- min is 128, never 0
+  R+G+B+A ~= 255 in 28.6% of texels
+
+OA  m_011_010_lca  512x512
+  R  distinct=4    0 (252,011)  255 (8,379)  8 (1,517)  170 (237)
+  G  distinct=4    0 (252,662)  255 (8,858)  4 (387)     85 (237)
+  B  distinct=4  255 (242,820)    0 (18,545) 8 (542)      3 (237)
+  A  distinct=1  255 everywhere
+  R+G+B+A ~= 255 in 0.7% of texels
+```
+
+Two distinct values per channel. Not three, not a ramp — **0 and 255**, with a
+few hundred transition texels at the seams. A blend weight cannot look like this.
+These channels are *flags*, and the mask is an indexed surface selector, not
+fractional coverage.
+
+The alphas settle it. A3's never goes below 128 and takes exactly two values;
+OA's is constant 255. Neither is a coverage channel. A3's two-state alpha is
+exactly the shape of an extra selector bit — the "encoding tricks" BI describe
+for taking one segment from four surfaces to six.
+
+And the sums say the channels are not mutually exclusive: R+G+B+A totals ~255 in
+28.6% of A3 texels and 0.7% of OA's, so multiple channels sit at 255 over the
+same texel. The current shader reads those as several simultaneous weights,
+renormalises them, and *averages the surfaces together* — which is precisely the
+measured symptom, a washed-out ground with structured banding along the mask's
+hard binary edges rather than noise.
+
+So the composition is not mistuned; it is decoding the wrong thing. The blend
+weights, the mask-weight fix earlier today, and the per-layer TexGens are all
+downstream of a mask that never carried weights to begin with.
+
+What this does NOT yet establish is the decode: which bit pattern selects which
+of the six surfaces, and whether any blending between them is intended at all
+(hard binary edges suggest little or none, with the satellite carrying the
+low-frequency variation). That needs the pattern correlated against the layer
+names the tile's own filename lists — `p_003-000_l02_l04_n_n_n` names its layers
+in order, which is the key to the mapping.
