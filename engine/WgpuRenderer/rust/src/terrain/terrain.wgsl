@@ -333,14 +333,30 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     }
     surface = surface / bound_weight;
     normal_ts = normal_ts / bound_weight;
-    // Preserve the satellite as the low-frequency colour authority. The LCA
-    // stack is close-range detail, not a second satellite: leaving it visible
-    // at long range exposes its per-material colour blocks. Fade that detail
-    // from 25 to 120 metres, exactly where the continuous satellite texture is
-    // the useful anti-tiling signal. Zero remains the exact legacy fallback.
-    // The override is no longer capped at 0.35: that cap was a guard rail around
-    // a mask read as weights, and with the selector decoded the composition can
-    // finally be judged at the strength it was authored for.
+    // The satellite is the colour authority at EVERY range, and the surface stack
+    // MODULATES it -- it does not replace it.
+    //
+    // Replacing it is what made close range worse than the legacy path even with
+    // the mask decoded correctly (owner-reported, and visible as flat pale ground
+    // that has lost the satellite's local colour): a surface's `_co` is a
+    // high-frequency detail image with an essentially uniform average, so
+    // substituting it for the satellite throws away every metre-scale colour cue
+    // the terrain has and keeps only the grain.
+    //
+    // Real Virtuality composites the other way round, and three independent things
+    // in the corpus say so. Arma 1 carries an explicit per-surface `_mco` MACRO
+    // colour beside every `_nohq`/`_co` (measured: 9,598 of 9,598 stage groups are
+    // exactly that triple) -- a low-frequency colour for the detail to multiply.
+    // Arma 2 and 3 drop `_mco` and gain the satellite, which is the same role at
+    // world scale. And this renderer already carries the convention for OFP's own
+    // detail layer a few lines below: `rgb *= 2.0 * detail.a`.
+    //
+    // So the surface enters as a gain around mid-grey, x2 to keep a ~0.5-average
+    // detail neutral, and the distance fade now fades that gain to 1.0 rather than
+    // fading the colour back to the satellite. Zero remains the exact legacy
+    // fallback. The override is no longer capped at 0.35: that cap was a guard rail
+    // around a mask read as weights.
+    //
     // Stage 0 is not a repeating close-detail texture: both families provide a
     // separate TexGen for their continuous, low-frequency satellite colour.
     // Sampling it through the old cell frame is what made a genuine layered
@@ -349,9 +365,10 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                                       satellite_uv, satellite_dwx, satellite_dwy).rgb;
     let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(view_pos));
     let blend = authored_weight * detail_fade;
-    // The normal follows the same fade as the colour it belongs to: a surface that has
-    // faded back to the satellite must not keep perturbing the lighting.
-    return AuthoredCell(mix(satellite, surface, blend),
+    let gain = mix(vec3<f32>(1.0), 2.0 * surface, blend);
+    // The normal follows the same fade as the detail it belongs to: a surface whose
+    // gain has faded to neutral must not keep perturbing the lighting.
+    return AuthoredCell(satellite * gain,
                         normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, blend)));
 }
 

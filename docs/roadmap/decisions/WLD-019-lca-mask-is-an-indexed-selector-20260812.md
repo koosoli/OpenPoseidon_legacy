@@ -163,3 +163,77 @@ mean something once the composition is on.
 `surface_count == 0` early-returns to the legacy cell path byte for byte, which is
 every OFP world — OFP terrain has no authored materials at all. The OFP preview-0
 WGPU gate and the original-training mission capture both pass unchanged.
+
+---
+
+# Amendment — Arma 1 is the third witness, and it says "four"
+
+The owner's corpus also holds the Arma 1 (Armed Assault) packages. Sahrani's
+`sara.pbo` carries the same `p_<x>-<y>_<layers>.rvmat` + per-tile `_lco`/mask
+scheme, so it is the same lineage — with an **older convention** that completes
+the story. Censused over all 4,859 of its terrain RVMATs:
+
+| | Arma 1 | Arma 2 / OA | Arma 3 |
+|---|---|---|---|
+| `PixelShaderID` | `Terrain1`..`Terrain15` | `TerrainX` | `TerrainSNX` |
+| stage group | **three**: `_mco`, `_nohq`, `_co` | two: `_nopx`, `_co` | two: `_nopx`, `_co` |
+| first surface stage | Stage2 | Stage4 | Stage4 |
+| surfaces | (stages − 2) / 3, **max 4** | **6** | **5** |
+| mask name | `m_<x>_<y>_**lco**.paa` | `..._lca.paa` | `..._lca.paa` |
+| tile normal | none | none | Stage14 |
+
+The three-stage group is perfectly regular: **9,598 of 9,598** groups are exactly
+`_mco` at +0, `_nohq` at +1, `_co` at +2. The `TerrainN` number is a variant id,
+not a layer count — `Terrain1`, `Terrain2`, `Terrain4` and `Terrain8` all carry a
+single surface.
+
+And the A1 mask, measured over 430 masks (40.1M texels): DXT1, **no alpha**
+(constant 255), RGB one-hot to within DXT1's block interpolation (0.85% of texels
+have two channels high, all at block edges). Four states — none, R, G, B — for
+exactly four surfaces.
+
+So the progression is literally BI's sentence: **Arma 1 had four surfaces per
+segment in three RGB channels plus the unpainted base; Arma 2 "increased from
+four to six" by encoding two more into alpha; Arma 3 kept five and spent the
+freed stage on a per-tile normal map.** The decode in this record is the general
+case, and A1 needs no new mask logic at all — its constant-255 alpha lands on the
+RGB group by construction.
+
+**A1 is nonetheless blocked, and not on materials.** `sara.wrp` is **OPRW
+revision 20**; `LoadOprwModern` accepts only 24 and 25, so no A1 world loads at
+all. Revision 20 also predates the revision-23 switch of the bulk arrays from
+LZSS to LZO, so it is a genuine format reader rather than a relaxed version
+check. The terrain-material half of A1 support is small — a per-family stride
+(3 vs 2), a first-stage offset (2 vs 4) and the `_lco` mask suffix, all
+selectable on `pixelShaderId`, which `RvMaterialSource` already carries — but it
+is not worth writing before there is a world to test it against, so it is
+deliberately NOT implemented here. `_mco` is the one field with no home in the
+current IR; under the modulation model below the satellite fills that role, so it
+may simply stay unread.
+
+---
+
+# Amendment 2 — the surface modulates the satellite, it does not replace it
+
+The owner judged the captures: the decoded path won at range on both generations
+and **lost at close range on Takistan**, where the legacy path was preferred.
+
+That is a compositing error, not a decode error. A surface's `_co` is a
+high-frequency detail image with a near-uniform average, so substituting it for
+the satellite at close range throws away every metre-scale colour cue the terrain
+has and keeps only the grain — flat, pale ground.
+
+Three independent things in the corpus say Real Virtuality composites the other
+way round:
+
+1. **Arma 1 carries an explicit per-surface `_mco` macro colour** beside every
+   `_nohq`/`_co` — a low-frequency colour for the detail to multiply.
+2. **Arma 2 and 3 drop `_mco` and gain the satellite**, which is that same role
+   promoted to world scale.
+3. **This renderer already carries the convention** for OFP's own detail layer:
+   `rgb *= 2.0 * detail.a`.
+
+So the satellite is now the colour authority at every range and the decoded stack
+enters as a gain around mid-grey (`×2`, keeping a ~0.5-average detail neutral).
+The distance fade fades that gain to 1.0 rather than fading the colour back to
+the satellite, so the long-range result the owner accepted is unchanged.
