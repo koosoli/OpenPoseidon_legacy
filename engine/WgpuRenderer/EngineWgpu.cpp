@@ -2812,11 +2812,26 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
     // changes, and each shape re-registers with this answer.
     if (_materialDebug.disableNormalMap)
         return 0;
+    // MAT-LEGACY in the retained set. Original OFP/CWA content has no RVMAT at all, so
+    // everything below finds nothing and those surfaces shade as they did in 2001. The
+    // `<texture>_nohq.paa` enhancement is the one mechanism that can give them a normal
+    // map -- and it lived only in DrawSectionTL, which draws a handful of sections a
+    // frame, so an enhancement pack was invisible in the actual world for the same reason
+    // the authored normal maps were. Stock content has no such files and still resolves to
+    // 0 here, at the cost of one cached hash lookup.
+    const auto legacy = [&]() -> uint64_t
+    {
+        if (!_materialDebug.legacyEnhancement)
+            return 0;
+        auto* texture = section.properties.GetTexture();
+        const char* name = texture ? texture->Name() : nullptr;
+        return name && *name ? LegacyEnhancementNormal(name) : 0;
+    };
     if (!section.surfMat)
-        return 0;
+        return legacy();
     const char* materialPath = section.surfMat->GetName().Data();
     if (!materialPath || !*materialPath)
-        return 0;
+        return legacy();
     const auto cached = _materialBindings.find(materialPath);
     if (cached == _materialBindings.end())
         return 0; // ResolveMaterialBaseColour fills the cache first
@@ -2833,7 +2848,12 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
 
     const auto* normal = cached->second.Find(Asset::Material::MaterialSlot::NormalMap);
     if (!normal)
+    {
+        // A material that names no normal can still have a sibling enhancement.
+        if (const uint64_t enhanced = legacy())
+            return report(enhanced, "legacy enhancement", "");
         return report(0, "no NormalMap slot", "");
+    }
     std::string loadName = normal->texture.path.canonical();
     if (normal->texture.isProcedural)
     {
