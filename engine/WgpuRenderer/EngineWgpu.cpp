@@ -820,6 +820,9 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     }
     PushRenderParams();
     PushSkyRuntime();
+    // Once at startup so the WGR_MATERIAL_* env overrides read above reach the
+    // retained path; after this only a Materials-tab change pushes it.
+    PushMaterialDebug();
 
     Dev::DebugOverlay::InitForEngine(_window);
     _eventWindow.Attach(_window, _w, _h);
@@ -2827,11 +2830,12 @@ uint64_t EngineWgpu::ResolveMaterialSpecularMap(const ShapeSection& section)
 // is a flat normal) and generates like any other, so it binds here too.
 uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
 {
-    // Honoured here rather than in the shader so the toggle needs no per-frame
-    // uniform: SetMaterialDebugSettings drops the retained model cache when it
-    // changes, and each shape re-registers with this answer.
-    if (_materialDebug.disableNormalMap)
-        return 0;
+    // NOT honoured here any more. Baking the toggle into the material record meant it
+    // only applied to shapes registered AFTER the flip, and nothing re-registers a live
+    // one -- so on a loaded world it did nothing at all. The retained shader now reads it
+    // per fragment from the frame UBO (PushMaterialDebug), which also keeps the record
+    // truthful: a record that had dropped its normal slot could not get it back when the
+    // toggle was flipped off again.
     // MAT-LEGACY in the retained set. Original OFP/CWA content has no RVMAT at all, so
     // everything below finds nothing and those surfaces shade as they did in 2001. The
     // `<texture>_nohq.paa` enhancement is the one mechanism that can give them a normal
@@ -2911,7 +2915,9 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
         uv[2] = 0.0f;
         uv[3] = 0.0f;
     }
-    if (!_materialDebug.composeMultiLayers || !section.surfMat)
+    // Same as the normal map above: composeMultiLayers is a presentation switch honoured
+    // per fragment by the retained shader, not baked into the record here.
+    if (!section.surfMat)
         return false;
     const char* materialPath = section.surfMat->GetName().Data();
     if (!materialPath || !*materialPath)

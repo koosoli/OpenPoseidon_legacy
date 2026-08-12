@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor}
+#import frame::{frame, reverse_z, fog_factor, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI}
 #import shading::{shade, ShadeMaterial}
 #import gbuffer::{oct_encode, a2c_coverage}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -365,7 +365,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     var base = textureSample(textures[sm.texture_slot],
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw);
-    if (sm.mask_slot != 0u) {
+    if (sm.mask_slot != 0u && matdbg_flag(MATDBG_COMPOSE_MULTI)) {
         let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], in.uv).rgb;
         var weight = 0.0;
         var blended = vec3<f32>(0.0);
@@ -460,10 +460,17 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // Decode matches it too: NOHQ stores X in A and Y in G, Z is reconstructed.
     let geometric_normal = normalize(in.normal);
     var shading_normal = geometric_normal;
-    if (sm.normal_slot != 0u) {
+    // Hoisted out of the branch: the Visualize Normal view needs it for sections that
+    // bind no normal map too, where flat (0,0,1) is the honest answer (WGSL rule 7).
+    var normal_ts_dbg = vec3<f32>(0.0, 0.0, 1.0);
+    if (sm.normal_slot != 0u && !matdbg_flag(MATDBG_DISABLE_NORMAL)) {
         let normal_sample = textureSample(textures[sm.normal_slot], samplers[sm.sampler_idx], in.uv);
-        let normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
+        var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
+        if (matdbg_flag(MATDBG_INVERT_NORMAL_Y)) {
+            normal_ts_xy.y = -normal_ts_xy.y;
+        }
         let normal_ts = vec3<f32>(normal_ts_xy, sqrt(max(0.0, 1.0 - dot(normal_ts_xy, normal_ts_xy))));
+        normal_ts_dbg = normal_ts;
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);
         // Scale-invariant cotangent frame. Building the tangent from a raw product of
@@ -490,6 +497,16 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
             shading_normal =
                 normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
         }
+    }
+    // Material Debug views. Placed after the tangent frame so Visualize Normal shows the
+    // normal that actually shades this fragment, and after the alpha discard so cutouts stay
+    // cut out. View 0 (full material) falls straight through.
+    let dbg_view = matdbg_view();
+    if (dbg_view == 1u) {
+        return vec4<f32>(base.rgb, out_a);
+    }
+    if (dbg_view == 2u) {
+        return vec4<f32>(normal_ts_dbg * 0.5 + vec3<f32>(0.5), out_a);
     }
     let rgb = shade(
         base.rgb, m, shading_normal, in.world_pos, in.fog, dwx, dwy, linear,

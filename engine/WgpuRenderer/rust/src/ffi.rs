@@ -2500,6 +2500,24 @@ pub unsafe extern "C" fn wgr_set_cloud_shadow_strength(renderer: *mut WgrRendere
 /// WgrSkyLook's size is part of the ABI handshake, and this is one enum. Values above 2 clamp.
 ///
 /// # Safety
+/// Material Debug state for the RETAINED path (dev panel, Materials tab).
+/// `view`: 0 full material, 1 base colour only, 2 decoded normal.
+/// `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
+///
+/// These are presentation switches read per fragment, NOT baked into the material
+/// records -- baking them is why the toggles did nothing on an already-loaded world.
+///
+/// # Safety
+/// `renderer` must be a live renderer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_material_debug(renderer: *mut WgrRenderer, view: u32, flags: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_material_debug(view, flags);
+}
+
 /// `renderer` must be a live renderer from `wgr_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_set_cirrus_mode(renderer: *mut WgrRenderer, mode: u32) {

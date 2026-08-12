@@ -238,17 +238,39 @@ class EngineWgpu : public EngineDummy
     MaterialDebugSettings GetMaterialDebugSettings() const override { return _materialDebug; }
     void SetMaterialDebugSettings(const MaterialDebugSettings& s) override
     {
-        // The retained set resolves its textures once, when a shape is first
-        // registered, so a toggle that only changes shading state would never
-        // reach it -- and the retained set is what draws essentially every world
-        // section, which is why "Disable Normal Map" appeared to do nothing.
-        // Dropping the cache re-registers each shape on next sight with the new
-        // answer. It is a developer A/B, so rebuilding is the right cost.
-        const bool rebuildRetained = s.disableNormalMap != _materialDebug.disableNormalMap ||
-                                     s.composeMultiLayers != _materialDebug.composeMultiLayers;
         _materialDebug = s;
-        if (rebuildRetained)
-            _gpuModels.clear();
+        PushMaterialDebug();
+    }
+
+    // Push the Materials tab's state to the retained path, where it is read per
+    // fragment out of the frame UBO.
+    //
+    // This used to try to rebuild instead: it dropped `_gpuModels` so each shape
+    // would re-register with the new answer baked into its material record. That
+    // could never work on a loaded world. `_gpuInstances` was untouched, so
+    // SceneObjectCreated early-returns for every live object; and the hook only
+    // fires from Landscape::AddObject, which is load/spawn-only and never runs
+    // again. The cache cleared, nothing re-registered, and the toggle did nothing
+    // -- which is exactly what was reported. Baking presentation state into
+    // retained data was the mistake; these are switches, so they are switches.
+    void PushMaterialDebug()
+    {
+        if (_renderer == nullptr)
+        {
+            return;
+        }
+        uint32_t view = 0;
+        switch (_materialDebug.view)
+        {
+            case MaterialDebugSettings::View::BaseColorOnly: view = 1; break;
+            case MaterialDebugSettings::View::NormalMap: view = 2; break;
+            default: view = 0; break; // every other view stays on the per-draw path
+        }
+        uint32_t flags = 0;
+        flags |= _materialDebug.disableNormalMap ? (1u << 0) : 0u;
+        flags |= _materialDebug.invertNormalY ? (1u << 1) : 0u;
+        flags |= _materialDebug.composeMultiLayers ? (1u << 2) : 0u;
+        wgr_set_material_debug(_renderer, view, flags);
     }
     MaterialDebugInfo GetMaterialDebugInfo() const override { return _materialDebugInfo; }
     // Interior sky visibility (docs/interior-sky-visibility-plan.md) — same pattern: stored

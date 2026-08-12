@@ -981,6 +981,12 @@ impl Renderer {
         self.sky.set_cloud_shadow_strength(strength);
     }
 
+    // Material Debug (dev panel, Materials tab) for the retained GPU-driven path.
+    // `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
+    fn set_material_debug(&mut self, view: u32, flags: u32) {
+        self.gfx3d.set_material_debug(view, flags);
+    }
+
     fn set_cirrus_mode(&mut self, mode: u32) {
         self.sky.set_cirrus_mode(mode);
     }

@@ -1684,6 +1684,17 @@ extern "C"
        --benchmark run (that runs --no-dev, so the Sky tab is not reachable). */
     WGR_API void wgr_set_cirrus_mode(WgrRenderer* renderer, uint32_t mode);
 
+    /* Material Debug state for the RETAINED (GPU-driven) path — the dev panel's
+     * Materials tab. `view`: 0 full material, 1 base colour only, 2 decoded normal.
+     * `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi
+     * layers (SET = compose, which is the default).
+     *
+     * Presentation switches, read per fragment. They are deliberately NOT baked
+     * into the material records at registration: doing that is why the toggles
+     * appeared dead on a world that was already loaded, since the retained set
+     * resolves its textures once and nothing re-registers a live instance. */
+    WGR_API void wgr_set_material_debug(WgrRenderer* renderer, uint32_t view, uint32_t flags);
+
     /* Push the per-frame sky runtime (celestial dir/phase, night factor, fog colour, camera
      * altitude, fog range) — the runtime half of the sky UBO; the look half comes from
      * wgr_set_render_params. */

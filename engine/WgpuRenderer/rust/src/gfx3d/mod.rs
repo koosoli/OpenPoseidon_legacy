@@ -525,6 +525,8 @@ impl CameraGroup {
             + 16
             + 16
             // Stage 2 baked-volume knobs.
+            + 16
+            // Material Debug lane for the retained path (frame.wgsl `matdbg`).
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -2548,6 +2550,10 @@ pub struct Gfx3d {
     // AO target keeps whatever it last held, which is why the consumers read it through the same
     // `strength` gate rather than sampling unconditionally.
     gtao_settings: GtaoSettings,
+    // Material Debug (dev panel) for the retained path, pushed straight into the frame
+    // UBO each frame. Presentation state, never baked into the material records.
+    material_debug_view: u32,
+    material_debug_flags: u32,
     // (proj_xx, proj_yy, near) per camera, cached from `prepare` so the GTAO dispatch uses the
     // SAME projection the prepass rasterised with. Recomputing it at dispatch time from a
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
@@ -3144,6 +3150,8 @@ impl Gfx3d {
             gtao,
             gtao_blur,
             gtao_settings: GtaoSettings::default(),
+            material_debug_view: 0,
+            material_debug_flags: 1 << 2, // compose Multi layers, matching the C++ default
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
             hiz: hiz::HiZ::new(device),
@@ -4828,6 +4836,21 @@ impl Gfx3d {
                     if baked_on && sv.debug { 1.0 } else { 0.0 },
                 ];
                 queue.write_buffer(buf, knob_off + 32, bytemuck::cast_slice(&knobs_c));
+                // Material Debug (frame.wgsl `matdbg`), the LAST lane of the block. Written
+                // unconditionally and derived from bind_size rather than from the sky offsets
+                // above, which live inside a conditional: the retained shader reads this every
+                // frame and a stale lane would leave a debug view stuck on.
+                let matdbg = [
+                    self.material_debug_view as f32,
+                    self.material_debug_flags as f32,
+                    0.0f32,
+                    0.0f32,
+                ];
+                queue.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&matdbg),
+                );
             }
         }
         // Track buffer regrowth so the combined group-1 bind groups (which borrow
@@ -6352,6 +6375,11 @@ impl Gfx3d {
     // Render-target size the GTAO pass works at (== the depth target).
     pub fn render_size(&self) -> (u32, u32) {
         self.depth_size
+    }
+
+    pub fn set_material_debug(&mut self, view: u32, flags: u32) {
+        self.material_debug_view = view;
+        self.material_debug_flags = flags;
     }
 
     pub fn gtao_settings(&self) -> &GtaoSettings {

@@ -77,7 +77,23 @@ struct Frame {
     // than sharing `skyvis` so the two implementations can be toggled independently and A/B'd
     // live — which is the only way to judge which one looks right.
     skyvisc: vec4<f32>,
+    // Material Debug (dev panel, Materials tab) for the RETAINED path:
+    //   x = view      0 full material, 1 base colour only, 2 decoded normal
+    //   y = flags     bit0 disable normal map, bit1 invert normal Y,
+    //                 bit2 compose Multi layers (SET = compose, the default)
+    // These are presentation switches, so they live here and are read per fragment
+    // rather than being baked into the material records at registration -- baking
+    // them is why the toggles did nothing on a world that was already loaded.
+    matdbg: vec4<f32>,
 };
+
+// Material Debug accessors. `flags` is a bitfield carried in a float lane, so it is
+// rounded before masking rather than compared.
+fn matdbg_view() -> u32 { return u32(frame.matdbg.x + 0.5); }
+fn matdbg_flag(bit: u32) -> bool { return (u32(frame.matdbg.y + 0.5) & (1u << bit)) != 0u; }
+const MATDBG_DISABLE_NORMAL: u32 = 0u;
+const MATDBG_INVERT_NORMAL_Y: u32 = 1u;
+const MATDBG_COMPOSE_MULTI: u32 = 2u;
 
 // One frame-global point or spot light. Positions are ABSOLUTE world space so a
 // single upload serves every camera; the shader reconstructs the camera-relative
