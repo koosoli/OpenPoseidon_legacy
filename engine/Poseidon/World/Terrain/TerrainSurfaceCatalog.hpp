@@ -63,6 +63,16 @@ class TerrainSurfaceCatalog
     // matched, which is what the `files=` globs are written against.
     RStringB Character(const char* surfaceTexture) const;
 
+    // Does the catalogue KNOW this surface at all, whatever it says about it?
+    //
+    // An empty `Character` has two very different meanings and callers must be
+    // able to tell them apart: "no config we read describes this texture", where a
+    // caller may reasonably guess from the name, and "the map declares it and says
+    // `character = "Empty"`", i.e. this surface grows nothing -- which is the
+    // majority, 8 of Takistan's 14 surfaces. Guessing over the second is how sand
+    // grows grass.
+    bool Declares(const char* surfaceTexture) const;
+
     // The clutter list for a character class, empty when unknown, with each entry's
     // model resolved. By value because the join happens here: a character names its
     // clutter classes, and those classes are defined on the world -- on Arma 3 in a

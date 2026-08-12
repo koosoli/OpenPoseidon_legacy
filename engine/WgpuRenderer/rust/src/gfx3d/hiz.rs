@@ -35,6 +35,12 @@ pub struct HiZ {
     // One single-level view per mip: the storage-write target for its own reduce/copy pass and
     // the sampled source for the next level's reduce.
     mip_views: Vec<wgpu::TextureView>,
+    // PERF: these were rebuilt every frame (1 copy + up to ~11 reduce binds at 1080p) even
+    // though nothing they reference changes between `ensure` calls — the mip views are ours,
+    // and the scene depth view is recreated only by Gfx3d::ensure_depth, which also resizes
+    // this pyramid. Cached and dropped in `ensure` for that reason.
+    copy_bind: Option<wgpu::BindGroup>,
+    reduce_binds: Vec<wgpu::BindGroup>,
 }
 
 impl HiZ {
@@ -116,6 +122,8 @@ impl HiZ {
             tex: None,
             view_all: None,
             mip_views: Vec::new(),
+            copy_bind: None,
+            reduce_binds: Vec::new(),
         }
     }
 
@@ -156,6 +164,10 @@ impl HiZ {
         self.tex = Some(tex);
         self.size = size;
         self.mips = mips;
+        // The cached binds reference the mip views just replaced (and the depth view whose
+        // recreation is what brought us here), so they die with them.
+        self.copy_bind = None;
+        self.reduce_binds.clear();
     }
 
     pub fn mips(&self) -> u32 {
@@ -172,7 +184,7 @@ impl HiZ {
     // the prepass render pass closes and before the color-pass cull dispatch (wgpu barriers the
     // storage writes -> the cull's textureLoads). No-op until ensure() allocated the pyramid.
     pub fn build(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         depth_view: &wgpu::TextureView,
@@ -180,30 +192,53 @@ impl HiZ {
         let Some(_tex) = self.tex.as_ref() else {
             return;
         };
+        // Build the bind-group cache once per allocation (see the field comment).
+        if self.copy_bind.is_none() {
+            self.copy_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_hiz_copy_bind"),
+                layout: &self.copy_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.mip_views[0]),
+                    },
+                ],
+            }));
+            self.reduce_binds = (1..self.mips as usize)
+                .map(|m| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("wgr_hiz_reduce_bind"),
+                        layout: &self.reduce_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &self.mip_views[m - 1],
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&self.mip_views[m]),
+                            },
+                        ],
+                    })
+                })
+                .collect();
+        }
         // One RenderDoc/capture group for the whole pyramid build (the copy + every reduce level).
         encoder.push_debug_group("wgr_hiz");
         // mip0: 1:1 copy of the scene depth.
-        let copy_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wgr_hiz_copy_bind"),
-            layout: &self.copy_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.mip_views[0]),
-                },
-            ],
-        });
         {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("wgr_hiz_copy"),
                 timestamp_writes: None,
             });
             cp.set_pipeline(&self.copy_pipeline);
-            cp.set_bind_group(0, &copy_bind, &[]);
+            cp.set_bind_group(0, self.copy_bind.as_ref(), &[]);
             let (w, h) = self.size;
             cp.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
         }
@@ -211,26 +246,12 @@ impl HiZ {
         // ~11) reduce dispatches collapse under one node in a capture.
         encoder.push_debug_group("wgr_hiz_reduce");
         for m in 1..self.mips as usize {
-            let reduce_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("wgr_hiz_reduce_bind"),
-                layout: &self.reduce_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.mip_views[m - 1]),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.mip_views[m]),
-                    },
-                ],
-            });
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("wgr_hiz_reduce"),
                 timestamp_writes: None,
             });
             cp.set_pipeline(&self.reduce_pipeline);
-            cp.set_bind_group(0, &reduce_bind, &[]);
+            cp.set_bind_group(0, &self.reduce_binds[m - 1], &[]);
             let mw = (self.size.0 >> m).max(1);
             let mh = (self.size.1 >> m).max(1);
             cp.dispatch_workgroups(mw.div_ceil(8), mh.div_ceil(8), 1);

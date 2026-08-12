@@ -37,6 +37,7 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
@@ -136,6 +137,13 @@ World::World(Engine* engine, bool editor)
     Glob.clock.SetTimeInYear(8 * OneHour + 130 * OneDay);
     mainLight->Recalculate(this);
     _timeToSkip = 0;
+
+    // Arm the single wind authority for this world. Deliberately NOT seeded from
+    // GRandGen (which was just seeded off the wall clock two lines up, and is a
+    // shared mutable stream): the wind must be reproducible from mission state
+    // alone, or two machines in one session would blow smoke in different
+    // directions. SimulateLandscape ticks it from here on.
+    GWind.Init();
 
     _scene.SetMainLight(mainLight);
     _scene.MainLightChanged();

@@ -412,6 +412,15 @@ pub struct WgrSky {
     pub cloud3: WgrVec4, // x = weather scale (1/m), y = weather amount [0,1], z = warp scale (1/m), w = warp amount (m)
     // Evolution offsets (RUNTIME): x = shape, y = detail, z = weather drift, w = pad.
     pub cloud4: WgrVec4,
+    // Moon disc (RUNTIME). x = angular RADIUS (rad), y = illuminated fraction (0 new .. 1 full),
+    // z = disc radiance scale (irradiance; the shader divides by the solid angle so inflating
+    // the disc for visibility lowers its radiance and total power holds), w = draw (0 = skip).
+    pub moon_params: WgrVec4,
+    // xyz = unit dir TO THE SUN AS SEEN FROM THE MOON — the vector that shades the lunar
+    // sphere. Separate from sun_dir on purpose: that one may be the legacy sun and is
+    // smoothed, and a terminator tilted wrong looks worse than no phase at all.
+    // w = earthshine reflectance floor on the dark side.
+    pub moon_sun: WgrVec4,
 }
 
 impl Default for WgrSky {
@@ -441,6 +450,10 @@ impl Default for WgrSky {
             cloud3: [1.0 / 16_000.0, 0.4, 1.0 / 6_000.0, 900.0],
             // Evolution offsets are runtime; zero until the first sky-runtime push.
             cloud4: [0.0, 0.0, 0.0, 0.0],
+            // Moon runtime. Mean angular radius as a neutral seed; the disc stays OFF
+            // (w = 0) until C++ pushes a real radiance scale.
+            moon_params: [0.00452, 1.0, 0.0, 0.0],
+            moon_sun: [0.0, 1.0, 0.0, 0.0],
         }
     }
 }
@@ -498,13 +511,18 @@ impl Default for WgrSkyLook {
 #[derive(Clone, Copy, Default)]
 pub struct WgrSkyRuntime {
     pub sun_dir: WgrVec4,   // xyz = unit dir TO the sun; w = pad
-    pub moon_dir: WgrVec4,  // xyz = unit dir TO the moon; w = moon phase
+    pub moon_dir: WgrVec4,  // xyz = unit dir TO the moon; w = illuminated fraction (0 new .. 1 full)
     pub fog_color: WgrVec4, // xyz = scene fog colour; w = fog far-range (m)
     pub misc: WgrVec4,      // x = night factor (0..1), y = camera altitude ASL (m), z/w = pad
     // Cloud evolution offsets (m, CPU-wrapped like the wind offset): x = shape, y = detail,
     // z = weather/coverage drift, w = pad. Drifting the noise lookup makes clouds form and
     // dissolve in place rather than merely translating with the wind.
     pub cloud_evolve: WgrVec4,
+    // x = moon angular radius (rad), y = illuminated fraction, z = disc radiance scale,
+    // w = draw the disc (0 = skip).
+    pub moon_params: WgrVec4,
+    // xyz = unit dir TO the sun as seen from the moon; w = earthshine floor.
+    pub moon_sun: WgrVec4,
 }
 
 // Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args).
@@ -1262,9 +1280,13 @@ const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 192);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);
-const _: () = assert!(std::mem::size_of::<WgrSky>() == 256);
+// WgrSky 16 vec4 -> 18 (was 256 bytes) and WgrSkyRuntime 5 vec4 -> 7 (was 80): the moon
+// disc added moon_params + moon_sun to both. These two asserts, the matching
+// static_asserts in wgpu_renderer.hpp, and sky/mod.rs's field-ORDER test are the set that
+// has to move together — any one of them left behind is silent garbage in the shader.
+const _: () = assert!(std::mem::size_of::<WgrSky>() == 288);
 const _: () = assert!(std::mem::size_of::<WgrSkyLook>() == 192);
-const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 80);
+const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 112);
 const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 // 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
 // each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.
@@ -2548,6 +2570,54 @@ pub unsafe extern "C" fn wgr_set_cirrus_puffiness(
     }
     let renderer = unsafe { &mut *renderer };
     renderer.set_cirrus_puffiness(puffiness, variation);
+}
+
+/// Volumetric sun shafts (crepuscular rays / god rays), from the dev panel's Sky tab.
+///
+/// A world-space march, not a screen-space radial blur: the shafts are occluded by the CLD-020
+/// cloud transmittance map (so a bank crossing the sun reshapes them), by the terrain sun-shadow
+/// ceiling, and by the cascade shadow map. Nothing here references the sun's SCREEN position, so
+/// there is no off-screen-sun halo to suppress, and the effect fades out on its own below the
+/// horizon and behind the camera (elevation fade + a forward-peaked phase function).
+///
+/// `density` is the scattering coefficient in 1/m (the engine's clear-day Mie is 6e-6);
+/// `distance` is the march cap in metres; `g` is the Henyey-Greenstein anisotropy;
+/// `cloud_influence` scales how much the deck shapes the shafts (0 = geometry only, for A/B);
+/// `steps` and `res_div` are the two cost knobs — `res_div` is the screen-resolution divisor for
+/// the march target (2 = half in each axis). All values clamp.
+///
+/// Its own entry point rather than a WgrSkyLook lane, for the reason given on
+/// `wgr_set_cirrus_mode`: that struct's size is part of the ABI handshake.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wgr_set_god_rays(
+    renderer: *mut WgrRenderer,
+    enabled: u32,
+    intensity: f32,
+    density: f32,
+    distance: f32,
+    g: f32,
+    cloud_influence: f32,
+    steps: u32,
+    res_div: u32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_god_rays(crate::godrays::GodRaySettings {
+        enabled: enabled != 0,
+        intensity,
+        density,
+        distance,
+        g,
+        cloud_influence,
+        steps,
+        res_div,
+    });
 }
 
 /// Read one cascade layer of the shadow depth map back as row-major floats

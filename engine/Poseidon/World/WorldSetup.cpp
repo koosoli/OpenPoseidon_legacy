@@ -35,6 +35,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/TitEffects.hpp>
@@ -1280,6 +1281,27 @@ void World::SimulateLandscape(float deltaT)
     }
     GLOB_LAND->SetOvercast(_actualOvercast);
     GLOB_LAND->SetFog(_actualFog);
+
+    // THE one wind tick. Everything downstream — grass, smoke, cloth, parachutes,
+    // helicopter turbulence, the cloud deck, the FFT ocean spectrum, and (opt-in)
+    // ballistics — reads the cached sample this produces; nobody re-evaluates and
+    // nobody rolls its own motion.
+    //
+    // Placed here, at the tail of the weather step, for three reasons:
+    //   * _actualOvercast is final for this frame, so the wind is coupled to the
+    //     overcast the sky and fog are about to be drawn with, not last frame's;
+    //   * SimulateLandscape runs before SimulateAllVehicles, so every entity that
+    //     reads wind this frame reads the value for this frame;
+    //   * it is on the simulation side, so the renderer can only ever sample it.
+    //
+    // NetTime, not raw Glob.time: it is the clock corrected by NetTimeOffset, so
+    // two machines in the same session evaluate the same closed form at the same
+    // argument and get the same vector without a single replicated byte.
+    //
+    // Ticked even while _freezeWeather is set: freezing the forecast holds
+    // overcast still, and the wind then holds its mean while still breathing,
+    // which is what the dev panel wants when scrubbing time of day.
+    GWind.Update(Glob.NetTime().toInt(), _actualOvercast);
 }
 
 void World::SetWeather(float overcast, float fog, float time)

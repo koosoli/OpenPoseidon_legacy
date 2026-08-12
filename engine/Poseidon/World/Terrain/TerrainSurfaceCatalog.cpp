@@ -200,6 +200,19 @@ RStringB TerrainSurfaceCatalog::Character(const char* surfaceTexture) const
     return RStringB();
 }
 
+bool TerrainSurfaceCatalog::Declares(const char* surfaceTexture) const
+{
+    const std::string pure = PureName(surfaceTexture);
+    if (pure.empty())
+        return false;
+    for (const Surface& s : _surfaces)
+    {
+        if (PatternMatch(pure.c_str(), s.files.Data()))
+            return true;
+    }
+    return false;
+}
+
 std::vector<TerrainSurfaceCatalog::Clutter> TerrainSurfaceCatalog::ClutterFor(const char* character) const
 {
     if (character == nullptr || *character == '\0')

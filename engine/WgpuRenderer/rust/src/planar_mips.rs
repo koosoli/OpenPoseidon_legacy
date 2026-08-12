@@ -7,6 +7,14 @@ pub struct PlanarMips {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    // PERF: one bind group per level was created every frame although the only thing they
+    // reference — the planar target's mip views — changes solely when the caller reallocates
+    // that target on a resize. Cached alongside the exact views they were built from and
+    // compared by identity (wgpu resource equality is identity, not structural), so a
+    // reallocation that happens to keep the same mip COUNT still invalidates the cache. A
+    // count-only key would silently keep binding views of a dropped texture.
+    binds: Vec<wgpu::BindGroup>,
+    bind_sources: Vec<wgpu::TextureView>,
 }
 
 impl PlanarMips {
@@ -78,6 +86,8 @@ impl PlanarMips {
             pipeline,
             layout,
             sampler,
+            binds: Vec::new(),
+            bind_sources: Vec::new(),
         }
     }
 
@@ -93,26 +103,37 @@ impl PlanarMips {
     }
 
     pub fn render(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
         mip_views: &[wgpu::TextureView],
     ) {
+        // Rebuild the cache only when the source views actually differ (identity compare).
+        let sources = &mip_views[..mip_views.len().saturating_sub(1)];
+        if self.bind_sources != sources {
+            self.binds = sources
+                .iter()
+                .map(|src| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("wgr_planar_mips_bind"),
+                        layout: &self.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(src),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                    })
+                })
+                .collect();
+            self.bind_sources = sources.to_vec();
+        }
         for level in 1..mip_views.len() {
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("wgr_planar_mips_bind"),
-                layout: &self.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&mip_views[level - 1]),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
+            let bind = &self.binds[level - 1];
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wgr_planar_mips_downsample"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -130,7 +151,7 @@ impl PlanarMips {
                 multiview_mask: None,
             });
             pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &bind, &[]);
+            pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }
     }

@@ -1531,7 +1531,20 @@ class Engine : public IGraphicsEngine
         float cloudDensity = 0.06f;                        // extinction (1/m); higher = more opaque
         float cloudBottom = 1200.0f;                       // cloud layer base altitude ASL (m)
         float cloudTop = 3500.0f;                          // cloud layer top altitude ASL (m)
-        float cloudWind[2] = {8.0f, 2.0f};                 // horizontal scroll velocity (m/s)
+        float cloudWind[2] = {8.0f, 2.0f};                 // horizontal scroll velocity (m/s), manual fallback
+        // Drive the deck's scroll velocity from the world's wind authority
+        // (World/Weather/WindModel) instead of the constant above, the same way
+        // cloudCoverageFromWeather drives coverage from overcast. With this off
+        // the sky keeps its authored constant wind exactly, which is also the
+        // only way to get the old bit-reproducible velocity*time cloud offset
+        // back for frame-comparison work.
+        bool cloudWindFromWeather = true;
+        // Cloud-base wind is not surface wind. Friction slows the lowest tens of
+        // metres; at a ~1200 m base the flow runs appreciably faster and backed a
+        // few degrees. 2.2x is the usual rule-of-thumb ratio for a neutral
+        // boundary layer and it is what stops a 2 m/s surface breeze reading as a
+        // frozen sky.
+        float cloudWindAloftScale = 2.2f;
         // Anti-repetition: shape + detail tiles sampled at INCOMMENSURATE world sizes so the visual
         // period is far longer than either; a large-scale weather field drifts coverage across the
         // sky; a domain warp breaks grid regularity. Sizes are world metres (scale = 1/size).
@@ -1603,6 +1616,80 @@ class Engine : public IGraphicsEngine
         // sun-direction and depth-occlusion contract is validated.  0 early-outs in the shader;
         // local emitters and the sun's lighting are independent of this setting.
         float lensFlare = 0.0f;
+
+        // ---- God rays (crepuscular rays / light shafts) ----------------------------
+        // A world-space volumetric march at a fraction of the screen resolution, occluded by the
+        // CLD-020 cloud sun-transmittance map, the terrain shadow ceiling and the cascade shadow
+        // map — so the shafts take the shape of whatever is actually between the camera and the
+        // sun, and change as a cloud bank crosses it. Not a screen-space radial blur, which is why
+        // an off-screen sun produces no edge halo. Composited into the linear HDR scene before
+        // bloom/exposure/tonemap, so shafts bloom and roll off like any other light.
+        // These defaults MUST match godrays::GodRaySettings::default on the renderer side, or the
+        // first Sky-tab edit would visibly change settings nobody touched.
+        bool godRays = true;
+        float godRayIntensity = 1.0f;      // multiplier on the physical single-scatter estimate
+        float godRayDensity = 1.2e-5f;     // scattering coefficient (1/m); clear-day Mie is 6e-6
+        // March cap. Short on purpose: the cloud map spans 4 km centred on the camera, so a ray
+        // leaves it by ~2-2.9 km and reads fully lit past that, and the aerial froxel already owns
+        // sun-shafted haze beyond. What this pass adds over the froxel is cloud shaping and
+        // resolution, both near/mid-field concerns.
+        float godRayDistance = 3000.0f;    // march cap (m)
+        float godRayG = 0.60f;             // Henyey-Greenstein anisotropy (beam tightness)
+        float godRayCloudInfluence = 1.0f; // how strongly the cloud deck shapes the shafts
+        int godRaySteps = 16;              // samples per ray      -- the two cost knobs
+        int godRayResDiv = 2;              // screen-res divisor   --
+
+        // ---- Moon / celestial mechanics -------------------------------------------
+        // The 2001 engine placed the sun and the moon with a toy orbital model (see the
+        // header comment in Graphics/Rendering/Lighting/Ephemeris.hpp): no eccentricity,
+        // no lunar perturbations, a 28-day month, and longitude ignored entirely. These
+        // switch the bodies onto a real low-precision ephemeris driven by the world's
+        // date (Glob.clock) and the world config's latitude/longitude, and expose the
+        // handful of overrides a screenshot or an A/B needs.
+        //
+        // The whole block is CONSUMED BY LightSun::Recalculate, which runs about once
+        // per twenty seconds of simulated time — not per frame. Nothing here costs
+        // anything at frame rate.
+        bool moonRealistic = true;  // ephemeris moon position + phase (off = legacy orbit)
+        // The SUN stays on the legacy model by default. A real ephemeris moves daylight:
+        // solar transit shifts by up to the +/-16 min equation of time, and the
+        // altitude/azimuth track through the day changes shape. Every time-of-day preset
+        // in this file was authored against the legacy sun, so flipping this silently
+        // would re-time every sunrise in every mission. Turn it on deliberately.
+        bool sunRealistic = false;
+        // Hand-place the moon (azimuth from north toward east, elevation above the
+        // horizon) instead of computing it. For screenshots and for isolating a phase.
+        bool moonManual = false;
+        float moonManualAzimuthDeg = 135.0f;
+        float moonManualElevationDeg = 30.0f;
+        // Observer latitude override, GEOGRAPHIC degrees, NORTH POSITIVE. Note this is
+        // the OPPOSITE sign to the CfgWorlds `latitude` field. Off = use the world's.
+        bool moonLatitudeOverride = false;
+        float moonLatitudeDeg = 45.0f;
+        // Celestial date override. Affects the EPHEMERIS ONLY — it does not move the
+        // simulation clock, so it is local, non-replicated, and safe to scrub while a
+        // mission runs. Use it to find a phase; use the `setDate` path to move the world.
+        bool moonDateOverride = false;
+        int moonDateYear = 1985;
+        int moonDateMonth = 6;
+        int moonDateDay = 21;
+        // Multiplies the TRUE angular radius of the disc. 1 = correct (~0.26 deg, which
+        // is genuinely small — the "huge moon" of photographs is a long lens, not the sky).
+        float moonSizeScale = 1.0f;
+        // Multiplies both the drawn disc and the moonlight. Artistic gain on top of the
+        // physical phase falloff, not a replacement for it.
+        float moonBrightnessScale = 1.0f;
+        // Full-moon irradiance as a fraction of the sun's, for the sky-lit scene path.
+        // The physical ratio is ~2.5e-6, which renders as black: human night vision is
+        // scotopic and the tonemap here is not. 1/400 is a game-legible night that still
+        // reads as night. Scaled by the phase function, so a crescent is ~30x dimmer.
+        float moonIntensity = 0.0025f;
+        // Moon casts a directional light (and shadows) at night. Off = the pre-existing
+        // behaviour, where night is lit by flat ambient only and the moon is scenery.
+        bool moonLighting = true;
+        // Force the illuminated fraction (0 = new .. 1 = full) instead of computing it.
+        // Negative = use the real phase. Only affects the LOOK; the position is unchanged.
+        float moonPhaseOverride = -1.0f;
     };
     // True on backends with a procedural sky pass (wgpu); gates the ImGui Sky tab.
     virtual bool SupportsSky() const { return false; }
@@ -1755,6 +1842,13 @@ class Engine : public IGraphicsEngine
         // Coupled, the amplitude sets a wind speed (and matching cascade domain lengths), so the
         // JONSWAP peak frequency moves with it and taller seas are also longer seas.
         bool seaStateCoupling = true;
+        // WIND COUPLING — take the ocean's wind heading and sea state from the world's
+        // wind authority (World/Weather/WindModel) instead of the hardcoded 0.82/0.57
+        // at 12 m/s the spectrum shipped with. The live wind is LATCHED into coarse
+        // buckets with hysteresis before it reaches the spectrum (see UpdateSeaWind in
+        // WaterWgpu.cpp) precisely so this does not cost an h0 rebuild per frame.
+        // Force off for A/B with the environment variable WGR_WATER_WIND=0.
+        bool windFromWeather = true;
         // Shore breaker gain — the shoaling swell that runs in toward the beach. OFF by default:
         // the current train is an analytic two-harmonic sine, which can shoal and steepen but
         // fundamentally cannot overturn, so it never reads as a wave crashing into itself. A real
@@ -1932,6 +2026,15 @@ class Engine : public IGraphicsEngine
     // and "Reset to defaults", and this is a separate entry point so no ABI-checked struct grows.
     // APPENDED at the class end (vtable-slot note above).
     virtual void SetSkyCirrusPuffiness(float /*puffiness*/, float /*variation*/) {}
+
+    // GOD RAYS (crepuscular rays / light shafts), from the Sky tab. SkySettings carries the whole
+    // block so it round-trips through Get/SetSkySettings and "Reset to defaults"; this pushes it
+    // to the backend. Same reasoning as SetSkyCirrus above — a separate entry point, so no
+    // ABI-checked struct grows. APPENDED at the class end (vtable-slot note above).
+    virtual void SetGodRays(bool /*enabled*/, float /*intensity*/, float /*density*/, float /*distance*/,
+                            float /*g*/, float /*cloudInfluence*/, int /*steps*/, int /*resDiv*/)
+    {
+    }
 
     // GetWaterGpuTimings returns ONE shared region array covering every timed
     // subsystem; each debug tab slices its own range. Mirrors WgrGpuTimerRegion

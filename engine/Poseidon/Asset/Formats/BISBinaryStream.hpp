@@ -161,6 +161,22 @@ class BinaryReader
             throw std::runtime_error("Failed to read raw bytes");
     }
 
+    // Decompress exactly `count` bytes of an LZSS payload that carries no leading
+    // element count. readCompressedArray cannot serve here because it reads its own
+    // count first; the pre-LZO OPRW bulk arrays derive their size from the grid
+    // dimensions instead, so the payload starts at the very first flag byte.
+    //
+    // The stream is left just past the payload's trailing checksum, which the
+    // decoder consumes and verifies -- that check is the only thing that says an
+    // LZSS payload was the size the caller claimed.
+    void readCompressedBytes(void* buffer, size_t count)
+    {
+        if (count == 0)
+            return;
+        if (!decompressLZSS(buffer, count))
+            throw std::runtime_error("LZSS decompression failed");
+    }
+
   private:
     QIStream& stream_;
 

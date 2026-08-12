@@ -131,6 +131,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_alpha_classify.cpp
     Graphics/test_surface_decompose.cpp
     Graphics/test_shadowmap_math.cpp
+    Graphics/test_ephemeris.cpp
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_procedural_texture.cpp
@@ -204,6 +205,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Formats tests (isolated format readers)
     Asset/Formats/Common/test_format_detector.cpp
     Asset/Formats/test_wrp.cpp
+    Asset/Formats/World/test_oprw20.cpp
     Asset/Formats/World/test_oprw25.cpp
     Asset/Formats/RTM/test_rtm_reader.cpp
     Asset/Formats/test_rtm.cpp
@@ -283,6 +285,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_occlusion_sphere_edge.cpp
     World/test_landscape_layout.cpp
     World/test_landscape_layout_no_pch.cpp
+    World/Weather/test_wind_model.cpp
 
     # Audio tests (batch-09)
     Audio/test_pcm_cache.cpp

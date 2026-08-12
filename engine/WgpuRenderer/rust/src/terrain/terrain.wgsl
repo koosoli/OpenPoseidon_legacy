@@ -316,7 +316,17 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // 1 and every surface sample is multiplied away, so computing the stack there is pure
     // waste -- and in any landscape view most of the screen is past it. Bailing here is
     // exact, not an approximation: the returned colour is the satellite either way.
-    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(view_pos));
+    //
+    // WHERE THAT LINE BELONGS IS A MEASURED QUESTION, and 120 m was far too close.
+    // The satellite is one texel per ~1.03 m on Stratis (its TexGen puts 992 usable
+    // texels of a 1024 image across a 1024 m tile) and per ~2 m on the OA worlds, so
+    // past the fade the ground is a photo being MAGNIFIED, not minified: at a ~6.4e-4
+    // rad/pixel view one satellite texel covers ~13 screen pixels at 120 m and does not
+    // reach one pixel until ~1.6 km. Everything between those two distances was ground
+    // drawn below screen resolution with the authored surfaces -- 2.4 mm/texel images
+    // whose own trilinear mip tracks the pixel footprint exactly -- switched off.
+    let view_dist = length(view_pos);
+    let detail_fade = 1.0 - smoothstep(detail_fade_start, detail_fade_end, view_dist);
     let blend = authored_weight * detail_fade;
     if (blend <= 0.001) {
         return AuthoredCell(satellite, vec3<f32>(0.0, 0.0, 1.0));
@@ -325,9 +335,24 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // `var`, not `let`: the loop below indexes it with a non-constant slot.
     var weights = decode_mask(mask);
     let view_ts = terrain_view_ts(view_pos);
-    // Parallax fades out with the detail it belongs to and is off entirely beyond it:
-    // displacing a surface that has already faded into the satellite moves nothing.
-    let parallax = terrain_parallax * (1.0 - smoothstep(10.0, 45.0, length(view_pos)));
+    // The per-surface NORMAL is on its own, SHORTER band than the colour, and that is the
+    // whole reason extending the colour band is affordable. A surface's normal costs one
+    // texture fetch per selected slot and buys micro-shading whose features go sub-pixel
+    // long before the albedo does; the colour costs the same fetch and buys structure that
+    // stays above screen resolution to kilometres. So the far band keeps the colour and
+    // drops the normal, which holds the FAR fetch count at satellite + mask + colour
+    // instead of growing it with the distance the band now covers.
+    //
+    // `normal_tex = 0` is the existing "this surface names no normal" path in
+    // authored_surface, so switching it off here needs no second code path: it skips the
+    // fetch, skips the parallax offset, and returns a flat tangent-space normal.
+    let normal_fade = 1.0 - smoothstep(detail_normal_start, detail_normal_end, view_dist);
+    let normal_blend = authored_weight * normal_fade;
+    let want_normal = normal_blend > 0.001;
+    // Parallax fades out with the NORMAL it is read from (`_nopx` red), and is off entirely
+    // beyond it: displacing a surface whose normal is no longer fetched has nothing to read.
+    let parallax = select(0.0, terrain_parallax * (1.0 - smoothstep(10.0, 45.0, view_dist)),
+                          want_normal);
     // A slot the source left empty carries no surface, so its share is not spent:
     // the total is renormalised over the slots that resolved. Handing it to the
     // base instead would paint the base wherever a hole was selected, which is
@@ -344,7 +369,8 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         let slot_dwx = terrain_uv_gradient(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_dwx, ddx);
         let slot_dwy = terrain_uv_gradient(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_dwy, ddy);
         var slot_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
-        surface += authored_surface(colour_tex, material.surface_normals[i], slot_uv,
+        let slot_normal_tex = select(0u, material.surface_normals[i], want_normal);
+        surface += authored_surface(colour_tex, slot_normal_tex, slot_uv,
                                     slot_dwx, slot_dwy, view_ts, parallax,
                                     &slot_normal_ts) * weights[i];
         normal_ts += slot_normal_ts * weights[i];
@@ -388,10 +414,12 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // Sampling it through the old cell frame is what made a genuine layered
     // A3 material look like a tiled single texture.
     let gain = mix(vec3<f32>(1.0), 2.0 * surface, blend);
-    // The normal follows the same fade as the detail it belongs to: a surface whose
-    // gain has faded to neutral must not keep perturbing the lighting.
+    // The normal follows its OWN (shorter) fade, so a surface whose normal is no longer
+    // fetched contributes exactly a flat tangent-space normal and the caller's guard falls
+    // back to the geometric one. At normal_blend = 0 this is (0,0,1) exactly, which is what
+    // makes dropping the fetch above a no-op rather than a discontinuity.
     return AuthoredCell(satellite * gain,
-                        normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, blend)));
+                        normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)));
 }
 
 struct VsOut {
@@ -459,6 +487,30 @@ override blend_width: f32 = 0.15;
 // a surface without one simply does not displace. Tunable via WGR_TERRAIN_PARALLAX.
 override terrain_parallax: f32 = 0.02;
 override a3_surface_blend: f32 = 0.0;
+// Distance band (metres from the CAMERA -- WLD-019 amendment) over which the authored
+// surface stack's colour gain eases back to neutral and the ground becomes the bare
+// satellite. Past `detail_fade_end` the fragment costs ONE ground fetch.
+//
+// These were 25 -> 120 and that is where the "low resolution at mid distance" report
+// comes from: the satellite is ~1.03 m/texel (Stratis) to ~2 m/texel (OA), which at a
+// typical ~6.4e-4 rad/pixel view is one texel per ~13 screen pixels at 120 m and does
+// not reach one texel per pixel until ~1.6 km. So the old band switched the detail off
+// an order of magnitude closer than the point where it stops adding anything, and the
+// detail was ALREADY half gone by ~55 m.
+//
+// Tunable via WGR_TERRAIN_DETAIL_START / WGR_TERRAIN_DETAIL_END. The exact pre-change
+// behaviour is WGR_TERRAIN_DETAIL_START=25 WGR_TERRAIN_DETAIL_END=120
+// WGR_TERRAIN_DETAIL_NORMAL_START=25 WGR_TERRAIN_DETAIL_NORMAL_END=120.
+override detail_fade_start: f32 = 600.0;
+override detail_fade_end: f32 = 900.0;
+// The per-surface NORMAL's own, shorter band (WGR_TERRAIN_DETAIL_NORMAL_START / _END).
+// It is deliberately separate from the colour: the normal is the fetch that does NOT
+// have to grow with the extended colour band, so the far band stays at satellite + mask
+// + colour. Parallax rides this band too -- its height is `_nopx` red, i.e. the same
+// fetch. Set _END equal to detail_fade_end to keep normals for the whole band (one more
+// fetch per selected slot); set it low to buy frame time back.
+override detail_normal_start: f32 = 150.0;
+override detail_normal_end: f32 = 300.0;
 // HDR path (docs/hdr-pipeline-plan.md): 1 = decode ground albedo + sun/light/fog
 // colours from sRGB to linear and drop the [0,1] radiance clamp. 0 = gamma-naive.
 override linear: f32 = 0.0;

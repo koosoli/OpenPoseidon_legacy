@@ -11,6 +11,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/World.hpp>
 
 #include <algorithm>
@@ -228,8 +229,55 @@ static float SeaStateLengthMultiplier(float amplitude)
     return std::max(std::pow(ratio, 0.75f), 1.0f);
 }
 
+// ---------------------------------------------------------------------------
+// Sea-state wind latch.
+//
+// The rule, stated explicitly because it is the whole reason the ocean can read
+// the live wind at all without costing a spectrum rebuild per frame:
+//
+//   The spectrum re-derives from wind ONLY when BOTH of these hold:
+//     (a) at least kSeaWindMinDwellSeconds have passed since the last re-derive, AND
+//     (b) the MEAN wind has moved out of the latched bucket by more than the
+//         bucket half-width plus a hysteresis band —
+//           speed:     1.0 m/s buckets, 0.35 m/s hysteresis
+//           direction: 15 deg buckets,  4 deg hysteresis
+//
+// Consequences worth being explicit about:
+//   * Gusts never rebuild the spectrum. Only WindSample::meanSpeed /
+//     meanDirectionRad are read here, and those move on a 4-20 minute clock. A
+//     real sea is fetch/duration limited: it answers to the mean wind over tens
+//     of minutes, so this is the physically correct input as well as the cheap one.
+//   * Worst case is one rebuild per 20 s even if the wind is sitting exactly on
+//     a bucket edge; the hysteresis band means it will not even do that.
+//   * Typical gameplay: overcast moves at ~1/3600 per second, so the mean wind
+//     crosses a 1 m/s bucket roughly every eight minutes.
+// ---------------------------------------------------------------------------
+constexpr float kSeaWindMinDwellSeconds = 20.0f;
+constexpr float kSeaWindSpeedBucket = 1.0f;      // m/s
+constexpr float kSeaWindSpeedHysteresis = 0.35f; // m/s beyond the half bucket
+constexpr float kSeaWindDirBucket = 0.2617994f;  // 15 deg in rad
+constexpr float kSeaWindDirHysteresis = 0.06981f; // 4 deg in rad
+
+// Shortest signed angle from `from` to `to`, in (-pi, pi].
+static float AngleDelta(float from, float to)
+{
+    constexpr float kPi = 3.14159265358979323846f;
+    float d = std::fmod(to - from + kPi, 2.0f * kPi);
+    if (d < 0.0f)
+    {
+        d += 2.0f * kPi;
+    }
+    return d - kPi;
+}
+
+static float SnapToBucket(float value, float bucket)
+{
+    return std::round(value / bucket) * bucket;
+}
+
 static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolution = 512, uint32_t seedXor = 0,
-                               float windMultiplier = 1.0f, float lengthMultiplier = 1.0f)
+                               float windMultiplier = 1.0f, float lengthMultiplier = 1.0f,
+                               float windDirDeltaRad = 0.0f)
 {
     WgrWaterCascadeConfig c{};
     c.enabled = 1;
@@ -254,7 +302,8 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
     // Push one cascade config, applying the WTR-001 dev seed override (xor) so a non-zero
     // override re-randomises the whole h0 field deterministically while seedXor == 0 leaves
     // the tuned preset seeds untouched.
-    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier](uint32_t index, const WgrWaterCascadeConfig& cfg)
+    auto push = [renderer, seedXor, windMultiplier, lengthMultiplier, windDirDeltaRad](
+                    uint32_t index, const WgrWaterCascadeConfig& cfg)
     {
         WgrWaterCascadeConfig out = cfg;
         out.spectrum_seed ^= seedXor;
@@ -263,6 +312,12 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
         out.wind_speed *= windMultiplier;
         out.tile_length_x *= lengthMultiplier;
         out.tile_length_y *= lengthMultiplier;
+        // World wind heading. Added as a DELTA rather than assigned, so the small
+        // authored spread between cascades (0.349 / 0.2618 rad — the directional
+        // spread that keeps the sea from being a single-heading corduroy) survives
+        // the rotation. The delta comes from the latched sea wind, so it changes in
+        // 15-degree steps at most once per 20 s and does not churn the spectrum.
+        out.wind_direction_rad += windDirDeltaRad;
         wgr_water_set_cascade_config(renderer, index, &out);
     };
 
@@ -460,6 +515,53 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     const auto& fz0 = _engine.WaterLook().freeze;
     ApplyCascadePreset(_renderer, _engine.WaterLook().cascadePreset, _engine.WaterLook().fftResolution,
                        fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u);
+}
+
+bool WaterWgpu::UpdateSeaWind(float now)
+{
+    // Opt-out: the setting, or WGR_WATER_WIND=0 for an A/B capture without a UI.
+    static const bool envEnabled = EnvFloat("WGR_WATER_WIND", 1.0f) != 0.0f;
+    if (!_engine.WaterLook().windFromWeather || !envEnabled || !GWind.IsActive())
+    {
+        return false;
+    }
+
+    // MEAN wind only. Never `speed` / `directionRad` — see the latch commentary
+    // above ApplyCascadePreset for why a gust must not touch h0.
+    const WindSample& wind = GWind.Sample();
+    const float wantSpeed = SnapToBucket(wind.meanSpeed, kSeaWindSpeedBucket);
+    const float wantDir = SnapToBucket(wind.meanDirectionRad, kSeaWindDirBucket);
+
+    if (!_seaWindInit)
+    {
+        _seaWindInit = true;
+        _seaWindSpeed = wantSpeed;
+        _seaWindDirRad = wantDir;
+        _seaWindLatchTime = now;
+        return true;
+    }
+
+    // (a) dwell
+    if (now - _seaWindLatchTime < kSeaWindMinDwellSeconds)
+    {
+        return false;
+    }
+    // (b) moved out of the latched bucket by more than half a bucket + hysteresis
+    const bool speedMoved =
+        std::abs(wind.meanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
+    const bool dirMoved =
+        std::abs(AngleDelta(_seaWindDirRad, wind.meanDirectionRad)) > (kSeaWindDirBucket * 0.5f + kSeaWindDirHysteresis);
+    if (!speedMoved && !dirMoved)
+    {
+        return false;
+    }
+
+    _seaWindSpeed = wantSpeed;
+    _seaWindDirRad = wantDir;
+    _seaWindLatchTime = now;
+    LOG_INFO(Graphics, "Water sea-state wind latched: {:.1f} m/s heading {:.0f} deg (spectrum re-derives once)",
+             _seaWindSpeed, _seaWindDirRad * (180.0f / 3.14159265358979323846f));
+    return true;
 }
 
 bool WaterWgpu::RebuildIfNeeded(const Landscape& land)
@@ -664,8 +766,31 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // matching set of cascade lengths, so a rougher sea grows longer waves rather than steeper
     // ones, and the spectrum pass is told to apply no residual amplitude of its own. Legacy mode
     // keeps the old behaviour (uniform variance scaling at unchanged wavelengths) for A/B.
-    const float windMultiplier = look.seaStateCoupling ? SeaStateWindMultiplier(look.waveAmp) : 1.0f;
+    float windMultiplier = look.seaStateCoupling ? SeaStateWindMultiplier(look.waveAmp) : 1.0f;
     const float lengthMultiplier = look.seaStateCoupling ? SeaStateLengthMultiplier(look.waveAmp) : 1.0f;
+    // WIND AUTHORITY — latch the world's mean wind into the spectrum. UpdateSeaWind
+    // is the throttle; everything below reads only the latched values, which change
+    // in 1 m/s / 15-degree steps and at most once per 20 s, so the h0 rebuild budget
+    // is spent on real sea-state changes and nothing else.
+    UpdateSeaWind(_params.time);
+    float windDirDeltaRad = 0.0f;
+    if (_seaWindInit)
+    {
+        _params.fft_wind_sea.x = std::cos(_seaWindDirRad);
+        _params.fft_wind_sea.y = std::sin(_seaWindDirRad);
+        _params.fft_wind_sea.z = _seaWindSpeed;
+        // Sea state lane. 12 m/s -> 0.667, which is where the authored 0.65 sat, so
+        // an average blustery day reproduces the shipped look.
+        _params.fft_wind_sea.w = std::clamp(_seaWindSpeed / 18.0f, 0.0f, 1.0f);
+        // Rotate the cascades off their authored reference heading (0.349 rad), which
+        // preserves the inter-cascade directional spread — see the push lambda.
+        windDirDeltaRad = _seaWindDirRad - 0.349f;
+        // Gentle energy coupling on top of the amplitude slider. Deliberately NOT a
+        // linear speed ratio: at calm the mean wind is ~1.5 m/s and a literal ratio
+        // would flatten the sea to a mirror, which reads as a broken ocean rather
+        // than a calm one. Anchored so 12 m/s (the shipped constant) is exactly 1.0.
+        windMultiplier *= std::clamp(0.55f + 0.45f * (_seaWindSpeed / 12.0f), 0.55f, 1.60f);
+    }
     if (look.seaStateCoupling)
     {
         _params.fft_cascade_lengths.x *= lengthMultiplier;
@@ -676,7 +801,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // WTR-001: per-frame preset push carries the dev-tab seed override (>= 0) as the xor
     // so toggling it live re-randomises h0 deterministically on the next spectrum rebuild.
     ApplyCascadePreset(_renderer, look.cascadePreset, look.fftResolution,
-                       fz.fftSeed >= 0 ? static_cast<uint32_t>(fz.fftSeed) : 0u, windMultiplier, lengthMultiplier);
+                       fz.fftSeed >= 0 ? static_cast<uint32_t>(fz.fftSeed) : 0u, windMultiplier, lengthMultiplier,
+                       windDirDeltaRad);
 
     // y gates the GPU whitewater/spray billboard pass and z controls its activity.
     // The authored default is enabled at a restrained 0.25 activity. x remains the

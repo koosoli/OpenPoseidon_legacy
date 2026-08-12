@@ -18,7 +18,7 @@ using Oprw24Geography = Oprw25Geography;
 
 inline Oprw24World ReadOprw24(BinaryReader& reader)
 {
-    return ReadOprw25(reader, 24);
+    return ReadOprwModern(reader, 24);
 }
 
 inline bool IsOprw24(BinaryReader& reader)

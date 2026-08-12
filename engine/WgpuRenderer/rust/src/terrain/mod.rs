@@ -670,6 +670,30 @@ impl Terrain {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(0.02);
+        // Authored-detail distance bands (see terrain.wgsl). Two bands, not one: the
+        // COLOUR reaches far because the satellite it modulates is ~1 texel per metre and
+        // is therefore being magnified over the whole mid field, while the per-surface
+        // NORMAL -- one extra fetch per selected slot -- stops much sooner because its
+        // micro-shading goes sub-pixel first. Keeping them separate is what holds the far
+        // band at satellite + mask + colour instead of letting the fetch count grow with
+        // the distance the band covers.
+        //
+        // A/B from a capture command line:
+        //   WGR_TERRAIN_DETAIL_START=25 WGR_TERRAIN_DETAIL_END=120 \
+        //   WGR_TERRAIN_DETAIL_NORMAL_START=25 WGR_TERRAIN_DETAIL_NORMAL_END=120
+        // is the pre-change behaviour exactly.
+        let env_f64 = |name: &str, fallback: f64| {
+            std::env::var(name)
+                .ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(fallback)
+        };
+        let detail_fade_start = env_f64("WGR_TERRAIN_DETAIL_START", 600.0);
+        // Never let the band invert: a smoothstep with end <= start is a step, which pops.
+        let detail_fade_end = env_f64("WGR_TERRAIN_DETAIL_END", 900.0).max(detail_fade_start + 1.0);
+        let detail_normal_start = env_f64("WGR_TERRAIN_DETAIL_NORMAL_START", 150.0);
+        let detail_normal_end =
+            env_f64("WGR_TERRAIN_DETAIL_NORMAL_END", 300.0).max(detail_normal_start + 1.0);
         let vs_constants = [("skirt_k", skirt_k)];
         // HDR path: the color target is Rgba16Float only when HDR is on (see gfx3d),
         // so it signals linear shading (albedo/sun/fog decode + no clamp).
@@ -682,6 +706,10 @@ impl Terrain {
             ("blend_width", blend_width),
             ("a3_surface_blend", a3_surface_blend),
             ("terrain_parallax", terrain_parallax),
+            ("detail_fade_start", detail_fade_start),
+            ("detail_fade_end", detail_fade_end),
+            ("detail_normal_start", detail_normal_start),
+            ("detail_normal_end", detail_normal_end),
             ("linear", linear),
         ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

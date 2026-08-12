@@ -5,18 +5,23 @@
 #include "TextureWgpu.hpp"
 
 #include <Poseidon/Core/Global.hpp> // Glob.time (coast wet-band animation clock)
+#include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <stb_image.h>
 #include <stb_image_resize2.h>
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -25,13 +30,47 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 namespace Poseidon
 {
 // Grid-mesh resolution per axis; must match GRID_N in terrain/mod.rs.
 constexpr int TerrainGridN = 32;
+
+// ---------------------------------------------------------------------------
+// The geography word uploaded to the grass system (one R32Uint texel per land
+// cell). Mirrored by GEO_* in grass/grass.wgsl -- change both together.
+//
+//   bits  0-14  GeographyInfo::packed, verbatim from Landscape (AITypes.hpp):
+//               0-1 waterDepth, 2 full, 3 forestInner, 4 forestOuter, 5 road,
+//               6 track, 7 slow, 8-9 howManyObjects, 10-11 howManyHardObjects,
+//               12-14 gradient.
+//   bit  15     GrassAuthoredCell -- this cell's clutter answer came from the
+//               map's OWN per-texel LCA surface mask, so the two fields below
+//               are meaningful. Clear on every OFP world and on any cell whose
+//               material carries no authored mask; there the legacy per-layer
+//               texture classification set bit 31 and these fields are 0.
+//   bits 16-22  GrassCoverage, 0..127. The cell's authored clutter density,
+//               scaled so the densest clutter character on this world is 127.
+//               This is what makes Takistan's grass (character total 0.94) and
+//               its desert (0.12) different fields rather than the same lawn.
+//   bits 23-27  GrassSurfaceId, 0..30, with 31 = none/unclassified. A dense id
+//               for the surface that dominates the cell. NOTHING consumes it
+//               yet: it is what per-surface clutter VARIETY selects on, and it
+//               costs nothing to carry now that the mask is being decoded.
+//   bits 28-30  reserved, always 0.
+//   bit  31     GrassTextureCell -- this cell can grow grass at all.
+// ---------------------------------------------------------------------------
 constexpr uint32_t GrassTextureCell = 0x80000000u;
+constexpr uint32_t GrassAuthoredCell = 0x00008000u;
+constexpr uint32_t GrassCoverageShift = 16u;
+constexpr uint32_t GrassCoverageMask = 0x007f0000u;
+constexpr uint32_t GrassSurfaceShift = 23u;
+constexpr uint32_t GrassSurfaceMask = 0x0f800000u;
+constexpr uint32_t GrassSurfaceNone = 31u;
+// Every bit this file writes on top of GeographyInfo, so a re-bake starts clean.
+constexpr uint32_t GrassBakedMask = GrassTextureCell | GrassAuthoredCell | GrassCoverageMask | GrassSurfaceMask;
 
 static bool ContainsNoCase(const char* text, const char* needle)
 {
@@ -60,18 +99,26 @@ static bool ContainsNoCase(const char* text, const char* needle)
     return false;
 }
 
+// CWR/OFP terrain assets are mostly named in English or Czech.  Keep this
+// strict: an unclassified texture must not grow procedural grass over desert,
+// dirt, concrete, or rock.
+//
+// This is the LAST resort. Where the map's own CfgSurfaces is readable it is the
+// authority (TerrainSurfaceCatalog); this only answers for data that names no
+// surface class at all, and for Arma archives that ship no config we can parse.
+static bool IsGrassSurfaceName(const char* name)
+{
+    return ContainsNoCase(name, "grass") || ContainsNoCase(name, "trava") || ContainsNoCase(name, "louka") ||
+           ContainsNoCase(name, "meadow") || ContainsNoCase(name, "pasture");
+}
+
 static bool IsGrassTexture(const Texture* texture)
 {
     if (texture == nullptr)
     {
         return false;
     }
-    const char* name = texture->Name();
-    // CWR/OFP terrain assets are mostly named in English or Czech.  Keep this
-    // strict: an unclassified texture must not grow procedural grass over desert,
-    // dirt, concrete, or rock.
-    return ContainsNoCase(name, "grass") || ContainsNoCase(name, "trava") || ContainsNoCase(name, "louka") ||
-           ContainsNoCase(name, "meadow") || ContainsNoCase(name, "pasture");
+    return IsGrassSurfaceName(texture->Name());
 }
 
 static bool EqualsNoCase(const char* a, const char* b)
@@ -437,6 +484,701 @@ void TerrainWgpu::UploadIndexMap(const Landscape& land)
     wgr_terrain_set_index_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), indices.data());
 }
 
+static bool StartsWithNoCase(const char* text, const char* prefix)
+{
+    if (text == nullptr || prefix == nullptr || *prefix == '\0')
+    {
+        return false;
+    }
+    for (; *prefix != '\0'; ++text, ++prefix)
+    {
+        if (*text == '\0')
+        {
+            return false;
+        }
+        char a = static_cast<char>(std::tolower(static_cast<unsigned char>(*text)));
+        char b = static_cast<char>(std::tolower(static_cast<unsigned char>(*prefix)));
+        // Archive prefixes and texture paths disagree about the separator often
+        // enough that treating them as different characters loses whole banks.
+        a = (a == '/') ? '\\' : a;
+        b = (b == '/') ? '\\' : b;
+        if (a != b)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Read one file out of the virtual filesystem (PBO or loose). Empty on failure;
+// every caller here treats "absent" as a fallback, never as an error.
+static std::vector<uint8_t> ReadVfsFile(const char* path)
+{
+    std::vector<uint8_t> bytes;
+    QIFStreamB file;
+    file.AutoOpen(path);
+    if (file.fail() || file.rest() <= 0)
+    {
+        return bytes;
+    }
+    bytes.resize(static_cast<size_t>(file.rest()));
+    file.read(bytes.data(), static_cast<int>(bytes.size()));
+    return bytes;
+}
+
+void TerrainWgpu::BuildSurfaceCatalog(const Landscape& land)
+{
+    _surfaceCatalog = TerrainSurfaceCatalog{};
+
+    // Which archives can possibly define THIS world's surfaces? The ones that own
+    // its terrain images, and every mounted archive they nest inside. Offering
+    // every mounted archive instead would parse 487 configs on an Arma 3 install.
+    //
+    // Measured against the retail installs, this is exactly the right net, and it
+    // is the IMAGE PATHS that carry it -- follow the references, do not scan:
+    //
+    //   Stratis   surfaces  a3\map_stratis\data\layers\p_*.rvmat ->
+    //                       a3\map_data\gdt_strdrygrass_co.paa
+    //             mask      a3\map_stratis\data\layers\m_000_000_lca.paa
+    //             CfgSurfaces + CfgSurfaceCharacters are in a3\map_data\config.bin
+    //             the `class clutter` bodies are in a3\map_stratis\config.bin,
+    //             which nothing but the MASK path reaches -- no surface texture
+    //             lives under a3\map_stratis\.
+    //   Takistan  surfaces  ca\takistan\data\tk_trava_co.paa, and that one
+    //             archive's config.bin holds all three classes.
+    //
+    // Bank prefixes are stored with a trailing separator and nest, so a single
+    // reference collects every ancestor that is actually mounted: `a3\`,
+    // `a3\map_stratis\`, `a3\map_stratis\data\`, `a3\map_stratis\data\layers\`.
+    // That is at most a handful of configs -- about 150 KB of raP on Stratis --
+    // rather than the whole addon set.
+    std::vector<std::string> owners;
+    const auto note = [&](const RStringB& reference)
+    {
+        if (reference.GetLength() == 0)
+        {
+            return;
+        }
+        for (int b = 0; b < GFileBanks.Size(); ++b)
+        {
+            const RString prefix = GFileBanks[b].GetPrefix();
+            if (prefix.GetLength() == 0 || !StartsWithNoCase(reference.Data(), prefix.Data()))
+            {
+                continue;
+            }
+            std::string owner(prefix.Data());
+            if (std::find(owners.begin(), owners.end(), owner) == owners.end())
+            {
+                owners.push_back(std::move(owner));
+            }
+        }
+    };
+    const int materialCount = std::max(0, land.GetNTextures());
+    for (int i = 0; i < materialCount; ++i)
+    {
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+        if (source == nullptr)
+        {
+            continue;
+        }
+        for (const RStringB& surface : source->surfaces)
+        {
+            note(surface);
+        }
+        // The mask, satellite and tile normal are the world's OWN images, so
+        // they are what reaches the world's own addon -- which on Arma 3 is the
+        // only archive carrying the `class clutter` bodies. Noting only the
+        // surfaces found CfgSurfaces and missed every clutter model.
+        note(source->mask);
+        note(source->satellite);
+        note(source->tileNormal);
+    }
+    // And the world by name, for a world mounted under its own addon rather than
+    // loaded from a loose path.
+    note(RStringB(land.GetName() ? land.GetName() : ""));
+
+    // Escape hatch: point at extra configs without a rebuild when a world turns
+    // out to declare its surfaces somewhere this rule does not reach.
+    if (const char* extra = std::getenv("WGR_GRASS_SURFACE_CONFIGS"))
+    {
+        std::string list(extra);
+        size_t start = 0;
+        while (start <= list.size())
+        {
+            const size_t end = list.find(';', start);
+            std::string one = list.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            if (!one.empty())
+            {
+                const std::vector<uint8_t> bytes = ReadVfsFile(one.c_str());
+                if (!bytes.empty() && _surfaceCatalog.AddConfig(bytes))
+                {
+                    LOG_INFO(Graphics, "Wgpu grass surfaces: added config '{}' (WGR_GRASS_SURFACE_CONFIGS)", one);
+                }
+                else
+                {
+                    LOG_WARN(Graphics, "Wgpu grass surfaces: could not read config '{}'", one);
+                }
+            }
+            if (end == std::string::npos)
+            {
+                break;
+            }
+            start = end + 1;
+        }
+    }
+
+    // A world referencing an unbounded number of addons must not turn world load
+    // into a config parse. Nothing observed comes close to this.
+    constexpr size_t MaxSurfaceConfigs = 16;
+    int offered = 0, accepted = 0;
+    std::string parsedNames;
+    for (const std::string& owner : owners)
+    {
+        if (static_cast<size_t>(offered) >= MaxSurfaceConfigs)
+        {
+            LOG_WARN(Graphics, "Wgpu grass surfaces: stopping at {} configs; {} archives were candidates",
+                     MaxSurfaceConfigs, owners.size());
+            break;
+        }
+        // `QFBank::GetPrefix()` already ends with the separator -- BankList::Load
+        // mounts with `prefix + NATIVE_DIR_STR`, and `AutoBank` strips exactly
+        // that length before looking the remainder up inside the archive. Adding
+        // another one produced `a3\map_data\\config.bin`, whose remainder was
+        // `\config.bin`, which is not an entry in any PBO. That is why every
+        // Arma world reported "0 offered a config" and ran on the name heuristic.
+        std::string path = owner;
+        if (!path.empty() && path.back() != '\\' && path.back() != '/')
+        {
+            path += '\\';
+        }
+        path += "config.bin";
+        const std::vector<uint8_t> bytes = ReadVfsFile(path.c_str());
+        if (bytes.empty())
+        {
+            continue;
+        }
+        ++offered;
+        if (_surfaceCatalog.AddConfig(bytes))
+        {
+            ++accepted;
+            if (!parsedNames.empty())
+            {
+                parsedNames += ", ";
+            }
+            parsedNames += path;
+        }
+    }
+    LOG_INFO(Graphics,
+             "Wgpu grass surfaces: {} archive(s) own or contain this world's terrain images, {} offered a config, "
+             "{} parsed -> {} surfaces, {} characters, {} clutter classes [{}]",
+             owners.size(), offered, accepted, _surfaceCatalog.SurfaceCount(), _surfaceCatalog.CharacterCount(),
+             _surfaceCatalog.ClutterCount(), parsedNames.empty() ? "none" : parsedNames);
+}
+
+namespace
+{
+// One authored surface slot's contribution, resolved once per material.
+struct SlotClutter
+{
+    float coverage = 0.0f;    // authored, unnormalised (see Coverage())
+    uint8_t surfaceId = 0xff; // dense id, 0xff = not clutter-bearing
+    bool present = false;     // false for a hole: the slot has no surface
+};
+
+// The WLD-019 decode, on the CPU. The mask is an INDEXED selector, not a weight
+// field: RGB is strictly one-hot and alpha takes three authored levels. The three
+// levels are read as a partition of unity so a filtered texel between two of them
+// crossfades instead of decoding as a level nobody painted.
+inline void DecodeMaskWeights(const uint8_t* texel, float out[A3TerrainMaterial::MaxSurfaces])
+{
+    const float r = texel[0] * (1.0f / 255.0f);
+    const float g = texel[1] * (1.0f / 255.0f);
+    const float b = texel[2] * (1.0f / 255.0f);
+    const float a = texel[3] * (1.0f / 255.0f);
+    const float group = std::clamp((a - 0.5f) * 2.0f, 0.0f, 1.0f);   // alpha 1.0 -> RGB slots
+    const float levelFour = 1.0f - std::abs(a - 0.5f) * 2.0f;        // alpha 0.5 -> slot 4
+    const float levelFive = std::clamp(1.0f - a * 2.0f, 0.0f, 1.0f); // alpha 0.0 -> slot 5
+    const float painted = std::min(r + g + b, 1.0f);
+    out[0] = group * (1.0f - painted);
+    out[1] = group * r;
+    out[2] = group * g;
+    out[3] = group * b;
+    out[4] = levelFour;
+    out[5] = levelFive;
+}
+
+// terrain.wgsl's `terrain_uv`, on the CPU: the transform is a basis, so u is the
+// first component of aside/up/dir and v the second (WLD-019 bug 4).
+inline void MaskUv(const A3TerrainUv& uv, float wx, float wy, float wz, float tileU, float tileV, float& outU,
+                   float& outV)
+{
+    const float sx = uv.worldPos ? wx : tileU;
+    const float sy = uv.worldPos ? wy : tileV;
+    const float sz = uv.worldPos ? wz : 0.0f;
+    outU = sx * uv.u[0] + sy * uv.u[1] + sz * uv.u[2] + uv.u[3];
+    outV = sx * uv.v[0] + sy * uv.v[1] + sz * uv.v[2] + uv.v[3];
+}
+
+inline int WrapTexel(float coord, int dim)
+{
+    // The mask is sampled through a repeating sampler on the GPU.
+    float f = coord - std::floor(coord);
+    int t = static_cast<int>(f * static_cast<float>(dim));
+    return std::clamp(t, 0, dim - 1);
+}
+} // namespace
+
+// Taps per land-cell axis. 4x4 is the smallest grid that resolves a coverage
+// FRACTION rather than a yes/no from one texel, which is what turns a mask edge
+// into a thinning field instead of a new hard boundary one step finer than the
+// old one. On Stratis a 4 m cell spans 4 mask texels, so this is a full cover.
+constexpr int GrassMaskTapsPerAxis = 4;
+
+bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection)
+{
+    const int n = land.GetLandRange();
+    const int materialCount = std::max(0, land.GetNTextures());
+    if (n <= 0 || materialCount <= 0)
+    {
+        return false;
+    }
+    const size_t cells = static_cast<size_t>(n) * static_cast<size_t>(n);
+    const std::string world = land.GetName() ? land.GetName() : "";
+
+    // Applies the baked answer, filtered by the dev panel's per-material
+    // selection. Separated from the bake itself so a live toggle costs a pass
+    // over the cells rather than a decode of every mask on the map.
+    const auto apply = [&]()
+    {
+        for (int z = 0; z < n; ++z)
+        {
+            for (int x = 0; x < n; ++x)
+            {
+                const size_t cell = static_cast<size_t>(z) * static_cast<size_t>(n) + static_cast<size_t>(x);
+                const uint32_t baked = _grassAuthoredCells[cell];
+                if ((baked & GrassAuthoredCell) == 0)
+                {
+                    continue; // no authored mask here: the legacy answer stands
+                }
+                const int material = land.GetTexture(z, x);
+                const bool selected = material >= 0 && material < static_cast<int>(_grassSurfaceEnabled.size()) &&
+                                      _grassSurfaceEnabled[static_cast<size_t>(material)];
+                uint32_t word = (geography[cell] & ~GrassBakedMask) | baked;
+                if (!selected)
+                {
+                    word &= ~GrassTextureCell;
+                }
+                geography[cell] = word;
+            }
+        }
+    };
+
+    // ---- Resolve every material's slots to a clutter coverage ---------------
+    //
+    // The catalogue is the authority where it answers. Where it does not -- an
+    // OFP world, or an Arma archive whose config we could not read -- the slot's
+    // own texture NAME is the fallback, which is still a per-texel answer and so
+    // still strictly better than the per-material name match it replaces.
+    std::vector<std::array<SlotClutter, A3TerrainMaterial::MaxSurfaces>> slots(static_cast<size_t>(materialCount));
+    std::unordered_map<std::string, uint8_t> surfaceIds;
+    std::unordered_map<std::string, float> coverageCache;
+    float maxCoverage = 0.0f;
+    int authoredMaterials = 0;
+    int byCatalogue = 0, byName = 0;
+    // Every distinct surface, with the character and coverage it resolved to.
+    // This is the line to read when the question is "is the map's own config
+    // reaching us": a world running on the name fallback reports every surface
+    // at exactly 1.00 with no character, and one reading its config reports the
+    // authored spread. `models` is how many of the character's clutter classes
+    // found a `model=`, which is zero when the world's own addon is not mounted
+    // even though CfgSurfaceCharacters was.
+    std::string surfaceReport;
+    for (int m = 0; m < materialCount; ++m)
+    {
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(m);
+        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+        {
+            continue;
+        }
+        ++authoredMaterials;
+        for (unsigned char s = 0; s < source->surfaceCount && s < A3TerrainMaterial::MaxSurfaces; ++s)
+        {
+            const RStringB& surface = source->surfaces[s];
+            if (surface.GetLength() == 0)
+            {
+                continue; // a hole keeps its slot but grows nothing
+            }
+            SlotClutter& slot = slots[static_cast<size_t>(m)][s];
+            slot.present = true;
+            std::string key(surface.Data());
+            std::transform(key.begin(), key.end(), key.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            const auto cached = coverageCache.find(key);
+            if (cached != coverageCache.end())
+            {
+                slot.coverage = cached->second;
+            }
+            else
+            {
+                float coverage = 0.0f;
+                size_t models = 0, clutterCount = 0;
+                const RStringB character = _surfaceCatalog.Character(surface.Data());
+                if (character.GetLength() != 0)
+                {
+                    coverage = _surfaceCatalog.Coverage(character.Data());
+                    for (const TerrainSurfaceCatalog::Clutter& entry : _surfaceCatalog.ClutterFor(character.Data()))
+                    {
+                        ++clutterCount;
+                        models += entry.model.GetLength() != 0 ? 1 : 0;
+                    }
+                    if (coverage > 0.0f)
+                    {
+                        ++byCatalogue;
+                    }
+                }
+                const bool authoredAnswer = coverage > 0.0f;
+                if (coverage <= 0.0f && !_surfaceCatalog.Declares(surface.Data()) &&
+                    IsGrassSurfaceName(surface.Data()))
+                {
+                    // No authored probability to scale by; treat it as a full
+                    // field so a config-less install still gets its meadows.
+                    // Only when the catalogue said NOTHING about the surface: one
+                    // the map itself declares as `character = "Empty"` grows
+                    // nothing, and guessing from its name would put the grass
+                    // straight back where the map says there is none.
+                    coverage = 1.0f;
+                    ++byName;
+                }
+                if (coverage > 0.0f)
+                {
+                    char line[192];
+                    snprintf(line, sizeof(line), "%s%s -> %s %.2f (%zu/%zu models)",
+                             surfaceReport.empty() ? "" : ", ", key.c_str(),
+                             authoredAnswer ? character.Data() : "<by name>", coverage, models, clutterCount);
+                    surfaceReport += line;
+                }
+                coverageCache.emplace(key, coverage);
+                slot.coverage = coverage;
+            }
+            if (slot.coverage > 0.0f)
+            {
+                maxCoverage = std::max(maxCoverage, slot.coverage);
+                const auto existing = surfaceIds.find(key);
+                if (existing != surfaceIds.end())
+                {
+                    slot.surfaceId = existing->second;
+                }
+                else if (surfaceIds.size() < GrassSurfaceNone)
+                {
+                    const uint8_t id = static_cast<uint8_t>(surfaceIds.size());
+                    surfaceIds.emplace(key, id);
+                    slot.surfaceId = id;
+                }
+            }
+        }
+    }
+    if (authoredMaterials == 0)
+    {
+        return false; // every OFP world takes this exit before touching anything
+    }
+    if (maxCoverage <= 0.0f)
+    {
+        LOG_WARN(Graphics,
+                 "Wgpu grass: {} authored materials but no surface on this world grows clutter; keeping the legacy "
+                 "per-layer classification",
+                 authoredMaterials);
+        return false;
+    }
+
+    // Re-derive the dev panel's per-material selection from the authored
+    // surfaces. Before this it came from matching the material's slot-0 texture
+    // NAME, which is the defect being fixed: 271 of Stratis's 479 materials read
+    // as `gdt_strbeach` and grew nothing at all, whatever their mask painted.
+    if (refreshSelection && static_cast<int>(_grassSurfaceEnabled.size()) == materialCount)
+    {
+        int selectable = 0;
+        for (int m = 0; m < materialCount; ++m)
+        {
+            const A3TerrainMaterial* source = land.GetA3TerrainMaterial(m);
+            if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+            {
+                continue; // no authored mask: the legacy name/class answer stands
+            }
+            bool hasClutter = false;
+            for (const SlotClutter& slot : slots[static_cast<size_t>(m)])
+            {
+                hasClutter = hasClutter || slot.coverage > 0.0f;
+            }
+            _grassSurfaceEnabled[static_cast<size_t>(m)] = hasClutter;
+            selectable += hasClutter ? 1 : 0;
+        }
+        LOG_INFO(Graphics, "Wgpu grass surfaces: {} of {} authored materials carry a clutter-bearing surface",
+                 selectable, materialCount);
+    }
+
+    // A live dev-panel toggle re-enters here with the same world; re-applying the
+    // cached bake costs a pass over the cells instead of decoding every mask.
+    if (_grassAuthoredWorld == world && _grassAuthoredCells.size() == cells)
+    {
+        apply();
+        return true;
+    }
+
+    // ---- Group cells by the mask they resolve through -----------------------
+    //
+    // A mask serves every variant of its satellite tile -- Stratis has 479
+    // materials over 64 masks, Takistan 3,293 over 220 -- so decoding per
+    // material would decode each image seven to fifteen times over.
+    std::unordered_map<std::string, int> maskIds;
+    std::vector<std::string> maskPaths;
+    std::vector<int> materialMask(static_cast<size_t>(materialCount), -1);
+    for (int m = 0; m < materialCount; ++m)
+    {
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(m);
+        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+        {
+            continue;
+        }
+        std::string key(source->mask.Data());
+        std::transform(key.begin(), key.end(), key.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        const auto found = maskIds.find(key);
+        if (found != maskIds.end())
+        {
+            materialMask[static_cast<size_t>(m)] = found->second;
+            continue;
+        }
+        const int id = static_cast<int>(maskPaths.size());
+        maskIds.emplace(key, id);
+        maskPaths.emplace_back(source->mask.Data());
+        materialMask[static_cast<size_t>(m)] = id;
+    }
+    if (maskPaths.empty())
+    {
+        return false;
+    }
+
+    const size_t cellCount = cells;
+    std::vector<uint32_t> cellsByMask(cellCount);
+    std::vector<uint32_t> maskOffset(maskPaths.size() + 2, 0); // +1 for the "no mask" bucket
+    {
+        // Counting sort: one pass to count, one to place. 16 MB of indices on a
+        // 2048-cell world, against 268 MB if every decoded mask were kept live.
+        for (int z = 0; z < n; ++z)
+        {
+            for (int x = 0; x < n; ++x)
+            {
+                const int material = land.GetTexture(z, x);
+                const int mask =
+                    (material >= 0 && material < materialCount) ? materialMask[static_cast<size_t>(material)] : -1;
+                ++maskOffset[static_cast<size_t>(mask + 1) + 1];
+            }
+        }
+        for (size_t i = 1; i < maskOffset.size(); ++i)
+        {
+            maskOffset[i] += maskOffset[i - 1];
+        }
+        std::vector<uint32_t> cursor(maskOffset.begin(), maskOffset.end() - 1);
+        for (int z = 0; z < n; ++z)
+        {
+            for (int x = 0; x < n; ++x)
+            {
+                const int material = land.GetTexture(z, x);
+                const int mask =
+                    (material >= 0 && material < materialCount) ? materialMask[static_cast<size_t>(material)] : -1;
+                cellsByMask[cursor[static_cast<size_t>(mask + 1)]++] =
+                    static_cast<uint32_t>(z) * static_cast<uint32_t>(n) + static_cast<uint32_t>(x);
+            }
+        }
+    }
+
+    // ---- Decode each mask once and answer its own cells ---------------------
+    const float landGrid = land.GetLandGrid();
+    const float originX = _params.world_origin.x;
+    const float originZ = _params.world_origin.y;
+    const float invMax = 1.0f / maxCoverage;
+    std::atomic<uint32_t> decoded{0};
+    std::atomic<uint32_t> missing{0};
+    std::atomic<uint64_t> maskBytes{0};
+
+    const auto processMask = [&](size_t maskIndex, const std::vector<uint8_t>& bytes)
+    {
+        const uint32_t begin = maskOffset[maskIndex + 1];
+        const uint32_t end = maskOffset[maskIndex + 2];
+        if (begin >= end)
+        {
+            return; // a mask nobody's cells use
+        }
+        const DecodedImage image = DecodePAABuffer(bytes.data(), bytes.size(), /*isPaa=*/true);
+        if (!image.valid())
+        {
+            missing.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+        decoded.fetch_add(1, std::memory_order_relaxed);
+        const int mw = image.width;
+        const int mh = image.height;
+        const uint8_t* pixels = image.rgba.data();
+        constexpr float tapStep = 1.0f / static_cast<float>(GrassMaskTapsPerAxis);
+        for (uint32_t c = begin; c < end; ++c)
+        {
+            const uint32_t cell = cellsByMask[c];
+            const int x = static_cast<int>(cell % static_cast<uint32_t>(n));
+            const int z = static_cast<int>(cell / static_cast<uint32_t>(n));
+            const int material = land.GetTexture(z, x);
+            if (material < 0 || material >= materialCount)
+            {
+                continue;
+            }
+            const A3TerrainMaterial* source = land.GetA3TerrainMaterial(material);
+            if (source == nullptr)
+            {
+                continue;
+            }
+            const auto& slotTable = slots[static_cast<size_t>(material)];
+            const float height = land.GetHeight(z, x);
+            float coverageSum = 0.0f;
+            int histogram[A3TerrainMaterial::MaxSurfaces] = {0, 0, 0, 0, 0, 0};
+            for (int tz = 0; tz < GrassMaskTapsPerAxis; ++tz)
+            {
+                for (int tx = 0; tx < GrassMaskTapsPerAxis; ++tx)
+                {
+                    const float fx = static_cast<float>(x) + (static_cast<float>(tx) + 0.5f) * tapStep;
+                    const float fz = static_cast<float>(z) + (static_cast<float>(tz) + 0.5f) * tapStep;
+                    const float wx = originX + fx * landGrid;
+                    const float wz = originZ + fz * landGrid;
+                    float u = 0.0f, v = 0.0f;
+                    MaskUv(source->maskUv, wx, height, wz, fx, fz, u, v);
+                    const uint8_t* texel = pixels + (static_cast<size_t>(WrapTexel(v, mh)) * static_cast<size_t>(mw) +
+                                                     static_cast<size_t>(WrapTexel(u, mw))) *
+                                                        4u;
+                    float weights[A3TerrainMaterial::MaxSurfaces];
+                    DecodeMaskWeights(texel, weights);
+                    // Argmax over the slots this material actually filled. A hole
+                    // must not win: the source says there is no surface there, and
+                    // handing its weight to a neighbour is exactly the renumbering
+                    // bug WLD-019 records.
+                    int best = -1;
+                    float bestWeight = 0.0f;
+                    for (unsigned char s = 0; s < source->surfaceCount && s < A3TerrainMaterial::MaxSurfaces; ++s)
+                    {
+                        if (!slotTable[s].present)
+                        {
+                            continue;
+                        }
+                        if (best < 0 || weights[s] > bestWeight)
+                        {
+                            best = s;
+                            bestWeight = weights[s];
+                        }
+                    }
+                    if (best < 0)
+                    {
+                        continue;
+                    }
+                    coverageSum += slotTable[static_cast<size_t>(best)].coverage;
+                    ++histogram[best];
+                }
+            }
+            constexpr float taps = static_cast<float>(GrassMaskTapsPerAxis * GrassMaskTapsPerAxis);
+            const float normalised = std::clamp((coverageSum / taps) * invMax, 0.0f, 1.0f);
+            const uint32_t quantised = static_cast<uint32_t>(std::lround(normalised * 127.0f));
+            // The dominant CLUTTER-bearing surface, not the dominant surface. A
+            // cell that is mostly beach with a corner of dry grass grows dry
+            // grass, so that is the variety its id has to name; the beach's id
+            // would say nothing about the blades actually standing there.
+            int dominant = -1;
+            for (int s = 0; s < static_cast<int>(A3TerrainMaterial::MaxSurfaces); ++s)
+            {
+                if (histogram[s] <= 0 || slotTable[static_cast<size_t>(s)].surfaceId == 0xff)
+                {
+                    continue;
+                }
+                if (dominant < 0 || histogram[s] > histogram[dominant])
+                {
+                    dominant = s;
+                }
+            }
+            const uint32_t surfaceId =
+                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].surfaceId : GrassSurfaceNone;
+            uint32_t word = GrassAuthoredCell;
+            word |= (quantised << GrassCoverageShift) & GrassCoverageMask;
+            word |= (surfaceId << GrassSurfaceShift) & GrassSurfaceMask;
+            if (quantised > 0)
+            {
+                word |= GrassTextureCell;
+            }
+            _grassAuthoredCells[cell] = word;
+        }
+    };
+
+    // I/O stays on the calling thread (QFBank is not MT-safe -- MT_SAFE is 0 in
+    // QBStream.hpp); only the decode and the gather are parallel. Batching keeps
+    // the compressed masks resident for one batch instead of all at once.
+    const auto started = std::chrono::steady_clock::now();
+    _grassAuthoredCells.assign(cellCount, 0u);
+    TaskPool* pool = GetGlobalTaskPool();
+    const size_t batchSize = std::max<size_t>(1, (pool ? pool->ThreadCount() : 1) * 2u);
+    std::vector<std::vector<uint8_t>> batch;
+    batch.reserve(batchSize);
+    for (size_t first = 0; first < maskPaths.size(); first += batchSize)
+    {
+        const size_t last = std::min(first + batchSize, maskPaths.size());
+        batch.clear();
+        for (size_t i = first; i < last; ++i)
+        {
+            batch.push_back(ReadVfsFile(maskPaths[i].c_str()));
+            maskBytes.fetch_add(batch.back().size(), std::memory_order_relaxed);
+            if (batch.back().empty())
+            {
+                missing.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        const auto run = [&](uint32_t begin, uint32_t end)
+        {
+            for (uint32_t i = begin; i < end; ++i)
+            {
+                if (!batch[i].empty())
+                {
+                    processMask(first + i, batch[i]);
+                }
+            }
+        };
+        if (pool != nullptr)
+        {
+            pool->ParallelFor(static_cast<uint32_t>(last - first), run);
+        }
+        else
+        {
+            run(0, static_cast<uint32_t>(last - first));
+        }
+    }
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+
+    // Cells whose material carries no authored mask keep whatever the legacy
+    // per-layer pass decided; they are reported so a partly-authored world is
+    // visible as a number rather than as a look nobody can attribute.
+    const uint32_t legacyCells = maskOffset[1];
+    LOG_INFO(Graphics,
+             "Wgpu grass mask bake: {} masks decoded ({} unreadable, {:.1f} MB read) for {} authored materials; "
+             "{} surfaces grow clutter ({} from the map's config, {} by name), peak coverage {:.2f}; "
+             "{} cells left on the legacy path; {:.0f} ms on {} thread(s)",
+             decoded.load(), missing.load(), maskBytes.load() / (1024.0 * 1024.0), authoredMaterials, surfaceIds.size(),
+             byCatalogue, byName, maxCoverage, legacyCells, ms, pool ? pool->ThreadCount() : 1u);
+    LOG_INFO(Graphics, "Wgpu grass surface coverage: [{}]", surfaceReport.empty() ? "none" : surfaceReport);
+    if (decoded.load() == 0)
+    {
+        // Nothing decoded: leave the legacy classification alone rather than
+        // blanking a world's grass because its archives were not mounted.
+        _grassAuthoredCells.clear();
+        _grassAuthoredWorld.clear();
+        return false;
+    }
+    _grassAuthoredWorld = world;
+    apply();
+    return true;
+}
+
 void TerrainWgpu::UploadGeography(const Landscape& land)
 {
     const int n = land.GetLandRange();
@@ -468,9 +1210,15 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         // The authored CfgSurfaces class is the authority wherever it resolves --
         // that is what covers OFP, whose texture names carry no semantics at all.
         // The name heuristic covers the Arma generations, whose surfaces resolve to
-        // `Default` here (their own CfgSurfaces lives in a config.bin this engine
-        // cannot yet parse) but whose texture names ARE semantic: Takistan's
+        // `Default` here (their own CfgSurfaces lives in a config.bin ParamFile
+        // cannot parse) but whose texture names ARE semantic: Takistan's
         // `tk_trava_co` is matched by "trava".
+        //
+        // On an Arma-generation world both signals are only a SEED. They classify
+        // a whole terrain material by the name of its slot-0 surface, which is
+        // the cell's material for a whole land cell -- 32 m on Stratis. The
+        // authored mask bake below replaces that answer per geography cell, and
+        // re-derives this selection from the surfaces that actually grow clutter.
         int classGrass = 0, nameGrass = 0, resolvedLayers = 0;
         for (int i = 0; i < layerCount; ++i)
         {
@@ -541,8 +1289,6 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
     }
 
     std::vector<uint32_t> geography(static_cast<size_t>(n) * n);
-    size_t grassCellCount = 0;
-    size_t grassRenderableCellCount = 0;
     for (int z = 0; z < n; ++z)
     {
         for (int x = 0; x < n; ++x)
@@ -552,16 +1298,37 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
             if (layer >= 0 && layer < static_cast<int>(grassLayer.size()) && grassLayer[static_cast<size_t>(layer)])
             {
                 cell |= GrassTextureCell;
-                ++grassCellCount;
-            }
-            // Match grass.wgsl: water, forests, roads/tracks and hard
-            // buildings are excluded, but the legacy "full" flag is valid
-            // ordinary ground on Everon and must remain grass-capable.
-            if ((cell & GrassTextureCell) != 0 && (cell & 0x00000c7bu) == 0)
-            {
-                ++grassRenderableCellCount;
             }
             geography[static_cast<size_t>(z) * n + x] = cell;
+        }
+    }
+
+    // The map's own answer, where the map has one. OFP worlds have no authored
+    // terrain materials at all, so `BakeAuthoredGrassMask` returns false before
+    // touching a byte and everything below runs on the array just built.
+    const std::string world = land.GetName() ? land.GetName() : "";
+    if (_surfaceCatalogWorld != world)
+    {
+        BuildSurfaceCatalog(land);
+        _surfaceCatalogWorld = world;
+    }
+    const bool authored = BakeAuthoredGrassMask(land, geography, layersChanged);
+
+    // Match grass.wgsl: water, forests, roads/tracks and hard buildings are
+    // excluded, but the legacy "full" flag is valid ordinary ground on Everon
+    // and must remain grass-capable.
+    size_t grassCellCount = 0;
+    size_t grassRenderableCellCount = 0;
+    for (uint32_t cell : geography)
+    {
+        if ((cell & GrassTextureCell) == 0)
+        {
+            continue;
+        }
+        ++grassCellCount;
+        if ((cell & 0x00000c7bu) == 0)
+        {
+            ++grassRenderableCellCount;
         }
     }
     // Some legacy Everon WRP revisions mark a broad part of ordinary ground
@@ -610,10 +1377,10 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
             ++hardOnlyCells;
     }
     LOG_INFO(Graphics,
-             "Wgpu grass texture mask: {} layer(s), {} / {} surface cells, {} renderable after geography, "
+             "Wgpu grass texture mask ({}): {} layer(s), {} / {} surface cells, {} renderable after geography, "
              "{} with forest relaxed (road/water/building always excluded) [{}]",
-             grassLayerCount, grassCellCount, geography.size(), grassRenderableCellCount, hardOnlyCells,
-             grassLayerNames.empty() ? "none matched" : grassLayerNames);
+             authored ? "authored LCA surfaces" : "legacy per-layer", grassLayerCount, grassCellCount, geography.size(),
+             grassRenderableCellCount, hardOnlyCells, grassLayerNames.empty() ? "none matched" : grassLayerNames);
     LOG_INFO(Graphics, "Wgpu terrain texture layers: [{}]", allLayerNames);
     wgr_grass_set_geography(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), geography.data());
     UploadGrassTuft();

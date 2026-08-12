@@ -1,6 +1,7 @@
 #include "TerrainCommand.hpp"
 #include "../SDLPreview.hpp"
 #include <Poseidon/World/Terrain/WrpReader.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
@@ -779,14 +780,12 @@ void TerrainCommand::Setup(CLI::App& app)
                 if (!file.fail())
                 {
                     Asset::Formats::BinaryReader probe(file);
-                    const bool objectsAreOprw24 = Asset::Formats::World::IsOprw24(probe);
-                    if (objectsAreOprw24 || Asset::Formats::World::IsOprw25(probe))
+                    if (Asset::Formats::World::PeekOprwModernRevision(probe) != 0)
                     {
                         Asset::Formats::World::Oprw25World world;
                         try
                         {
-                            world = objectsAreOprw24 ? Asset::Formats::World::ReadOprw24(probe)
-                                                     : Asset::Formats::World::ReadOprw25(probe);
+                            world = Asset::Formats::World::ReadOprwModern(probe);
                         }
                         catch (const std::exception& e)
                         {
@@ -892,12 +891,12 @@ void TerrainCommand::Setup(CLI::App& app)
                     if (!probe.fail())
                     {
                         Asset::Formats::BinaryReader reader(probe);
-                        if (Asset::Formats::World::IsOprw25(reader))
+                        if (Asset::Formats::World::PeekOprwModernRevision(reader) != 0)
                         {
                             Asset::Formats::World::Oprw25World world;
                             try
                             {
-                                world = Asset::Formats::World::ReadOprw25(reader);
+                                world = Asset::Formats::World::ReadOprwModern(reader);
                             }
                             catch (const std::exception& e)
                             {
@@ -1007,15 +1006,13 @@ void TerrainCommand::Setup(CLI::App& app)
                 }
 
                 // The census covers every later-generation container the engine
-                // itself loads, and the runtime (Landscape::LoadOprwModern) reads
-                // revision 24 as well as 25. A census that only accepted 25 could
-                // not measure the generation whose coverage is least known.
+                // itself loads, which is now Armed Assault's revisions 18 and 20 as
+                // well as 24 and 25. A census that only accepted 25 could not
+                // measure the generation whose coverage is least known.
                 Asset::Formats::BinaryReader reader(file);
-                const bool isOprw24 = Asset::Formats::World::IsOprw24(reader);
-                const bool isOprw25 = Asset::Formats::World::IsOprw25(reader);
-                if (!isOprw24 && !isOprw25)
+                if (Asset::Formats::World::PeekOprwModernRevision(reader) == 0)
                 {
-                    std::cerr << "Error: " << inputFile << " is not an OPRW revision 24 or 25 world.\n"
+                    std::cerr << "Error: " << inputFile << " is not an OPRW revision 18, 20, 24 or 25 world.\n"
                               << "The census covers the later-generation container only; use "
                                  "'terrain inspect' for RVW and OPRW 2/3.\n";
                     std::exit(1);
@@ -1024,8 +1021,7 @@ void TerrainCommand::Setup(CLI::App& app)
                 Asset::Formats::World::Oprw25World world;
                 try
                 {
-                    world = isOprw24 ? Asset::Formats::World::ReadOprw24(reader)
-                                     : Asset::Formats::World::ReadOprw25(reader);
+                    world = Asset::Formats::World::ReadOprwModern(reader);
                 }
                 catch (const std::exception& e)
                 {

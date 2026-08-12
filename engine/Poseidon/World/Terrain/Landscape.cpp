@@ -6,6 +6,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Random/randomGen.hpp>
@@ -766,6 +767,20 @@ void Landscape::Simulate(float deltaT)
 
 Vector3 Landscape::GetWind() const
 {
+    // Forward to the world's single wind authority. Every legacy consumer -- smoke
+    // sources, flag cloth, parachutes, helicopter turbulence -- already funnels through
+    // here, so this one forwarder unifies all of them without touching a call site.
+    //
+    // The legacy random walk in Weather::MoveClouds is deliberately LEFT RUNNING even
+    // though nothing reads its result now: it draws five values from the shared GRandGen
+    // stream every 5 seconds, and removing those draws would shift every downstream
+    // random result in a classic mission. It is inert, not dead.
+    if (GWind.IsActive())
+    {
+        const WindSample& wind = GWind.Sample();
+        return Vector3(wind.velocityX, 0.0f, wind.velocityZ);
+    }
+    // Fallback for a Landscape used outside a World: exact legacy behaviour.
     Vector3 ret = _weather._windSpeed + Vector3(4, 0, 2) * _weather._overcastSetClouds;
     if (Glob.time < _weather._gustUntil)
     {

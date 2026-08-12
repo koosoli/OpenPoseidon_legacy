@@ -1666,8 +1666,10 @@ fn gtao_writes_full_visibility_where_nothing_was_drawn() {
         occlusion_query_set: None,
         multiview_mask: None,
     }));
-    // The chain is the pass' actual input, so build it from the cleared depth first.
-    mips.build(&device, &queue, &mut enc, &depth, 0.0957);
+    // The chain is the pass' actual input, so build it from the cleared depth first. Full chain
+    // (top_mip = every level) so this harness keeps exercising the reduce path even though the
+    // shipped GtaoSettings::max_mip is 0 and the runtime build now stops at mip 0.
+    mips.build(&device, &queue, &mut enc, &depth, 0.0957, mips.mips());
     gtao.dispatch(&mut enc, w, h);
 
     // Copy the AO target out. Rgba16Float = 8 B/texel; the row stride must be 256-aligned.
@@ -6349,18 +6351,18 @@ impl Gfx3d {
 
     // Build this frame's Hi-Z pyramid from the post-prepass depth (§5). Recorded AFTER the depth
     // prepass render pass closes and BEFORE cull_dispatch_color. No-op unless occlusion is active.
-    pub fn build_hiz(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
+    pub fn build_hiz(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
         if !self.occlusion_active() {
             return;
         }
-        let Some(depth) = self.depth_sample_view.as_ref() else {
+        let Some(depth) = self.depth_sample_view.clone() else {
             return;
         };
         // MSAA: depth_sample_view is the resolved single-sample target, which is stale until the
         // resolve pass fills it from this frame's freshly-completed prepass depth. No-op at 1x
         // (depth_sample_view is the depth target's own aspect, already current).
         self.resolve_depth_sample(encoder);
-        self.hiz.build(device, encoder, depth);
+        self.hiz.build(device, encoder, &depth);
     }
 
     // MSAA depth -> single-sample nearest (depth_sample_view). No-op at 1x, where
@@ -6435,20 +6437,21 @@ impl Gfx3d {
         }
         // Linear-view-Z chain from this frame's resolved depth. Must precede the GTAO dispatch;
         // wgpu barriers the storage writes -> GTAO's textureLoads.
-        if let Some(depth) = self.depth_sample_view.as_ref() {
+        //
+        // `top_mip` is both what the shader is told it may climb to AND how far the chain is
+        // actually built: they are the same number by construction, so the build can never
+        // produce a level nothing reads (at the shipped max_mip = 0 that is the whole reduce
+        // chain) nor stop short of one the march would sample.
+        let top_mip = s.max_mip.min(self.gtao_depth_mips.mips().saturating_sub(1));
+        if let Some(depth) = self.depth_sample_view.clone() {
             self.gtao_depth_mips
-                .build(device, queue, encoder, depth, near);
+                .build(device, queue, encoder, &depth, near, top_mip);
         }
         timers.end(encoder, crate::gpu_timers::Region::GtaoPrep);
         self.gtao.upload(
             queue,
             &GtaoParams {
-                proj: [
-                    proj_xx,
-                    proj_yy,
-                    near,
-                    s.max_mip.min(self.gtao_depth_mips.mips().saturating_sub(1)) as f32,
-                ],
+                proj: [proj_xx, proj_yy, near, top_mip as f32],
                 screen: [
                     w as f32,
                     h as f32,

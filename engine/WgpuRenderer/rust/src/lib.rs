@@ -3,6 +3,7 @@ mod exposure;
 mod ffi;
 mod gfx2d;
 mod gfx3d;
+mod godrays;
 mod gpu_timers;
 mod grass;
 mod handles;
@@ -29,6 +30,7 @@ use crate::ffi::{
 };
 use crate::gfx2d::Gfx2d;
 use crate::gfx3d::{Gfx3d, env_f32};
+use crate::godrays::{GodRayFrame, GodRaySettings, GodRays};
 use crate::gpu_timers::{GpuTimers, Region as TimerRegion};
 use crate::grass::{Grass, GrassPass};
 use crate::log::{LogSink, log_level};
@@ -235,6 +237,15 @@ pub struct Renderer {
     // places in the frame plan, and threading two more arguments through each of them (and through
     // run_tonemap) would be noise.
     underwater_view: UnderwaterView,
+    // Volumetric sun shafts, composited into the linear HDR scene just before bloom (HDR path
+    // only — there is nothing sensible to add light to after a tonemap). `godrays_frame` carries
+    // the camera the SKY pass chose, captured at the sky upload and consumed in run_tonemap.
+    godrays: Option<GodRays>,
+    godrays_frame: Option<GodRayFrame>,
+    // Set once the frame's single-sample depth resolve has run at a point where the 3D depth is
+    // already final, so the god-ray march can reuse it instead of recording a second resolve.
+    // Deliberately NOT set by the pre-water resolve: depth is still being written after that one.
+    frame_depth_final_resolved: bool,
     // Bloom pyramid, built alongside the tonemap on the HDR path; the resolve adds it.
     bloom: Option<Bloom>,
     // Eye adaptation / auto-exposure; produces a 1x1 exposure scale the resolve applies.
@@ -739,6 +750,9 @@ impl Renderer {
         let tonemap = hdr_enabled.then(|| Tonemap::new(&device, config.format));
         let underwater = Underwater::new(&device, color_format, fft_storage_supported);
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
+        // God rays composite into the HDR scene target, so like bloom they only exist on the
+        // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
+        let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT));
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -838,6 +852,9 @@ impl Renderer {
                 color_bias: 1.0,
                 caustic_gain: 1.0,
             },
+            godrays,
+            godrays_frame: None,
+            frame_depth_final_resolved: false,
             bloom,
             exposure,
             exposure_params: ffi::WgrExposure::default(),
@@ -995,12 +1012,20 @@ impl Renderer {
         self.sky.set_cirrus_puffiness(puffiness, variation);
     }
 
+    // Volumetric sun shafts (dev panel, Sky tab). Inert on the LDR-direct path, where the pass
+    // does not exist at all.
+    fn set_god_rays(&mut self, s: GodRaySettings) {
+        if let Some(gr) = self.godrays.as_mut() {
+            gr.set_settings(s);
+        }
+    }
+
     fn set_sky_runtime(&mut self, rt: ffi::WgrSkyRuntime) {
         let s = &mut self.sky_params;
         s.sun_dir[0] = rt.sun_dir[0]; // keep sun_dir.w (sunIntensity, a look field)
         s.sun_dir[1] = rt.sun_dir[1];
         s.sun_dir[2] = rt.sun_dir[2];
-        s.moon_dir = rt.moon_dir; // xyz dir + w phase
+        s.moon_dir = rt.moon_dir; // xyz dir + w illuminated fraction
         s.ground_albedo[3] = rt.misc[0]; // night factor
         s.fog_color[0] = rt.fog_color[0]; // keep fog_color.w (haze, a look field)
         s.fog_color[1] = rt.fog_color[1];
@@ -1010,6 +1035,8 @@ impl Renderer {
         s.cloud1[0] = rt.misc[2]; // cloud wind world offset x (m, CPU-wrapped)
         s.cloud1[1] = rt.misc[3]; // cloud wind world offset z (m, CPU-wrapped)
         s.cloud4 = rt.cloud_evolve; // shape / detail / weather drift offsets (m, CPU-wrapped)
+        s.moon_params = rt.moon_params; // radius / illuminated fraction / radiance / draw
+        s.moon_sun = rt.moon_sun; // sub-solar direction + earthshine
     }
 
     // Debug readback of the current auto-exposure scale (blocking; dev panel only).
@@ -1030,6 +1057,50 @@ impl Renderer {
     // GRS-A — latest grass instance counts (same async-readback discipline).
     fn grass_stats(&self) -> crate::grass::GrassStats {
         self.grass.stats()
+    }
+
+    // Record the god-ray march + additive composite into the single-sample HDR scene view.
+    //
+    // Everything it reads already exists and is already up to date at this point in the frame:
+    // the sky's CLD-020 cloud transmittance map, the terrain sun-shadow ceiling mask, the cascade
+    // shadow array, and the resolved scene depth. No new geometry pass, no new shadow render.
+    fn render_god_rays(&mut self, encoder: &mut wgpu::CommandEncoder, scene: &wgpu::TextureView) {
+        let Some(frame) = self.godrays_frame else {
+            return; // the sky pass did not run this frame, so there is no camera to march with
+        };
+        if !self
+            .godrays
+            .as_ref()
+            .is_some_and(|g| g.active(&self.sky_params))
+        {
+            return;
+        }
+        // The march samples a SINGLE-SAMPLE depth. Under MSAA that is the far-reduce resolve the
+        // water and cloud passes also use; both of those run earlier, so on a normal frame this is
+        // already done and the flag skips a second full-screen resolve. At 1x it is a no-op.
+        if !self.frame_depth_final_resolved {
+            self.gfx3d.resolve_water_depth(encoder);
+            self.frame_depth_final_resolved = true;
+        }
+        let Some(depth) = self.gfx3d.water_depth_view().cloned() else {
+            return;
+        };
+        let cloud = self.sky.cloud_shadow_view().clone();
+        let cloud_map = self.sky.cloud_shadow_mapping_current();
+        let mask = self.terrain.shadow_mask_view();
+        let csm = self.gfx3d.shadow_sample_view().clone();
+        let (width, height) = (self.config.width, self.config.height);
+        // Disjoint field borrows: the pass owns none of the resources it reads.
+        let device = &self.device;
+        let queue = &self.queue;
+        let sky = &self.sky_params;
+        let Some(gr) = self.godrays.as_mut() else {
+            return;
+        };
+        gr.render(
+            device, queue, encoder, scene, &depth, &cloud, &mask, &csm, &frame, sky, cloud_map,
+            width, height,
+        );
     }
 
     // Tonemap the HDR scene target onto `dst` (the swapchain). No-op if the tonemap
@@ -1070,6 +1141,14 @@ impl Renderer {
             });
             drop(pass);
             encoder.pop_debug_group();
+        }
+        // Volumetric sun shafts, added to the LINEAR HDR scene here: after the MSAA resolve (so
+        // the blend costs one sample per pixel, not `sample_count`) and before bloom / eye
+        // adaptation / the tonemap curve, so the shafts bloom, drive exposure and roll off like
+        // every other light in the frame. Skipped underwater — the submerged look has its own
+        // compositor and its own shafts, and every occluder this pass reads is above the surface.
+        if underwater_time.is_none() {
+            self.render_god_rays(encoder, source);
         }
         let post_source = if underwater_time.is_some() {
             // The compositor reads a single-sample reversed-Z depth target, including
@@ -1882,6 +1961,9 @@ impl Renderer {
                 label: Some("wgr_frame"),
             });
         // WTR-002 — new frame, new set of timestamp brackets.
+        // Cleared per frame; set by the first depth resolve recorded after the 3D depth is final,
+        // so the god-ray march can reuse it (see render_god_rays).
+        self.frame_depth_final_resolved = false;
         self.gpu_timers.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
         // GPU completion from acquire/present pacing without summing overlapping
@@ -2264,6 +2346,16 @@ impl Renderer {
             None
         };
         let sky_drawn = sky_ivp.is_some();
+        // The god-ray march runs in the post chain, long after this block, but it must march with
+        // the SAME camera the sky drew with — re-picking one down there is how the shafts end up
+        // built against a different view than the sun and clouds casting them. None = no sky this
+        // frame, and the pass skips entirely.
+        self.godrays_frame = sky_ivp.map(|(ivp, cam_pos, cam_shadow)| GodRayFrame {
+            inv_view_proj: ivp,
+            cam_pos,
+            csm: cam_shadow,
+            terrain: shadow_mapping,
+        });
         if let Some((ivp, cam_pos, cam_shadow)) = sky_ivp {
             self.sky.upload(
                 &self.queue,
@@ -2902,6 +2994,9 @@ impl Renderer {
                 // Ensure a resolved single-sample scene depth exists this frame (idempotent if water
                 // already resolved it). Uses the farthest-sample resolve (as water does).
                 self.gfx3d.resolve_water_depth(&mut encoder);
+                // All 3D depth is written by now, so this resolve is the FINAL one: the god-ray
+                // march in the post chain can reuse it rather than recording its own.
+                self.frame_depth_final_resolved = true;
                 if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
                     self.sky.render_cloud(
                         &self.device,

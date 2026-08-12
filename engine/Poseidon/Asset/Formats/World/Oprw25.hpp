@@ -13,11 +13,13 @@
 namespace Poseidon::Asset::Formats::World
 {
 
-// The shared later-generation world reader. OPRW 24 (Arma 2 / Operation Arrowhead)
-// and OPRW 25 (Arma 3) have the same payload layout; revision 25 only inserts an
-// app id after the revision. Keeping that fact here, rather than teaching the
-// OFP-era WrpReader about a structurally unrelated container, makes the generation
-// boundary explicit and keeps the two profile entry points independently strict.
+// The shared later-generation world reader. OPRW 18 and 20 (Armed Assault), 24
+// (Arma 2 / Operation Arrowhead) and 25 (Arma 3) are one container family with the
+// same field order; the four differences between the Arma 1 revisions and the later
+// ones are enumerated in kOprwModernRevisions below and gated by revision inside
+// ReadOprwModern. Keeping that here, rather than teaching the OFP-era WrpReader
+// about a structurally unrelated container, makes the generation boundary explicit
+// and keeps each profile entry point independently strict.
 //
 // Revision 25 is what Arma 3 ships. It differs from the OFP-era OPRW the legacy
 // reader knows in every structural respect that matters: the per-cell grids are
@@ -83,7 +85,9 @@ struct Oprw25StaticEntity
 struct Oprw25RoadLink
 {
     std::vector<Vector3> positions;
-    // Revision 24 added a per-connection type byte; parallel to positions.
+    // Revision 24 added a per-connection type byte, parallel to positions. Empty on
+    // revisions 18 and 20, which store the positions and then go straight to the
+    // object id.
     std::vector<uint8_t> connectionTypes;
     int32_t objectId = 0;
     std::string p3dPath;
@@ -102,8 +106,17 @@ struct Oprw25World
     // Map peaks, in world space. Their maximum matches the elevation maximum.
     std::vector<Vector3> mountains;
 
+    // Per-land-cell colour index and UV jitter, packed as the engine's own
+    // RandomInfo bitfield (colour:8, uOff:4, vOff:4 -- the offsets measured at
+    // -5..+5 across Sahrani). Stored in the file on revisions 18 and 20, exactly as
+    // the OFP-era container stored it; revision 24 dropped it, and the engine
+    // regenerates the equivalent at load time (Landscape::InitRandomization).
+    // Empty on revisions 24 and 25.
+    std::vector<uint16_t> randomization;
+
     // Per-terrain-cell bytes.
     std::vector<uint8_t> grassApprox;
+    // Second per-terrain-cell byte array, added in revision 24; empty on 18 and 20.
     std::vector<uint8_t> primaryTextureIndex;
     std::vector<uint8_t> subdivisionHints;
     std::vector<uint8_t> persistent; // per land cell
@@ -310,12 +323,16 @@ class QuadTree
     std::vector<Node> nodes_;
 };
 
-// Revision 23 switched the bulk arrays from LZSS to LZO. Unlike ODOL 73 there is no
-// per-payload compression flag: a payload is compressed exactly when its
-// decompressed size reaches the engine's 1024-byte threshold. That is not an
-// assumption -- it is what makes both local worlds consume to the byte, and a wrong
-// rule would desynchronise the very next field.
-inline std::vector<uint8_t> ReadCompressed(BinaryReader& reader, size_t expected)
+// Revision 23 switched the bulk arrays from LZSS to LZO; 18 and 20 predate it and
+// use the same SSCompress LZSS every other pre-Arma-2 BIS payload uses. Under
+// either codec there is no per-payload compression flag: a payload is compressed
+// exactly when its decompressed size reaches the engine's 1024-byte threshold. That
+// is not an assumption -- it is what makes every local world consume to the byte,
+// and a wrong rule would desynchronise the very next field.
+//
+// The LZSS payload ends in a checksum the decoder verifies, so a wrong `expected`
+// is caught at the payload rather than surfacing as nonsense several fields later.
+inline std::vector<uint8_t> ReadCompressed(BinaryReader& reader, size_t expected, bool lzo = true)
 {
     std::vector<uint8_t> output(expected);
     if (expected == 0)
@@ -323,6 +340,11 @@ inline std::vector<uint8_t> ReadCompressed(BinaryReader& reader, size_t expected
     if (expected < COMPRESSION_THRESHOLD)
     {
         reader.readBytes(output.data(), expected);
+        return output;
+    }
+    if (!lzo)
+    {
+        reader.readCompressedBytes(output.data(), expected);
         return output;
     }
 
@@ -395,10 +417,42 @@ inline int32_t ReadBoundedCount(BinaryReader& reader, const char* field, size_t 
 // rather than its length, so this is the divisor that recovers the count.
 constexpr size_t kOprw25ObjectRecordSize = 60;
 
-// Reads a revision-25 world. Throws std::runtime_error on anything it does not
-// recognise; it never returns a partially-populated world, because a world whose
-// object table came from a desynchronised stream is worse than no world at all.
-inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25)
+// The revisions this reader has been read against real bytes for. 21, 22 and 23 sit
+// between the two verified groups and are deliberately absent: the codec switch is
+// documented at 23 and the other three differences are only bracketed between 20
+// and 24, so accepting an unseen revision would be a guess wearing a version check.
+constexpr int32_t kOprwModernRevisions[] = {18, 20, 24, 25};
+
+inline bool IsOprwModernRevision(int32_t revision)
+{
+    for (const int32_t known : kOprwModernRevisions)
+        if (revision == known)
+            return true;
+    return false;
+}
+
+// Reads one revision of the later-generation container. Throws std::runtime_error
+// on anything it does not recognise; it never returns a partially-populated world,
+// because a world whose object table came from a desynchronised stream is worse
+// than no world at all.
+//
+// Everything revision-dependent is decided once, here, from the revision the caller
+// asked for -- four booleans, each measured rather than assumed:
+//
+//   lzo               revision 23 moved the bulk arrays from LZSS to LZO.
+//   randomization     18/20 store the per-land-cell colour/UV jitter array the
+//                     OFP container also stored. 24 dropped it.
+//   second byte array 24 added a second per-terrain-cell byte array before the
+//                     elevation grid.
+//   road link types   24 added the per-connection type byte.
+//
+// The road-link one is the trap: the file declares the road network's byte length,
+// and walking it lands on that length under *either* rule, because the segment
+// path is a null-terminated string that resynchronises whatever came before it.
+// The discriminator is the path itself -- read with the wrong rule, Sahrani's
+// "ca\roads\..." comes back as "\roads\...", two characters eaten. So the size
+// check is necessary and not sufficient, and this gate is set from that.
+inline Oprw25World ReadOprwModern(BinaryReader& reader, int32_t expectedVersion)
 {
     Oprw25World world;
 
@@ -411,6 +465,14 @@ inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25
     if (world.header.version != expectedVersion)
         throw std::runtime_error("OPRW revision " + std::to_string(world.header.version) +
                                  " is not the requested profile revision " + std::to_string(expectedVersion));
+    if (!IsOprwModernRevision(world.header.version))
+        throw std::runtime_error("OPRW revision " + std::to_string(world.header.version) +
+                                 " is not a later-generation world container this build reads");
+
+    const bool lzo = world.header.version >= 23;
+    const bool hasRandomization = world.header.version < 24;
+    const bool hasPrimaryTextureIndex = world.header.version >= 24;
+    const bool hasRoadConnectionTypes = world.header.version >= 24;
 
     if (world.header.version >= 25)
         world.header.appId = reader.read<int32_t>();
@@ -449,11 +511,19 @@ inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25
 
     world.materialIndex = Detail::QuadTree(reader, h.landRangeX, h.landRangeY, 2).Expand<uint16_t>();
 
-    world.grassApprox = Detail::ReadCompressed(reader, terrainCells);
-    world.primaryTextureIndex = Detail::ReadCompressed(reader, terrainCells);
+    if (hasRandomization)
+    {
+        const auto raw = Detail::ReadCompressed(reader, landCells * sizeof(uint16_t), lzo);
+        world.randomization.resize(landCells);
+        std::memcpy(world.randomization.data(), raw.data(), raw.size());
+    }
+
+    world.grassApprox = Detail::ReadCompressed(reader, terrainCells, lzo);
+    if (hasPrimaryTextureIndex)
+        world.primaryTextureIndex = Detail::ReadCompressed(reader, terrainCells, lzo);
 
     {
-        const auto raw = Detail::ReadCompressed(reader, terrainCells * sizeof(float));
+        const auto raw = Detail::ReadCompressed(reader, terrainCells * sizeof(float), lzo);
         world.elevation.resize(terrainCells);
         std::memcpy(world.elevation.data(), raw.data(), raw.size());
     }
@@ -505,8 +575,8 @@ inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25
     if (static_cast<size_t>(objectTableBytes) % kOprw25ObjectRecordSize != 0)
         throw std::runtime_error("OPRW 25 object table size is not a whole number of records");
 
-    world.persistent = Detail::ReadCompressed(reader, landCells);
-    world.subdivisionHints = Detail::ReadCompressed(reader, terrainCells);
+    world.persistent = Detail::ReadCompressed(reader, landCells, lzo);
+    world.subdivisionHints = Detail::ReadCompressed(reader, terrainCells, lzo);
 
     world.maxObjectId = reader.read<int32_t>();
     const int32_t roadNetBytes = reader.read<int32_t>();
@@ -531,9 +601,12 @@ inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25
             link.positions.reserve(static_cast<size_t>(connections));
             for (int16_t c = 0; c < connections; ++c)
                 link.positions.push_back(Detail::ReadVector3(reader));
-            link.connectionTypes.resize(static_cast<size_t>(connections));
-            for (int16_t c = 0; c < connections; ++c)
-                link.connectionTypes[c] = reader.read<uint8_t>();
+            if (hasRoadConnectionTypes)
+            {
+                link.connectionTypes.resize(static_cast<size_t>(connections));
+                for (int16_t c = 0; c < connections; ++c)
+                    link.connectionTypes[c] = reader.read<uint8_t>();
+            }
             link.objectId = reader.read<int32_t>();
             link.p3dPath = Detail::ReadBoundedAsciiz(reader, "road segment model");
             link.toWorld = Detail::ReadMatrix4x3(reader);
@@ -573,25 +646,56 @@ inline Oprw25World ReadOprw25(BinaryReader& reader, int32_t expectedVersion = 25
     return world;
 }
 
-// Cheap probe for dispatch, leaving the stream where it found it.
-inline bool IsOprwRevision(BinaryReader& reader, int32_t expectedVersion)
+// The revision of the OPRW this stream holds, or 0 if it is not an OPRW at all.
+// Leaves the stream where it found it.
+inline int32_t PeekOprwRevision(BinaryReader& reader)
 {
     const int start = reader.tell();
     char signature[4] = {};
     int32_t version = 0;
-    bool result = false;
     try
     {
         reader.readBytes(signature, sizeof(signature));
         version = reader.read<int32_t>();
-        result = std::memcmp(signature, "OPRW", 4) == 0 && version == expectedVersion;
+        if (std::memcmp(signature, "OPRW", 4) != 0)
+            version = 0;
     }
     catch (const std::exception&)
     {
-        result = false;
+        version = 0;
     }
     reader.seek(start);
-    return result;
+    return version;
+}
+
+// The revision to read this stream at, or 0 if this reader does not handle it.
+// One call replaces the chain of per-revision probes every dispatch site grew.
+inline int32_t PeekOprwModernRevision(BinaryReader& reader)
+{
+    const int32_t revision = PeekOprwRevision(reader);
+    return IsOprwModernRevision(revision) ? revision : 0;
+}
+
+// Reads whichever accepted revision the stream declares. The profile entry points
+// below stay for callers that mean one specific generation and want anything else
+// refused; this one is for the tools and the runtime, which mean "whatever this is".
+inline Oprw25World ReadOprwModern(BinaryReader& reader)
+{
+    const int32_t revision = PeekOprwModernRevision(reader);
+    if (revision == 0)
+        throw std::runtime_error("Not an OPRW world of a revision this build reads");
+    return ReadOprwModern(reader, revision);
+}
+
+// Cheap probe for dispatch, leaving the stream where it found it.
+inline bool IsOprwRevision(BinaryReader& reader, int32_t expectedVersion)
+{
+    return PeekOprwRevision(reader) == expectedVersion;
+}
+
+inline Oprw25World ReadOprw25(BinaryReader& reader)
+{
+    return ReadOprwModern(reader, 25);
 }
 
 inline bool IsOprw25(BinaryReader& reader)

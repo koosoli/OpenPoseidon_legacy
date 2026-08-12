@@ -29,6 +29,7 @@
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp> // rotor wash for grass
 #include <Poseidon/World/Scene/ObjectClasses.hpp>              // ForestPlain (mode-1 conform exclusion)
 #include <Poseidon/World/Terrain/Landscape.hpp>                // GLandscape->SurfaceY (GPU-driven conform bcSurfaceY)
+#include <Poseidon/World/Weather/WindModel.hpp>                // the one wind authority (grass sway, cloud drift)
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -1208,6 +1209,32 @@ void EngineWgpu::NextFrame()
             ambLin[1] = amb.G() * ambScale;
             ambLin[2] = amb.B() * ambScale;
             skyLit = 1.0f;
+
+            // MOONLIGHT. On this path the directional radiance is the atmosphere's sun
+            // transmittance, which is ~0 once the sun is below the horizon — so without
+            // this the night scene is lit by ambient alone and the moon casts nothing,
+            // whatever LightSun says. LightSun has already swung Direction()/
+            // ShadowDirection() onto the moon (MoonLightAmount() > 0 is exactly when it
+            // does), so only the RADIANCE is missing here.
+            //
+            // Reddened by the same atmospheric transmittance the sun uses, sampled along
+            // the MOON's direction: a moon low over the horizon looks orange for the same
+            // reason the sun does, and its light on the ground goes with it.
+            const float moonAmount = GScene->MainLight()->MoonLightAmount();
+            if (moonAmount > 0.0f && _sky.moonIntensity > 0.0f)
+            {
+                const Vector3 moonTr =
+                    AtmosphereSunTransmittance(_sky, camAlt, -GScene->MainLight()->MoonDirection());
+                // moonIntensity is the full-moon irradiance as a FRACTION of the sun's
+                // (default 1/400 — see Engine::SkySettings). moonAmount already carries
+                // the phase falloff and the horizon ramps.
+                const float moonRad = rad * _sky.moonIntensity * moonAmount;
+                // Slight blue bias, matching LightSun::MoonLightColor: the Purkinje shift
+                // is not modelled anywhere downstream, so it has to live in the light.
+                sunLin[0] += moonTr.X() * moonRad * 0.73f;
+                sunLin[1] += moonTr.Y() * moonRad * 0.80f;
+                sunLin[2] += moonTr.Z() * moonRad * 1.00f;
+            }
         }
 
         // Cloud coverage makes the sun light diffuse: dim the directional beam toward ZERO and lift
@@ -1651,7 +1678,14 @@ void EngineWgpu::PushSceneCamera()
         // coarsest LOD within metres). pixel_limit mirrors LevelFromDistance2's 0.125.
         if (_gpuDriven && _renderer)
         {
-            wgr_set_cull_params(_renderer, static_cast<float>(OBJECT_Z), static_cast<float>(camera->Left()),
+            // Draw distance is Scene::GetObjectDrawDistance(), NOT the raw OBJECT_Z: objectsZ
+            // is 2/3 of the view distance and doubles as the simulation radius, which put the
+            // renderer's hard cull edge at a distance where distance fog is only ~30% applied
+            // — so objects materialised out of nothing there (the flying pop-in). The shared
+            // accessor anchors the render cull to the fog max range, where fog is 1.0, and is
+            // read by the CPU path (Scene::LevelFromDistance2) from the same place so the two
+            // culls cannot drift. WGR_OBJECT_DISTANCE_SCALE=1 restores the legacy distance.
+            wgr_set_cull_params(_renderer, GScene->GetObjectDrawDistance(), static_cast<float>(camera->Left()),
                                 GScene->GetLodInvWidth(), 0.125f);
             // GPU Hi-Z occlusion replaces the engine's software occlusion buffer for the retained
             // set; force the built-in off while it's on so the two don't both cull (and the CPU
@@ -4299,14 +4333,20 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // retained as a gain so artists can test gust visibility without
     // changing mission weather, and becomes the complete manual control
     // when live wind is turned off in the Grass panel.
-    if (settings.useLiveWind && GLandscape)
+    //
+    // Read from the wind AUTHORITY (World/Weather/WindModel), not from
+    // Landscape's legacy 5-second random walk. Two things change for free:
+    // the sway no longer steps every five seconds (the closed form is smooth,
+    // so a gust builds and decays instead of snapping), and it is the same
+    // vector the ocean spectrum, the cloud deck and the smoke sources use, so
+    // the field leans the way the sea is running.
+    if (settings.useLiveWind && GWind.IsActive())
     {
-        const Vector3 liveWind = GLandscape->GetWind();
-        const float windXZ = std::sqrt(liveWind.X() * liveWind.X() + liveWind.Z() * liveWind.Z());
-        if (windXZ > 0.001f)
+        const WindSample& wind = GWind.Sample();
+        if (wind.speed > 0.001f)
         {
-            params.wind_direction = std::atan2(liveWind.Z(), liveWind.X()) * (180.0f / 3.14159265358979323846f);
-            params.wind_strength = std::clamp(windXZ * 0.20f * settings.windStrength, 0.0f, 3.0f);
+            params.wind_direction = wind.directionRad * (180.0f / 3.14159265358979323846f);
+            params.wind_strength = std::clamp(wind.speed * 0.20f * settings.windStrength, 0.0f, 3.0f);
         }
     }
     // The far ring must start beyond the mid ring, whose reach the shader
@@ -4780,7 +4820,42 @@ void EngineWgpu::PushSkyRuntime()
 
     WgrSkyRuntime rt{};
     rt.sun_dir = {_skySunDir.X(), _skySunDir.Y(), _skySunDir.Z(), 0.0f};
-    rt.moon_dir = {_skyMoonDir.X(), _skyMoonDir.Y(), _skyMoonDir.Z(), _skyMoonPhase};
+    // MOON. Everything here comes straight from LightSun's ephemeris, UNSMOOTHED: the
+    // illuminated fraction and the angular radius move on a monthly timescale and the
+    // sub-solar direction moves ~0.04 deg per minute, so there is nothing to pop.
+    // (_skyMoonDir IS smoothed, like the sun, because the 20-second Recalculate cadence
+    // would otherwise step the disc across the sky.)
+    float moonIllum = 1.0f;
+    float moonRadius = 0.00452f;
+    float moonDiscScale = 0.0f;
+    float moonEarthshine = 0.0f;
+    Vector3 moonSunDir(0.0f, 1.0f, 0.0f);
+    if (GScene && GScene->MainLight())
+    {
+        const LightSun* ml = GScene->MainLight();
+        moonIllum = std::clamp(ml->MoonIllumination(), 0.0f, 1.0f);
+        moonRadius = std::max(ml->MoonAngularRadius(), 1.0e-5f);
+        moonSunDir = ml->MoonSunDirection();
+        // Disc SURFACE radiance, not total brightness. MoonBrightness() is the empirical
+        // lunar phase function — the TOTAL light the disc sends us — so dividing by the lit
+        // AREA recovers the per-unit-area radiance. That division is what makes a quarter
+        // moon's lit half genuinely dimmer per unit area than a full moon's, which is the
+        // real opposition effect and not an artistic choice.
+        const float k = std::max(moonIllum, 0.02f);
+        moonDiscScale = _sky.sunIntensity * _sky.exposure * _sky.moonIntensity *
+                        (ml->MoonBrightness() / k) * std::max(_sky.moonBrightnessScale, 0.0f);
+        // Earthshine is brightest when the moon is thinnest (the Earth is then "full" as seen
+        // from the moon). A reflectance floor added to the BRDF before the radiance scale, so
+        // it tracks the disc's overall level instead of floating free of it.
+        moonEarthshine = 0.010f * (1.0f - moonIllum);
+    }
+    moonSunDir.Normalize();
+    const float moonDraw =
+        (_sky.moonIntensity > 0.0f && _sky.moonBrightnessScale > 0.0f && moonDiscScale > 0.0f) ? 1.0f : 0.0f;
+
+    rt.moon_dir = {_skyMoonDir.X(), _skyMoonDir.Y(), _skyMoonDir.Z(), moonIllum};
+    rt.moon_params = {moonRadius, moonIllum, moonDiscScale, moonDraw};
+    rt.moon_sun = {moonSunDir.X(), moonSunDir.Y(), moonSunDir.Z(), moonEarthshine};
     rt.fog_color = {_skyFog[0], _skyFog[1], _skyFog[2], fogFar};
     // misc.zw = cloud wind WORLD offset (metres) = windVel * time, wrapped to a large period in
     // DOUBLE precision so it stays bounded (the shader scales it into the noise coord and the Repeat
@@ -4794,8 +4869,44 @@ void EngineWgpu::PushSkyRuntime()
     const double cloudT = (_waterLook.freeze.freezeClouds || _waterLook.freeze.freezeTime)
                               ? static_cast<double>(_waterLook.freeze.fixedTime)
                               : static_cast<double>(Glob.time.toFloat());
-    double windX = std::fmod(static_cast<double>(_sky.cloudWind[0]) * cloudT, kWindWrap);
-    double windZ = std::fmod(static_cast<double>(_sky.cloudWind[1]) * cloudT, kWindWrap);
+    // The deck's scroll velocity. Driven by the world's wind authority when
+    // cloudWindFromWeather is on, so an overcast front that stiffens the wind
+    // also runs the clouds — the same number that raises the sea state, leans
+    // the grass and carries the smoke.
+    double windVelX = static_cast<double>(_sky.cloudWind[0]);
+    double windVelZ = static_cast<double>(_sky.cloudWind[1]);
+    if (_sky.cloudWindFromWeather && GWind.IsActive())
+    {
+        // Mean wind, not the instantaneous gust: a 3 km-wide cloud bank does not
+        // accelerate on a seven-second gust, and feeding gusts here would make
+        // the whole sky shudder. Aloft scale converts surface wind to cloud-base
+        // wind (see cloudWindAloftScale).
+        const WindSample& wind = GWind.Sample();
+        const double aloft = static_cast<double>(std::max(_sky.cloudWindAloftScale, 0.0f)) * wind.meanSpeed;
+        windVelX = aloft * std::cos(wind.meanDirectionRad);
+        windVelZ = aloft * std::sin(wind.meanDirectionRad);
+    }
+    // INTEGRATE the offset. `velocity * elapsed` is only correct while velocity is
+    // constant; the moment the wind changes, that form rewrites the whole history
+    // and the deck jumps by kilometres. Accumulating v*dt keeps it continuous
+    // through every wind change. dt comes from the same cloud clock, so the
+    // Water tab's freeze switches (which hold cloudT) still hold the deck still.
+    if (!_cloudOffsetInit)
+    {
+        _cloudOffsetInit = true;
+        _cloudOffsetClock = cloudT;
+        // Preserve the historical starting phase so an untouched sky looks the
+        // same at mission start as it did before the offset became integrated.
+        _cloudOffsetX = std::fmod(windVelX * cloudT, kWindWrap);
+        _cloudOffsetZ = std::fmod(windVelZ * cloudT, kWindWrap);
+    }
+    // Clamp dt: a time-of-day skip or a mission load must not fling the deck.
+    const double cloudDt = std::clamp(cloudT - _cloudOffsetClock, 0.0, 0.5);
+    _cloudOffsetClock = cloudT;
+    _cloudOffsetX = std::fmod(_cloudOffsetX + windVelX * cloudDt, kWindWrap);
+    _cloudOffsetZ = std::fmod(_cloudOffsetZ + windVelZ * cloudDt, kWindWrap);
+    const double windX = _cloudOffsetX;
+    const double windZ = _cloudOffsetZ;
     rt.misc = {_skyNight, camAlt, static_cast<float>(windX), static_cast<float>(windZ)};
     // Cloud EVOLUTION offsets, on the same clock and the same wrap as the wind above (so they
     // freeze together under the Water tab's freeze switches). Wind translates the field; these

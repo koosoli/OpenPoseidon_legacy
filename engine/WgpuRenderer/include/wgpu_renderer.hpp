@@ -464,6 +464,17 @@ struct WgrSky
      * Applied on the noise volume's third axis, so the field morphs in place — clouds form and
      * dissolve — instead of only translating with the wind. w = pad. */
     WgrVec4 cloud4;
+    /* Moon disc (RUNTIME). Appended at the END so no existing lane moves.
+     * x = moon angular RADIUS (rad, real, ~0.0045 and varying +/-6% over the month),
+     * y = illuminated fraction (0 new .. 1 full),
+     * z = disc radiance scale (irradiance; the shader divides by the solid angle),
+     * w = draw the disc (0 = skip entirely). */
+    WgrVec4 moon_params;
+    /* xyz = unit direction TO THE SUN AS SEEN FROM THE MOON. Deliberately NOT sun_dir:
+     * that one may be the legacy sun and is temporally smoothed, and the terminator's TILT
+     * is the thing people notice when it is wrong. w = earthshine reflectance floor on the
+     * dark side (0 = none). */
+    WgrVec4 moon_sun;
 };
 
 /* --- Consolidated imgui-tweakable render params (docs/render-params-consolidation-plan.md) ---
@@ -495,10 +506,16 @@ struct WgrSkyLook
 struct WgrSkyRuntime
 {
     WgrVec4 sun_dir;   /* xyz = unit dir TO the sun; w = pad */
-    WgrVec4 moon_dir;  /* xyz = unit dir TO the moon; w = moon phase */
+    WgrVec4 moon_dir;  /* xyz = unit dir TO the moon; w = ILLUMINATED FRACTION (0 new .. 1 full).
+                        * Was the legacy synodic-age float, which only ever indexed moon.p3d's
+                        * texture animation — and that dome is suppressed on this backend. */
     WgrVec4 fog_color; /* xyz = scene fog colour; w = fog far-range (m) */
     WgrVec4 misc;      /* x = night factor (0..1), y = camera altitude ASL (m), z/w = wind offset */
     WgrVec4 cloud_evolve; /* x = shape, y = detail, z = weather drift (m, CPU-wrapped); w = pad */
+    /* Moon disc. See WgrSky::moon_params / moon_sun for the field meanings — these are the
+     * per-frame source the renderer folds into those UBO lanes. */
+    WgrVec4 moon_params;
+    WgrVec4 moon_sun;
 };
 
 /* Long-distance terrain sun-shadow sweep (was wgr_terrain_set_sun_shadow's args). */
@@ -1341,9 +1358,14 @@ static_assert(sizeof(WgrDraw3D) == 272, "WgrDraw3D layout must match the Rust #[
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTonemap) == 48, "WgrTonemap layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrExposure) == 32, "WgrExposure layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrSky) == 256, "WgrSky layout must match the Rust #[repr(C)] struct");
+/* 18 vec4 = 288 bytes. Was 256 (16 vec4) before the moon disc added moon_params + moon_sun. */
+static_assert(sizeof(WgrSky) == 288, "WgrSky layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyLook) == 192, "WgrSkyLook layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrSkyRuntime) == 80, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
+/* 7 vec4 = 112 bytes. Was 80 (5 vec4) before the moon disc added moon_params + moon_sun.
+ * This assert and sky/mod.rs's rust_and_wgsl_sky_structs_declare_the_same_fields_in_the_same_order
+ * are the ONLY things standing between a lane added on one side of the FFI and silent garbage
+ * in the shader — keep them in step. */
+static_assert(sizeof(WgrSkyRuntime) == 112, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFoliage) == 48, "WgrFoliage layout must match the Rust #[repr(C)] struct");
@@ -1693,6 +1715,35 @@ extern "C"
        the phase is how a screenshot capture (no dev panel) selects a point in the variation
        cycle, which is otherwise an hour long and always sampled at the same instant. */
     WGR_API void wgr_set_cirrus_puffiness(WgrRenderer* renderer, float puffiness, float variation);
+
+    /* Volumetric sun shafts (crepuscular rays / god rays).
+
+       A WORLD-SPACE march, not a screen-space radial blur. Each low-resolution view ray is walked
+       and asked "is the sun visible from here", against three maps that already exist and are
+       rebuilt every frame: the CLD-020 cloud sun-transmittance map (so a cloud bank crossing the
+       sun reshapes the shafts — the point of the feature), the long-range terrain shadow-ceiling
+       mask, and the cascade shadow map (buildings, tree crowns). No new geometry or shadow pass.
+
+       Consequences of being world-space rather than screen-space, both of which are requirements
+       and not accidents: the sun's SCREEN position never enters the shader, so an off-screen sun
+       produces no edge halo; and the fade-out below the horizon / behind the camera comes from the
+       sun-elevation ramp and the forward-peaked phase function rather than a special case.
+
+       `density` = scattering coefficient, 1/m (the engine's clear-day Mie is 6e-6).
+       `distance` = march cap, metres. `g` = Henyey-Greenstein anisotropy (higher = tighter beam).
+       `cloudInfluence` = how strongly the deck shapes the shafts; 0 = geometry only, for A/B.
+       `steps` and `resDiv` are the cost knobs — `resDiv` is the screen-resolution divisor for the
+       march target (2 = half in each axis, the default). Everything clamps.
+
+       Composited into the LINEAR HDR scene before bloom / auto-exposure / tonemap, so shafts
+       bloom and roll off like any other light; there is no effect on the LDR-direct path.
+
+       Own entry point rather than a WgrSkyLook lane, for the reason given on wgr_set_cirrus_mode:
+       that struct's size is part of the ABI handshake. Overridable at startup with
+       WGR_GODRAYS=<enabled>[,<intensity>[,<density x1e-6>[,<steps>[,<res divisor>]]]] — which is
+       how a --no-dev capture ablates it, since the Sky tab is not reachable there. */
+    WGR_API void wgr_set_god_rays(WgrRenderer* renderer, uint32_t enabled, float intensity, float density,
+                                  float distance, float g, float cloudInfluence, uint32_t steps, uint32_t resDiv);
 
     /* Material Debug state for the RETAINED (GPU-driven) path — the dev panel's
      * Materials tab. `view`: 0 full material, 1 base colour only, 2 decoded normal.

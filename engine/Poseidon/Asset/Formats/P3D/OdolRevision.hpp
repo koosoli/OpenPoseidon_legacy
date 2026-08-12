@@ -23,6 +23,10 @@ namespace Poseidon::Asset::Formats::P3D
 // honestly cover:
 //
 //   7   OFP / Cold War Assault   -- the one this build parses
+//   40  Armed Assault (Arma 1)   -- the *only* revision Arma 1 ships: 2,684
+//                                   models across all 95 A1 PBOs in the corpus,
+//                                   revision 40 without exception. The one
+//                                   non-ODOL P3D found is an MLOD source.
 //   48  Arma 2                   -- the base-game revision; every one of the 64
 //                                   Takistan references parses through the same
 //                                   A2-family reader as 49
@@ -51,6 +55,10 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
     switch (version)
     {
         case 7:  return {7,  OdolSupport::Parsed,     "Operation Flashpoint / Cold War Assault"};
+        // Naming it turns every Arma 1 model in a census from "unrecognised
+        // revision" -- which reads as a corrupt file -- into a named, countable
+        // gap. No reader is claimed: nothing of revision 40 parses today.
+        case 40: return {40, OdolSupport::Recognised, "Armed Assault (Arma 1)"};
         case 48: return {48, OdolSupport::NarrowSubset, "Arma 2"};
         case 49: return {49, OdolSupport::NarrowSubset, "Arma 2 / Arma 2 Operation Arrowhead"};
         case 50: return {50, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};

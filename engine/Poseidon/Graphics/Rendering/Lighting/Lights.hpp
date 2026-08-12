@@ -97,6 +97,24 @@ class LightSun
 	float _nightEffect;
 	float _starsVisible;
 
+	// --- Real lunar/solar geometry (Graphics/Rendering/Lighting/Ephemeris.hpp) -------
+	// The 2001 model had a moon DIRECTION and a scalar "phase" it used only to pick a
+	// frame of the moon.p3d texture animation. A phase-correct renderer needs more:
+	// how much of the disc is lit, how big the disc is, and which way the terminator
+	// faces. These are filled by Recalculate from the ephemeris (or held at neutral
+	// values when the legacy model is selected).
+
+	// Unit direction TO the sun as seen from the moon (i.e. the moon's light vector).
+	// The sun is 390x further away than the moon, so this is the solar direction to
+	// well under a degree — but it is kept SEPARATE from _sunDirection on purpose: the
+	// renderer may be showing a legacy or temporally-smoothed sun, and the terminator
+	// must come from the astronomy, not from whatever the sun disc happens to be doing.
+	Vector3 _moonSunDirection;
+	float _moonIllumination;   // lit fraction of the visible disc, 0 (new) .. 1 (full)
+	float _moonBrightness;     // total disc brightness relative to a full moon (0..1)
+	float _moonAngularRadius;  // apparent RADIUS of the disc, radians (~0.0045)
+	float _moonLightAmount;    // 0..1 — how much of the shading light is moonlight now
+
 
 	public:
 
@@ -124,7 +142,25 @@ class LightSun
 
 	ColorVal MoonObjectColor() const {return _moonObjectColor;}
 	ColorVal MoonHaloObjectColor() const {return _moonHaloObjectColor;}
+	// Synodic age, 0 = new .. 0.5 = full. Legacy units (drives moon.p3d's texture
+	// animation on the GL33 skydome); a phase-correct shader wants MoonIllumination().
 	float MoonPhase() const {return _moonPhase;}
+
+	// Unit direction TO the sun as seen from the moon — the vector a shader shades the
+	// lunar sphere with, and the thing that fixes the terminator's ORIENTATION.
+	Vector3Val MoonSunDirection() const {return _moonSunDirection;}
+	// Illuminated fraction of the disc, 0 (new) .. 1 (full).
+	float MoonIllumination() const {return _moonIllumination;}
+	// Total brightness relative to a full moon, from the empirical lunar phase function
+	// (astro::MoonPhaseBrightness). Strongly non-linear: quarter moon is ~0.09, not 0.5.
+	float MoonBrightness() const {return _moonBrightness;}
+	// Apparent angular RADIUS of the disc in radians. Varies ~+/-6% over the month.
+	float MoonAngularRadius() const {return _moonAngularRadius;}
+	// 0..1 blend of moonlight into the scene's directional light. >0 only once the sun
+	// is well below the horizon AND the moon is above it; scaled by the phase function.
+	// While this is >0, Direction()/ShadowDirection() point along the MOONLIGHT, not the
+	// sun (SunDirection() always stays astronomical, for the sky).
+	float MoonLightAmount() const {return _moonLightAmount;}
 
 	ColorVal SkyColor() const {return _skyColor;}
 	ColorVal GetDiffuse() const {return _diffuse;}

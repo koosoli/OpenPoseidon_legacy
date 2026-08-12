@@ -329,6 +329,15 @@ class Scene
     Landscape* GetLandscape() const { return _landscape; }
     ShadowCache& GetShadowCache() const { return _shadowCache; }
 
+    // Render-only object cull distance (metres). NOT ENGINE_CONFIG.objectsZ, which is
+    // also the simulation radius: this is the distance the renderer stops DRAWING
+    // objects at, anchored to the fog max range so an object crossing the edge is
+    // already fully dissolved into the sky. See SceneDraw.cpp for the derivation and
+    // the WGR_OBJECT_DISTANCE_SCALE knob. Both the CPU draw path
+    // (LevelFromDistance2) and the GPU-driven cull (wgr_set_cull_params) read this,
+    // so they cannot drift apart.
+    float GetObjectDrawDistance() const;
+
     int LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                            Vector3Par viewDirection);
     int LevelShadowFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,

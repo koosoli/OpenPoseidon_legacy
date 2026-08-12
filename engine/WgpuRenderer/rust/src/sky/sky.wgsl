@@ -12,7 +12,7 @@
 struct Sky {
     inv_view_proj: mat4x4<f32>,
     sun_dir: vec4<f32>,       // xyz = dir TO sun, w = sun radiance scale
-    moon_dir: vec4<f32>,      // xyz = dir TO moon, w = moon phase (unused here)
+    moon_dir: vec4<f32>,      // xyz = dir TO moon, w = illuminated fraction (0 new .. 1 full)
     rayleigh: vec4<f32>,      // xyz = Rayleigh beta (1/m), w = Rayleigh scale height (m)
     mie: vec4<f32>,           // x = Mie beta, y = Mie g, z = Mie scale height (m), w = turbidity
     ground_albedo: vec4<f32>, // xyz = ground albedo, w = night factor
@@ -41,6 +41,11 @@ struct Sky {
     // texel grid on the CPU, so the field does not crawl as the camera moves), z = 1/span in
     // metres, w = strength (0 = the pass is skipped entirely and every surface reads fully lit).
     cloud_shadow: vec4<f32>,
+    // Moon disc. x = angular RADIUS (rad), y = illuminated fraction, z = disc radiance
+    // scale (irradiance; divided by the solid angle in moon_disc), w = draw (0 = skip).
+    moon_params: vec4<f32>,
+    // xyz = unit dir TO the sun as seen from the MOON; w = earthshine reflectance floor.
+    moon_sun: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -1192,6 +1197,69 @@ fn cloud_over_cirrus(deck: CloudResult, cirrus: CloudResult) -> CloudResult {
     return res;
 }
 
+// ---- Moon disc ---------------------------------------------------------------
+// A SHADED SPHERE, not a phase billboard. The lunar surface normal is reconstructed per
+// pixel inside the disc and lit with the real sub-solar direction, so the terminator gets
+// both its correct CURVATURE (an ellipse, not a straight cut) and its correct TILT
+// relative to the horizon for free. A rotated phase texture can match one of those or the
+// other, and the tilt is the one people notice.
+//
+// The reflectance is Lommel-Seeliger (I = ndl / (ndl + ndv)) rather than Lambert. That is
+// what makes the real moon read as a flat disc instead of a shaded ball: the regolith is a
+// deep, dark, porous scattering layer, and a Lambert full moon has obviously wrong dark
+// limbs.
+fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
+    if (sky.moon_params.w < 0.5) {
+        return vec3<f32>(0.0);
+    }
+    let moon = normalize(sky.moon_dir.xyz);
+    let cos_a = dot(dir, moon);
+    let radius = max(sky.moon_params.x, 1.0e-4);
+    let cos_r = cos(radius);
+    if (cos_a <= cos_r) {
+        return vec3<f32>(0.0);
+    }
+    // Tangent frame on the disc. World up is degenerate at the zenith, so seed elsewhere.
+    var seed = vec3<f32>(0.0, 1.0, 0.0);
+    if (abs(moon.y) > 0.99) {
+        seed = vec3<f32>(1.0, 0.0, 0.0);
+    }
+    let tx = normalize(cross(seed, moon));
+    let ty = cross(moon, tx);
+    // Offset of this ray from the disc centre, in units of the disc radius. The small-angle
+    // form is exact to a part in 1e5 at a quarter of a degree.
+    let off = dir - moon * cos_a;
+    let u = dot(off, tx) / radius;
+    let v = dot(off, ty) / radius;
+    let r2 = u * u + v * v;
+    if (r2 >= 1.0) {
+        return vec3<f32>(0.0);
+    }
+    let nz = sqrt(max(0.0, 1.0 - r2));
+    // Outward normal of the VISIBLE hemisphere: -moon at the disc centre, perpendicular to
+    // the view at the limb.
+    let n = tx * u + ty * v - moon * nz;
+    let l = normalize(sky.moon_sun.xyz);
+    let ndl = dot(n, l);
+    let ndv = nz;
+    let lit = max(ndl, 0.0);
+    let ls = lit / max(lit + ndv, 1.0e-3);
+    let brdf = mix(ls, lit, 0.15);
+    // Earthshine: the dark side of a crescent is genuinely visible, lit by a nearly full
+    // Earth. It is the detail that makes a young moon read as a sphere rather than a
+    // cut-out. Artistically scaled — the true ratio is ~1e-4 and would vanish here.
+    let earthshine = max(sky.moon_sun.w, 0.0);
+    // Soften the limb over the outer 3% of the radius so the edge does not alias.
+    let edge = 1.0 - smoothstep(0.97, 1.0, sqrt(r2));
+    // Radiance from irradiance / solid angle, exactly as the sun disc does below, so
+    // inflating the disc for visibility lowers its radiance and total power holds.
+    let solid_angle = 2.0 * PI * (1.0 - cos_r);
+    let scale = sky.moon_params.z / solid_angle;
+    let tint = vec3<f32>(1.0, 0.97, 0.92);
+    let moon_t = sample_transmittance(pos, moon);
+    return tint * (brdf + earthshine) * edge * scale * moon_t;
+}
+
 @fragment
 fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let dir = normalize(in.ray_dir);
@@ -1228,6 +1296,10 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
             let disc = (sky.sun_dir.w * sky.params.y) / solid_angle;
             color = color + disc * sun_t * limb;
         }
+        // Moon disc, same gate: only where the view ray misses the planet, and drawn here in
+        // fs_sky (not in sky_radiance) so the depth-aware cloud composite that runs after
+        // geometry occludes it exactly as it occludes the sun.
+        color = color + moon_disc(dir, pos);
     }
 
     // Linear HDR path: hand linear radiance to the tonemap resolve. LDR-direct: no resolve runs,

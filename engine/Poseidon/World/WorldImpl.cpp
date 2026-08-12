@@ -77,6 +77,7 @@ bool DoEditorChildControllerUiAction(ControlsContainer* display, Poseidon::Contr
 } // namespace
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -1744,6 +1745,28 @@ LSError World::Serialize(ParamArchive& ar, int message)
     PARAM_CHECK(ar.Serialize("speedOvercast", _speedOvercast, 1))
     PARAM_CHECK(ar.Serialize("weatherTime", _weatherTime, 1))
     PARAM_CHECK(ar.Serialize("nextWeatherChange", _nextWeatherChange, 1))
+
+    // Wind authority. Only the AUTHORED conditions are stored: the live vector is
+    // a closed form of (conditions, overcast, clock), and both overcast and the
+    // clock are already in this archive above — so a restored save resumes the
+    // exact wind it was saved with, with no extra state and no drift.
+    // Every field carries a default equal to the authored constant, so archives
+    // written before this block load unchanged.
+    {
+        WindConditions wind = GWind.Conditions();
+        int windSeed = static_cast<int>(wind.seed);
+        PARAM_CHECK(ar.Serialize("windDirection", wind.baseDirectionRad, 1, 0.46364760f))
+        PARAM_CHECK(ar.Serialize("windCalmSpeed", wind.calmSpeed, 1, 1.5f))
+        PARAM_CHECK(ar.Serialize("windOvercastSpeed", wind.overcastSpeed, 1, 7.5f))
+        PARAM_CHECK(ar.Serialize("windGustiness", wind.gustiness, 1, 0.55f))
+        PARAM_CHECK(ar.Serialize("windVeer", wind.veerAmplitudeRad, 1, 0.55f))
+        PARAM_CHECK(ar.Serialize("windSeed", windSeed, 1, 1337))
+        if (!ar.IsSaving())
+        {
+            wind.seed = static_cast<uint32_t>(windSeed);
+            GWind.SetConditions(wind);
+        }
+    }
 
     PARAM_CHECK(ar.Serialize("horizontZ", ENGINE_CONFIG.horizontZ, 1, 900))
     PARAM_CHECK(ar.Serialize("tacticalZ", ENGINE_CONFIG.tacticalZ, 1, 900))

@@ -25,6 +25,7 @@
 #include <Poseidon/World/Terrain/LandFile.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw24.hpp>
+#include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
 #include <stdexcept>
@@ -1734,18 +1735,21 @@ bool Landscape::LoadOprwModern(const char* path)
     }
 
     Fmt::BinaryReader reader(file);
-    const bool isOprw24 = Fmt::World::IsOprw24(reader);
-    const bool isOprw25 = Fmt::World::IsOprw25(reader);
-    if (!isOprw24 && !isOprw25)
+    // Revisions 18 and 20 (Armed Assault), 24 (Arma 2 / OA) and 25 (Arma 3). One
+    // probe rather than one per revision: the reader gates the differences on the
+    // revision it read, so the caller only has to know that this is a container of
+    // that family.
+    const int32_t revision = Fmt::World::PeekOprwModernRevision(reader);
+    if (revision == 0)
     {
-        RptF("LoadOprwModern: %s is not an OPRW revision 24 or 25 world", path);
+        RptF("LoadOprwModern: %s is not an OPRW revision 18, 20, 24 or 25 world", path);
         return false;
     }
 
     Fmt::World::Oprw25World world;
     try
     {
-        world = isOprw24 ? Fmt::World::ReadOprw24(reader) : Fmt::World::ReadOprw25(reader);
+        world = Fmt::World::ReadOprwModern(reader, revision);
     }
     catch (const std::exception& e)
     {

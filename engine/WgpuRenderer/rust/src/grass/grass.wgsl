@@ -156,6 +156,21 @@ const GEO_EXCLUDE_HARD: u32 = 0x00000c63u; // waterDepth | road | track | howMan
 const GEO_EXCLUDE_SOFT: u32 = 0x00000018u; // forestInner | forestOuter
 // Bit 2 (`full`) is deliberately in NEITHER: legacy Everon marks normal ground
 // with it, so excluding it removes every blade from valid grass terrain.
+//
+// The upper half of the word is written by TerrainWgpu::BakeAuthoredGrassMask
+// from the map's OWN per-texel LCA surface mask (see the layout comment in
+// TerrainWgpu.cpp -- change both together):
+//   bit  15     the cell's answer is authored, so the fields below are real
+//   bits 16-22  clutter coverage 0..127, relative to the world's densest
+//               clutter character. This is what makes Takistan's grass
+//               (character total 0.94) and its desert (0.12) different fields.
+//   bits 23-27  a dense surface id for the surface dominating the cell,
+//               31 = none. Carried for per-surface clutter VARIETY; unused here.
+const GEO_AUTHORED: u32 = 0x00008000u;
+const GEO_COVERAGE_MASK: u32 = 0x007f0000u;
+const GEO_COVERAGE_SHIFT: u32 = 16u;
+const GEO_SURFACE_MASK: u32 = 0x0f800000u;
+const GEO_SURFACE_SHIFT: u32 = 23u;
 const BLADE_SEGMENTS: u32 = 5u;
 const VERTS_PER_CARD: u32 = BLADE_SEGMENTS * 6u;
 const NEAR_CLUMP_BLADES: u32 = 6u;
@@ -339,6 +354,30 @@ fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
         pick = pick - w;
     }
     return chosen + 1u;
+}
+
+// The map's own clutter density for this cell, 0..1.
+//
+// A cell the bake did not answer -- every OFP cell, and any Arma cell whose
+// material carries no authored mask -- returns 1.0, so those worlds keep exactly
+// the density they had. Where it IS authored, the number is the fraction of the
+// cell's mask texels that selected a clutter-bearing surface, multiplied by that
+// surface's own authored probability total, which is deliberately not normalised
+// per surface: the remainder is bare ground, and that is what separates a field
+// from scree.
+fn geo_clutter_coverage(geo: u32) -> f32 {
+    if ((geo & GEO_AUTHORED) == 0u) { return 1.0; }
+    return f32((geo & GEO_COVERAGE_MASK) >> GEO_COVERAGE_SHIFT) * (1.0 / 127.0);
+}
+
+// Stable thinning by the authored coverage. Keyed on a salt of its own rather
+// than reusing the candidate's survival seed, so the coverage field thins the
+// set independently instead of correlating with the density hash and carving
+// the same blades out of every ring.
+fn authored_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
+    let cover = geo_clutter_coverage(geo);
+    if (cover >= 0.999) { return false; }
+    return hash_cell01(cell_id, 0x51a3f7c9u) >= cover;
 }
 
 // Coverage multiplier from a world-space noise map, so density is patchy rather
@@ -673,6 +712,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u) { return; }
     if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
@@ -734,6 +774,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let geo = textureLoad(geography, geocell, 0).x;
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
     let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
@@ -790,6 +831,7 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     let geo = textureLoad(geography, geocell, 0).x;
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
+    if (authored_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);

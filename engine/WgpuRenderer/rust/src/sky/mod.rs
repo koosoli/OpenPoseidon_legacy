@@ -58,6 +58,59 @@ fn cloud_composite_wgsl_validates() {
     .expect("cloud_composite.wgsl validate");
 }
 
+// The three checks above are naga-ONLY, which is necessary but not sufficient: naga never
+// sees a bind group layout, so a binding whose declared type disagrees with the layout — or
+// a uniform whose size no longer matches what the pipeline expects — parses and validates
+// cleanly and then panics at pipeline creation. That panic is what the project's startup
+// diagnostics describe as "the prompt returns instantly with nothing on screen".
+//
+// Building the real Sky against a real device is the test that catches it, because
+// Sky::new creates every sky pipeline (fs_sky included, which is where moon_disc lives)
+// against the actual bind group layouts and writes the actual uniform buffer.
+#[cfg(test)]
+mod sky_device_tests {
+    // Best-effort headless device; the test skips when no adapter is available (CI without
+    // a GPU). Same shape as godrays.rs::tests::headless.
+    fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()
+    }
+
+    #[test]
+    fn sky_pipelines_build_on_a_real_device() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let mut sky = super::Sky::new(&device, &queue, crate::HDR_FORMAT, 1);
+        // Also exercise the upload path, so a SkyUniform whose size drifted away from
+        // sky.wgsl's `struct Sky` fails HERE (as a bind/size validation error) rather than
+        // as "buffer bound with size N where the shader expects M" on every 3D draw.
+        let params = crate::ffi::WgrSky::default();
+        let ident = [
+            [1.0f32, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        sky.upload(
+            &queue,
+            &params,
+            ident,
+            [0.0, 0.0, 0.0, 0.0],
+            &bytemuck::Zeroable::zeroed(),
+            &bytemuck::Zeroable::zeroed(),
+        );
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+}
+
 // LUT resolutions. Transmittance is smooth in both axes; multiscatter is very
 // low-frequency, so a tiny map suffices (its build is the expensive one).
 const TRANSMITTANCE_W: u32 = 256;
@@ -205,6 +258,13 @@ struct SkyUniform {
     // which reads as the clouds sliding across the ground). z = 1/span in metres, w = strength,
     // where 0 skips the pass and leaves every surface fully lit.
     cloud_shadow: [f32; 4],
+    // Moon disc. x = angular RADIUS (rad), y = illuminated fraction, z = disc radiance
+    // scale (irradiance — the shader divides by the solid angle, so inflating the disc for
+    // visibility lowers its radiance and total power holds), w = draw (0 = skip).
+    moon_params: [f32; 4],
+    // xyz = unit dir TO the sun as seen from the moon (shades the lunar sphere);
+    // w = earthshine reflectance floor on the dark side.
+    moon_sun: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -411,9 +471,15 @@ pub struct Sky {
     // cloud_lo resizes with the scene. Only used on the HDR (linear) path.
     cloud_pipeline: wgpu::RenderPipeline,
     cloud_depth_layout: wgpu::BindGroupLayout,
-    cloud_lo_tex: Option<wgpu::Texture>,
-    cloud_lo_view: Option<wgpu::TextureView>,
-    cloud_lo_size: (u32, u32),
+    // PERF: a SIZE-KEYED CACHE, not one slot. render_cloud is called twice per frame at two
+    // different sizes — once for the planar reflection (half of the half-res planar target,
+    // i.e. a quarter of the screen) and once for the over-scene march (half the screen). A
+    // single slot keyed on the requested size therefore missed on EVERY call and destroyed +
+    // reallocated a multi-megabyte HDR texture twice per frame, forever. Keyed storage makes
+    // both calls hit after the first frame; the cache is capped because only a handful of
+    // distinct sizes can ever be asked for (screen/2 and planar/2, plus their post-resize
+    // predecessors).
+    cloud_lo: Vec<CloudLoTarget>,
     cloud_composite_pipeline: wgpu::RenderPipeline,
     cloud_composite_layout: wgpu::BindGroupLayout,
     cloud_composite_bind: Option<wgpu::BindGroup>,
@@ -425,6 +491,22 @@ pub struct Sky {
     last_lut: Option<LutKey>,
     lut_dirty: bool,
 }
+
+// One cached low-res cloud march target. `_tex` keeps the allocation alive for `view`.
+struct CloudLoTarget {
+    size: (u32, u32),
+    _tex: wgpu::Texture,
+    view: wgpu::TextureView,
+    // The depth view the two cached binds below were built against; identity-compared so a
+    // resize (which is the only thing that replaces it) rebuilds them and nothing else does.
+    depth_src: Option<wgpu::TextureView>,
+    composite_bind: Option<wgpu::BindGroup>,
+    depth_bind: Option<wgpu::BindGroup>,
+}
+
+// How many distinct low-res cloud sizes to keep. Two are live every frame (screen/2 and
+// planar/2); the spare slots absorb a resize without evicting a live one mid-frame.
+const CLOUD_LO_CACHE: usize = 4;
 
 impl Sky {
     pub fn new(
@@ -1228,9 +1310,7 @@ impl Sky {
             cloud_noise_tex,
             cloud_pipeline,
             cloud_depth_layout,
-            cloud_lo_tex: None,
-            cloud_lo_view: None,
-            cloud_lo_size: (0, 0),
+            cloud_lo: Vec::new(),
             cloud_composite_pipeline,
             cloud_composite_layout,
             cloud_composite_bind: None,
@@ -1401,6 +1481,8 @@ impl Sky {
             ],
             cam_pos,
             cloud_shadow: self.cloud_shadow_mapping(cam_pos),
+            moon_params: sky.moon_params,
+            moon_sun: sky.moon_sun,
         };
         self.cloud_shadow_map_params = u.cloud_shadow;
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
@@ -1492,60 +1574,92 @@ impl Sky {
         height: u32,
     ) {
         let lo = (width.div_ceil(2).max(1), height.div_ceil(2).max(1));
-        if self.cloud_lo_size != lo || self.cloud_lo_view.is_none() {
-            let tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("wgr_cloud_lo"),
-                size: wgpu::Extent3d {
-                    width: lo.0,
-                    height: lo.1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: crate::HDR_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-            let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-            self.cloud_lo_tex = Some(tex);
-            self.cloud_lo_view = Some(view);
-            self.cloud_lo_size = lo;
+        // Find-or-create in the size-keyed cache (see the field comment): the planar and the
+        // over-scene marches ask for two different sizes every frame, so a single slot
+        // reallocated the texture on every call.
+        let slot = match self.cloud_lo.iter().position(|t| t.size == lo) {
+            Some(i) => i,
+            None => {
+                let tex = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("wgr_cloud_lo"),
+                    size: wgpu::Extent3d {
+                        width: lo.0,
+                        height: lo.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: crate::HDR_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+                // Evict oldest first so a window resize cannot grow this without bound.
+                if self.cloud_lo.len() >= CLOUD_LO_CACHE {
+                    self.cloud_lo.remove(0);
+                }
+                self.cloud_lo.push(CloudLoTarget {
+                    size: lo,
+                    _tex: tex,
+                    view,
+                    depth_src: None,
+                    composite_bind: None,
+                    depth_bind: None,
+                });
+                self.cloud_lo.len() - 1
+            }
+        };
+        // The composite bind carries the low-res cloud buffer + the scene depth (for the bilateral
+        // upsample); group(1) carries the same depth for the march itself. PERF: both used to be
+        // rebuilt unconditionally on the claim that "the depth view is regenerated every frame".
+        // It is not — Gfx3d::ensure_depth recreates it only on a resize, and the planar target
+        // likewise. Compare by identity (wgpu resource equality is identity) and rebuild only
+        // when the view genuinely changed. Cached per size slot because the two calls per frame
+        // pass two different depth views.
+        {
+            let target = &mut self.cloud_lo[slot];
+            if target.depth_src.as_ref() != Some(depth_view) || target.composite_bind.is_none() {
+                target.composite_bind =
+                    Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("wgr_cloud_composite_bind"),
+                        layout: &self.cloud_composite_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&target.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &self.cloud_composite_sampler,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(depth_view),
+                            },
+                        ],
+                    }));
+                target.depth_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("wgr_cloud_depth_bind"),
+                    layout: &self.cloud_depth_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(depth_view),
+                    }],
+                }));
+                target.depth_src = Some(depth_view.clone());
+            }
         }
-        // The composite bind carries the low-res cloud buffer + the full-res scene depth (for the
-        // bilateral upsample). The depth view is regenerated every frame, so rebuild the bind here
-        // (cheap) rather than only on resize.
-        self.cloud_composite_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wgr_cloud_composite_bind"),
-            layout: &self.cloud_composite_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        self.cloud_lo_view.as_ref().unwrap(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.cloud_composite_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(depth_view),
-                },
-            ],
-        }));
-        // group(1): the resolved scene depth, rebuilt each frame (the depth view is regenerated).
-        let depth_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wgr_cloud_depth_bind"),
-            layout: &self.cloud_depth_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 6,
-                resource: wgpu::BindingResource::TextureView(depth_view),
-            }],
-        });
-        let lo_view = self.cloud_lo_view.as_ref().unwrap();
+        // `composite_cloud` runs later in the frame against whichever target this call filled.
+        self.cloud_composite_bind = self.cloud_lo[slot].composite_bind.clone();
+        let depth_bind = self.cloud_lo[slot]
+            .depth_bind
+            .clone()
+            .expect("cloud depth bind just built");
+        let lo_view = &self.cloud_lo[slot].view;
         encoder.push_debug_group("wgr_cloud");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_cloud"),
@@ -2080,6 +2194,11 @@ mod sky_uniform_layout_tests {
             // this list, so the check that is supposed to catch a layout skew was itself skewed
             // and had been failing since.
             "cloud_shadow",
+            // The moon disc's two lanes. They ride the SAME UBO as everything above, so the
+            // C++ static_assert(sizeof(WgrSkyRuntime) == 112) and this list are the pair that
+            // has to move together — one without the other is silent garbage in the shader.
+            "moon_params",
+            "moon_sun",
         ];
         assert_eq!(
             wgsl, rust,

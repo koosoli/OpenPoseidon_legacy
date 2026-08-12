@@ -17,6 +17,7 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <string>
 #include <vector>
@@ -581,6 +582,58 @@ void Scene::ObjectsDrawn()
     _aLights.Resize(0);
 }
 
+// The distance the RENDERER culls objects at.
+//
+// ENGINE_CONFIG.objectsZ is 2/3 of the view distance (ViewDistanceResolver's OFP
+// ratio) and doubles as the SIMULATION radius (Simul.cpp:1188/1224), so it cannot
+// simply be raised. But as a render cull it is in the wrong place: distance fog is
+// anchored to the fog MAX range (frame.wgsl apply_fog: max_dist = fogStart +
+// 1/fogInvRange = Scene::GetFogMaxRange(); the legacy flat path uses the same
+// anchor), and objectsZ sits at ~2/3 of it. pow(2/3, fogFalloff=3) = 0.30 in the
+// aerial path, and 1 - (0.667V-0.3V)/0.7V = 0.48 in the flat path -- i.e. an object
+// crossing the cull edge materialises out of nothing at 70% (resp. 52%) of its own
+// colour. That instantaneous appearance IS the pop-in; no LOD change can hide it,
+// because below the edge the object is not drawn at all.
+//
+// Anchoring the render cull to the fog max range instead makes the edge coincide
+// with fog amount 1.0, where the object is exactly the sky it replaces -- zero pop
+// by construction, and no cross-fade machinery needed. What newly appears out there
+// is the model's COARSEST authored LOD: the LOD chooser (FindSqrtLevel below) has
+// already walked past every finer level by a few hundred metres, so extending the
+// cull adds silhouettes, not detail.
+//
+// WGR_OBJECT_DISTANCE_SCALE is the A/B knob: 1.0 reproduces the legacy cull exactly.
+// The result is clamped into [objectsZ, fogMaxRange] so it can never draw LESS than
+// before, and never past the distance at which fog has fully replaced the object.
+float Scene::GetObjectDrawDistance() const
+{
+    static const float scale = []() -> float {
+        if (const char* e = std::getenv("WGR_OBJECT_DISTANCE_SCALE"))
+        {
+            const float v = static_cast<float>(atof(e));
+            if (v > 0.0f)
+            {
+                return v;
+            }
+        }
+        return 1.5f; // objectsZ = 2/3 view -> 1.5x lands on the fog edge
+    }();
+
+    const float legacy = ENGINE_CONFIG.objectsZ;
+    float d = legacy * scale;
+    // Never past the fog edge (in rain/fog _fogMaxRange shrinks below objectsZ, hence
+    // the floor afterwards rather than a plain min).
+    if (_fogMaxRange > 0.0f && d > _fogMaxRange)
+    {
+        d = _fogMaxRange;
+    }
+    if (d < legacy)
+    {
+        d = legacy;
+    }
+    return d;
+}
+
 int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Vector3Par direction,
                               Vector3Par viewDirection)
 {
@@ -589,7 +642,7 @@ int Scene::LevelFromDistance2(LODShape* shape, float distance2, float oScale, Ve
     float scale = GetCamera()->Left();
     float diameter = shape->BoundingSphere() * 2 * oScale;
 
-    if (distance2 > Square(ENGINE_CONFIG.objectsZ))
+    if (distance2 > Square(GetObjectDrawDistance()))
     {
         return LOD_INVISIBLE;
     }

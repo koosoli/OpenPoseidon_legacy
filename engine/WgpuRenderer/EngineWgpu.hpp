@@ -94,6 +94,23 @@ class EngineWgpu : public EngineDummy
                   int specFlags) override;
     void DrawLine(const Line2DAbs& line, PackedColor c0, PackedColor c1, const Rect2DAbs& clip) override;
 
+    // Roads and blob shadows are conformed onto the analytic heightfield by
+    // Shape::SurfaceSplit / FaceArray::Draw, which lift each conformed vertex by
+    // exactly these epsilons. EngineWgpu inherits EngineDummy, whose pair returns
+    // ZERO, so under wgpu the road was laid EXACTLY coplanar with the terrain it
+    // was cut against -- and the depth test then decided it per terrain cell,
+    // which is the alternating light/dark "piano key" pattern along Arma 2 roads.
+    //
+    // The NDC decal offset does not save it: SurfaceSplit's cached split shape has
+    // OnSurface swapped for IsOnSurface (Shadow.cpp), so the draw never classifies
+    // as SurfaceMode::OnSurface and never receives Offset::Decal. Measured:
+    // WGR_DECAL_SCALE=0 changes the road pixels by at most 2/255, i.e. the decal
+    // bias reaches roads not at all. The world-space epsilon is the whole guard.
+    //
+    // Values match GL33 (EngineGL33.hpp), which has never shown this artifact.
+    float ZShadowEpsilon() const override { return 0.01f; }
+    float ZRoadEpsilon() const override { return 0.005f; }
+
     bool GetTL() const override { return true; }
     bool GetTLOnSurface() const override { return true; }
     bool UsesGpuSkinning() const override { return true; }
@@ -172,6 +189,25 @@ class EngineWgpu : public EngineDummy
         _sky.cirrusPuffVariation = variation;
         if (_renderer != nullptr)
             wgr_set_cirrus_puffiness(_renderer, puffiness, variation);
+    }
+    // God rays. Same shape again (own FFI entry point, _sky updated so GetSkySettings round-trips
+    // and "Reset to defaults" restores it). The renderer clamps every value, so a garbage push
+    // cannot make the march expensive.
+    void SetGodRays(bool enabled, float intensity, float density, float distance, float g, float cloudInfluence,
+                    int steps, int resDiv) override
+    {
+        _sky.godRays = enabled;
+        _sky.godRayIntensity = intensity;
+        _sky.godRayDensity = density;
+        _sky.godRayDistance = distance;
+        _sky.godRayG = g;
+        _sky.godRayCloudInfluence = cloudInfluence;
+        _sky.godRaySteps = steps;
+        _sky.godRayResDiv = resDiv;
+        if (_renderer != nullptr)
+            wgr_set_god_rays(_renderer, enabled ? 1u : 0u, intensity, density, distance, g, cloudInfluence,
+                             static_cast<uint32_t>(steps < 0 ? 0 : steps),
+                             static_cast<uint32_t>(resDiv < 0 ? 0 : resDiv));
     }
     // Suppress the legacy skydome on wgpu while the procedural sky is drawing.
     bool ProceduralSkyActive() const override { return _renderer != nullptr && _sky.enabled; }
@@ -396,6 +432,15 @@ class EngineWgpu : public EngineDummy
     float _skyMoonPhase = 0.5f;
     float _skyNight = 0.0f;
     float _skyFog[3] = {0.7f, 0.75f, 0.8f};
+    // Cloud-deck advection offset in world metres, INTEGRATED rather than computed
+    // as velocity*time. With a constant authored cloudWind the closed form was
+    // exact, but a weather-driven wind changes speed and heading, and v(t)*t would
+    // teleport the whole deck every time it did. Double so the accumulation stays
+    // exact over a long session; wrapped to kWindWrap in PushSkyRuntime.
+    double _cloudOffsetX = 0.0;
+    double _cloudOffsetZ = 0.0;
+    double _cloudOffsetClock = 0.0; // last sky clock value, for the dt
+    bool _cloudOffsetInit = false;
     TextureBankWgpu* _wbank = nullptr;
     SDLEventWindow _eventWindow;
     int _w = 0;

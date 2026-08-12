@@ -4261,6 +4261,120 @@ void DrawSkyTab()
     }
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Moon");
+    ImGui::TextDisabled("position, phase and moonlight from a real ephemeris (date + world lat/long)");
+
+    // Live readout. The point of showing all four together is that a wrong-looking moon is
+    // almost always one of them disagreeing with the others — a phase that does not match the
+    // elongation means the sun and the moon are on different models.
+    if (GScene && GScene->MainLight())
+    {
+        const LightSun* ml = GScene->MainLight();
+        const Vector3 toMoon = -ml->MoonDirection();
+        const float moonEl = asinf(std::clamp(static_cast<float>(toMoon.Y()), -1.0f, 1.0f)) * 180.0f / 3.14159265f;
+        float moonAz = atan2f(static_cast<float>(toMoon.X()), static_cast<float>(toMoon.Z())) * 180.0f / 3.14159265f;
+        if (moonAz < 0.0f)
+        {
+            moonAz += 360.0f;
+        }
+        char dateBuf[64] = {0};
+        Glob.clock.FormatDate("%Y-%m-%d", dateBuf);
+        const float tod = Glob.clock.GetTimeOfDay();
+        ImGui::TextDisabled("sim date %s  %02d:%02d", dateBuf, static_cast<int>(tod * 24.0f),
+                            static_cast<int>(tod * 1440.0f) % 60);
+        ImGui::TextDisabled("az %.1f  el %+.1f  lit %.0f%%  size %.3f deg", moonAz, moonEl,
+                            ml->MoonIllumination() * 100.0f,
+                            ml->MoonAngularRadius() * 2.0f * 180.0f / 3.14159265f);
+        ImGui::TextDisabled("phase brightness %.3f x full   moonlight %.3f", ml->MoonBrightness(),
+                            ml->MoonLightAmount());
+    }
+
+    changed |= ImGui::Checkbox("Realistic position (ephemeris)", &s.moonRealistic);
+    ImGui::SetItemTooltip("On: position, phase, illuminated fraction and apparent size from a low-precision\n"
+                          "lunar ephemeris (accurate to ~0.015 deg -- a thirty-fifth of the moon's own\n"
+                          "diameter), driven by the simulation date and the world's latitude/longitude.\n"
+                          "Off: the 2001 model -- a 28-day month with no eccentricity and no perturbations,\n"
+                          "which puts the moon tens of degrees from where it belongs.");
+
+    changed |= ImGui::Checkbox("Realistic SUN position too", &s.sunRealistic);
+    ImGui::SetItemTooltip("MOVES DAYLIGHT. Solar transit shifts by up to the +/-16 min equation of time and\n"
+                          "the altitude track through the day changes shape, and every time-of-day preset\n"
+                          "was authored against the legacy sun. Measured divergence is small (<5 deg in\n"
+                          "azimuth all year) but it is not zero. The moon's PHASE and terminator always come\n"
+                          "from the ephemeris sun regardless of this switch, so they never disagree.");
+
+    changed |= ImGui::Checkbox("Manual placement (screenshots)", &s.moonManual);
+    ImGui::SetItemTooltip("Ignore the astronomy and put the moon where you want it. Position only -- the "
+                          "phase and brightness stay whatever the date says, so framing a shot does not "
+                          "silently change the look.");
+    ImGui::BeginDisabled(!s.moonManual);
+    changed |= ImGui::SliderFloat("  azimuth (deg)", &s.moonManualAzimuthDeg, 0.0f, 360.0f, "%.1f");
+    ImGui::SetItemTooltip("From NORTH, increasing toward EAST. 90 = due east, 180 = due south.");
+    changed |= ImGui::SliderFloat("  elevation (deg)", &s.moonManualElevationDeg, -20.0f, 90.0f, "%.1f");
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Observer / date");
+    changed |= ImGui::Checkbox("Override date", &s.moonDateOverride);
+    ImGui::SetItemTooltip("Celestial date ONLY -- it does not move the simulation clock, so it is local, "
+                          "not replicated, and safe to scrub while a mission runs. Use it to find a phase; "
+                          "use the mission Intel / setDate to actually move the world.");
+    ImGui::BeginDisabled(!s.moonDateOverride);
+    changed |= ImGui::InputInt("  year", &s.moonDateYear);
+    changed |= ImGui::SliderInt("  month", &s.moonDateMonth, 1, 12);
+    changed |= ImGui::SliderInt("  day", &s.moonDateDay, 1, 31);
+    ImGui::TextDisabled("  a full lunation is 29.53 days -- step the day to walk the phases");
+    ImGui::EndDisabled();
+
+    changed |= ImGui::Checkbox("Override latitude", &s.moonLatitudeOverride);
+    ImGui::SetItemTooltip("Off = the world config's `latitude`. NOTE the sign: CfgWorlds stores NEGATIVE for "
+                          "the northern hemisphere; the slider below is plain GEOGRAPHIC latitude, north "
+                          "positive, so 45 means 45 N.");
+    ImGui::BeginDisabled(!s.moonLatitudeOverride);
+    changed |= ImGui::SliderFloat("  latitude (deg N)", &s.moonLatitudeDeg, -90.0f, 90.0f, "%.1f");
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+    ImGui::TextDisabled("Look");
+    changed |= ImGui::SliderFloat("Moon size scale", &s.moonSizeScale, 0.25f, 6.0f, "%.2f");
+    ImGui::SetItemTooltip("Multiplies the TRUE angular radius (~0.26 deg, which is genuinely tiny -- the "
+                          "huge moon of photographs is a long lens, not the sky). The disc is drawn "
+                          "energy-conserving, so inflating it lowers its radiance and total power holds.");
+    changed |= ImGui::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
+    ImGui::SetItemTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
+                          "phase falloff. 0 turns the moon off entirely.");
+    changed |= ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.02f, "%.4f",
+                                  ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("Full-moon irradiance as a FRACTION of the sun's, for the HDR sky-lit path.\n"
+                          "The physical ratio is 2.5e-6, which renders as black -- human night vision is\n"
+                          "scotopic and this tonemap is not. 0.0025 (1/400) is a legible night that still\n"
+                          "reads as night. Scaled by the phase curve, so a quarter moon is ~11x dimmer.");
+    changed |= ImGui::Checkbox("Moonlight (directional + shadows)", &s.moonLighting);
+    ImGui::SetItemTooltip("On: the moon becomes the scene's directional light once the sun is below -2 deg "
+                          "and the moon is above the horizon, and casts shadows. Off: the pre-existing "
+                          "behaviour -- night lit by flat ambient only, moon purely scenery.");
+
+    bool forcePhase = s.moonPhaseOverride >= 0.0f;
+    if (ImGui::Checkbox("Force phase", &forcePhase))
+    {
+        s.moonPhaseOverride = forcePhase ? 1.0f : -1.0f;
+        changed = true;
+    }
+    ImGui::SetItemTooltip("Pin the illuminated fraction for a screenshot. Position is unchanged -- only the "
+                          "look. Brightness follows the forced phase through the same curve.");
+    ImGui::BeginDisabled(!forcePhase);
+    {
+        float forcedK = forcePhase ? s.moonPhaseOverride : 1.0f;
+        if (ImGui::SliderFloat("  illuminated fraction", &forcedK, 0.0f, 1.0f, "%.2f"))
+        {
+            s.moonPhaseOverride = forcedK;
+            changed = true;
+        }
+        ImGui::TextDisabled("  0 = new, 0.5 = quarter, 1 = full");
+    }
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Atmosphere");
     // Rayleigh/Mie coeffs are tiny (1/m); edit in convenient 1e-6 units.
     float rayleigh[3] = {s.rayleigh[0] * 1e6f, s.rayleigh[1] * 1e6f, s.rayleigh[2] * 1e6f};
@@ -4407,6 +4521,61 @@ void DrawSkyTab()
                         "dark, because missing data must never invent shadow.");
 
     ImGui::Separator();
+    ImGui::TextUnformatted("God rays (crepuscular shafts)");
+    ImGui::TextDisabled("sunlight scattering in the air between the camera and whatever is shading it");
+    changed |= ImGui::Checkbox("God rays", &s.godRays);
+    ImGui::SetItemTooltip("A world-space volumetric march, NOT a radial blur around the sun on screen. Each "
+                          "low-res view ray is walked and asked whether the sun is visible from that point, "
+                          "against three maps that already exist: the cloud sun-transmittance map above, the "
+                          "long-range terrain shadow ceiling, and the cascade shadow map (buildings, tree "
+                          "crowns). So the shafts are shaped by the clouds and by real geometry, an off-screen "
+                          "sun cannot smear a halo into the frame edge, and the effect fades out on its own "
+                          "below the horizon and behind the camera.\n"
+                          "Composited into the linear HDR scene BEFORE bloom and eye adaptation, so shafts "
+                          "bloom and roll off like any other light rather than sitting on top as white paint.\n"
+                          "Capture/benchmark override: WGR_GODRAYS=<on>[,<intensity>[,<density x1e-6>"
+                          "[,<steps>[,<res divisor>]]]] -- WGR_GODRAYS=0 is the A/B ablation.");
+    ImGui::BeginDisabled(!s.godRays);
+    changed |= ImGui::SliderFloat("Shaft intensity", &s.godRayIntensity, 0.0f, 4.0f, "%.2f");
+    ImGui::SetItemTooltip("Multiplier on the physical single-scatter estimate. 1 = as computed from the sun "
+                          "radiance, the density below and the phase function.");
+    changed |= ImGui::SliderFloat("Cloud shaping", &s.godRayCloudInfluence, 0.0f, 1.0f, "%.2f");
+    ImGui::SetItemTooltip("How much the cloud deck carves the shafts. 1 = full, 0 = terrain and objects only, "
+                          "which is the A/B for 'is this actually following the clouds'.\n"
+                          "Reads the same CLD-020 map as the ground shadows above, with that slider's strength "
+                          "divided back out, so dialling ground cloud shadows DOWN does not flatten the shafts. "
+                          "At Cloud shadow strength = 0 the map is uniformly lit and there is no cloud shape "
+                          "left to read, so this control goes inert -- keep that slider above 0.");
+    float rayDensity = s.godRayDensity * 1e6f;
+    if (ImGui::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 60.0f, "%.2f"))
+    {
+        s.godRayDensity = rayDensity * 1e-6f;
+        changed = true;
+    }
+    ImGui::SetItemTooltip("Scattering coefficient of the air the shafts live in (1/m). The engine's clear-day "
+                          "Mie is 6; the default sits above it because the march is capped at the reach below "
+                          "instead of running to the horizon, so the truncated tail has to be paid for here.");
+    changed |= ImGui::SliderFloat("Shaft reach (m)", &s.godRayDistance, 500.0f, 20000.0f, "%.0f");
+    ImGui::SetItemTooltip("March cap. Past this the aerial-perspective froxel already owns the look; raising "
+                          "it spends the SAME number of samples over a longer path, so the far shafts get "
+                          "coarser rather than the pass getting slower.");
+    changed |= ImGui::SliderFloat("Forward scatter g", &s.godRayG, 0.0f, 0.95f, "%.2f");
+    ImGui::SetItemTooltip("Henyey-Greenstein anisotropy: higher = a tighter, brighter beam toward the sun and "
+                          "a faster fade away from it. This is also what makes the shafts vanish when you turn "
+                          "your back on the sun, so it is not purely a look knob.");
+    ImGui::TextDisabled("  cost knobs -- the march is the whole feature's budget:");
+    changed |= ImGui::SliderInt("Ray steps", &s.godRaySteps, 4, 48);
+    ImGui::SetItemTooltip("Samples per ray, distributed with the square of distance (dense near the camera, "
+                          "where a shaft edge covers many pixels). Cost is linear in this.");
+    changed |= ImGui::SliderInt("Ray resolution divisor", &s.godRayResDiv, 1, 4);
+    ImGui::SetItemTooltip("Screen-resolution divisor for the march. 2 = half in each axis (a quarter of the "
+                          "pixels), the default; 4 quarters each axis and costs a sixteenth. The result is "
+                          "upsampled with a depth-aware filter, so raising this softens the shafts rather than "
+                          "haloing them around silhouettes -- but it will eventually show as steppiness on a "
+                          "shaft edge that crosses the screen at a shallow angle.");
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Stars");
     changed |= ImGui::SliderFloat("Star brightness", &s.starIntensity, 0.0f, 4.0f, "%.2f");
 
@@ -4462,6 +4631,10 @@ void DrawSkyTab()
         // Same story for the second layer's shape: not a sky-look lane, so it needs its own push,
         // unconditional inside `changed` so "Reset to defaults" restores it too.
         GEngine->SetSkyCirrusPuffiness(s.cirrusPuffiness, s.cirrusPuffVariation);
+        // God rays: same story again, not a sky-look lane, so its own push. Unconditional inside
+        // `changed` so "Reset to defaults" restores it too.
+        GEngine->SetGodRays(s.godRays, s.godRayIntensity, s.godRayDensity, s.godRayDistance, s.godRayG,
+                            s.godRayCloudInfluence, s.godRaySteps, s.godRayResDiv);
     }
 
     // Copy the full authored sky state so it can be pasted into per-ToD keyframes

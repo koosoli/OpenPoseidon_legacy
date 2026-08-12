@@ -3,6 +3,7 @@
 #include <Poseidon/Graphics/Core/ITerrainRenderer.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Terrain/TerrainCdlod.hpp>
+#include <Poseidon/World/Terrain/TerrainSurfaceCatalog.hpp>
 
 #include <wgpu_renderer.hpp>
 
@@ -48,6 +49,19 @@ class TerrainWgpu : public ITerrainRenderer
     void UploadGroundTextures(const Landscape& land);
     void UploadIndexMap(const Landscape& land);
     void UploadGeography(const Landscape& land);
+    // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
+    // Arma-generation `config.bin` files of the archives that own THIS world's
+    // terrain textures. Only those archives: merging a whole modern config tree is
+    // what TerrainSurfaceCatalog exists to avoid, and an Arma 3 install has 487.
+    void BuildSurfaceCatalog(const Landscape& land);
+    // Decodes each authored LCA mask once and writes the per-geography-cell
+    // clutter answer (grass bit + coverage + surface id) into `geography`.
+    // Returns false when the world has no authored terrain materials, in which
+    // case the caller's legacy per-layer classification stands untouched.
+    // `refreshSelection` re-derives the dev panel's per-material selection from
+    // the authored surfaces; it is set only on a world change, so a live toggle
+    // is not undone by the next re-upload.
+    bool BakeAuthoredGrassMask(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
     void UploadJitterMap(const Landscape& land);
     // Loads the global high-frequency detail noise texture (config-driven, once).
     void UploadDetailNoise();
@@ -101,6 +115,18 @@ class TerrainWgpu : public ITerrainRenderer
     bool _grassBladeAtlasUploaded = false;
     std::vector<bool> _grassSurfaceEnabled;
     bool _grassNeedsCompatibilityOverride = false;
+
+    // The map's own clutter definitions, rebuilt per world. Empty for every OFP
+    // world by construction (that generation defines none of these classes) and
+    // empty whenever the owning archive ships no readable config, which is why
+    // every consumer below has a texture-name fallback.
+    TerrainSurfaceCatalog _surfaceCatalog;
+    std::string _surfaceCatalogWorld;
+    // The baked per-cell answer (bit 31 / bit 15 / coverage / surface id only),
+    // kept so the dev panel's per-material toggle re-applies the selection
+    // without decoding every mask on the map again.
+    std::vector<uint32_t> _grassAuthoredCells;
+    std::string _grassAuthoredWorld;
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

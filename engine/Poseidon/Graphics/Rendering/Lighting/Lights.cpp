@@ -1,5 +1,6 @@
 
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Ephemeris.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -11,6 +12,9 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <cmath>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -50,6 +54,12 @@ LightSun::LightSun()
     _moonPhase = 0;
     _nightEffect = 0;
     _starsVisible = 0;
+
+    _moonSunDirection = VUp;
+    _moonIllumination = 0;
+    _moonBrightness = 0;
+    _moonAngularRadius = 0.00452f; // mean apparent radius, ~0.259 deg
+    _moonLightAmount = 0;
 
     _colorFull = FullSunColor;
     _diffuse = _colorFull; // default - full sun
@@ -96,6 +106,262 @@ inline float ConvertSunAngle(float sunAngle)
     return AngleDifference(H_PI, sunAngle);
 }
 
+// ---------------------------------------------------------------------------------
+// Celestial mechanics: the real ephemeris, its dev overrides, and the env-var
+// ablation surface. See Ephemeris.hpp for what the 2001 model got wrong and why.
+// ---------------------------------------------------------------------------------
+
+// Defined in Foundation/Platform/Globals.cpp alongside Clock::FormatDate; the month
+// walk below has to agree with FormatDate exactly, or the date the ephemeris uses and
+// the date the UI prints diverge.
+int GetDaysInMonth(int year, int month);
+
+namespace
+{
+
+// Colour of moonlight as a DIRECTIONAL term. Real moonlight is very slightly warmer
+// than sunlight (the regolith is grey-brown and it is reflected sunlight), and looks
+// blue only because scotopic vision is blue-shifted — the Purkinje effect. This
+// leans blue on purpose: the eye's own response is not modelled anywhere downstream,
+// so the shift has to live in the light.
+const Color MoonLightColor(0.62f, 0.68f, 0.85f);
+
+// Peak DIFFUSE contribution of a full moon on the legacy (GL33 / non-sky-lit) path.
+// The engine's night ambient floor is BackgroundColor * MIN_BACK_INTENSITY, i.e. about
+// 0.03, so a directional term of this size reads as "the moon is lighting this" without
+// turning night into a blue day. The physically correct number is ~2.5e-6 of the sun
+// and renders as black.
+const float MoonFullDiffuse = 0.075f;
+
+// Ramps, in sine-of-elevation (the engine's own currency for sun height).
+// Moonlight only exists once the sun is genuinely down...
+const float MoonSunDownHigh = sinf(-2.0f * (float)H_PI / 180.0f); // no moonlight above this
+const float MoonSunDownLow = sinf(-8.0f * (float)H_PI / 180.0f);  // full moonlight below this
+// ...and only while the moon is actually up. A moon within a degree of the horizon is
+// heavily extincted and casts nothing useful, so the ramp starts below zero and
+// finishes a few degrees up rather than switching at the geometric horizon.
+const float MoonUpLow = sinf(-1.0f * (float)H_PI / 180.0f);
+const float MoonUpHigh = sinf(4.0f * (float)H_PI / 180.0f);
+
+// Engine world frame: X = east, Y = up, Z = north. Azimuth is measured from north
+// toward east. Verified against the legacy orbital model, which agrees with the
+// ephemeris on the sun's azimuth to within a few degrees all year.
+Vector3 HorizonToDirection(double azimuthRad, double altitudeRad)
+{
+    const double ca = cos(altitudeRad);
+    return Vector3(static_cast<float>(ca * sin(azimuthRad)), static_cast<float>(sin(altitudeRad)),
+                   static_cast<float>(ca * cos(azimuthRad)));
+}
+
+float Saturate01(float v)
+{
+    return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
+}
+
+float RampUp(float v, float lo, float hi)
+{
+    if (hi <= lo)
+    {
+        return v >= hi ? 1.0f : 0.0f;
+    }
+    const float t = Saturate01((v - lo) / (hi - lo));
+    return t * t * (3.0f - 2.0f * t); // smoothstep — no kink where the light appears
+}
+
+// WGR_* ablation surface, parsed once. This exists so a capture command line can turn
+// the whole feature off (or pin a phase) without the dev panel:
+//
+//   WGR_MOON=0            legacy 2001 orbit AND no moonlight — the pre-change behaviour
+//   WGR_MOON=1            force the ephemeris moon on
+//   WGR_MOON_LIGHT=0|1    moonlight only (position still realistic)
+//   WGR_MOON_SUN=1        put the SUN on the ephemeris too (moves daylight; see below)
+//   WGR_MOON_DATE=Y-M-D   celestial date override, e.g. 1985-9-28
+//   WGR_MOON_LAT=<deg>    observer latitude override, GEOGRAPHIC, north positive
+//   WGR_MOON_AZEL=az,el   hand-place the moon (degrees; azimuth from north toward east)
+//   WGR_MOON_SIZE=<k>     multiply the true angular radius
+//   WGR_MOON_BRIGHT=<k>   multiply disc + moonlight
+//   WGR_MOON_PHASE=<k>    force the illuminated fraction, 0 (new) .. 1 (full)
+struct MoonEnv
+{
+    int enable = -1;    // -1 = unset
+    int light = -1;
+    int sun = -1;
+    bool date = false;
+    int year = 0, month = 1, day = 1;
+    bool latitude = false;
+    float latitudeDeg = 0.0f;
+    bool azel = false;
+    float azimuthDeg = 0.0f, elevationDeg = 0.0f;
+    float size = -1.0f;
+    float bright = -1.0f;
+    float phase = -1.0f;
+};
+
+int EnvBool(const char* name)
+{
+    const char* v = std::getenv(name);
+    if (!v || !*v)
+    {
+        return -1;
+    }
+    return (std::strcmp(v, "0") == 0 || std::strcmp(v, "off") == 0 || std::strcmp(v, "false") == 0) ? 0 : 1;
+}
+
+const MoonEnv& GetMoonEnv()
+{
+    static MoonEnv env = []
+    {
+        MoonEnv e;
+        e.enable = EnvBool("WGR_MOON");
+        e.light = EnvBool("WGR_MOON_LIGHT");
+        e.sun = EnvBool("WGR_MOON_SUN");
+        if (const char* d = std::getenv("WGR_MOON_DATE"))
+        {
+            int y = 0, m = 0, dd = 0;
+            if (std::sscanf(d, "%d-%d-%d", &y, &m, &dd) == 3 && m >= 1 && m <= 12 && dd >= 1 && dd <= 31)
+            {
+                e.date = true;
+                e.year = y;
+                e.month = m;
+                e.day = dd;
+            }
+        }
+        if (const char* l = std::getenv("WGR_MOON_LAT"))
+        {
+            e.latitude = std::sscanf(l, "%f", &e.latitudeDeg) == 1;
+        }
+        if (const char* a = std::getenv("WGR_MOON_AZEL"))
+        {
+            e.azel = std::sscanf(a, "%f,%f", &e.azimuthDeg, &e.elevationDeg) == 2;
+        }
+        if (const char* s = std::getenv("WGR_MOON_SIZE"))
+        {
+            if (std::sscanf(s, "%f", &e.size) != 1)
+            {
+                e.size = -1.0f;
+            }
+        }
+        if (const char* b = std::getenv("WGR_MOON_BRIGHT"))
+        {
+            if (std::sscanf(b, "%f", &e.bright) != 1)
+            {
+                e.bright = -1.0f;
+            }
+        }
+        if (const char* p = std::getenv("WGR_MOON_PHASE"))
+        {
+            if (std::sscanf(p, "%f", &e.phase) != 1)
+            {
+                e.phase = -1.0f;
+            }
+        }
+        return e;
+    }();
+    return env;
+}
+
+// The dev-panel knobs (Engine::SkySettings) with the env overrides folded in. GEngine
+// is null in headless tools and on the dedicated server, where the defaults apply.
+Engine::SkySettings ResolveCelestialSettings()
+{
+    Engine::SkySettings s = GEngine ? GEngine->GetSkySettings() : Engine::SkySettings{};
+    const MoonEnv& e = GetMoonEnv();
+    if (e.enable == 0)
+    {
+        s.moonRealistic = false;
+        s.moonLighting = false;
+        s.sunRealistic = false;
+    }
+    else if (e.enable == 1)
+    {
+        s.moonRealistic = true;
+    }
+    if (e.light >= 0)
+    {
+        s.moonLighting = e.light != 0;
+    }
+    if (e.sun >= 0)
+    {
+        s.sunRealistic = e.sun != 0;
+    }
+    if (e.date)
+    {
+        s.moonDateOverride = true;
+        s.moonDateYear = e.year;
+        s.moonDateMonth = e.month;
+        s.moonDateDay = e.day;
+    }
+    if (e.latitude)
+    {
+        s.moonLatitudeOverride = true;
+        s.moonLatitudeDeg = e.latitudeDeg;
+    }
+    if (e.azel)
+    {
+        s.moonManual = true;
+        s.moonManualAzimuthDeg = e.azimuthDeg;
+        s.moonManualElevationDeg = e.elevationDeg;
+    }
+    if (e.size > 0.0f)
+    {
+        s.moonSizeScale = e.size;
+    }
+    if (e.bright >= 0.0f)
+    {
+        s.moonBrightnessScale = e.bright;
+    }
+    if (e.phase >= 0.0f)
+    {
+        s.moonPhaseOverride = e.phase;
+    }
+    return s;
+}
+
+// The SIMULATION clock's calendar date and local time-of-day. Deliberately not
+// wall-clock: in multiplayer every client advances Glob.clock from the replicated
+// mission start date and the shared simulation delta, so a sky derived from it is the
+// same sky on every machine. Reading the host's local time here would desync it.
+void CelestialDateTime(const Engine::SkySettings& s, int& year, int& month, int& day, double& hoursLocal)
+{
+    const float timeOfDay = Glob.clock.GetTimeOfDay();
+    hoursLocal = static_cast<double>(timeOfDay) * 24.0;
+
+    if (s.moonDateOverride)
+    {
+        year = s.moonDateYear;
+        month = s.moonDateMonth;
+        day = s.moonDateDay;
+        return;
+    }
+
+    year = Glob.clock.GetYear();
+    // Mirrors Clock::FormatDate: the engine's year is a fixed 365 grid, and the day is
+    // the floor of the year fraction (plus the roll-over FormatDate applies).
+    int dayOfYear = static_cast<int>(std::floor(Glob.clock.GetTimeInYear() * 365.0f));
+    if (timeOfDay > 1.0f)
+    {
+        dayOfYear++;
+    }
+    if (dayOfYear < 0)
+    {
+        dayOfYear = 0;
+    }
+    if (dayOfYear > 364)
+    {
+        dayOfYear = 364;
+    }
+    int m = 0;
+    while (m < 11 && dayOfYear >= GetDaysInMonth(year, m))
+    {
+        dayOfYear -= GetDaysInMonth(year, m);
+        m++;
+    }
+    month = m + 1;
+    day = dayOfYear + 1;
+}
+
+} // namespace
+
 // create a coordinate system simulating Earth and Moon movement relative to sun
 void LightSun::Recalculate(World* world)
 {
@@ -104,6 +370,10 @@ void LightSun::Recalculate(World* world)
         world = GWorld;
     }
     float latitudeCoord = world ? world->GetLatitude() : -40 * H_PI / 180;
+    // Longitude was loaded from CfgWorlds and then never read by anything — the legacy
+    // model has no concept of it. The ephemeris uses it to convert the clock's LOCAL
+    // mean solar time to UT (no civil time zone, so 12:00 is still local noon).
+    float longitudeCoord = world ? world->GetLongitude() : +15 * H_PI / 180;
     static const Matrix3 moonOrbitAngle(MRotationZ, 5 * H_PI / 180);
     static const Matrix3 earthAxis = Matrix3(MRotationX, 23 * H_PI / 180);
     Matrix3 latitude(MRotationX, latitudeCoord); // -40 - Croatia, -90 - north pole
@@ -144,15 +414,99 @@ void LightSun::Recalculate(World* world)
     _starsOrientation(0, 2) = -_starsOrientation(0, 2);
     _starsOrientation(2, 2) = -_starsOrientation(2, 2);
 
-    // calculate _moonDirectionUp so that moon is always facing the sun
-    _moonDirectionUp = _moonDirection - _direction;
-    // both _direction and _moonDirection are normalized
-    // moon phase is determined by position of moon relative to sun
+    // ---- Real ephemeris ---------------------------------------------------------
+    // Everything above this line is the 2001 toy model, kept because it is still the
+    // SUN's default (see Engine::SkySettings::sunRealistic) and the fallback when the
+    // ephemeris is switched off. Below, the real positions overwrite it.
+    const Engine::SkySettings celestial = ResolveCelestialSettings();
+
+    // Legacy phase, computed before any overwrite so the fallback path is unchanged.
     float cosMoonPhase = -(_direction * _moonDirection);
-    float moonHaloIntensity = (cosMoonPhase + 1) * 0.5;
-    float moonIntensity = floatMin(cosMoonPhase + 1, 1);
-    // cos==0 -> full moon, cos==-1 -> dark moon
-    _moonPhase = 0.5 + acos(cosMoonPhase) / (2 * H_PI); // D moon
+    _moonPhase = 0.5 + acos(floatMin(floatMax(cosMoonPhase, -1.0f), 1.0f)) / (2 * H_PI);
+    _moonIllumination = Saturate01((cosMoonPhase + 1.0f) * 0.5f);
+    // cosMoonPhase is +1 at full and -1 at new, so acos of it IS the phase angle the
+    // brightness curve wants (0 = full, 180 = new).
+    _moonBrightness = static_cast<float>(astro::MoonPhaseBrightness(
+        acos(floatMin(floatMax(cosMoonPhase, -1.0f), 1.0f)) * (180.0 / H_PI)));
+    _moonAngularRadius = 0.00452f;
+    // Fallback terminator reference: the legacy sun. `_direction` is a light-TRAVEL
+    // vector, so the direction to the sun is its negation.
+    Vector3 sunToDirection = -_direction;
+
+    if (celestial.moonRealistic || celestial.sunRealistic)
+    {
+        double latitudeRad = astro::GeographicLatitudeFromWorld(static_cast<double>(latitudeCoord));
+        if (celestial.moonLatitudeOverride)
+        {
+            latitudeRad = static_cast<double>(celestial.moonLatitudeDeg) * (H_PI / 180.0);
+        }
+        int year = 1985, month = 1, day = 1;
+        double hoursLocal = 12.0;
+        CelestialDateTime(celestial, year, month, day, hoursLocal);
+
+        const double jd =
+            astro::JulianDayFromLocal(year, month, day, hoursLocal, static_cast<double>(longitudeCoord));
+        const astro::SkyState sky =
+            astro::Compute(jd, astro::GeoObserver{latitudeRad, static_cast<double>(longitudeCoord)});
+
+        // The terminator's orientation always comes from the REAL sun, even when the
+        // drawn/lighting sun is the legacy one: a moon whose phase is right but whose
+        // terminator is tilted wrong looks worse than a moon with no phase at all.
+        sunToDirection = HorizonToDirection(sky.sun.azimuthRad, sky.sun.altitudeRad);
+
+        if (celestial.sunRealistic)
+        {
+            _direction = -sunToDirection;
+        }
+        if (celestial.moonRealistic)
+        {
+            _moonDirection = -HorizonToDirection(sky.moon.azimuthRad, sky.moon.altitudeRad);
+            _moonPhase = static_cast<float>(sky.moonAgeFraction);
+            _moonIllumination = static_cast<float>(sky.moonIlluminatedFraction);
+            _moonBrightness = static_cast<float>(sky.moonRelativeBrightness);
+            _moonAngularRadius = static_cast<float>(sky.moonAngularRadiusRad);
+        }
+    }
+
+    // Hand-placed moon (screenshots / isolating a phase). Position only — the phase
+    // and brightness stay whatever the astronomy or the phase override says, so a
+    // manual placement does not silently also change the look.
+    if (celestial.moonManual)
+    {
+        _moonDirection = -HorizonToDirection(static_cast<double>(celestial.moonManualAzimuthDeg) * (H_PI / 180.0),
+                                             static_cast<double>(celestial.moonManualElevationDeg) * (H_PI / 180.0));
+    }
+    if (celestial.moonPhaseOverride >= 0.0f)
+    {
+        _moonIllumination = Saturate01(celestial.moonPhaseOverride);
+        // Invert k = (1 + cos a)/2 to recover the phase angle the brightness curve wants.
+        const double alphaDeg = acos(floatMin(floatMax(2.0f * _moonIllumination - 1.0f, -1.0f), 1.0f)) * (180.0 / H_PI);
+        _moonBrightness = static_cast<float>(astro::MoonPhaseBrightness(alphaDeg));
+        // Keep the legacy p3d texture animation consistent with the forced phase. Age
+        // runs 0 = new .. 0.5 = full, so the WAXING half is 0.5 - alpha/360 (an
+        // arbitrary but harmless choice: a forced phase says nothing about which way
+        // the lunation is going).
+        _moonPhase = static_cast<float>(0.5 - alphaDeg / 360.0);
+    }
+    _moonAngularRadius *= floatMax(celestial.moonSizeScale, 0.01f);
+    _moonSunDirection = sunToDirection;
+    _moonSunDirection.Normalize();
+
+    // Orient the moon model so its lit side faces the sun. Same construction the 2001
+    // code used, but referred to the ephemeris sun.
+    _moonDirectionUp = _moonDirection + _moonSunDirection;
+    if (_moonDirectionUp.SquareSize() < 1e-6f)
+    {
+        // Sun exactly behind the moon (new or full): the "up" is degenerate and the
+        // terminator is undefined anyway. Any stable vector will do.
+        _moonDirectionUp = VUp;
+    }
+
+    // Halo/disc alpha on the legacy skydome path. (cosMoonPhase + 1) * 0.5 was always
+    // the illuminated fraction in disguise, so both now read it directly and stay
+    // correct when the ephemeris is driving.
+    float moonHaloIntensity = _moonIllumination;
+    float moonIntensity = floatMin(_moonIllumination * 2.0f, 1.0f);
 
     float sinSun = -_direction.Y();
     float absSinSun = fabs(sinSun);
@@ -250,6 +604,32 @@ void LightSun::Recalculate(World* world)
     _moonObjectColor.SetA(::MoonObjectColor.A() * moonIntensity);
     _moonHaloObjectColor.SetA(::MoonHaloObjectColor.A() * moonHaloIntensity);
 
+    // ---- Moonlight --------------------------------------------------------------
+    // Before this, the moon lit NOTHING: at night _colorFull was set to MoonColor,
+    // which is HBlack, so the scene's only night illumination was the flat ambient
+    // floor. The moon was scenery.
+    //
+    // Two geometric gates, then the phase. `moonGeometry` is deliberately independent
+    // of brightness: it answers "is the moon the thing lighting this scene right now",
+    // and is what steers the shading/shadow direction. Scaling the DIRECTION blend by
+    // phase would leave a crescent night lit from halfway between a black sun and the
+    // moon, which is a direction nothing is in.
+    float moonGeometry = 0.0f;
+    if (celestial.moonLighting)
+    {
+        const float sunDown = RampUp(-sinSun, -MoonSunDownHigh, -MoonSunDownLow);
+        const float moonUp = RampUp(sinMoon, MoonUpLow, MoonUpHigh);
+        moonGeometry = sunDown * moonUp;
+    }
+    _moonLightAmount = moonGeometry * _moonBrightness * floatMax(celestial.moonBrightnessScale, 0.0f);
+    if (_moonLightAmount > 0.0f)
+    {
+        // Legacy / non-sky-lit path: the moon becomes the directional light's colour.
+        // (The wgpu HDR sky-lit path derives its sun radiance from the atmosphere
+        // instead and adds its own moon term — see EngineWgpu::PushFrame.)
+        _colorFull = _colorFull + MoonLightColor * (MoonFullDiffuse * _moonLightAmount);
+    }
+
     float ambientI = sinSun * 1.5;
     float backgroundI = sinSun * 2.0;
     saturate(ambientI, MIN_BACK_INTENSITY, 1);
@@ -266,8 +646,26 @@ void LightSun::Recalculate(World* world)
     _ambient.SaturateMinMax();
     _direction.Normalize();
 
-    _shadowDirection = _direction;
+    // _sunDirection is the ASTRONOMICAL sun and is taken before the moonlight swap
+    // below: the sky pass positions its sun disc from it, and the atmosphere's
+    // transmittance lookup uses it to decide the scene is in night. _direction is the
+    // SHADING/shadow direction, which at night is the moon.
     _sunDirection = _direction;
+
+    if (moonGeometry > 0.0f)
+    {
+        Vector3 moonTravel = _moonDirection;
+        moonTravel.Normalize();
+        _direction = _direction * (1.0f - moonGeometry) + moonTravel * moonGeometry;
+        if (_direction.SquareSize() < 1e-6f)
+        {
+            // Moon exactly opposite the (already-set) sun travel vector; take the moon.
+            _direction = moonTravel;
+        }
+        _direction.Normalize();
+    }
+
+    _shadowDirection = _direction;
 
     const float maxShadowDer = -0.2;
     if (_shadowDirection[1] > maxShadowDer)

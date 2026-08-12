@@ -777,7 +777,22 @@ RoadType::RoadType(const char* name)
             }
             for (int i = 0; i < shape->NVertex(); i++)
             {
-                shape->SetClip(i, shape->Clip(i) | ClipLandOn);
+                // REPLACE the land nibble; do not OR into it. Object::Draw forks roads on
+                // `(andHints & ClipLandMask) == ClipLandOn` being EXACT: one vertex still
+                // carrying ClipLandKeep/Under/Above turns that AND into 0x900 and sends the
+                // whole model down the other branch. The two branches then light the road
+                // through code that reads Shape::Norm() with OPPOSITE sign conventions --
+                // the GPU path negates it (MeshBuild.cpp:44), the CPU per-vertex path does
+                // not (TransLight.cpp:548) -- so one of them lights a flat road with an
+                // inverted normal, takes the `cosFi <= 0` branch and falls to packedAmbient:
+                // sun-independent, forever. That is the alternating light/dark "piano key"
+                // pattern on Arma 2 roads. Measured: the dark pieces read 88/100/101 at
+                // 08:00/12:00/16:00 while the light ones track the sun.
+                //
+                // Arma 2 road parts mix land bits, which is why this is A2-specific. OFP
+                // parts are already pure ClipLandOn, for which this is bit-identical to the
+                // previous OR.
+                shape->SetClip(i, (shape->Clip(i) & ~ClipLandMask) | ClipLandOn);
             }
             shape->CalculateHints();
         }

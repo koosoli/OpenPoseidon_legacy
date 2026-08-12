@@ -7,6 +7,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -41,6 +42,30 @@ RString GetMissionDirectory();
 }
 
 using Poseidon::Foundation::EnumName;
+
+namespace
+{
+/// Airspeed = ground speed minus the air's own motion. Drag acts on THAT, which
+/// is the only physically correct place for wind to enter a trajectory: a
+/// crosswind does not push the round sideways directly, it makes the round's
+/// relative airflow oblique and the drag vector tilts.
+///
+/// OFF BY DEFAULT (WindModel::BallisticsEnabled). Classic OFP missions were
+/// authored against a windless solution and this engine's standing constraint
+/// is that they still play as they did — at full overcast the unified wind
+/// reaches ~9 m/s mean, which over a 600 m shot is a real deflection. With the
+/// flag false this returns `speed` unchanged, so the caller's expression is
+/// byte-identical to the pre-wind code and no classic mission moves an inch.
+inline Vector3 ShotAirspeed(Vector3Par speed)
+{
+    if (!Poseidon::WindModel::BallisticsEnabled())
+    {
+        return speed;
+    }
+    const Poseidon::WindSample& wind = Poseidon::GWind.Sample();
+    return speed - Vector3(wind.velocityX, 0.0f, wind.velocityZ);
+}
+} // namespace
 
 #if _ENABLE_CHEATS
 #define ARROWS 1
@@ -652,7 +677,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
 
-    Vector3 accel = _speed * (_speed.Size() * _airFriction);
+    // Drag on the RELATIVE airflow. Identical to `_speed * (_speed.Size() *
+    // _airFriction)` unless the ballistics wind opt-in is on — see ShotAirspeed.
+    const Vector3 airspeed = ShotAirspeed(_speed);
+    Vector3 accel = airspeed * (airspeed.Size() * _airFriction);
     accel[1] -= _coefGravity * G_CONST;
 
     _initDelay -= deltaT;
@@ -1452,7 +1480,12 @@ void SmokeShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
 
-    Vector3 accel = _speed * (_speed.Size() * _airFriction);
+    // Same relative-airflow drag as ShotShell. A smoke round's body has a high
+    // drag coefficient once it is falling, so this is where the wind carries a
+    // deployed smoke grenade downwind coherently with the smoke it emits (which
+    // already reads the same authority through the cloudlet sources).
+    const Vector3 airspeed = ShotAirspeed(_speed);
+    Vector3 accel = airspeed * (airspeed.Size() * _airFriction);
     accel[1] -= G_CONST;
 
     float surfaceY = GLandscape->SurfaceY(position[0], position[2]);

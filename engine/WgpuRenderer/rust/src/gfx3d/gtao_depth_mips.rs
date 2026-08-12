@@ -38,6 +38,12 @@ pub(crate) struct GtaoDepthMips {
     view_all: Option<wgpu::TextureView>,
     mip_views: Vec<wgpu::TextureView>,
     tex: Option<wgpu::Texture>,
+    // PERF: the bind groups were rebuilt from scratch every frame although nothing they
+    // reference can change without `resize` running: the mip views are ours, the params buffer
+    // is fixed, and `depth_view` is recreated only by Gfx3d::ensure_depth — which calls
+    // `resize` in the same branch. Cached here and dropped in `resize` for exactly that reason.
+    linearise_bind: Option<wgpu::BindGroup>,
+    reduce_binds: Vec<wgpu::BindGroup>,
 }
 
 impl GtaoDepthMips {
@@ -129,6 +135,8 @@ impl GtaoDepthMips {
             view_all: None,
             mip_views: Vec::new(),
             tex: None,
+            linearise_bind: None,
+            reduce_binds: Vec::new(),
         }
     }
 
@@ -166,6 +174,10 @@ impl GtaoDepthMips {
         self.tex = Some(tex);
         self.size = size;
         self.mips = mips;
+        // The cached binds reference the views just replaced (and the depth view the caller is
+        // replacing in the same breath), so they die here.
+        self.linearise_bind = None;
+        self.reduce_binds.clear();
     }
 
     pub(crate) fn mips(&self) -> u32 {
@@ -179,13 +191,20 @@ impl GtaoDepthMips {
 
     // Record the chain build: linearise the resolved depth into mip0, then min-reduce down.
     // `depth_view` must be the single-sample nearest-resolved depth (post-prepass).
+    //
+    // `top_mip` is the highest level the horizon march may read (GtaoParams.proj.w — the shipped
+    // default is 0). PERF: levels above it are never sampled, so building them was pure waste —
+    // gtao.wgsl clamps `mip` to `max_mip` and sample_z's upper tap is guarded by the same value,
+    // so nothing can read past `top_mip`. At the default that removes the ENTIRE reduce chain
+    // (~10 dispatches at 1080p) and leaves only the full-res linearise, with no visual change.
     pub(crate) fn build(
-        &self,
+        &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         depth_view: &wgpu::TextureView,
         near: f32,
+        top_mip: u32,
     ) {
         if self.tex.is_none() {
             return;
@@ -198,23 +217,25 @@ impl GtaoDepthMips {
             }),
         );
         encoder.push_debug_group("wgr_gtao_depth_mips");
-        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("wgr_gtao_mip_linearise_bind"),
-            layout: &self.linearise_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(depth_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&self.mip_views[0]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: self.params.as_entire_binding(),
-                },
-            ],
+        let linearise_bind = self.linearise_bind.get_or_insert_with(|| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_gtao_mip_linearise_bind"),
+                layout: &self.linearise_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(depth_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&self.mip_views[0]),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: self.params.as_entire_binding(),
+                    },
+                ],
+            })
         });
         {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -222,30 +243,35 @@ impl GtaoDepthMips {
                 timestamp_writes: None,
             });
             cp.set_pipeline(&self.linearise_pipeline);
-            cp.set_bind_group(0, &bind, &[]);
+            cp.set_bind_group(0, &*linearise_bind, &[]);
             cp.dispatch_workgroups(self.size.0.div_ceil(8), self.size.1.div_ceil(8), 1);
         }
-        for m in 1..self.mips as usize {
-            let rb = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("wgr_gtao_mip_reduce_bind"),
-                layout: &self.reduce_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.mip_views[m - 1]),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(&self.mip_views[m]),
-                    },
-                ],
-            });
+        let last = top_mip.min(self.mips.saturating_sub(1)) as usize;
+        while self.reduce_binds.len() < last {
+            let m = self.reduce_binds.len() + 1;
+            self.reduce_binds
+                .push(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("wgr_gtao_mip_reduce_bind"),
+                    layout: &self.reduce_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(&self.mip_views[m - 1]),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&self.mip_views[m]),
+                        },
+                    ],
+                }));
+        }
+        for m in 1..=last {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("wgr_gtao_mip_reduce"),
                 timestamp_writes: None,
             });
             cp.set_pipeline(&self.reduce_pipeline);
-            cp.set_bind_group(0, &rb, &[]);
+            cp.set_bind_group(0, &self.reduce_binds[m - 1], &[]);
             let mw = (self.size.0 >> m).max(1);
             let mh = (self.size.1 >> m).max(1);
             cp.dispatch_workgroups(mw.div_ceil(8), mh.div_ceil(8), 1);
