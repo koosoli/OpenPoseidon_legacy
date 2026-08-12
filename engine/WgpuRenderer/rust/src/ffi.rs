@@ -867,7 +867,11 @@ pub struct WgrTerrainMaterial {
     pub overlays: [u32; 4],
     pub overlay_count: u32,
     pub uv_source_mask: u32,
-    pub _padding: [u32; 2],
+    // Tangent-space normals parallel to `base` / `overlays`, plus the whole-tile
+    // normal that shares the satellite's frame. 0 = none.
+    pub base_normal: u32,
+    pub tile_normal: u32,
+    pub overlay_normals: [u32; 4],
     pub satellite_uv: WgrTerrainUv,
     pub mask_uv: WgrTerrainUv,
     pub base_uv: WgrTerrainUv,

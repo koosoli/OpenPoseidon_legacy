@@ -1529,7 +1529,15 @@ extern "C"
         // Bit N selects worldPos for UV N; clear selects the terrain mesh's
         // local `tex` coordinates. Slots: satellite, mask, base, overlays.
         uint32_t uv_source_mask;
-        uint32_t _padding[2];
+        /* Tangent-space normals, parallel to `base` / `overlays`: the `_nopx` map
+         * authored on the odd stage before each colour. `tile_normal` is the whole
+         * tile's normal sharing the satellite's frame (Arma 3 Stage14; Arma 2 has
+         * none). 0 = none, and slot 0 is the white fallback, so each is tested
+         * rather than sampled blind. These fill the two padding words and extend
+         * the header by one vec4 row, keeping it 16-byte aligned. */
+        uint32_t base_normal;
+        uint32_t tile_normal;
+        uint32_t overlay_normals[4];
         WgrTerrainUv satellite_uv;
         WgrTerrainUv mask_uv;
         WgrTerrainUv base_uv;

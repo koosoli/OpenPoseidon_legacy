@@ -296,6 +296,12 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         material.satellite = bindTexture(source->satellite, fallback, satelliteResolved);
         material.mask = bindTexture(source->mask, material.satellite, maskResolved);
         material.base = bindTexture(source->base, material.satellite, baseResolved);
+        // Normals fall back to 0, not to a colour texture: the shader tests for 0
+        // and keeps the geometric normal, whereas a colour map decoded as a normal
+        // would tilt every surface by whatever its albedo happened to be.
+        bool normalResolved = false;
+        material.base_normal = bindTexture(source->baseNormal, 0, normalResolved);
+        material.tile_normal = bindTexture(source->tileNormal, 0, normalResolved);
         const auto setUvSource = [&](uint32_t slot, const A3TerrainUv& uv)
         {
             if (uv.worldPos)
@@ -315,6 +321,8 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         {
             bool overlayResolved = false;
             material.overlays[overlay] = bindTexture(source->overlays[overlay], material.base, overlayResolved);
+            material.overlay_normals[overlay] =
+                bindTexture(source->overlayNormals[overlay], 0, overlayResolved);
             setUvSource(3 + overlay, source->overlayUvs[overlay]);
             std::copy(source->overlayUvs[overlay].u.begin(), source->overlayUvs[overlay].u.end(),
                       material.overlay_uvs[overlay].u);
