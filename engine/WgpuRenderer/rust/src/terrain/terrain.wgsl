@@ -59,21 +59,28 @@ struct TerrainUv {
     u: vec4<f32>,
     v: vec4<f32>,
 };
+// Mirrors WgrTerrainMaterial (wgpu_renderer.hpp / ffi.rs), 336 bytes. The two
+// pad words are load-bearing: they carry the header to the 16-byte boundary the
+// TerrainUv rows need, and a skew here renders as the wrong ground, not as an
+// error. Both sides carry a size assert; keep all three in step.
+const TERRAIN_SURFACE_SLOTS: u32 = 6u;
 struct TerrainMaterial {
     legacy: u32,
     satellite: u32,
     mask: u32,
-    base: u32,
-    overlays: array<u32, 4>,
-    overlay_count: u32,
-    uv_source_mask: u32,
-    base_normal: u32,
     tile_normal: u32,
-    overlay_normals: array<u32, 4>,
+    // Surface colours BY SLOT: slot k is the source's Stage(4 + 2k). 0 is a hole
+    // the source left empty, not a surface -- slot 0 of the bindless array is the
+    // white fallback, so every one of these is tested before it is sampled.
+    surfaces: array<u32, 6>,
+    surface_normals: array<u32, 6>,
+    surface_count: u32,
+    uv_source_mask: u32,
+    pad0: u32,
+    pad1: u32,
     satellite_uv: TerrainUv,
     mask_uv: TerrainUv,
-    base_uv: TerrainUv,
-    overlay_uvs: array<TerrainUv, 4>,
+    surface_uvs: array<TerrainUv, 6>,
 };
 @group(2) @binding(6) var<storage, read> terrain_materials: array<TerrainMaterial>;
 
@@ -161,10 +168,11 @@ fn terrain_uv_gradient(transform: TerrainUv, source_bit: u32, source_mask: u32,
     return vec2<f32>(dot(source, transform.u.xyz), dot(source, transform.v.xyz));
 }
 
-// OPRW25 TerrainSNX is authored as a satellite colour plus an LCA RGBA mask
-// selecting a base surface and up to four overlays.  The satellite retains its
+// Both later families are authored as a satellite colour plus an LCA mask that
+// SELECTS one of a stack of surfaces (Arma 2 / OA `TerrainX`: six slots; Arma 3
+// `TerrainSNX`: five, plus a whole-tile normal map). The satellite retains its
 // low-frequency tile variation; the mask controls the high-frequency surfaces.
-// Legacy terrain descriptors have overlay_count == 0 and take the original
+// Legacy terrain descriptors have surface_count == 0 and take the original
 // single-texture route exactly.
 // Colour plus the tangent-space normal the authored surfaces carry. `normal_ts` is
 // (0,0,1) -- flat -- for a legacy descriptor or when the material names no normal, so a
@@ -208,83 +216,138 @@ fn authored_surface(colour_tex: u32, normal_tex: u32, uv: vec2<f32>,
     return textureSampleGrad(ground[colour_tex], ground_samp, uv_shifted, dwx, dwy).rgb;
 }
 
+// Decode the LCA selector into one weight per surface slot.
+//
+// The mask is NOT a weight field. Measured over every shipped mask of both
+// generations (67M texels on Stratis, 57M on Takistan): R, G and B hold only 0
+// or 255 and are strictly one-hot -- 0.0000% of texels have two channels high --
+// while alpha holds only 255, 128 or 0. It is an indexed surface SELECTOR, and
+// the fractional coverage the ground needs comes from filtering it, not from the
+// stored values.
+//
+// The index is BI's own "encoding tricks employed ... increased from four to
+// six" (bohemia.net/en/blog/show-me-the-light):
+//
+//   alpha 255 -> the RGB one-hot picks slots 0..3 (none = slot 0, the base)
+//   alpha 128 -> slot 4
+//   alpha   0 -> slot 5
+//
+// Four surfaces in RGB plus two more addressed through alpha is exactly six.
+// The correlation is exact across 284 tiles: alpha level 128 occurs only on
+// tiles that bind a fifth surface (137/137 Takistan, 30/30 Stratis) and level 0
+// only on tiles that bind a sixth (47/47) -- no counterexamples. Arma 3's
+// TerrainSNX has five slots and correspondingly never authors level 0.
+//
+// Reading alpha as a fifth WEIGHT, which is what this did before, gave slot 4
+// full coverage over the 90% of texels sitting at alpha 255 and left the base
+// nothing. That is the washed-out ground with banding along the mask's hard
+// edges, and on Arma 2 it was worse still: OA's masks are DXT1 with no alpha at
+// all, so the decoder's constant 255 covered every tile completely.
+//
+// The three alpha levels are interpolated as a partition of unity, so a filtered
+// tap between two authored levels crossfades instead of decoding as a level that
+// was never painted. Every returned weight is non-negative and they sum to 1.
+fn decode_mask(mask: vec4<f32>) -> array<f32, 6> {
+    let a = mask.a;
+    let group = clamp((a - 0.5) * 2.0, 0.0, 1.0);       // alpha 1.0 -> RGB slots
+    let level_four = 1.0 - abs(a - 0.5) * 2.0;          // alpha 0.5 -> slot 4
+    let level_five = clamp(1.0 - a * 2.0, 0.0, 1.0);    // alpha 0.0 -> slot 5
+    // One-hot by construction, so the sum is the painted coverage and the
+    // remainder is the base's. Clamped because a filtered tap across a seam can
+    // overshoot by a rounding step.
+    let painted = min(mask.r + mask.g + mask.b, 1.0);
+    return array<f32, 6>(group * (1.0 - painted), group * mask.r, group * mask.g,
+                         group * mask.b, level_four, level_five);
+}
+
+// `world_pos` is ABSOLUTE (the TexGens are authored in world space); `view_pos` is
+// the same point camera-relative, and is the only thing distance and the view
+// vector may be taken from. Passing the absolute position for both -- which is
+// what this did -- makes `length()` the distance from the world origin, so on
+// every real world the detail fade sat at zero from the first metre and the
+// authored stack was never drawn at all. The only visible difference the flag
+// made was satellite-instead-of-legacy, which is why turning it up measured as
+// almost nothing.
 fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                         ddx: vec2<f32>, ddy: vec2<f32>, world_pos: vec3<f32>,
+                        view_pos: vec3<f32>,
                         world_dwx: vec3<f32>, world_dwy: vec3<f32>) -> AuthoredCell {
     let material = terrain_materials[entry & CELL_LAYER_MASK];
-    let authored_weight = clamp(a3_surface_blend, 0.0, 0.35);
+    let authored_weight = clamp(a3_surface_blend, 0.0, 1.0);
     // The normal renderer must remain byte-for-byte on the established cell
-    // path while the authored TerrainSNX composition is evaluated and compared.
+    // path while the authored composition is evaluated and compared.
     // This also avoids applying an unavailable texgen to legacy descriptors.
-    if (material.overlay_count == 0u || authored_weight == 0.0) {
+    if (material.surface_count == 0u || authored_weight == 0.0) {
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
                             vec3<f32>(0.0, 0.0, 1.0));
     }
-    // RVMAT's worldPos is terrain-local X/Z/Y, whereas the renderer carries
-    // world coordinates as X/Y/Z. Preserve height in the third component but
-    // put the planar Z axis where TerrainSNX TexGen expects it.
-    let material_pos = vec3<f32>(world_pos.x, world_pos.z, world_pos.y);
-    let material_dwx = vec3<f32>(world_dwx.x, world_dwx.z, world_dwx.y);
-    let material_dwy = vec3<f32>(world_dwy.x, world_dwy.z, world_dwy.y);
+    // RVMAT `worldPos` is the engine's own world vector, Y up -- the same axes
+    // the renderer already carries. The swizzle that used to sit here was
+    // compensating for the transposed TexGen read (see LandSave's uvForStage);
+    // with the basis transposed at load, the source needs no permutation, and
+    // permuting it now would put the height back into the planar UV.
+    let material_pos = world_pos;
+    let material_dwx = world_dwx;
+    let material_dwy = world_dwy;
     let satellite_uv = terrain_uv(material.satellite_uv, 0u, material.uv_source_mask, material_pos, tile_uv);
     let mask_uv = terrain_uv(material.mask_uv, 1u, material.uv_source_mask, material_pos, tile_uv);
-    let base_uv = terrain_uv(material.base_uv, 2u, material.uv_source_mask, material_pos, tile_uv);
     let satellite_dwx = terrain_uv_gradient(material.satellite_uv, 0u, material.uv_source_mask, material_dwx, ddx);
     let satellite_dwy = terrain_uv_gradient(material.satellite_uv, 0u, material.uv_source_mask, material_dwy, ddy);
     let mask_dwx = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwx, ddx);
     let mask_dwy = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwy, ddy);
-    let base_dwx = terrain_uv_gradient(material.base_uv, 2u, material.uv_source_mask, material_dwx, ddx);
-    let base_dwy = terrain_uv_gradient(material.base_uv, 2u, material.uv_source_mask, material_dwy, ddy);
     let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
-    // TerrainSNX has one implicit base and up to four masked detail layers:
-    // Stage4 is the base, stages 6/8/10/12 map to mask RGBA respectively.
-    // The unpainted mask remainder belongs to the base layer.
-    // The mask's four channels address four overlay slots, and a tile rarely uses all of
-    // them: Stratis's p_003-000_l02_l04_n_n_n names two layers and leaves three empty, so
-    // stages 8, 10 and 12 carry no texture at all. Summing all four channels into the
-    // weight subtracted from the base then removes coverage that nothing adds back, and
-    // the surface washes out -- the same mistake as blending an unbound layer, in the
-    // other direction. Only channels with a bound overlay may take weight from the base.
-    var mask_weight = 0.0;
-    for (var i = 0u; i < min(material.overlay_count, 4u); i = i + 1u) {
-        if (material.overlays[i] != 0u) {
-            mask_weight += mask[i];
-        }
-    }
-    mask_weight = min(mask_weight, 1.0);
-    let view_ts = terrain_view_ts(world_pos);
+    // `var`, not `let`: the loop below indexes it with a non-constant slot.
+    var weights = decode_mask(mask);
+    let view_ts = terrain_view_ts(view_pos);
     // Parallax fades out with the detail it belongs to and is off entirely beyond it:
     // displacing a surface that has already faded into the satellite moves nothing.
-    let parallax = terrain_parallax * (1.0 - smoothstep(10.0, 45.0, length(world_pos)));
-    var base_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
-    var surface = authored_surface(material.base, material.base_normal, base_uv,
-                                   base_dwx, base_dwy, view_ts, parallax,
-                                   &base_normal_ts) * (1.0 - mask_weight);
-    var normal_ts = base_normal_ts * (1.0 - mask_weight);
-    for (var i = 0u; i < min(material.overlay_count, 4u); i = i + 1u) {
-        let overlay_uv = terrain_uv(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_pos, tile_uv);
-        let overlay_dwx = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwx, ddx);
-        let overlay_dwy = terrain_uv_gradient(material.overlay_uvs[i], 3u + i, material.uv_source_mask, material_dwy, ddy);
-        var overlay_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
-        surface += authored_surface(material.overlays[i], material.overlay_normals[i], overlay_uv,
-                                    overlay_dwx, overlay_dwy, view_ts, parallax,
-                                    &overlay_normal_ts) * mask[i];
-        normal_ts += overlay_normal_ts * mask[i];
+    let parallax = terrain_parallax * (1.0 - smoothstep(10.0, 45.0, length(view_pos)));
+    // A slot the source left empty carries no surface, so its share is not spent:
+    // the total is renormalised over the slots that resolved. Handing it to the
+    // base instead would paint the base wherever a hole was selected, which is
+    // the unbound-layer trap in its other direction.
+    var surface = vec3<f32>(0.0);
+    var normal_ts = vec3<f32>(0.0);
+    var bound_weight = 0.0;
+    for (var i = 0u; i < min(material.surface_count, TERRAIN_SURFACE_SLOTS); i = i + 1u) {
+        let colour_tex = material.surfaces[i];
+        if (colour_tex == 0u || weights[i] <= 0.0) {
+            continue;
+        }
+        let slot_uv = terrain_uv(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_pos, tile_uv);
+        let slot_dwx = terrain_uv_gradient(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_dwx, ddx);
+        let slot_dwy = terrain_uv_gradient(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_dwy, ddy);
+        var slot_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        surface += authored_surface(colour_tex, material.surface_normals[i], slot_uv,
+                                    slot_dwx, slot_dwy, view_ts, parallax,
+                                    &slot_normal_ts) * weights[i];
+        normal_ts += slot_normal_ts * weights[i];
+        bound_weight += weights[i];
     }
+    if (bound_weight <= 0.0) {
+        // Every slot the mask selected here is a hole. The satellite is still the
+        // right answer for the colour, so fall through with no detail at all
+        // rather than dividing by zero.
+        return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
+                            vec3<f32>(0.0, 0.0, 1.0));
+    }
+    surface = surface / bound_weight;
+    normal_ts = normal_ts / bound_weight;
     // Preserve the satellite as the low-frequency colour authority. The LCA
     // stack is close-range detail, not a second satellite: leaving it visible
     // at long range exposes its per-material colour blocks. Fade that detail
     // from 25 to 120 metres, exactly where the continuous satellite texture is
-    // the useful anti-tiling signal. Zero remains the exact legacy fallback;
-    // the pipeline override is intentionally capped while this authored path
-    // is compared against the established renderer.
-    // Stage 0 is not a repeating close-detail texture: TerrainSNX provides a
-    // separate TexGen for its continuous, low-frequency satellite colour.
+    // the useful anti-tiling signal. Zero remains the exact legacy fallback.
+    // The override is no longer capped at 0.35: that cap was a guard rail around
+    // a mask read as weights, and with the selector decoded the composition can
+    // finally be judged at the strength it was authored for.
+    // Stage 0 is not a repeating close-detail texture: both families provide a
+    // separate TexGen for their continuous, low-frequency satellite colour.
     // Sampling it through the old cell frame is what made a genuine layered
     // A3 material look like a tiled single texture.
     let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
                                       satellite_uv, satellite_dwx, satellite_dwy).rgb;
-    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(world_pos));
+    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(view_pos));
     let blend = authored_weight * detail_fade;
     // The normal follows the same fade as the colour it belongs to: a surface that has
     // faded back to the satellite must not keep perturbing the lighting.
@@ -411,10 +474,10 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let w01 = (1.0 - fx) * fy;
     let w11 = fx * fy;
     let absolute_world_pos = in.world_pos + frame.cam_pos.xyz;
-    let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
-    let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
-    let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
-    let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, dwx, dwy);
+    let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+    let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+    let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+    let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
     var rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
     // The authored surface normal, blended across the same four cells as the colour so it
     // stays continuous over a cell boundary.

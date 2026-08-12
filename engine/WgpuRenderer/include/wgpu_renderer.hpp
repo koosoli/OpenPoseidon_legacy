@@ -1504,11 +1504,22 @@ extern "C"
      * used; the index-map upload must clamp cell indices to the same bound. */
     WGR_API void wgr_terrain_set_ground_layers(WgrRenderer* renderer, const uint64_t* handles, uint32_t count);
 
-    // Stratis alone resolves 706 distinct TerrainSNX images (satellite, LCA,
-    // base and overlays).  512 silently discarded 194 of them, which turns an
-    // authored blend into a partial fallback.  This remains comfortably below
-    // the renderer's 8,192 bindless-texture device requirement.
-    constexpr uint32_t WGR_TERRAIN_MAX_GROUND_LAYERS = 1024;
+    // The budget is dominated by per-tile images, so it scales with map AREA:
+    // every satellite segment contributes its own `_lco` and `_lca`, and the
+    // surface set is a small shared remainder. Measured, authored images bound:
+    //
+    //   Stratis    (A3,  8x8 tiles)     706
+    //   Takistan   (OA, 484 tiles)      998
+    //   Zargabad   (OA, ~480 tiles)     988
+    //   Chernarus  (A2, 1024 tiles)   2,076
+    //
+    // 512 discarded 194 of Stratis's. 1024 cleared both Operation Arrowhead
+    // worlds by a hair and then dropped 1,052 of Chernarus's -- leaving 498 of
+    // its 1,024 materials incomplete, i.e. base Arma 2's flagship terrain half
+    // untextured. 4,096 covers every world in the corpus with room to spare and
+    // still sits under the renderer's 8,192 bindless-texture device requirement,
+    // which is requested unconditionally and already sized by the object array.
+    constexpr uint32_t WGR_TERRAIN_MAX_GROUND_LAYERS = 4096;
 
     /* Upload the per-land-cell texture index map: a `width` x `height` (= land
      * range per axis) R16Uint texture where each texel's bits 0-14 are the
@@ -1519,41 +1530,53 @@ extern "C"
     WGR_API void wgr_terrain_set_index_map(WgrRenderer* renderer, uint32_t width, uint32_t height,
                                            const uint16_t* indices);
 
-    /* One authored OPRW25 terrain material. Slots are indices into the ground
-     * binding array: satellite, LCA mask, base surface, then RGBA overlays.
-     * `overlay_count` is 0 for legacy single-texture terrain. */
+    /* One authored terrain material. Slots are indices into the ground binding
+     * array: satellite, LCA selector mask, then the surface stack by stage
+     * position. `surface_count` is 0 for legacy single-texture terrain. */
     struct WgrTerrainUv
     {
         float u[4];
         float v[4];
     };
+/* Surface slots in a terrain material's stage stack. Arma 2 / OA's TerrainX
+ * fills all six (Stage4..Stage14); Arma 3's TerrainSNX fills five and spends
+ * Stage14 on `tile_normal`. Slots are addressed by stage position, so an unused
+ * slot is a hole that keeps its index -- the LCA mask selects by slot. */
+#define WGR_TERRAIN_SURFACE_SLOTS 6
+
     struct WgrTerrainMaterial
     {
         // Original per-cell colour texture. This remains the default renderer
-        // route; `satellite` below is the authored TerrainSNX Stage0 image.
+        // route; `satellite` below is the authored Stage0 image.
         uint32_t legacy;
         uint32_t satellite;
         uint32_t mask;
-        uint32_t base;
-        uint32_t overlays[4];
-        uint32_t overlay_count;
-        // Bit N selects worldPos for UV N; clear selects the terrain mesh's
-        // local `tex` coordinates. Slots: satellite, mask, base, overlays.
-        uint32_t uv_source_mask;
-        /* Tangent-space normals, parallel to `base` / `overlays`: the `_nopx` map
-         * authored on the odd stage before each colour. `tile_normal` is the whole
-         * tile's normal sharing the satellite's frame (Arma 3 Stage14; Arma 2 has
-         * none). 0 = none, and slot 0 is the white fallback, so each is tested
-         * rather than sampled blind. These fill the two padding words and extend
-         * the header by one vec4 row, keeping it 16-byte aligned. */
-        uint32_t base_normal;
+        /* The whole tile's normal, sharing the satellite's frame (Arma 3
+         * Stage14; Arma 2 has none). 0 = none, and slot 0 is the bindless white
+         * fallback, so it is tested rather than sampled blind. */
         uint32_t tile_normal;
-        uint32_t overlay_normals[4];
+        /* Surface colours by slot, 0 where the source leaves the stage empty. */
+        uint32_t surfaces[WGR_TERRAIN_SURFACE_SLOTS];
+        /* Tangent-space normals parallel to `surfaces`: the `_nopx` map authored
+         * on the odd stage before each colour. 0 = none. */
+        uint32_t surface_normals[WGR_TERRAIN_SURFACE_SLOTS];
+        // One past the highest slot the source names; holes below it are kept.
+        uint32_t surface_count;
+        // Bit N selects worldPos for UV N; clear selects the terrain mesh's
+        // local `tex` coordinates. Slots: satellite, mask, then surfaces 0..5.
+        uint32_t uv_source_mask;
+        uint32_t _pad0;
+        uint32_t _pad1;
         WgrTerrainUv satellite_uv;
         WgrTerrainUv mask_uv;
-        WgrTerrainUv base_uv;
-        WgrTerrainUv overlay_uvs[4];
+        WgrTerrainUv surface_uvs[WGR_TERRAIN_SURFACE_SLOTS];
     };
+    /* 20 header words, then the satellite/mask UVs and six per-slot UVs of two
+     * vec4 each. The WGSL `TerrainMaterial` in terrain.wgsl must be kept to the
+     * same 336 bytes: a skew here renders as the wrong ground, not as an error. */
+    static_assert(sizeof(WgrTerrainUv) == 32, "WgrTerrainUv layout must match the Rust #[repr(C)] struct");
+    static_assert(sizeof(WgrTerrainMaterial) == 336,
+                  "WgrTerrainMaterial layout must match the Rust #[repr(C)] struct");
     WGR_API void wgr_terrain_set_materials(WgrRenderer* renderer, const WgrTerrainMaterial* materials,
                                            uint32_t count);
 

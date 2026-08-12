@@ -400,23 +400,34 @@ struct A3TerrainUv
 // colour here has a normal beside it in the source. Arma 3 additionally carries
 // one normal for the whole tile at Stage14 (`n_<x>_<y>_no.paa`), which Arma 2
 // does not. Preserved whether or not the renderer consumes them yet.
+//
+// The surface stack is addressed BY STAGE, never by encounter order. A tile's
+// LCA mask selects a slot, and the slot is the stage's position in the stack --
+// Stage4 is slot 0, Stage6 slot 1, and so on. Faces that do not need a slot ship
+// an rvmat with that stage empty (`p_015-010_n_l09_l13_n_l10_l11` leaves slots 0
+// and 3 empty), which is the common case: 33,107 of Takistan's stage tokens are
+// holes. Packing the named colours down into a dense list renumbers every slot
+// after a hole and the mask then selects the wrong surface.
 struct A3TerrainMaterial
 {
+    // Arma 2 / Operation Arrowhead's TerrainX carries six surface slots on
+    // Stage4..Stage14; Arma 3's TerrainSNX carries five on Stage4..Stage12 and
+    // spends Stage14 on the whole-tile normal instead.
+    static constexpr size_t MaxSurfaces = 6;
+
     RStringB satellite;
     RStringB mask;
-    RStringB base;
-    std::array<RStringB, 4> overlays;
-    // Parallel to `base` and `overlays`: the `_nopx` map authored on the odd stage
+    std::array<RStringB, MaxSurfaces> surfaces;
+    // Parallel to `surfaces`: the `_nopx` map authored on the odd stage
     // immediately before each colour. Empty where the source names none.
-    RStringB baseNormal;
-    std::array<RStringB, 4> overlayNormals;
+    std::array<RStringB, MaxSurfaces> surfaceNormals;
     // The whole tile's normal, sharing the satellite's frame. Arma 3 Stage14.
     RStringB tileNormal;
     A3TerrainUv satelliteUv;
     A3TerrainUv maskUv;
-    A3TerrainUv baseUv;
-    std::array<A3TerrainUv, 4> overlayUvs;
-    unsigned char overlayCount = 0;
+    std::array<A3TerrainUv, MaxSurfaces> surfaceUvs;
+    // One past the highest slot this material names, so holes below it survive.
+    unsigned char surfaceCount = 0;
 };
 
 #define USE_SWIZZLED_ARRAYS 0

@@ -20,7 +20,7 @@ const GRID_N: u32 = 32;
 
 // Capacity of the ground binding_array (and the device binding-array limit we
 // request). Must match WGR_TERRAIN_MAX_GROUND_LAYERS in wgpu_renderer.hpp.
-pub const TERRAIN_MAX_GROUND_LAYERS: u32 = 1024;
+pub const TERRAIN_MAX_GROUND_LAYERS: u32 = 4096;
 
 // Recompute the terrain sun-shadow mask only once the sun has moved past this
 // angular threshold (cos of ~0.25°), so the amortized sweep skips most frames.

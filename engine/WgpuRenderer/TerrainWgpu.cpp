@@ -278,9 +278,8 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         WgrTerrainMaterial& material = materials[static_cast<size_t>(i)];
         material.legacy = cellLayer[static_cast<size_t>(i)];
         material.satellite = material.legacy;
-        material.base = material.legacy;
         const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
-        if (source == nullptr || source->overlayCount == 0 || source->mask.GetLength() == 0)
+        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
         {
             continue;
         }
@@ -292,15 +291,12 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         const uint32_t fallback = material.legacy;
         bool satelliteResolved = false;
         bool maskResolved = false;
-        bool baseResolved = false;
         material.satellite = bindTexture(source->satellite, fallback, satelliteResolved);
         material.mask = bindTexture(source->mask, material.satellite, maskResolved);
-        material.base = bindTexture(source->base, material.satellite, baseResolved);
         // Normals fall back to 0, not to a colour texture: the shader tests for 0
         // and keeps the geometric normal, whereas a colour map decoded as a normal
         // would tilt every surface by whatever its albedo happened to be.
         bool normalResolved = false;
-        material.base_normal = bindTexture(source->baseNormal, 0, normalResolved);
         material.tile_normal = bindTexture(source->tileNormal, 0, normalResolved);
         const auto setUvSource = [&](uint32_t slot, const A3TerrainUv& uv)
         {
@@ -309,32 +305,33 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         };
         setUvSource(0, source->satelliteUv);
         setUvSource(1, source->maskUv);
-        setUvSource(2, source->baseUv);
         std::copy(source->satelliteUv.u.begin(), source->satelliteUv.u.end(), material.satellite_uv.u);
         std::copy(source->satelliteUv.v.begin(), source->satelliteUv.v.end(), material.satellite_uv.v);
         std::copy(source->maskUv.u.begin(), source->maskUv.u.end(), material.mask_uv.u);
         std::copy(source->maskUv.v.begin(), source->maskUv.v.end(), material.mask_uv.v);
-        std::copy(source->baseUv.u.begin(), source->baseUv.u.end(), material.base_uv.u);
-        std::copy(source->baseUv.v.begin(), source->baseUv.v.end(), material.base_uv.v);
-        material.overlay_count = source->overlayCount;
-        for (uint32_t overlay = 0; overlay < material.overlay_count; ++overlay)
+        material.surface_count = source->surfaceCount;
+        bool anySurface = false;
+        for (uint32_t slot = 0; slot < material.surface_count; ++slot)
         {
-            bool overlayResolved = false;
-            material.overlays[overlay] = bindTexture(source->overlays[overlay], material.base, overlayResolved);
-            material.overlay_normals[overlay] =
-                bindTexture(source->overlayNormals[overlay], 0, overlayResolved);
-            setUvSource(3 + overlay, source->overlayUvs[overlay]);
-            std::copy(source->overlayUvs[overlay].u.begin(), source->overlayUvs[overlay].u.end(),
-                      material.overlay_uvs[overlay].u);
-            std::copy(source->overlayUvs[overlay].v.begin(), source->overlayUvs[overlay].v.end(),
-                      material.overlay_uvs[overlay].v);
+            // A hole stays a hole. Falling back to another surface here would
+            // give the mask's selector a texture where the source says there is
+            // none, which is how an unpainted slot ends up covering ground.
+            bool surfaceResolved = false;
+            material.surfaces[slot] = bindTexture(source->surfaces[slot], 0, surfaceResolved);
+            material.surface_normals[slot] = bindTexture(source->surfaceNormals[slot], 0, normalResolved);
+            anySurface = anySurface || surfaceResolved;
+            setUvSource(2 + slot, source->surfaceUvs[slot]);
+            std::copy(source->surfaceUvs[slot].u.begin(), source->surfaceUvs[slot].u.end(),
+                      material.surface_uvs[slot].u);
+            std::copy(source->surfaceUvs[slot].v.begin(), source->surfaceUvs[slot].v.end(),
+                      material.surface_uvs[slot].v);
         }
-        // The mask and the base surface are what make the composition authored;
-        // a Stage0 satellite is optional and most families do not carry one.
-        // This counts materials whose authored images all reached a layer, not
-        // materials whose layer indices happen to differ.
+        // The mask and at least one surface are what make the composition
+        // authored; a Stage0 satellite is optional and most families do not
+        // carry one. This counts materials whose authored images all reached a
+        // layer, not materials whose layer indices happen to differ.
         (void)satelliteResolved;
-        if (maskResolved && baseResolved)
+        if (maskResolved && anySurface)
         {
             ++complete;
         }

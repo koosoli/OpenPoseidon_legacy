@@ -1877,13 +1877,18 @@ bool Landscape::LoadOprwModern(const char* path)
                 continue;
             }
 
-            // TerrainSNX is an authored composition, not a generic object
-            // material. Stage0 is the satellite colour; Stage1 is the LCA
-            // RGBA blend mask; even stages from 4 onward are the base surface
-            // colour followed by up to four overlay colours (their preceding
-            // odd stages are normals). Preserve the exact references here;
-            // TerrainWgpu uploads and composites them instead of inventing a
-            // cell-boundary fade.
+            // The terrain families are authored compositions, not generic object
+            // materials. Stage0 is the satellite colour; Stage1 is the LCA
+            // selector mask; the even stages from 4 onward are surface colours
+            // and their preceding odd stages are those surfaces' normals.
+            //
+            // The two generations differ in how far the stack runs, and the
+            // difference is the whole reason slots are read by stage index:
+            //   Arma 2 / OA  TerrainX    Stage4..Stage14 = six surfaces
+            //   Arma 3       TerrainSNX  Stage4..Stage12 = five surfaces,
+            //                            Stage14 = the whole-tile normal map.
+            // Preserve the exact references here; TerrainWgpu uploads and
+            // composites them instead of inventing a cell-boundary fade.
             A3TerrainMaterial& authored = _a3TerrainMaterials[static_cast<int>(i)];
             const auto uvForStage = [&](const Poseidon::Asset::Material::RvStage& stage)
             {
@@ -1901,9 +1906,22 @@ bool Landscape::LoadOprwModern(const char* path)
                         }
                     }
                 }
+                // `uvTransform` is a basis, not a pair of row vectors: aside/up/dir
+                // are where the source's X/Y/Z axes GO, so the u channel is the
+                // first component of each of the three, not all three components
+                // of `aside`. Transposing it here keeps the shader a plain dot
+                // product.
+                //
+                // Reading it row-wise happens to work for the `tex` stages, whose
+                // matrices are diagonal, and silently destroys every `worldPos`
+                // stage: Stratis's satellite TexGen is aside=(k,0,0) up=(0,0,k)
+                // dir=(0,-k,0), so the row reading takes v from the source's third
+                // component -- the terrain HEIGHT -- instead of from world Z. The
+                // satellite then smears along the slope and the LCA mask, which
+                // shares that TexGen, selects one surface for the whole tile.
                 A3TerrainUv uv;
-                uv.u = {transform->aside[0], transform->aside[1], transform->aside[2], transform->pos[0]};
-                uv.v = {transform->up[0], transform->up[1], transform->up[2], transform->pos[1]};
+                uv.u = {transform->aside[0], transform->up[0], transform->dir[0], transform->pos[0]};
+                uv.v = {transform->aside[1], transform->up[1], transform->dir[1], transform->pos[1]};
                 uv.worldPos = *uvSource == "worldPos";
                 return uv;
             };
@@ -1932,8 +1950,25 @@ bool Landscape::LoadOprwModern(const char* path)
                     authored.mask = RStringB(texture.c_str());
                     authored.maskUv = uvForStage(stage);
                 }
+                else if (stage.index > 12 && lower.find("_no.paa") != std::string::npos)
+                {
+                    // Arma 3's whole-tile terrain normal (Stage14). It sits past
+                    // that generation's five-surface stack and shares the
+                    // satellite's frame. Arma 2 has no equivalent and spends the
+                    // same stage on its sixth surface, so this is decided by the
+                    // `_no` suffix rather than by the stage index alone.
+                    authored.tileNormal = RStringB(texture.c_str());
+                }
                 else if (stage.index >= 4 && (stage.index & 1) == 0 && lower.find("_co.paa") != std::string::npos)
                 {
+                    // The slot is the stage's position in the stack, NOT the order
+                    // in which named colours turn up: Stage4 is slot 0, Stage6 slot
+                    // 1, and so on. Empty stages are holes that keep their slot.
+                    const size_t slot = static_cast<size_t>((stage.index - 4) / 2);
+                    if (slot >= authored.surfaces.size())
+                    {
+                        continue;
+                    }
                     // The surface's normal is the odd stage immediately before its
                     // colour -- that pairing is the whole convention, so it is read
                     // by position rather than by matching names, which differ
@@ -1952,26 +1987,11 @@ bool Landscape::LoadOprwModern(const char* path)
                         }
                         return RStringB();
                     };
-                    if (authored.base.GetLength() == 0)
-                    {
-                        authored.base = RStringB(texture.c_str());
-                        authored.baseUv = uvForStage(stage);
-                        authored.baseNormal = normalFor(stage.index);
-                    }
-                    else if (authored.overlayCount < authored.overlays.size())
-                    {
-                        const size_t overlay = authored.overlayCount++;
-                        authored.overlays[overlay] = RStringB(texture.c_str());
-                        authored.overlayUvs[overlay] = uvForStage(stage);
-                        authored.overlayNormals[overlay] = normalFor(stage.index);
-                    }
-                }
-                else if (stage.index > 12 && lower.find("_no.paa") != std::string::npos)
-                {
-                    // Arma 3's whole-tile terrain normal (Stage14). It sits past the
-                    // surface stack, shares the satellite's frame, and Arma 2 has no
-                    // equivalent -- so it is captured, not required.
-                    authored.tileNormal = RStringB(texture.c_str());
+                    authored.surfaces[slot] = RStringB(texture.c_str());
+                    authored.surfaceUvs[slot] = uvForStage(stage);
+                    authored.surfaceNormals[slot] = normalFor(stage.index);
+                    authored.surfaceCount =
+                        std::max(authored.surfaceCount, static_cast<unsigned char>(slot + 1));
                 }
             }
 
@@ -2005,21 +2025,33 @@ bool Landscape::LoadOprwModern(const char* path)
                   world.materials.size());
         // Authored coverage, per field, so a generation that stops supplying one is
         // visible as a number rather than as a look nobody can attribute.
-        int withSatellite = 0, withMask = 0, withBaseNormal = 0, withOverlayNormals = 0, withTileNormal = 0;
+        int withSatellite = 0, withMask = 0, withSurfaceNormals = 0, withTileNormal = 0;
+        int surfaces = 0, holes = 0, sixSlot = 0;
         for (int m = 0; m < _a3TerrainMaterials.Size(); ++m)
         {
             const A3TerrainMaterial& authored = _a3TerrainMaterials[m];
             withSatellite += authored.satellite.GetLength() != 0;
             withMask += authored.mask.GetLength() != 0;
-            withBaseNormal += authored.baseNormal.GetLength() != 0;
             withTileNormal += authored.tileNormal.GetLength() != 0;
-            for (unsigned char o = 0; o < authored.overlayCount; ++o)
-                withOverlayNormals += authored.overlayNormals[o].GetLength() != 0;
+            sixSlot += authored.surfaceCount > 5;
+            for (unsigned char s = 0; s < authored.surfaceCount; ++s)
+            {
+                // A hole is a slot the source left empty below a slot it filled.
+                // It must survive to the GPU: the mask selects by slot, so
+                // closing the gap would renumber every surface after it.
+                if (authored.surfaces[s].GetLength() == 0)
+                {
+                    ++holes;
+                    continue;
+                }
+                ++surfaces;
+                withSurfaceNormals += authored.surfaceNormals[s].GetLength() != 0;
+            }
         }
         LOG_INFO(World,
-                 "Terrain materials {}: {} satellite, {} mask, {} base normal, {} overlay normals, {} tile normal, "
-                 "of {}",
-                 path, withSatellite, withMask, withBaseNormal, withOverlayNormals, withTileNormal,
+                 "Terrain materials {}: {} satellite, {} mask, {} surfaces ({} holes preserved, {} using the sixth "
+                 "slot), {} surface normals, {} tile normal, of {}",
+                 path, withSatellite, withMask, surfaces, holes, sixSlot, withSurfaceNormals, withTileNormal,
                  _a3TerrainMaterials.Size());
     }
     ProgressRefresh();

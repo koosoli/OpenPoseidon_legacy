@@ -862,25 +862,33 @@ pub struct WgrTerrainUv {
     pub v: [f32; 4],
 }
 
+/// Surface slots in a terrain material's stage stack. Arma 2 / OA's `TerrainX`
+/// fills all six (Stage4..Stage14); Arma 3's `TerrainSNX` fills five and spends
+/// Stage14 on the whole-tile normal map instead.
+pub const WGR_TERRAIN_SURFACE_SLOTS: usize = 6;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct WgrTerrainMaterial {
     pub legacy: u32,
     pub satellite: u32,
     pub mask: u32,
-    pub base: u32,
-    pub overlays: [u32; 4],
-    pub overlay_count: u32,
-    pub uv_source_mask: u32,
-    // Tangent-space normals parallel to `base` / `overlays`, plus the whole-tile
-    // normal that shares the satellite's frame. 0 = none.
-    pub base_normal: u32,
+    // The whole tile's normal, sharing the satellite's frame (Arma 3 Stage14;
+    // Arma 2 spends that stage on its sixth surface instead). 0 = none.
     pub tile_normal: u32,
-    pub overlay_normals: [u32; 4],
+    // Surface colours by SLOT, not by encounter order: slot k is Stage(4 + 2k).
+    // 0 where the source leaves that stage empty -- a hole keeps its index,
+    // because the LCA mask selects a slot.
+    pub surfaces: [u32; WGR_TERRAIN_SURFACE_SLOTS],
+    // Tangent-space normals parallel to `surfaces`. 0 = none.
+    pub surface_normals: [u32; WGR_TERRAIN_SURFACE_SLOTS],
+    pub surface_count: u32,
+    pub uv_source_mask: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
     pub satellite_uv: WgrTerrainUv,
     pub mask_uv: WgrTerrainUv,
-    pub base_uv: WgrTerrainUv,
-    pub overlay_uvs: [WgrTerrainUv; 4],
+    pub surface_uvs: [WgrTerrainUv; WGR_TERRAIN_SURFACE_SLOTS],
 }
 
 // One terrain node (shared grid mesh at world-xz `origin`, `size` wide, level
@@ -1258,6 +1266,10 @@ const _: () = assert!(std::mem::size_of::<WgrSky>() == 256);
 const _: () = assert!(std::mem::size_of::<WgrSkyLook>() == 192);
 const _: () = assert!(std::mem::size_of::<WgrSkyRuntime>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
+// 20 header words, then satellite/mask UVs and six per-slot UVs of two vec4
+// each. The WGSL `TerrainMaterial` in terrain.wgsl mirrors this byte for byte.
+const _: () = assert!(std::mem::size_of::<WgrTerrainUv>() == 32);
+const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 336);
 const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 48);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
