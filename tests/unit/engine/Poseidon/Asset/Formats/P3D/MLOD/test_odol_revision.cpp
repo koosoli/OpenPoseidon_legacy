@@ -39,13 +39,13 @@ static std::vector<char> odolHeader(uint32_t version)
 TEST_CASE("ODOL revisions found in the corpora are described", "[p3d][odol][ast-012a]")
 {
     REQUIRE(P3D::DescribeOdolRevision(7).support == P3D::OdolSupport::Parsed);
-    for (uint32_t version : {48u})
-    {
-        const auto info = P3D::DescribeOdolRevision(version);
-        // Recognised means "present in the corpora", never "supported".
-        REQUIRE(info.support == P3D::OdolSupport::Recognised);
-        REQUIRE(std::string(info.generation) != "unknown");
-    }
+    // Revision 48 was Recognised-only for as long as no base Arma 2 asset was
+    // available to test against. With the licensed base-A2 packages supplied it
+    // routes through the same A2-family reader as 49/50/52 -- unchanged, because
+    // that reader's version gates already covered it -- and all 64 revision-48
+    // models Takistan references parse.
+    REQUIRE(P3D::DescribeOdolRevision(48).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(48).generation).find("Arma 2") != std::string::npos);
     REQUIRE(P3D::DescribeOdolRevision(49).support == P3D::OdolSupport::NarrowSubset);
     REQUIRE(std::string(P3D::DescribeOdolRevision(49).generation).find("Arma 2") != std::string::npos);
     REQUIRE(P3D::DescribeOdolRevision(50).support == P3D::OdolSupport::NarrowSubset);

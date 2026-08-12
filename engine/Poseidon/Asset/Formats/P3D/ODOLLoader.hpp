@@ -72,6 +72,8 @@ class ODOLLoader
         // same unsupported-revision failure, carrying the constraint that broke.
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 73)
             return loadOdol73Static(reader, size, sourcePath, revision);
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 48)
+            return loadOdol48Static(reader, size, sourcePath, revision);
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 49)
             return loadOdol49Static(reader, size, sourcePath, revision);
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 50)
@@ -101,6 +103,13 @@ class ODOLLoader
         {
             throw P3D::UnsupportedOdolRevision(revision, error.what());
         }
+    }
+
+    static Model loadOdol48Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        try { return convertOdolStatic(P3D::ReadOdol48StaticModel(reader, size), sourcePath, 48, "ODOL48", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
     }
 
     static Model loadOdol49Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)

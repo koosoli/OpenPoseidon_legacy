@@ -23,7 +23,9 @@ namespace Poseidon::Asset::Formats::P3D
 // honestly cover:
 //
 //   7   OFP / Cold War Assault   -- the one this build parses
-//   48  Arma 2                   -- 17 models
+//   48  Arma 2                   -- the base-game revision; every one of the 64
+//                                   Takistan references parses through the same
+//                                   A2-family reader as 49
 //   49  Arma 2                   -- ~1,400 models, the widest
 //   50  Arma 2 OA / BAF / PMC    -- ~90 models
 //   52  Arma 2 OA / ACR          -- ~100 models
@@ -49,7 +51,7 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
     switch (version)
     {
         case 7:  return {7,  OdolSupport::Parsed,     "Operation Flashpoint / Cold War Assault"};
-        case 48: return {48, OdolSupport::Recognised, "Arma 2"};
+        case 48: return {48, OdolSupport::NarrowSubset, "Arma 2"};
         case 49: return {49, OdolSupport::NarrowSubset, "Arma 2 / Arma 2 Operation Arrowhead"};
         case 50: return {50, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};
         case 52: return {52, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};

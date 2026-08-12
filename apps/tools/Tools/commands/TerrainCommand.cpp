@@ -361,6 +361,7 @@ ModelResult ClassifyModel(const std::string& virtualPath, const AddonIndex& inde
         // defect, and that misclassification is invisible in the histogram.
         switch (result.revision)
         {
+            case 48:
             case 49:
             case 50:
             case 52:

@@ -2673,13 +2673,17 @@ tickets:
       - capability: ODOL_A2_STATIC_LOD_PARSE
         status: PARTIAL
         denominator: >-
-          Official Operation Arrowhead Takistan, OPRW revision 24: 534 referenced
-          models over 438,906 placements. 470 of 470 resolvable models parse, all
-          ODOL revision 49 (was 416 of 470; the 54 failures were one structure,
+          Official Operation Arrowhead Takistan, OPRW revision 24, against the
+          full local Arma 2 + Operation Arrowhead licensed corpus (111 archives,
+          148,218 entries): 534 of 534 referenced models parse over 438,906 of
+          438,906 placements -- ODOL revision 48 (64 models) and revision 49 (470
+          models). Two backlogs closed: the 54 parse failures were one structure,
           the model animation table, now read through the shared revision-gated
-          reader). The remaining 64 models over 4,058 placements are base Arma 2
-          paths absent from the supplied licensed corpus -- 0 of 64 found by
-          basename across 58 archives and 67,417 entries.
+          reader; the 64 unresolved paths were base Arma 2 assets the corpus did
+          not yet contain, and once supplied they needed no reader change, only
+          for revision 48 to stop being refused. Runtime log for a Takistan
+          capture: 0 "Bad version in LODShape::LoadOptimized", 0 unsupported
+          revisions.
       - capability: OPRW24_WORLD_CENSUS
         status: COMPLETE
         denominator: >-
@@ -2693,10 +2697,10 @@ tickets:
         resolution, or that anything draws. Takistan terrain materials, normal
         maps, vegetation cutouts and road appearance remain open.
       - >-
-        CORPUS-INCOMPLETE: 64 base Arma 2 models (ca\structures, ca\misc,
-        ca\misc2, ca\misc3, ca\buildings, ca\buildings2, ca\wheeled, ca\wheeled2)
-        cannot be resolved. The base Arma 2 licensed data package is required.
-      - ODOL revision 48 remains unsupported; Takistan references none.
+        Revision 48 is a static-subset claim with the same limits as 49/50/52:
+        geometry parses, and nothing asserts materials, animation or proxies are
+        correct. It is measured only against the 64 revision-48 models Takistan
+        references, not against base Arma 2 as a whole.
       - Animations are retained, never evaluated.
     fallback: >-
       Unknown animation types remain a refusal, and an unknown OPRW revision is

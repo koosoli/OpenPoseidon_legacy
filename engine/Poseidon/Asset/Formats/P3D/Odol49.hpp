@@ -245,6 +245,7 @@ inline Odol73StaticModel ReadOdolA2StaticModel(BinaryReader& reader, int fileSiz
 {
     Odol73StaticModel model; model.directory = ReadOdol49StaticDirectory(reader, fileSize, revision); model.lods.reserve(model.directory.starts.size()); for (size_t i = 0; i < model.directory.starts.size(); ++i) model.lods.push_back(ReadOdol49StaticLod(reader, model.directory.starts[i], model.directory.ends[i], revision)); return model;
 }
+inline Odol73StaticModel ReadOdol48StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 48); }
 inline Odol73StaticModel ReadOdol49StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 49); }
 inline Odol73StaticModel ReadOdol50StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 50); }
 inline Odol73StaticModel ReadOdol52StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 52); }

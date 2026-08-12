@@ -115,3 +115,41 @@ correctness, material resolution, or what actually draws. Takistan's terrain
 materials, normal maps, vegetation cutouts and road appearance remain open — see
 the A2/OA handover backlog. Base Arma 2 ODOL revision 48 remains unsupported and
 untested: no revision-48 model is referenced by this world.
+
+---
+
+# Amendment, same day — the corpus gap closed, and 534 of 534
+
+The owner supplied the base Arma 2 licensed data packages
+(`ALDP_A2_PBOs_DPL_APL_part1..3`, `ALDP_A2_PBOs_ADPL-SA_APL-SA_part1..3`), taking
+the local corpus from 58 archives / 67,417 entries to **111 / 148,218**.
+
+All 64 previously-unresolvable models resolved immediately, and every one of them
+is **ODOL revision 48** — precisely the revision this record left unsupported for
+want of an asset to test against. No path, prefix or resolver change was needed,
+which confirms the CORPUS-INCOMPLETE classification was right.
+
+Revision 48 then needed **no reader work at all**. `ReadOdolA2StaticModel` is
+already parameterised by revision and its gates are `< 50`, `>= 51` and `>= 52`;
+48 takes the same branches as 49. The only change was to stop refusing it:
+`DescribeOdolRevision(48)` becomes `NarrowSubset`, `ODOLLoader` gains a
+`loadOdol48Static` mirroring its siblings, and the census dispatches 48 to the
+A2-family reader.
+
+```
+Takistan, official OA OPRW 24, full A2+OA corpus:
+  534 of 534 referenced models parse, 438,906 of 438,906 placements
+  revisions: 48 (64 models), 49 (470 models)
+  runtime log: 0 "Bad version in LODShape::LoadOptimized", 0 unsupported revisions
+```
+
+So the two measured backlogs are closed: **54 → 0** and **65 → 0**.
+
+Gates re-run at this commit: Stratis 350 of 350 over 163,953 placements
+unchanged; OFP Preview-0 WGPU smoke passed; `[odol]` 22 passed / 2 skipped and
+`[Formats]` 23 passed / 1 skipped; Takistan day capture renders with terrain,
+buildings, walls and roads.
+
+The revision-48 claim is still a *static-subset* claim, with the same limits as
+49/50/52: geometry parses, nothing here asserts that materials, animation or
+proxies are correct.
