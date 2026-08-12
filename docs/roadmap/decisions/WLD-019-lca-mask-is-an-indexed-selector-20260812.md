@@ -3,8 +3,10 @@
 **Date:** 2026-08-12
 **Related:** WLD-017 (terrain materials ≠ ground layers), WLD-018 (satellite stage
 dropped), MAT-040 + amendments (parallax is terrain-only; the mask is not a weight field)
-**Status:** Measured and implemented. Composition renders correctly on Arma 2, OA and
-Arma 3; still behind `WGR_TERRAIN_A3_SURFACES` (default 0) pending a look call.
+**Status:** Measured, implemented, and ON by default since 2026-08-12 on the
+owner's look call (`WGR_TERRAIN_A3_SURFACES`, default 1.0; set 0 to revert Arma
+worlds). Renders correctly on Arma 2, OA and Arma 3. OFP is untouched by
+construction — see the fallback section.
 
 ## What the corpus says
 
@@ -147,10 +149,10 @@ real fields, tracks and rocky slopes instead of flat sand and green polygons;
 Stratis resolves scrub, dirt tracks and beach instead of uniform sand; ground
 level finally shows the authored gravel surfaces at all.
 
-It remains **off by default** (`WGR_TERRAIN_A3_SURFACES=0`) because promoting it
-changes the default look of two whole generations, which is the owner's call. The
-0.35 cap is gone — that was a guard rail around a mask read as weights — so the
-override now spans the full 0..1.
+It is **on by default** as of 2026-08-12: the owner judged the captures and took
+the decoded composition on both generations. The 0.35 cap is gone — that was a
+guard rail around a mask read as weights — so `WGR_TERRAIN_A3_SURFACES` now spans
+the full 0..1, and 0 restores the pre-decode look on Arma worlds.
 
 Left standing, and deliberately not tuned here: close-range surface tiling is
 visible on Takistan (the `tex`-source TexGen scale is ×10 per land cell and has
