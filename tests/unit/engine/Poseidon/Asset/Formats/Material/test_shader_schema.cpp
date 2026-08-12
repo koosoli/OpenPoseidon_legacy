@@ -411,31 +411,64 @@ class Stage5 { texture="a3\structures_f\civ\constructions\data\wip_cinderblocks_
     REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).suffixRole == "SpecularDetail");
     REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).suffixAgrees);
 
-    // Layers 1-3, colour and detail+specular alike, have no slots.
-    REQUIRE(ir.unmappedStages == std::vector<int>{1, 2, 3});
+    // Layers 1-3 are bound now (MAT-039). Only their detail+specular stages, 6-8,
+    // remain unmapped, and this material declares none of them.
+    REQUIRE(ir.Slot(MaterialSlot::LayerColour1).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::LayerColour2).sourceStage == 2);
+    REQUIRE(ir.Slot(MaterialSlot::LayerColour3).sourceStage == 3);
+    REQUIRE(ir.unmappedStages.empty());
     REQUIRE_FALSE(ir.Slot(MaterialSlot::Detail).present);
 }
 
-TEST_CASE("Multi's normal, macro and ambient shadow are per-surface, not per-layer",
-          "[asset][material][mat-030][multi]")
+TEST_CASE("Multi's macro and ambient shadow are per-surface; its normals are per layer",
+          "[asset][material][mat-030][multi][mat-039]")
 {
-    // Stages 9-11 were missed while the census stopped at Stage8. Measured over all 1,628:
-    // Stage9 macro 1626, Stage10 ambient shadow 1628, Stage11 normal 1628. None of them is
-    // layered, so no blending question arises -- a Multi material has a normal map like
-    // anything else, and not binding it left every Arma 3 structure without one.
+    // Stage9 macro and Stage10 ambient shadow really are whole-surface -- both sit on the
+    // mask's own TexGen4. The normals are not: stages 11-14 pair with the colour stages
+    // 0-3 by TexGen, one per layer. Measured on two generations independently, which is
+    // what makes it a shared Real Virtuality convention rather than a per-title one:
+    //
+    //   OA   ca\structures_e\housek\data\house_k_5_multi.rvmat
+    //          Stage0 rock\wall_01_co       texGen0 <-> Stage11 rock\wall_01_nohq       texGen0
+    //          Stage1 loam\wall_brick01_co  texGen1 <-> Stage12 loam\wall_brick01_nohq  texGen1
+    //   A3   a3\structures_f\civ\offices\data\office_exterior_multi.rvmat
+    //          Stage0 plaster\stucco_001_co texGen0 <-> Stage11 plaster\stucco_001_nohq texGen0
+    //          Stage1 plaster03_4x4_office_co texGen1 <-> Stage12 ..._nohq                texGen1
+    //
+    // Calling Stage11 "the surface normal" bound layer 0's map to the whole surface.
     auto ir = translate(R"CFG(
 PixelShaderID="Multi";
-class Stage0 { texture="a3\structures_f\data\wall_04_co.paa"; };
+class TexGen0
+{
+	uvSource="tex";
+	class uvTransform { aside[]={4,0,0}; up[]={0,4,0}; dir[]={0,0,0}; pos[]={0,0,0}; };
+};
+class TexGen1
+{
+	uvSource="tex";
+	class uvTransform { aside[]={16,0,0}; up[]={0,16,0}; dir[]={0,0,0}; pos[]={0,0,0}; };
+};
+class Stage0 { texture="a3\structures_f\data\wall_04_co.paa"; texGen=0; };
+class Stage1 { texture="a3\structures_f\datarick_04_co.paa"; texGen=1; };
 class Stage4 { texture="a3\structures_f\data\wall_04_mask.paa"; };
 class Stage5 { texture="a3\structures_f\data\wall_04_dtsmdi.paa"; };
 class Stage9 { texture="a3\structures_f\data\wall_04_mc.paa"; };
 class Stage10 { texture="a3\structures_f\data\wall_04_ads.paa"; };
-class Stage11 { texture="a3\structures_f\data\wall_04_nohq.paa"; };
+class Stage11 { texture="a3\structures_f\data\wall_04_nohq.paa"; texGen=0; };
+class Stage12 { texture="a3\structures_f\datarick_04_nohq.paa"; texGen=1; };
 )CFG");
     REQUIRE(ir.schemaKnown);
     REQUIRE(ir.Slot(MaterialSlot::Macro).sourceStage == 9);
     REQUIRE(ir.Slot(MaterialSlot::AmbientShadow).sourceStage == 10);
     REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 11);
+    REQUIRE(ir.Slot(MaterialSlot::LayerNormal1).sourceStage == 12);
+
+    // The per-layer TexGen is the point: layer 1 tiles four times as densely as layer 0,
+    // and a translation that kept only `uvSource` collapsed both onto one frame.
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).uvTransform.present);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).uvTransform.aside[0] == 4.0f);
+    REQUIRE(ir.Slot(MaterialSlot::LayerColour1).uvTransform.aside[0] == 16.0f);
+    REQUIRE(ir.Slot(MaterialSlot::LayerNormal1).uvTransform.aside[0] == 16.0f);
 
     // `_ads` is the majority spelling of the ambient-shadow suffix in this family (808 of
     // 1,628), and went unrecognised until now -- so the second witness stayed silent on the

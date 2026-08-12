@@ -166,6 +166,11 @@ struct TranslatedSlot
     int            sourceStage = -1;
     RvTextureRef   texture;
     std::string    uvSource;
+    // The stage's own transform, or the TexGenN block it selected. Multi gives each
+    // surface layer a different one -- Takistan's brick is a finer scale than the rock
+    // it sits beside -- so a translation that keeps only `uvSource` collapses every
+    // layer onto one frame and loses the detail the surface reads as.
+    RvUvTransform  uvTransform;
     SlotChannelMap channels;
 };
 
@@ -222,6 +227,7 @@ inline TranslatedMaterial TranslateSemantics(const RvMaterialSource& source, con
         entry.sourceStage = binding.sourceStage;
         entry.texture  = binding.texture;
         entry.uvSource = binding.uvSource;
+        entry.uvTransform = binding.uvTransform;
         entry.channels = ChannelsForSlot(entry.slot);
         out.slots.push_back(std::move(entry));
     }

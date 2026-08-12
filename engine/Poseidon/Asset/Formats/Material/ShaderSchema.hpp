@@ -44,6 +44,16 @@ enum class MaterialSlot
     // Multi's blend mask. Preserved so a layered material's blend control is visible
     // rather than dropped; nothing samples it yet.
     Mask,
+    // Multi's three further surface layers. Layer 0 is BaseColour/NormalMap above,
+    // and each layer has its own TexGen -- measured on Takistan's brick houses,
+    // where layer 1 is the brick and carries the fine detail the surface reads as.
+    // Dropping them is why a Multi surface renders as its rock layer alone.
+    LayerColour1,
+    LayerColour2,
+    LayerColour3,
+    LayerNormal1,
+    LayerNormal2,
+    LayerNormal3,
     AmbientShadow,
     SpecularDetail,
     Fresnel,
@@ -61,6 +71,12 @@ inline const char* ToString(MaterialSlot slot)
         case MaterialSlot::Macro: return "Macro";
         case MaterialSlot::MacroAmbient: return "MacroAmbient";
         case MaterialSlot::Mask: return "Mask";
+        case MaterialSlot::LayerColour1: return "LayerColour1";
+        case MaterialSlot::LayerColour2: return "LayerColour2";
+        case MaterialSlot::LayerColour3: return "LayerColour3";
+        case MaterialSlot::LayerNormal1: return "LayerNormal1";
+        case MaterialSlot::LayerNormal2: return "LayerNormal2";
+        case MaterialSlot::LayerNormal3: return "LayerNormal3";
         case MaterialSlot::AmbientShadow: return "AmbientShadow";
         case MaterialSlot::SpecularDetail: return "SpecularDetail";
         case MaterialSlot::Fresnel: return "Fresnel";
@@ -75,6 +91,9 @@ struct MaterialSlotBinding
     RvTextureRef texture;
     int          sourceStage = -1;
     std::string  uvSource; // "tex", "tex1", "none" -- selects an AST-011C UV channel
+    // The stage's own uvTransform, or the TexGenN block it named. Multi gives each
+    // surface layer its own, and that scale difference is the detail.
+    RvUvTransform uvTransform;
 
     // What the filename suffix suggests, and whether it agrees with the slot the
     // schema assigned. A disagreement is reported, never used to override: if the
@@ -279,18 +298,26 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     static const ShaderSchema kMulti{
         "Multi",
         {
-            MaterialSlot::BaseColour,     // 0  -- layer 0 colour, standing in for the base
-            MaterialSlot::Count,          // 1  -- layer 1, no slot
-            MaterialSlot::Count,          // 2  -- layer 2, no slot
-            MaterialSlot::Count,          // 3  -- layer 3, no slot
-            MaterialSlot::Mask,           // 4  -- the blend mask, preserved unused
+            MaterialSlot::BaseColour,     // 0  -- layer 0 colour
+            MaterialSlot::LayerColour1,   // 1  -- layer 1 colour
+            MaterialSlot::LayerColour2,   // 2  -- layer 2 colour
+            MaterialSlot::LayerColour3,   // 3  -- layer 3 colour
+            MaterialSlot::Mask,           // 4  -- the blend mask selecting between them
             MaterialSlot::SpecularDetail, // 5  -- layer 0 detail+specular, paired with Stage0
             MaterialSlot::Count,          // 6  -- layer 1 detail+specular, no slot
             MaterialSlot::Count,          // 7  -- layer 2 detail+specular, no slot
             MaterialSlot::Count,          // 8  -- layer 3 detail+specular, no slot
             MaterialSlot::Macro,          // 9  -- whole surface, not per layer
             MaterialSlot::AmbientShadow,  // 10 -- whole surface
-            MaterialSlot::NormalMap,      // 11 -- whole surface
+            // Measured on ca\structures_e\housek\data\house_k_5_multi.rvmat: Stage11
+            // is `rock\wall_01_nohq` at texGen0, pairing with Stage0's
+            // `rock\wall_01_co` at texGen0, and 12/13/14 pair the same way with
+            // stages 1/2/3. These normals are PER LAYER, not "whole surface" as this
+            // table previously said, and 12-14 were not mapped at all.
+            MaterialSlot::NormalMap,      // 11 -- layer 0 normal
+            MaterialSlot::LayerNormal1,   // 12 -- layer 1 normal
+            MaterialSlot::LayerNormal2,   // 13 -- layer 2 normal
+            MaterialSlot::LayerNormal3,   // 14 -- layer 3 normal
         }};
     static const ShaderSchema kSkin{
         "Skin",
@@ -441,11 +468,46 @@ inline MaterialIR TranslateMaterial(const RvMaterialSource& source)
         binding.texture     = stage.texture;
         binding.sourceStage = stage.index;
         binding.uvSource    = stage.uvSource;
+        // A stage normally names a TexGenN block rather than carrying its own
+        // transform, so resolve the link here -- otherwise every layer of a Multi
+        // material reports the identity and the per-layer scale is silently lost.
+        binding.uvTransform = stage.uvTransform;
+        if (!binding.uvTransform.present && stage.texGen >= 0)
+        {
+            for (const auto& texGen : source.texGens)
+            {
+                if (texGen.index != stage.texGen)
+                    continue;
+                binding.uvTransform = texGen.uvTransform;
+                if (binding.uvSource.empty())
+                    binding.uvSource = texGen.uvSource;
+                break;
+            }
+        }
         binding.suffixRole  = detail::SuffixRole(stage.texture.raw);
         // A procedural texture has no filename to disagree with, and an unknown
         // suffix is silence rather than dissent.
-        binding.suffixAgrees =
-            binding.suffixRole.empty() || binding.suffixRole == ToString(slot);
+        // The suffix names a ROLE, not a slot. Multi's further layers are colours and
+        // normals like any other, so `wall_brick01_co` in LayerColour1 agrees just as
+        // `wall_01_co` in BaseColour does -- comparing slot names alone would report
+        // every layered material as a disagreement and drown the real ones.
+        const auto roleOf = [](MaterialSlot s)
+        {
+            switch (s)
+            {
+                case MaterialSlot::LayerColour1:
+                case MaterialSlot::LayerColour2:
+                case MaterialSlot::LayerColour3:
+                    return ToString(MaterialSlot::BaseColour);
+                case MaterialSlot::LayerNormal1:
+                case MaterialSlot::LayerNormal2:
+                case MaterialSlot::LayerNormal3:
+                    return ToString(MaterialSlot::NormalMap);
+                default:
+                    return ToString(s);
+            }
+        };
+        binding.suffixAgrees = binding.suffixRole.empty() || binding.suffixRole == roleOf(slot);
 
         ir.slots[static_cast<size_t>(slot)] = std::move(binding);
         if (!ir.slots[static_cast<size_t>(slot)].suffixAgrees)
