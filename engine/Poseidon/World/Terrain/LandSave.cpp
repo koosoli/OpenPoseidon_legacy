@@ -1915,7 +1915,14 @@ bool Landscape::LoadOprwModern(const char* path)
                 std::string lower = texture;
                 for (char& c : lower)
                     c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                if (stage.index == 0 && lower.find("_co.paa") != std::string::npos)
+                // Stage0 is the satellite by position, and BOTH generations name
+                // the tile `s_<x>_<y>_lco.paa` -- Takistan's TerrainX and Stratis's
+                // TerrainSNX alike. `_lco.paa` does not contain `_co.paa`, so this
+                // matched neither and every world's satellite was dropped before it
+                // reached the IR: 3,293 tiles on Takistan, and 64 on Stratis, which
+                // is why the layer count rises on both once it is accepted.
+                if (stage.index == 0 &&
+                    (lower.find("_co.paa") != std::string::npos || lower.find("_lco.paa") != std::string::npos))
                 {
                     authored.satellite = RStringB(texture.c_str());
                     authored.satelliteUv = uvForStage(stage);
@@ -1941,9 +1948,17 @@ bool Landscape::LoadOprwModern(const char* path)
                 }
             }
 
-            // The satellite layer is the one named `_co`; the mask is `_lca` and
-            // the detail layers are `_nopx`/`_co` pairs further down. Taking the
-            // first `_co` that is not a detail layer picks the tile's own colour.
+            // NOT the Stage0 satellite, even though it is now captured in the IR.
+            // The satellite is one low-frequency image per 1024 m tile with its
+            // own worldPos TexGen; the legacy slot is sampled through the land
+            // cell's frame, so binding it here tiles a whole tile's image into
+            // every 50 m cell -- measured on Takistan as a corduroy pattern over
+            // the entire map. It belongs to the authored path, which carries the
+            // TexGen that makes it mean anything.
+            //
+            // The mask is `_lca` and the detail layers are `_nopx`/`_co` pairs.
+            // Taking the first `_co` that is not a detail layer picks a close-range
+            // surface, which is what the legacy cell frame can actually sample.
             for (const auto& stage : material.stages)
             {
                 const std::string& texture = stage.texture.raw;
