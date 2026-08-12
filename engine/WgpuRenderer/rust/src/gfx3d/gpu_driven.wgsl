@@ -58,9 +58,16 @@ struct SectionMaterial {
     // RVMAT Stage1, 0 = none. Same reason as specular_slot: slot 0 is the white fallback,
     // which would decode to a normal leaning hard in +X and light every surface wrongly.
     normal_slot: u32,
-    _pad_normal0: u32,
-    _pad_normal1: u32,
-    _pad_normal2: u32,
+    // Multi's blend mask (0 = not layered) and its three further layer colours.
+    mask_slot: u32,
+    layer_slot: array<u32, 3>,
+    // Explicit, because WGSL would insert this padding itself to 16-align layer_uv while
+    // Rust would not, and the silent 12-byte disagreement corrupts every later field.
+    _pad_layer0: u32,
+    _pad_layer1: u32,
+    _pad_layer2: u32,
+    // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
+    layer_uv: array<vec4<f32>, 4>,
 };
 
 @group(1) @binding(0) var<storage, read> instances: array<Instance>;
@@ -346,7 +353,43 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let sm = section_materials[in.section];
     // The section id is uniform across a derivative quad (one section per primitive), so the
     // bindless index stays uniform and implicit-mip sampling is legal.
-    let base = textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], in.uv);
+    // Multi's four-layer masked blend. Each layer is authored at its own UV scale --
+    // on Takistan's brick houses the brick tiles far more densely than the rock beside
+    // it, and that difference is the detail the surface reads as, so the layer's own
+    // transform is applied rather than the section's raw uv. The mask's RGB weights
+    // layers 1-3 and whatever it leaves unpainted belongs to layer 0, which is the same
+    // convention the terrain's LCA composition uses.
+    //
+    // mask_slot == 0 means "not a layered material" and takes layer 0 alone, which is
+    // every non-Multi section and is byte-identical to the previous behaviour.
+    var base = textureSample(textures[sm.texture_slot],
+                             samplers[sm.sampler_idx],
+                             in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw);
+    if (sm.mask_slot != 0u) {
+        let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], in.uv).rgb;
+        var weight = 0.0;
+        var blended = vec3<f32>(0.0);
+        for (var i = 0u; i < 3u; i = i + 1u) {
+            // Slot 0 is the white fallback. A layer the material does not name must
+            // contribute NOTHING and leave its mask weight to layer 0; sampling it blind
+            // blends white into the surface, which blows the building out and drags the
+            // whole frame's auto-exposure down with it.
+            if (sm.layer_slot[i] == 0u) {
+                continue;
+            }
+            let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
+            let layer = textureSample(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i).rgb;
+            blended = blended + layer * mask[i];
+            weight = weight + mask[i];
+        }
+        // The unpainted remainder belongs to layer 0. Where the mask over-paints, the
+        // layers are renormalised rather than allowed to sum past one.
+        if (weight > 1.0) {
+            blended = blended / weight;
+            weight = 1.0;
+        }
+        base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);
+    }
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
     // alpha; opaque sections keep full coverage (1.0). Without A2C, the classic hard discard.
     var out_a = base.a;

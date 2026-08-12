@@ -5626,7 +5626,14 @@ impl Gfx3d {
                 alpha_ref: m.alpha_ref,
                 specular_slot: textures.texture_slot(m.specular_texture_id),
                 normal_slot: textures.texture_slot(m.normal_texture_id),
-                _pad_normal: [0; 3],
+                mask_slot: textures.texture_slot(m.mask_texture_id),
+                layer_slot: [
+                    textures.texture_slot(m.layer_texture_id[0]),
+                    textures.texture_slot(m.layer_texture_id[1]),
+                    textures.texture_slot(m.layer_texture_id[2]),
+                ],
+                _pad_layer: [0; 3],
+                layer_uv: m.layer_uv,
             })
             .collect();
         let model =

@@ -252,6 +252,11 @@ pub struct WgrModelMaterial {
     pub normal_texture_id: u64,
     pub sampler: u32,
     pub alpha_ref: f32,
+    // Multi's four-layer masked blend; 0 mask = not layered, take layer 0 alone.
+    pub mask_texture_id: u64,
+    pub layer_texture_id: [u64; 3],
+    // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
+    pub layer_uv: [[f32; 4]; 4],
 }
 
 // One drawable LOD level of a model: its FindSqrtLevel resolution threshold (`_resolutions[i]`)
@@ -1245,7 +1250,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 60);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 96);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 192);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);

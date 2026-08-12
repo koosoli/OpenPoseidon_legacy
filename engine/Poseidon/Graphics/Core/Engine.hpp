@@ -948,6 +948,11 @@ class Engine : public IGraphicsEngine
         bool disableAmbientShadow = false;
         bool disableSpecularGloss = false;
         bool disableFresnelEnvironment = false;
+        // MAT-039: the Multi family's three further surface layers. On by default --
+        // it costs one mask fetch plus three texture fetches on layered sections only,
+        // and without it those surfaces render as their first layer alone. Off is the
+        // A/B that shows what the composition contributes.
+        bool composeMultiLayers = true;
         // MAT-LEGACY: the optional `<texture>_nohq.paa` enhancement for original OFP/CWA assets,
         // which have no RVMAT of their own. Off turns every legacy section back to its 2001
         // shading, which is the only way to see the enhancement's actual contribution A/B.

@@ -337,6 +337,17 @@ struct WgrModelMaterial
     WgrTexture normal_texture_id;
     uint32_t sampler;
     float alpha_ref;
+    /* The Multi family is a four-layer masked blend: `mask_texture_id` selects between
+     * layer 0 (texture_id / normal_texture_id above) and these three, each of which is
+     * authored at its own UV scale -- on Takistan's brick houses the brick layer tiles
+     * far more densely than the rock it sits on, and that difference is the detail the
+     * surface reads as. 0 in the mask means "not layered", and the shader then takes
+     * layer 0 alone, exactly as before. */
+    WgrTexture mask_texture_id;
+    WgrTexture layer_texture_id[3];
+    /* Per layer, including layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
+     * RVMAT authors these transforms diagonally, so a full 3x3 is not carried. */
+    float layer_uv[4][4];
 };
 
 /* One drawable LOD level: its FindSqrtLevel resolution threshold (_resolutions[i]) +
@@ -386,7 +397,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 96, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 192, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

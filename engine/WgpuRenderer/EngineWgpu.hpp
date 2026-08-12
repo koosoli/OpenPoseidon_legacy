@@ -233,7 +233,8 @@ class EngineWgpu : public EngineDummy
         // section, which is why "Disable Normal Map" appeared to do nothing.
         // Dropping the cache re-registers each shape on next sight with the new
         // answer. It is a developer A/B, so rebuilding is the right cost.
-        const bool rebuildRetained = s.disableNormalMap != _materialDebug.disableNormalMap;
+        const bool rebuildRetained = s.disableNormalMap != _materialDebug.disableNormalMap ||
+                                     s.composeMultiLayers != _materialDebug.composeMultiLayers;
         _materialDebug = s;
         if (rebuildRetained)
             _gpuModels.clear();
@@ -499,6 +500,9 @@ class EngineWgpu : public EngineDummy
     // loadable one, or 0. Same reason as the two above: the per-draw path bound it
     // and the retained set, which owns nearly every world section, did not.
     uint64_t ResolveMaterialNormalMap(const ShapeSection& section);
+    // Multi's mask and its three further layer colours, with each layer's own UV
+    // transform. Fills nothing and returns false for any other family.
+    bool ResolveMaterialLayers(const ShapeSection& section, WgrModelMaterial& material);
     // Fraction of a translated RVMAT's flat specular constant to apply, standing in
     // for a per-texel specular map that is not bound. 1.0 for anything that is not a
     // translated RVMAT, and 1.0 once `specularMap` is non-zero -- the map is what the

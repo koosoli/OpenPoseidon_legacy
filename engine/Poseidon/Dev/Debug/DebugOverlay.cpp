@@ -4010,6 +4010,13 @@ void DrawMaterialDebugTab()
                           "what makes it an A/B of the whole world rather than of a handful of sections.\n"
                           "Toggling drops the retained model cache, so shapes re-register as you look at\n"
                           "them; expect a brief hitch, and nothing else.");
+    changed |= ImGui::Checkbox("Compose Multi layers", &settings.composeMultiLayers);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The Multi shader family is a four-layer masked blend, each layer at its own UV scale. "
+                          "Off binds layer 0 alone, which is how these surfaces rendered before MAT-039 -- a brick "
+                          "house drawn as the rock underneath it. On costs one mask fetch plus three texture "
+                          "fetches, and only on sections that are actually layered, so it is on by default. "
+                          "Toggling drops the retained model cache; expect a brief hitch.");
     changed |= ImGui::Checkbox("Legacy OFP/CWA enhancement", &settings.legacyEnhancement);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Original CWA assets have no RVMAT, so they normally render as they did in 2001.\n"

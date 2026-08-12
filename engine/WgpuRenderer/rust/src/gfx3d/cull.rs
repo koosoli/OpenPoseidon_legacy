@@ -121,7 +121,15 @@ pub struct SectionMaterialGpu {
     // This one does grow the struct: WGSL rounds the stride up to the vec4 alignment, so the
     // padding is explicit on both sides rather than left to each language's own rules.
     pub normal_slot: u32,
-    pub _pad_normal: [u32; 3],
+    // Multi's blend: the mask (0 = not layered) and the three further layer colours.
+    pub mask_slot: u32,
+    pub layer_slot: [u32; 3],
+    // WGSL aligns an array<vec4<f32>> to 16 bytes; Rust aligns [[f32; 4]; 4] to 4. Without
+    // this the two layouts disagree by 12 bytes and every field from layer_uv on reads the
+    // wrong memory -- which renders as white buildings, not as an error.
+    pub _pad_layer: [u32; 3],
+    // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
+    pub layer_uv: [[f32; 4]; 4],
 }
 
 // A permissive plane that never culls anything: dot(0, p) + BIG >= -radius always holds.

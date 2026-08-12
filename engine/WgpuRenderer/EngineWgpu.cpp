@@ -2851,6 +2851,81 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
+// Multi's mask and its three further surface layers, each with its own UV transform.
+//
+// MAT-039: the family is a four-layer masked blend and only layer 0 was ever bound, so a
+// brick house rendered as the rock underneath it. Each layer is authored at its own
+// TexGen -- brick tiles far more densely than rock -- and that scale difference is the
+// detail the surface reads as, so the transform travels with the layer.
+//
+// Returns false for every other family, leaving mask_texture_id 0, which the shader
+// reads as "not layered" and takes layer 0 alone.
+bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMaterial& material)
+{
+    // Identity for every layer, so a material that resolves nothing still samples at the
+    // section's own UV rather than at zero.
+    for (auto& uv : material.layer_uv)
+    {
+        uv[0] = 1.0f;
+        uv[1] = 1.0f;
+        uv[2] = 0.0f;
+        uv[3] = 0.0f;
+    }
+    if (!_materialDebug.composeMultiLayers || !section.surfMat)
+        return false;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return false;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return false; // ResolveMaterialBaseColour fills the cache first
+
+    const auto layerUv = [&](Asset::Material::MaterialSlot slot, size_t index)
+    {
+        const auto* entry = cached->second.Find(slot);
+        if (!entry || !entry->uvTransform.present)
+            return;
+        // RVMAT authors these diagonally; the off-diagonal terms are zero in every
+        // observed Multi material, so the scale/offset pair is lossless here.
+        material.layer_uv[index][0] = entry->uvTransform.aside[0];
+        material.layer_uv[index][1] = entry->uvTransform.up[1];
+        material.layer_uv[index][2] = entry->uvTransform.pos[0];
+        material.layer_uv[index][3] = entry->uvTransform.pos[1];
+    };
+    const auto bind = [&](Asset::Material::MaterialSlot slot) -> uint64_t
+    {
+        const auto* entry = cached->second.Find(slot);
+        if (!entry || entry->texture.isProcedural || entry->texture.path.empty())
+            return 0;
+        Ref<Texture> texture = _wbank->Load(entry->texture.path.canonical().c_str());
+        auto* wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
+        return wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+    };
+
+    using Slot = Asset::Material::MaterialSlot;
+    const uint64_t mask = bind(Slot::Mask);
+    if (!mask)
+        return false; // no mask, no blend to drive -- layer 0 stands alone
+
+    material.mask_texture_id = mask;
+    layerUv(Slot::BaseColour, 0);
+    const Slot colours[3] = {Slot::LayerColour1, Slot::LayerColour2, Slot::LayerColour3};
+    for (size_t i = 0; i < 3; ++i)
+    {
+        material.layer_texture_id[i] = bind(colours[i]);
+        layerUv(colours[i], i + 1);
+    }
+
+    static std::unordered_set<std::string> logged;
+    if (logged.insert(materialPath).second)
+        LOG_INFO(Graphics, "Wgpu material: composed {} layers for {} family={} (uv scales {:.1f} {:.1f} {:.1f} {:.1f})",
+                 1 + (material.layer_texture_id[0] != 0) + (material.layer_texture_id[1] != 0) +
+                     (material.layer_texture_id[2] != 0),
+                 materialPath, cached->second.shaderFamily, material.layer_uv[0][0], material.layer_uv[1][0],
+                 material.layer_uv[2][0], material.layer_uv[3][0]);
+    return true;
+}
+
 // The albedo a section's RVMAT names, or 0 when it names none.
 //
 // An Arma 3 structure commonly carries a placeholder face texture (`*_mlod_co`)
@@ -3160,6 +3235,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Stage1. Same ordering dependency: the translation cache is populated
             // by ResolveMaterialBaseColour above.
             mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i));
+            // Multi's further layers, same ordering dependency on the translation cache.
+            ResolveMaterialLayers(s->GetSection(i), mat);
             if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
                 specScale < 1.0f)
             {

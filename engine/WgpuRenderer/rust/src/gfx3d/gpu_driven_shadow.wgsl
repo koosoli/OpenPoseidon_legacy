@@ -48,9 +48,16 @@ struct SectionMaterial {
     // SectionMaterialGpu exactly or every field after this one reads the wrong bytes.
     specular_slot: u32,
     normal_slot: u32,
-    _pad_normal0: u32,
-    _pad_normal1: u32,
-    _pad_normal2: u32,
+    // Multi's blend mask (0 = not layered) and its three further layer colours.
+    mask_slot: u32,
+    layer_slot: array<u32, 3>,
+    // Explicit, because WGSL would insert this padding itself to 16-align layer_uv while
+    // Rust would not, and the silent 12-byte disagreement corrupts every later field.
+    _pad_layer0: u32,
+    _pad_layer1: u32,
+    _pad_layer2: u32,
+    // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
+    layer_uv: array<vec4<f32>, 4>,
 };
 
 @group(0) @binding(0) var<uniform> pass_data: PassData;
