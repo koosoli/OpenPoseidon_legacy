@@ -75,3 +75,44 @@ image, which is not a test of anything.
 `ShaderSchema`'s suffix table already classifies `_nopx` as a normal map and notes
 the PX payload is "unsampled here". That comment is now backed by a cross-generation
 measurement rather than a single-corpus observation.
+
+---
+
+# Amendment — BI's own account, and a lead on the composition
+
+The owner supplied https://www.bohemia.net/en/blog/show-me-the-light, Bohemia's
+write-up of the Arma 2 renderer. Two things in it bear directly on this record.
+
+**It confirms the measurement.** Parallax occlusion mapping is described as "a
+double ray casting computed on the GPU", applied **to terrain surfaces** —
+adapted from ATI sample code. Reached here from the corpus alone (objects hold
+`_nohq` red flat at zero; only the `gdt_*` / `tk_*` terrain surfaces vary it), and
+the vendor's own description agrees: parallax in Real Virtuality is a terrain
+feature. Two independent witnesses now, one measured and one authored.
+
+Note it is a *ray cast*, not the single-step offset implemented in the previous
+commit. That was chosen for cost inside an already four-way-blended function; the
+gap between the two is a known and deliberate difference, not an oversight.
+
+**It names something the composition does not implement.** On the LCA mask:
+
+> "by using all four channels of the ARGB mask and with some encoding tricks
+> employed, the total number of different surfaces on a single satellite segment
+> was increased from four to six"
+
+The renderer treats the mask's four channels as four plain per-overlay weights
+plus an unpainted remainder for the base. If the shipped masks instead *encode*
+six surfaces into four channels, then reading them as direct weights is wrong
+wherever that encoding is in play — and reading an encoded channel as a weight
+would produce exactly the symptoms measured against the legacy path: energy in
+the wrong places, and structured banding rather than noise.
+
+This is now the leading hypothesis for why the authored composition looks worse
+than the legacy path, ahead of the TexGen values. It is also checkable without
+guessing: sample a shipped `*_lca.paa`, histogram its four channels, and see
+whether the values cluster in a way a plain weight would not — a six-way encoding
+cannot be uniformly distributed per channel.
+
+The satellite-frame hypothesis is separately eliminated: forcing the satellite
+through the legacy cell frame tiles it into a repeating grid across the terrain,
+so its own worldPos TexGen is correct and is not the fault.
