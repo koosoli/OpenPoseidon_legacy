@@ -500,18 +500,50 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 secEndFile[s] = static_cast<int>(mesh.sections[s].startTriangle + mesh.sections[s].triangleCount);
 
             std::vector<int> facesPerSection(nSections, 0);
-            int fileBytePos = 0;
-            int faceStreamPos = 0;
-            int curSec = 0;
-            for (int f = 0; f < totalFaces; ++f)
+            // Re-deriving face counts from byte offsets requires knowing the
+            // stride of the stream those offsets came from, and this walk knows
+            // only one: the v7 layout, 8 bytes of PolyProperties plus a 2-byte
+            // index per vertex, so 16 bytes for a triangle. Revision 73's face
+            // stream is 4 + 4 per vertex -- also 16 for a triangle -- so Arma 3
+            // has been correct here by coincidence, and drifts on quads (20 vs
+            // 18). The Arma 2 family stores 2 + 2, so a triangle is 8 bytes and
+            // every section boundary lands at twice its true face, which drew
+            // half of Takistan's tree crowns with the trunk's bark texture.
+            //
+            // Where the loader already worked the ranges out face by face, take
+            // them. That removes the stride assumption instead of adding a
+            // per-revision branch to it. `faceRangeKnown` exists for exactly
+            // this and was never read.
+            int exactTotal = 0;
+            const bool exactRanges =
+                std::all_of(mesh.sections.begin(), mesh.sections.end(),
+                            [](const Poseidon::Model::Section& s) { return s.faceRangeKnown; });
+            if (exactRanges)
+                for (const auto& sec : mesh.sections)
+                    exactTotal += static_cast<int>(sec.faceCount);
+            // Only when the exact ranges account for the whole face stream. A
+            // partial cover would silently drop the remainder, which the byte
+            // walk never does -- it assigns every face to some section.
+            if (exactRanges && exactTotal == totalFaces)
             {
-                const int sectionProgress = isODOL ? fileBytePos : faceStreamPos;
-                while (curSec < nSections - 1 && sectionProgress >= secEndFile[curSec])
-                    curSec++;
-                facesPerSection[curSec]++;
-                int nVerts = faceRefs[f].isQuad ? 4 : 3;
-                fileBytePos += kFilePolyPropsSize + static_cast<int>(sizeof(VertexIndex)) * (1 + nVerts);
-                ++faceStreamPos;
+                for (int s = 0; s < nSections; ++s)
+                    facesPerSection[s] = static_cast<int>(mesh.sections[s].faceCount);
+            }
+            else
+            {
+                int fileBytePos = 0;
+                int faceStreamPos = 0;
+                int curSec = 0;
+                for (int f = 0; f < totalFaces; ++f)
+                {
+                    const int sectionProgress = isODOL ? fileBytePos : faceStreamPos;
+                    while (curSec < nSections - 1 && sectionProgress >= secEndFile[curSec])
+                        curSec++;
+                    facesPerSection[curSec]++;
+                    int nVerts = faceRefs[f].isQuad ? 4 : 3;
+                    fileBytePos += kFilePolyPropsSize + static_cast<int>(sizeof(VertexIndex)) * (1 + nVerts);
+                    ++faceStreamPos;
+                }
             }
 
             std::vector<ShapeSection> shapeSections(nSections);

@@ -2772,3 +2772,66 @@ tickets:
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-017-terrain-materials-are-not-ground-layers-20260812.md
+
+  - id: MAT-037
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Section face ranges must not be re-derived with another stream's stride
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: ACTIVE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 152b9d8
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-016]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/World/Model/ShapeAdapter.cpp
+        symbol: Poseidon::Model::ShapeAdapter::convertToLODShape
+    test_ids: [odol-local-fixture, oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
+    benchmark_artifacts: []
+    evidence_hash: null
+    decision_record: docs/roadmap/decisions/MAT-037-shapeadapter-section-split-assumed-one-stride-20260812.md
+    capability_claims:
+      - capability: SECTION_FACE_RANGES_ARE_EXACT
+        status: COMPLETE
+        denominator: >-
+          ShapeAdapter re-derived per-section face counts by walking the OFP v7
+          face stream (8-byte PolyProperties + 2-byte indices = 16 per triangle)
+          against byte offsets from the source ODOL stream. Revision 73 is 4+4 =
+          16 per triangle and agreed by coincidence; the Arma 2 family is 2+2 = 8
+          and was out by exactly 2x. On the Takistan almond LOD0 the true split
+          5,104/1,914/2,398 became 2,552/957/5,907, drawing 3,509 crown faces
+          with the trunk's bark texture. It now takes the exact per-section face
+          counts the loader already computed and validated (faceRangeKnown /
+          faceCount), when they cover the whole face stream.
+    known_failures:
+      - >-
+        OA canopies are correctly textured but sparse. Their leaf atlas has 0.0%
+        fully opaque texels against Arma 3's 12.5%, and a fixed 0.5 alpha
+        reference erodes an alpha-to-coverage-authored atlas, worsening with mip
+        level. Shared, not A2-specific, and not addressed here.
+      - >-
+        ca\structures_e\misc\misc_market\cages_ep1.p3d still renders black. Its
+        lattice silhouette is correct, so alpha cuts out and the surviving bars
+        are black. Unaffected by this change; not yet diagnosed.
+      - No unit test covers this; the path needs a Model and a Shape. The gate is
+        the measured before/after on three worlds plus the OFP smoke.
+    fallback: >-
+      The byte walk is retained verbatim and still used wherever a section does
+      not report an exact range or the ranges do not account for every face --
+      which includes the whole OFP v7 path, whose behaviour is unchanged.
+    reviewer: null
+    reviewer_method: null
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-037-shapeadapter-section-split-assumed-one-stride-20260812.md
