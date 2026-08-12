@@ -1684,6 +1684,16 @@ extern "C"
        --benchmark run (that runs --no-dev, so the Sky tab is not reachable). */
     WGR_API void wgr_set_cirrus_mode(WgrRenderer* renderer, uint32_t mode);
 
+    /* Second cloud layer SHAPE. `puffiness` 0 = drawn-out fibrous veil (cirrus fibratus) ..
+       1 = lumpy cirrocumulus; 0.5 reproduces the look the layer shipped with. `variation` is how
+       far it drifts either side of that on its own, on the world's weather-drift clock
+       (0 = perfectly steady). Both clamp to 0..1, and neither takes effect instantly — the
+       renderer eases toward the value they imply so a slider drag cannot step the sky.
+       Overridable at startup with WGR_CIRRUS_PUFF=<puffiness>[,<variation>[,<phase turns>]];
+       the phase is how a screenshot capture (no dev panel) selects a point in the variation
+       cycle, which is otherwise an hour long and always sampled at the same instant. */
+    WGR_API void wgr_set_cirrus_puffiness(WgrRenderer* renderer, float puffiness, float variation);
+
     /* Material Debug state for the RETAINED (GPU-driven) path — the dev panel's
      * Materials tab. `view`: 0 full material, 1 base colour only, 2 decoded normal.
      * `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi

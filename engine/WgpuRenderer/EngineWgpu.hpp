@@ -164,6 +164,15 @@ class EngineWgpu : public EngineDummy
         if (_renderer != nullptr)
             wgr_set_cirrus_mode(_renderer, enabled ? (volumetric ? 2u : 1u) : 0u);
     }
+    // Second-layer shape: puffiness + how much it varies from that on its own. Same shape as
+    // SetSkyCirrus above (own FFI entry point, _sky updated so GetSkySettings round-trips).
+    void SetSkyCirrusPuffiness(float puffiness, float variation) override
+    {
+        _sky.cirrusPuffiness = puffiness;
+        _sky.cirrusPuffVariation = variation;
+        if (_renderer != nullptr)
+            wgr_set_cirrus_puffiness(_renderer, puffiness, variation);
+    }
     // Suppress the legacy skydome on wgpu while the procedural sky is drawing.
     bool ProceduralSkyActive() const override { return _renderer != nullptr && _sky.enabled; }
 

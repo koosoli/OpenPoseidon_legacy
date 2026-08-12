@@ -264,6 +264,84 @@ fn cirrus_mode_from_env() -> f32 {
     }
 }
 
+/// Cirrus PUFFINESS defaults, matching `Engine::SkySettings`.
+///
+/// 0.5 is the middle of the slider AND exactly the look the layer shipped with: sky.wgsl maps the
+/// slider through a middle knot that IS the old constant (see `cirrus_mix3`), so the control is
+/// opt-in tuning in both directions rather than a new look imposed on everyone.
+const CIRRUS_PUFF_DEFAULT: f32 = 0.5;
+/// How far the layer is allowed to wander from that on its own, as a fraction of the full slider.
+/// Deliberately small: at 0.15 the extremes are cirrus that is slightly more drawn-out or slightly
+/// lumpier than shipped, over the better part of an hour, which is weather rather than animation.
+/// 0 pins it exactly.
+const CIRRUS_PUFF_VAR_DEFAULT: f32 = 0.15;
+/// Metres of weather drift the C++ side wraps `cloud_evolve.z` at (`kWindWrap` in EngineWgpu.cpp).
+/// The variation waveform is built to be exactly periodic over this distance, so the wrap reseat
+/// — which is a real discontinuity in the drift value — is invisible in the puffiness.
+const CIRRUS_VAR_WRAP: f32 = 100000.0;
+/// Per-upload ease toward the target puffiness (the `rate` pattern auto-exposure uses). This is
+/// what makes the sliders unable to POP: moving either of them, or the cloud-evolution speed the
+/// clock is derived from, changes a TARGET that the rendered value then walks to — roughly half a
+/// second to settle at 60 fps.
+///
+/// Frame-rate dependent by design (there is no dt on this path), and stepped once per `upload`,
+/// which a frame drawing a planar reflection calls twice. Both are harmless for something this
+/// small: the two calls differ by 8% of a residual that is already invisible, and it converges in
+/// well under a second at any playable rate, so a delayed capture is deterministic to ~1e-5.
+const CIRRUS_PUFF_EASE: f32 = 0.08;
+
+/// The layer's self-variation: a bounded [-1,1] signal driven by the world's own weather-drift
+/// clock, so it advances with the sim (and freezes with it, and with the Water tab's cloud freeze).
+///
+/// `drift_m` is `cloud_evolve.z` — metres, and therefore already scaled by the Sky tab's cloud
+/// evolution speed: a world whose weather changes faster also breathes faster, which is the right
+/// coupling. `phase_turns` shifts the whole signal (see `cirrus_puff_from_env`).
+///
+/// Two sines rather than one so it does not read as a metronome, and their frequencies are the
+/// INTEGERS 7 and 11 in units of the wrap period. That is deliberate and is the opposite of the
+/// choice made everywhere else in this file: here the signal is a function of TIME, not of space,
+/// and it must be continuous where the clock jumps. Integer frequencies (and coprime, so the
+/// combined period is the full wrap rather than a seventh of it) make the value at the wrap
+/// identical to the value at 0. Amplitudes sum to exactly 1, so the output is bounded.
+fn cirrus_variation(drift_m: f32, phase_turns: f32) -> f32 {
+    let z = drift_m / CIRRUS_VAR_WRAP + phase_turns;
+    let tau = std::f32::consts::TAU;
+    0.6 * (tau * 7.0 * z + 1.7).sin() + 0.4 * (tau * 11.0 * z + 4.1).sin()
+}
+
+/// Where the puffiness is headed on a given clock reading: the authored base plus the variation,
+/// clamped to the slider's own range — so a base near an end simply has less room to wander that
+/// way, rather than wrapping or saturating oddly. `variation` = 0 returns `base` exactly.
+fn cirrus_puff_target(base: f32, variation: f32, phase_turns: f32, drift_m: f32) -> f32 {
+    (base + variation * cirrus_variation(drift_m, phase_turns)).clamp(0.0, 1.0)
+}
+
+/// `WGR_CIRRUS_PUFF=<puffiness>[,<variation>[,<phase>]]` — startup override for the two Sky-tab
+/// values plus a phase offset, in turns of the variation's full period.
+///
+/// The phase exists for the same reason `WGR_CIRRUS` does: the variation is on the SIM clock and a
+/// screenshot capture is a few seconds into a mission, so every capture would otherwise sample the
+/// same instant of an hour-long cycle and the control could not be photographed at all. `--dev` is
+/// not available under `--test-type screenshot` / `--benchmark`, so there is no other way in.
+/// Returns None when the variable is absent, so the caller keeps the compiled defaults.
+fn cirrus_puff_from_env() -> Option<(f32, f32, f32)> {
+    let raw = std::env::var("WGR_CIRRUS_PUFF").ok()?;
+    let mut it = raw.split(',').map(|f| f.trim().parse::<f32>().ok());
+    let puff = it.next().flatten().unwrap_or(CIRRUS_PUFF_DEFAULT);
+    let var = it.next().flatten().unwrap_or(CIRRUS_PUFF_VAR_DEFAULT);
+    let phase = it.next().flatten().unwrap_or(0.0);
+    let v = (
+        puff.clamp(0.0, 1.0),
+        var.clamp(0.0, 1.0),
+        phase.rem_euclid(1.0),
+    );
+    eprintln!(
+        "[wgr] sky: cirrus puffiness {} variation {} phase {} from WGR_CIRRUS_PUFF",
+        v.0, v.1, v.2
+    );
+    Some(v)
+}
+
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
@@ -310,6 +388,16 @@ pub struct Sky {
     /// existing vec4 rather than growing WgrSkyLook, for the reason stated on
     /// `wgr_set_cloud_shadow_strength`: the look struct's size is part of the ABI handshake.
     cirrus_mode: f32,
+    /// Cirrus PUFFINESS: the authored base (Sky tab), 0 = drawn-out fibrous veil, 1 = lumpy
+    /// cirrocumulus. See sky.wgsl's PUFFINESS block for what the shader does with it.
+    cirrus_puff: f32,
+    /// How far the layer drifts either side of that on the weather clock. 0 = perfectly steady.
+    cirrus_puff_var: f32,
+    /// Phase offset (turns) for the variation — capture/diagnostic only, see `cirrus_puff_from_env`.
+    cirrus_puff_phase: f32,
+    /// The value actually uploaded (cloud4.w): the target eased frame to frame, so no slider can
+    /// step the sky's shape. Seeded at the base so the first frame does not fade in from nowhere.
+    cirrus_puff_now: f32,
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1128,6 +1216,8 @@ impl Sky {
         } else {
             0.0
         };
+        // Read once — it logs, and the three fields must agree with each other.
+        let puff_env = cirrus_puff_from_env();
 
         Self {
             sky_pipeline,
@@ -1174,6 +1264,13 @@ impl Sky {
             // override exists so the two modes can be A/B'd from a --benchmark run, which has no
             // dev panel: WGR_CIRRUS=0 off, 1 flat, 2 volumetric.
             cirrus_mode: cirrus_mode_from_env(),
+            // Cirrus puffiness + its self-variation, matching Engine::SkySettings' defaults. The
+            // env override exists so a capture (which has no dev panel) can select a puffiness AND
+            // a point in the variation cycle: WGR_CIRRUS_PUFF=puff[,variation[,phase]].
+            cirrus_puff: puff_env.map_or(CIRRUS_PUFF_DEFAULT, |v| v.0),
+            cirrus_puff_var: puff_env.map_or(CIRRUS_PUFF_VAR_DEFAULT, |v| v.1),
+            cirrus_puff_phase: puff_env.map_or(0.0, |v| v.2),
+            cirrus_puff_now: puff_env.map_or(CIRRUS_PUFF_DEFAULT, |v| v.0),
             cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN, 0.85],
             froxel_view,
             froxel_shadow_layout,
@@ -1230,6 +1327,16 @@ impl Sky {
         self.cirrus_mode = (mode.min(2)) as f32;
     }
 
+    /// Cirrus shape: `puffiness` 0 = drawn-out fibrous veil .. 1 = lumpy cirrocumulus (0.5 is the
+    /// shipped look), `variation` = how far it wanders from that on its own (0 = perfectly steady).
+    ///
+    /// Neither takes effect immediately: `upload` eases toward the value they imply, so a slider
+    /// drag cannot step the sky. The env override, if present, wins until this is called.
+    pub fn set_cirrus_puffiness(&mut self, puffiness: f32, variation: f32) {
+        self.cirrus_puff = puffiness.clamp(0.0, 1.0);
+        self.cirrus_puff_var = variation.clamp(0.0, 1.0);
+    }
+
     pub fn cloud_shadow_view(&self) -> &wgpu::TextureView {
         &self.cloud_shadow_view
     }
@@ -1250,6 +1357,16 @@ impl Sky {
             self.last_lut = Some(key);
             self.lut_dirty = true;
         }
+        // Cirrus puffiness for this upload. cloud_evolve.z (cloud4.z) is the world's weather-drift
+        // clock in metres, which is the same clock the cloud shapes themselves evolve on, so the
+        // layer breathes with the weather and freezes when the sim does.
+        let target = cirrus_puff_target(
+            self.cirrus_puff,
+            self.cirrus_puff_var,
+            self.cirrus_puff_phase,
+            sky.cloud4[2],
+        );
+        self.cirrus_puff_now += (target - self.cirrus_puff_now) * CIRRUS_PUFF_EASE;
         let u = SkyUniform {
             inv_view_proj,
             sun_dir: sky.sun_dir,
@@ -1267,7 +1384,15 @@ impl Sky {
             cloud1: sky.cloud1,
             cloud2: sky.cloud2,
             cloud3: sky.cloud3,
-            cloud4: sky.cloud4,
+            // cloud4.w is the evolution vec4's pad lane (C++ sends 0) — the renderer writes the
+            // live cirrus puffiness into it. Same "spare lane" trick as output.w's cirrus mode,
+            // and for the same reason: no FFI struct changes size, so no ABI assert moves.
+            cloud4: [
+                sky.cloud4[0],
+                sky.cloud4[1],
+                sky.cloud4[2],
+                self.cirrus_puff_now,
+            ],
             output: [
                 self.linear,
                 self.star_intensity,
@@ -1700,6 +1825,195 @@ mod cirrus_tests {
         assert!(
             src.contains("if (mode < 0.5 || sky.cloud0.x <= 0.001 || dir.y <= 0.01)"),
             "mode 0 must return before any work -- the toggle has to cost nothing when off"
+        );
+    }
+}
+
+#[cfg(test)]
+mod cirrus_puffiness_tests {
+    use super::*;
+
+    // The whole promise of the puffiness slider is that its DEFAULT changes nothing. That is why
+    // the mapping is three-point with the shipped value in the middle rather than a lerp between
+    // two ends: at 0.5 the shader uses the old constant ITSELF. Pinned because nobody can see a
+    // few percent of drift in one of five parameters, so a later "tidy" of the mapping would
+    // silently re-tune the shipped sky for everyone.
+    #[test]
+    fn the_default_puffiness_reproduces_the_shipped_constants() {
+        let src = include_str!("sky.wgsl");
+        let value_of = |name: &str| -> f32 {
+            let decl = format!("const {}: f32 = ", name);
+            let tail = src
+                .split_once(decl.as_str())
+                .unwrap_or_else(|| panic!("sky.wgsl declares {}", name))
+                .1;
+            let end = tail.find(';').expect("constant is terminated");
+            tail[..end].trim().parse().expect("constant is a number")
+        };
+        // The values the layer rendered with before puffiness existed.
+        let shipped = [
+            ("ASPECT", 0.25f32), // sheet octaves stretched 4x along world X
+            ("FINE", 0.38),      // weight of the x1.618 octave
+            ("ERODE", 0.45),     // fibre erosion strength
+            ("DENSITY", 2.8),    // optical depth straight up
+            ("THICK", 900.0),    // volumetric shell thickness (m)
+        ];
+        for (name, was) in shipped {
+            assert_eq!(
+                value_of(&format!("CIRRUS_{}_SHIPPED", name)),
+                was,
+                "CIRRUS_{}_SHIPPED must stay the value the layer shipped with",
+                name
+            );
+            // And the two ends must actually bracket it, or the slider would fold back on itself
+            // and both halves would move the same way.
+            let lo = value_of(&format!("CIRRUS_{}_FIBRE", name));
+            let hi = value_of(&format!("CIRRUS_{}_PUFF", name));
+            assert!(
+                (lo - was).signum() != (hi - was).signum(),
+                "CIRRUS_{}: the fibrous and puffy ends must sit on opposite sides of shipped",
+                name
+            );
+        }
+        // The midpoint is only the shipped value because the slider's default IS the midpoint and
+        // the mapping hits its middle knot exactly there.
+        assert_eq!(CIRRUS_PUFF_DEFAULT, 0.5);
+        assert!(
+            src.contains(
+                "return select(mix(fibre, shipped, t), mix(shipped, puffy, t - 1.0), puff > 0.5);"
+            ),
+            "the puffiness map must pass through the shipped value at 0.5"
+        );
+        for name in ["ASPECT", "FINE", "ERODE", "DENSITY", "THICK"] {
+            assert!(
+                src.contains(&format!("CIRRUS_{}_SHIPPED", name)),
+                "CIRRUS_{}_SHIPPED must be mapped through, not just declared",
+                name
+            );
+        }
+    }
+
+    // The five parameters must all be READ, or the slider moves a number nothing looks at. Each
+    // one is an independent silent failure: drop the thickness and the layer stops gaining depth,
+    // drop the erosion and it stops losing its fibres, and either way it still renders cirrus.
+    #[test]
+    fn every_puffiness_parameter_reaches_the_shader() {
+        let src = include_str!("sky.wgsl");
+        assert!(
+            src.contains("let puff = clamp(sky.cloud4.w, 0.0, 1.0)"),
+            "the shader must read puffiness from the cloud4.w spare lane"
+        );
+        for used in [
+            "p.x * sh.aspect",       // streak aspect
+            "let wb = sh.fine;",     // octave balance
+            "fibre * sh.erode",      // fibre erosion
+            "-d * sh.density",       // flat-mode optical depth
+            "CIRRUS_ALT - sh.thick", // shell geometry
+        ] {
+            assert!(src.contains(used), "sky.wgsl must use `{}`", used);
+        }
+        // Optical depth per metre divides by the LIVE thickness, so a deeper shell is not also a
+        // brighter one -- without this, "puffier" would read as "whiter" and the slider would be
+        // an exposure control wearing a shape control's label.
+        assert!(
+            src.contains("sh.density / (sh.thick * CIRRUS_PROFILE_INTEGRAL)"),
+            "extinction must be normalised by the live shell thickness"
+        );
+        // The shape is resolved once per pixel, not once per march step.
+        assert!(
+            src.contains("let sh = cirrus_shape();"),
+            "cirrus_layer must hoist the puffiness mixes out of the march"
+        );
+    }
+
+    // The variation rides a clock that JUMPS: the C++ side wraps the weather drift at 100 km, so
+    // the signal has to have the wrap as an exact period or the sky's shape steps every few hours
+    // of play. Integer frequencies in units of the wrap are what guarantee that, and the guarantee
+    // survives nothing -- change 7.0 to 7.5 and it still compiles, still varies, and pops.
+    #[test]
+    fn the_variation_is_continuous_across_the_drift_wrap() {
+        let before = cirrus_variation(CIRRUS_VAR_WRAP - 1e-3, 0.0);
+        let after = cirrus_variation(0.0, 0.0);
+        assert!(
+            (before - after).abs() < 1e-4,
+            "the variation must not step where the drift clock wraps ({} vs {})",
+            before,
+            after
+        );
+        // Bounded, so `base + amount * wave` cannot leave the slider's range by more than the
+        // amount itself, and 0 amount is exactly the base.
+        let mut max = 0.0f32;
+        for i in 0..20000 {
+            let v = cirrus_variation(i as f32 * (CIRRUS_VAR_WRAP / 20000.0), 0.0);
+            max = max.max(v.abs());
+        }
+        assert!(
+            max <= 1.0,
+            "the variation must stay inside [-1,1], got {}",
+            max
+        );
+        // ...and it must actually get somewhere near the ends, or the amount slider would be
+        // calibrated against a signal that never delivers what it promises.
+        assert!(max > 0.85, "the variation barely moves: peak {}", max);
+        // It must also not be a metronome: two frequencies means the peaks are not evenly spaced.
+        // Sampling a single period of the SLOWER component must show more than one distinct level.
+        let a = cirrus_variation(CIRRUS_VAR_WRAP / 28.0, 0.0);
+        let b = cirrus_variation(CIRRUS_VAR_WRAP / 28.0 + CIRRUS_VAR_WRAP / 7.0, 0.0);
+        assert!(
+            (a - b).abs() > 0.05,
+            "the two components share a period -- the layer would breathe like a metronome"
+        );
+    }
+
+    // 0 variation must mean EXACTLY the authored value, at every point on the clock. This is the
+    // "perfectly steady" contract, and it is what makes the slider safe to leave at 0.
+    #[test]
+    fn zero_variation_is_perfectly_steady() {
+        for &drift in &[0.0f32, 1.0, 137.0, 5_000.0, 99_999.0, 1.0e6] {
+            for &base in &[0.0f32, 0.25, CIRRUS_PUFF_DEFAULT, 1.0] {
+                assert_eq!(cirrus_puff_target(base, 0.0, 0.0, drift), base);
+            }
+        }
+        // And the default variation is small enough that the default look stays recognisable:
+        // the slider's midpoint IS the shipped look, so the excursion is what the owner sees.
+        let mut lo = 1.0f32;
+        let mut hi = 0.0f32;
+        for i in 0..20000 {
+            let d = i as f32 * (CIRRUS_VAR_WRAP / 20000.0);
+            let t = cirrus_puff_target(CIRRUS_PUFF_DEFAULT, CIRRUS_PUFF_VAR_DEFAULT, 0.0, d);
+            lo = lo.min(t);
+            hi = hi.max(t);
+        }
+        assert!(
+            lo > 0.3 && hi < 0.7,
+            "the default variation must stay near the shipped look, got {}..{}",
+            lo,
+            hi
+        );
+    }
+
+    // The ease is the anti-pop guarantee: whatever the sliders do, the value the shader sees moves
+    // by a fraction of the gap per frame. It must be a real fraction (not 1, which is no ease at
+    // all, and not so small the control feels dead) and it must converge.
+    #[test]
+    fn the_applied_puffiness_cannot_step() {
+        assert!(CIRRUS_PUFF_EASE > 0.0 && CIRRUS_PUFF_EASE < 0.5);
+        // Worst case: the user drags puffiness from one end to the other in one frame.
+        let mut now = 0.0f32;
+        let target = 1.0f32;
+        now += (target - now) * CIRRUS_PUFF_EASE;
+        assert!(
+            now < 0.15,
+            "a full-range slider jump moved the sky by {} in one frame",
+            now
+        );
+        for _ in 0..600 {
+            now += (target - now) * CIRRUS_PUFF_EASE;
+        }
+        assert!(
+            (now - target).abs() < 1e-4,
+            "the ease must converge well inside a screenshot delay, got {}",
+            now
         );
     }
 }

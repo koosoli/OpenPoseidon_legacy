@@ -1569,6 +1569,24 @@ class Engine : public IGraphicsEngine
         // camera above the deck and the sky filling the frame the two modes are level (5.865 vs
         // 5.869 ms), because the shell march bounds its path and bails in the gaps.
         bool cirrusVolumetric = true;
+        // PUFFINESS of the second layer: 0 = cirrus fibratus (wind shear draws the ice into long
+        // parallel fibres — elongated, striated, flat), 1 = cirrocumulus (shallow convection
+        // breaks it into a raft of nearly round cells — short, lumpy, with real vertical depth).
+        // One slider drives four coupled things in the shader (streak aspect, coarse-vs-fine
+        // octave balance, fibre erosion, and the marched shell's thickness), because up there
+        // those are all consequences of the same cause: whether the air is being sheared or is
+        // convecting. Total opacity is held roughly constant across the range, so it reads as a
+        // shape control and not a brightness one. 0.5 = EXACTLY the shipped look (every endpoint
+        // pair in sky.wgsl is symmetric about the previous hard-coded constant).
+        float cirrusPuffiness = 0.5f;
+        // How far the layer wanders from that on its own, as a fraction of the slider — so a
+        // still day is sometimes flatter and sometimes lumpier without anyone touching it.
+        // Driven from the world's weather-drift clock (the same one the cumulus shapes evolve
+        // on), so it is smooth, continuous, tied to sim time, and freezes when the sim does; the
+        // full cycle is the better part of an hour at the default evolution speed. 0 = perfectly
+        // steady, i.e. exactly the look at the chosen puffiness. Small by default: at 0.15 the
+        // extremes are a slightly more drawn-out or slightly lumpier version of the shipped look.
+        float cirrusPuffVariation = 0.15f;
         // CLD-020 cloud shadows: the deck dims the direct sun on terrain, objects, grass and
         // water through a world-anchored transmittance map rebuilt each frame around the camera.
         // 0 = off (every surface reads fully lit, and the compute pass early-outs per texel).
@@ -1907,6 +1925,13 @@ class Engine : public IGraphicsEngine
     // ABI handshake (the same reason cloud-shadow strength, stars and lens flare have their own).
     // APPENDED at the class end (vtable-slot note above).
     virtual void SetSkyCirrus(bool /*enabled*/, bool /*volumetric*/) {}
+
+    // SECOND CLOUD LAYER shape: puffiness (0 fibrous veil .. 1 lumpy cirrocumulus, 0.5 = shipped)
+    // and how far it varies from that on its own over world time (0 = steady). Same reasoning as
+    // SetSkyCirrus above — SkySettings carries both so they round-trip through Get/SetSkySettings
+    // and "Reset to defaults", and this is a separate entry point so no ABI-checked struct grows.
+    // APPENDED at the class end (vtable-slot note above).
+    virtual void SetSkyCirrusPuffiness(float /*puffiness*/, float /*variation*/) {}
 
     // GetWaterGpuTimings returns ONE shared region array covering every timed
     // subsystem; each debug tab slices its own range. Mirrors WgrGpuTimerRegion

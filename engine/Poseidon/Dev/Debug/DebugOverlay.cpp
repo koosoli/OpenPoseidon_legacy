@@ -4370,6 +4370,28 @@ void DrawSkyTab()
                           "grazing ray travels kilometres THROUGH it.\n"
                           "Off: one ray/sheet intersection at 7 km -- cheaper, but a sheet is pierced, "
                           "never travelled through, so it has no parallax and no soft grazing edge.");
+    changed |= ImGui::SliderFloat("Puffiness", &s.cirrusPuffiness, 0.0f, 1.0f, "%.2f");
+    ImGui::SetItemTooltip("What KIND of ice cloud it is, which up there is one question: is the air being "
+                          "sheared, or is it convecting?\n"
+                          "0 = cirrus fibratus -- shear draws the ice out into long parallel fibres: "
+                          "elongated, heavily striated, flat.\n"
+                          "1 = cirrocumulus -- shallow convection breaks the sheet into a raft of nearly "
+                          "round cells: short, lumpy, and genuinely deeper (the marched shell runs 500 m "
+                          "at the fibrous end, 900 m at the default and 1400 m at the puffy one, always at "
+                          "the SAME step count, so the whole slider is free).\n"
+                          "0.5 is exactly the look this layer shipped with. Total opacity is held roughly "
+                          "constant across the range on purpose -- this is a shape control, not a "
+                          "brightness one.");
+    changed |= ImGui::SliderFloat("Puffiness variation", &s.cirrusPuffVariation, 0.0f, 1.0f, "%.2f");
+    ImGui::SetItemTooltip("How far the layer wanders from that on its own, so a still day is sometimes "
+                          "flatter and sometimes lumpier without anyone touching it.\n"
+                          "0 = perfectly steady (exactly the look at the puffiness above).\n"
+                          "Driven by the world's weather-drift clock -- the same one the cumulus shapes "
+                          "form and dissolve on -- so it is continuous, moves with sim time, freezes when "
+                          "the sim does, and speeds up with the Evolve slider. A full cycle is the better "
+                          "part of an hour at Evolve 8, so this is weather, not animation.\n"
+                          "Neither slider can pop: the renderer eases toward the value they imply.");
+    ImGui::TextDisabled("  capture/benchmark override: WGR_CIRRUS_PUFF=<puff>[,<variation>[,<phase turns>]]");
     ImGui::EndDisabled();
 
     ImGui::Separator();
@@ -4437,6 +4459,9 @@ void DrawSkyTab()
         // ABI handshake), so they need their own push. Unconditional inside `changed` rather than
         // gated on the checkboxes, so "Reset to defaults" restores them too.
         GEngine->SetSkyCirrus(s.cirrusEnabled, s.cirrusVolumetric);
+        // Same story for the second layer's shape: not a sky-look lane, so it needs its own push,
+        // unconditional inside `changed` so "Reset to defaults" restores it too.
+        GEngine->SetSkyCirrusPuffiness(s.cirrusPuffiness, s.cirrusPuffVariation);
     }
 
     // Copy the full authored sky state so it can be pasted into per-ToD keyframes

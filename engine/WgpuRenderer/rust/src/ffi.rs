@@ -2528,6 +2528,28 @@ pub unsafe extern "C" fn wgr_set_cirrus_mode(renderer: *mut WgrRenderer, mode: u
     renderer.set_cirrus_mode(mode);
 }
 
+/// Second cloud layer SHAPE: `puffiness` 0 = drawn-out fibrous veil .. 1 = lumpy cirrocumulus
+/// (0.5 is the look the layer shipped with), `variation` = how far it is allowed to wander from
+/// that on its own over the world's weather clock (0 = perfectly steady). Both clamp to 0..1.
+///
+/// Its own entry point rather than a WgrSkyLook lane, for the reason given on
+/// `wgr_set_cirrus_mode`: that struct's size is part of the ABI handshake.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_cirrus_puffiness(
+    renderer: *mut WgrRenderer,
+    puffiness: f32,
+    variation: f32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_cirrus_puffiness(puffiness, variation);
+}
+
 /// Read one cascade layer of the shadow depth map back as row-major floats
 /// (row 0 = top). Returns the map resolution (side length), or 0 when no map
 /// exists / `layer` is out of range / `out_len` is too small.
