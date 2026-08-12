@@ -423,6 +423,21 @@ const CLOUD_LIGHT_STEPS: i32 = 4;
 // the path keeps the step size honest; the density dissolves over the last stretch so the bound itself
 // doesn't read as an edge. The true far field is the (later) cheap 2D deck, not this volumetric layer.
 const CLOUD_MARCH_DIST: f32 = 16000.0;
+// Total spread of the per-column cloud BASE height, as a fraction of the deck thickness. 0 restores
+// the old single-plane deck. At the default 1200..3500 m deck this is ~690 m of spread — a column's
+// base sits anywhere in +/-345 m of the authored sky.cloud0.z. See cloud_density.
+//
+// CENTRED on the authored base rather than only rising, so the deck's mean altitude — and therefore
+// the whole sky's composition — is what it was; only the flatness goes away.
+//
+// A shader constant rather than a uniform field: it is a look constant, not a per-frame one, and
+// WgrSky's size is checked by an ABI handshake on both the C++ and Rust sides — a new field there
+// costs a padding-matched change in three places to expose a number nothing animates.
+//
+// The whole vertical profile is TRANSLATED by this, not squashed into the authored deck, so a
+// higher-based cloud is the same cloud higher up rather than a thinner one. That means the marched
+// shell has to reach half this beyond the authored base and top, which cloud_shell_bot/top do.
+const CLOUD_BASE_VARY: f32 = 0.30;
 
 // Henyey-Greenstein phase (g > 0 forward, g < 0 back).
 fn hg(cos_t: f32, g: f32) -> f32 {
@@ -434,20 +449,42 @@ fn hg(cos_t: f32, g: f32) -> f32 {
 // camera-relative ray xz + the CPU-wrapped wind WORLD offset (cloud1.xy, bounded so the scaled
 // texture coord stays precise), with .y = altitude above the cloud base (bounded, unlike raw
 // planet-scale p.y). Returns (worldX, altitude, worldZ) — the 3 noise axes.
+// Deck thickness (m) — the vertical extent of ONE column's cloud profile, which is constant.
+fn cloud_thickness() -> f32 {
+    return max(sky.cloud0.w - sky.cloud0.z, 1.0);
+}
+
+// Planet radii of the MARCHED shell — the authored deck grown by half the base-height spread at
+// each end, because a column whose base is displaced carries its whole profile with it. A shell
+// that stopped at the authored bottom/top would slice those columns off flat and trade one flat
+// plane for another. Everything that bounds the march (cloud_interval, and through it the cloud
+// shadow pass) must use these, not sky.cloud0.z/w.
+fn cloud_shell_bot() -> f32 {
+    return sky.params.z + sky.cloud0.z - cloud_thickness() * CLOUD_BASE_VARY * 0.5;
+}
+
+fn cloud_shell_top() -> f32 {
+    return sky.params.z + sky.cloud0.w + cloud_thickness() * CLOUD_BASE_VARY * 0.5;
+}
+
 fn cloud_world(p: vec3<f32>) -> vec3<f32> {
     let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
     let alt = length(p) - (sky.params.z + sky.cloud0.z);
     return vec3<f32>(world_xz.x, alt, world_xz.y);
 }
 
-// Weather-driven LOCAL coverage at a WORLD xz (metres): the authored base coverage drifts across the
-// world by a very large-scale 2D field (a huge-scale slice of the noise volume), so the sky isn't
-// uniformly cloudy — some regions read cloudier, some clearer. World-anchored, so it is stable as the
-// camera moves; sampled PER cloud sample (not once per ray at the view-dependent shell entry, which
-// made the whole cloud field shift/morph with camera altitude and view angle).
-// The drift amount is tied to the AVAILABLE HEADROOM (max at coverage 0.5, ZERO at 0 and 1): authored
-// full overcast stays genuinely solid (so the sun is actually blocked) and authored clear stays clear.
-fn cloud_coverage(world_xz: vec2<f32>) -> f32 {
+// Weather fields at a WORLD xz (metres), from ONE tap of the noise volume:
+//   .x = LOCAL coverage — the authored base coverage drifts across the world by a very large-scale
+//        2D field (a huge-scale slice of the noise volume), so the sky isn't uniformly cloudy —
+//        some regions read cloudier, some clearer.
+//   .y = LOCAL cloud-base height [0,1] — see CLOUD_BASE_VARY / cloud_density. FREE: the same tap.
+// World-anchored, so both are stable as the camera moves; sampled PER cloud sample (not once per ray
+// at the view-dependent shell entry, which made the whole cloud field shift/morph with camera
+// altitude and view angle).
+// The coverage drift amount is tied to the AVAILABLE HEADROOM (max at coverage 0.5, ZERO at 0 and 1):
+// authored full overcast stays genuinely solid (so the sun is actually blocked) and authored clear
+// stays clear.
+fn cloud_weather(world_xz: vec2<f32>) -> vec2<f32> {
     // The 0.5 slice is now drifted: where the weather field says "more cloud here" moves slowly,
     // so banks build in one place and clear in another instead of the pattern being fixed forever.
     // The slice this samples DRIFTS with world position, and that is what stops the coverage field
@@ -465,9 +502,25 @@ fn cloud_coverage(world_xz: vec2<f32>) -> f32 {
         0.5 + sky.cloud4.z * sky.cloud3.x + drift,
         world_xz.y * sky.cloud3.x,
     );
-    let weather = textureSampleLevel(cloud_noise, cloud_samp, wc, 0.0).r;
+    let weather = textureSampleLevel(cloud_noise, cloud_samp, wc, 0.0);
     let vary = sky.cloud3.y * 2.0 * min(sky.cloud0.x, 1.0 - sky.cloud0.x);
-    return clamp(sky.cloud0.x + (weather - 0.5) * 2.0 * vary, 0.0, 1.0);
+    let cov = clamp(sky.cloud0.x + (weather.r - 0.5) * 2.0 * vary, 0.0, 1.0);
+    // Cloud-BASE field, out of the SAME tap's G channel (the volume's detail fBm: base frequency 8
+    // against the shape channel's 4, so at the weather scale it varies over roughly a kilometre —
+    // one bank of cloud sits lower than the next, which is what a real sky does; the condensation
+    // level is regional, not global).
+    //
+    // R and G share their upper octaves (R = fBm 4/8/16, G = fBm 8/16/32), so raw G correlates
+    // ~0.5 with R: every cloudier region would also be a higher-based region, and that systematic
+    // reads as the whole deck tilting where it thickens. Subtracting R's deviation once cancels
+    // exactly the shared part (the octave weights work out to a coefficient of ~1), leaving a base
+    // field independent of coverage. Pure ALU — still one tap.
+    //
+    // smoothstep rather than a linear remap so the field spends most of its area near 0 or near 1:
+    // that gives distinct base LEVELS with soft transitions between them, instead of a continuous
+    // ramp that just reads as a tilted plane.
+    let bfield = 0.5 + (weather.g - 0.5) * 2.0 - (weather.r - 0.5);
+    return vec2<f32>(cov, smoothstep(0.30, 0.70, bfield));
 }
 
 // Cloud density fraction [0,1] at a planet-centred position, given the ray's local coverage. Anti-
@@ -478,11 +531,14 @@ fn cloud_coverage(world_xz: vec2<f32>) -> f32 {
 fn cloud_density(p: vec3<f32>) -> f32 {
     let planet_r = sky.params.z;
     let r_bot = planet_r + sky.cloud0.z;
-    let r_top = planet_r + sky.cloud0.w;
-    // Height gradient: flat-ish bottom, rounded fading top. Zero outside the vertical band.
-    let hf = clamp((length(p) - r_bot) / max(r_top - r_bot, 1.0), 0.0, 1.0);
-    let grad = smoothstep(0.0, 0.12, hf) * (1.0 - smoothstep(0.55, 1.0, hf));
-    if (grad <= 0.0) {
+    let thick = cloud_thickness();
+    // Altitude above the AUTHORED cloud base. A column's own base sits within +/-half the spread of
+    // that and carries a full `thick` of profile with it, so this band is the union of every
+    // column's possible profile. Testing it here keeps the empty-space bail ZERO-TAP; the exact
+    // per-column band needs the weather tap, which the cloudy path was fetching anyway.
+    let half_vary = thick * CLOUD_BASE_VARY * 0.5;
+    let alt = length(p) - r_bot;
+    if (alt <= -half_vary || alt >= thick + half_vary) {
         return 0.0;
     }
     var w = cloud_world(p);
@@ -504,10 +560,31 @@ fn cloud_density(p: vec3<f32>) -> f32 {
     w.z += (warp_n.g - 0.5) * 2.0 * sky.cloud3.w;
     // World-anchored coverage sampled at THIS sample (not once per ray) so the cloud field stays
     // locked in the world as the camera flies through it, instead of morphing with altitude/angle.
-    let cov = cloud_coverage(w.xz);
+    let weather = cloud_weather(w.xz);
+    let cov = weather.x;
     if (cov <= 0.001) {
         return 0.0; // clear patch -> skip the shape/detail taps (per-sample empty-space fast path)
     }
+    // Per-column cloud BASE (metres above the authored base). Every cloud used to start at exactly
+    // sky.cloud0.z, because the height gradient was a function of altitude alone — so the whole
+    // sky's undersides lay on one plane, which is the most artificial thing about a procedural deck.
+    // A real sky's condensation level varies by hundreds of metres from one air mass to the next,
+    // and it is the bottoms, not the tops, that the eye reads as a floor.
+    let base_h = (weather.y - 0.5) * CLOUD_BASE_VARY * thick;
+    let hl = (alt - base_h) / thick;
+    if (hl <= 0.0 || hl >= 1.0) {
+        return 0.0; // outside THIS column's cloud band
+    }
+    // Height gradient: flat-ish bottom, rounded fading top — unchanged, but now in the column's own
+    // frame rather than the deck's, so the profile is TRANSLATED and keeps its full thickness.
+    let grad = smoothstep(0.0, 0.12, hl) * (1.0 - smoothstep(0.55, 1.0, hl));
+    if (grad <= 0.0) {
+        return 0.0;
+    }
+    // Carry the noise column up with the base as well, so a raised cloud is the SAME cloud higher
+    // up rather than the upper slice of a fixed one. (Vertical domain warp; base_h varies smoothly
+    // with world xz, so this is a smooth shear, not a seam.)
+    w.y -= base_h;
     // Shape (large, incommensurate tile) drives the blobs; overcast floor + coverage remap.
     // Shape/detail sampled at a Y drifted by the evolution offset: the volume is 3D and tileable,
     // so walking the third axis walks through uncorrelated slices — the cheapest honest way to get
@@ -600,8 +677,10 @@ fn star_field(dir_in: vec3<f32>, sun: vec3<f32>) -> vec3<f32> {
 // planet). t1 <= t0 means the ray never crosses the shell (caller skips).
 fn cloud_interval(pos: vec3<f32>, dir: vec3<f32>) -> vec2<f32> {
     let planet_r = sky.params.z;
-    let r_bot = planet_r + sky.cloud0.z;
-    let r_top = planet_r + sky.cloud0.w;
+    // The SHELL, not the authored deck: columns whose base is displaced carry their profile past
+    // sky.cloud0.z/w, and a ray that stopped at the authored bounds would cut those off flat.
+    let r_bot = cloud_shell_bot();
+    let r_top = cloud_shell_top();
     let h = length(pos);
     let hb = ray_sphere(pos, dir, r_bot);
     let ht = ray_sphere(pos, dir, r_top);
@@ -671,7 +750,7 @@ fn march_clouds(
     // Coverage is now world-anchored and sampled PER cloud sample (in cloud_density). Here we only need
     // a representative value at the shell entry to tint the broad cloud AMBIENT / underside AO (a slow-
     // varying look term, so one large-scale tap per ray is plenty).
-    let cov = cloud_coverage(cloud_world(pos + dir * t0).xz);
+    let cov = cloud_weather(cloud_world(pos + dir * t0).xz).x;
     // Adaptive step COUNT + per-pixel jittered start. The radial-ring artifact (worse with cloud
     // thickness / grazing angle) was primary-ray step aliasing of the vertical density structure: a
     // FIXED step count made dt scale with the angle-dependent path length, and the step phase varied
@@ -763,6 +842,91 @@ fn march_clouds(
     return res;
 }
 
+// ---- Second cloud layer: high cirrus -----------------------------------------
+// ONE ray/sphere intersection against a thin sheet ~7 km up and two noise taps. No march: that is
+// the entire cost, on sky pixels only. A second VOLUMETRIC deck was not an option — it would have
+// doubled the most expensive pass in the sky for a layer that is barely three-dimensional.
+//
+// It buys what a single deck cannot: cloud at a completely different altitude, so the sky has
+// depth instead of one populated slab. And the flat-sheet approximation, which would be the wrong
+// model for cumulus, is very nearly right here — cirrus IS a thin fibrous sheet of ice crystals,
+// so it is streaky and strongly forward-scattering rather than puffy and self-shadowing.
+const CIRRUS_ALT: f32 = 7000.0;          // m ASL — well clear of the cumulus deck below
+// Horizontal noise scale (1/m). This is the number that decides whether the layer reads as cirrus
+// or as one enormous smear: the sheet tap below stretches it 4x along world X, so at 1/7000 a
+// streak is roughly 7 km across and 28 km long — a few degrees wide from 8 km below, which is what
+// a cirrus field subtends. The first attempt used 1/26000 and produced a single blob filling the
+// upper sky, because one "feature" was 100 km long.
+const CIRRUS_SCALE: f32 = 1.0 / 7000.0;
+const CIRRUS_COVER: f32 = 0.52;          // fraction of the sheet that holds cloud
+const CIRRUS_DENSITY: f32 = 2.8;         // optical depth straight up through full density
+// Fibre erosion strength. Careful here: the eroding channel is an fBm with mean 0.5, so a factor
+// near 0.7 subtracts ~0.35 from a field whose surviving values are themselves only ~0.3 — it
+// deletes the layer rather than texturing it, which is exactly what the first version did.
+const CIRRUS_ERODE: f32 = 0.45;
+const CIRRUS_FADE: f32 = 150000.0;       // m — dissolve into haze beyond this slant distance
+
+fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, bg: vec3<f32>,
+                max_dist: f32) -> CloudResult {
+    var res: CloudResult;
+    res.inscatter = vec3<f32>(0.0);
+    res.trans = 1.0;
+    // Follows the deck's on/off so "clear weather" stays clear, and skips downward rays outright:
+    // from inside the shell every direction has a far intersection with the sheet, including ones
+    // pointing at the ground, and drawing those would paint cirrus under the horizon.
+    if (sky.cloud0.x <= 0.001 || dir.y <= 0.01) {
+        return res;
+    }
+    let hit = ray_sphere(pos, dir, sky.params.z + CIRRUS_ALT);
+    let t = hit.y;
+    if (t <= 0.0 || t >= max_dist) {
+        return res; // no intersection, or the opaque scene is nearer — terrain occludes it
+    }
+    let p = pos + dir * t;
+    // Same world anchoring and wind offset as the deck (cloud1.xy is CPU-wrapped for precision, so
+    // it must be used as given, not rescaled to fake a different wind speed aloft).
+    let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+    // Anisotropic sampling — ~4x stretched along world X — is what makes this read as cirrus
+    // FIBRES rather than a flat smear. Free: it is only a scale on the lookup coordinate.
+    let s = CIRRUS_SCALE;
+    let sheet = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(world_xz.x * s * 0.25, 0.5 + sky.cloud4.z * s, world_xz.y * s), 0.0).r;
+    let fibre = textureSampleLevel(cloud_noise, cloud_samp,
+        vec3<f32>(world_xz.x * s * 0.9, 0.25 + sky.cloud4.z * s * 2.0, world_xz.y * s * 3.5), 0.0).g;
+    let cover = CIRRUS_COVER * smoothstep(0.02, 0.35, sky.cloud0.x);
+    var d = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
+    d = clamp(d - (1.0 - d) * fibre * CIRRUS_ERODE, 0.0, 1.0);
+    // Fade in off the horizon (where the sheet is hundreds of km away and haze owns the sky) and
+    // out with slant distance, so neither edge of the sheet is ever a line.
+    d = d * smoothstep(0.015, 0.07, dir.y) * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
+    if (d <= 0.001) {
+        return res;
+    }
+    // Slant path through a thin sheet goes as 1/sin(elevation); clamped because the horizon limit
+    // is unbounded and would turn the far sheet into a solid white band.
+    let trans = exp(-d * CIRRUS_DENSITY / clamp(dir.y, 0.15, 1.0));
+    let cos_t = dot(dir, sun);
+    // Ice: a strong forward lobe (the halo/silver look) over an isotropic floor. Thin enough that
+    // self-shadowing is not worth a light march, so no sun-transmittance term through the sheet.
+    let phase = mix(hg(cos_t, 0.75), 1.0 / (4.0 * PI), 0.55);
+    let sun_col = sample_transmittance(pos, sun) * radiance;
+    let luma = dot(bg, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let ambient = mix(bg, vec3<f32>(luma), 0.3) * sky.cloud2.z * 0.8;
+    res.inscatter = (sun_col * phase + ambient) * (1.0 - trans);
+    res.trans = trans;
+    return res;
+}
+
+// Composite the cumulus deck OVER the cirrus sheet: the deck is nearer, so its transmittance
+// attenuates everything behind it. Returns the pair the caller hands to the over-scene blend
+// (out = inscatter + scene * trans), where `scene` for a sky pixel is fs_sky's atmosphere.
+fn cloud_over_cirrus(deck: CloudResult, cirrus: CloudResult) -> CloudResult {
+    var res: CloudResult;
+    res.inscatter = deck.inscatter + deck.trans * cirrus.inscatter;
+    res.trans = deck.trans * cirrus.trans;
+    return res;
+}
+
 @fragment
 fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let dir = normalize(in.ray_dir);
@@ -833,7 +997,11 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // a coarse checkerboard once reflected in the water (which magnifies each env texel). A jitter-free
     // march bands slightly instead, but the low step count + huge texels blur that away; the smooth
     // result is what the SH projection + reflection want.
-    let cloud = march_clouds(pos, dir, sun, sky.sun_dir.w * sky.params.y, color, 12.0, 2, 0.0, 1e12);
+    let radiance = sky.sun_dir.w * sky.params.y;
+    let deck = march_clouds(pos, dir, sun, radiance, color, 12.0, 2, 0.0, 1e12);
+    // The cirrus sheet goes into the env bake too, so the water reflects — and the SH ambient sees —
+    // the same two-layer sky the camera does. It costs two taps per env texel.
+    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, color, 1e12));
     return vec4<f32>(color * cloud.trans + cloud.inscatter, 1.0);
 }
 
@@ -867,8 +1035,11 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     }
 
     let bg = sky_radiance(dir); // local sky colour for the cloud ambient
-    let cloud = march_clouds(pos, dir, sun, sky.sun_dir.w * sky.params.y, bg,
-                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
+    let radiance = sky.sun_dir.w * sky.params.y;
+    let deck = march_clouds(pos, dir, sun, radiance, bg,
+                            CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
+    // Second layer, behind the deck. Bounded by the same scene distance, so terrain occludes it.
+    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, scene_dist));
 
     // ---- Lens flare -----------------------------------------------------------------------
     // Written here rather than as its own pass because this shader already holds everything a
@@ -880,9 +1051,9 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     // Occlusion is therefore not approximated:
     //   * geometry -- a pixel whose ray hits something before the sky has scene_dist < 1e11, and
     //     the flare is cut there, so it cannot leak through a mountain or a wall;
-    //   * cloud -- cloud.trans is the transmittance this ray already measured through the deck, so
-    //     a thick cloud crossing the sun dims the flare by exactly what it dims the sun by, and it
-    //     does so continuously, with no pop at the cloud edge;
+    //   * cloud -- cloud.trans is the transmittance this ray already measured through BOTH layers,
+    //     so a thick cloud (or a cirrus veil) crossing the sun dims the flare by exactly what it
+    //     dims the sun by, and it does so continuously, with no pop at the cloud edge;
     //   * horizon -- faded out as the sun sets rather than cut, so it does not blink at the moment
     //     the disc touches the ground.
     //
