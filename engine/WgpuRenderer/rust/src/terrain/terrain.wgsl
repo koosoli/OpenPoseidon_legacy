@@ -239,7 +239,19 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // TerrainSNX has one implicit base and up to four masked detail layers:
     // Stage4 is the base, stages 6/8/10/12 map to mask RGBA respectively.
     // The unpainted mask remainder belongs to the base layer.
-    let mask_weight = min(dot(mask, vec4<f32>(1.0)), 1.0);
+    // The mask's four channels address four overlay slots, and a tile rarely uses all of
+    // them: Stratis's p_003-000_l02_l04_n_n_n names two layers and leaves three empty, so
+    // stages 8, 10 and 12 carry no texture at all. Summing all four channels into the
+    // weight subtracted from the base then removes coverage that nothing adds back, and
+    // the surface washes out -- the same mistake as blending an unbound layer, in the
+    // other direction. Only channels with a bound overlay may take weight from the base.
+    var mask_weight = 0.0;
+    for (var i = 0u; i < min(material.overlay_count, 4u); i = i + 1u) {
+        if (material.overlays[i] != 0u) {
+            mask_weight += mask[i];
+        }
+    }
+    mask_weight = min(mask_weight, 1.0);
     let view_ts = terrain_view_ts(world_pos);
     // Parallax fades out with the detail it belongs to and is off entirely beyond it:
     // displacing a surface that has already faded into the satellite moves nothing.
