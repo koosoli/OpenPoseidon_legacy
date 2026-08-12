@@ -188,7 +188,18 @@ struct AuthoredCell {
 // origin and the view vector is simply -world_pos.
 fn terrain_view_ts(world_pos: vec3<f32>) -> vec3<f32> {
     let v = normalize(-world_pos);
-    return vec3<f32>(v.x, v.z, max(abs(v.y), 1e-3));
+    // Floor the tangent-space Z HARD. The single-step offset below scales with xy/z,
+    // and at a grazing view -- standing and looking out along the ground, which is
+    // most of the time -- z goes to zero. A 1e-3 floor then multiplies the offset by
+    // up to a thousand and samples the surface at essentially random coordinates, so
+    // the near ground turns to mush and stops resolving detail as you walk toward it.
+    // 0.3 caps the stretch at about 3x, which is the whole useful range of a one-step
+    // offset anyway.
+    //
+    // This was latent until the detail fade started measuring camera distance
+    // correctly (WLD-019): before that `parallax` was zero everywhere, so the
+    // blowup never ran.
+    return vec3<f32>(v.x, v.z, max(abs(v.y), 0.3));
 }
 
 // One authored surface: its colour, its tangent-space normal, and the parallax offset its
@@ -206,7 +217,11 @@ fn authored_surface(colour_tex: u32, normal_tex: u32, uv: vec2<f32>,
         // blended; one step recovers most of the depth cue at one fetch, and the fetch
         // was needed for the normal regardless.
         if (parallax > 0.0) {
-            uv_shifted = uv + (n_sample.r - 0.5) * parallax * view_ts.xy / view_ts.z;
+            // Bounded as well as floored: a one-step offset is a depth CUE, so it may
+            // never displace further than the depth it represents. Without this the
+            // grazing case still smears even with the Z floor in place.
+            let offset = (n_sample.r - 0.5) * parallax * view_ts.xy / view_ts.z;
+            uv_shifted = uv + clamp(offset, vec2<f32>(-parallax), vec2<f32>(parallax));
         }
         let n_xy = vec2<f32>(n_sample.a, n_sample.g) * 2.0 - vec2<f32>(1.0);
         *out_normal = vec3<f32>(n_xy, sqrt(max(0.0, 1.0 - dot(n_xy, n_xy))));
@@ -295,6 +310,17 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let satellite_dwy = terrain_uv_gradient(material.satellite_uv, 0u, material.uv_source_mask, material_dwy, ddy);
     let mask_dwx = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwx, ddx);
     let mask_dwy = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwy, ddy);
+    let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
+                                      satellite_uv, satellite_dwx, satellite_dwy).rgb;
+    // Work out the detail's strength BEFORE fetching any of it. Past the fade the gain is
+    // 1 and every surface sample is multiplied away, so computing the stack there is pure
+    // waste -- and in any landscape view most of the screen is past it. Bailing here is
+    // exact, not an approximation: the returned colour is the satellite either way.
+    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(view_pos));
+    let blend = authored_weight * detail_fade;
+    if (blend <= 0.001) {
+        return AuthoredCell(satellite, vec3<f32>(0.0, 0.0, 1.0));
+    }
     let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
     // `var`, not `let`: the loop below indexes it with a non-constant slot.
     var weights = decode_mask(mask);
@@ -361,10 +387,6 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // separate TexGen for their continuous, low-frequency satellite colour.
     // Sampling it through the old cell frame is what made a genuine layered
     // A3 material look like a tiled single texture.
-    let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
-                                      satellite_uv, satellite_dwx, satellite_dwy).rgb;
-    let detail_fade = 1.0 - smoothstep(25.0, 120.0, length(view_pos));
-    let blend = authored_weight * detail_fade;
     let gain = mix(vec3<f32>(1.0), 2.0 * surface, blend);
     // The normal follows the same fade as the detail it belongs to: a surface whose
     // gain has faded to neutral must not keep perturbing the lighting.
@@ -491,15 +513,38 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let w01 = (1.0 - fx) * fy;
     let w11 = fx * fy;
     let absolute_world_pos = in.world_pos + frame.cam_pos.xyz;
-    let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-    let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-    let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-    let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-    var rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
-    // The authored surface normal, blended across the same four cells as the colour so it
-    // stays continuous over a cell boundary.
-    let authored_normal_ts = w00 * c00.normal_ts + w10 * c10.normal_ts
+    var rgb = vec3<f32>(0.0);
+    var authored_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+    // The four-cell cross-fade exists to hide the LEGACY per-cell texture's hard cell
+    // edge. When all four cells name the same entry it changes nothing -- and it is
+    // the same entry over the whole interior of every cell, which is nearly the whole
+    // screen -- so evaluating one tap there is EXACTLY equal, not an approximation.
+    //
+    // That equality is worth a lot now the authored composition is live: a legacy cell
+    // is one texture fetch, but an authored one is a mask, a satellite and up to six
+    // surfaces with a colour and a normal each, so the four taps went from 4 fetches to
+    // as many as 56 per terrain fragment -- and terrain is most of the frame. This is
+    // the optimisation with no visual cost, by construction.
+    //
+    // The exception is a CLAMPED transition tile: there `sample_cell` samples in the
+    // cell's own [0,1] frame, so the four taps genuinely differ even for one entry.
+    // Those keep the full blend.
+    let uniform_cell = e00 == e10 && e00 == e01 && e00 == e11 && (e00 & CELL_CLAMPED) == 0u;
+    if (uniform_cell) {
+        let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        rgb = c.rgb;
+        authored_normal_ts = c.normal_ts;
+    } else {
+        let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
+        // The authored surface normal, blended across the same four cells as the colour so it
+        // stays continuous over a cell boundary.
+        authored_normal_ts = w00 * c00.normal_ts + w10 * c10.normal_ts
                            + w01 * c01.normal_ts + w11 * c11.normal_ts;
+    }
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
