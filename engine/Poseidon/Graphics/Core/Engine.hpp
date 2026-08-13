@@ -1681,9 +1681,15 @@ class Engine : public IGraphicsEngine
         float moonBrightnessScale = 1.0f;
         // Full-moon irradiance as a fraction of the sun's, for the sky-lit scene path.
         // The physical ratio is ~2.5e-6, which renders as black: human night vision is
-        // scotopic and the tonemap here is not. 1/400 is a game-legible night that still
-        // reads as night. Scaled by the phase function, so a crescent is ~30x dimmer.
-        float moonIntensity = 0.0025f;
+        // scotopic and the tonemap here is not. What it must beat is the night AMBIENT
+        // floor, ~0.023 radiance at the 22:00 preset, and the moon's directional term works
+        // out to about intensity * 0.41 -- so the original 1/400 landed at 4% of ambient:
+        // present in the buffer and invisible on screen. 0.06 puts it at ~1.1x ambient. The
+        // legacy GL33 path sits at 1.7x (0.075 * 0.68 diffuse against 0.030 ambient), so the
+        // two backends were a factor of ~40 apart for the same scene. Drives the disc as
+        // well as the light: they are one body, so this is one knob by necessity. The phase
+        // function scales it on top, making a crescent ~30x dimmer.
+        float moonIntensity = 0.06f;
         // Moon casts a directional light (and shadows) at night. Off = the pre-existing
         // behaviour, where night is lit by flat ambient only and the moon is scenery.
         bool moonLighting = true;

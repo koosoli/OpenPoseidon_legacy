@@ -5,6 +5,7 @@
 #include "TextureWgpu.hpp"
 
 #include <Poseidon/Core/Global.hpp> // Glob.time (coast wet-band animation clock)
+#include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <stb_image.h>
@@ -69,9 +70,25 @@ constexpr uint32_t GrassCoverageShift = 16u;
 constexpr uint32_t GrassCoverageMask = 0x007f0000u;
 constexpr uint32_t GrassSurfaceShift = 23u;
 constexpr uint32_t GrassSurfaceMask = 0x0f800000u;
-constexpr uint32_t GrassSurfaceNone = 31u;
+constexpr uint32_t GrassRunCountShift = 28u;
+constexpr uint32_t GrassRunCountMask = 0x70000000u;
+
+// The world's clutter atlas. 32 layers because a surface's clutter classes must
+// occupy a CONTIGUOUS run -- that is what lets the shader select one with
+// `first + hash*count` instead of walking a bitmask -- so the budget is the SUM
+// of the per-surface lists, not their distinct union: Stratis needs 28 slots
+// over 21 distinct classes, Takistan 25 over 10. 32 is also exactly what the
+// 5-bit `first` field can address, and 8 what the 3-bit `count` field can.
+//
+// 512 rather than 1024 square: this atlas feeds the MID ring only, the plates
+// are 54-89% empty so a cropped sub-image carries what a whole 1024 plate did,
+// and 32 layers at 512 is 42.7 MB against the 48 MB nine 1024 layers cost.
+constexpr uint32_t GrassAtlasLayers = 32;
+constexpr uint32_t GrassAtlasMaxRun = 8;
+constexpr int GrassAtlasSize = 512;
 // Every bit this file writes on top of GeographyInfo, so a re-bake starts clean.
-constexpr uint32_t GrassBakedMask = GrassTextureCell | GrassAuthoredCell | GrassCoverageMask | GrassSurfaceMask;
+constexpr uint32_t GrassBakedMask =
+    GrassTextureCell | GrassAuthoredCell | GrassCoverageMask | GrassSurfaceMask | GrassRunCountMask;
 
 static bool ContainsNoCase(const char* text, const char* needle)
 {
@@ -678,11 +695,146 @@ void TerrainWgpu::BuildSurfaceCatalog(const Landscape& land)
 
 namespace
 {
+// One clutter class's card: the plate it draws from, and the sub-rect of that
+// plate its own geometry uses.
+struct ClutterCard
+{
+    std::string plate;
+    float u0 = 0.0f, v0 = 0.0f, u1 = 1.0f, v1 = 1.0f;
+    bool valid = false;
+};
+
+// Read a clutter p3d and take the plate it names plus the UV rect its faces
+// occupy.
+//
+// The UVs are the AUTHORED answer and the reason this reads the model at all.
+// A shared plate carries several classes -- `c_papaver_ca.paa` is one 2048
+// square image serving three poppy models -- and each model uses only its own
+// corner. Connected-component labelling on alpha was the cheap alternative and
+// it is wrong here for a measurable reason: that plate is only 54.7% clear, so
+// its sub-images sit close enough to merge, and a merged card draws two plants
+// on one quad, which reads as a rendering bug nobody can attribute.
+//
+// Both generations load: Operation Arrowhead clutter is ODOL 49 and Arma 3's is
+// ODOL 73, and the narrow readers cover both.
+ClutterCard ReadClutterCard(const char* modelPath, const std::vector<uint8_t>& bytes)
+{
+    ClutterCard card;
+    if (bytes.empty())
+    {
+        return card;
+    }
+    Poseidon::Model::Model model;
+    try
+    {
+        model = Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer(
+            reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size()), modelPath);
+    }
+    catch (const std::exception&)
+    {
+        return card;
+    }
+
+    // The most detailed VISUAL lod that carries faces. Geometry/memory/roadway
+    // lods have no usable UVs and a clutter p3d ships several of them.
+    const Poseidon::Model::LODLevel* best = nullptr;
+    for (const Poseidon::Model::LODLevel& lod : model.lodLevels)
+    {
+        if (lod.purpose != Poseidon::Model::LodPurpose::Visual)
+        {
+            continue;
+        }
+        if (lod.mesh.triangles.empty() && lod.mesh.quads.empty())
+        {
+            continue;
+        }
+        if (best == nullptr || lod.resolution < best->resolution)
+        {
+            best = &lod;
+        }
+    }
+    if (best == nullptr)
+    {
+        return card;
+    }
+
+    int material = -1;
+    for (size_t i = 0; i < best->mesh.materials.size(); ++i)
+    {
+        const std::string& texture = best->mesh.materials[i].texturePath;
+        if (texture.empty())
+        {
+            continue;
+        }
+        // `_ca` is the cut-out plate, which is the one that carries the plant.
+        if (ContainsNoCase(texture.c_str(), "_ca."))
+        {
+            material = static_cast<int>(i);
+            break;
+        }
+        if (material < 0)
+        {
+            material = static_cast<int>(i);
+        }
+    }
+    if (material < 0)
+    {
+        return card;
+    }
+    card.plate = best->mesh.materials[static_cast<size_t>(material)].texturePath;
+
+    float u0 = 1e9f, v0 = 1e9f, u1 = -1e9f, v1 = -1e9f;
+    const auto accumulate = [&](uint32_t index)
+    {
+        if (index >= best->mesh.vertices.size())
+        {
+            return;
+        }
+        const Poseidon::Model::Vector2& uv = best->mesh.vertices[index].uv;
+        u0 = std::min(u0, uv.u);
+        u1 = std::max(u1, uv.u);
+        v0 = std::min(v0, uv.v);
+        v1 = std::max(v1, uv.v);
+    };
+    for (const Poseidon::Model::Triangle& tri : best->mesh.triangles)
+    {
+        if (static_cast<int>(tri.materialIndex) != material)
+            continue;
+        accumulate(tri.indices[0]);
+        accumulate(tri.indices[1]);
+        accumulate(tri.indices[2]);
+    }
+    for (const Poseidon::Model::Quad& quad : best->mesh.quads)
+    {
+        if (static_cast<int>(quad.materialIndex) != material)
+            continue;
+        for (int k = 0; k < 4; ++k)
+            accumulate(quad.indices[k]);
+    }
+    // A degenerate or out-of-range box means the model tiles or mirrors its
+    // plate rather than taking a sub-rect; the whole plate is then the honest
+    // answer, and it is what the previous whole-plate behaviour did anyway.
+    if (u1 - u0 < 0.02f || v1 - v0 < 0.02f || u0 < -0.01f || v0 < -0.01f || u1 > 1.01f || v1 > 1.01f)
+    {
+        u0 = 0.0f;
+        v0 = 0.0f;
+        u1 = 1.0f;
+        v1 = 1.0f;
+    }
+    card.u0 = std::clamp(u0, 0.0f, 1.0f);
+    card.v0 = std::clamp(v0, 0.0f, 1.0f);
+    card.u1 = std::clamp(u1, 0.0f, 1.0f);
+    card.v1 = std::clamp(v1, 0.0f, 1.0f);
+    card.valid = true;
+    return card;
+}
+
 // One authored surface slot's contribution, resolved once per material.
 struct SlotClutter
 {
     float coverage = 0.0f;    // authored, unnormalised (see Coverage())
-    uint8_t surfaceId = 0xff; // dense id, 0xff = not clutter-bearing
+    uint8_t layerFirst = 0;   // first atlas layer this surface's clutter occupies
+    uint8_t layerCount = 0;   // how many follow it; 0 = no clutter atlas run
     bool present = false;     // false for a hole: the slot has no surface
 };
 
@@ -728,6 +880,156 @@ inline int WrapTexel(float coord, int dim)
     return std::clamp(t, 0, dim - 1);
 }
 } // namespace
+
+// Build the world's clutter atlas: one 512-square layer per clutter class, the
+// classes of a surface laid down consecutively so the shader can pick one with
+// `first + hash*count`.
+//
+// Layer 0 is reserved for the loose primary photo card, so a surface that
+// resolves nothing degrades to exactly today's look rather than to a hole.
+bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RStringB>>& surfaces,
+                                    std::unordered_map<std::string, std::pair<uint8_t, uint8_t>>& outRuns,
+                                    std::vector<uint8_t>& outLayers, uint32_t& outLayerCount)
+{
+    constexpr size_t LayerBytes = static_cast<size_t>(GrassAtlasSize) * GrassAtlasSize * 4u;
+    outLayers.assign(LayerBytes * GrassAtlasLayers, 0u);
+    outRuns.clear();
+    outLayerCount = 1; // layer 0 is the loose primary, filled by the caller
+
+    std::unordered_map<std::string, DecodedImage> plates;
+    // Per generation, the alpha-weighted mean colour of the opaque texels we
+    // actually put in the atlas. Arma 3's plates are authored a generation apart
+    // from Operation Arrowhead's, and if one reads darker this is the number that
+    // says so -- measured from the pixels in hand rather than assumed, because
+    // both generations ship the same DXT5 `_ca` container and the format cannot
+    // tell them apart.
+    double toneSum[2][3] = {{0, 0, 0}, {0, 0, 0}};
+    double toneWeight[2] = {0, 0};
+    int cards = 0, missingModel = 0, missingPlate = 0, dropped = 0;
+    std::string report;
+
+    for (const auto& [surfaceKey, character] : surfaces)
+    {
+        if (character.GetLength() == 0)
+        {
+            continue;
+        }
+        std::vector<TerrainSurfaceCatalog::Clutter> classes = _surfaceCatalog.ClutterFor(character.Data());
+        // Highest probability first, so a run truncated by the 8-layer cap keeps
+        // the plants that actually cover the ground.
+        std::stable_sort(classes.begin(), classes.end(),
+                         [](const TerrainSurfaceCatalog::Clutter& a, const TerrainSurfaceCatalog::Clutter& b)
+                         { return a.probability > b.probability; });
+
+        const uint32_t first = outLayerCount;
+        uint32_t count = 0;
+        for (const TerrainSurfaceCatalog::Clutter& entry : classes)
+        {
+            if (count >= GrassAtlasMaxRun || outLayerCount >= GrassAtlasLayers)
+            {
+                ++dropped;
+                continue;
+            }
+            if (entry.model.GetLength() == 0)
+            {
+                // A class the config names but whose `class clutter` body we never
+                // saw -- Stratis's StrGrassDryMediumgroup, at p<=0.35 not a rare
+                // one. It is skipped rather than substituted: putting a different
+                // plant in its slot would be a silent wrong answer, and the
+                // surface still has its other classes. A surface that loses ALL of
+                // them falls back to layer 0 below.
+                ++missingModel;
+                continue;
+            }
+            const std::vector<uint8_t> modelBytes = ReadVfsFile(entry.model.Data());
+            const ClutterCard card = ReadClutterCard(entry.model.Data(), modelBytes);
+            if (!card.valid || card.plate.empty())
+            {
+                ++missingModel;
+                continue;
+            }
+            std::string plateKey = card.plate;
+            std::transform(plateKey.begin(), plateKey.end(), plateKey.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            auto plate = plates.find(plateKey);
+            if (plate == plates.end())
+            {
+                // One decode per PLATE, not per class: `c_papaver_ca.paa` serves
+                // three classes and is 2048 square.
+                const std::vector<uint8_t> plateBytes = ReadVfsFile(card.plate.c_str());
+                DecodedImage image;
+                if (!plateBytes.empty())
+                {
+                    image = DecodePAABuffer(plateBytes.data(), plateBytes.size(), /*isPaa=*/true);
+                }
+                plate = plates.emplace(plateKey, std::move(image)).first;
+            }
+            if (!plate->second.valid())
+            {
+                ++missingPlate;
+                continue;
+            }
+
+            // Crop the authored sub-rect and rescale it to fill the layer.
+            const DecodedImage& image = plate->second;
+            const int x0 = std::clamp(static_cast<int>(card.u0 * static_cast<float>(image.width)), 0, image.width - 1);
+            const int x1 = std::clamp(static_cast<int>(std::ceil(card.u1 * static_cast<float>(image.width))), x0 + 1,
+                                      image.width);
+            const int y0 = std::clamp(static_cast<int>(card.v0 * static_cast<float>(image.height)), 0, image.height - 1);
+            const int y1 = std::clamp(static_cast<int>(std::ceil(card.v1 * static_cast<float>(image.height))), y0 + 1,
+                                      image.height);
+            const int cropW = x1 - x0;
+            const int cropH = y1 - y0;
+            const uint8_t* src = image.rgba.data() + (static_cast<size_t>(y0) * image.width + x0) * 4u;
+            uint8_t* dst = outLayers.data() + static_cast<size_t>(outLayerCount) * LayerBytes;
+            stbir_resize_uint8_linear(src, cropW, cropH, image.width * 4, dst, GrassAtlasSize, GrassAtlasSize,
+                                      GrassAtlasSize * 4, STBIR_RGBA);
+
+            const int generation = StartsWithNoCase(card.plate.c_str(), "a3\\") ? 1 : 0;
+            for (size_t t = 0; t < LayerBytes; t += 4)
+            {
+                const double a = dst[t + 3] / 255.0;
+                if (a <= 0.5)
+                    continue;
+                toneSum[generation][0] += dst[t + 0] * a;
+                toneSum[generation][1] += dst[t + 1] * a;
+                toneSum[generation][2] += dst[t + 2] * a;
+                toneWeight[generation] += a;
+            }
+
+            if (report.size() < 900)
+            {
+                char line[192];
+                snprintf(line, sizeof(line), "%s%s@%u", report.empty() ? "" : ", ", entry.name.Data(),
+                         outLayerCount);
+                report += line;
+            }
+            ++outLayerCount;
+            ++count;
+            ++cards;
+        }
+        // No usable class: point the surface at the primary card rather than
+        // leaving a run the shader would read as "no clutter" and then thin.
+        outRuns[surfaceKey] = count > 0 ? std::make_pair(static_cast<uint8_t>(first), static_cast<uint8_t>(count))
+                                        : std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(1));
+    }
+
+    for (int generation = 0; generation < 2; ++generation)
+    {
+        if (toneWeight[generation] <= 0.0)
+            continue;
+        LOG_INFO(Graphics, "Wgpu grass clutter tone ({}): alpha-weighted mean of opaque texels = ({:.3f}, {:.3f}, {:.3f})",
+                 generation == 1 ? "Arma 3" : "Arma 2/OA", toneSum[generation][0] / toneWeight[generation] / 255.0,
+                 toneSum[generation][1] / toneWeight[generation] / 255.0,
+                 toneSum[generation][2] / toneWeight[generation] / 255.0);
+    }
+    LOG_INFO(Graphics,
+             "Wgpu grass clutter atlas: {} cards over {} layers of {} ({} classes had no model, {} no readable plate, "
+             "{} dropped at the {}-per-surface / {}-layer caps) [{}]",
+             cards, outLayerCount, GrassAtlasLayers, missingModel, missingPlate, dropped, GrassAtlasMaxRun,
+             GrassAtlasLayers, report.empty() ? "none" : report);
+    return cards > 0;
+}
 
 // Taps per land-cell axis. 4x4 is the smallest grid that resolves a coverage
 // FRACTION rather than a yes/no from one texel, which is what turns a mask edge
@@ -781,8 +1083,11 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
     // own texture NAME is the fallback, which is still a per-texel answer and so
     // still strictly better than the per-material name match it replaces.
     std::vector<std::array<SlotClutter, A3TerrainMaterial::MaxSurfaces>> slots(static_cast<size_t>(materialCount));
-    std::unordered_map<std::string, uint8_t> surfaceIds;
     std::unordered_map<std::string, float> coverageCache;
+    // Distinct clutter-bearing surfaces, in first-seen order, with the character
+    // each resolved to. This is what the atlas runs are laid down from, so the
+    // order is deterministic for a given world.
+    std::vector<std::pair<std::string, RStringB>> clutterSurfaces;
     float maxCoverage = 0.0f;
     int authoredMaterials = 0;
     int byCatalogue = 0, byName = 0;
@@ -851,6 +1156,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
                 }
                 if (coverage > 0.0f)
                 {
+                    clutterSurfaces.emplace_back(key, character);
                     char line[192];
                     snprintf(line, sizeof(line), "%s%s -> %s %.2f (%zu/%zu models)", surfaceReport.empty() ? "" : ", ",
                              key.c_str(), authoredAnswer ? character.Data() : "<by name>", coverage, models,
@@ -863,17 +1169,6 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
             if (slot.coverage > 0.0f)
             {
                 maxCoverage = std::max(maxCoverage, slot.coverage);
-                const auto existing = surfaceIds.find(key);
-                if (existing != surfaceIds.end())
-                {
-                    slot.surfaceId = existing->second;
-                }
-                else if (surfaceIds.size() < GrassSurfaceNone)
-                {
-                    const uint8_t id = static_cast<uint8_t>(surfaceIds.size());
-                    surfaceIds.emplace(key, id);
-                    slot.surfaceId = id;
-                }
             }
         }
     }
@@ -888,6 +1183,50 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
                  "per-layer classification",
                  authoredMaterials);
         return false;
+    }
+
+    // The map's own plants. Built once per world, from the same surface list the
+    // coverage came from, so a surface's atlas run and its density are two
+    // statements about one authored character rather than two guesses.
+    std::unordered_map<std::string, std::pair<uint8_t, uint8_t>> atlasRuns;
+    const auto atlasStarted = std::chrono::steady_clock::now();
+    const bool haveAtlas =
+        BuildClutterAtlas(clutterSurfaces, atlasRuns, _clutterAtlas, _clutterAtlasLayers);
+    const double atlasMs =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - atlasStarted).count();
+    if (!haveAtlas)
+    {
+        // Nothing usable: drop the buffer so UploadGrassTuft keeps the loose
+        // photo cards rather than uploading 32 blank layers.
+        _clutterAtlas.clear();
+        _clutterAtlasLayers = 0;
+    }
+    LOG_INFO(Graphics, "Wgpu grass clutter atlas: {:.0f} ms", atlasMs);
+    // Attach each slot to its surface's run.
+    for (int m = 0; m < materialCount; ++m)
+    {
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(m);
+        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+        {
+            continue;
+        }
+        for (unsigned char s = 0; s < source->surfaceCount && s < A3TerrainMaterial::MaxSurfaces; ++s)
+        {
+            SlotClutter& slot = slots[static_cast<size_t>(m)][s];
+            if (!slot.present || slot.coverage <= 0.0f)
+            {
+                continue;
+            }
+            std::string key(source->surfaces[s].Data());
+            std::transform(key.begin(), key.end(), key.begin(),
+                           [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            const auto run = atlasRuns.find(key);
+            if (run != atlasRuns.end())
+            {
+                slot.layerFirst = run->second.first;
+                slot.layerCount = run->second.second;
+            }
+        }
     }
 
     // Re-derive the dev panel's per-material selection from the authored
@@ -1090,7 +1429,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
             int dominant = -1;
             for (int s = 0; s < static_cast<int>(A3TerrainMaterial::MaxSurfaces); ++s)
             {
-                if (histogram[s] <= 0 || slotTable[static_cast<size_t>(s)].surfaceId == 0xff)
+                if (histogram[s] <= 0 || slotTable[static_cast<size_t>(s)].layerCount == 0)
                 {
                     continue;
                 }
@@ -1099,11 +1438,17 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
                     dominant = s;
                 }
             }
-            const uint32_t surfaceId =
-                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].surfaceId : GrassSurfaceNone;
+            // The cell grows the plants its dominant clutter-bearing surface
+            // declares. The run is contiguous, so this is two small fields and
+            // the shader needs no table: see the geography word layout above.
+            const uint32_t runFirst =
+                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerFirst : 0u;
+            const uint32_t runCount =
+                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerCount : 0u;
             uint32_t word = GrassAuthoredCell;
             word |= (quantised << GrassCoverageShift) & GrassCoverageMask;
-            word |= (surfaceId << GrassSurfaceShift) & GrassSurfaceMask;
+            word |= (runFirst << GrassSurfaceShift) & GrassSurfaceMask;
+            word |= (runCount << GrassRunCountShift) & GrassRunCountMask;
             if (quantised > 0)
             {
                 word |= GrassTextureCell;
@@ -1163,7 +1508,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
              "Wgpu grass mask bake: {} masks decoded ({} unreadable, {:.1f} MB read) for {} authored materials; "
              "{} surfaces grow clutter ({} from the map's config, {} by name), peak coverage {:.2f}; "
              "{} cells left on the legacy path; {:.0f} ms on {} thread(s)",
-             decoded.load(), missing.load(), maskBytes.load() / (1024.0 * 1024.0), authoredMaterials, surfaceIds.size(),
+             decoded.load(), missing.load(), maskBytes.load() / (1024.0 * 1024.0), authoredMaterials, clutterSurfaces.size(),
              byCatalogue, byName, maxCoverage, legacyCells, ms, pool ? pool->ThreadCount() : 1u);
     LOG_INFO(Graphics, "Wgpu grass surface coverage: [{}]", surfaceReport.empty() ? "none" : surfaceReport);
     if (decoded.load() == 0)
@@ -1576,6 +1921,46 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
     // The upload is a fixed nine-layer local texture array: primary A3 clump
     // plus every available user-local grass family.
     const char* overridePath = std::getenv("WGR_GRASS_TUFT");
+
+    // The map's own plants, where the map has them. Layer 0 is still the loose
+    // primary card -- the atlas builder reserved it -- so a surface whose clutter
+    // did not resolve, and every OFP world, keep exactly the look they have now.
+    if (!_clutterAtlas.empty() && _clutterAtlasLayers > 1)
+    {
+        constexpr size_t LayerBytes = static_cast<size_t>(GrassAtlasSize) * GrassAtlasSize * 4u;
+        int w = 0, h = 0, channels = 0;
+        uint8_t* pixels = nullptr;
+        for (const char* candidate : {overridePath, "assets/grass/meadow-grass-clump-alpha-1024.png"})
+        {
+            if (candidate != nullptr && *candidate != '\0')
+            {
+                pixels = stbi_load(candidate, &w, &h, &channels, 4);
+                if (pixels != nullptr)
+                    break;
+            }
+        }
+        if (pixels != nullptr)
+        {
+            stbir_resize_uint8_linear(pixels, w, h, w * 4, _clutterAtlas.data(), GrassAtlasSize, GrassAtlasSize,
+                                      GrassAtlasSize * 4, STBIR_RGBA);
+            stbi_image_free(pixels);
+        }
+        // Unused slots repeat layer 0 rather than sampling uninitialised memory.
+        for (uint32_t layer = _clutterAtlasLayers; layer < GrassAtlasLayers; ++layer)
+        {
+            std::memcpy(_clutterAtlas.data() + static_cast<size_t>(layer) * LayerBytes, _clutterAtlas.data(),
+                        LayerBytes);
+        }
+        _grassPhotoFamilies.clear();
+        _grassPhotoFamilies.emplace_back("map clutter (per surface)");
+        wgr_grass_set_tufts(_renderer, GrassAtlasSize, GrassAtlasSize, GrassAtlasLayers, _clutterAtlas.data());
+        _grassTuftWorld = worldKey;
+        LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
+                 _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
+                 static_cast<double>(LayerBytes * GrassAtlasLayers) / (1024.0 * 1024.0));
+        return;
+    }
+
     const char* primary[] = {overridePath, "assets/grass/meadow-grass-clump-alpha-1024.png"};
     constexpr int TargetSize = 1024;
     std::vector<uint8_t> layers;

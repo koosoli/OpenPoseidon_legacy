@@ -267,12 +267,9 @@ const MoonEnv& GetMoonEnv()
     return env;
 }
 
-// The dev-panel knobs (Engine::SkySettings) with the env overrides folded in. GEngine
-// is null in headless tools and on the dedicated server, where the defaults apply.
-Engine::SkySettings ResolveCelestialSettings()
+// Fold the WGR_MOON* overrides into an already-loaded settings block.
+void ApplyMoonEnv(const MoonEnv& e, Engine::SkySettings& s)
 {
-    Engine::SkySettings s = GEngine ? GEngine->GetSkySettings() : Engine::SkySettings{};
-    const MoonEnv& e = GetMoonEnv();
     if (e.enable == 0)
     {
         s.moonRealistic = false;
@@ -321,30 +318,45 @@ Engine::SkySettings ResolveCelestialSettings()
     {
         s.moonPhaseOverride = e.phase;
     }
+}
 
-    // WRITE THE ENV OVERRIDES BACK, ONCE.
-    //
-    // Without this, `s` is a LOCAL copy and the env vars only ever reached LightSun. That is
-    // exactly half the moon: the light is computed here (so WGR_MOON_BRIGHT visibly brightened
-    // the ground) but the DISC's radiance is computed in EngineWgpu::PushSkyRuntime from the
-    // engine's own SkySettings, which never saw the override at all — so the same flag moved
-    // the moonlight and did nothing to the moon. Pushing the resolved block back into the
-    // engine makes both sides read one set of numbers.
-    //
-    // One-shot on purpose: env wins at startup, and from then on the Sky tab owns the values,
-    // so a slider drag is not silently reverted on the next simulation tick.
-    static bool envApplied = false;
-    if (!envApplied && GEngine && e.AnySet())
+// The dev-panel knobs (Engine::SkySettings), with the env overrides folded in ONCE and then
+// handed to the engine so both halves of the moon read one set of numbers.
+//
+// Why the hand-over rather than folding env in on every call: the light is computed HERE, but
+// the DISC's radiance is computed in EngineWgpu::PushSkyRuntime from the engine's own
+// SkySettings. Applying the override only to this local copy meant WGR_MOON_BRIGHT visibly
+// brightened the ground and did nothing whatsoever to the moon. Re-applying it on every call
+// would fix that but break the other direction: a Sky-tab drag would move the disc (renderer
+// reads the panel) while the moonlight stayed pinned to the env value (this function would
+// stomp it back every tick). So env wins exactly once, at startup, and the panel owns both
+// sides from then on.
+//
+// GEngine is null in headless tools and on the dedicated server; there the hand-over cannot
+// happen, so the overrides keep being applied locally, which is the correct behaviour for a
+// process that has no Sky tab to own them.
+Engine::SkySettings ResolveCelestialSettings()
+{
+    const MoonEnv& e = GetMoonEnv();
+    static bool envHandedOver = false;
+
+    Engine::SkySettings s = GEngine ? GEngine->GetSkySettings() : Engine::SkySettings{};
+
+    if (!envHandedOver && e.AnySet())
     {
-        envApplied = true;
-        GEngine->SetSkySettings(s);
+        ApplyMoonEnv(e, s);
+        if (GEngine)
+        {
+            GEngine->SetSkySettings(s);
+            envHandedOver = true;
+        }
     }
 
     // Report what the gate resolved to, once, like every other WGR_* switch in this codebase.
     // The renderer logs the moon again at the FFI boundary (wgr_set_sky_runtime); the pair
     // brackets the whole path, so a disagreement between them localises the fault immediately.
     static bool logged = false;
-    if (!logged)
+    if (!logged && GEngine)
     {
         logged = true;
         LOG_INFO(Graphics,

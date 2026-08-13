@@ -88,6 +88,50 @@ WgrSlice<WgrMeshVertex> AsMeshVerts(const std::vector<SVertex>& v)
     return {reinterpret_cast<const WgrMeshVertex*>(v.data()), U32(v.size())};
 }
 
+// MAT-043: which translated stage supplies a material's base colour.
+//
+// Stage0 when the material authors one. When it does not, the first authored LAYER colour
+// stands in. `Multi` is a four-layer masked blend and MAT-039's compromise is already "one
+// layer stands in for the base" -- it just assumed the authored layer is layer 0. Twelve of
+// the 1,049 Multi materials in the A2/OA corpus declare Stage1..Stage14 and no Stage0, so
+// BaseColour is genuinely absent while three good layer colours sit beside it. Those sections
+// also carry no face texture (Arma 2 keeps the albedo in the RVMAT), so giving up left the
+// section untextured -- flat light grey, near-black once lit.
+//
+// This lives in one place because the retained path (ResolveMaterialBaseColour) and the CPU
+// direct path (DrawSectionTL) each had their OWN BaseColour lookup, so fixing one silently
+// left the other resolving the same material differently.
+//
+// It can only fire where nothing would otherwise bind, so it cannot change a surface that
+// resolves today.
+static const Asset::Material::TranslatedSlot* EffectiveBaseColourStage(
+    const Asset::Material::TranslatedMaterial& translated, const char*& whichStage)
+{
+    using Slot = Asset::Material::MaterialSlot;
+    whichStage = "Stage0";
+    if (const auto* base = translated.Find(Slot::BaseColour))
+    {
+        return base;
+    }
+    struct LayerFallback
+    {
+        Slot        slot;
+        const char* label;
+    };
+    static constexpr LayerFallback kLayerFallback[] = {
+        {Slot::LayerColour1, "Stage1"}, {Slot::LayerColour2, "Stage2"}, {Slot::LayerColour3, "Stage3"}};
+    for (const auto& candidate : kLayerFallback)
+    {
+        const auto* layer = translated.Find(candidate.slot);
+        if (layer && !layer->texture.isProcedural && !layer->texture.path.empty())
+        {
+            whichStage = candidate.label;
+            return layer;
+        }
+    }
+    return nullptr;
+}
+
 bool ContainsNoCase(const char* text, const std::string& part)
 {
     if (!text || part.empty())
@@ -1993,10 +2037,19 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
     const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||
                                      ContainsNoCase(debugMaterialPath, _materialDebugRvmatMatch);
+    // `__trace__` is an OBSERVER, not a selector: it must not change what is drawn.
+    //
+    // It used to, and that silently invalidated every appearance judgement made in a
+    // trace run. `productionMaterialTarget` below requires an EMPTY selector, so simply
+    // setting WGR_MATERIAL_DEBUG_RVMAT=__trace__ turned production material binding OFF
+    // for the whole CPU direct path -- every section drawn there came out untextured.
+    // "It renders flat white under __trace__" was therefore a property of the flag, not
+    // of the geometry. Treat the trace sentinel as no selector at all.
+    const bool diagnosticSelector = !_materialDebugRvmatMatch.empty() && _materialDebugRvmatMatch != "__trace__";
     // Without a diagnostic selector, authored section RVMATs are production
     // bindings. Unknown families and procedural stages remain intentionally
     // unbound after translation; there is no suffix-based fallback here.
-    const bool productionMaterialTarget = _materialDebugRvmatMatch.empty() && debugSection.surfMat;
+    const bool productionMaterialTarget = !diagnosticSelector && debugSection.surfMat;
     const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
     d._pad = materialDebugTarget
@@ -2109,7 +2162,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 // texture field blank.  For the explicit material-debug slice,
                 // make Stage0 the draw's base texture so a normal-map smoke
                 // exercises textured shading rather than a white fallback.
-                if (const auto* base = translated.Find(Asset::Material::MaterialSlot::BaseColour);
+                const char* cpuBaseFrom = "Stage0";
+                if (const auto* base = EffectiveBaseColourStage(translated, cpuBaseFrom);
                     base && !base->texture.isProcedural && !base->texture.path.empty())
                 {
                     Ref<Texture> baseTexture = _wbank->Load(base->texture.path.canonical().c_str());
@@ -3216,9 +3270,18 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
         return 0;
     };
 
-    const auto* base = cached->second.Find(Asset::Material::MaterialSlot::BaseColour);
+    const char* baseFrom = "Stage0";
+    const auto* base = EffectiveBaseColourStage(cached->second, baseFrom);
+
+    if (base && std::strcmp(baseFrom, "Stage0") != 0)
+    {
+        static std::unordered_set<std::string> loggedLayerBase;
+        if (loggedLayerBase.insert(materialPath).second)
+            LOG_INFO(Graphics, "Wgpu material: {} has no Stage0; using {} as the base layer (family={})", materialPath,
+                     baseFrom, cached->second.shaderFamily);
+    }
     if (!base)
-        return reject("no BaseColour slot", "");
+        return reject("no BaseColour slot and no layer colour", "");
 
     // A procedural stage is generated from its own name rather than loaded. The
     // constant-colour ones are a real albedo -- `mil_wallbig_multi` names its whole
@@ -3465,6 +3528,51 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             if (const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i)))
             {
                 mat.texture_id = baseColour;
+            }
+            else if (mat.texture_id == 0)
+            {
+                // MAT-043: the terminal case. No RVMAT albedo AND no face texture to stand
+                // in, so this section will draw with the no-texture default -- flat light
+                // grey, near-black once lit. `fallback=none` in ResolveMaterialBaseColour's
+                // warning is what found the fort rampart in a single grep, but it names only
+                // the RVMAT, and an RVMAT is shared across models. Name the model, LOD and
+                // section too, so the next one is identified without a bisection hunt.
+                const ShapeSection& sec2 = s->GetSection(i);
+                const char* rvmat = sec2.surfMat ? sec2.surfMat->GetName().Data() : "<none>";
+                // Model-space extent of the offending section. Size is what decides whether an
+                // untextured section is a cosmetic speck or the thing filling the screen, and a
+                // recolouring probe cannot be used to find out -- the debug-RVMAT selector also
+                // diverts the object off the retained path, so it changes two things at once.
+                // This perturbs nothing: combine it with the instance position from
+                // WGR_INSTANCE_TRACE to place the section in the world.
+                float lo[3] = {1e30f, 1e30f, 1e30f};
+                float hi[3] = {-1e30f, -1e30f, -1e30f};
+                int secFaces = 0;
+                for (Offset f = sec2.beg; f < sec2.end; s->NextFace(f))
+                {
+                    const Poly& poly = s->Face(f);
+                    if (poly.N() < 3)
+                    {
+                        continue;
+                    }
+                    secFaces++;
+                    for (int v = 0; v < poly.N(); v++)
+                    {
+                        Vector3Val p = s->Pos(poly.GetVertex(v));
+                        for (int a = 0; a < 3; a++)
+                        {
+                            lo[a] = floatMin(lo[a], p[a]);
+                            hi[a] = floatMax(hi[a], p[a]);
+                        }
+                    }
+                }
+                const float diag = secFaces > 0 ? Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).Size() : 0.0f;
+                static std::unordered_set<std::string> loggedUntextured;
+                if (loggedUntextured.insert(std::string(shape->Name()) + "|" + rvmat).second)
+                    LOG_WARN(Graphics,
+                             "Wgpu material: section draws UNTEXTURED (fallback=none) model={} lod={} section={} "
+                             "rvmat={} faces={} diag={} min=({},{},{}) max=({},{},{})",
+                             shape->Name(), level, i, rvmat, secFaces, diag, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
             }
             // The per-texel specular map, when the material names one. With it bound
             // the flat constant is applied in full and the map scales it per texel,
@@ -4837,6 +4945,15 @@ void EngineWgpu::PushRenderParams()
         const float overcast = GLandscape->GetOvercast();
         const float t = overcast < 0.0f ? 0.0f : (overcast > 1.0f ? 1.0f : overcast);
         _sky.cloudCoverage = _sky.cloudCoverageClear + (_sky.cloudCoverageFull - _sky.cloudCoverageClear) * t;
+    }
+    // WGR_CLOUD_COVERAGE=<0..1> pins coverage and overrides the weather drive above. The Sky tab
+    // can already do this, but a --no-dev capture has no Sky tab, and the cloud deck occludes the
+    // sun and moon discs per ray -- so with no way to force a clear sky from a command line, a
+    // capture of anything celestial is a coin flip against the mission's overcast.
+    if (const char* cc = std::getenv("WGR_CLOUD_COVERAGE"))
+    {
+        const float v = std::strtof(cc, nullptr);
+        _sky.cloudCoverage = v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
     }
 
     p.sky.cloud0 = {_sky.cloudCoverage, _sky.cloudDensity, _sky.cloudBottom, _sky.cloudTop};

@@ -29,8 +29,8 @@ struct GrassParams {
     lod_density: vec4<f32>,
     tint_procedural: vec4<f32>,
     tint_photo: vec4<f32>,
-    layer_bounds: array<vec4<f32>, 9>,
-    layer_means: array<vec4<f32>, 9>,
+    layer_bounds: array<vec4<f32>, 32>,
+    layer_means: array<vec4<f32>, 32>,
 };
 // Must mirror grass.wgsl's 32-byte layout exactly: both shaders bind the same
 // instance buffer through the shared `data_layout`.
@@ -89,7 +89,7 @@ fn lod_height_scale(packed_z: u32) -> f32 {
 // same way as the colour card, or the cascade would carry a silhouette larger
 // than the one drawn.
 fn photo_layer_bounds(layer: u32) -> vec4<f32> {
-    let b = grass.layer_bounds[min(layer, 8u)];
+    let b = grass.layer_bounds[min(layer, 31u)];
     if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
     return b;
 }
@@ -98,9 +98,28 @@ fn photo_layer_weight(index: u32) -> f32 {
     return max(grass.layer_weights[index / 4u][index % 4u], 0.0);
 }
 
+// Mirrors instance_layer_run / pick_photo_layer_run in grass.wgsl. The shadow
+// must resolve to the SAME atlas layer as the colour pass, so the per-surface
+// run is read from the instance here too rather than falling back to the global
+// mix -- otherwise a clutter-driven surface would cast the silhouette of the
+// legacy photo card.
+fn instance_layer_run(packed_w: u32) -> vec2<u32> {
+    return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
+}
+
+fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
+    let forced = grass.photo_mix.x;
+    if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
+    if (run.y > 0u) {
+        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        return min(run.x + min(pick, run.y - 1u), 31u);
+    }
+    return pick_photo_layer(patch_cell);
+}
+
 fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
     let forced = grass.photo_mix.x;
-    if (forced > -0.5) { return min(u32(forced + 0.5), 8u); }
+    if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
     if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
         return 0u;
     }
@@ -252,7 +271,7 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let quad_u = select(0.0, 1.0, right);
     let quad_v = select(0.0, 1.0, top);
     let patch_cell = floor(inst.xz / max(grass.renderer.w, 4.0));
-    let layer = pick_photo_layer(patch_cell);
+    let layer = pick_photo_layer_run(patch_cell, instance_layer_run(inst_packed.w));
     let bounds = photo_layer_bounds(layer);
     let u = mix(bounds.x, bounds.y, quad_u);
     let img_v = mix(bounds.w, bounds.z, quad_v);

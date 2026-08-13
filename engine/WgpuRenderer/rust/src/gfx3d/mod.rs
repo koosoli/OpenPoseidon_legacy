@@ -1564,12 +1564,14 @@ fn gtao_resources_are_valid_on_a_real_device() {
             proj: [1.4286, 1.9048, 0.0957, (mips.mips() - 1) as f32],
             screen: [w as f32, h as f32, 1.0 / w as f32, 1.0 / h as f32],
             tuning: [1.5, 1.0, 3.0, 10.0],
-            limits: [512.0, 1.0, 0.0, 0.0],
+            // Scale 1: this harness pins the per-pixel march, which is the reference path the
+            // block-replicated one has to agree with on a flat surface.
+            limits: [512.0, 1.0, 1.0, 0.0],
         },
     );
     blur.upload(&queue, w, h, 6.0, 24.0, 8.0);
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    gtao.dispatch(&mut enc, w, h);
+    gtao.dispatch(&mut enc, w, h, 1);
     blur.dispatch(&mut enc, w, h);
     queue.submit(std::iter::once(enc.finish()));
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
@@ -1830,6 +1832,30 @@ fn normal_resolve_takes_a_single_sample_rather_than_averaging() {
     }
 }
 
+/// AO march resolution gate. DEFAULT 2 (one march per 2x2 block, denoised back to full
+/// resolution) — the owner's call after the full-res march measured as the frame's most
+/// resolution-hungry pass. `WGR_GTAO_SCALE=1` restores the per-pixel march for an A/B capture or
+/// for anyone who wants it back; the dev panel's AO quality control drives the same value live
+/// through `Gfx3d::set_gtao_scale`.
+///
+/// Logs what it resolved to, like the other WGR_* gates, so a benchmark log says which path ran.
+fn gtao_scale_from_env() -> u32 {
+    let scale = std::env::var("WGR_GTAO_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(2)
+        .clamp(1, 2);
+    eprintln!(
+        "[wgr] gtao march scale: {scale} ({}) from WGR_GTAO_SCALE",
+        if scale == 1 {
+            "one march per pixel"
+        } else {
+            "one march per 2x2 block, bilateral-upsampled by the denoise"
+        }
+    );
+    scale
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct GtaoParams {
@@ -1841,7 +1867,8 @@ pub(crate) struct GtaoParams {
     pub screen: [f32; 4],
     // x = world radius (m), y = strength, z = slices, w = steps per slice.
     pub tuning: [f32; 4],
-    // x = max screen radius (px, a sanity bound), y = thickness falloff, zw unused.
+    // x = max screen radius (px, a sanity bound), y = thickness falloff, z = AO scale
+    // (screen pixels per marched sample, 1 or 2 — see cs_gtao), w unused.
     pub limits: [f32; 4],
 }
 
@@ -2008,10 +2035,14 @@ impl Gtao {
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(params));
     }
 
-    pub(crate) fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, w: u32, h: u32) {
+    // `scale` = screen pixels per marched sample; MUST equal GtaoParams.limits.z, because the
+    // shader indexes blocks and this sizes the grid of blocks. Passing them separately is the
+    // one way they can disagree, so the caller derives both from the same value.
+    pub(crate) fn dispatch(&self, encoder: &mut wgpu::CommandEncoder, w: u32, h: u32, scale: u32) {
         let Some(bind) = self.bind.as_ref() else {
             return;
         };
+        let scale = scale.max(1);
         encoder.push_debug_group("wgr_gtao");
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("wgr_gtao"),
@@ -2019,8 +2050,13 @@ impl Gtao {
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, bind, &[]);
-        // Workgroup is 8x8; round up so edge pixels are covered (the shader bounds-checks).
-        pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
+        // One invocation per scale x scale BLOCK. Workgroup is 8x8; round up so edge blocks are
+        // covered (the shader bounds-checks every store).
+        pass.dispatch_workgroups(
+            w.div_ceil(scale).div_ceil(8),
+            h.div_ceil(scale).div_ceil(8),
+            1,
+        );
         drop(pass);
         encoder.pop_debug_group();
     }
@@ -2552,6 +2588,10 @@ pub struct Gfx3d {
     // AO target keeps whatever it last held, which is why the consumers read it through the same
     // `strength` gate rather than sampling unconditionally.
     gtao_settings: GtaoSettings,
+    // Screen pixels per marched AO sample (1 or 2). Deliberately NOT a field of GtaoSettings:
+    // C++ pushes that struct every frame, so anything living in it is frame-0-only from the
+    // renderer's side and an env override would be silently reverted. See `set_gtao_scale`.
+    gtao_scale: u32,
     // Material Debug (dev panel) for the retained path, pushed straight into the frame
     // UBO each frame. Presentation state, never baked into the material records.
     material_debug_view: u32,
@@ -3152,6 +3192,7 @@ impl Gfx3d {
             gtao,
             gtao_blur,
             gtao_settings: GtaoSettings::default(),
+            gtao_scale: gtao_scale_from_env(),
             material_debug_view: 0,
             material_debug_flags: 1 << 2, // compose Multi layers, matching the C++ default
             cam_gtao_proj: Vec::new(),
@@ -6388,6 +6429,18 @@ impl Gfx3d {
         &self.gtao_settings
     }
 
+    /// Screen pixels per marched AO sample (1 = per pixel, 2 = per 2x2 block).
+    pub fn gtao_scale(&self) -> u32 {
+        self.gtao_scale
+    }
+
+    /// Live override for the AO march resolution, for the dev panel's AO quality control.
+    /// Clamped to 1..=2: the block-replicate + bilateral-upsample argument holds for a 2x2 block,
+    /// and past that the denoise can no longer reconstruct a contact shadow it never sampled.
+    pub fn set_gtao_scale(&mut self, scale: u32) {
+        self.gtao_scale = scale.clamp(1, 2);
+    }
+
     pub fn gtao_debug_on(&self) -> bool {
         self.gtao_settings.enabled && self.gtao_settings.debug_mode > 0
     }
@@ -6464,7 +6517,13 @@ impl Gfx3d {
                     s.slices.max(1) as f32,
                     s.steps.max(1) as f32,
                 ],
-                limits: [s.max_radius_px.max(2.0), s.thickness.max(0.01), 0.0, 0.0],
+                limits: [
+                    s.max_radius_px.max(2.0),
+                    s.thickness.max(0.01),
+                    // Must match the `scale` handed to `dispatch` below — see its comment.
+                    self.gtao_scale.max(1) as f32,
+                    0.0,
+                ],
             },
         );
         self.gtao_blur.upload(
@@ -6476,7 +6535,7 @@ impl Gfx3d {
             s.blur_normal_power,
         );
         timers.begin(encoder, crate::gpu_timers::Region::GtaoCompute);
-        self.gtao.dispatch(encoder, w, h);
+        self.gtao.dispatch(encoder, w, h, self.gtao_scale);
         timers.end(encoder, crate::gpu_timers::Region::GtaoCompute);
         timers.begin(encoder, crate::gpu_timers::Region::GtaoBlur);
         self.gtao_blur.dispatch(encoder, w, h);

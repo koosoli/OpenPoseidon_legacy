@@ -4343,12 +4343,22 @@ void DrawSkyTab()
     changed |= ImGui::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
     ImGui::SetItemTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
                           "phase falloff. 0 turns the moon off entirely.");
-    changed |= ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.02f, "%.4f",
+    changed |= ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f",
                                   ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Full-moon irradiance as a FRACTION of the sun's, for the HDR sky-lit path.\n"
-                          "The physical ratio is 2.5e-6, which renders as black -- human night vision is\n"
-                          "scotopic and this tonemap is not. 0.0025 (1/400) is a legible night that still\n"
-                          "reads as night. Scaled by the phase curve, so a quarter moon is ~11x dimmer.");
+    ImGui::SetItemTooltip(
+        "Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
+        "disc's radiance, because they are the same body: the disc/ground ratio is fixed by\n"
+        "the moon's solid angle, so one knob is the honest number of knobs.\n"
+        "\n"
+        "The physical ratio is 2.5e-6, which renders as black -- night vision is scotopic and\n"
+        "this tonemap is not. What it has to beat is the engine's night AMBIENT floor, which\n"
+        "on the HDR sky-lit path works out at ~0.023 radiance at the 22:00 preset. The moon's\n"
+        "directional term is roughly intensity * 0.41, so:\n"
+        "  0.0025  moon =  4% of ambient -- present in the buffer, invisible on screen\n"
+        "  0.02    moon =  35% of ambient -- a hint of directional shading\n"
+        "  0.06    moon = 1.1x ambient -- clear moonlight, readable shadows  <- default\n"
+        "  0.11    moon = 2.0x ambient -- matches the legacy/GL33 path's moonlit look\n"
+        "Scaled by the phase curve on top, so a quarter moon is ~11x dimmer than these.");
     changed |= ImGui::Checkbox("Moonlight (directional + shadows)", &s.moonLighting);
     ImGui::SetItemTooltip("On: the moon becomes the scene's directional light once the sun is below -2 deg "
                           "and the moon is above the horizon, and casts shadows. Off: the pre-existing "

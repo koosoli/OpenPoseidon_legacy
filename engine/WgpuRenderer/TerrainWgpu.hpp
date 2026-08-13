@@ -65,6 +65,13 @@ class TerrainWgpu : public ITerrainRenderer
     // the authored surfaces; it is set only on a world change, so a live toggle
     // is not undone by the next re-upload.
     bool BakeAuthoredGrassMask(const Landscape& land, std::vector<uint32_t>& geography, bool refreshSelection);
+    // Builds the world's own clutter atlas: one layer per clutter class, the
+    // classes of a surface consecutive so the shader selects within a run.
+    // `surfaces` is (surface texture key, character) in the order the runs
+    // should be laid down; `outRuns` maps the same key to (first, count).
+    bool BuildClutterAtlas(const std::vector<std::pair<std::string, RStringB>>& surfaces,
+                           std::unordered_map<std::string, std::pair<uint8_t, uint8_t>>& outRuns,
+                           std::vector<uint8_t>& outLayers, uint32_t& outLayerCount);
     void UploadJitterMap(const Landscape& land);
     // Loads the global high-frequency detail noise texture (config-driven, once).
     void UploadDetailNoise();
@@ -133,6 +140,10 @@ class TerrainWgpu : public ITerrainRenderer
     // without decoding every mask on the map again.
     std::vector<uint32_t> _grassAuthoredCells;
     std::string _grassAuthoredWorld;
+    // The world's clutter atlas, built during the mask bake and uploaded by
+    // UploadGrassTuft. Empty on every OFP world, which keeps the loose cards.
+    std::vector<uint8_t> _clutterAtlas;
+    uint32_t _clutterAtlasLayers = 0;
 
     // Terrain params UBO mirror. The static fields (grid/dims/range) are set at upload; the
     // coast wet-band fields (sea_level/time/swash/wet_*) are refreshed and pushed every frame.

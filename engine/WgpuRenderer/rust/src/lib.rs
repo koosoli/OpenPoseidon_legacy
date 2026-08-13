@@ -246,6 +246,14 @@ pub struct Renderer {
     // already final, so the god-ray march can reuse it instead of recording a second resolve.
     // Deliberately NOT set by the pre-water resolve: depth is still being written after that one.
     frame_depth_final_resolved: bool,
+    // PERF: whether the FAR-reduce depth resolve currently in `water_depth_view` matches the depth
+    // buffer as it now stands. A full-res resolve is not cheap (it reads every MSAA sample), and
+    // the frame asked for it up to four times: water, clouds, the god rays, the underwater
+    // compositor. This is a narrower claim than `frame_depth_final_resolved` above — that one says
+    // "no more 3D depth will be written this frame", this one says "the resolve is not stale yet" —
+    // and it is cleared by every pass that writes depth, which is what makes skipping provably
+    // safe rather than a guess. See `ensure_far_depth_resolve`.
+    far_depth_resolve_current: bool,
     // Bloom pyramid, built alongside the tonemap on the HDR path; the resolve adds it.
     bloom: Option<Bloom>,
     // Eye adaptation / auto-exposure; produces a 1x1 exposure scale the resolve applies.
@@ -855,6 +863,7 @@ impl Renderer {
             godrays,
             godrays_frame: None,
             frame_depth_final_resolved: false,
+            far_depth_resolve_current: false,
             bloom,
             exposure,
             exposure_params: ffi::WgrExposure::default(),
@@ -1059,6 +1068,28 @@ impl Renderer {
         self.grass.stats()
     }
 
+    // Record the FAR-reduce MSAA depth resolve, unless one already recorded on this encoder is
+    // still valid (see `far_depth_resolve_current`). No-op at 1x, where `water_depth_view` is the
+    // depth target's own aspect and is always current.
+    //
+    // PERF: `Gfx3d::resolve_water_depth` is NOT idempotent — it unconditionally records a
+    // full-screen pass that reads all `sample_count` depth samples per pixel. On a normal
+    // above-water frame with clouds the old code recorded it twice back to back (water, then
+    // clouds) with only the water draw in between, and that pass attaches depth READ-ONLY
+    // (`depth_ops: None`), so the second resolve provably could not observe anything new.
+    //
+    // Every caller now goes through here, and every pass that writes depth clears the flag, so
+    // this stays correct for the cases where a later resolve genuinely IS needed: a post-
+    // `ClearDepth` segment (the weapon/near view) rewrites depth, and the underwater compositor
+    // and god rays run after it.
+    fn ensure_far_depth_resolve(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if self.far_depth_resolve_current {
+            return;
+        }
+        self.gfx3d.resolve_water_depth(encoder);
+        self.far_depth_resolve_current = true;
+    }
+
     // Record the god-ray march + additive composite into the single-sample HDR scene view.
     //
     // Everything it reads already exists and is already up to date at this point in the frame:
@@ -1079,7 +1110,7 @@ impl Renderer {
         // water and cloud passes also use; both of those run earlier, so on a normal frame this is
         // already done and the flag skips a second full-screen resolve. At 1x it is a no-op.
         if !self.frame_depth_final_resolved {
-            self.gfx3d.resolve_water_depth(encoder);
+            self.ensure_far_depth_resolve(encoder);
             self.frame_depth_final_resolved = true;
         }
         let Some(depth) = self.gfx3d.water_depth_view().cloned() else {
@@ -1153,7 +1184,7 @@ impl Renderer {
         let post_source = if underwater_time.is_some() {
             // The compositor reads a single-sample reversed-Z depth target, including
             // when the HDR scene colour was MSAA-resolved above.
-            self.gfx3d.resolve_water_depth(encoder);
+            self.ensure_far_depth_resolve(encoder);
             self.ensure_underwater_target(self.config.width, self.config.height);
             let target = &self
                 .underwater_target
@@ -1980,6 +2011,9 @@ impl Renderer {
         // Cleared per frame; set by the first depth resolve recorded after the 3D depth is final,
         // so the god-ray march can reuse it (see render_god_rays).
         self.frame_depth_final_resolved = false;
+        // New encoder, and the depth target is about to be cleared and rewritten: nothing
+        // resolved on a previous frame's encoder can be reused.
+        self.far_depth_resolve_current = false;
         self.gpu_timers.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
         // GPU completion from acquire/present pacing without summing overlapping
@@ -2170,6 +2204,40 @@ impl Renderer {
                 reflected_vp,
                 true,
             );
+            // CORRECTNESS — close and submit the frame here, so the reflected sky uniform this
+            // block just uploaded is the one these passes actually execute with.
+            //
+            // `Queue::write_buffer` is documented to begin GPU execution "only on the next call to
+            // Queue::submit(), just before the explicitly submitted commands". Sky owns ONE uniform
+            // buffer and the frame writes it twice: once above with the mirrored camera's
+            // inv_view_proj / cam_pos / (zeroed) cascades, and once further down with the main
+            // camera's. With a single submit at the end of the frame BOTH writes landed before ANY
+            // command ran, so the last one won and the reflected sky, cloud march and cloud
+            // composite were all rendered with the MAIN camera's rays — the mirrored basis built
+            // above was computed, uploaded, and then silently overwritten before it was ever read.
+            // The reflection still looked plausible (it is half-res and mip-blurred before water
+            // samples it), which is why this survived: it reads as a slightly wrong sky, not as a
+            // broken one.
+            //
+            // Splitting the submit is the fix available from here. The alternative — a second
+            // uniform slice or a dynamic offset — lives in sky/mod.rs, which another workstream
+            // owns; that is the tidier end state and should replace this when that file is free.
+            // The extra submission is not pure cost: the reflection no longer waits for the rest of
+            // the frame to be recorded before the GPU can start it.
+            //
+            // Safe because the sky uniform is the only buffer this frame writes twice (every other
+            // upload — cameras, terrain, cull params, water, tonemap — is written once, and a write
+            // flushed at an earlier submit than strictly needed is harmless). Timestamps are
+            // queue-global and the query set is shared, so the FrameTotal bracket opened before
+            // this submit still resolves correctly against its close in the second command buffer.
+            let planar_encoder = std::mem::replace(
+                &mut encoder,
+                self.device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("wgr_frame_main"),
+                    }),
+            );
+            self.queue.submit(std::iter::once(planar_encoder.finish()));
         }
 
         // The local ripple field is independent of opaque depth and is consumed only by
@@ -2616,6 +2684,10 @@ impl Renderer {
             seg_idx += 1;
             let seg_ops = &ops[start..end];
             let has_2d = seg_ops.iter().any(|o| matches!(o, Plan3dOp::Draw2D(_)));
+            // This segment is about to write depth (prepass and/or colour sub-pass), so any
+            // far-resolve from an earlier segment is now stale. Cleared HERE rather than after the
+            // passes so an early `continue`/`break` cannot leave a stale resolve marked current.
+            self.far_depth_resolve_current = false;
 
             // Depth+normal prepass over the FIRST (world) depth segment only
             // (docs/depth-prepass-plan.md, decision 5): start == 0 marks it. The prepass
@@ -2890,7 +2962,7 @@ impl Renderer {
                 // Water reconstructs the seabed from the FARTHEST-sample depth resolve (not the
                 // Hi-Z near resolve): a nearest resolve reads A2C foliage/rotor edges as the seabed
                 // and rings them with foam. Record that resolve, then point water at it.
-                self.gfx3d.resolve_water_depth(&mut encoder);
+                self.ensure_far_depth_resolve(&mut encoder);
                 let dgen = self.gfx3d.depth_gen();
                 if let Some(dv) = self.gfx3d.water_depth_view() {
                     self.water.set_depth_view(&self.device, dv, dgen);
@@ -3007,9 +3079,11 @@ impl Renderer {
             // terrain and envelop the camera when flown through — not a sky-only element. World segment
             // only, HDR + coverage>0; after water so it composites over water too.
             if start == 0 && !resolved && sky_drawn && self.sky.clouds_active(&self.sky_params) {
-                // Ensure a resolved single-sample scene depth exists this frame (idempotent if water
-                // already resolved it). Uses the farthest-sample resolve (as water does).
-                self.gfx3d.resolve_water_depth(&mut encoder);
+                // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
+                // water pass above already recorded it and attaches depth read-only, so the flag
+                // makes this a no-op instead of a second full-res resolve). Farthest-sample, as
+                // water uses.
+                self.ensure_far_depth_resolve(&mut encoder);
                 // All 3D depth is written by now, so this resolve is the FINAL one: the god-ray
                 // march in the post chain can reuse it rather than recording its own.
                 self.frame_depth_final_resolved = true;
@@ -3075,6 +3149,9 @@ impl Renderer {
                 });
                 render_ops(self, &mut pass, seg_ops, display_2d, true, false);
                 drop(pass);
+                // The 2D sub-pass attaches depth Load/Store, so a depth-tested 2D draw can write
+                // it. That is after this segment's water/cloud resolves, so mark them stale.
+                self.far_depth_resolve_current = false;
             }
 
             if end >= ops.len() {
@@ -3096,7 +3173,7 @@ impl Renderer {
                 && underwater_time.is_some()
                 && !resolved
             {
-                self.gfx3d.resolve_water_depth(&mut encoder);
+                self.ensure_far_depth_resolve(&mut encoder);
                 let depth = self
                     .gfx3d
                     .water_depth_view()
@@ -3132,7 +3209,7 @@ impl Renderer {
                 .unwrap_or_else(|| scene_view.clone());
             self.run_tonemap(&mut encoder, &hdr_source, &color, underwater_time);
         } else if underwater_time.is_some() && !resolved {
-            self.gfx3d.resolve_water_depth(&mut encoder);
+            self.ensure_far_depth_resolve(&mut encoder);
             let depth = self
                 .gfx3d
                 .water_depth_view()
@@ -3470,7 +3547,13 @@ impl Renderer {
             .set_blade_atlas(&self.device, &self.queue, width, height, layers, rgba);
     }
 
-    fn grass_set_params(&mut self, params: WgrGrassParams) {
+    fn grass_set_params(&mut self, mut params: WgrGrassParams) {
+        // Ablation, applied HERE rather than in grass/mod.rs on purpose: C++ rebuilds and pushes
+        // this whole struct every frame from GrassSettings, so the renderer-side `WGR_GRASS` gate
+        // only ever decided frame 0. See `Ablate`.
+        if ABLATE.get_or_init(Ablate::from_env).grass {
+            params.enabled = 0.0;
+        }
         self.grass.set_params(&self.queue, params);
     }
 

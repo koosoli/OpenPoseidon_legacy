@@ -126,20 +126,62 @@ fn gtao_arc(h: f32, g: f32) -> f32 {
     return 0.25 * (cos(g) - cos(2.0 * h - g) + 2.0 * h * sin(g));
 }
 
+// Write one marched result to every pixel of its `scale` x `scale` block.
+fn store_block(base: vec2<i32>, dims: vec2<i32>, scale: i32, value: vec4<f32>) {
+    for (var y = 0; y < scale; y = y + 1) {
+        for (var x = 0; x < scale; x = x + 1) {
+            let q = base + vec2<i32>(x, y);
+            if (q.x < dims.x && q.y < dims.y) {
+                textureStore(ao_out, q, value);
+            }
+        }
+    }
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn cs_gtao(@builtin(global_invocation_id) gid: vec3<u32>) {
     let dims = vec2<i32>(textureDimensions(ao_out));
-    let px = vec2<i32>(gid.xy);
-    if (px.x >= dims.x || px.y >= dims.y) {
+    // PERF (AO resolution). `scale` is how many screen pixels across one marched sample covers:
+    // 1 = a march per pixel, 2 = a march per 2x2 block replicated over it. The march is ~72 depth
+    // taps per invocation and was by far the most resolution-hungry pass in the frame, so at
+    // scale 2 it costs a quarter of what it did.
+    //
+    // The AO TARGET stays full resolution and the bilateral denoise after it stays full
+    // resolution, and that is the whole design: that blur already rejects taps on full-res depth
+    // and normal divergence, so running it over replicated blocks makes it a joint bilateral
+    // UPSAMPLE for free, using the exact filter the plan calls the entire denoise budget (there
+    // is no TAA here). A separate half-res AO target plus a bespoke upsample would have saved a
+    // little more bandwidth and cost a second edge-aware filter to get wrong.
+    let scale = max(i32(params.limits.z), 1);
+    let block = vec2<i32>(gid.xy) * scale;
+    if (block.x >= dims.x || block.y >= dims.y) {
         return;
     }
 
-    let z = sample_z_mip(px, 0);
+    // Representative pixel for the block: the NEAREST surface in it, not the corner or the
+    // centre. Picking blindly is the classic half-res silhouette artifact — where a block
+    // straddles an edge, a sky (or far) representative hands background AO to foreground pixels,
+    // and the denoise cannot reject it because the tap's own full-res depth says "surface". Least
+    // linear z = nearest = the surface most likely to be doing the occluding. Costs `scale^2`
+    // loads of a chain we are already sampling.
+    var px = block;
+    var z = sample_z_mip(block, 0);
+    for (var y = 0; y < scale; y = y + 1) {
+        for (var x = 0; x < scale; x = x + 1) {
+            let q = min(block + vec2<i32>(x, y), dims - vec2<i32>(1));
+            let zq = sample_z_mip(q, 0);
+            if (zq < z) {
+                z = zq;
+                px = q;
+            }
+        }
+    }
+
     // Nothing drawn here. Unoccluded, and marching would integrate garbage horizons against a
     // surface that does not exist. Bent normal points at the eye so a consumer that reads it
-    // anyway gets something sane.
+    // anyway gets something sane. (Every pixel of the block is sky: `z` is the nearest of them.)
     if (z >= SKY_Z * 0.5) {
-        textureStore(ao_out, px, vec4<f32>(0.0, 0.0, -1.0, 1.0));
+        store_block(block, dims, scale, vec4<f32>(0.0, 0.0, -1.0, 1.0));
         return;
     }
 
@@ -281,5 +323,7 @@ fn cs_gtao(@builtin(global_invocation_id) gid: vec3<u32>) {
     // normal so the ambient lookup never samples a zero direction.
     let bent_len = length(bent);
     let bent_n = select(n, bent / bent_len, bent_len > 1e-5);
-    textureStore(ao_out, px, vec4<f32>(bent_n, ao));
+    // Replicate over the block (identity at scale 1); the bilateral denoise resolves it back to
+    // per-pixel detail along depth and normal edges.
+    store_block(block, dims, scale, vec4<f32>(bent_n, ao));
 }

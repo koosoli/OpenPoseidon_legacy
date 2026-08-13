@@ -89,11 +89,11 @@ struct GrassParams {
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
     // alpha test, so rasterising it was pure overdraw on a fill-bound path.
-    layer_bounds: array<vec4<f32>, 9>,
+    layer_bounds: array<vec4<f32>, 32>,
     // Mean linear colour of each layer's covered texels. The contrast pivot: a
     // fixed pivot made contrast a brightness change, and a DISTANCE-dependent
     // one, because mips average each texel toward exactly this value.
-    layer_means: array<vec4<f32>, 9>,
+    layer_means: array<vec4<f32>, 32>,
 };
 
 // 32 bytes. `pos_seed` stays f32 for world precision; everything the compute
@@ -325,7 +325,7 @@ fn lod_height_scale(packed_z: u32) -> f32 {
 // Opaque box of a photo layer, (u0, u1, v0, v1). Defaults to the full quad, so
 // a layer with no transparent margin -- or no atlas at all -- is untrimmed.
 fn photo_layer_bounds(layer: u32) -> vec4<f32> {
-    let b = grass.layer_bounds[min(layer, 8u)];
+    let b = grass.layer_bounds[min(layer, 31u)];
     // A degenerate or unset box would collapse the card; fall back to the quad.
     if (b.y - b.x < 0.02 || b.w - b.z < 0.02) { return vec4<f32>(0.0, 1.0, 0.0, 1.0); }
     return b;
@@ -335,9 +335,37 @@ fn photo_layer_weight(index: u32) -> f32 {
     return max(grass.layer_weights[index / 4u][index % 4u], 0.0);
 }
 
+// The atlas run this blade's SURFACE declares, unpacked from the instance.
+//
+//   bits 0-2  species (unchanged)
+//   bits 3-7  first atlas layer, 0-31
+//   bits 8-10 how many layers follow it, 0 = this surface has none
+//
+// The whole point of the contiguous run is that selection is `first + hash*count`
+// -- an unpack and a multiply, no loop over a mask and no second texture fetch.
+// The field arrives free: cs_place* already has the geography texel in a register
+// for the exclusion tests, so writing it into the instance costs nothing there,
+// and the vertex shader already reads `packed.w` for the species.
+fn instance_layer_run(packed_w: u32) -> vec2<u32> {
+    return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
+}
+
+fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
+    let forced = grass.photo_mix.x;
+    if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
+    // A surface whose clutter the map actually declares picks from its own run.
+    if (run.y > 0u) {
+        let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
+        return min(run.x + min(pick, run.y - 1u), 31u);
+    }
+    // Otherwise the legacy global mix: every OFP world, and any Arma surface
+    // whose clutter classes all failed to resolve a model.
+    return pick_photo_layer(patch_cell);
+}
+
 fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
     let forced = grass.photo_mix.x;
-    if (forced > -0.5) { return min(u32(forced + 0.5), 8u); }
+    if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
     if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
         return 0u;
     }
@@ -647,10 +675,15 @@ fn species_transmission(species: u32) -> vec4<f32> {
     }
 }
 
-fn pack_flatten(flatten: vec4<f32>, species: u32) -> vec4<u32> {
+// `geo` carries the surface's atlas run in bits 23-30 (see the geography word
+// layout in TerrainWgpu.cpp); it is moved into packed.w bits 3-10 so the vertex
+// shader can read it from the instance it already loads.
+fn pack_flatten(flatten: vec4<f32>, species: u32, geo: u32) -> vec4<u32> {
+    let first = (geo >> 23u) & 31u;
+    let count = (geo >> 28u) & 7u;
     return vec4<u32>(pack2x16snorm(clamp(flatten.xy, vec2<f32>(-1.0), vec2<f32>(1.0))),
                      pack2x16unorm(vec2<f32>(clamp(flatten.z, 0.0, 1.0), clamp(flatten.w, 0.0, 1.0))),
-                     0u, species & 7u);
+                     0u, (species & 7u) | (first << 3u) | (count << 8u));
 }
 
 // The player helicopter uses an elevated interactor strength as a rotor marker.
@@ -729,7 +762,7 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
     packed.z = pack_lod_fade(near_fade);
     instances[out_index].packed = packed;
 }
@@ -786,7 +819,7 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     instances[out_index].pos_seed = vec4<f32>(world_xz.x, y, world_xz.y, seed);
-    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz));
+    var packed = pack_flatten(eval_flatten(world_xz), pick_species(world_xz), geo);
     packed.z = pack_lod_fade(mid_fade);
     instances[out_index].packed = packed;
 }
@@ -1055,7 +1088,7 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     // geometry to the box removes that work and leaves the image identical,
     // because the plant occupies exactly the same world space either way.
     let patch_cell = floor(inst.xz / max(grass.renderer.w, 4.0));
-    let layer = pick_photo_layer(patch_cell);
+    let layer = pick_photo_layer_run(patch_cell, instance_layer_run(inst_packed.w));
     let bounds = photo_layer_bounds(layer);
     let u = mix(bounds.x, bounds.y, quad_u);
     // Texture v runs downward, so the BOTTOM of the content is bounds.w and the
@@ -1387,7 +1420,7 @@ fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
     // with distance, because mip averaging pulls each texel toward that mean, so
     // the near-field cancellation between bright stems and dark gaps disappears.
     let contrast = clamp(grass.photo.x, 0.5, 2.5);
-    let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 8u)].rgb *
+    let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 31u)].rgb *
         vec3<f32>(0.74, 1.22, 0.56) * photo_brightness;
     let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
     let plate_pivot = mix(vec3<f32>(mean_luma), mean_a3, photo_sat);

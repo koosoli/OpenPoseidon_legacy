@@ -344,7 +344,16 @@ pub fn create_tufts(
 
 /// Number of photo-clump layers the shader indexes. Layer 0 is the primary
 /// clump; 1..8 are the local families.
-pub const TUFT_LAYERS: usize = 9;
+// 32, not 9: the atlas is now built from the MAP's clutter classes, and a
+// surface's classes must occupy a CONTIGUOUS run so the shader can select one
+// with `first + hash*count` instead of walking a mask. Contiguity means the
+// budget is the SUM of the per-surface class lists, not their distinct union --
+// Stratis is 28 slots over 21 distinct classes, Takistan 25 over 10. 32 is also
+// exactly what the 5-bit `first` field in the geography word can address.
+//
+// The layers are 512 rather than 1024 square, so this is 42.7 MB against the
+// 48 MB nine 1024-square layers cost before.
+pub const TUFT_LAYERS: usize = 32;
 
 /// The alpha threshold the trim is computed against. Deliberately far below the
 /// 0.5 alpha test: the card is shrunk to this box, so anything the runtime

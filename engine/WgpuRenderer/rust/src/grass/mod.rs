@@ -123,8 +123,8 @@ struct GrassParams {
     tint_procedural: [f32; 4],
     tint_photo: [f32; 4],
     // Renderer-derived from the uploaded atlas, never from the caller.
-    photo_layer_bounds: [f32; 36],
-    photo_layer_means: [f32; 36],
+    photo_layer_bounds: [f32; 128],
+    photo_layer_means: [f32; 128],
 }
 
 /// Mirrors `GrassInstance` in grass.wgsl and grass_shadow.wgsl (32 B). `packed`
@@ -246,9 +246,9 @@ pub struct Grass {
     // Mid candidate grid edge, derived the same way from the mid ring's reach.
     mid_grid_dim: u32,
     // Opaque bounds of the uploaded photo atlas, (u0, u1, v0, v1) per layer.
-    tuft_bounds: [f32; 36],
+    tuft_bounds: [f32; 128],
     // Mean covered colour per layer, the contrast pivot.
-    tuft_means: [f32; 36],
+    tuft_means: [f32; 128],
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
@@ -1662,8 +1662,8 @@ fn clamp_tint(tint: [f32; 4]) -> [f32; 4] {
 
 /// Neutral contrast pivots until a real atlas arrives. 0.34 is the constant the
 /// pivot used to be hardcoded to, so an un-measured layer behaves as before.
-fn default_layer_means() -> [f32; 36] {
-    let mut out = [0.0f32; 36];
+fn default_layer_means() -> [f32; 128] {
+    let mut out = [0.0f32; 128];
     for layer in 0..blade_atlas::TUFT_LAYERS {
         out[layer * 4] = 0.34;
         out[layer * 4 + 1] = 0.34;
@@ -1676,8 +1676,8 @@ fn default_layer_means() -> [f32; 36] {
 /// Untrimmed card bounds: (u0, u1, v0, v1) = the full quad for every layer. What
 /// the shader sees until a real atlas arrives, and what it falls back to for any
 /// layer whose plate has no transparent margin.
-fn default_layer_bounds() -> [f32; 36] {
-    let mut out = [0.0f32; 36];
+fn default_layer_bounds() -> [f32; 128] {
+    let mut out = [0.0f32; 128];
     for layer in 0..blade_atlas::TUFT_LAYERS {
         out[layer * 4] = 0.0;
         out[layer * 4 + 1] = 1.0;
