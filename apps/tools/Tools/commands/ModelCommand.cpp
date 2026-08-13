@@ -382,6 +382,26 @@ void PrintOdolSelections(const std::string& path, bool proxiesOnly)
                   << " per vertex)\n";
         std::cout << "  sections " << lod.sections.size() << ", selections " << lod.namedSelections.size()
                   << ", proxies " << lod.header.proxies.size() << "\n";
+        // MAT-046: a proxy's marker face is located by the PROXY record's own sectionIndex,
+        // not by its named selection (which is empty on this generation). Print both units
+        // side by side so the claim is checkable rather than asserted.
+        for (size_t si = 0; si < lod.sections.size(); ++si)
+        {
+            const auto& sec = lod.sections[si];
+            uint32_t secFaces = 0;
+            for (size_t face = 0; face < lod.polygons.faces.size(); ++face)
+                if (offsets[face] >= static_cast<uint32_t>(sec.faceLower) &&
+                    offsets[face] < static_cast<uint32_t>(sec.faceUpper))
+                    ++secFaces;
+            std::cout << "    section " << std::setw(3) << si << " bytes [" << sec.faceLower << "," << sec.faceUpper
+                      << ") faces " << std::setw(5) << secFaces << " texture " << std::setw(4) << sec.textureIndex
+                      << " material " << sec.materialIndex << "\n";
+        }
+        for (const auto& proxy : lod.header.proxies)
+            std::cout << "    proxy   " << std::left << std::setw(50) << proxy.model.substr(0, 50) << std::right
+                      << " seq " << std::setw(4) << proxy.sequenceId << " namedSel " << std::setw(4)
+                      << proxy.namedSelectionIndex << " bone " << std::setw(4) << proxy.boneIndex << " section "
+                      << proxy.sectionIndex << "\n";
         for (const auto& selection : lod.namedSelections)
         {
             const bool isProxy = selection.name.rfind("proxy:", 0) == 0;
