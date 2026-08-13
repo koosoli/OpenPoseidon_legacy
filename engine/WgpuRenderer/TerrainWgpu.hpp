@@ -24,10 +24,13 @@ class TerrainWgpu : public ITerrainRenderer
 
     void DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd) override;
     int GrassSurfaceCount() const;
-    // GRS-E: upload the game's photographed grass tuft for the mid LOD (once).
-    void UploadGrassTuft();
-    // GRS-F: upload eight opaque photo layers for the near blade geometry (once).
-    void UploadGrassBladeAtlas();
+    // GRS-E: upload the game's photographed grass tuft for the mid LOD.
+    // `worldKey` identifies what the atlas content is derived from; the upload is
+    // skipped while it is unchanged, and repeated when it is not. See the call
+    // site in UploadGeography for why this is a key and not a bool.
+    void UploadGrassTuft(const std::string& worldKey);
+    // GRS-F: upload eight opaque photo layers for the near blade geometry.
+    void UploadGrassBladeAtlas(const std::string& worldKey);
     const char* GrassLoadedMapName() const { return _uploadedName.c_str(); }
     const char* GrassSurfaceName(int index) const;
     bool GrassSurfaceEnabled(int index) const;
@@ -109,10 +112,13 @@ class TerrainWgpu : public ITerrainRenderer
     // Terrain layers are map-specific.  The explicit selection is deliberately
     // kept outside GeographyInfo so the dev panel can reclassify a surface live.
     std::vector<std::string> _grassSurfaceNames;
-    bool _grassTuftUploaded = false;
+    // What the currently resident atlases were built from. Empty = never built.
+    // A world-scoped key rather than a "done" flag, so a second world in one
+    // session cannot inherit the first world's clutter.
+    std::string _grassTuftWorld;
     // Display names of the uploaded photo layers, index-aligned with the atlas.
     std::vector<std::string> _grassPhotoFamilies;
-    bool _grassBladeAtlasUploaded = false;
+    std::string _grassBladeAtlasWorld;
     std::vector<bool> _grassSurfaceEnabled;
     bool _grassNeedsCompatibilityOverride = false;
 

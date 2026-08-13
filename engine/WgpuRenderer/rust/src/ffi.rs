@@ -2517,11 +2517,18 @@ fn log_moon_runtime(renderer: &WgrRenderer, rt: &WgrSkyRuntime) {
     let el = my.atan2(horiz).to_degrees();
     let sun_el = rt.sun_dir[1].asin().to_degrees();
 
+    // Cloud coverage rides the LOOK half of the same UBO. It is printed here because a fully
+    // drawn disc behind an overcast deck and a disc that was never drawn look identical from
+    // outside: fs_cloud_composite multiplies the sky (disc included) by the deck's
+    // transmittance, so a thick deck hides the moon completely and correctly.
+    let coverage = renderer.sky_params.cloud0[0];
+    let night = renderer.sky_params.ground_albedo[3];
+
     renderer.log.log(
         log_level::INFO,
         &format!(
             "moon: dir=({:.4},{:.4},{:.4}) az={:.1} el={:.1} | lit={:.3} radius={:.5}rad ({:.3}deg) \
-             discScale={:.6} draw={} earthshine={:.4} | sunEl={:.1}",
+             discScale={:.6} draw={} earthshine={:.4} | sunEl={:.1} night={:.2} cloudCover={:.2}",
             mx,
             my,
             mz,
@@ -2534,6 +2541,8 @@ fn log_moon_runtime(renderer: &WgrRenderer, rt: &WgrSkyRuntime) {
             if rt.moon_params[3] >= 0.5 { "YES" } else { "NO" },
             rt.moon_sun[3],
             sun_el,
+            night,
+            coverage,
         ),
     );
 }

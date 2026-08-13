@@ -662,7 +662,17 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // This backend conforms terrain-clipped geometry (vegetation, roads' visuals) on
     // the GPU, so ClipLand objects publish a conform plane and skip their per-frame CPU
     // vertex deform. GL33 never sets this and keeps deforming on the CPU.
+    // WGR_GPU_CONFORM=0 forces the GL33 behaviour (CPU deform, no conform plane). This is
+    // the ONLY per-draw code path a road can reach on wgpu and not on GL33, so it is the
+    // ablation that separates "the roads look wrong because of GPU conform" from everything
+    // else -- and GL33 is known-clean at the same camera. Any value but "0" is on, matching
+    // the other WGR_* gates.
     GGpuTerrainConform = true;
+    if (const char* gc = std::getenv("WGR_GPU_CONFORM"))
+    {
+        GGpuTerrainConform = std::strcmp(gc, "0") != 0;
+    }
+    LOG_INFO(Graphics, "Wgpu: GPU terrain conform: {}", GGpuTerrainConform);
 
     // Terrain is always drawn via the GPU heightmap path on this backend (the legacy
     // per-segment Shape path is GL33-only). It owns the sun-shadow mask, GPU conform, etc.
@@ -2645,6 +2655,74 @@ WgrInstance BuildGpuInstance(const Object& obj, uint32_t model, const ConformPla
     return inst;
 }
 
+// WGR_INSTANCE_TRACE: audit the retained scene's INSTANCE data.
+//
+// A retained instance is the one place where an ordinary, correctly registered model can be
+// turned into an enormous stretched sheet: the vertex shader multiplies the mesh by this
+// matrix and then displaces it by the conform words. A degenerate, mirrored or non-finite
+// matrix, or a mode-1 plane carrying garbage coefficients, collapses the geometry toward a
+// plane of arbitrary size -- and none of that is visible to the DrawSectionTL material trace,
+// because the retained path never goes there.
+//
+// Rather than dumping every instance and asking for a sort, this classifies: anything that
+// trips a bound is prefixed ANOMALY, and anything with a large world radius is logged too (on
+// Takistan almost nothing legitimately exceeds ~50 m). `grep ANOMALY` should be the search.
+static bool GpuInstanceFinite(float v)
+{
+    return v == v && v > -1e30f && v < 1e30f;
+}
+
+static void TraceGpuInstance(const char* where, const char* name, const Matrix4& world, float modelRadius,
+                             const ConformPlane& cp, uint32_t model)
+{
+    static const bool trace = std::getenv("WGR_INSTANCE_TRACE") != nullptr;
+    if (!trace)
+    {
+        return;
+    }
+
+    const Vector3 aside = world.DirectionAside();
+    const Vector3 up = world.DirectionUp();
+    const Vector3 dir = world.Direction();
+    const Vector3 pos = world.Position();
+    const float la = aside.Size(), lu = up.Size(), ld = dir.Size();
+    const float det = aside * up.CrossProduct(dir); // signed volume of the basis
+    const float scale = world.Scale();
+    const float worldRadius = modelRadius * scale;
+
+    bool anomaly = false;
+    for (float v : {la, lu, ld, det, scale, worldRadius, pos.X(), pos.Y(), pos.Z()})
+    {
+        anomaly = anomaly || !GpuInstanceFinite(v);
+    }
+    // Degenerate (collapses the mesh onto a plane -> a sheet), mirrored, or wildly scaled.
+    anomaly = anomaly || det <= 1e-6f || det > 1e4f;
+    anomaly = anomaly || la < 1e-4f || lu < 1e-4f || ld < 1e-4f;
+    anomaly = anomaly || la > 100.0f || lu > 100.0f || ld > 100.0f;
+    // A bounding sphere no placed Takistan object should reach.
+    anomaly = anomaly || worldRadius > 200.0f;
+    // Mode-1 conform coefficients are land-grid heights; garbage here displaces vertices by
+    // arbitrary amounts, which is the other way to manufacture a sheet.
+    if (cp.mode == 1)
+    {
+        for (float v : {cp.invLandGrid, cp.xf, cp.zf, cp.y00, cp.y10, cp.d1000, cp.d0100, cp.d1011, cp.d0111, cp.bias})
+        {
+            anomaly = anomaly || !GpuInstanceFinite(v);
+        }
+        anomaly = anomaly || std::fabs(cp.y00) > 5000.0f || std::fabs(cp.y10) > 5000.0f;
+    }
+
+    if (!anomaly && worldRadius < 50.0f)
+    {
+        return; // ordinary small instance -- not worth a line
+    }
+    LOG_INFO(Graphics,
+             "{} GpuInstance {} name={} model={} pos=({},{},{}) radius={} scale={} det={} axes=({},{},{}) "
+             "conformMode={} plane=(y00={} y10={} d1000={} d0100={} bias={})",
+             anomaly ? "ANOMALY" : "large", where, name, model, pos.X(), pos.Y(), pos.Z(), worldRadius, scale, det, la,
+             lu, ld, cp.mode, cp.y00, cp.y10, cp.d1000, cp.d0100, cp.bias);
+}
+
 // §12d: a proxy child instance — rigid interior furniture at an explicit COMPOSED world
 // transform (parentTransform * proxyLocalTransform), which is static for a static parent. No
 // conform (mode 0). Cull sphere center = the composed origin, radius = the proxy model's own
@@ -3327,6 +3405,27 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 }
             }
         }
+        // VertexIndex is `short` (Core/Types.hpp) and wgr_mesh_create takes a uint16_t index
+        // slice, so a LOD with more than 65535 vertices silently wraps: BuildIndices truncates
+        // and the mesh then draws triangles between unrelated vertices -- one model's indices
+        // against its own far-away geometry, i.e. exactly the stretched-sheet failure. There is
+        // no bounds check anywhere on this path. Measured headroom on Takistan: the largest
+        // visual LOD in the world's 513 models is a_mosque_big_hq_ep1 at 30,503 points, so this
+        // cannot fire on this world -- but it is unguarded, and it is silent when it does.
+        if (nv > 65535)
+        {
+            LOG_ERROR(Graphics,
+                      "ANOMALY GpuModel 16-bit index overflow: name={} lod={} vertices={} (ceiling 65535) -- "
+                      "indices wrap; refusing the retained path for this shape",
+                      shape->Name(), level, nv);
+            eligible = false;
+            break;
+        }
+        if (std::getenv("WGR_INSTANCE_TRACE"))
+        {
+            LOG_INFO(Graphics, "GpuModel lod name={} lod={} res={} vertices={} indices={} sections={} radius={}",
+                     shape->Name(), level, shape->Resolution(level), nv, ni, s->NSections(), shape->BoundingSphere());
+        }
         const uint64_t mesh =
             wgr_mesh_create(_renderer, AsMeshVerts(verts),
                             WgrSlice<uint16_t>{reinterpret_cast<const uint16_t*>(indices.data()), U32(ni)});
@@ -3545,6 +3644,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     // Terrain conform: ForestPlain -> mode-1 plane, ClipLand veg/fences -> mode-2, else rigid.
     const ConformPlane cp = GpuConformFor(*obj, *shape, _gpuConformShapes.count(shape) != 0);
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
+    TraceGpuInstance("created", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, model);
     const uint32_t slot = wgr_instance_add(_renderer, &inst);
     // Full (whole object on the GPU) vs Partial (GPU owns the opaque geometry; the CPU still
     // draws proxies + blend/decal sections) — base decision per shape in RegisterGpuModel.
@@ -3612,6 +3712,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     // reinvalidation, but static clutter effectively never moves — recompute defensively.
     const ConformPlane cp = GpuConformFor(*obj, *shape, _gpuConformShapes.count(shape) != 0);
     const WgrInstance inst = BuildGpuInstance(*obj, it->second.model, cp);
+    TraceGpuInstance("updated", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, it->second.model);
     wgr_instance_update(_renderer, it->second.slot, &inst);
     it->second.pos = obj->Transform().Position();
     it->second.mode = cp.mode;

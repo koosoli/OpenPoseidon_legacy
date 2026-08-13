@@ -1395,8 +1395,25 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
              grassRenderableCellCount, hardOnlyCells, grassLayerNames.empty() ? "none matched" : grassLayerNames);
     LOG_INFO(Graphics, "Wgpu terrain texture layers: [{}]", allLayerNames);
     wgr_grass_set_geography(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), geography.data());
-    UploadGrassTuft();
-    UploadGrassBladeAtlas();
+
+    // The grass atlases are WORLD-scoped, not process-scoped.
+    //
+    // They used to be guarded by a plain `uploaded` bool on the single
+    // EngineWgpu::_terrain, so the first world to load owned the atlas for the
+    // rest of the session. That is harmless while the only content is our own
+    // loose photo cards, and becomes a real defect the moment the atlas is built
+    // from the MAP's clutter: load Takistan, then Everon, and OFP terrain grows
+    // Arma clutter with no way to notice. Closing it now, before that content
+    // exists, is the cheap ordering.
+    //
+    // The key is what the atlas content is derived FROM. An OFP world derives
+    // nothing from the world, so every OFP world shares one key and rebuilds
+    // never fire -- Everon keeps exactly the cards it has today at exactly
+    // today's cost. An Arma world is keyed by name, so any Arma <-> OFP or
+    // Arma <-> Arma transition rebuilds.
+    const std::string atlasKey = anyAuthored ? ("arma:" + world) : std::string("loose");
+    UploadGrassTuft(atlasKey);
+    UploadGrassBladeAtlas(atlasKey);
 }
 
 // GRS-E — upload an authored photographed grass clump for the mid LOD's crossed
@@ -1548,9 +1565,9 @@ const char* TerrainWgpu::GrassPhotoFamilyName(int index) const
     return _grassPhotoFamilies[static_cast<size_t>(index)].c_str();
 }
 
-void TerrainWgpu::UploadGrassTuft()
+void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
 {
-    if (!_renderer || _grassTuftUploaded)
+    if (!_renderer || _grassTuftWorld == worldKey)
     {
         return;
     }
@@ -1630,7 +1647,7 @@ void TerrainWgpu::UploadGrassTuft()
             layers.insert(layers.end(), primaryLayer.begin(), primaryLayer.end());
         }
         wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
-        _grassTuftUploaded = true;
+        _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);
         return;
@@ -1642,9 +1659,9 @@ void TerrainWgpu::UploadGrassTuft()
 // GRS-F — replace only the near ribbon's procedural surface detail. The near
 // grass keeps its existing per-blade geometry, density and wind; these are
 // opaque texture layers, not alpha-cutout cards.
-void TerrainWgpu::UploadGrassBladeAtlas()
+void TerrainWgpu::UploadGrassBladeAtlas(const std::string& worldKey)
 {
-    if (!_renderer || _grassBladeAtlasUploaded)
+    if (!_renderer || _grassBladeAtlasWorld == worldKey)
     {
         return;
     }
@@ -1683,7 +1700,7 @@ void TerrainWgpu::UploadGrassBladeAtlas()
 
     wgr_grass_set_blade_atlas(_renderer, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               static_cast<uint32_t>(BladePaths.size()), layers.data());
-    _grassBladeAtlasUploaded = true;
+    _grassBladeAtlasWorld = worldKey;
     LOG_INFO(Graphics, "Wgpu grass: near-LOD photo blade atlas uploaded ({} layers, {}x{})", BladePaths.size(), width,
              height);
 }
