@@ -181,6 +181,18 @@ struct Odol73StaticSection
     int32_t faceLower = 0, faceUpper = 0;
     int32_t minBone = 0, boneCount = 0;
     int16_t textureIndex = 0;
+    // MAT-046: CommonFaceFlags. Read, not skipped -- 0x10000000 is IsHiddenProxy,
+    // and dropping this word is why proxy marker triangles draw. The file says
+    // the section is a hidden proxy marker (measured 0x10002000 on all 38 marker
+    // sections of the Takistan set); discarding it left Section::hints at 0, so
+    // neither RegisterGpuModel's skip nor Shape::Draw's had anything to skip.
+    //
+    // The comment in ShapeAdapter.cpp claiming Oxygen emits sections before
+    // marking proxy faces hidden, so section hints lack IsHiddenProxy, is false
+    // for this generation -- and believing it is why the fix was attempted
+    // through named selections, which are EMPTY on the drawing LOD (717 of 717
+    // proxy selections report zero faces on LOD 0).
+    uint32_t commonFaceFlags = 0;
     int32_t materialIndex = 0;
 };
 
@@ -837,7 +849,7 @@ inline std::vector<Odol73StaticSection> ReadOdol73StaticSections(BinaryReader& r
         section.boneCount = reader.read<int32_t>();
         (void)reader.read<uint32_t>();
         section.textureIndex = reader.read<int16_t>();
-        (void)reader.read<uint32_t>();
+        section.commonFaceFlags = reader.read<uint32_t>();
         section.materialIndex = reader.read<int32_t>();
         if (section.materialIndex == -1)
             (void)ReadBoundedAsciiz(reader, "section material");

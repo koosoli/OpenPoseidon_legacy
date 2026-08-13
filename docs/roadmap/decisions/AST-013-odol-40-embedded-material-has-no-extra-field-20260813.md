@@ -138,4 +138,22 @@ producing something plausible — which is the exact trap this ADR was written a
 python a1odol/matver.py     # first-material version histogram (no desync possible)
 python a1odol/matchain.py   # variant A vs B over multi-material LODs
 python a1odol/fullb.py      # whole-corpus LOD closure with matExtraField off
+python a1odol/measure.py    # face-stream unit and restDataSize, corpus-wide
 ```
+
+And the C++ reader against the same population — extract the corpus flat, then point the
+opt-in survey case at it. Keep the destination path SHORT: the flattened names run past
+Win32's 260-character limit under a deep temp directory, and the one model that "refused"
+on the first run was `Failed to open file`, not a parse failure.
+
+```powershell
+python a1odol/extract_all.py C:\a1corpus
+$env:POSEIDON_ODOL40_CORPUS = "C:\a1corpus"
+.\build\win-x64-clang-rwdi\tests\unit\engine\Poseidon\PoseidonTests.exe `
+    "ODOL 40 corpus survey reports what the reader takes"
+```
+
+Measured 2026-08-13: **2,580 of 2,580 models loaded** through `ODOLLoader` into the engine's
+`Model` IR, 14,028,174 vertices. That is the whole A1 population, and it is a stronger claim than
+the prototype's: the prototype closed LOD bodies, this also survives the conversion to the IR,
+including the face-stream-offset cross-check against each LOD's declared `faceDataSize`.

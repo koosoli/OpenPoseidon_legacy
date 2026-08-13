@@ -245,7 +245,9 @@ std::vector<char> arma1Model()
     b.f32(1.0f); b.f32(0.0f);
     b.f32(0.0f); b.f32(1.0f);
     b.u32(1);                                   // one UV set in total
-    b.i32(3); b.boolean(false);                 // positions
+    // Positions are a plain compressed array: count then payload, with NO
+    // condensed flag. Only the UV sets, the normals and the clip flags carry one.
+    b.i32(3);
     b.vec3(0.0f, 0.0f, 0.0f);
     b.vec3(1.0f, 0.0f, 0.0f);
     b.vec3(0.0f, 1.0f, 0.0f);
@@ -400,20 +402,36 @@ std::vector<char> embeddedMaterial(uint32_t version)
     b.u32(0); b.u32(0); b.u32(0); b.u32(0);
     b.asciiz("");
     b.u32(0); b.u32(0);
-    if (version > 6) b.u32(1);        // stages
-    if (version > 8) b.u32(1);        // texGens, independent only above 8
-    if (version < 8)
+    // Version 6 declares no stage count at all, so it has one stage fewer than
+    // the others: zero.
+    const uint32_t stages = version > 6 ? 1u : 0u;
+    if (version > 6) b.u32(stages);   // stages
+    if (version > 8) b.u32(stages);   // texGens, an independent count only above 8
+    for (uint32_t stage = 0; stage < stages; ++stage)
     {
-        b.u32(7);                                 // transform uv source
-        for (int i = 0; i < 12; ++i) b.f32(0.0f); // its 3x4 matrix
-        b.u32(0); b.asciiz("stage.paa");          // filter, texture -- and no stage id
+        if (version < 8)
+        {
+            b.u32(7);                                 // transform uv source
+            for (int i = 0; i < 12; ++i) b.f32(0.0f); // its 3x4 matrix
+            b.u32(0); b.asciiz("stage.paa");          // filter, texture -- and no stage id
+        }
+        else
+        {
+            b.u32(0); b.asciiz("stage.paa"); b.u32(0);
+            if (version >= 11) b.boolean(false);
+        }
     }
-    else
+    if (version >= 8)
+        for (uint32_t stage = 0; stage < stages; ++stage)
+        {
+            b.u32(7);
+            for (int i = 0; i < 12; ++i) b.f32(0.0f);
+        }
+    if (version >= 10)
     {
-        b.u32(0); b.asciiz("stage.paa"); b.u32(0);
+        // The thermal stage texture, itself a StageTexture at the same version.
+        b.u32(0); b.asciiz("ti.paa"); b.u32(0);
         if (version >= 11) b.boolean(false);
-        b.u32(7);
-        for (int i = 0; i < 12; ++i) b.f32(0.0f);
     }
     b.u8(0x7f);
     return b.data;

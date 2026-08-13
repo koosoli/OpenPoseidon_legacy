@@ -4,6 +4,7 @@
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/Asset/Probes/AssetPreview.hpp>
 #include <Poseidon/Asset/Formats/Common/FormatDetector.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
@@ -343,6 +344,9 @@ void PrintOdolSelections(const std::string& path, bool proxiesOnly)
     {
         switch (revision.version)
         {
+            case 40:
+                model = Poseidon::Asset::Formats::P3D::ReadOdol40StaticModel(reader, static_cast<int>(bytes.size()));
+                break;
             case 48:
             case 49:
             case 50:

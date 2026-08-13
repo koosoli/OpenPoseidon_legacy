@@ -4,6 +4,7 @@
 #include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw24.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
@@ -365,6 +366,12 @@ ModelResult ClassifyModel(const std::string& virtualPath, const AddonIndex& inde
         // defect, and that misclassification is invisible in the histogram.
         switch (result.revision)
         {
+            case 40:
+                // AST-020: Armed Assault's only revision. Without this the census
+                // reports every A1 model as a bare container read and the
+                // histogram cannot tell "parses" from "recognised".
+                (void)Asset::Formats::P3D::ReadOdol40StaticModel(reader, size);
+                break;
             case 48:
             case 49:
             case 50:

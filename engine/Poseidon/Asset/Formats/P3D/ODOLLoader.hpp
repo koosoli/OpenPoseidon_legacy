@@ -334,6 +334,23 @@ class ODOLLoader
             Section     section;
             section.materialIndex = sectionMaterialSlot[sectionIndex];
             section.specialMaterial = source_section.materialIndex;
+            // MAT-046: carry the section's hidden bits through, so proxy marker
+            // triangles stop drawing. Both existing skips (RegisterGpuModel and
+            // Shape::Draw) already test these; they were simply never given a
+            // non-zero value on this generation, because the reader dropped the
+            // CommonFaceFlags word.
+            //
+            // MASKED to the two hidden bits rather than passed whole, which is
+            // the one thing that differs from the v7 path below. The full word
+            // also carries NoClamp (set on every section), ClampU/V,
+            // IsAlphaOrdered and ZBias, and on this generation it would reach
+            // render::IsGpuOwnedSectionSpec, which classifies blend/surface from
+            // the spec -- so handing it all through could reroute sections
+            // between the retained and CPU paths as a side effect of a fix about
+            // hiding markers. Widening this is a separate, measurable change.
+            constexpr uint32_t kHiddenMask = static_cast<uint32_t>(RenderHints::IsHidden)
+                                             | static_cast<uint32_t>(RenderHints::IsHiddenProxy);
+            section.hints = static_cast<RenderHints>(source_section.commonFaceFlags & kHiddenMask);
             // Face-stream offsets, as on the v7 path: not triangle indices.
             section.startTriangle = static_cast<uint32_t>(source_section.faceLower);
             section.triangleCount = static_cast<uint32_t>(source_section.faceUpper - source_section.faceLower);
