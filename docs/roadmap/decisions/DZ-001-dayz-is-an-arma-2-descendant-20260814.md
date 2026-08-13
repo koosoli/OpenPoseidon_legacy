@@ -229,25 +229,42 @@ Two things that frame does *not* show, and one that did not work at all:
   parity with it is explicitly not chased, so this is a WGPU question, not a GL33 one.
 * **Some model sections draw untextured** — 45 of them in that run, plus 1,035 materials with no
   albedo slot falling back to their face texture.
-* **WGPU draws pure black.** Every pixel exactly 0, at every camera position tried. The control
-  proves it is this path and not the rig: the same recipe on the stock OFP mission with no DayZ
-  renders normally (mean 168, 1.43 M non-black), and produces **zero** uncaptured wgpu errors, while
-  each DayZ run produces 60-70. The dominant one, 57 of 64:
+* **WGPU draws pure black**, every pixel exactly 0, at every camera position tried.
+
+  Two controls make this a finding rather than a guess. The stock OFP mission with no DayZ renders
+  normally (mean 168, 1.43 M non-black) with **zero** uncaptured wgpu errors. More usefully, **Arma
+  3's Stratis through the identical `--test-world` + `--addon-root` path also renders completely**
+  (every one of 921,600 pixels non-black, mean 140) with **zero** uncaptured errors. So it is neither
+  the substituted-world path nor the other session's in-flight renderer changes, both of which those
+  runs share. It is what DayZ's asset volume does to the renderer.
+
+  Each DayZ run produces 60-70 uncaptured errors. The timeline is the diagnosis: the run streams
+  cleanly for **105 seconds**, then the first error appears, and from that moment invalid
+  `TextureView`s show up in **three unrelated subsystems at once** --
 
   ```
-  In Device::create_bind_group, label = 'wgr_bindless_texture_bind'
-    TextureView with '' label is invalid
+  In Queue::submit / a pass parameter        TextureView 'wgr_sky_bake_layer' is invalid
+  In Device::create_bind_group               'wgr_bindless_texture_bind'  -- TextureView '' is invalid
+  In Device::create_bind_group               'wgr_grass_terrain_bind'     -- TextureView '' is invalid
   ```
 
-  One invalid view poisons the whole bindless array, so every object draw after it fails. A second,
-  rarer one invalidates `wgr_sky_bake_layer` inside `Queue::submit`, which explains why even the sky
-  is absent.
+  -- and the process dies mid-error. Three independent subsystems do not develop resource-lifetime
+  bugs simultaneously; what they share is the device. The leading hypothesis is **resource
+  exhaustion** under 2,971,218 placements and ~28,000 textures: once `create_texture` starts failing,
+  every view derived from a failed texture is invalid, and the first failed submit takes the frame
+  with it. Host memory reaches 4-5 GB in the same window, which is consistent.
 
-  **This is not attributed yet.** The working tree carries another session's uncommitted renderer
-  changes (`EngineWgpu.cpp/.hpp`, `wgpu_renderer.hpp`, `rust/src/ffi.rs`, `rust/src/godrays.rs`), and
-  those are compiled into the DLL these captures ran against. Whether DayZ's texture volume exposes a
-  pre-existing hole in the bindless slot lifetime or interacts with that in-flight work cannot be
-  told apart without a clean tree. Reproduce on a clean checkout before treating it as a DayZ bug.
+  That makes this a **scalability limit, not a format-compatibility bug**, and it is why GL33 --
+  which does not use the bindless path and bakes no sky -- draws the same world fine.
+
+  Tested and rejected: making `SharedTextures::bindless_slots` hold texture *handles* resolved
+  against the registry at build time, rather than cloned `TextureView`s. That removes a real class of
+  dangling-view bug, but it changed nothing measurable here (52 bindless errors before, 52 after),
+  because the bindless failures are collateral -- the sky-bake view goes invalid first. It was
+  reverted rather than committed unmeasured.
+
+  Next step for whoever picks this up: instrument `create_texture` failure and GPU allocation, and
+  measure whether an object/texture budget for DayZ-scale worlds makes it render.
 
 ## What is not claimed
 
