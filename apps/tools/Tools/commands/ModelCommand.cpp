@@ -114,6 +114,10 @@ static void setupModelInspect(CLI::App& model)
             if (!info.valid)
             {
                 std::cerr << "Error: Failed to load " << inputPath << std::endl;
+                // Without this the reader's diagnosis -- which revision, which
+                // field, which boundary it missed -- never reaches the operator.
+                if (info.isSupported && !info.errorMessage.empty())
+                    std::cerr << "  " << info.errorMessage << std::endl;
                 throw CLI::RuntimeError(1);
             }
             std::cout << std::endl;

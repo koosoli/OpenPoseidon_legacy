@@ -262,6 +262,22 @@ TEST_CASE("OPRW25: earlier revisions are refused rather than misread", "[Formats
     }
 }
 
+// DZ-001. Revision 29 is DayZ's, and it is accepted; the revisions around it are
+// not. That distinction is the whole point of keeping kOprwModernRevisions an
+// explicit list rather than a range: 29's header, static entities and road links
+// each carry an extra field, and 26/27/28/30 have never been seen, so admitting
+// them would apply DayZ's field widths to an unknown layout.
+TEST_CASE("OPRW29: DayZ's revision is accepted and its neighbours are not",
+          "[Formats][WRP][OPRW25][DZ-001]")
+{
+    REQUIRE(IsOprwModernRevision(29));
+    for (const int32_t revision : {26, 27, 28, 30})
+    {
+        INFO("revision " << revision);
+        REQUIRE_FALSE(IsOprwModernRevision(revision));
+    }
+}
+
 TEST_CASE("OPRW25: a non-OPRW container is refused", "[Formats][WRP][OPRW25]")
 {
     auto bytes = BuildWorld();

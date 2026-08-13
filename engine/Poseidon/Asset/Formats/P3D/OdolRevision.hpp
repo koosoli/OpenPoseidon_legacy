@@ -33,6 +33,10 @@ namespace Poseidon::Asset::Formats::P3D
 //   49  Arma 2                   -- ~1,400 models, the widest
 //   50  Arma 2 OA / BAF / PMC    -- ~90 models
 //   52  Arma 2 OA / ACR          -- ~100 models
+//   54  DayZ                     -- the only revision DayZ ships: 8,203 models
+//                                   across all 133 PBOs of the owner's install,
+//                                   revision 54 without exception. DayZ is an
+//                                   Arma 2 descendant here, not an Arma 3 one.
 //   73  Arma 3                   -- 162 PBOs, the newest
 //   75  Arma 3 Tools Binarize     -- official Samples differential fixture
 enum class OdolSupport
@@ -67,6 +71,12 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
         case 49: return {49, OdolSupport::NarrowSubset, "Arma 2 / Arma 2 Operation Arrowhead"};
         case 50: return {50, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};
         case 52: return {52, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};
+        // DayZ. Not an Arma 3 derivative for models: DayZ forked the Arma 2 line
+        // before revision 73's layout changes, so 54 reads through the A2-family
+        // parser plus a six-byte widening of three fixed runs. Measured on the
+        // owner's install -- 8,203 models across 133 PBOs, revision 54 without
+        // exception, and no other P3D revision present anywhere in DayZ.
+        case 54: return {54, OdolSupport::NarrowSubset, "DayZ"};
         // AST-012B reads exactly one shape of revision 73: a static LOD with no
         // skeleton, animation, proxy, named selection or skinning data, whose
         // faces are triangles and quads. That is a narrow subset of Arma 3

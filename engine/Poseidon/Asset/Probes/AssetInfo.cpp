@@ -222,7 +222,14 @@ ModelInfo InspectModel(const std::string& path)
     ModelCache cache;
     auto model = cache.load(path);
     if (!model)
+    {
+        // The detector's message, if any, only says the revision is unsupported.
+        // The loader's says which constraint this particular file broke, so it is
+        // the more specific of the two and wins.
+        if (!cache.lastError().empty())
+            info.errorMessage = cache.lastError();
         return info;
+    }
 
     info.lodCount = static_cast<int>(model->GetLODCount());
     for (size_t i = 0; i < model->lodLevels.size(); ++i)

@@ -741,7 +741,30 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         for (auto& colour : material.colours)
             for (float& component : colour)
                 component = reader.read<float>();
+        // DayZ's material version 20 widens the record in two places: eight colour
+        // quads where every Arma revision writes six, and eighteen further words
+        // between the specular power and the shader ids.
+        //
+        // Measured, not guessed. Each embedded material names its source .rvmat, so
+        // the rvmat is independent ground truth: across 300 cross-checked materials
+        // the specular power always lands 128 bytes into the colour block (eight
+        // quads, not six) and the surface path always at +220, and reading it this
+        // way makes PixelShaderID/VertexShaderID resolve to the classic enum values
+        // their rvmat names imply -- Normal->0, Super->102, NormalMapSpecularMap->18,
+        // Basic->0, Super->23, NormalMap->1, with no name ever mapping to two numbers.
+        //
+        // The gate is version >= 12 rather than == 20 because the two populations
+        // are far apart: every Arma material observed is <= 11 and every DayZ one is
+        // exactly 20. Nothing in between has been seen, so where the change actually
+        // landed is untested -- this only has to separate the two known families.
+        const bool wideMaterial = material.version >= 12;
+        if (wideMaterial)
+            for (int i = 0; i < 8; ++i)
+                (void)reader.read<float>(); // two further colour quads
         (void)reader.read<float>(); // specular power
+        if (wideMaterial)
+            for (int i = 0; i < 18; ++i)
+                (void)reader.read<uint32_t>();
         material.pixelShader = reader.read<uint32_t>();
         material.vertexShader = reader.read<uint32_t>();
         (void)reader.read<uint32_t>();

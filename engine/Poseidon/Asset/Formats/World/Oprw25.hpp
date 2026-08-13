@@ -421,7 +421,11 @@ constexpr size_t kOprw25ObjectRecordSize = 60;
 // between the two verified groups and are deliberately absent: the codec switch is
 // documented at 23 and the other three differences are only bracketed between 20
 // and 24, so accepting an unseen revision would be a guess wearing a version check.
-constexpr int32_t kOprwModernRevisions[] = {18, 20, 24, 25};
+// 29 is DayZ, and it is here on the same terms as the rest: read against real
+// bytes, not admitted on the strength of its number. Both worlds DayZ ships --
+// ChernarusPlus and Enoch, ~224 MB each -- read through this profile and satisfy
+// the reader's own end-of-stream checks, which is what 21/22/23 cannot claim.
+constexpr int32_t kOprwModernRevisions[] = {18, 20, 24, 25, 29};
 
 inline bool IsOprwModernRevision(int32_t revision)
 {
@@ -476,6 +480,17 @@ inline Oprw25World ReadOprwModern(BinaryReader& reader, int32_t expectedVersion)
 
     if (world.header.version >= 25)
         world.header.appId = reader.read<int32_t>();
+    // Revision 29's app id is not a number, it is the FourCC 'ENF0' -- the Enfusion
+    // marker -- and it is followed by a further word and a single byte before the
+    // grid dimensions begin. Measured on both worlds DayZ ships: reading it this way
+    // yields landRange 256x256 and terrainRange 2048x2048 for each, with cell sizes
+    // 60 m and 50 m, i.e. 15360 m for ChernarusPlus and 12800 m for Enoch -- the
+    // documented sizes of both maps. Off by even one byte none of that lands.
+    if (world.header.version >= 29)
+    {
+        (void)reader.read<uint32_t>();
+        (void)reader.read<uint8_t>();
+    }
     world.header.landRangeX = reader.read<int32_t>();
     world.header.landRangeY = reader.read<int32_t>();
     world.header.terrainRangeX = reader.read<int32_t>();
@@ -557,6 +572,14 @@ inline Oprw25World ReadOprwModern(BinaryReader& reader, int32_t expectedVersion)
             entity.shapeName = Detail::ReadBoundedAsciiz(reader, "static entity shape");
             entity.position = Detail::ReadVector3(reader);
             entity.objectId = reader.read<int32_t>();
+            // Revision 29 carries one more word per entity. Identified positionally
+            // rather than by name: walking Chernarus's table, the objectId field
+            // increments by one from record to record while this one holds the same
+            // value throughout, so it is the id that is the id and this is a
+            // separate constant. Four bytes short here and the very next thing --
+            // the object-offset quadtree -- reads a nonsense tree.
+            if (world.header.version >= 29)
+                (void)reader.read<uint32_t>();
             world.staticEntities.push_back(std::move(entity));
         }
     }
@@ -608,6 +631,14 @@ inline Oprw25World ReadOprwModern(BinaryReader& reader, int32_t expectedVersion)
                     link.connectionTypes[c] = reader.read<uint8_t>();
             }
             link.objectId = reader.read<int32_t>();
+            // Revision 29 adds a word here too, in the same place relative to the
+            // object id as the one on a static entity. Decoded by hand on the first
+            // link of Chernarus's road net: connections=2, two positions inside the
+            // map, two type bytes, objectId=25992, this word, then the segment path
+            // and a well-formed 4x3 basis -- and the next link's connection count
+            // lands exactly where that predicts.
+            if (world.header.version >= 29)
+                (void)reader.read<uint32_t>();
             link.p3dPath = Detail::ReadBoundedAsciiz(reader, "road segment model");
             link.toWorld = Detail::ReadMatrix4x3(reader);
             links.push_back(std::move(link));

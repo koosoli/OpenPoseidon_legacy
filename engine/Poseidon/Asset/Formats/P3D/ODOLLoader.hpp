@@ -101,6 +101,8 @@ class ODOLLoader
             return loadOdol50Static(reader, size, sourcePath, revision);
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 52)
             return loadOdol52Static(reader, size, sourcePath, revision);
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 54)
+            return loadOdol54Static(reader, size, sourcePath, revision);
         if (revision.support != P3D::OdolSupport::Parsed)
             throw P3D::UnsupportedOdolRevision(revision);
 
@@ -161,6 +163,16 @@ class ODOLLoader
     static Model loadOdol52Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
     {
         try { return convertOdolStatic(P3D::ReadOdol52StaticModel(reader, size), sourcePath, 52, "ODOL52", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
+    }
+
+    static Model loadOdol54Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        // measuredBasis is false for the same reason revisions 40 and 48-52 leave
+        // it false: AST-018's winding conclusion was measured on a revision-73
+        // fixture, and nothing has re-measured it here.
+        try { return convertOdolStatic(P3D::ReadOdol54StaticModel(reader, size), sourcePath, 54, "ODOL54", false); }
         catch (const P3D::UnsupportedOdolRevision&) { throw; }
         catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
     }

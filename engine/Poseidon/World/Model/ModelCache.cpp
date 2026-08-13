@@ -58,6 +58,8 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& file
 
 std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::string& filePath)
 {
+    _lastError.clear();
+
     std::ifstream file(filePath, std::ios::binary);
     if (!file)
     {
@@ -66,12 +68,14 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
         {
             return loadFromFileServer(filePath);
         }
+        _lastError = "cannot open file";
         return nullptr;
     }
 
     FormatInfo info = P3DFormatDetector::DetectFormat(file);
     if (!info.isSupported)
     {
+        _lastError = info.errorMessage.empty() ? "unsupported format" : info.errorMessage;
         return nullptr;
     }
 
@@ -89,16 +93,31 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
         }
         else
         {
+            _lastError = "unrecognised P3D signature '" + info.signature + "'";
             return nullptr;
         }
     }
+    // Kept separate so a recognised-but-unimplemented revision is not reported as
+    // a malformed file: the two call for different follow-up.
+    catch (const Poseidon::Asset::Formats::P3D::UnsupportedOdolRevision& error)
+    {
+        _lastError = error.what();
+        return nullptr;
+    }
+    catch (const std::exception& error)
+    {
+        _lastError = error.what();
+        return nullptr;
+    }
     catch (...)
     {
+        _lastError = "unknown exception while reading the model";
         return nullptr;
     }
 
     if (!model->compile() || !model->isCompiled())
     {
+        _lastError = "model read but failed to compile";
         return nullptr;
     }
 

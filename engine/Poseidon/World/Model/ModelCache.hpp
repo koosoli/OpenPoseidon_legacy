@@ -42,6 +42,14 @@ public:
     Stats getStats() const { return _stats; }
     void resetStats() { _stats = Stats{0, 0, 0, 0, _cache.size()}; }
 
+    // Why the most recent load returned null. The readers throw messages that name
+    // the exact constraint a file broke -- the revision, the field, the boundary it
+    // missed -- and loadFromFile used to discard all of it in a catch(...), so every
+    // failure reached the caller as an indistinguishable nullptr. Keeping it is what
+    // makes an unsupported revision, a malformed file and a missing file three
+    // different reports instead of one.
+    const std::string& lastError() const { return _lastError; }
+
 private:
     std::string normalizePath(const std::string& path) const;
 
@@ -51,6 +59,7 @@ private:
 
     std::map<std::string, std::shared_ptr<Model::Model>> _cache;
     mutable Stats _stats;
+    std::string _lastError;
 };
 
 } // namespace Poseidon

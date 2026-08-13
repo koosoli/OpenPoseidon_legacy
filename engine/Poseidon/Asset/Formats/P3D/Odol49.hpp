@@ -98,8 +98,16 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
     readVector(result.model.bboxMin); readVector(result.model.bboxMax);
     if (expectedRevision >= 52) { skipVector(); skipVector(); }
     for (int i = 0; i < 6; ++i) skipVector();
-    for (int i = 0; i < 4; ++i) (void)reader.read<bool>();
-    for (int i = 0; i < 6; ++i) (void)reader.read<float>();
+    // Revision 54 (DayZ) widens three fixed-size runs by six bytes in total: one
+    // more bool here, one more float after them, and one more filler byte after
+    // the mass array. Measured, not inferred from the revision number -- the
+    // three counts were fitted against the LOD byte-offset table, which is
+    // located independently by its tiling constraint, and the fit closes the
+    // directory exactly on the first byte of LOD data for 8,203 of 8,203 models
+    // in the DayZ corpus. Getting any one of them wrong moves that landing point.
+    const bool dayz = expectedRevision >= 54;
+    for (int i = 0; i < (dayz ? 5 : 4); ++i) (void)reader.read<bool>();
+    for (int i = 0; i < (dayz ? 7 : 6); ++i) (void)reader.read<float>();
     (void)reader.read<bool>(); (void)reader.read<int32_t>(); (void)reader.read<bool>();
     (void)reader.read<float>(); (void)reader.read<bool>();
     result.skeletonName = ReadBoundedAsciiz(reader, "skeleton name");
@@ -114,7 +122,7 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
     }
     (void)reader.read<uint8_t>(); (void)ReadOdol49CompressedArray<float>(reader, "mass array", 1'000'000);
     for (int i = 0; i < 4; ++i) (void)reader.read<float>();
-    for (int i = 0; i < 12; ++i) (void)reader.read<uint8_t>();
+    for (int i = 0; i < (dayz ? 13 : 12); ++i) (void)reader.read<uint8_t>();
     (void)reader.read<uint32_t>(); (void)reader.read<bool>(); (void)ReadBoundedAsciiz(reader, "class name");
     (void)ReadBoundedAsciiz(reader, "damage name"); (void)reader.read<bool>(); (void)reader.read<uint32_t>();
     result.hasAnimations = reader.read<bool>();
@@ -249,5 +257,13 @@ inline Odol73StaticModel ReadOdol48StaticModel(BinaryReader& reader, int fileSiz
 inline Odol73StaticModel ReadOdol49StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 49); }
 inline Odol73StaticModel ReadOdol50StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 50); }
 inline Odol73StaticModel ReadOdol52StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 52); }
+// DayZ. It belongs to this family and not to revision 73's: its prologue carries
+// no appId and no muzzle-flash string, it has none of revision 73's three
+// per-LOD index arrays, and it is below both animation gates (55's hide value,
+// 56's period/phase pair), so the shared animation reader needs no new case.
+// The one structural surprise is that DayZ writes its LODs in descending file
+// order, which costs nothing here because every LOD is seeked to by its own
+// declared offset.
+inline Odol73StaticModel ReadOdol54StaticModel(BinaryReader& reader, int fileSize) { return ReadOdolA2StaticModel(reader, fileSize, 54); }
 
 } // namespace Poseidon::Asset::Formats::P3D

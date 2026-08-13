@@ -59,7 +59,25 @@ TEST_CASE("ODOL revisions found in the corpora are described", "[p3d][odol][ast-
     REQUIRE(std::string(P3D::DescribeOdolRevision(73).generation) == "Arma 3");
     REQUIRE(P3D::DescribeOdolRevision(75).support == P3D::OdolSupport::Recognised);
     REQUIRE(std::string(P3D::DescribeOdolRevision(75).generation) == "Arma 3 Tools Binarize");
+    // DZ-001. DayZ, and deliberately described as its own generation rather than as
+    // an Arma one: 54 is an Arma 2 descendant structurally, but calling it "Arma 2"
+    // here would send anyone reading a refusal to the wrong corpus.
+    REQUIRE(P3D::DescribeOdolRevision(54).support == P3D::OdolSupport::NarrowSubset);
+    REQUIRE(std::string(P3D::DescribeOdolRevision(54).generation) == "DayZ");
     REQUIRE(P3D::DescribeOdolRevision(9999).support == P3D::OdolSupport::Unknown);
+}
+
+// The revisions between the A2 family and DayZ were never observed in any corpus,
+// so they must stay refused. This is the guard on the widening gate in Odol49.hpp:
+// it keys on `revision >= 54`, and if 53 were ever admitted to the table it would
+// silently take the DayZ field widths.
+TEST_CASE("The gap between the Arma 2 family and DayZ stays unclaimed", "[p3d][odol][dz-001]")
+{
+    for (uint32_t revision : {51u, 53u, 55u, 56u})
+    {
+        INFO("revision " << revision);
+        REQUIRE(P3D::DescribeOdolRevision(revision).support == P3D::OdolSupport::Unknown);
+    }
 }
 
 TEST_CASE("A recognised revision is refused, naming its generation", "[p3d][odol][ast-012a]")
