@@ -812,7 +812,25 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 if (strncmp(sel.Name(), "proxy:", 6) != 0)
                     continue;
                 if (sel.Faces().Size() < 1)
+                {
+                    // MAT-044: this early-out is why Arma 2 houses bake their proxy-marker
+                    // section as untextured geometry. The section keeps hints 0, so neither
+                    // Shape::Draw nor RegisterGpuModel's IsHidden|IsHiddenProxy skip fires,
+                    // and one triangle per proxy is drawn with no texture and no RVMAT.
+                    // Measured: section 0's triangle count equals the proxy count exactly on
+                    // house_k_1 (14), house_k_3 (29), house_k_5 (17) and house_l_3 (12).
+                    // Whether the face list is empty because the A2 reader drops it or because
+                    // the source selects only vertices is the open question -- say which.
+                    if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT");
+                        trace && std::strcmp(trace, "__trace__") == 0)
+                    {
+                        LOG_INFO(Graphics,
+                                 "ShapeAdapter proxy patch SKIPPED (no faces): model={} lod={} selection={} "
+                                 "points={}",
+                                 model.sourcePath, li, sel.Name(), sel.Size());
+                    }
                     continue;
+                }
                 int faceIdx = sel.Faces()[0];
                 Offset faceOfs = lod->Faces().Find(faceIdx);
                 for (int s = 0; s < lod->NSections(); s++)

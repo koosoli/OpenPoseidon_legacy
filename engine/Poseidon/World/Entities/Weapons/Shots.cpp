@@ -8,6 +8,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -689,6 +690,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
         _timeToLive -= deltaT;
         if (_timeToLive < 0)
         {
+            // Ballistics diagnostic — inlined around a bool, compiles to a
+            // not-taken branch when the dev panel switch is off.
+            Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),
+                                                    Poseidon::Dev::BallisticTerminus::Expired, nullptr);
             _delete = true;
             return;
         }
@@ -753,6 +758,21 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 
             if (minI >= 0)
             {
+                if (Poseidon::Dev::Ballistics::Enabled())
+                {
+                    // Ballistics diagnostic — the exact impact point and what was
+                    // struck. Runs on remote shots too, so a client's trail ends
+                    // where the round actually stopped. Guarded rather than relying
+                    // on NotifyImpact's own gate: GetDebugName() allocates an
+                    // RString, and that must not happen on every impact in a build
+                    // where nobody opened the tab.
+                    CollisionInfo& diagInfo = collision[minI];
+                    const Point3 diagPos = diagInfo.object->PositionModelToTop(diagInfo.pos);
+                    const RString diagName = diagInfo.object->GetDebugName();
+                    Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), diagPos.X(), diagPos.Y(), diagPos.Z(),
+                                                            Poseidon::Dev::BallisticTerminus::HitObject,
+                                                            static_cast<const char*>(diagName));
+                }
                 if (IsLocal())
                 {
                     CollisionInfo& info = collision[minI];
@@ -855,6 +875,13 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             if (t <= maxDist)
             {
                 position = isect;
+
+                // Ballistics diagnostic — terrain / sea terminus.
+                Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),
+                                                        (hitSea || _waterImpactDone)
+                                                            ? Poseidon::Dev::BallisticTerminus::HitWater
+                                                            : Poseidon::Dev::BallisticTerminus::HitGround,
+                                                        nullptr);
 
                 // A sea hit already submitted its water interaction above. Do not also
                 // run the legacy ground-impact presentation for ordinary rifle rounds:

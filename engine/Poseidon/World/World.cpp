@@ -39,6 +39,8 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/Dev/Diag/DiagPause.hpp>
+#include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <chrono>
 
 #include <Poseidon/Core/Progress.hpp>
@@ -329,6 +331,27 @@ void World::Simulate(float deltaT, bool& enableDraw)
         }
     }
 #endif
+
+    // Diagnostic pause hotkey — Ctrl+P, dev builds only.
+    //
+    // Ctrl is tested first and the P edge is consumed only when it is held, so
+    // a plain P press still reaches whatever else wants it.  ConsumeDevKeyPress
+    // reports nothing without --dev, so a release player cannot reach this.
+    // (SDL_SCANCODE_PAUSE is already taken by the T&L toggle in
+    // Core/Game/GameLoop.cpp:100, which is why this is not on the Pause key.)
+    if (input.IsKeyDown(SDL_SCANCODE_LCTRL) || input.IsKeyDown(SDL_SCANCODE_RCTRL))
+    {
+        if (input.ConsumeDevKeyPress(SDL_SCANCODE_P))
+        {
+            const bool paused = Dev::ToggleDiagPause();
+            Foundation::GlobalShowMessage(800, "Simulation %s", paused ? "PAUSED (free-fly live)" : "running");
+        }
+    }
+
+    // Ballistics diagnostic sampling.  Returns immediately unless the dev-panel
+    // switch is on; placed before the draw phase so the trails submitted below
+    // are this frame's positions rather than last frame's.
+    Dev::Ballistics::Sample();
 
     Glob.uiTime += noAccDeltaT;
     if (IsSimulationEnabled())
@@ -886,6 +909,31 @@ void World::Simulate(float deltaT, bool& enableDraw)
             _playerSuspended = false;
         }
 
+        // -------------------------------------------------------------------
+        // Free-fly stays live while the simulation is frozen.
+        //
+        // The free camera is a CameraVehicle entity, and entities are stepped by
+        // SimulateAllVehicles, which IsSimulationEnabled() gates — so a paused
+        // world freezes the camera along with everything else, which is exactly
+        // the thing that makes a paused world useless for inspection.  Step the
+        // manual camera holder here, on its own, before its transform is read
+        // below.  Only manual holders: a scripted camEffect or a player-attached
+        // view must stay frozen with the thing it is attached to.
+        //
+        // CameraVehicle::Simulate divides its delta by the time-acceleration
+        // factor so manual flight stays real-time under time compression
+        // (CameraHold.cpp:336); multiply it back out here so the camera moves at
+        // real wall-clock speed while paused.
+        if (!IsSimulationEnabled())
+        {
+            CameraHolder* freeCam = dyn_cast<CameraHolder, Object>(_cameraOn);
+            if (freeCam && freeCam->GetManual())
+            {
+                const float accel = _acceleratedTime > 0.01f ? _acceleratedTime : 1.0f;
+                freeCam->Simulate(noAccDeltaT * accel, SimulateVisibleNear);
+            }
+        }
+
         Camera& camera = *_scene.GetCamera();
         float fov = 0.7;
         Matrix4 transform = camera.Transform();
@@ -1398,6 +1446,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
     {
         _scene.BeginObjects();
         DrawViewerSceneAddons();
+        // Projectile trails.  Must sit inside the BeginObjects/EndObjects
+        // window — the same one VehicleAI's path diagnostic draws its lines in.
+        // Returns immediately unless the dev-panel switch is on.
+        Dev::Ballistics::Draw();
     }
 
     if (camInsideVehicle)

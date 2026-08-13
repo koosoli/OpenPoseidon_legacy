@@ -727,8 +727,8 @@ ClutterCard ReadClutterCard(const char* modelPath, const std::vector<uint8_t>& b
     Poseidon::Model::Model model;
     try
     {
-        model = Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer(
-            reinterpret_cast<const char*>(bytes.data()), static_cast<int>(bytes.size()), modelPath);
+        model = Poseidon::Asset::Formats::ODOLLoader::loadFromBuffer(reinterpret_cast<const char*>(bytes.data()),
+                                                                     static_cast<int>(bytes.size()), modelPath);
     }
     catch (const std::exception&)
     {
@@ -832,10 +832,10 @@ ClutterCard ReadClutterCard(const char* modelPath, const std::vector<uint8_t>& b
 // One authored surface slot's contribution, resolved once per material.
 struct SlotClutter
 {
-    float coverage = 0.0f;    // authored, unnormalised (see Coverage())
-    uint8_t layerFirst = 0;   // first atlas layer this surface's clutter occupies
-    uint8_t layerCount = 0;   // how many follow it; 0 = no clutter atlas run
-    bool present = false;     // false for a hole: the slot has no surface
+    float coverage = 0.0f;  // authored, unnormalised (see Coverage())
+    uint8_t layerFirst = 0; // first atlas layer this surface's clutter occupies
+    uint8_t layerCount = 0; // how many follow it; 0 = no clutter atlas run
+    bool present = false;   // false for a hole: the slot has no surface
 };
 
 // The WLD-019 decode, on the CPU. The mask is an INDEXED selector, not a weight
@@ -973,9 +973,10 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             // Crop the authored sub-rect and rescale it to fill the layer.
             const DecodedImage& image = plate->second;
             const int x0 = std::clamp(static_cast<int>(card.u0 * static_cast<float>(image.width)), 0, image.width - 1);
-            const int x1 = std::clamp(static_cast<int>(std::ceil(card.u1 * static_cast<float>(image.width))), x0 + 1,
-                                      image.width);
-            const int y0 = std::clamp(static_cast<int>(card.v0 * static_cast<float>(image.height)), 0, image.height - 1);
+            const int x1 =
+                std::clamp(static_cast<int>(std::ceil(card.u1 * static_cast<float>(image.width))), x0 + 1, image.width);
+            const int y0 =
+                std::clamp(static_cast<int>(card.v0 * static_cast<float>(image.height)), 0, image.height - 1);
             const int y1 = std::clamp(static_cast<int>(std::ceil(card.v1 * static_cast<float>(image.height))), y0 + 1,
                                       image.height);
             const int cropW = x1 - x0;
@@ -1000,8 +1001,7 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             if (report.size() < 900)
             {
                 char line[192];
-                snprintf(line, sizeof(line), "%s%s@%u", report.empty() ? "" : ", ", entry.name.Data(),
-                         outLayerCount);
+                snprintf(line, sizeof(line), "%s%s@%u", report.empty() ? "" : ", ", entry.name.Data(), outLayerCount);
                 report += line;
             }
             ++outLayerCount;
@@ -1018,7 +1018,8 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
     {
         if (toneWeight[generation] <= 0.0)
             continue;
-        LOG_INFO(Graphics, "Wgpu grass clutter tone ({}): alpha-weighted mean of opaque texels = ({:.3f}, {:.3f}, {:.3f})",
+        LOG_INFO(Graphics,
+                 "Wgpu grass clutter tone ({}): alpha-weighted mean of opaque texels = ({:.3f}, {:.3f}, {:.3f})",
                  generation == 1 ? "Arma 3" : "Arma 2/OA", toneSum[generation][0] / toneWeight[generation] / 255.0,
                  toneSum[generation][1] / toneWeight[generation] / 255.0,
                  toneSum[generation][2] / toneWeight[generation] / 255.0);
@@ -1190,8 +1191,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
     // statements about one authored character rather than two guesses.
     std::unordered_map<std::string, std::pair<uint8_t, uint8_t>> atlasRuns;
     const auto atlasStarted = std::chrono::steady_clock::now();
-    const bool haveAtlas =
-        BuildClutterAtlas(clutterSurfaces, atlasRuns, _clutterAtlas, _clutterAtlasLayers);
+    const bool haveAtlas = BuildClutterAtlas(clutterSurfaces, atlasRuns, _clutterAtlas, _clutterAtlasLayers);
     const double atlasMs =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - atlasStarted).count();
     if (!haveAtlas)
@@ -1441,10 +1441,8 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
             // The cell grows the plants its dominant clutter-bearing surface
             // declares. The run is contiguous, so this is two small fields and
             // the shader needs no table: see the geography word layout above.
-            const uint32_t runFirst =
-                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerFirst : 0u;
-            const uint32_t runCount =
-                dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerCount : 0u;
+            const uint32_t runFirst = dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerFirst : 0u;
+            const uint32_t runCount = dominant >= 0 ? slotTable[static_cast<size_t>(dominant)].layerCount : 0u;
             uint32_t word = GrassAuthoredCell;
             word |= (quantised << GrassCoverageShift) & GrassCoverageMask;
             word |= (runFirst << GrassSurfaceShift) & GrassSurfaceMask;
@@ -1508,8 +1506,9 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
              "Wgpu grass mask bake: {} masks decoded ({} unreadable, {:.1f} MB read) for {} authored materials; "
              "{} surfaces grow clutter ({} from the map's config, {} by name), peak coverage {:.2f}; "
              "{} cells left on the legacy path; {:.0f} ms on {} thread(s)",
-             decoded.load(), missing.load(), maskBytes.load() / (1024.0 * 1024.0), authoredMaterials, clutterSurfaces.size(),
-             byCatalogue, byName, maxCoverage, legacyCells, ms, pool ? pool->ThreadCount() : 1u);
+             decoded.load(), missing.load(), maskBytes.load() / (1024.0 * 1024.0), authoredMaterials,
+             clutterSurfaces.size(), byCatalogue, byName, maxCoverage, legacyCells, ms,
+             pool ? pool->ThreadCount() : 1u);
     LOG_INFO(Graphics, "Wgpu grass surface coverage: [{}]", surfaceReport.empty() ? "none" : surfaceReport);
     if (decoded.load() == 0)
     {
@@ -1670,6 +1669,16 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         _surfaceCatalogWorld = world;
     }
     const bool authored = BakeAuthoredGrassMask(land, geography, layersChanged);
+    if (!authored)
+    {
+        // THE hazard, and it lives here rather than in the upload: the atlas is a
+        // member, so a session that loads Takistan and then Everon would still be
+        // holding Takistan's clutter when UploadGrassTuft next runs, and OFP
+        // terrain would grow Arma plants. A world that builds no atlas must drop
+        // the previous world's.
+        _clutterAtlas.clear();
+        _clutterAtlasLayers = 0;
+    }
 
     // Match grass.wgsl: water, forests, roads/tracks and hard buildings are
     // excluded, but the legacy "full" flag is valid ordinary ground on Everon

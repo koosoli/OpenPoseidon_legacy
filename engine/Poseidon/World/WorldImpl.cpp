@@ -11,6 +11,7 @@
 #include <Poseidon/UI/UIActiveDisplay.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/Dev/Diag/DiagPause.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -203,6 +204,15 @@ bool World::IsSimulationEnabled() const
     }
     else
     {
+        // Dev diagnostic pause (Dev/Diag/DiagPause.hpp).  Installed inside the
+        // single-player branch on purpose: the GModeNetware branch above never
+        // reaches here, so a local pause is structurally unable to touch a
+        // network game.  Default false — with it false this is one bool load
+        // and the function behaves exactly as it always did.
+        if (Dev::DiagPauseActive())
+        {
+            return false;
+        }
         if (_warningMessage)
         {
             return false;

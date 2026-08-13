@@ -326,6 +326,9 @@ list(APPEND POSEIDON_TEST_SOURCES
     Dev/Debug/test_debug_profiling.cpp
     Dev/Debug/test_debug_commands.cpp
 
+    # Ballistics diagnostic: trajectory store, ring eviction, pause gate
+    Dev/Diag/test_ballistics_recorder.cpp
+
     # Mission introspection
     Game/Mission/test_mission_info.cpp
 

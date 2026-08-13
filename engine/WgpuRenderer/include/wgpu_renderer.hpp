@@ -1682,6 +1682,15 @@ extern "C"
      * See docs/render-params-consolidation-plan.md. */
     WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams* params);
 
+    /* AO march resolution: 1 = one GTAO horizon march per pixel, 2 = one per 2x2 block, denoised
+       back to full resolution by the AO bilateral filter (which already rejects on full-res depth
+       and normals, so it doubles as the upsample). Clamped to 1..=2.
+       DEFAULT 2 — the per-pixel march is ~72 depth taps per pixel and measured as the frame's most
+       resolution-hungry pass. Its own entry point, not a WgrGtao field, because C++ pushes that
+       struct every frame and this default belongs to the renderer; WGR_GTAO_SCALE seeds it. */
+    WGR_API void wgr_set_gtao_scale(WgrRenderer* renderer, uint32_t scale);
+    WGR_API uint32_t wgr_get_gtao_scale(const WgrRenderer* renderer);
+
     /* CLD-020: strength of the cloud shadow the deck casts on terrain, objects, grass and water.
        0 = off (every surface reads fully lit); 1 = the full computed transmittance. Its own entry
        point rather than a field in WgrSkyLook, because growing that struct changes a size the ABI

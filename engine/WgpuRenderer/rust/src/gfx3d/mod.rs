@@ -1672,7 +1672,24 @@ fn gtao_writes_full_visibility_where_nothing_was_drawn() {
     // (top_mip = every level) so this harness keeps exercising the reduce path even though the
     // shipped GtaoSettings::max_mip is 0 and the runtime build now stops at mip 0.
     mips.build(&device, &queue, &mut enc, &depth, 0.0957, mips.mips());
-    gtao.dispatch(&mut enc, w, h);
+    // Scale 2 (the shipped default) on purpose: this test reads back EVERY texel, so it is also
+    // the check that the block store covers the whole target. A store loop that dropped the last
+    // column or row of a block would leave those texels never written, and they would fail the
+    // full-visibility assert below rather than passing quietly.
+    //
+    // The params MUST be uploaded, not left zeroed: limits.z carries the same scale the dispatch
+    // grid was sized from, and a zeroed uniform would make the shader walk 1x1 blocks over a grid
+    // sized for 2x2 and leave three quarters of the target untouched.
+    gtao.upload(
+        &queue,
+        &GtaoParams {
+            proj: [1.4286, 1.9048, 0.0957, (mips.mips() - 1) as f32],
+            screen: [w as f32, h as f32, 1.0 / w as f32, 1.0 / h as f32],
+            tuning: [1.5, 1.0, 3.0, 10.0],
+            limits: [512.0, 1.0, 2.0, 0.0],
+        },
+    );
+    gtao.dispatch(&mut enc, w, h, 2);
 
     // Copy the AO target out. Rgba16Float = 8 B/texel; the row stride must be 256-aligned.
     let row = (w * 8).div_ceil(256) * 256;

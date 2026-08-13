@@ -179,6 +179,63 @@ mod runtime_diagnostics_tests {
     }
 }
 
+/// Feature ablation for A/B measurement, from `WGR_ABLATE` (comma-separated, e.g.
+/// `WGR_ABLATE=grass,ao`). Default: nothing ablated.
+///
+/// WHY THIS EXISTS AND WHY IT IS NOT JUST MORE `WGR_*` GATES. Several subsystems already had a
+/// renderer-side env gate — `WGR_GRASS`, `WGR_SKY_VIS` — and every one of them is INERT at
+/// runtime, because C++ rebuilds and pushes the corresponding settings struct every single frame
+/// (`SetGrassSettings`, `wgr_set_render_params`). Those gates decide frame 0 and are then
+/// overwritten, so "grass off" A/B runs measured grass ON and the difference read as noise. That
+/// is a measurement trap, not a feature gap: it produces a plausible number that is wrong.
+///
+/// These are applied at the points where the per-frame push LANDS, so nothing downstream can undo
+/// them, and they are read once and cached so a hot path never touches the environment.
+#[derive(Clone, Copy, Default)]
+struct Ablate {
+    grass: bool,
+    ao: bool,
+    skyvis: bool,
+    planar: bool,
+    clouds: bool,
+}
+
+static ABLATE: std::sync::OnceLock<Ablate> = std::sync::OnceLock::new();
+
+impl Ablate {
+    fn from_env() -> Self {
+        let mut a = Ablate::default();
+        let Ok(raw) = std::env::var("WGR_ABLATE") else {
+            return a;
+        };
+        let mut unknown: Vec<String> = Vec::new();
+        for token in raw.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+            match token.to_ascii_lowercase().as_str() {
+                "grass" => a.grass = true,
+                "ao" | "gtao" => a.ao = true,
+                "skyvis" | "interior_sky" => a.skyvis = true,
+                "planar" | "reflection" => a.planar = true,
+                "clouds" | "cloud" => a.clouds = true,
+                other => unknown.push(other.to_string()),
+            }
+        }
+        // Loud about a typo: a silently ignored ablation name is the same failure mode as the
+        // clobbered gates above — the run looks valid and measures the wrong thing.
+        if !unknown.is_empty() {
+            eprintln!(
+                "[wgr] WGR_ABLATE: UNKNOWN token(s) {} — nothing was ablated for them. \
+                 Known: grass, ao, skyvis, planar, clouds",
+                unknown.join(", ")
+            );
+        }
+        eprintln!(
+            "[wgr] WGR_ABLATE: grass={} ao={} skyvis={} planar={} clouds={}",
+            a.grass, a.ao, a.skyvis, a.planar, a.clouds
+        );
+        a
+    }
+}
+
 pub struct Renderer {
     // How much wider the planar reflection's frustum is than the screen's. 1 = the old behaviour,
     // where a grazing reflection ran off the edge of the reflection target and the reflected
@@ -914,6 +971,7 @@ impl Renderer {
     // setters are diffed against the last block because they realloc/re-scan (and the sun-shadow
     // setter dirties its sweep on every call). See docs/render-params-consolidation-plan.md.
     fn set_render_params(&mut self, p: ffi::WgrRenderParams) {
+        let ablate = *ABLATE.get_or_init(Ablate::from_env);
         self.tonemap_params = p.tonemap;
         self.exposure_params = p.exposure;
         self.foliage_params = p.foliage;
@@ -968,7 +1026,7 @@ impl Renderer {
         // dirty-tracking above exists because those setters can re-run a CPU horizon scan.
         let g = &p.gtao;
         self.gfx3d.set_gtao_settings(crate::gfx3d::GtaoSettings {
-            enabled: g.enabled != 0,
+            enabled: g.enabled != 0 && !ablate.ao,
             radius_m: g.radius_m,
             strength: g.strength,
             slices: g.slices,
@@ -986,6 +1044,7 @@ impl Renderer {
         // the settings struct clamps, so a garbage push cannot allocate a 64k depth map.
         let mut sv = *self.gfx3d.interior_sky_settings();
         sv.apply(&p.interior_sky);
+        sv.enabled &= !ablate.skyvis;
         self.gfx3d.set_interior_sky_settings(sv);
     }
 
@@ -1706,7 +1765,9 @@ impl Renderer {
             .map(|batch| batch.camera as usize)
             .unwrap_or(main_scene_cam);
         let planar_sea = self.water.underwater_params().map(|p| p.0);
+        let ablate = *ABLATE.get_or_init(Ablate::from_env);
         let planar_active = planar_sea.is_some()
+            && !ablate.planar
             && !self.water.low_quality()
             && !water_batches.is_empty()
             && cameras
@@ -2159,7 +2220,7 @@ impl Renderer {
                 if let Some(resolve) = planar.depth_resolve.as_ref() {
                     resolve.resolve(&mut encoder);
                 }
-                if self.sky.clouds_active(&self.sky_params) {
+                if !ablate.clouds && self.sky.clouds_active(&self.sky_params) {
                     self.gpu_timers
                         .begin(&mut encoder, TimerRegion::PlanarClouds);
                     self.sky.render_cloud(
@@ -3078,7 +3139,12 @@ impl Renderer {
             // scene depth, then composite over the lit scene (premultiplied blend) so clouds occlude
             // terrain and envelop the camera when flown through — not a sky-only element. World segment
             // only, HDR + coverage>0; after water so it composites over water too.
-            if start == 0 && !resolved && sky_drawn && self.sky.clouds_active(&self.sky_params) {
+            if start == 0
+                && !resolved
+                && sky_drawn
+                && !ablate.clouds
+                && self.sky.clouds_active(&self.sky_params)
+            {
                 // Ensure a resolved single-sample scene depth exists (genuinely idempotent now: the
                 // water pass above already recorded it and attaches depth read-only, so the flag
                 // makes this a no-op instead of a second full-res resolve). Farthest-sample, as
@@ -3545,6 +3611,16 @@ impl Renderer {
     fn grass_set_blade_atlas(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
         self.grass
             .set_blade_atlas(&self.device, &self.queue, width, height, layers, rgba);
+    }
+
+    // AO march resolution (wgr_set_gtao_scale / wgr_get_gtao_scale). Lives on Gfx3d next to the
+    // pass it configures; see `Gfx3d::set_gtao_scale` for why it is not part of GtaoSettings.
+    fn set_gtao_scale(&mut self, scale: u32) {
+        self.gfx3d.set_gtao_scale(scale);
+    }
+
+    fn gtao_scale(&self) -> u32 {
+        self.gfx3d.gtao_scale()
     }
 
     fn grass_set_params(&mut self, mut params: WgrGrassParams) {

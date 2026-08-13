@@ -2440,6 +2440,45 @@ pub unsafe extern "C" fn wgr_set_render_params(
     }));
 }
 
+/// Set the AO march resolution: 1 = one horizon march per pixel, 2 = one per 2x2 block,
+/// bilateral-upsampled back to full resolution by the AO denoise. Clamped to 1..=2.
+///
+/// Deliberately its own entry point rather than a field of `WgrGtao`. That struct is rebuilt and
+/// pushed by C++ every frame, so a value carried in it would be owned by whatever C++ happens to
+/// hold — and the shipped default here (2) is the renderer's, chosen because the per-pixel march
+/// measured as the frame's most resolution-hungry pass. `WGR_GTAO_SCALE` seeds it; this call is
+/// what a dev-panel AO quality control drives.
+///
+/// # Safety
+/// `renderer` must be a live renderer handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_gtao_scale(renderer: *mut WgrRenderer, scale: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.set_gtao_scale(scale);
+    }));
+}
+
+/// The current AO march resolution (see `wgr_set_gtao_scale`), so a dev panel can show the live
+/// value rather than a control that drifts out of sync with what the renderer is doing.
+///
+/// # Safety
+/// `renderer` must be a live renderer handle or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_gtao_scale(renderer: *const WgrRenderer) -> u32 {
+    if renderer.is_null() {
+        return 1;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        renderer.gtao_scale()
+    }))
+    .unwrap_or(1)
+}
+
 /// Push the per-frame sky runtime (celestial direction/phase, night factor, fog colour, camera
 /// altitude, fog range). Writes the runtime half of the sky UBO; the authored look half comes
 /// from wgr_set_render_params. See docs/render-params-consolidation-plan.md.
