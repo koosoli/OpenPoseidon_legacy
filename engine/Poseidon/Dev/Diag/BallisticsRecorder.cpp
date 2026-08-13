@@ -217,6 +217,24 @@ void Sample()
         return;
     }
 
+    // Mission reload / world teardown guard.  The pooled line objects hold a
+    // shape built against the scene's preloaded white texture, and every track
+    // holds coordinates in the old world's frame.  Both are meaningless — and
+    // the shapes are unsafe — once the scene is rebuilt, so drop everything the
+    // first frame a different Scene is seen.  One pointer compare per frame.
+    static const void* s_lastScene = nullptr;
+    const void* scene = static_cast<const void*>(GScene);
+    if (scene != s_lastScene)
+    {
+        s_lastScene = scene;
+        s_store.Clear();
+        s_live.clear();
+        s_selected = 0;
+        s_lineShapes.clear();
+        s_lineObjects.clear();
+        s_poolUsed = 0;
+    }
+
     const float now = Glob.time.toFloat();
 
     for (auto& entry : s_live)

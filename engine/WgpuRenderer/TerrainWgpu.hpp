@@ -31,6 +31,9 @@ class TerrainWgpu : public ITerrainRenderer
     void UploadGrassTuft(const std::string& worldKey);
     // GRS-F: upload eight opaque photo layers for the near blade geometry.
     void UploadGrassBladeAtlas(const std::string& worldKey);
+    // Reports whether the photo-card atlas actually reached the renderer, so an
+    // absent atlas and a switched-off opt-in stop looking identical in the log.
+    void ReportPhotoClumpState() const;
     const char* GrassLoadedMapName() const { return _uploadedName.c_str(); }
     const char* GrassSurfaceName(int index) const;
     bool GrassSurfaceEnabled(int index) const;

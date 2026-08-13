@@ -42,6 +42,7 @@
 #include <Poseidon/UI/Locale/MissionLanguageDetector.hpp>
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/BallisticsTab.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
@@ -5511,6 +5512,13 @@ void DrawMainWindow()
         if (ImGui::BeginTabItem("Profile"))
         {
             DrawProfileTab();
+            ImGui::EndTabItem();
+        }
+        // Fully qualified: the tab body lives in BallisticsTab.cpp, so this call does not
+        // depend on where this file's anonymous namespace happens to sit.
+        if (ImGui::BeginTabItem("Ballistics"))
+        {
+            Poseidon::Dev::DrawBallisticsTab();
             ImGui::EndTabItem();
         }
         ImGuiTabItemFlags memoryFlags = 0;

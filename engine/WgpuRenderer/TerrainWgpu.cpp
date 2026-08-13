@@ -896,7 +896,6 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
     outRuns.clear();
     outLayerCount = 1; // layer 0 is the loose primary, filled by the caller
 
-    std::unordered_map<std::string, DecodedImage> plates;
     // Per generation, the alpha-weighted mean colour of the opaque texels we
     // actually put in the atlas. Arma 3's plates are authored a generation apart
     // from Operation Arrowhead's, and if one reads darker this is the number that
@@ -907,6 +906,22 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
     double toneWeight[2] = {0, 0};
     int cards = 0, missingModel = 0, missingPlate = 0, dropped = 0;
     std::string report;
+
+    // ---- Phase 1: plan the atlas, serially ----------------------------------
+    //
+    // Model reads stay on the calling thread: QFBank is not MT-safe (MT_SAFE is 0
+    // in QBStream.hpp), the same constraint the mask bake works under. Only the
+    // decode, crop and rescale are parallel, and those are where the 715 ms
+    // measured on Stratis actually goes.
+    struct CardJob
+    {
+        uint32_t layer = 0;
+        size_t plate = 0;
+        ClutterCard card;
+    };
+    std::vector<CardJob> jobs;
+    std::vector<std::string> platePaths;
+    std::unordered_map<std::string, size_t> plateIds;
 
     for (const auto& [surfaceKey, character] : surfaces)
     {
@@ -934,10 +949,10 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             {
                 // A class the config names but whose `class clutter` body we never
                 // saw -- Stratis's StrGrassDryMediumgroup, at p<=0.35 not a rare
-                // one. It is skipped rather than substituted: putting a different
-                // plant in its slot would be a silent wrong answer, and the
-                // surface still has its other classes. A surface that loses ALL of
-                // them falls back to layer 0 below.
+                // one. Skipped rather than substituted: putting a different plant
+                // in its slot would be a silent wrong answer, and the surface
+                // still has its other classes. A surface that loses ALL of them
+                // falls back to layer 0 below.
                 ++missingModel;
                 continue;
             }
@@ -951,52 +966,15 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
             std::string plateKey = card.plate;
             std::transform(plateKey.begin(), plateKey.end(), plateKey.begin(),
                            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-            auto plate = plates.find(plateKey);
-            if (plate == plates.end())
+            // One decode per PLATE, not per class: `c_papaver_ca.paa` serves three
+            // classes and is 2048 square.
+            auto plate = plateIds.find(plateKey);
+            if (plate == plateIds.end())
             {
-                // One decode per PLATE, not per class: `c_papaver_ca.paa` serves
-                // three classes and is 2048 square.
-                const std::vector<uint8_t> plateBytes = ReadVfsFile(card.plate.c_str());
-                DecodedImage image;
-                if (!plateBytes.empty())
-                {
-                    image = DecodePAABuffer(plateBytes.data(), plateBytes.size(), /*isPaa=*/true);
-                }
-                plate = plates.emplace(plateKey, std::move(image)).first;
+                plate = plateIds.emplace(plateKey, platePaths.size()).first;
+                platePaths.push_back(card.plate);
             }
-            if (!plate->second.valid())
-            {
-                ++missingPlate;
-                continue;
-            }
-
-            // Crop the authored sub-rect and rescale it to fill the layer.
-            const DecodedImage& image = plate->second;
-            const int x0 = std::clamp(static_cast<int>(card.u0 * static_cast<float>(image.width)), 0, image.width - 1);
-            const int x1 =
-                std::clamp(static_cast<int>(std::ceil(card.u1 * static_cast<float>(image.width))), x0 + 1, image.width);
-            const int y0 =
-                std::clamp(static_cast<int>(card.v0 * static_cast<float>(image.height)), 0, image.height - 1);
-            const int y1 = std::clamp(static_cast<int>(std::ceil(card.v1 * static_cast<float>(image.height))), y0 + 1,
-                                      image.height);
-            const int cropW = x1 - x0;
-            const int cropH = y1 - y0;
-            const uint8_t* src = image.rgba.data() + (static_cast<size_t>(y0) * image.width + x0) * 4u;
-            uint8_t* dst = outLayers.data() + static_cast<size_t>(outLayerCount) * LayerBytes;
-            stbir_resize_uint8_linear(src, cropW, cropH, image.width * 4, dst, GrassAtlasSize, GrassAtlasSize,
-                                      GrassAtlasSize * 4, STBIR_RGBA);
-
-            const int generation = StartsWithNoCase(card.plate.c_str(), "a3\\") ? 1 : 0;
-            for (size_t t = 0; t < LayerBytes; t += 4)
-            {
-                const double a = dst[t + 3] / 255.0;
-                if (a <= 0.5)
-                    continue;
-                toneSum[generation][0] += dst[t + 0] * a;
-                toneSum[generation][1] += dst[t + 1] * a;
-                toneSum[generation][2] += dst[t + 2] * a;
-                toneWeight[generation] += a;
-            }
+            jobs.push_back(CardJob{outLayerCount, plate->second, card});
 
             if (report.size() < 900)
             {
@@ -1013,6 +991,105 @@ bool TerrainWgpu::BuildClutterAtlas(const std::vector<std::pair<std::string, RSt
         outRuns[surfaceKey] = count > 0 ? std::make_pair(static_cast<uint8_t>(first), static_cast<uint8_t>(count))
                                         : std::make_pair(static_cast<uint8_t>(0), static_cast<uint8_t>(1));
     }
+
+    // ---- Phase 2: read every distinct plate, serially -----------------------
+    std::vector<std::vector<uint8_t>> plateBytes(platePaths.size());
+    std::vector<std::vector<size_t>> jobsByPlate(platePaths.size());
+    size_t plateTotal = 0;
+    for (size_t i = 0; i < platePaths.size(); ++i)
+    {
+        plateBytes[i] = ReadVfsFile(platePaths[i].c_str());
+        plateTotal += plateBytes[i].size();
+    }
+    for (size_t j = 0; j < jobs.size(); ++j)
+    {
+        jobsByPlate[jobs[j].plate].push_back(j);
+    }
+
+    // ---- Phase 3: decode, crop and rescale, in parallel over PLATES ---------
+    //
+    // Over plates rather than cards, because the decode is the cost and cards
+    // sharing a plate must not decode it twice. Every job writes only its own
+    // layer and the layers are disjoint, so no job can race another. Tone is
+    // accumulated per plate and reduced afterwards rather than through an atomic.
+    struct PlateTone
+    {
+        double sum[3] = {0.0, 0.0, 0.0};
+        double weight = 0.0;
+        int generation = 0;
+        bool decoded = false;
+    };
+    std::vector<PlateTone> plateTone(platePaths.size());
+    const auto runPlates = [&](uint32_t begin, uint32_t end)
+    {
+        for (uint32_t i = begin; i < end; ++i)
+        {
+            if (plateBytes[i].empty() || jobsByPlate[i].empty())
+            {
+                continue;
+            }
+            const DecodedImage image = DecodePAABuffer(plateBytes[i].data(), plateBytes[i].size(), /*isPaa=*/true);
+            if (!image.valid())
+            {
+                continue;
+            }
+            plateTone[i].decoded = true;
+            plateTone[i].generation = StartsWithNoCase(platePaths[i].c_str(), "a3\\") ? 1 : 0;
+            for (size_t j : jobsByPlate[i])
+            {
+                const ClutterCard& card = jobs[j].card;
+                const int x0 =
+                    std::clamp(static_cast<int>(card.u0 * static_cast<float>(image.width)), 0, image.width - 1);
+                const int x1 = std::clamp(static_cast<int>(std::ceil(card.u1 * static_cast<float>(image.width))),
+                                          x0 + 1, image.width);
+                const int y0 =
+                    std::clamp(static_cast<int>(card.v0 * static_cast<float>(image.height)), 0, image.height - 1);
+                const int y1 = std::clamp(static_cast<int>(std::ceil(card.v1 * static_cast<float>(image.height))),
+                                          y0 + 1, image.height);
+                const uint8_t* src = image.rgba.data() + (static_cast<size_t>(y0) * image.width + x0) * 4u;
+                uint8_t* dst = outLayers.data() + static_cast<size_t>(jobs[j].layer) * LayerBytes;
+                stbir_resize_uint8_linear(src, x1 - x0, y1 - y0, image.width * 4, dst, GrassAtlasSize, GrassAtlasSize,
+                                          GrassAtlasSize * 4, STBIR_RGBA);
+                for (size_t t = 0; t < LayerBytes; t += 4)
+                {
+                    const double a = dst[t + 3] / 255.0;
+                    if (a <= 0.5)
+                        continue;
+                    plateTone[i].sum[0] += dst[t + 0] * a;
+                    plateTone[i].sum[1] += dst[t + 1] * a;
+                    plateTone[i].sum[2] += dst[t + 2] * a;
+                    plateTone[i].weight += a;
+                }
+            }
+        }
+    };
+    TaskPool* pool = GetGlobalTaskPool();
+    if (pool != nullptr && platePaths.size() > 1)
+    {
+        pool->ParallelFor(static_cast<uint32_t>(platePaths.size()), runPlates);
+    }
+    else
+    {
+        runPlates(0, static_cast<uint32_t>(platePaths.size()));
+    }
+
+    // ---- Phase 4: reduce ----------------------------------------------------
+    for (size_t i = 0; i < plateTone.size(); ++i)
+    {
+        if (!plateTone[i].decoded)
+        {
+            missingPlate += static_cast<int>(jobsByPlate[i].size());
+            cards -= static_cast<int>(jobsByPlate[i].size());
+            continue;
+        }
+        const int g = plateTone[i].generation;
+        toneSum[g][0] += plateTone[i].sum[0];
+        toneSum[g][1] += plateTone[i].sum[1];
+        toneSum[g][2] += plateTone[i].sum[2];
+        toneWeight[g] += plateTone[i].weight;
+    }
+    LOG_INFO(Graphics, "Wgpu grass clutter plates: {} distinct, {:.1f} MB read, decoded on {} thread(s)",
+             platePaths.size(), plateTotal / (1024.0 * 1024.0), pool ? pool->ThreadCount() : 1u);
 
     for (int generation = 0; generation < 2; ++generation)
     {
@@ -1919,6 +1996,31 @@ const char* TerrainWgpu::GrassPhotoFamilyName(int index) const
     return _grassPhotoFamilies[static_cast<size_t>(index)].c_str();
 }
 
+// Which of the two conditions behind the photo-card path is actually holding it
+// off. They are indistinguishable from every other signal -- both end with the
+// expensive procedural clump drawn -- and the vertex count is the only tell,
+// which needs the GPU stats overlay to read. So it is reported here, permanently,
+// every time the atlas is (re)uploaded.
+//
+//   have_photo_clumps = 0  the atlas never reached the renderer: missing asset,
+//                          failed decode, or a world whose clutter resolved
+//                          nothing. A renderer-side fact.
+//   have_photo_clumps = 1  the atlas is resident, so anything still drawing the
+//                          procedural clump is the `use_photo_tuft` opt-in that
+//                          the game pushes with GrassSettings, which defaults off.
+void TerrainWgpu::ReportPhotoClumpState() const
+{
+    if (_renderer == nullptr)
+    {
+        return;
+    }
+    const bool resident = wgr_grass_have_photo_clumps(_renderer) != 0;
+    LOG_INFO(Graphics,
+             "Wgpu grass photo cards: atlas resident={}; when resident, the near/mid rings still draw the procedural "
+             "clump unless the game's use_photo_tuft opt-in is set (360/108 vertices per instance against 12)",
+             resident ? 1 : 0);
+}
+
 void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
 {
     if (!_renderer || _grassTuftWorld == worldKey)
@@ -1967,6 +2069,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
                  _clutterAtlasLayers, GrassAtlasLayers, GrassAtlasSize, GrassAtlasSize,
                  static_cast<double>(LayerBytes * GrassAtlasLayers) / (1024.0 * 1024.0));
+        ReportPhotoClumpState();
         return;
     }
 
@@ -2044,10 +2147,12 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
                  MaxPhotoGrassFamilies + 1u);
+        ReportPhotoClumpState();
         return;
     }
     // Expected for anyone without the optional asset -- INFO, not a warning.
     LOG_INFO(Graphics, "Wgpu grass: no mid-LOD clump texture; mid ring uses procedural ribbons");
+    ReportPhotoClumpState();
 }
 
 // GRS-F — replace only the near ribbon's procedural surface detail. The near
