@@ -406,7 +406,7 @@ struct ReplaceObjectInfo
 
 void Landscape::ReplaceObjects(RString name)
 {
-    if (_objectIds.Size() > 0)
+    if (!_objectIds.empty())
     {
         RebuildIDCache();
     }
@@ -526,7 +526,6 @@ void Landscape::ReplaceObjects(RString name)
                                 newObject->InitSkew(this);
                                 newObject->SetType(Primary);
                                 AddObject(newObject);
-                                _objectIds.Access(id);
                                 _objectIds[id] = newObject;
                             }
                         }

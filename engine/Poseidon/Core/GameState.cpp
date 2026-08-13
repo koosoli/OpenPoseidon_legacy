@@ -61,7 +61,19 @@ using namespace Poseidon;
 //
 // Measured spellings in that install: "Arma 3" on 485 archives and "ArmA 3" on
 // one. StringInList compares case-insensitively, so a single entry covers both.
-static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS", "Arma 3", "ArmA 2 OA", nullptr};
+//
+// DZ-001 adds DayZ's two, for exactly the same reason and after exactly the same
+// symptom. Measured across the owner's install (124 archives carrying a product
+// property): "dayz" on 99, "dayz bliss" on 24, "undefined" on 1. None declares an
+// encryption or a pboVersion, so the product name was the only thing refusing
+// them -- and refusing them is silent, so the world loaded and then reported
+// every one of its models as "file not found".
+//
+// "undefined" is deliberately not accepted: it names no product, so honouring it
+// would mean mounting anything at all that forgot to fill the field in.
+static const char* ProductList[] = {"OFP: Cold War Crisis", "OFP: Resistance", "VBS",
+                                    "Arma 3",               "ArmA 2 OA",       "dayz",
+                                    "dayz bliss",           nullptr};
 static bool StringInList(const char* str, const char** list);
 
 namespace Poseidon

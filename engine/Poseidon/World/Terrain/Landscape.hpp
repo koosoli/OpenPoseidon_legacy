@@ -7,6 +7,7 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #include <array>
+#include <unordered_map>
 
 namespace Poseidon
 {
@@ -554,8 +555,16 @@ class Landscape : public SerializeClass
 
     mutable int _lastFindObjectX, _lastFindObjectZ; // usally query for ids on same square
     int _objectId;
-    // id's are remmembered at least during load session
-    AutoArray<OLink<Object>> _objectIds;
+    // id's are remmembered at least during load session.
+    //
+    // Keyed, not indexed. This was an AutoArray addressed by the object id, which
+    // holds only while ids are dense from zero -- true of every world up to Arma 3,
+    // and false of DayZ: Chernarus's ids start at 0x01000000 and run to 654,367,047
+    // for 2,971,218 objects, so Access(id) tried to grow one element per id and took
+    // the process down inside Realloc. A dense array would need 5.2 GB to hold 23 MB
+    // of links. The map costs a hash per lookup and is bounded by the object count
+    // rather than by the largest id any world happens to use.
+    std::unordered_map<int, OLink<Object>> _objectIds;
     // id to data conversion
 
     RefArray<Object> _arrows;

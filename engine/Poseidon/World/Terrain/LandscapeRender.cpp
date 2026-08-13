@@ -1967,16 +1967,17 @@ void Landscape::Draw(Scene& scene)
 
 Object* Landscape::GetObject(int id) const
 {
-    if (_objectIds.Size() <= 0)
+    if (_objectIds.empty())
     {
         LOG_ERROR(World, "No Object ID cache - performing slow search");
         return FindObjectNC(id);
     }
-    if (id < 0 || id >= _objectIds.Size())
+    if (id < 0)
     {
         return nullptr;
     }
-    return _objectIds[id];
+    const auto found = _objectIds.find(id);
+    return found == _objectIds.end() ? nullptr : static_cast<Object*>(found->second);
 }
 
 Texture* Landscape::GetTexture(int id) const

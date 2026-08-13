@@ -163,6 +163,33 @@ is a different engine.
 * `Asset/Formats/World/Oprw25.hpp` — revision 29 accepted; header, static-entity and road-link deltas.
 * `World/Model/ModelCache.{hpp,cpp}` — see below.
 
+## Getting it into the engine: two defects that were not about formats
+
+Reading the files is not the same as loading the world. Substituting ChernarusPlus
+into the runtime with `--test-world` + `--addon-root` found two more, both of which
+had nothing to do with parsing and everything to do with assumptions:
+
+**1. The addon product allow-list silently refused every DayZ archive.**
+`CheckProductCallback` refuses any PBO whose `product` property is outside a fixed
+list, and refuses it *silently*. DayZ declares `product = "dayz"` (99 archives) or
+`"dayz bliss"` (24), so all 117 were dropped, and the symptom was not "no addons" —
+it was a world that loaded and then reported every one of its 2,352 models as
+"file not found". The comment above that list already records Arma 3 hitting this
+exact trap. Adding the two names is what made models and materials resolve.
+
+**2. Object ids are sparse handles, and two containers were indexed by them.**
+`Landscape::_objectIds` was an `AutoArray` addressed by object id, as were the
+`idCache`/`conflicts` pair inside the OPRW placement loop. Every world up to Arma 3
+numbers objects densely from zero, so that held. DayZ does not: Chernarus's ids run
+**0x01000000 .. 654,367,047** for 2,971,218 objects, so `Access(id)` tried to grow
+one element per id — 5.2 GB to hold 23 MB of pointers — and took the process down
+inside `Realloc`. Both are now keyed rather than indexed, which also removes a
+latent O(largest id) allocation for every other generation.
+
+The duplicate-id fixup that followed `idCache` derived its next free id from the
+container's *size*; with a map that is meaningless, so it now continues past the
+highest id actually seen.
+
 ## One thing that was not about DayZ
 
 `ModelCache::loadFromFile` ended in `catch (...) { return nullptr; }`. Every load failure — an
@@ -188,11 +215,46 @@ ODOL revision 54 is not supported by this build for this model
 which is the line that located the material delta. Without it this work would have been a hex editor
 and a guess.
 
+## It renders
+
+Chernarus draws in the engine. Freefly at 6500/2700, 400 m, noon, `--render gl33`: Chernogorsk's
+panelak blocks, the road network with its lane markings, trees and bushes, and forested hills behind
+— all DayZ models on DayZ terrain. Measured rather than eyeballed alone: 529,038 of 921,600 pixels
+non-black, mean luminance 88.
+
+Two things that frame does *not* show, and one that did not work at all:
+
+* **The ground is white.** Terrain surface materials are read (7,192 of 7,193 satellite/mask blends
+  bound, 27,855 surfaces) but are not textured on the GL33 path. GL33 is the fallback backend and
+  parity with it is explicitly not chased, so this is a WGPU question, not a GL33 one.
+* **Some model sections draw untextured** — 45 of them in that run, plus 1,035 materials with no
+  albedo slot falling back to their face texture.
+* **WGPU draws pure black.** Every pixel exactly 0, at every camera position tried. The control
+  proves it is this path and not the rig: the same recipe on the stock OFP mission with no DayZ
+  renders normally (mean 168, 1.43 M non-black), and produces **zero** uncaptured wgpu errors, while
+  each DayZ run produces 60-70. The dominant one, 57 of 64:
+
+  ```
+  In Device::create_bind_group, label = 'wgr_bindless_texture_bind'
+    TextureView with '' label is invalid
+  ```
+
+  One invalid view poisons the whole bindless array, so every object draw after it fails. A second,
+  rarer one invalidates `wgr_sky_bake_layer` inside `Queue::submit`, which explains why even the sky
+  is absent.
+
+  **This is not attributed yet.** The working tree carries another session's uncommitted renderer
+  changes (`EngineWgpu.cpp/.hpp`, `wgpu_renderer.hpp`, `rust/src/ffi.rs`, `rust/src/godrays.rs`), and
+  those are compiled into the DLL these captures ran against. Whether DayZ's texture volume exposes a
+  pre-existing hole in the bindless slot lifetime or interacts with that in-flight work cannot be
+  told apart without a clean tree. Reproduce on a clean checkout before treating it as a DayZ bug.
+
 ## What is not claimed
 
-* **Rendering.** Everything above is container-level: the models and worlds *read*, and their numbers
-  are internally consistent and match external facts about both maps. No DayZ asset has been put on
-  screen, and no visual check has been run.
+* **A playable game.** The world draws; nothing else about DayZ works. See "Out of scope".
+* **WGPU rendering.** See above -- the target backend is black, with a named and reproducible cause.
+* **Object streaming performance.** Chernarus loads at roughly 2 fps for several minutes and reaches
+  ~4-5 GB resident. 2,971,218 placements is 18x Stratis, and nothing here was tuned for it.
 * **The material-version boundary.** Gated at >= 12, observed only at 20. See above.
 * **Map info.** ChernarusPlus retains 17,810,372 bytes of trailing map-info undecoded, exactly as the
   Arma 3 worlds do.

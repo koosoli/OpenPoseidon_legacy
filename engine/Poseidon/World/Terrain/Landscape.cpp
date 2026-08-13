@@ -2104,9 +2104,9 @@ float Landscape::AboveSurfaceOrWater(Vector3Val pos) const
 AutoArray<int> Landscape::GetObjectIDList() const
 {
     AutoArray<int> ret;
-    for (int i = 0; i < _objectIds.Size(); i++)
+    for (const auto& entry : _objectIds)
     {
-        Object* obj = _objectIds[i];
+        Object* obj = entry.second;
         if (obj)
         {
             ret.Add(obj->ID());
@@ -2485,7 +2485,6 @@ Object* Landscape::AddObject(Vector3Par pos, float head, LODShapeWithShadow* sha
     // Fail("Old positioning used.");
     int id = NewObjectID();
     Object* obj = NewObject(shape, id);
-    _objectIds.Access(id);
     _objectIds[id] = obj;
     if (head)
     {
@@ -2587,7 +2586,6 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
     }
 
     // object id list cleared after load is finished
-    _objectIds.Access(id);
     _objectIds[id] = obj;
     PoseidonAssert(obj->ID() == id);
     // check matrix type

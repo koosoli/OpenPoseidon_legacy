@@ -2101,8 +2101,14 @@ bool Landscape::LoadOprwModern(const char* path)
     }
     ProgressRefresh();
 
-    AutoArray<InitPtr<Object>> idCache;
-    AutoArray<AutoArray<InitPtr<Object>>> conflicts;
+    // Keyed by object id, not indexed by it. DayZ ids are sparse handles --
+    // Chernarus runs 0x01000000..654,367,047 for 2,971,218 placements -- so an
+    // array addressed by id would reserve 5.2 GB to hold 23 MB of pointers, and
+    // died in Realloc long before that. Every world up to Arma 3 numbers its
+    // objects densely from zero, which is why this held until now.
+    std::unordered_map<int, Object*> idCache;
+    std::unordered_map<int, std::vector<Object*>> conflicts;
+    int highestId = -1;
 
     int created = 0;
     int refused = 0;
@@ -2143,30 +2149,27 @@ bool Landscape::LoadOprwModern(const char* path)
         }
         ++created;
 
-        idCache.Access(placement.objectId);
-        if (idCache[placement.objectId])
-        {
-            conflicts.Access(placement.objectId);
-            conflicts[placement.objectId].Add(object);
-        }
+        const int placedId = placement.objectId;
+        if (placedId > highestId)
+            highestId = placedId;
+        const auto slot = idCache.find(placedId);
+        if (slot != idCache.end() && slot->second)
+            conflicts[placedId].push_back(object);
         else
-        {
-            idCache[placement.objectId] = object;
-        }
+            idCache[placedId] = object;
 
         if ((created & 0x3ff) == 0)
             ProgressRefresh();
     }
 
-    int newID = idCache.Size();
-    for (int i = 0; i < conflicts.Size(); i++)
+    // Ids handed to duplicates must miss every authored id, so continue past the
+    // highest one seen rather than past the container's size.
+    int newID = highestId + 1;
+    for (auto& entry : conflicts)
     {
-        if (conflicts[i].Size() == 0)
-            continue;
-        Object* o1 = idCache[i];
-        for (int j = 0; j < conflicts[i].Size(); j++)
+        Object* o1 = idCache[entry.first];
+        for (Object* o2 : entry.second)
         {
-            Object* o2 = conflicts[i][j];
             if (dyn_cast<ForestPlain>(o1))
                 swap(o1, o2);
             o2->SetID(newID++);
@@ -2417,7 +2420,7 @@ void Landscape::OnTimeSkipped()
 void Landscape::ClearIDCache()
 {
     Log("Landscape::ClearIDCache");
-    _objectIds.Clear();
+    _objectIds.clear();
 }
 
 void Landscape::RebuildIDCache()
@@ -2436,7 +2439,6 @@ void Landscape::RebuildIDCache()
                 int id = obj->ID();
                 if (id >= 0)
                 {
-                    _objectIds.Access(id);
                     _objectIds[id] = obj;
                     if (id > maxId)
                     {
@@ -2451,14 +2453,12 @@ void Landscape::RebuildIDCache()
             }
         }
     }
-    _objectIds.Compact();
     SetLastObjectID(maxId);
 }
 
 void Landscape::AddToIDCache(Object* object)
 {
     int id = object->ID();
-    _objectIds.Access(id);
     _objectIds[id] = object;
 }
 
@@ -2470,9 +2470,10 @@ Object* Landscape::FindObject(int id) const
     }
     // this function is much slower than GetObject(id)
     // try id cache first
-    if (id < _objectIds.Size())
+    const auto found = _objectIds.find(id);
+    if (found != _objectIds.end())
     {
-        Object* ret = _objectIds[id];
+        Object* ret = found->second;
         if (ret)
         {
             PoseidonAssert(ret->ID() == id);
