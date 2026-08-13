@@ -2086,13 +2086,34 @@ impl Renderer {
         // state as the terrain draw later in this frame.
         self.grass
             .prepare_terrain(&self.device, &self.queue, &self.terrain);
-        // NOTE: the resolution-derived near-ring clamp (Grass::set_screen_metrics) is
-        // deliberately NOT called yet. Wiring it here with
-        // `self.config.height as f32 * 0.5 * cam.proj[5]` collapsed the near ring to its
-        // 8 m floor and produced ZERO near instances, and the candidate count came out
-        // identical (23,104) at 800x600 and at 1920x1080 -- so the value being derived does
-        // not scale with the viewport at all and `proj[5]` is not the vertical-FOV term it
-        // was taken to be here. Left uncalled until the metric is derived correctly.
+        // Pixels per radian for the main scene camera: (viewport_height / 2) * proj[1][1].
+        // `proj` is column-major so [1][1] is element 5, and that element is
+        // 1/tan(fov_y/2) by construction: Camera.cpp sets _projectionNormal(1,1) = 1/cTop,
+        // MatrixConversion maps (1,1) -> flat index 5, and EngineWgpu's reversed-Z
+        // infinite-far rebuild touches only _33 and _43, leaving element 5 alone.
+        //
+        // The near ring uses this to stop where its blades stop being a pixel wide, which
+        // is a DIFFERENT distance at every resolution -- a 32-86 mm blade goes sub-pixel at
+        // roughly 24 m at 800x600 and 55 m at 1080p -- so a fixed metric radius is wrong at
+        // all but one of them.
+        // DISABLED pending a fix, and NOT for the reason first recorded. The metric itself
+        // is correct: with the capture harness actually passing a resolution (it was
+        // silently running every "1080p" capture at 800x600), the near grid scales exactly
+        // with viewport height -- dim 152 at 600 and 272 at 1080, a ratio of 1.79 against
+        // the viewport's 1.80. So proj[5] IS 1/tan(fov_y/2) here, as the source chain says
+        // (Camera.cpp sets _projectionNormal(1,1) = 1/cTop; MatrixConversion maps it to flat
+        // index 5; the reversed-Z rebuild touches only _33/_43).
+        //
+        // What is broken is downstream: with the clamp applied the near ring places almost
+        // nothing -- 0 instances at 800x600 and 35 at 1080p, against 6,378 and 6,925
+        // unclamped -- even though the radius lands at a perfectly reasonable ~24 m and
+        // ~44 m. The grid is resized correctly and then fails to populate, so the fault is
+        // in how a resized near grid is filled, not in the radius.
+        //
+        // if let Some(cam) = cameras.get(main_scene_cam) {
+        //     self.grass
+        //         .set_screen_metrics(&self.queue, self.config.height as f32 * 0.5 * cam.proj[5]);
+        // }
         if let (Some(batch), Some(camera_bind)) = (grass_batches.first(), self.gfx3d.camera_bind())
         {
             self.grass.reset_indirect(&self.queue);

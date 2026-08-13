@@ -2285,6 +2285,55 @@ void TerrainWgpu::UploadDetailNoise()
     }
 }
 
+// MEASUREMENT ONLY -- changes nothing, drives nothing.
+//
+// The projected-size clamp on the grass near ring was reverted because the
+// metric it was handed did not scale with the viewport. Reading the source
+// settles half of that: `WgrCamera::proj` element 5 IS 1/tan(fov_y/2), by
+// construction and not by assumption --
+//
+//   Camera.cpp:41            _projectionNormal(1,1) = _invCTop = 1 / cTop
+//   MatrixConversion.cpp:63  mat._22 = src(1,1)            (flat index 5)
+//   EngineWgpu.cpp:1705      ConvertProjectionMatrix(entry.proj, ProjectionNormal())
+//   EngineWgpu.cpp:1716-17   only _33/_43 are rewritten for reversed-Z infinite far
+//
+// so the reversed-Z rebuild leaves the vertical-FOV term alone and the formula
+// was structurally right. What that leaves is the HEIGHT term, and the engine's
+// own viewport is the way to check it: if this line and the renderer-side value
+// disagree, the disagreement is `config.height`, not the projection.
+//
+// cTop is the half-height of the view at unit distance, so pixels per radian is
+// (render_height / 2) / cTop, and a blade of width w is one pixel wide at
+// w * px_per_radian metres.
+void TerrainWgpu::ReportGrassScreenMetric(Scene& scene) const
+{
+    static bool reported = false;
+    if (reported || GEngine == nullptr)
+    {
+        return;
+    }
+    const Camera* camera = scene.GetCamera();
+    if (camera == nullptr)
+    {
+        return;
+    }
+    const float cTop = static_cast<float>(camera->Top());
+    const int height = GEngine->Height();
+    const int width = GEngine->Width();
+    if (cTop <= 0.0f || height <= 0)
+    {
+        return;
+    }
+    reported = true;
+    const float pxPerRadian = (static_cast<float>(height) * 0.5f) / cTop;
+    // The mean authored near-blade width (grass.wgsl: mix(0.016, 0.043) half-width).
+    const float bladeWidth = 0.059f;
+    LOG_INFO(Graphics,
+             "Wgpu grass screen metric: engine viewport {}x{}, cTop={:.4f} (1/cTop={:.4f}), px_per_radian={:.1f}, "
+             "one-pixel blade distance={:.1f} m",
+             width, height, cTop, 1.0f / cTop, pxPerRadian, bladeWidth * pxPerRadian);
+}
+
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     if (_renderer == nullptr || GLandscape == nullptr)
@@ -2297,6 +2346,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     {
         return;
     }
+    ReportGrassScreenMetric(scene);
 
     // Refresh the coast wet-band params every frame: the animated sea level + clock (+ the
     // live-tuned coast look) drive the damp intertidal band, keyed on the SAME sea level and

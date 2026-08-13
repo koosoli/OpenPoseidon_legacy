@@ -34,6 +34,10 @@ class TerrainWgpu : public ITerrainRenderer
     // Reports whether the photo-card atlas actually reached the renderer, so an
     // absent atlas and a switched-off opt-in stop looking identical in the log.
     void ReportPhotoClumpState() const;
+    // Measurement only: logs the engine-side pixels-per-radian once, so the
+    // reverted near-ring clamp can be re-derived against a number rather than
+    // against an assumption. Drives nothing.
+    void ReportGrassScreenMetric(Scene& scene) const;
     const char* GrassLoadedMapName() const { return _uploadedName.c_str(); }
     const char* GrassSurfaceName(int index) const;
     bool GrassSurfaceEnabled(int index) const;

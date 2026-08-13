@@ -14,6 +14,7 @@
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
+#include <memory>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -557,19 +558,33 @@ void PrintWorldCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
 // world is still mostly missing.
 
 // Read one virtual asset path out of the addon index, as bytes.
+//
+// The bank is cached by archive path. Opening a QFBank re-reads and re-indexes the
+// whole PBO, and a terrain census asks for thousands of small files out of one
+// archive -- Sahrani's 5,126 materials all live in `sara.pbo`, so re-opening per
+// material turned a two-second report into minutes.
 bool ReadIndexedAsset(const AddonIndex& index, const std::string& virtualPath, std::vector<uint8_t>& out)
 {
+    static std::map<std::string, std::shared_ptr<QFBank>> banks;
     const auto found = index.find(CanonicalAssetPath(virtualPath));
     if (found == index.end())
         return false;
-    QFBank bank;
     std::string bankName = found->second.pboPath;
     if (bankName.size() > 4)
         bankName.resize(bankName.size() - 4);
-    if (!bank.open(RString(bankName.c_str())))
+    auto cached = banks.find(bankName);
+    if (cached == banks.end())
+    {
+        auto bank = std::make_shared<QFBank>();
+        if (!bank->open(RString(bankName.c_str())) || bank->error())
+            bank.reset();
+        cached = banks.emplace(bankName, std::move(bank)).first;
+    }
+    if (!cached->second)
         return false;
+    QFBank& bank = *cached->second;
     bank.Lock();
-    Ref<IFileBuffer> buffer = bank.error() ? Ref<IFileBuffer>() : bank.Read(found->second.entryName.c_str());
+    Ref<IFileBuffer> buffer = bank.Read(found->second.entryName.c_str());
     if (!buffer || buffer->GetSize() <= 0)
     {
         bank.Unlock();
@@ -691,7 +706,7 @@ void PrintTerrainMaterialCensus(const Poseidon::Asset::Formats::World::Oprw25Wor
             distinctSurfaces.insert(CanonicalAssetPath(colour));
             if (!textureOf(base + family.normalOffset).empty())
                 ++normalBindings;
-            if (family.macroOffset >= 0)
+            if (family.hasMacro)
             {
                 const std::string macro = textureOf(base + family.macroOffset);
                 if (!macro.empty())

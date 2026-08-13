@@ -231,6 +231,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Cache/test_derived_asset_key.cpp
     Asset/Formats/Material/test_rv_material_source.cpp
     Asset/Formats/Material/test_shader_schema.cpp
+    Asset/Formats/Material/test_terrain_family.cpp
     Asset/Formats/Material/test_material_channels.cpp
 
     # PoseidonFormats C API tests

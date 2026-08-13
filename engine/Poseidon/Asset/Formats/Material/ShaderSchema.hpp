@@ -483,14 +483,23 @@ struct TerrainFamily
     // generation; only the surface stack moves.
     int satelliteStage = 0;
     int maskStage = 1;
+    // The stage a group's COLOUR sits on. Offsets below are relative to it, and
+    // the later generations put the surface's normal on the odd stage BEFORE its
+    // colour -- hence a negative normalOffset there. Anchoring the group on the
+    // colour rather than on its first stage is what keeps that expressible: the
+    // Arma 2 stack is 3/4, 5/6, 7/8 ... read as normal-then-colour pairs, so a
+    // group's first stage is one BELOW `firstSurfaceStage`.
     int firstSurfaceStage = 4;
-    // Stages per surface, and where the pieces sit inside a group.
+    // Stages per surface, and where the pieces sit relative to the colour.
     int stageStride = 2;
-    int normalOffset = 0;
-    int colourOffset = 1;
-    // Arma 1's per-surface macro colour. -1 in the later generations, which spend
-    // the same role on the world-scale satellite instead.
-    int macroOffset = -1;
+    int normalOffset = -1;
+    int colourOffset = 0;
+    // Arma 1's per-surface macro colour, the low-frequency `_mco` its detail pair
+    // multiplies. `hasMacro` is a separate flag rather than a sentinel offset
+    // because every real offset here is negative: the later generations have no
+    // macro at all, having promoted that role to the world-scale satellite.
+    bool hasMacro = false;
+    int macroOffset = 0;
     int maxSurfaces = 6;
     // Arma 3's whole-tile normal at Stage14. 0 where the generation has none.
     int tileNormalStage = 0;
@@ -575,11 +584,14 @@ inline bool FindTerrainFamily(const std::string& pixelShaderId, TerrainFamily& f
         return false;
 
     family = TerrainFamily{};
-    family.firstSurfaceStage = 2;
+    // Arma 1's group is macro, normal, colour on consecutive stages from Stage2,
+    // so its colour is the group's LAST stage: Stage4, Stage7, Stage10, Stage13.
+    family.firstSurfaceStage = 4;
     family.stageStride = 3;
-    family.macroOffset = 0;
-    family.normalOffset = 1;
-    family.colourOffset = 2;
+    family.hasMacro = true;
+    family.macroOffset = -2;
+    family.normalOffset = -1;
+    family.colourOffset = 0;
     family.maxSurfaces = 4;
     family.tileNormalStage = 0;
     family.maskSuffix = "_lco.paa";
