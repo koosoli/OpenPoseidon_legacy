@@ -1384,6 +1384,22 @@ impl Sky {
         ]
     }
 
+    /// Fix this frame's cloud-shadow world square BEFORE anything publishes or samples it.
+    ///
+    /// `upload` used to derive the mapping, but `upload` runs late in `render_frame` -- long
+    /// after `gfx3d::prepare` has already baked `cloud_shadow_mapping_current()` into the
+    /// camera UBO. Every sampler therefore ran a whole frame behind the compute pass that
+    /// FILLED the map. Snapping makes that lag invisible while the camera is still (the
+    /// square does not move) and maximally visible while it flies: on every frame that
+    /// crosses one of the 8 m snap lines the two squares differ by exactly one texel, so the
+    /// entire shadow field translates 8 m and returns on the next frame -- several times a
+    /// second in flight, never at a standstill. That is the reported flicker.
+    ///
+    /// Call once per frame, from the same camera the sky pass will use.
+    pub fn begin_cloud_shadow_frame(&mut self, cam_pos: [f32; 4]) {
+        self.cloud_shadow_map_params = self.cloud_shadow_mapping(cam_pos);
+    }
+
     /// The mapping last uploaded, so the frame bind group can publish the same numbers to
     /// the shaders that SAMPLE the map. Two independently computed mappings would drift.
     pub fn cloud_shadow_mapping_current(&self) -> [f32; 4] {
@@ -1480,11 +1496,16 @@ impl Sky {
                 self.cirrus_mode,
             ],
             cam_pos,
-            cloud_shadow: self.cloud_shadow_mapping(cam_pos),
+            // Whatever begin_cloud_shadow_frame fixed for this frame -- NOT a fresh
+            // derivation from this call's cam_pos. This is the identical number the camera
+            // bind group has already published to every shader that samples the map, so
+            // cs_cloud_shadow fills the exact square those shaders will read. It also stops
+            // the reflected-camera upload (which runs first, with a mirrored cam_pos) from
+            // moving the square out from under the main pass.
+            cloud_shadow: self.cloud_shadow_map_params,
             moon_params: sky.moon_params,
             moon_sun: sky.moon_sun,
         };
-        self.cloud_shadow_map_params = u.cloud_shadow;
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
         // the froxel fill doesn't depend on the graphics camera group's buffer).

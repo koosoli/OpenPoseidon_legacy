@@ -797,9 +797,22 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
 @compute @workgroup_size(8, 8, 1)
 fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= FAR_GRID_DIM || gid.y >= FAR_GRID_DIM || grass.enabled < 0.5) { return; }
+    // The outer edge dissolves over `band` metres BEYOND the requested radius,
+    // never inside it: fading inward would quietly shorten the draw distance the
+    // slider asks for. So the candidate grid has to reach `far_radius + band`,
+    // and the band is capped at a fraction of the radius so the short presets do
+    // not dilate their spacing much (see the density note below).
+    let far_band = min(lod_band(), grass.far_radius * 0.10);
+    let far_end = grass.far_radius + far_band;
     // Keep the fixed 384x384 far candidate grid bounded even at the 5 km
     // developer radius: farther fields automatically use wider, cheaper cells.
-    let far_spacing = max(max(grass.spacing * 4.0, 1.0), grass.far_radius / (f32(FAR_GRID_DIM) * 0.5 - 1.0));
+    // The grid is a FIXED 384^2, so widening the reach costs no candidates, no
+    // instances and no memory -- only a slightly wider cell, which thins the far
+    // field by (1 + far_band/far_radius)^-2. At the default 30 m dissolve that is
+    // -4.8% at the 1200 m flying preset, and the 0.10 cap bounds the worst case
+    // at -17.4% for radii under 300 m, where the far ring is a minor contributor
+    // anyway.
+    let far_spacing = max(max(grass.spacing * 4.0, 1.0), far_end / (f32(FAR_GRID_DIM) * 0.5 - 1.0));
     let half = f32(FAR_GRID_DIM) * 0.5;
     let snap = floor(frame.cam_pos.xz / far_spacing) * far_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
@@ -819,11 +832,20 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Keep the outer ring visually continuous. It is still economical (one
     // triangle per tuft), but no longer becomes invisible just past 60 m.
     let far_coverage = grass.density * clamp(grass.lod_density.z, 0.0, 1.0) * density_field(world_xz);
-    if (distance2 <= near_start * near_start || distance2 > grass.far_radius * grass.far_radius || seed > far_coverage) { return; }
+    if (distance2 <= near_start * near_start || distance2 > far_end * far_end || seed > far_coverage) { return; }
     // Thicken in across the same band the mid ring thins out over, so the outer
     // proxy does not appear as a complete disc edge at one distance.
+    //
+    // And thin out again over the last band, which the mid ring has always done
+    // (`fade_out` above) and this ring never did: it rejected everything past
+    // `far_radius` outright, so the whole field ended on one hard circle. From
+    // the air that circle is the horizon of the grass and it tracks the camera,
+    // which is the same complaint as vegetation popping in.
     let band = lod_band();
-    let far_fade = smoothstep(near_start, near_start + band, sqrt(distance2));
+    let distance = sqrt(distance2);
+    let fade_in = smoothstep(near_start, near_start + band, distance);
+    let fade_out = 1.0 - smoothstep(max(grass.far_radius, near_start), far_end, distance);
+    let far_fade = min(fade_in, fade_out);
     if (!lod_dissolve(cell_id, far_fade)) { return; }
     let map_max = terrain.world_origin + vec2<f32>(f32(terrain.hm_width - 1u), f32(terrain.hm_height - 1u)) * terrain.terrain_grid;
     if (any(world_xz < terrain.world_origin) || any(world_xz >= map_max)) { return; }

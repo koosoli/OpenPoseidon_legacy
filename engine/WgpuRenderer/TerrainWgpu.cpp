@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -837,8 +838,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
                     }
                 }
                 const bool authoredAnswer = coverage > 0.0f;
-                if (coverage <= 0.0f && !_surfaceCatalog.Declares(surface.Data()) &&
-                    IsGrassSurfaceName(surface.Data()))
+                if (coverage <= 0.0f && !_surfaceCatalog.Declares(surface.Data()) && IsGrassSurfaceName(surface.Data()))
                 {
                     // No authored probability to scale by; treat it as a full
                     // field so a config-less install still gets its meadows.
@@ -852,9 +852,9 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
                 if (coverage > 0.0f)
                 {
                     char line[192];
-                    snprintf(line, sizeof(line), "%s%s -> %s %.2f (%zu/%zu models)",
-                             surfaceReport.empty() ? "" : ", ", key.c_str(),
-                             authoredAnswer ? character.Data() : "<by name>", coverage, models, clutterCount);
+                    snprintf(line, sizeof(line), "%s%s -> %s %.2f (%zu/%zu models)", surfaceReport.empty() ? "" : ", ",
+                             key.c_str(), authoredAnswer ? character.Data() : "<by name>", coverage, models,
+                             clutterCount);
                     surfaceReport += line;
                 }
                 coverageCache.emplace(key, coverage);

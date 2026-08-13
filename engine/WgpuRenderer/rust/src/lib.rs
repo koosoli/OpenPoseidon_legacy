@@ -1621,12 +1621,8 @@ impl Renderer {
         let shadow_mask_view = self.terrain.shadow_mask_view();
         let shadow_mask_gen = self.terrain.shadow_gen();
         let mut shadow_mapping = self.terrain.shadow_mapping();
-        // The Sky pass owns the cloud map and its texel snapping, so it is the only thing that
-        // knows where the map landed this frame. Publishing the SAME numbers the compute pass
-        // used is the point: two independently derived mappings would disagree by a texel and the
-        // shadows would sit slightly off from the clouds casting them.
-        shadow_mapping.cloud_shadow =
-            glam::Vec4::from_array(self.sky.cloud_shadow_mapping_current());
+        // shadow_mapping.cloud_shadow is filled in below, once main_scene_cam is known --
+        // see there for why it cannot be done here.
         // Lend the terrain heightmap to the mesh conform group (group 4) so object
         // vertex shaders conform ClipLand vegetation to SurfaceY without CPU rewrites.
         let heightmap_view = self.terrain.heightmap_view();
@@ -1651,6 +1647,26 @@ impl Renderer {
             .or_else(|| water_batches.first().map(|b| b.camera as usize))
             .or_else(|| grass_batches.first().map(|b| b.camera as usize))
             .unwrap_or(0);
+        // The Sky pass owns the cloud map and its texel snapping, so it is the only thing that
+        // knows where the map landed this frame. Publishing the SAME numbers the compute pass
+        // used is the point: two independently derived mappings would disagree by a texel and
+        // the shadows would sit slightly off from the clouds casting them.
+        //
+        // ORDER IS THE WHOLE FIX. Sky::upload runs several hundred lines below, AFTER
+        // gfx3d::prepare has already baked this struct into the camera UBO -- so reading the
+        // mapping before it handed every sampler the PREVIOUS frame's square while
+        // cs_cloud_shadow filled the map with THIS frame's. Snapping hid that at a standstill
+        // (the square does not move) and showcased it in flight: on each frame the camera
+        // crossed an 8 m snap line the two squares differed by exactly one texel, the whole
+        // shadow field translated 8 m, and it came back the next frame. That is the flicker.
+        // Fixing the square HERE -- from the same camera the sky pass resolves to, so the two
+        // cannot disagree -- makes the frame self-consistent, and Sky::upload now consumes
+        // this square rather than deriving another.
+        if let Some(cam) = cameras.get(main_scene_cam) {
+            self.sky.begin_cloud_shadow_frame(cam.cam_pos);
+        }
+        shadow_mapping.cloud_shadow =
+            glam::Vec4::from_array(self.sky.cloud_shadow_mapping_current());
         // Append a private reflected camera to the GPU upload only. It never crosses the
         // C++ ABI and has no cascade data: main-camera shadow matrices are not valid after
         // a mirror transform.

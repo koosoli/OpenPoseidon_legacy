@@ -12,6 +12,8 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <stddef.h>
+#include <cstdlib>
+#include <cstring>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/CacheList.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
@@ -85,7 +87,22 @@ void RemmemberShadow::Init(Object* object, Vector3Par lightDir, int level, Matri
         // make sure buffer is regenerated
         _shadow->ReleaseVBuffer();
         // optimize it for HW rendering
-        _shadow->FindSections();
+        //
+        // MAT-042: the splitOnly copy is ordinary VISIBLE geometry (Object::Draw
+        // substitutes it for the LOD when an on-surface shape is fully ClipLandOn),
+        // so it must keep the LOD's authored materials. SurfaceSplit now remaps the
+        // section table across the split; FindSections here would undo that -- it
+        // re-derives sections from per-face properties, which do not carry surfMat,
+        // and merges sections that differ only by RVMAT. That is what drew Arma 2
+        // on-surface geometry as a flat, untextured, unlit sheet.
+        //
+        // The projected-shadow copy still needs the rebuild: MakeShadow nulls the
+        // face textures and zeroes the hints after the sections were copied, so its
+        // inherited table is stale by construction.
+        if (!splitOnly || _shadow->NSections() <= 0)
+        {
+            _shadow->FindSections();
+        }
         if (_shadow->NVertex() > 1024)
         {
             _shadow->ConvertToVBuffer(VBBigDiscardable);
@@ -97,6 +114,33 @@ void RemmemberShadow::Init(Object* object, Vector3Par lightDir, int level, Matri
 
         // table should be exact - for best memory usage
         _shadow->Compact();
+
+        // The draw-time WGPU trace can only print the Shape address it is handed,
+        // and for these runtime copies that address matches nothing the load-time
+        // ShapeAdapter trace emitted -- which is exactly how a materialless section
+        // stayed anonymous. Emit the copy's identity here so the two halves join:
+        // grep the log for this line, take the `copy=` pointer, and it is the
+        // `shape=` of the corresponding "Wgpu material trace" lines.
+        if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT");
+            trace && std::strcmp(trace, "__trace__") == 0)
+        {
+            int unassigned = 0;
+            for (int s = 0; s < _shadow->NSections(); s++)
+            {
+                if (!_shadow->GetSection(s).surfMat)
+                {
+                    unassigned++;
+                }
+            }
+            LOG_INFO(Graphics,
+                     "ShadowCache copy trace: copy={} model={} lod={} kind={} faces={} sections={} unassigned={} "
+                     "min=({},{},{}) max=({},{},{})",
+                     static_cast<const void*>(_shadow.GetRef()),
+                     object->GetShape() ? object->GetShape()->Name() : "<none>", level,
+                     splitOnly ? "surface-split" : "projected-shadow", _shadow->NFaces(), _shadow->NSections(),
+                     unassigned, _shadow->Min().X(), _shadow->Min().Y(), _shadow->Min().Z(), _shadow->Max().X(),
+                     _shadow->Max().Y(), _shadow->Max().Z());
+        }
     }
 }
 

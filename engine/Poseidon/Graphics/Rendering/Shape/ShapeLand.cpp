@@ -34,6 +34,49 @@ void Shape::SurfaceSplit(const Landscape* land, const Matrix4& toWorld, float y,
 
     FaceArray splitFaces(_face.Size() * 3 + 16, false);
 
+    // MAT-042: carry the section table across the split.
+    //
+    // The split rewrites the face stream, so the old section offsets die with it.
+    // Callers used to recover by calling FindSections() afterwards, and that is
+    // lossy in two ways: it rebuilds sections from per-face PolyProperties, which
+    // carry a texture pointer and the special flags but NOT the authored RVMAT
+    // (surfMat lives only on ShapeSection), and it MERGES any two sections that
+    // agree on texture+special+material -- which on Arma 2 content is most of
+    // them, because those models leave the section texture null and describe the
+    // whole surface in the RVMAT. The result was a materialless, textureless
+    // section drawn with the no-texture default albedo.
+    //
+    // Faces are visited here in increasing offset order and sections are
+    // contiguous, increasing, non-overlapping ranges over that same stream, so
+    // each source section's fragments come out contiguous and in order. Remapping
+    // beg/end is therefore exact, and it preserves properties, material AND
+    // surfMat rather than re-deriving a strict subset of them.
+    const bool remapSections = _face._sections.Size() > 0;
+    AutoArray<ShapeSection> newSections;
+    int srcSection = 0;    // source section owning the face being split
+    int openSection = -1;  // source section whose output range is currently open
+    Offset sectionBeg = splitFaces.End();
+
+    // Close the open output range. A source section that produced no fragments
+    // (fully clipped away) is dropped rather than emitted empty, which keeps the
+    // table contiguous -- Shape::Draw asserts the last section ends at EndFaces().
+    auto closeSection = [&]()
+    {
+        if (openSection < 0)
+        {
+            return;
+        }
+        const Offset sectionEnd = splitFaces.End();
+        if (sectionEnd > sectionBeg)
+        {
+            ShapeSection& dst = newSections.Append();
+            static_cast<ShapeSectionInfo&>(dst) = _face._sections[openSection];
+            dst.beg = sectionBeg;
+            dst.end = sectionEnd;
+        }
+        openSection = -1;
+    };
+
     // determine range of landscape squares polygon is in
     Vector3 sNo(1, 0, 0);
     Vector3 uNo(0, 0, 1);
@@ -50,6 +93,21 @@ void Shape::SurfaceSplit(const Landscape* land, const Matrix4& toWorld, float y,
         {
             LOG_DEBUG(Graphics, "Invalid source?");
             continue;
+        }
+
+        if (remapSections)
+        {
+            // The last section owns any trailing face an incomplete table missed.
+            while (srcSection + 1 < _face._sections.Size() && i >= _face._sections[srcSection].end)
+            {
+                srcSection++;
+            }
+            if (srcSection != openSection)
+            {
+                closeSection();
+                openSection = srcSection;
+                sectionBeg = splitFaces.End();
+            }
         }
 
         Vector3 pos(VFastTransform, toWorld, Pos(source.GetVertex(0)));
@@ -140,8 +198,16 @@ void Shape::SurfaceSplit(const Landscape* land, const Matrix4& toWorld, float y,
         pos.SetFastTransform(fromWorld, wPos);
     }
 
+    closeSection();
+
     _face = splitFaces;              // copy to compact array
     _face.GetData().UnlinkStorage(); // unlink from static storage
+    // After the assignment above the table is splitFaces' (empty) one, so the
+    // remapped sections have to be installed here rather than before it.
+    if (remapSections)
+    {
+        _face.SetSections(newSections.Data(), newSections.Size());
+    }
     // unmark all splitting hints
     for (int ii = 0; ii < NVertex(); ii++)
     {

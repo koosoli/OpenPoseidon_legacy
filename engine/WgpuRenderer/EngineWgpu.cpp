@@ -1916,8 +1916,17 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                                      (debugMaterialPath ? debugMaterialPath : "<none>");
         static std::unordered_set<std::string> loggedSectionTraces;
         if (loggedSectionTraces.insert(traceKey).second)
-            LOG_INFO(Graphics, "Wgpu material trace: shape={} section={} RVMAT={}", static_cast<const void*>(&sMesh),
-                     beg, debugMaterialPath ? debugMaterialPath : "<none>");
+            // Size and extent are here because a materialless section is only worth
+            // chasing when it is big: sort the trace by `indices` or by bbox volume
+            // and the offender is at the top. `shape=` joins either to the load-time
+            // ShapeAdapter trace (a directly drawn LOD) or to the "ShadowCache copy
+            // trace" line (a runtime SurfaceSplit / projected-shadow copy).
+            LOG_INFO(Graphics,
+                     "Wgpu material trace: shape={} section={} RVMAT={} indices={} sections={} min=({},{},{}) "
+                     "max=({},{},{})",
+                     static_cast<const void*>(&sMesh), beg, debugMaterialPath ? debugMaterialPath : "<none>",
+                     indexCount, sMesh.NSections(), sMesh.Min().X(), sMesh.Min().Y(), sMesh.Min().Z(),
+                     sMesh.Max().X(), sMesh.Max().Y(), sMesh.Max().Z());
     }
     const bool unassignedMaterialTarget = _materialDebugRvmatMatch == "__unassigned__" && !debugSection.surfMat;
     const bool materialDebugTarget = unassignedMaterialTarget || _materialDebugRvmatMatch == "*" ||

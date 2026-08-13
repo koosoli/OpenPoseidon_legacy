@@ -1187,16 +1187,37 @@ impl Grass {
                 1.72
             };
         // The grid has to span the whole disc, so its edge is the diameter. Round
-        // up to the workgroup size and cap; at the cap the field is bounded by a
-        // square smaller than the radius, which is visible but never a silent
-        // density change.
+        // up to the workgroup size and cap.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
         let near_grid_dim = want
             .div_ceil(8)
             .saturating_mul(8)
             .clamp(NEAR_GRID_MIN, NEAR_GRID_MAX);
+        // At the cap the grid cannot span the requested disc, and the field was
+        // then bounded by the grid's SQUARE -- a straight edge across the world,
+        // camera-locked, with no dissolve. It bites at exactly the settings the
+        // dense presets use: the reach is 768 * spacing * 3.20, so 0.02 m spacing
+        // asks for 200 m and gets a 49 m square.
+        //
+        // Cap the radius at what the grid actually covers instead. The near ring
+        // then ends in its own circular dissolve, strictly inside the square, and
+        // the field does not get shorter -- the mid ring already reaches 1000 m
+        // and simply takes over earlier. Costs nothing: the grid, the candidate
+        // count and the dispatch are all unchanged.
+        //
+        // One cell of margin because near candidates jitter by up to +-0.925 of a
+        // cell out of their own square.
+        let near_reach = (near_grid_dim as f32 * 0.5 - 1.0).max(1.0) * near_spacing;
+        let near_radius = near_radius.min(near_reach);
         // Mirrors mid_ring_end() in grass.wgsl. Both must agree: the shader
-        // decides which candidates to accept, this decides how many exist.
+        // decides which candidates to accept, this decides how many exist -- and
+        // both now read the same capped `near_radius`, since the shader takes it
+        // from these params rather than recomputing it.
+        //
+        // The mid grid needs no equivalent cap: MID_GRID_MAX * MID_PLACEMENT_SPACING
+        // / 2 is 1000.4 m against a MID_RING_MAX of 1000, so it always spans its
+        // disc. Adding a cap here anyway would diverge from mid_ring_end(), which
+        // recomputes the reach in the shader.
         let mid_radius = params.mid_radius.clamp(8.0, MID_RING_MAX);
         let mid_natural = (near_radius + 10.0).max((near_radius * 2.5).min(MID_RING_MAX));
         let mid_end = if mid_radius > near_radius {

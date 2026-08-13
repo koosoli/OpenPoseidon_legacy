@@ -1575,9 +1575,21 @@ int LODShape::FindSqrtLevel(float resolution2, bool noDecal) const
         {
             break; // this one is too rough
         }
-        if (aRes >= 900)
+        // AST-018 hardening (NOT a fix for any observed defect -- measured blast
+        // radius on Takistan is zero). This was the last consumer deciding
+        // drawability by float comparison, the thing LodPurpose.hpp exists to be
+        // the single copy of. `>= 900` is also order-dependent, and 342 of
+        // Takistan's 513 referenced models store their shadow buffers (11000 /
+        // 11010) AFTER the 1e15 sentinels rather than in ascending order.
+        //
+        // The test is `== Visual`, deliberately not IsDrawableLod: the crewed view
+        // LODs (1000 / 1100 / 1200) are drawable but are reserved distances, not
+        // detail steps, and a distance chooser must never walk into them. Every
+        // resolution below 900 classifies Visual, so on measured content this
+        // breaks in exactly the same place the old comparison did.
+        if (Model::ClassifyLodResolution(aRes) != Model::LodPurpose::Visual)
         {
-            break; // memory LOD
+            break; // special LOD (memory / geometry / shadow / unknown sentinel)
         }
     }
     i--;
