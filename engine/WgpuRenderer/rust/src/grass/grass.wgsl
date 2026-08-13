@@ -802,7 +802,10 @@ fn cs_place_far(@builtin(global_invocation_id) gid: vec3<u32>) {
     // slider asks for. So the candidate grid has to reach `far_radius + band`,
     // and the band is capped at a fraction of the radius so the short presets do
     // not dilate their spacing much (see the density note below).
-    let far_band = min(lod_band(), grass.far_radius * 0.10);
+    // Floored so the dissolve's two smoothstep edges can never coincide: the
+    // Grass tab can set the band to 0, and `smoothstep(e, e, x)` is a division by
+    // zero. At 1 mm the edge is hard again, which is what a 0 band asks for.
+    let far_band = max(min(lod_band(), grass.far_radius * 0.10), 0.001);
     let far_end = grass.far_radius + far_band;
     // Keep the fixed 384x384 far candidate grid bounded even at the 5 km
     // developer radius: farther fields automatically use wider, cheaper cells.

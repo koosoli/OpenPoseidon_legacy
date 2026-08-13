@@ -109,6 +109,342 @@ mod sky_device_tests {
         );
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
+
+    // ---- The moon disc actually reaches pixels -------------------------------------
+    //
+    // Building the pipeline proves the shader COMPILES. It does not prove moon_disc()
+    // returns anything, and "the disc is never drawn" is exactly the failure that
+    // survives a clean compile. This renders the real fs_sky pass headlessly with a moon
+    // placed dead-centre and reads the pixels back, so the question "is the shader
+    // drawing the disc" is answered here rather than from a screenshot.
+    //
+    // It also pins the two things a screenshot could not separate: whether the disc is
+    // absent (gate closed / shader broken) or merely somewhere else (direction wrong).
+
+    fn f16_to_f32(h: u16) -> f32 {
+        let sign = ((h >> 15) & 1) as u32;
+        let exp = ((h >> 10) & 0x1f) as u32;
+        let man = (h & 0x3ff) as u32;
+        let bits = match exp {
+            0 if man == 0 => sign << 31,
+            0 => {
+                // Subnormal: normalise it into a f32 exponent.
+                let mut e = -1i32;
+                let mut m = man;
+                while m & 0x400 == 0 {
+                    m <<= 1;
+                    e -= 1;
+                }
+                let exp32 = (127 - 15 + e) as u32;
+                (sign << 31) | (exp32 << 23) | ((m & 0x3ff) << 13)
+            }
+            0x1f => (sign << 31) | (0xff << 23) | (man << 13),
+            _ => (sign << 31) | ((exp + 127 - 15) << 23) | (man << 13),
+        };
+        f32::from_bits(bits)
+    }
+
+    fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    }
+
+    fn normalize(v: [f32; 3]) -> [f32; 3] {
+        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        [v[0] / l, v[1] / l, v[2] / l]
+    }
+
+    const TW: u32 = 128;
+    const TH: u32 = 128;
+
+    // Render fs_sky once into an HDR target and return the decoded RGBA f32 pixels.
+    fn render_sky_rgba(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sky: &mut super::Sky,
+        params: &crate::ffi::WgrSky,
+        ivp: [[f32; 4]; 4],
+    ) -> Vec<[f32; 4]> {
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("moon_test_target"),
+            size: wgpu::Extent3d {
+                width: TW,
+                height: TH,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&Default::default());
+        // 128 px * 8 bytes = 1024, already a multiple of the 256-byte row alignment.
+        let row_bytes = TW * 8;
+        let buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("moon_test_readback"),
+            size: (row_bytes * TH) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // The camera sits at the origin (the sky vs has no translation), so cam_pos only
+        // feeds the cloud-shadow lookup; sea level keeps the raymarch origin sane.
+        sky.upload(
+            queue,
+            params,
+            ivp,
+            [0.0, 0.0, 0.0, 0.0],
+            &bytemuck::Zeroable::zeroed(),
+            &bytemuck::Zeroable::zeroed(),
+        );
+        let mut encoder = device.create_command_encoder(&Default::default());
+        // WITHOUT this the transmittance LUT is an uninitialised texture, moon_disc's
+        // sample_transmittance returns 0 and the disc is multiplied to black — a way to
+        // "lose" the moon that has nothing to do with the moon code.
+        sky.render_luts(&mut encoder);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("moon_test_sky"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            sky.render(&mut pass);
+        }
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &tex,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buf,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row_bytes),
+                    rows_per_image: Some(TH),
+                },
+            },
+            wgpu::Extent3d {
+                width: TW,
+                height: TH,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(Some(encoder.finish()));
+        buf.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        let data = buf.slice(..).get_mapped_range();
+        let halves: &[u16] = bytemuck::cast_slice(&data);
+        let out = halves
+            .chunks_exact(4)
+            .map(|c| {
+                [
+                    f16_to_f32(c[0]),
+                    f16_to_f32(c[1]),
+                    f16_to_f32(c[2]),
+                    f16_to_f32(c[3]),
+                ]
+            })
+            .collect::<Vec<_>>();
+        drop(data);
+        buf.unmap();
+        out
+    }
+
+    #[test]
+    fn the_moon_disc_actually_renders() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let mut sky = super::Sky::new(&device, &queue, crate::HDR_FORMAT, 1);
+
+        // The coordinator's exact capture geometry: azimuth 120, elevation 30, in the
+        // engine frame (x = east, y = up, z = north).
+        let az = 120.0f32.to_radians();
+        let el = 30.0f32.to_radians();
+        let fwd = [el.cos() * az.sin(), el.sin(), el.cos() * az.cos()];
+        let right = normalize(cross([0.0, 1.0, 0.0], fwd));
+        let upv = cross(fwd, right);
+        // inv_view_proj mapping ndc(x,y,0,1) -> right*x*s + up*y*s + fwd, w = 1. Columns,
+        // because WGSL mat4x4 built from a [[f32;4];4] is column-major. s = tan(fov/2).
+        let s = 0.5f32; // ~53 deg horizontal fov
+        let ivp = [
+            [right[0] * s, right[1] * s, right[2] * s, 0.0],
+            [upv[0] * s, upv[1] * s, upv[2] * s, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [fwd[0], fwd[1], fwd[2], 1.0],
+        ];
+
+        let mut params = crate::ffi::WgrSky::default();
+        // Night: sun well below the horizon, so the sky behind the moon is dark and any
+        // bright pixel is unambiguously the disc.
+        params.sun_dir = [0.0, -1.0, 0.0, 22.0];
+        params.ground_albedo[3] = 1.0; // night factor
+        params.cloud0[0] = 0.0; // no cloud deck over the disc
+        // Moon dead-centre, full, and large enough to cover many pixels at this fov.
+        params.moon_dir = [fwd[0], fwd[1], fwd[2], 1.0];
+        let radius = 0.05f32; // ~2.9 deg -> ~14 px across at 128 px / 53 deg
+        params.moon_params = [radius, 1.0, 1.0e-2, 1.0];
+        // Full phase = sun behind the viewer, i.e. the lit face points back at us.
+        params.moon_sun = [-fwd[0], -fwd[1], -fwd[2], 0.0];
+
+        let lit = render_sky_rgba(&device, &queue, &mut sky, &params, ivp);
+
+        // CONTROL: identical frame with the draw flag cleared. Without this the assertions
+        // below would also pass on a frame whose centre is bright for some other reason.
+        let mut off = params;
+        off.moon_params[3] = 0.0;
+        let dark = render_sky_rgba(&device, &queue, &mut sky, &off, ivp);
+
+        let idx = |x: u32, y: u32| (y * TW + x) as usize;
+        let centre = idx(TW / 2, TH / 2);
+        let corner = idx(2, 2);
+
+        let lum = |p: [f32; 4]| p[0] + p[1] + p[2];
+
+        // 1. The disc exists: the centre is far brighter with the moon on than off.
+        assert!(
+            lum(lit[centre]) > lum(dark[centre]) * 10.0 + 1.0e-3,
+            "moon_disc drew nothing at the centre: on={:?} off={:?}",
+            lit[centre],
+            dark[centre]
+        );
+        // 2. It is a DISC, not a full-screen wash: the corner must be untouched.
+        assert!(
+            (lum(lit[corner]) - lum(dark[corner])).abs() < 1.0e-4,
+            "the moon changed a corner pixel — that is not a disc: on={:?} off={:?}",
+            lit[corner],
+            dark[corner]
+        );
+        // 3. The control is not vacuous: turning the moon off really did change the centre.
+        assert!(
+            lum(dark[centre]) < lum(lit[centre]),
+            "the draw flag did nothing — the control frame is identical"
+        );
+        // 4. The disc covers a plausible number of pixels for its angular size, so a
+        //    single stray bright texel cannot satisfy (1).
+        let changed = lit
+            .iter()
+            .zip(dark.iter())
+            .filter(|(a, b)| (lum(**a) - lum(**b)).abs() > 1.0e-4)
+            .count();
+        assert!(
+            changed > 60 && changed < 4000,
+            "disc covered {changed} px; expected a few hundred for a 2.9 deg radius at this fov"
+        );
+    }
+
+    // A crescent must differ from a full moon. This is the assertion the coordinator's
+    // capture made and could not satisfy: PHASE=1.0 and PHASE=0.35 came back
+    // pixel-identical, which is only possible if the phase never reaches the shading.
+    #[test]
+    fn phase_changes_the_lit_fraction_of_the_disc() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let mut sky = super::Sky::new(&device, &queue, crate::HDR_FORMAT, 1);
+
+        let fwd = [0.0f32, 0.5, 0.8660254];
+        let fwd = normalize(fwd);
+        let right = normalize(cross([0.0, 1.0, 0.0], fwd));
+        let upv = cross(fwd, right);
+        let s = 0.5f32;
+        let ivp = [
+            [right[0] * s, right[1] * s, right[2] * s, 0.0],
+            [upv[0] * s, upv[1] * s, upv[2] * s, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [fwd[0], fwd[1], fwd[2], 1.0],
+        ];
+
+        let mut base = crate::ffi::WgrSky::default();
+        base.sun_dir = [0.0, -1.0, 0.0, 22.0];
+        base.ground_albedo[3] = 1.0;
+        base.cloud0[0] = 0.0;
+        base.moon_dir = [fwd[0], fwd[1], fwd[2], 1.0];
+        base.moon_params = [0.05, 1.0, 1.0e-2, 1.0];
+
+        // Full: sub-solar direction points back at the viewer.
+        let mut full = base;
+        full.moon_sun = [-fwd[0], -fwd[1], -fwd[2], 0.0];
+        let full_px = render_sky_rgba(&device, &queue, &mut sky, &full, ivp);
+
+        // Side-lit: the sub-solar direction is perpendicular to the view, so exactly half
+        // the visible disc is lit and the terminator runs through the centre.
+        let mut half = base;
+        half.moon_sun = [right[0], right[1], right[2], 0.0];
+        let half_px = render_sky_rgba(&device, &queue, &mut sky, &half, ivp);
+
+        // Difference against a moon-OFF frame so the measurement is the disc alone. Summing
+        // the raw frame instead measures the night sky and the star field, which swamp a
+        // 14-px disc and hide exactly the asymmetry this test exists to find.
+        let mut off = base;
+        off.moon_params[3] = 0.0;
+        let off_px = render_sky_rgba(&device, &queue, &mut sky, &off, ivp);
+
+        let lum = |p: [f32; 4]| p[0] + p[1] + p[2];
+        let delta = |v: &[[f32; 4]], i: usize| (lum(v[i]) - lum(off_px[i])).max(0.0);
+        let total = |v: &[[f32; 4]]| (0..(TW * TH) as usize).map(|i| delta(v, i)).sum::<f32>();
+        // Disc-only light in the left vs right half. The disc is centred, so a full moon must
+        // be symmetric and a side-lit moon must go dark on one side.
+        let halves = |v: &[[f32; 4]]| {
+            let mut l = 0.0f32;
+            let mut r = 0.0f32;
+            for y in 0..TH {
+                for x in 0..TW {
+                    let d = delta(v, (y * TW + x) as usize);
+                    if x < TW / 2 { l += d } else { r += d }
+                }
+            }
+            (l, r)
+        };
+
+        assert!(total(&full_px) > 0.1, "the full moon drew nothing");
+
+        // The BRDF alone only accounts for the SHAPE of the phase. Its total falls modestly
+        // (Lommel-Seeliger brightens the limb, so a lit half is brighter per unit area than a
+        // full disc's centre); the order-of-magnitude falloff between full and quarter is
+        // carried by the CPU's moon_params.z, which this test deliberately holds fixed so the
+        // shading is measured on its own.
+        assert!(
+            total(&half_px) < total(&full_px) * 0.95,
+            "phase did not dim the disc at all: full={} half={}",
+            total(&full_px),
+            total(&half_px)
+        );
+
+        // THE TERMINATOR. This is the assertion that matters: a side-lit moon must be dark on
+        // one side and lit on the other. A phase that changes brightness but not WHICH PART is
+        // lit is exactly the "phase right, terminator wrong" failure that looks worse than no
+        // phase at all.
+        let (fl, fr) = halves(&full_px);
+        let (hl, hr) = halves(&half_px);
+        assert!(
+            (fl - fr).abs() < fl.max(fr) * 0.10,
+            "a full moon must be left/right symmetric, got {fl} vs {fr}"
+        );
+        assert!(
+            hr > hl * 3.0,
+            "no terminator: sub-solar direction is +right, so the right half must be much \
+             brighter, got left={hl} right={hr}"
+        );
+    }
 }
 
 // LUT resolutions. Transmittance is smooth in both axes; multiscatter is very

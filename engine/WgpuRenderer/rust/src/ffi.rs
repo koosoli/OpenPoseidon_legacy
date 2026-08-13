@@ -2456,7 +2456,86 @@ pub unsafe extern "C" fn wgr_set_sky_runtime(
     }
     let renderer = unsafe { &mut *renderer };
     let params = unsafe { &*params };
+    log_moon_runtime(renderer, params);
     renderer.set_sky_runtime(*params);
+}
+
+// Report what the MOON half of the sky runtime actually looks like as it crosses the FFI.
+//
+// This exists because "the disc is never drawn" and "the disc is drawn somewhere I am not
+// looking" produce identical screenshots, and nothing else in the pipeline distinguishes
+// them: every other WGR_* gate in this codebase logs what it resolved to, and the moon did
+// not. Logging HERE rather than on the C++ side is deliberate — this is the last point
+// before the values become a GPU buffer, so a line here separates "C++ computed the wrong
+// thing" from "the shader ignored the right thing" with no ambiguity left.
+//
+// Rate-limited to changes (with a coarse epsilon) so a static night scene prints once
+// rather than sixty times a second, but a converging smoothed direction still shows its
+// trajectory.
+fn log_moon_runtime(renderer: &WgrRenderer, rt: &WgrSkyRuntime) {
+    use std::sync::Mutex;
+    static LAST: Mutex<Option<[f32; 8]>> = Mutex::new(None);
+
+    let now = [
+        rt.moon_dir[0],
+        rt.moon_dir[1],
+        rt.moon_dir[2],
+        rt.moon_params[0],
+        rt.moon_params[1],
+        rt.moon_params[2],
+        rt.moon_params[3],
+        rt.moon_sun[3],
+    ];
+    let Ok(mut last) = LAST.lock() else {
+        return;
+    };
+    let changed = match *last {
+        None => true,
+        // The draw flag is the single most diagnostic bit, so any flip always prints.
+        Some(p) => {
+            p[6] != now[6]
+                || p.iter()
+                    .zip(now.iter())
+                    .any(|(a, b)| (a - b).abs() > a.abs().max(1.0e-3) * 0.02)
+        }
+    };
+    if !changed {
+        return;
+    }
+    *last = Some(now);
+    drop(last);
+
+    // Azimuth from north toward east and elevation, matching both the engine's freefly
+    // readout (atan2(dir.x, dir.z)) and WGR_MOON_AZEL, so the number printed here can be
+    // compared directly with the one that was asked for.
+    let (mx, my, mz) = (rt.moon_dir[0], rt.moon_dir[1], rt.moon_dir[2]);
+    let mut az = mx.atan2(mz).to_degrees();
+    if az < 0.0 {
+        az += 360.0;
+    }
+    let horiz = (mx * mx + mz * mz).sqrt().max(1.0e-6);
+    let el = my.atan2(horiz).to_degrees();
+    let sun_el = rt.sun_dir[1].asin().to_degrees();
+
+    renderer.log.log(
+        log_level::INFO,
+        &format!(
+            "moon: dir=({:.4},{:.4},{:.4}) az={:.1} el={:.1} | lit={:.3} radius={:.5}rad ({:.3}deg) \
+             discScale={:.6} draw={} earthshine={:.4} | sunEl={:.1}",
+            mx,
+            my,
+            mz,
+            az,
+            el,
+            rt.moon_params[1],
+            rt.moon_params[0],
+            rt.moon_params[0].to_degrees(),
+            rt.moon_params[2],
+            if rt.moon_params[3] >= 0.5 { "YES" } else { "NO" },
+            rt.moon_sun[3],
+            sun_el,
+        ),
+    );
 }
 
 /// How much wider the planar water reflection's frustum is than the screen's. 1 = the old

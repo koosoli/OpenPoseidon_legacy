@@ -1856,6 +1856,58 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         tex = t->EnsureUploaded();
         alphaClass = t->GetAlphaClass();
+        // WGR_ROAD_TRACE: one line per distinct texture reaching the immediate path.
+        // Answers three questions at once, which a material-only dump cannot:
+        //  (a) which PrepareTL branch ran (surfMat -> Combine, or the object material);
+        //  (b) the FOLDED TLMaterial that reached SetMaterial -- a zero diffuse, or
+        //      DisableSun in specFlags, would be the missing sun term the captures measured;
+        //  (c) the vertex normal in this shape BEFORE MeshBuild negates it.
+        // (c) is the discriminator. Shape::Norm() is +Y for the A2 road models decoded out
+        // of roads_e, MeshBuild.cpp:44 negates it, and shading.wgsl clamps
+        // max(dot(N, -sun_dir_world), 0) -- so a +Y source normal yields no sun term at all.
+        // Note GL33 shares BuildVertices AND the same clamp, so a plain sign error would
+        // band both backends; it does not, which is why the PATH matters as much as the
+        // values. A road that never appears in this log took the CPU FaceArray::Draw branch
+        // instead, and that absence is itself the answer.
+        if (const char* rt = std::getenv("WGR_ROAD_TRACE"); rt && std::strcmp(rt, "0") != 0)
+        {
+            const char* rname = t->Name();
+            if (rname && *rname)
+            {
+                static std::unordered_set<std::string> loggedRoadSections;
+                if (loggedRoadSections.insert(rname).second)
+                {
+                    const ShapeSection& sec = sMesh.GetSection(beg);
+                    float nx = 0.0f, ny = 0.0f, nz = 0.0f;
+                    const int nv = sMesh.NVertex();
+                    const int take = nv < 32 ? nv : 32;
+                    for (int v = 0; v < take; v++)
+                    {
+                        nx += sMesh.Norm(v).X();
+                        ny += sMesh.Norm(v).Y();
+                        nz += sMesh.Norm(v).Z();
+                    }
+                    if (take > 0)
+                    {
+                        nx /= float(take);
+                        ny /= float(take);
+                        nz /= float(take);
+                    }
+                    LOG_INFO(Graphics,
+                             "ROAD_TRACE tex={} branch={} nv={} meanNorm=({:.3f},{:.3f},{:.3f}) "
+                             "amb=({:.3f},{:.3f},{:.3f}) dif=({:.3f},{:.3f},{:.3f}) "
+                             "emi=({:.3f},{:.3f},{:.3f}) fdif=({:.3f},{:.3f},{:.3f}) specPow={} "
+                             "specFlags=0x{:x} secSpec=0x{:x}",
+                             rname, sec.surfMat ? "Combine(surfMat)" : "object-material", nv, nx, ny, nz,
+                             _curMaterial.ambient.R(), _curMaterial.ambient.G(), _curMaterial.ambient.B(),
+                             _curMaterial.diffuse.R(), _curMaterial.diffuse.G(), _curMaterial.diffuse.B(),
+                             _curMaterial.emmisive.R(), _curMaterial.emmisive.G(), _curMaterial.emmisive.B(),
+                             _curMaterial.forcedDiffuse.R(), _curMaterial.forcedDiffuse.G(),
+                             _curMaterial.forcedDiffuse.B(), _curMaterial.specularPower,
+                             unsigned(_curMaterial.specFlags), unsigned(sec.properties.Special()));
+                }
+            }
+        }
         // One-shot, opt-in probe for the original CWA PAC/P8 vegetation route.  The material
         // base-colour debug view must be allowed to identify whether a black canopy originates
         // in the texture upload or in lighting, without changing either path.  Kept general so

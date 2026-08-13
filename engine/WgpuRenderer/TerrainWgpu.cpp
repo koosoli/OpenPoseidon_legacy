@@ -1306,8 +1306,20 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
     // The map's own answer, where the map has one. OFP worlds have no authored
     // terrain materials at all, so `BakeAuthoredGrassMask` returns false before
     // touching a byte and everything below runs on the array just built.
+    //
+    // The catalogue is skipped outright on those worlds rather than merely going
+    // unused. An OFP `config.bin` is raP version 2 with a different layout from
+    // the version-0 container `ArmaRapReader` reads, so offering one is at best a
+    // wasted read and at worst a misparse; and this keeps the OFP path free of
+    // any Arma config handling by construction instead of by luck.
+    bool anyAuthored = false;
+    for (int i = 0; i < layerCount && !anyAuthored; ++i)
+    {
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+        anyAuthored = source != nullptr && source->surfaceCount != 0 && source->mask.GetLength() != 0;
+    }
     const std::string world = land.GetName() ? land.GetName() : "";
-    if (_surfaceCatalogWorld != world)
+    if (anyAuthored && _surfaceCatalogWorld != world)
     {
         BuildSurfaceCatalog(land);
         _surfaceCatalogWorld = world;

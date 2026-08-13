@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/MathDefs.hpp>
@@ -195,6 +196,12 @@ struct MoonEnv
     float size = -1.0f;
     float bright = -1.0f;
     float phase = -1.0f;
+
+    bool AnySet() const
+    {
+        return enable >= 0 || light >= 0 || sun >= 0 || date || latitude || azel || size > 0.0f ||
+               bright >= 0.0f || phase >= 0.0f;
+    }
 };
 
 int EnvBool(const char* name)
@@ -313,6 +320,40 @@ Engine::SkySettings ResolveCelestialSettings()
     if (e.phase >= 0.0f)
     {
         s.moonPhaseOverride = e.phase;
+    }
+
+    // WRITE THE ENV OVERRIDES BACK, ONCE.
+    //
+    // Without this, `s` is a LOCAL copy and the env vars only ever reached LightSun. That is
+    // exactly half the moon: the light is computed here (so WGR_MOON_BRIGHT visibly brightened
+    // the ground) but the DISC's radiance is computed in EngineWgpu::PushSkyRuntime from the
+    // engine's own SkySettings, which never saw the override at all — so the same flag moved
+    // the moonlight and did nothing to the moon. Pushing the resolved block back into the
+    // engine makes both sides read one set of numbers.
+    //
+    // One-shot on purpose: env wins at startup, and from then on the Sky tab owns the values,
+    // so a slider drag is not silently reverted on the next simulation tick.
+    static bool envApplied = false;
+    if (!envApplied && GEngine && e.AnySet())
+    {
+        envApplied = true;
+        GEngine->SetSkySettings(s);
+    }
+
+    // Report what the gate resolved to, once, like every other WGR_* switch in this codebase.
+    // The renderer logs the moon again at the FFI boundary (wgr_set_sky_runtime); the pair
+    // brackets the whole path, so a disagreement between them localises the fault immediately.
+    static bool logged = false;
+    if (!logged)
+    {
+        logged = true;
+        LOG_INFO(Graphics,
+                 "moon: ephemeris={} sun={} lighting={} manual={} ({:.1f}az/{:.1f}el) "
+                 "phaseOverride={:.2f} size={:.2f} bright={:.2f} intensity={:.4f} envOverrides={}",
+                 s.moonRealistic ? "on" : "off", s.sunRealistic ? "on" : "off",
+                 s.moonLighting ? "on" : "off", s.moonManual ? "on" : "off", s.moonManualAzimuthDeg,
+                 s.moonManualElevationDeg, s.moonPhaseOverride, s.moonSizeScale, s.moonBrightnessScale,
+                 s.moonIntensity, e.AnySet() ? "yes" : "no");
     }
     return s;
 }
