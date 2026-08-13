@@ -48,6 +48,24 @@ const HABLE_F: f32 = 0.30;
 const HABLE_W: f32 = 11.2;
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
+// Highlight desaturation ("roll to white"). The Hable curve below is applied PER CHANNEL, so a
+// bright saturated colour has its strong channels compressed onto the shoulder while its weak
+// channel is still on the near-linear part -- which INCREASES saturation at exactly the luminance
+// where a real film stock loses it. Measured on Stratis: authored yellow lichen on breakwater rock
+// enters at scene-linear (2.84, 1.57, 0.35), leaves the curve at (0.98, 0.83, 0.41), and reads as
+// a glowing orange ball instead of a blown highlight.
+//
+// This blends the post-curve colour toward its own PEAK CHANNEL as that peak approaches white, so
+// bright saturated things go white rather than neon. Toward the peak, not toward luma, so
+// brightness is preserved and only chroma is removed.
+//
+// Strictly bounded: nothing whose post-curve peak is below `desat_start` is touched AT ALL, so the
+// whole shadow and midtone range stays bit-identical and only the top stop moves. strength 0 =
+// disabled, and that is the default -- this is a look change and must be opted in.
+// Driven from tonemap.rs via pipeline constants (WGR_TONEMAP_DESAT).
+override desat_start: f32 = 0.75;
+override desat_strength: f32 = 0.0;
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -109,6 +127,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         color = hable(color);
     } else {
         color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+
+    // Roll-to-white, BEFORE the display-referred grade block: the grade is tuned against the
+    // curve's output and should keep seeing a well-formed highlight. Note the grade's saturation
+    // partially undoes this by design -- re-tune the two together rather than fighting them.
+    if (desat_strength > 0.0) {
+        let peak = max(color.r, max(color.g, color.b));
+        let w = clamp((peak - desat_start) / max(1.0 - desat_start, 1e-4), 0.0, 1.0);
+        color = mix(color, vec3<f32>(peak), w * desat_strength);
     }
 
     // Display-referred grading: contrast about mid grey, saturation, shadow lift,

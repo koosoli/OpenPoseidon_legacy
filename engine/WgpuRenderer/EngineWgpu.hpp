@@ -579,7 +579,10 @@ class EngineWgpu : public EngineDummy
     // A section's albedo when its RVMAT supplies one, or 0. The per-draw path has
     // always done this inline; the GPU-driven retained set needs the same answer,
     // so the lookup lives here rather than being duplicated.
-    uint64_t ResolveMaterialBaseColour(const ShapeSection& section);
+    // `fromConstant`, when given, reports whether the returned albedo came from a PROCEDURAL
+    // CONSTANT stage rather than a real image. The caller needs that to decide precedence
+    // against the section's own face texture -- see MAT-045 at the call site.
+    uint64_t ResolveMaterialBaseColour(const ShapeSection& section, bool* fromConstant = nullptr);
     // A section's per-texel specular map (RVMAT SpecularDetail) when its RVMAT names
     // a loadable one, or 0.
     uint64_t ResolveMaterialSpecularMap(const ShapeSection& section);

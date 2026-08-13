@@ -90,6 +90,27 @@ impl Tonemap {
             immediate_size: 0,
         });
 
+        // Highlight roll-to-white knobs (see tonemap.wgsl). Pushed as pipeline constants so the
+        // shader keeps a no-op default and the feature costs one compare when disabled.
+        //   WGR_TONEMAP_DESAT="<strength>"           -> start 0.75
+        //   WGR_TONEMAP_DESAT="<start>,<strength>"
+        // Absent or unparseable = off, i.e. byte-identical output to today.
+        let (desat_start, desat_strength) = match std::env::var("WGR_TONEMAP_DESAT") {
+            Ok(v) => {
+                let mut it = v.split(',').filter_map(|p| p.trim().parse::<f64>().ok());
+                match (it.next(), it.next()) {
+                    (Some(a), Some(b)) => (a, b),
+                    (Some(a), None) => (0.75, a),
+                    _ => (0.75, 0.0),
+                }
+            }
+            Err(_) => (0.75, 0.0),
+        };
+        let constants = [
+            ("desat_start", desat_start.clamp(0.0, 0.99)),
+            ("desat_strength", desat_strength.clamp(0.0, 1.0)),
+        ];
+
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("wgr_tonemap_pipeline"),
             layout: Some(&pipeline_layout),
@@ -110,7 +131,10 @@ impl Tonemap {
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
             }),
             multiview_mask: None,
             cache: None,

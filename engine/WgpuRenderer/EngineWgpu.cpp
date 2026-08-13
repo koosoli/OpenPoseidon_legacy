@@ -3208,8 +3208,10 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
 // GPU-driven is on by default, so on Stratis essentially every object went down
 // the path without it. Measured: 6,066 sections reach the adapter with a material
 // attached, while only 7 sections a frame pass through DrawSectionTL.
-uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
+uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section, bool* fromConstant)
 {
+    if (fromConstant)
+        *fromConstant = false;
     if (!section.surfMat)
         return 0;
     const char* materialPath = section.surfMat->GetName().Data();
@@ -3294,6 +3296,8 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section)
         if (!render::procedural::Parse(base->texture.raw.c_str()).generated)
             return reject("procedural lookup", base->texture.raw);
         loadName = base->texture.raw;
+        if (fromConstant)
+            *fromConstant = true;
     }
     else if (base->texture.path.empty())
     {
@@ -3525,9 +3529,139 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Arma 3 structures is usually a `*_mlod_co` placeholder. Applied here
             // rather than inside ClassifyGpuSection because that is a free
             // function with no access to the material cache or texture bank.
-            if (const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i)))
+            // Model-space size metrics for one section, computed only when we are about to
+            // report it (walking every section of every model would cost real load time).
+            const auto sectionExtent = [&](int secIndex, int& facesOut, float& diagOut, float& maxFaceOut,
+                                           int& bigFacesOut, float* loOut, float* hiOut)
+            {
+                const ShapeSection& sx = s->GetSection(secIndex);
+                float lo[3] = {1e30f, 1e30f, 1e30f};
+                float hi[3] = {-1e30f, -1e30f, -1e30f};
+                int   faces = 0;
+                float maxFace = 0.0f;
+                int   bigFaces = 0;
+                for (Offset f = sx.beg; f < sx.end; s->NextFace(f))
+                {
+                    const Poly& poly = s->Face(f);
+                    if (poly.N() < 3)
+                    {
+                        continue;
+                    }
+                    faces++;
+                    float flo[3] = {1e30f, 1e30f, 1e30f};
+                    float fhi[3] = {-1e30f, -1e30f, -1e30f};
+                    for (int v = 0; v < poly.N(); v++)
+                    {
+                        Vector3Val p = s->Pos(poly.GetVertex(v));
+                        for (int a = 0; a < 3; a++)
+                        {
+                            lo[a] = floatMin(lo[a], p[a]);
+                            hi[a] = floatMax(hi[a], p[a]);
+                            flo[a] = floatMin(flo[a], p[a]);
+                            fhi[a] = floatMax(fhi[a], p[a]);
+                        }
+                    }
+                    const float faceDiag = Vector3(fhi[0] - flo[0], fhi[1] - flo[1], fhi[2] - flo[2]).Size();
+                    maxFace = floatMax(maxFace, faceDiag);
+                    if (faceDiag >= 3.0f)
+                    {
+                        bigFaces++;
+                    }
+                }
+                facesOut = faces;
+                diagOut = faces > 0 ? Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).Size() : 0.0f;
+                maxFaceOut = maxFace;
+                bigFacesOut = bigFaces;
+                for (int a = 0; a < 3; a++)
+                {
+                    loOut[a] = lo[a];
+                    hiOut[a] = hi[a];
+                }
+            };
+
+            // MAT-045: a procedural CONSTANT colour must not override a real face texture.
+            //
+            // The rule above it ("the RVMAT's albedo wins over the section's face texture,
+            // which on Arma 3 structures is usually a `*_mlod_co` placeholder") is right when
+            // the RVMAT names an image. It is exactly backwards when the RVMAT's base stage is
+            // a procedural constant: there the CONSTANT is the authoring placeholder and the
+            // face texture is the real baked albedo.
+            //
+            // Measured on `house_l_8_ep1` LOD 4: `housel_08_mlod.rvmat`
+            // (PixelShaderID NormalMapSpecularDIMap) declares Stage0
+            // `#(argb,8,8,3)color(0,0,0,1,CO)` -- pure black -- while the section's face carries
+            // `house_l_8_mlod_co.paa`. Binding the constant painted a single 13.45 m face solid
+            // black: flat, one constant normal, untextured-looking, unlit-looking, and immune
+            // to every lighting toggle, because the albedo is literally zero.
+            //
+            // The rule is about information content, not about the colour value: a constant
+            // carries no spatial detail, so a real image always beats it. A constant still
+            // binds when the section has NO face texture -- `mil_wallbig_multi` really does
+            // name its whole surface that way, and that case is unaffected.
+            //
+            // The CPU direct path already refuses procedural base stages outright
+            // (DrawSectionTL tests `!base->texture.isProcedural`), which is why the same
+            // geometry drew light there and black here under WGR_GPU_DRIVEN=0 vs 1.
+            //
+            // WGR_CONSTANT_BASE_OVERRIDE=1 restores the old precedence for A/B.
+            static const bool constantOverridesFace = []
+            {
+                const char* v = std::getenv("WGR_CONSTANT_BASE_OVERRIDE");
+                return v && std::strcmp(v, "0") != 0;
+            }();
+            bool           baseFromConstant = false;
+            const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i), &baseFromConstant);
+            const bool     faceHasTexture = mat.texture_id != 0;
+            // Suppressed: the RVMAT offered only a constant and the face has the real image.
+            const bool constantYieldsToFace =
+                baseColour != 0 && baseFromConstant && faceHasTexture && !constantOverridesFace;
+            if (constantYieldsToFace)
+            {
+                const ShapeSection& secC = s->GetSection(i);
+                const char*         mpC = secC.surfMat ? secC.surfMat->GetName().Data() : "<none>";
+                static std::unordered_set<std::string> loggedConstantKept;
+                if (loggedConstantKept.insert(std::string(shape->Name()) + "|" + (mpC ? mpC : "")).second)
+                    LOG_INFO(Graphics,
+                             "Wgpu material: constant-colour base NOT overriding face texture model={} lod={} "
+                             "section={} rvmat={}",
+                             shape->Name(), level, i, mpC);
+            }
+            else if (baseColour)
             {
                 mat.texture_id = baseColour;
+                // A LARGE face whose albedo is a procedural CONSTANT colour is the other way
+                // to get a flat, untextured-looking, constant-normal surface -- and it is
+                // invisible to the UNTEXTURED warning, because a constant-colour stage binds a
+                // real texture handle. ResolveMaterialBaseColour accepts those deliberately
+                // (`mil_wallbig_multi` names its whole surface that way), which is correct, but
+                // it means "has a texture" does not imply "looks textured". Reported only for
+                // faces big enough to matter on screen, so the list stays short.
+                if (const ShapeSection& secP = s->GetSection(i); secP.surfMat)
+                {
+                    const char* mp = secP.surfMat->GetName().Data();
+                    if (const auto cachedP = _materialBindings.find(mp ? mp : ""); cachedP != _materialBindings.end())
+                    {
+                        const char* whichStage = "Stage0";
+                        const auto* baseStage = EffectiveBaseColourStage(cachedP->second, whichStage);
+                        if (baseStage && baseStage->texture.isProcedural)
+                        {
+                            int   pFaces = 0, pBig = 0;
+                            float pDiag = 0.0f, pMax = 0.0f, pLo[3], pHi[3];
+                            sectionExtent(i, pFaces, pDiag, pMax, pBig, pLo, pHi);
+                            if (pMax >= 3.0f)
+                            {
+                                static std::unordered_set<std::string> loggedFlatBase;
+                                if (loggedFlatBase.insert(std::string(shape->Name()) + "|" + mp).second)
+                                    LOG_WARN(Graphics,
+                                             "Wgpu material: LARGE face with CONSTANT-colour albedo model={} lod={} "
+                                             "section={} rvmat={} stage={} raw={} faces={} diag={} maxFace={} "
+                                             "bigFaces={} min=({},{},{}) max=({},{},{})",
+                                             shape->Name(), level, i, mp, whichStage, baseStage->texture.raw, pFaces,
+                                             pDiag, pMax, pBig, pLo[0], pLo[1], pLo[2], pHi[0], pHi[1], pHi[2]);
+                            }
+                        }
+                    }
+                }
             }
             else if (mat.texture_id == 0)
             {
@@ -3545,34 +3679,22 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 // diverts the object off the retained path, so it changes two things at once.
                 // This perturbs nothing: combine it with the instance position from
                 // WGR_INSTANCE_TRACE to place the section in the world.
-                float lo[3] = {1e30f, 1e30f, 1e30f};
-                float hi[3] = {-1e30f, -1e30f, -1e30f};
-                int secFaces = 0;
-                for (Offset f = sec2.beg; f < sec2.end; s->NextFace(f))
-                {
-                    const Poly& poly = s->Face(f);
-                    if (poly.N() < 3)
-                    {
-                        continue;
-                    }
-                    secFaces++;
-                    for (int v = 0; v < poly.N(); v++)
-                    {
-                        Vector3Val p = s->Pos(poly.GetVertex(v));
-                        for (int a = 0; a < 3; a++)
-                        {
-                            lo[a] = floatMin(lo[a], p[a]);
-                            hi[a] = floatMax(hi[a], p[a]);
-                        }
-                    }
-                }
-                const float diag = secFaces > 0 ? Vector3(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]).Size() : 0.0f;
+                // `diag` is the span of the section's SCATTER, not the size of anything the GPU
+                // actually draws, and reading it as an object size is the trap here: 36
+                // one-metre proxy markers spread through a mosque report diag=26 while every
+                // triangle is a speck. `maxFace` is the largest single face -- the number that
+                // decides "speck or slab" -- and `bigFaces` counts how many could cover a chunk
+                // of screen on their own.
+                int   secFaces = 0, bigFaces = 0;
+                float diag = 0.0f, maxFace = 0.0f, lo[3], hi[3];
+                sectionExtent(i, secFaces, diag, maxFace, bigFaces, lo, hi);
                 static std::unordered_set<std::string> loggedUntextured;
                 if (loggedUntextured.insert(std::string(shape->Name()) + "|" + rvmat).second)
                     LOG_WARN(Graphics,
                              "Wgpu material: section draws UNTEXTURED (fallback=none) model={} lod={} section={} "
-                             "rvmat={} faces={} diag={} min=({},{},{}) max=({},{},{})",
-                             shape->Name(), level, i, rvmat, secFaces, diag, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+                             "rvmat={} faces={} diag={} maxFace={} bigFaces={} min=({},{},{}) max=({},{},{})",
+                             shape->Name(), level, i, rvmat, secFaces, diag, maxFace, bigFaces, lo[0], lo[1], lo[2],
+                             hi[0], hi[1], hi[2]);
             }
             // The per-texel specular map, when the material names one. With it bound
             // the flat constant is applied in full and the map scales it per texel,

@@ -53,6 +53,20 @@ class ODOLLoader
         return loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), filePath);
     }
 
+    // The conversion from the parsed static-model structs to the engine's Model
+    // IR, without a file.
+    //
+    // Exposed because AST-019's defect lived entirely here: the container parsed
+    // correctly -- every LOD closed on its declared boundary and the face stream
+    // matched its declared size -- and the conversion then read a named
+    // selection's face list in the wrong unit. A test that starts from bytes
+    // cannot isolate that; one that starts from the structs states it exactly.
+    static Model convertStaticModel(const P3D::Odol73StaticModel& source, const std::string& sourcePath,
+                                    uint32_t sourceVersion)
+    {
+        return convertOdolStatic(source, sourcePath, sourceVersion, "ODOLStatic", sourceVersion == 73);
+    }
+
     static Model loadFromBuffer(const char* data, int size, const std::string& sourcePath)
     {
         QIStream     stream(const_cast<char*>(data), size);
@@ -322,9 +336,37 @@ class ODOLLoader
             mesh.sections.push_back(section);
         }
 
-        // Named selections. selectedFaces are face-stream offsets in the section
-        // bounds' unit, so they go through the same offset table the sections
-        // did rather than being copied across as if they were face indices.
+        // Named selections.
+        //
+        // AST-019: `selectedFaces` holds FACE INDICES, not the face-stream byte
+        // offsets a section's bounds use. The two live in the same LOD and are not
+        // the same unit, which is the whole reason this went unnoticed: the
+        // sections above are byte offsets and are handled correctly, so the
+        // offset table exists and looks like the obvious thing to reuse.
+        //
+        // Measured through this reader on real files of both generations, every
+        // non-empty selection in the sample:
+        //
+        //   A_Mosque_big_hq_EP1 (ODOL 49)  736 selections with faces:
+        //       every entry a valid face index   736
+        //       every entry a valid byte offset    0
+        //   Hospital_F          (ODOL 73)  382 selections with faces:
+        //       every entry a valid face index   382
+        //       every entry a valid byte offset    0
+        //
+        // Wider sweep over 120 models of structures_e (ODOL 48-52): 31,420
+        // non-proxy selections all-index, 0 all-offset, 0 neither. The handful
+        // that ALSO satisfy the offset test are selections of face 0 alone, where
+        // index 0 and offset 0 coincide.
+        //
+        // The clincher is shape rather than counts: `component01` selects faces
+        // [187,188,189,190,191,192] in a LOD of 1,841 faces whose stream is 18,188
+        // bytes. Consecutive integers are indices; byte offsets would step by 8.
+        //
+        // Reading them as offsets is why the previous code produced an empty face
+        // list for essentially every selection on both generations -- and named
+        // selections drive proxy-marker hiding, hit points, damage and destruction,
+        // so this was not only a proxy defect.
         mesh.selections.reserve(source.namedSelections.size());
         for (const auto& sourceSelection : source.namedSelections)
         {
@@ -336,13 +378,10 @@ class ODOLLoader
                     selection.vertexIndices.push_back(static_cast<uint32_t>(index));
             selection.vertexWeights = sourceSelection.vertexWeights;
             selection.sourceVertexWeights = sourceSelection.vertexWeights;
-            for (int32_t offset : sourceSelection.selectedFaces)
-                for (size_t face = 0; face + 1 < offsets.size(); ++face)
-                    if (offsets[face] == static_cast<uint32_t>(offset))
-                    {
-                        selection.triangleIndices.push_back(static_cast<uint32_t>(face));
-                        break;
-                    }
+            selection.triangleIndices.reserve(sourceSelection.selectedFaces.size());
+            for (int32_t face : sourceSelection.selectedFaces)
+                if (face >= 0 && static_cast<size_t>(face) < source.polygons.faces.size())
+                    selection.triangleIndices.push_back(static_cast<uint32_t>(face));
             selection.sectionIndices.reserve(sourceSelection.sections.size());
             for (int32_t index : sourceSelection.sections)
                 if (index >= 0) selection.sectionIndices.push_back(static_cast<uint32_t>(index));

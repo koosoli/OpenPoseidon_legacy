@@ -196,10 +196,17 @@ struct Odol73StaticPreRestData
 struct Odol73NamedSelection
 {
     std::string name;
-    // Face-stream offsets in the same unit as the section bounds, not face
-    // indices; Odol73FaceStreamOffsets converts them.
+    // AST-019: FACE INDICES into `Odol73Polygons::faces`. Deliberately NOT the
+    // same unit as a section's faceLower/faceUpper, which are face-stream byte
+    // offsets -- the two sit in the same LOD and disagree, which is exactly how
+    // the converter came to run these through the offset table and get nothing.
+    // Measured on both generations; see the note in ODOLLoader::convertLOD.
     std::vector<int32_t> selectedFaces;
     bool isSectional = false;
+    // The selection's own section list. Present in the format, but EMPTY in
+    // practice: 1,171 of 1,171 selections in an ODOL 49 mosque and 414 of 414 in
+    // an ODOL 73 hospital carry none, and only 218 of 36,135 across 120
+    // structures_e models do. It is not a usable fallback for the face list.
     std::vector<int32_t> sections;
     std::vector<int32_t> selectedVertices;
     // Parallel to selectedVertices when present, and absent entirely when the
