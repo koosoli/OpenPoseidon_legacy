@@ -1013,7 +1013,11 @@ fn planar_project(mirrored: vec3<f32>) -> vec3<f32> {
 // Mirroring the already displaced surface point makes cloud reflections slide as the
 // camera pitches.
 fn planar_reflection(surface_rel: vec3<f32>, surface_normal: vec3<f32>, roughness: f32) -> vec4<f32> {
-    if (planar.valid.x < 0.5) { return vec4<f32>(0.0); }
+    // valid.x is a 0..1 FADE, not a flag: the coverage gate in lib.rs dissolves the planar
+    // contribution to zero before it stops rendering the target, so the handover to the
+    // environment reflection completes while the target is still being updated. Testing it as a
+    // boolean would put a hard switch exactly where a shoreline crosses the horizon.
+    if (planar.valid.x <= 0.0) { return vec4<f32>(0.0); }
     let absolute = surface_rel + frame.cam_pos.xyz;
     let plane_point = vec3<f32>(absolute.x, wp.sea_level, absolute.z);
     let projection = planar_project(plane_point);
@@ -1061,7 +1065,9 @@ fn planar_reflection(surface_rel: vec3<f32>, surface_normal: vec3<f32>, roughnes
     // Escalate toward the coarsest mip as the lookup leaves the target, so the smear dissolves.
     let lod = min(max_mip, mix(reflection_lod, max_mip, outside_t));
     let color = textureSampleLevel(planar_color, planar_samp, distorted_uv, lod).rgb;
-    return vec4<f32>(color, valid);
+    // Two independent fades multiply: `valid` handles the lookup running off the edge of the
+    // target, planar.valid.x handles the coverage gate dissolving the whole source out.
+    return vec4<f32>(color, valid * planar.valid.x);
 }
 
 // WTR-003 — water debug views. When wp.debug_params.x is non-zero the fragment shader

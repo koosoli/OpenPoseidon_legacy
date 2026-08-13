@@ -728,7 +728,16 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (seed > coverage) { return; }
     // Dissolve out over the last `band` metres instead of stopping dead on the
     // near radius; cs_place_mid fades in across exactly the same band.
-    let band = lod_band();
+    //
+    // Capped at HALF the radius, which matters the moment the radius is derived
+    // rather than dialled. The dissolve band is a fixed 30 m by default, so a
+    // near radius below 30 m made `max(near_radius - band, 0)` collapse to 0 and
+    // the ring dissolved from the CAMERA outward -- full density only exactly at
+    // the eye, and mean presence over the ring falling from 55% to 24%. The old
+    // fixed 83 m radius always exceeded the band, so this could never fire; the
+    // projected-size clamp is what exposed it, and it is a latent bug in its own
+    // right that any short near radius would have hit.
+    let band = min(lod_band(), grass.near_radius * 0.5);
     let distance = length(delta);
     let near_fade = 1.0 - smoothstep(max(grass.near_radius - band, 0.0), grass.near_radius, distance);
     if (!lod_dissolve(cell_id, near_fade)) { return; }
@@ -790,7 +799,11 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     let delta = world_xz - frame.cam_pos.xz;
     let distance2 = dot(delta, delta);
     let coverage = grass.density * clamp(grass.lod_density.y, 0.0, 1.0) * density_field(world_xz);
-    let band = lod_band();
+    // The SAME cap cs_place applies. The two rings are complementary -- near
+    // thins out across exactly the band mid thickens in across -- so if only one
+    // of them clamped, a short near radius would leave the pair either
+    // double-covering or under-covering the join.
+    let band = min(lod_band(), grass.near_radius * 0.5);
     // A small overlap avoids a bare annulus at the detailed/mid and mid/far
     // joins; the dissolve band widens that overlap into a real crossfade.
     let mid_start = max(0.0, grass.near_radius - mid_spacing * 1.5 - band);

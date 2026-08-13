@@ -25,8 +25,9 @@ use crate::ffi::{
     WgrCamera, WgrCmd, WgrDraw2DBatch, WgrDraw3D, WgrGrassBatch, WgrGrassParams, WgrInstance,
     WgrLight, WgrMat4, WgrMeshVertex, WgrModelLod, WgrModelMaterial, WgrModelSection,
     WgrOverlayDraw, WgrOverlayVertex, WgrShadowCaster, WgrShadowPass, WgrTerrainBatch,
-    WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams, WgrVec4, WgrVertex2D, WgrWaterBatch, WgrWaterCascadeConfig,
-    WgrWaterInteractionEvent, WgrWaterInteractionParams, WgrWaterNode, WgrWaterParams,
+    WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams, WgrVec4, WgrVertex2D, WgrWaterBatch,
+    WgrWaterCascadeConfig, WgrWaterInteractionEvent, WgrWaterInteractionParams, WgrWaterNode,
+    WgrWaterParams,
 };
 use crate::gfx2d::Gfx2d;
 use crate::gfx3d::{Gfx3d, env_f32};
@@ -129,6 +130,116 @@ impl RuntimeDiagnostics {
 }
 
 #[cfg(test)]
+mod planar_coverage_tests {
+    use super::{PlanarConfig, screen_coverage_of_water};
+    use crate::ffi::{WgrCamera, WgrWaterNode};
+
+    // Camera at `eye` looking down -Z, matching the engine's convention: `view` carries rotation
+    // only (geometry is camera-relative) and `proj` is a plain RH perspective — reversed-Z only
+    // rewrites clip.z, which coverage never reads.
+    fn camera(eye: glam::Vec3) -> WgrCamera {
+        let mut cam: WgrCamera = bytemuck::Zeroable::zeroed();
+        cam.proj = glam::Mat4::perspective_rh(70f32.to_radians(), 16.0 / 9.0, 0.1, 10000.0)
+            .to_cols_array();
+        cam.view = glam::Mat4::IDENTITY.to_cols_array();
+        cam.cam_pos = [eye.x, eye.y, eye.z, 1.0];
+        cam
+    }
+
+    fn node(x: f32, z: f32, size: f32) -> WgrWaterNode {
+        let mut n: WgrWaterNode = bytemuck::Zeroable::zeroed();
+        n.origin = glam::Vec2::new(x, z);
+        n.size = size;
+        n
+    }
+
+    #[test]
+    fn no_water_is_no_coverage() {
+        assert_eq!(
+            screen_coverage_of_water(&[], &camera(glam::Vec3::Y), 0.0),
+            0.0
+        );
+    }
+
+    // Water behind the eye must not hold the reflection on. The camera looks down -Z, so +Z is
+    // behind it.
+    #[test]
+    fn water_behind_the_camera_is_ignored() {
+        let cam = camera(glam::Vec3::new(0.0, 20.0, 0.0));
+        let cov = screen_coverage_of_water(&[node(-50.0, 100.0, 100.0)], &cam, 0.0);
+        assert_eq!(cov, 0.0, "water behind the eye reported {cov}");
+    }
+
+    // The case the gate exists for: the owner's Stratis camera is a hillside view where the sea
+    // is a distant strip. A small far patch must read as a SMALL fraction, or the gate can never
+    // fire and the 7.94 ms is never recovered.
+    #[test]
+    fn a_distant_patch_is_a_small_fraction() {
+        let cam = camera(glam::Vec3::new(0.0, 60.0, 0.0));
+        let cov = screen_coverage_of_water(&[node(-40.0, -2000.0, 80.0)], &cam, 0.0);
+        assert!(cov > 0.0, "a visible patch must register at all");
+        assert!(cov < 0.05, "distant 80 m patch covered {cov} of the screen");
+    }
+
+    // ...and the converse, which is the safety direction: standing in the shallows, the node
+    // under the eye straddles the near plane and must saturate rather than produce a small
+    // finite AABB. Getting this backwards would disable the reflection exactly where it is most
+    // visible.
+    #[test]
+    fn water_at_the_camera_saturates() {
+        let cam = camera(glam::Vec3::new(0.0, 1.5, 0.0));
+        let cov = screen_coverage_of_water(&[node(-500.0, -500.0, 1000.0)], &cam, 0.0);
+        assert_eq!(cov, 1.0, "water under the camera reported {cov}");
+    }
+
+    // The divisor is the cost knob; pin both ends and the direction. A gentler slope would
+    // silently stop saving anything.
+    // The fade must be a skip-hider, not a quality dial. If it ever reaches up to `full` again,
+    // every coastal camera silently loses reflection strength — a visual regression disguised as
+    // a performance change, and one nobody would attribute to this gate.
+    #[test]
+    fn fade_is_full_across_the_normal_viewing_range() {
+        let c = PlanarConfig::default();
+        assert_eq!(c.fade_for(0.0), 0.0, "below the cut the reflection is gone");
+        assert_eq!(c.fade_for(c.cut), 0.0, "the fade reaches zero AT the cut");
+        assert!(c.fade_for(c.cut * 2.0) > 0.0 && c.fade_for(c.cut * 2.0) < 1.0);
+        assert_eq!(c.fade_for(c.cut * 3.0), 1.0);
+        // Anything a player would call "there is sea in this shot" is untouched.
+        for cov in [0.02f32, 0.05, 0.1, 0.3, 1.0] {
+            assert_eq!(c.fade_for(cov), 1.0, "coverage {cov} was dimmed");
+        }
+    }
+
+    #[test]
+    fn divisor_grows_as_coverage_shrinks() {
+        let c = PlanarConfig::default();
+        assert_eq!(
+            c.divisor_for(1.0),
+            c.min_div,
+            "full screen of water = best quality"
+        );
+        assert_eq!(c.divisor_for(c.full), c.min_div);
+        assert_eq!(c.divisor_for(0.0), c.max_div, "a sliver = cheapest");
+        let quarter = c.divisor_for(c.full * 0.25);
+        assert!(
+            quarter > c.min_div && quarter <= c.max_div,
+            "quarter coverage gave divisor {quarter}"
+        );
+        // Monotone: a camera panning water off screen must never make the reflection MORE
+        // expensive on the way out.
+        let mut prev = 0u32;
+        for i in 0..=20 {
+            let d = c.divisor_for(c.full * (1.0 - i as f32 / 20.0));
+            assert!(
+                d >= prev,
+                "divisor fell from {prev} to {d} as coverage dropped"
+            );
+            prev = d;
+        }
+    }
+}
+
+#[cfg(test)]
 mod runtime_diagnostics_tests {
     use super::RuntimeDiagnostics;
 
@@ -202,6 +313,163 @@ struct Ablate {
 
 static ABLATE: std::sync::OnceLock<Ablate> = std::sync::OnceLock::new();
 
+/// Planar-reflection cost policy, from `WGR_PLANAR=cut,full,min_div,max_div`.
+///
+/// PERF-002 measured the reflection at 7.94 ms of a 34 ms 1080p frame — 23% — and none of it
+/// scaled with how much water was on screen. These four numbers make it scale.
+#[derive(Clone, Copy)]
+struct PlanarConfig {
+    /// Screen coverage (0..1) below which the pass is skipped outright.
+    cut: f32,
+    /// Coverage at or above which the reflection runs at its cheapest divisor (`min_div`).
+    /// This is the RESOLUTION ramp's reference only — it must not be confused with the fade
+    /// band, which is deliberately much narrower (see `fade_for`).
+    full: f32,
+    /// Resolution divisor at full coverage. 2 = half res, the shipped behaviour.
+    min_div: u32,
+    /// Resolution divisor when water is a sliver — the reflection of a distant strip does not
+    /// need the pixels, and the consumer samples a roughness-blurred mip chain regardless.
+    max_div: u32,
+}
+
+impl Default for PlanarConfig {
+    fn default() -> Self {
+        // Deliberately conservative: at >=6% coverage nothing changes from the shipped
+        // behaviour at all. The divisor only starts climbing below that, and the pass is only
+        // skipped once water is under half a percent of the screen — by which point `planar_fade`
+        // has already dissolved its contribution to zero, so the skip is invisible by
+        // construction rather than by tuning.
+        PlanarConfig {
+            cut: 0.005,
+            full: 0.06,
+            min_div: 2,
+            max_div: 6,
+        }
+    }
+}
+
+static PLANAR_CFG: std::sync::OnceLock<PlanarConfig> = std::sync::OnceLock::new();
+
+/// Consecutive frames a new planar divisor must be wanted before it is committed. ~1/3 s at
+/// 60 fps: long enough that walking toward the shore does not realloc repeatedly, short enough
+/// that the resolution has caught up before the player has finished turning.
+const PLANAR_DIV_HOLD: u32 = 20;
+
+impl PlanarConfig {
+    fn from_env() -> Self {
+        let mut c = PlanarConfig::default();
+        if let Ok(raw) = std::env::var("WGR_PLANAR") {
+            let f: Vec<f32> = raw
+                .split(',')
+                .filter_map(|v| v.trim().parse::<f32>().ok())
+                .collect();
+            if let Some(v) = f.first() {
+                c.cut = v.clamp(0.0, 0.5);
+            }
+            if let Some(v) = f.get(1) {
+                c.full = v.clamp(0.0, 1.0);
+            }
+            if let Some(v) = f.get(2) {
+                c.min_div = (*v as u32).clamp(1, 16);
+            }
+            if let Some(v) = f.get(3) {
+                c.max_div = (*v as u32).clamp(1, 16);
+            }
+        }
+        c.full = c.full.max(c.cut);
+        c.max_div = c.max_div.max(c.min_div);
+        eprintln!(
+            "[wgr] planar reflection policy: cut={:.3} full={:.3} div={}..{} (WGR_PLANAR)",
+            c.cut, c.full, c.min_div, c.max_div
+        );
+        c
+    }
+
+    /// Weight the planar reflection is blended at, 0..1.
+    ///
+    /// The dissolve band is deliberately NARROW and sits immediately above `cut` — it exists
+    /// only to make the skip invisible, NOT as a quality dial. Spreading it up to `full` (6%)
+    /// would have dimmed the reflection across the entire normal viewing range, which is a
+    /// visual regression wearing a performance change's clothes: every coastal camera would have
+    /// lost reflection strength for nothing, since below `full` the saving already comes from the
+    /// resolution divisor. Above 3x `cut` the reflection is at full weight exactly as before.
+    fn fade_for(&self, coverage: f32) -> f32 {
+        let band_end = self.cut * 3.0;
+        if coverage >= band_end {
+            return 1.0;
+        }
+        if band_end <= self.cut {
+            return 1.0;
+        }
+        ((coverage - self.cut) / (band_end - self.cut)).clamp(0.0, 1.0)
+    }
+
+    /// Resolution divisor for this coverage. Reflection pixels worth rendering scale with the
+    /// water's screen AREA, so the linear divisor scales with 1/sqrt(coverage) — half the
+    /// coverage, ~1.4x the divisor. Quantised to whole divisors by the caller's stickiness.
+    fn divisor_for(&self, coverage: f32) -> u32 {
+        if coverage >= self.full {
+            return self.min_div;
+        }
+        let ratio = (self.full / coverage.max(1e-4)).sqrt();
+        ((self.min_div as f32 * ratio).round() as u32).clamp(self.min_div, self.max_div)
+    }
+}
+
+/// Fraction of the screen (0..1) the water surface covers for `cam`.
+///
+/// The water nodes are a non-overlapping CDLOD quadtree of flat quads at `sea`, so projecting
+/// each node's corners and summing their clipped screen AABBs is a genuine coverage estimate for
+/// a few microseconds of CPU. It OVER-estimates in three ways — screen AABB rather than the
+/// projected trapezoid, no occlusion by terrain in front of the water, and neighbouring nodes'
+/// AABBs can overlap slightly — and every one of those errs toward keeping the reflection ON,
+/// which is the direction a cost gate must fail in.
+fn screen_coverage_of_water(nodes: &[WgrWaterNode], cam: &WgrCamera, sea: f32) -> f32 {
+    if nodes.is_empty() {
+        return 0.0;
+    }
+    // `view` has its translation zeroed (geometry is camera-relative), so world points are
+    // projected as `proj * view * (world - cam_pos)`. Reversed-Z only rewrites clip.z, which
+    // coverage never reads.
+    let vp = glam::Mat4::from_cols_array(&cam.proj) * glam::Mat4::from_cols_array(&cam.view);
+    let eye = glam::Vec3::new(cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]);
+    let mut area = 0.0f32;
+    for node in nodes {
+        let (x0, z0) = (node.origin[0], node.origin[1]);
+        let (x1, z1) = (x0 + node.size, z0 + node.size);
+        let mut lo = glam::Vec2::splat(f32::INFINITY);
+        let mut hi = glam::Vec2::splat(f32::NEG_INFINITY);
+        let mut behind = 0;
+        for (cx, cz) in [(x0, z0), (x1, z0), (x0, z1), (x1, z1)] {
+            let clip = vp * glam::Vec3::new(cx - eye.x, sea - eye.y, cz - eye.z).extend(1.0);
+            if clip.w <= 1e-4 {
+                behind += 1;
+                continue;
+            }
+            let ndc = clip.truncate().truncate() / clip.w;
+            lo = lo.min(ndc);
+            hi = hi.max(ndc);
+        }
+        if behind == 4 {
+            continue; // entirely behind the eye
+        }
+        if behind > 0 {
+            // Straddles the near plane: the projected quad is unbounded and any finite AABB
+            // would understate it. Treat the whole screen as covered — a node this close is
+            // water at the camera's feet, which is exactly when the reflection must be at full
+            // quality, so guessing large here is both safe and correct.
+            return 1.0;
+        }
+        let w = (hi.x.min(1.0) - lo.x.max(-1.0)).max(0.0);
+        let h = (hi.y.min(1.0) - lo.y.max(-1.0)).max(0.0);
+        area += w * h;
+        if area >= 4.0 {
+            return 1.0; // NDC screen is 2x2; already saturated
+        }
+    }
+    (area * 0.25).clamp(0.0, 1.0)
+}
+
 impl Ablate {
     fn from_env() -> Self {
         let mut a = Ablate::default();
@@ -272,6 +540,18 @@ pub struct Renderer {
     // Single-sample opaque-scene snapshot consumed by water before it writes HDR.
     water_scene: Option<(wgpu::Texture, wgpu::TextureView)>,
     planar: Option<PlanarTarget>,
+    // (planar_active, coverage in half-percent buckets) at the last log line — see the gate in
+    // render_frame. Bucketed so a drifting camera does not print every frame.
+    planar_dbg_last: Option<(bool, u32)>,
+    // Live resolution divisor for the reflection, and the sticky-selection state behind it.
+    // Changing the divisor REALLOCATES the target and rebuilds water's bind group, so the choice
+    // is held for `PLANAR_DIV_HOLD` consecutive frames of agreement before it is committed;
+    // without that, a camera hovering at a bucket boundary would thrash a multi-megabyte texture
+    // every frame. (That exact failure — a per-frame realloc hiding behind a size comparison —
+    // is what the cloud low-res target was doing before PERF-001.)
+    planar_div: u32,
+    planar_div_want: u32,
+    planar_div_hold: u32,
     planar_mips: PlanarMips,
     hdr_size: (u32, u32),
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
@@ -889,6 +1169,10 @@ impl Renderer {
             hdr_resolve: None,
             water_scene: None,
             planar: None,
+            planar_dbg_last: None,
+            planar_div: 2,
+            planar_div_want: 2,
+            planar_div_hold: 0,
             planar_mips,
             hdr_size: (0, 0),
             sample_count,
@@ -1515,9 +1799,11 @@ impl Renderer {
     }
 
     fn ensure_planar_target(&mut self) {
+        // Divisor, not a fixed half: it tracks how much water is on screen (see PlanarConfig).
+        let div = self.planar_div.max(1);
         let size = (
-            (self.config.width.max(2) + 1) / 2,
-            (self.config.height.max(2) + 1) / 2,
+            (self.config.width.max(2) + div - 1) / div,
+            (self.config.height.max(2) + div - 1) / div,
         );
         if self.planar.as_ref().is_some_and(|p| p.size == size) {
             return;
@@ -1766,13 +2052,72 @@ impl Renderer {
             .unwrap_or(main_scene_cam);
         let planar_sea = self.water.underwater_params().map(|p| p.0);
         let ablate = *ABLATE.get_or_init(Ablate::from_env);
+        // How much of the screen the water surface actually covers, 0..1. The planar reflection
+        // re-renders terrain, the retained object set and a cloud march from a mirrored camera —
+        // measured at 1080p as 7.94 ms, 23% of the frame — and NONE of that cost scaled with how
+        // much water was on screen. At the owner's Stratis camera the sea is a distant strip on a
+        // hillside view and the frame was paying full price for it.
+        //
+        // Estimated on the CPU from the water nodes rather than with an occlusion query: the
+        // nodes are a non-overlapping CDLOD quadtree of flat quads at sea level, so projecting
+        // their corners and summing clipped screen areas is a real coverage number, it costs
+        // microseconds, and it is available BEFORE the reflection is recorded. An occlusion query
+        // would be exact but only answers one frame late, which is the wrong shape for a gate that
+        // decides whether to render at all.
+        let water_coverage = planar_sea
+            .and_then(|sea| cameras.get(water_camera).map(|cam| (sea, cam)))
+            .map(|(sea, cam)| screen_coverage_of_water(water_nodes, cam, sea))
+            .unwrap_or(0.0);
+        let planar_cfg = *PLANAR_CFG.get_or_init(PlanarConfig::from_env);
+        // Hysteresis-free by construction: the weight fades to 0 across a narrow band just above
+        // `cut` BEFORE the pass is skipped below it, so the handover to the environment-map
+        // reflection has already completed by the time the planar target stops being updated. A
+        // bare threshold on a binary switch would pop, and the popping edge would be exactly
+        // where a shoreline crosses the horizon — the most visible place it could happen.
+        let planar_fade = planar_cfg.fade_for(water_coverage);
         let planar_active = planar_sea.is_some()
             && !ablate.planar
+            && planar_fade > 0.0
             && !self.water.low_quality()
             && !water_batches.is_empty()
             && cameras
                 .get(water_camera)
                 .is_some_and(|c| c.cam_pos[1] >= planar_sea.unwrap());
+        // Sticky resolution selection. `divisor_for` is a continuous function of a continuously
+        // moving camera, so committing it directly would realloc the target on any frame the
+        // coverage crossed a rounding boundary. Require PLANAR_DIV_HOLD consecutive frames of
+        // agreement first.
+        if planar_active {
+            let want = planar_cfg.divisor_for(water_coverage);
+            if want == self.planar_div {
+                self.planar_div_hold = 0;
+            } else if want == self.planar_div_want {
+                self.planar_div_hold += 1;
+                if self.planar_div_hold >= PLANAR_DIV_HOLD {
+                    self.planar_div = want;
+                    self.planar_div_hold = 0;
+                }
+            } else {
+                self.planar_div_want = want;
+                self.planar_div_hold = 0;
+            }
+        }
+        // One line per transition, not per frame: this is the number that decides whether a
+        // quarter of the frame happens, so it has to be readable from a benchmark log without a
+        // debugger — and unreadable-by-default, because a per-frame line would swamp the log.
+        let coverage_bucket = (water_coverage * 200.0) as u32;
+        if self.planar_dbg_last != Some((planar_active, coverage_bucket)) {
+            self.planar_dbg_last = Some((planar_active, coverage_bucket));
+            eprintln!(
+                "[wgr] planar reflection {}: water covers {:.2}% of screen (cut {:.2}% full {:.2}%), fade {:.2}, div {}",
+                if planar_active { "ON" } else { "SKIPPED" },
+                water_coverage * 100.0,
+                planar_cfg.cut * 100.0,
+                planar_cfg.full * 100.0,
+                planar_fade,
+                self.planar_div,
+            );
+        }
         let mut prepared_cameras = cameras.to_vec();
         let mut reflected_vp = [0.0f32; 16];
         let reflected_camera = if planar_active {
@@ -2291,7 +2636,7 @@ impl Renderer {
                 &planar.sampled_view,
                 generation,
                 reflected_vp,
-                true,
+                planar_fade,
             );
             // CORRECTNESS — close and submit the frame here, so the reflected sky uniform this
             // block just uploaded is the one these passes actually execute with.
@@ -2327,6 +2672,17 @@ impl Renderer {
                     }),
             );
             self.queue.submit(std::iter::once(planar_encoder.finish()));
+        } else {
+            // The pass did not run this frame. The target still holds whatever it was last
+            // rendered for, and `reflected_vp` in water's uniform is stale with it, so the fade
+            // has to be driven to zero explicitly — the shader falls back to the sky env map,
+            // which is exactly the source `planar_fade` has already dissolved toward.
+            //
+            // This branch did not exist before the coverage gate, and its absence was a latent
+            // bug independent of it: the pass already stopped running when the camera dropped
+            // below the surface or water left the draw stream, and on those frames the water
+            // kept sampling a stale reflection through a stale matrix at full weight.
+            self.water.set_planar_fade(&self.queue, 0.0);
         }
 
         // The local ripple field is independent of opaque depth and is consumed only by
@@ -3613,7 +3969,8 @@ impl Renderer {
     }
 
     fn terrain_set_materials(&mut self, materials: &[WgrTerrainMaterial]) {
-        self.terrain.set_materials(&self.device, &self.queue, materials);
+        self.terrain
+            .set_materials(&self.device, &self.queue, materials);
     }
 
     fn grass_set_geography(&mut self, width: u32, height: u32, values: &[u32]) {

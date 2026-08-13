@@ -806,11 +806,46 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             Shape* lod = shape->_lods[li];
             if (!lod)
                 continue;
+            const auto& irSelections = model.lodLevels[li].mesh.selections;
             for (int si = 0; si < lod->NNamedSel(); si++)
             {
                 const ::NamedSelection& sel = lod->NamedSel(si);
                 if (strncmp(sel.Name(), "proxy:", 6) != 0)
                     continue;
+
+                // MAT-044: mark by the selection's OWN section list when the face list is
+                // empty.
+                //
+                // The face route below matches `selectedFaces` against a rebuilt byte-offset
+                // table (ODOLLoader), which only works while the table's stride matches the
+                // file's. On the Arma 2 family it evidently does not, so `triangleIndices`
+                // comes through empty and this patch used to give up -- leaving the section
+                // with hints 0, so neither Shape::Draw nor RegisterGpuModel's
+                // IsHidden|IsHiddenProxy skip could fire, and one untextured triangle per
+                // proxy was drawn as ordinary geometry. Measured on Takistan: 40 of 513
+                // models, 1,898 markers on visual LODs.
+                //
+                // ODOL named selections carry an explicit `sections` array (the IR's
+                // `sectionIndices`) alongside the face list -- the pre-computed mapping the
+                // format already provides. Using it needs no offset arithmetic at all, so it
+                // is immune to the stride question rather than depending on its answer.
+                bool marked = false;
+                if (sel.Faces().Size() < 1 && si < static_cast<int>(irSelections.size()) &&
+                    irSelections[si].name == sel.Name())
+                {
+                    for (uint32_t secIdx : irSelections[si].sectionIndices)
+                    {
+                        if (secIdx >= static_cast<uint32_t>(lod->NSections()))
+                            continue;
+                        ShapeSection& sec = lod->GetSection(static_cast<int>(secIdx));
+                        sec.properties.OrSpecial(IsHiddenProxy);
+                        sec.properties.SetTexture(nullptr);
+                        marked = true;
+                    }
+                }
+                if (marked)
+                    continue;
+
                 if (sel.Faces().Size() < 1)
                 {
                     // MAT-044: this early-out is why Arma 2 houses bake their proxy-marker
@@ -825,9 +860,13 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                         trace && std::strcmp(trace, "__trace__") == 0)
                     {
                         LOG_INFO(Graphics,
-                                 "ShapeAdapter proxy patch SKIPPED (no faces): model={} lod={} selection={} "
-                                 "points={}",
-                                 model.sourcePath, li, sel.Name(), sel.Size());
+                                 "ShapeAdapter proxy patch SKIPPED: model={} lod={} selection={} points={} "
+                                 "faces={} irSections={} sections={}",
+                                 model.sourcePath, li, sel.Name(), sel.Size(), sel.Faces().Size(),
+                                 si < static_cast<int>(irSelections.size())
+                                     ? static_cast<int>(irSelections[si].sectionIndices.size())
+                                     : -1,
+                                 lod->NSections());
                     }
                     continue;
                 }

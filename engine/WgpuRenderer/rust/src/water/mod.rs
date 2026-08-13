@@ -1083,17 +1083,35 @@ impl Water {
         planar: &wgpu::TextureView,
         view_gen: u64,
         full_vp: [f32; 16],
-        valid: bool,
+        // 0..1, not a bool: the coverage gate dissolves the planar contribution to zero BEFORE
+        // it stops rendering the target, so the handover to the environment-map reflection is a
+        // fade rather than a switch. See `PlanarConfig` in lib.rs.
+        fade: f32,
     ) {
         let mut params = [0.0f32; 20];
         params[..16].copy_from_slice(&full_vp);
-        params[16] = if valid { 1.0 } else { 0.0 };
+        params[16] = fade.clamp(0.0, 1.0);
         queue.write_buffer(&self.planar_params, 0, bytemuck::cast_slice(&params));
         if self.planar_gen != view_gen {
             self.planar_view = planar.clone();
             self.planar_gen = view_gen;
             self.rebuild_group1(device);
         }
+    }
+
+    // Write ONLY the planar fade, leaving the reflected view-projection and the bound target
+    // alone. Used on frames the reflection pass is skipped: the target still holds the last
+    // frame it was rendered for, and its matrix is stale, so the shader must be told to stop
+    // weighting it. Without this the water kept sampling a stale reflection with `valid = 1`
+    // whenever the pass stopped running — dropping below the surface, water leaving the draw
+    // stream, or now the coverage gate.
+    pub fn set_planar_fade(&self, queue: &wgpu::Queue, fade: f32) {
+        // params[16] is the fade lane; offset 16 floats = 64 bytes.
+        queue.write_buffer(
+            &self.planar_params,
+            64,
+            bytemuck::bytes_of(&fade.clamp(0.0, 1.0)),
+        );
     }
 
     // Lend the terrain heightmap to the water vertex stage so the surface can be clamped
