@@ -2086,6 +2086,13 @@ impl Renderer {
         // state as the terrain draw later in this frame.
         self.grass
             .prepare_terrain(&self.device, &self.queue, &self.terrain);
+        // NOTE: the resolution-derived near-ring clamp (Grass::set_screen_metrics) is
+        // deliberately NOT called yet. Wiring it here with
+        // `self.config.height as f32 * 0.5 * cam.proj[5]` collapsed the near ring to its
+        // 8 m floor and produced ZERO near instances, and the candidate count came out
+        // identical (23,104) at 800x600 and at 1920x1080 -- so the value being derived does
+        // not scale with the viewport at all and `proj[5]` is not the vertical-FOV term it
+        // was taken to be here. Left uncalled until the metric is derived correctly.
         if let (Some(batch), Some(camera_bind)) = (grass_batches.first(), self.gfx3d.camera_bind())
         {
             self.grass.reset_indirect(&self.queue);

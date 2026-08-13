@@ -429,6 +429,165 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     return nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// The TERRAIN families.
+//
+// These are not object materials and they do not fit the stage->slot table above:
+// a terrain rvmat is an authored composition of a satellite image, a selector mask
+// and a stack of ground surfaces, and the three generations lay that stack out
+// differently. Describing it as a family record, here, is what keeps the three
+// readings in one place instead of scattered through the world loader.
+//
+// MEASURED over every terrain rvmat of each generation:
+//
+//              | Arma 1 (Sahrani, 4,859)   | Arma 2 / OA        | Arma 3
+//   PixelShaderID | Terrain1..Terrain15    | TerrainX           | TerrainSNX
+//   Stage0        | s_<x>_<y>_lco.paa      | s_..._lco.paa      | s_..._lco.paa
+//   Stage1        | m_<x>_<y>_**lco**.paa  | m_..._lca.paa      | m_..._lca.paa
+//   first surface | Stage2                 | Stage4             | Stage4
+//   stage group   | THREE: _mco,_nohq,_co  | TWO: _nopx,_co     | TWO: _nopx,_co
+//   surfaces      | 4                      | 6                  | 5
+//   tile normal   | none                   | none               | Stage14
+//
+// Two Arma 1 facts are load-bearing and both are easy to get wrong.
+//
+// 1. THE MASK SUFFIX IS `_lco`, NOT `_lca`. Arma 1 names its selector mask with
+//    the same suffix as its satellite -- `m_024_037_lco.paa` beside
+//    `s_024_037_lco.paa` -- so a suffix test cannot tell them apart and the stage
+//    index must. 4,859 of 4,859 tiles are `s/_lco` at Stage0 and `m/_lco` at
+//    Stage1, without exception.
+//
+// 2. `Terrain<N>` IS A FOUR-BIT SLOT PRESENCE MASK, and the stage groups are
+//    DENSE. This is the trap. Arma 2 leaves a stage empty when a slot is unused,
+//    so its slot is its stage position; Arma 1 packs the groups and records which
+//    slots they occupy in the shader id. `p_030-017_l00_n_l08_n` is `Terrain5`
+//    (0b0101) and carries two groups: they are slots 0 and 2, not 0 and 1.
+//
+//    Verified on 4,859 tiles against two independent witnesses, with zero
+//    counterexamples on either: popcount(N) equals the number of three-stage
+//    groups in 4,859 of 4,859, and the positions of the non-`n` tokens in the
+//    tile's own filename equal the set bits of N in 4,859 of 4,859.
+//
+//    1,991 of the 4,859 tiles -- 41% -- have a hole. Reading the dense groups as
+//    slots 0,1,2,... would put the wrong surface under the wrong mask channel on
+//    every one of them. (The filename is evidence, not input: nothing here reads
+//    it. The shader id is the authored value and it is what this uses.)
+//
+//    It also explains an observation recorded in WLD-019 as "the TerrainN number
+//    is a variant id, not a layer count", on the grounds that Terrain1, 2, 4 and
+//    8 all carry a single surface. Those are exactly the four single-bit masks;
+//    that is the evidence FOR the bitmask reading.
+struct TerrainFamily
+{
+    // Stage indices. The satellite and the mask are at fixed positions in every
+    // generation; only the surface stack moves.
+    int satelliteStage = 0;
+    int maskStage = 1;
+    int firstSurfaceStage = 4;
+    // Stages per surface, and where the pieces sit inside a group.
+    int stageStride = 2;
+    int normalOffset = 0;
+    int colourOffset = 1;
+    // Arma 1's per-surface macro colour. -1 in the later generations, which spend
+    // the same role on the world-scale satellite instead.
+    int macroOffset = -1;
+    int maxSurfaces = 6;
+    // Arma 3's whole-tile normal at Stage14. 0 where the generation has none.
+    int tileNormalStage = 0;
+    // The mask's filename suffix. Diagnostics only -- the stage index decides.
+    const char* maskSuffix = "_lca.paa";
+    // True when the surface groups are packed and the shader id names the slots
+    // they occupy. False when a slot is its own stage position.
+    bool slotsFromShaderId = false;
+    // The four-bit presence mask, valid only when slotsFromShaderId.
+    int slotPresenceMask = 0;
+
+    // The slot the `group`-th (dense, 0-based) surface group occupies, or -1 if
+    // there is no such group. For the later generations this is the identity,
+    // which is the whole point: one call site serves all three readings.
+    int SlotOfGroup(int group) const
+    {
+        if (!slotsFromShaderId)
+            return group < maxSurfaces ? group : -1;
+        int seen = 0;
+        for (int slot = 0; slot < maxSurfaces; ++slot)
+        {
+            if ((slotPresenceMask & (1 << slot)) == 0)
+                continue;
+            if (seen == group)
+                return slot;
+            ++seen;
+        }
+        return -1;
+    }
+
+    int GroupCount() const
+    {
+        if (!slotsFromShaderId)
+            return maxSurfaces;
+        int bits = 0;
+        for (int slot = 0; slot < maxSurfaces; ++slot)
+            if (slotPresenceMask & (1 << slot))
+                ++bits;
+        return bits;
+    }
+};
+
+// Recognise a terrain shader id and describe its stack. Returns false for
+// anything that is not a terrain family, including OFP worlds, which author no
+// terrain materials at all.
+inline bool FindTerrainFamily(const std::string& pixelShaderId, TerrainFamily& family)
+{
+    if (detail::EqualsNoCase(pixelShaderId, "TerrainSNX"))
+    {
+        family = TerrainFamily{};
+        family.maxSurfaces = 5;
+        family.tileNormalStage = 14;
+        return true;
+    }
+    if (detail::EqualsNoCase(pixelShaderId, "TerrainX"))
+    {
+        family = TerrainFamily{};
+        family.maxSurfaces = 6;
+        return true;
+    }
+    // `Terrain<N>`, N in 1..15. The bare word "Terrain" is Arma 1's VERTEX shader
+    // id and never a pixel shader id, so requiring a number is not pedantry: it
+    // is what stops a vertex-shader string from being read as a slot mask of 0.
+    const std::string prefix = "Terrain";
+    if (pixelShaderId.size() <= prefix.size())
+        return false;
+    for (size_t i = 0; i < prefix.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(pixelShaderId[i])) !=
+            std::tolower(static_cast<unsigned char>(prefix[i])))
+            return false;
+    int value = 0;
+    for (size_t i = prefix.size(); i < pixelShaderId.size(); ++i)
+    {
+        const char ch = pixelShaderId[i];
+        if (ch < '0' || ch > '9')
+            return false;
+        value = value * 10 + (ch - '0');
+        if (value > 15)
+            return false;
+    }
+    if (value < 1)
+        return false;
+
+    family = TerrainFamily{};
+    family.firstSurfaceStage = 2;
+    family.stageStride = 3;
+    family.macroOffset = 0;
+    family.normalOffset = 1;
+    family.colourOffset = 2;
+    family.maxSurfaces = 4;
+    family.tileNormalStage = 0;
+    family.maskSuffix = "_lco.paa";
+    family.slotsFromShaderId = true;
+    family.slotPresenceMask = value;
+    return true;
+}
+
 // Translate a parsed source material into named slots for its shader family.
 //
 // Only the mapping happens here. No value is reinterpreted -- SMDI lands in

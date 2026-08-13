@@ -7,6 +7,8 @@
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/Asset/Probes/AssetPreview.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -553,6 +555,196 @@ void PrintWorldCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
 // denominators answer different questions. 349 of 350 models parsing sounds like
 // near-complete coverage; if the one failure is the model placed 40,000 times, the
 // world is still mostly missing.
+
+// Read one virtual asset path out of the addon index, as bytes.
+bool ReadIndexedAsset(const AddonIndex& index, const std::string& virtualPath, std::vector<uint8_t>& out)
+{
+    const auto found = index.find(CanonicalAssetPath(virtualPath));
+    if (found == index.end())
+        return false;
+    QFBank bank;
+    std::string bankName = found->second.pboPath;
+    if (bankName.size() > 4)
+        bankName.resize(bankName.size() - 4);
+    if (!bank.open(RString(bankName.c_str())))
+        return false;
+    bank.Lock();
+    Ref<IFileBuffer> buffer = bank.error() ? Ref<IFileBuffer>() : bank.Read(found->second.entryName.c_str());
+    if (!buffer || buffer->GetSize() <= 0)
+    {
+        bank.Unlock();
+        return false;
+    }
+    const auto* bytes = reinterpret_cast<const uint8_t*>(buffer->GetData());
+    out.assign(bytes, bytes + buffer->GetSize());
+    bank.Unlock();
+    return true;
+}
+
+// The terrain-material census.
+//
+// Separate from `census` because it answers a different question: not "can this
+// world's models be read" but "does every authored ground surface reach a
+// binding". A world whose terrain draws white has a number here, and it is zero.
+// It runs the same TerrainFamily record the world loader runs, so a disagreement
+// between this report and the frame is a renderer question, not a parsing one.
+void PrintTerrainMaterialCensus(const Poseidon::Asset::Formats::World::Oprw25World& world, const AddonIndex& index,
+                                int archives, const std::string& path, bool listStages)
+{
+    namespace Mat = Poseidon::Asset::Material;
+
+    std::map<std::string, int> families;
+    std::map<std::string, int> unknownFamilies;
+    int declared = 0, opened = 0, parsed = 0;
+    int withSatellite = 0, withMask = 0, withAnySurface = 0;
+    int surfaceBindings = 0, normalBindings = 0, macroBindings = 0, tileNormals = 0;
+    std::map<int, int> slotHistogram;
+    std::map<int, int> surfaceCountHistogram;
+    std::set<std::string> distinctSurfaces, distinctMacros, distinctMasks, distinctSatellites;
+    int packedWithHole = 0;
+    std::string stageSample;
+
+    std::vector<uint8_t> bytes;
+    for (const std::string& materialPath : world.materials)
+    {
+        if (materialPath.empty())
+            continue;
+        ++declared;
+        if (!ReadIndexedAsset(index, materialPath, bytes))
+            continue;
+        ++opened;
+        Mat::RvMaterialSource source;
+        try
+        {
+            source = Mat::ParseArmaRapMaterial(bytes, materialPath);
+        }
+        catch (const std::exception&)
+        {
+            continue;
+        }
+        ++parsed;
+
+        Mat::TerrainFamily family;
+        if (!Mat::FindTerrainFamily(source.pixelShaderId, family))
+        {
+            ++unknownFamilies[source.pixelShaderId];
+            continue;
+        }
+        ++families[source.pixelShaderId];
+
+        const auto textureOf = [&](int stageIndex) -> std::string
+        {
+            for (const auto& stage : source.stages)
+            {
+                if (stage.index != stageIndex)
+                    continue;
+                if (stage.texture.raw.empty() || Mat::RvTextureRef::LooksProcedural(stage.texture.raw))
+                    return std::string();
+                return stage.texture.raw;
+            }
+            return std::string();
+        };
+
+        if (listStages && stageSample.empty())
+        {
+            stageSample = materialPath + "  [" + source.pixelShaderId + "]\n";
+            for (const auto& stage : source.stages)
+                stageSample += "    Stage" + std::to_string(stage.index) + "  texGen=" +
+                               std::to_string(stage.texGen) + "  " + stage.texture.raw + "\n";
+            for (const auto& texGen : source.texGens)
+                stageSample += "    TexGen" + std::to_string(texGen.index) + "  uvSource=" + texGen.uvSource +
+                               "  aside.x=" + std::to_string(texGen.uvTransform.aside[0]) + "\n";
+        }
+
+        const std::string satellite = textureOf(family.satelliteStage);
+        if (!satellite.empty())
+        {
+            ++withSatellite;
+            distinctSatellites.insert(CanonicalAssetPath(satellite));
+        }
+        const std::string mask = textureOf(family.maskStage);
+        if (!mask.empty())
+        {
+            ++withMask;
+            distinctMasks.insert(CanonicalAssetPath(mask));
+        }
+        if (family.tileNormalStage > 0 && !textureOf(family.tileNormalStage).empty())
+            ++tileNormals;
+
+        int bound = 0;
+        const int groups = family.GroupCount();
+        bool sawHole = false;
+        for (int group = 0; group < groups; ++group)
+        {
+            const int slot = family.SlotOfGroup(group);
+            if (slot != group)
+                sawHole = true;
+            if (slot < 0)
+                continue;
+            const int base = family.firstSurfaceStage + group * family.stageStride;
+            const std::string colour = textureOf(base + family.colourOffset);
+            if (colour.empty())
+                continue;
+            ++bound;
+            ++surfaceBindings;
+            ++slotHistogram[slot];
+            distinctSurfaces.insert(CanonicalAssetPath(colour));
+            if (!textureOf(base + family.normalOffset).empty())
+                ++normalBindings;
+            if (family.macroOffset >= 0)
+            {
+                const std::string macro = textureOf(base + family.macroOffset);
+                if (!macro.empty())
+                {
+                    ++macroBindings;
+                    distinctMacros.insert(CanonicalAssetPath(macro));
+                }
+            }
+        }
+        if (sawHole)
+            ++packedWithHole;
+        ++surfaceCountHistogram[bound];
+        if (bound > 0)
+            ++withAnySurface;
+    }
+
+    std::cout << "World:            " << path << "\n";
+    std::cout << "Archives indexed: " << archives << " (" << index.size() << " entries)\n\n";
+    std::cout << "-- terrain materials --\n";
+    std::cout << "Declared:         " << declared << "\n";
+    std::cout << "Opened:           " << opened << "\n";
+    std::cout << "Parsed:           " << parsed << "\n";
+    std::cout << "Families:         ";
+    for (const auto& entry : families)
+        std::cout << entry.first << "=" << entry.second << " ";
+    std::cout << "\n";
+    if (!unknownFamilies.empty())
+    {
+        std::cout << "Unrecognised:     ";
+        for (const auto& entry : unknownFamilies)
+            std::cout << entry.first << "=" << entry.second << " ";
+        std::cout << "\n";
+    }
+    std::cout << "\n-- bindings --\n";
+    std::cout << "Satellite:        " << withSatellite << " (" << distinctSatellites.size() << " distinct)\n";
+    std::cout << "Selector mask:    " << withMask << " (" << distinctMasks.size() << " distinct)\n";
+    std::cout << "Tile normal:      " << tileNormals << "\n";
+    std::cout << "Surface colours:  " << surfaceBindings << " (" << distinctSurfaces.size() << " distinct)\n";
+    std::cout << "Surface normals:  " << normalBindings << "\n";
+    std::cout << "Surface macros:   " << macroBindings << " (" << distinctMacros.size() << " distinct)\n";
+    std::cout << "Materials with at least one surface: " << withAnySurface << " of " << parsed << "\n";
+    std::cout << "Packed groups whose slots are not 0..n-1: " << packedWithHole << "\n";
+    std::cout << "\nSurfaces per material: ";
+    for (const auto& entry : surfaceCountHistogram)
+        std::cout << entry.first << "->" << entry.second << "  ";
+    std::cout << "\nSlot usage:            ";
+    for (const auto& entry : slotHistogram)
+        std::cout << entry.first << "->" << entry.second << "  ";
+    std::cout << "\n";
+    if (!stageSample.empty())
+        std::cout << "\n-- stage table of one material --\n" << stageSample;
+}
+
 void PrintModelCensus(const Poseidon::Asset::Formats::World::Oprw25World& world, const AddonIndex& index,
                       int archivesRead, bool asJson)
 {
@@ -1041,6 +1233,52 @@ void TerrainCommand::Setup(CLI::App& app)
                     const auto index = BuildAddonIndex(addonRoot, archives);
                     PrintModelCensus(world, index, archives, asJson);
                 }
+                std::exit(0);
+            });
+    }
+    {
+        // The terrain-material census. Separate from `census` because it answers a
+        // different question: not "can the world's models be read" but "does every
+        // authored ground surface reach a binding". A world whose terrain draws
+        // white has a number here, and it is 0.
+        static std::string inputFile;
+        static std::string addonRoot;
+        static bool listStages = false;
+        auto* cmd = terrain->add_subcommand("materials", "Report terrain-material coverage for a world");
+        cmd->add_option("input", inputFile, "WRP terrain file")->required()->check(CLI::ExistingFile);
+        cmd->add_option("--addons", addonRoot, "Game install to resolve the terrain RVMATs against")
+            ->required()
+            ->check(CLI::ExistingDirectory);
+        cmd->add_flag("--stages", listStages, "Print the stage table of the first material of each family");
+        cmd->callback(
+            []()
+            {
+                QIFStream file;
+                file.open(inputFile.c_str());
+                if (file.fail())
+                {
+                    std::cerr << "Error: cannot open " << inputFile << "\n";
+                    std::exit(1);
+                }
+                Asset::Formats::BinaryReader reader(file);
+                if (Asset::Formats::World::PeekOprwModernRevision(reader) == 0)
+                {
+                    std::cerr << "Error: " << inputFile << " is not a later-generation OPRW world.\n";
+                    std::exit(1);
+                }
+                Asset::Formats::World::Oprw25World world;
+                try
+                {
+                    world = Asset::Formats::World::ReadOprwModern(reader);
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << "world_parse: FAILED -- " << e.what() << "\n";
+                    std::exit(1);
+                }
+                int archives = 0;
+                const auto index = BuildAddonIndex(addonRoot, archives);
+                PrintTerrainMaterialCensus(world, index, archives, inputFile, listStages);
                 std::exit(0);
             });
     }

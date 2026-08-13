@@ -28,6 +28,7 @@
 #include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
 #include <Poseidon/IO/Serialization/SerializeBinExt.hpp>
@@ -1882,17 +1883,25 @@ bool Landscape::LoadOprwModern(const char* path)
             }
 
             // The terrain families are authored compositions, not generic object
-            // materials. Stage0 is the satellite colour; Stage1 is the LCA
-            // selector mask; the even stages from 4 onward are surface colours
-            // and their preceding odd stages are those surfaces' normals.
+            // materials: a satellite image, a selector mask, then a stack of
+            // ground surfaces. All three generations are described by one family
+            // record (Asset::Material::FindTerrainFamily) rather than by stage
+            // arithmetic inlined here, because Arma 1 differs from the later two
+            // in four ways at once -- three stages per group instead of two, a
+            // first surface at Stage2 instead of Stage4, a mask that shares the
+            // satellite's `_lco` suffix, and a slot assignment that comes from
+            // the shader id rather than from the stage position.
             //
-            // The two generations differ in how far the stack runs, and the
-            // difference is the whole reason slots are read by stage index:
-            //   Arma 2 / OA  TerrainX    Stage4..Stage14 = six surfaces
-            //   Arma 3       TerrainSNX  Stage4..Stage12 = five surfaces,
-            //                            Stage14 = the whole-tile normal map.
+            //   Arma 1       Terrain1..15  Stage2..Stage13 = four surfaces
+            //   Arma 2 / OA  TerrainX      Stage4..Stage14 = six surfaces
+            //   Arma 3       TerrainSNX    Stage4..Stage12 = five surfaces,
+            //                              Stage14 = the whole-tile normal map.
+            //
             // Preserve the exact references here; TerrainWgpu uploads and
             // composites them instead of inventing a cell-boundary fade.
+            Poseidon::Asset::Material::TerrainFamily family;
+            const bool isTerrainFamily =
+                Poseidon::Asset::Material::FindTerrainFamily(material.pixelShaderId, family);
             A3TerrainMaterial& authored = _a3TerrainMaterials[static_cast<int>(i)];
             const auto uvForStage = [&](const Poseidon::Asset::Material::RvStage& stage)
             {
@@ -1929,71 +1938,81 @@ bool Landscape::LoadOprwModern(const char* path)
                 uv.worldPos = *uvSource == "worldPos";
                 return uv;
             };
-            for (const auto& stage : material.stages)
+            // A stage's texture, or an empty string when it is absent, empty or
+            // procedural. Reading by index rather than iterating is what lets the
+            // group layout be data (the family record) instead of control flow.
+            const auto textureOfStage = [&](int index) -> std::string
             {
-                const std::string& texture = stage.texture.raw;
-                if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
-                    continue;
-                std::string lower = texture;
-                for (char& c : lower)
-                    c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                // Stage0 is the satellite by position, and BOTH generations name
-                // the tile `s_<x>_<y>_lco.paa` -- Takistan's TerrainX and Stratis's
-                // TerrainSNX alike. `_lco.paa` does not contain `_co.paa`, so this
-                // matched neither and every world's satellite was dropped before it
-                // reached the IR: 3,293 tiles on Takistan, and 64 on Stratis, which
-                // is why the layer count rises on both once it is accepted.
-                if (stage.index == 0 &&
-                    (lower.find("_co.paa") != std::string::npos || lower.find("_lco.paa") != std::string::npos))
+                for (const auto& candidate : material.stages)
                 {
-                    authored.satellite = RStringB(texture.c_str());
-                    authored.satelliteUv = uvForStage(stage);
-                }
-                else if (stage.index == 1 && lower.find("_lca.paa") != std::string::npos)
-                {
-                    authored.mask = RStringB(texture.c_str());
-                    authored.maskUv = uvForStage(stage);
-                }
-                else if (stage.index > 12 && lower.find("_no.paa") != std::string::npos)
-                {
-                    // Arma 3's whole-tile terrain normal (Stage14). It sits past
-                    // that generation's five-surface stack and shares the
-                    // satellite's frame. Arma 2 has no equivalent and spends the
-                    // same stage on its sixth surface, so this is decided by the
-                    // `_no` suffix rather than by the stage index alone.
-                    authored.tileNormal = RStringB(texture.c_str());
-                }
-                else if (stage.index >= 4 && (stage.index & 1) == 0 && lower.find("_co.paa") != std::string::npos)
-                {
-                    // The slot is the stage's position in the stack, NOT the order
-                    // in which named colours turn up: Stage4 is slot 0, Stage6 slot
-                    // 1, and so on. Empty stages are holes that keep their slot.
-                    const size_t slot = static_cast<size_t>((stage.index - 4) / 2);
-                    if (slot >= authored.surfaces.size())
-                    {
+                    if (candidate.index != index)
                         continue;
-                    }
-                    // The surface's normal is the odd stage immediately before its
-                    // colour -- that pairing is the whole convention, so it is read
-                    // by position rather than by matching names, which differ
-                    // between generations (`_nopx` here, `_nohq` elsewhere).
-                    const auto normalFor = [&](int colourStage) -> RStringB
-                    {
-                        for (const auto& candidate : material.stages)
-                        {
-                            if (candidate.index != colourStage - 1)
-                                continue;
-                            const std::string& normalTexture = candidate.texture.raw;
-                            if (normalTexture.empty() ||
-                                Poseidon::Asset::Material::RvTextureRef::LooksProcedural(normalTexture))
-                                return RStringB();
-                            return RStringB(normalTexture.c_str());
-                        }
-                        return RStringB();
-                    };
-                    authored.surfaces[slot] = RStringB(texture.c_str());
-                    authored.surfaceUvs[slot] = uvForStage(stage);
-                    authored.surfaceNormals[slot] = normalFor(stage.index);
+                    const std::string& text = candidate.texture.raw;
+                    if (text.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(text))
+                        return std::string();
+                    return text;
+                }
+                return std::string();
+            };
+            const auto stageAt = [&](int index) -> const Poseidon::Asset::Material::RvStage*
+            {
+                for (const auto& candidate : material.stages)
+                    if (candidate.index == index)
+                        return &candidate;
+                return nullptr;
+            };
+
+            if (isTerrainFamily)
+            {
+                // The satellite is Stage0 by position in all three generations,
+                // and all three name it `s_<x>_<y>_lco.paa`. Position decides,
+                // never the suffix: Arma 1 gives the MASK the same `_lco` suffix,
+                // so a suffix test binds the mask as a second satellite.
+                const std::string satellite = textureOfStage(family.satelliteStage);
+                if (!satellite.empty())
+                {
+                    authored.satellite = RStringB(satellite.c_str());
+                    if (const auto* stage = stageAt(family.satelliteStage))
+                        authored.satelliteUv = uvForStage(*stage);
+                }
+                const std::string mask = textureOfStage(family.maskStage);
+                if (!mask.empty())
+                {
+                    authored.mask = RStringB(mask.c_str());
+                    if (const auto* stage = stageAt(family.maskStage))
+                        authored.maskUv = uvForStage(*stage);
+                }
+                // Arma 3's whole-tile normal. Arma 2 spends the same stage on its
+                // sixth surface and Arma 1 has no such stage at all, so this is
+                // gated on the family rather than on the stage index alone.
+                if (family.tileNormalStage > 0)
+                {
+                    const std::string tileNormal = textureOfStage(family.tileNormalStage);
+                    if (!tileNormal.empty())
+                        authored.tileNormal = RStringB(tileNormal.c_str());
+                }
+
+                // The surface stack. `SlotOfGroup` is the identity for the later
+                // generations -- their groups sit at their own slot's stage and a
+                // hole is an empty stage that keeps its place -- and the set-bit
+                // lookup for Arma 1, whose groups are packed and whose shader id
+                // names the slots they occupy.
+                const int groups = family.GroupCount();
+                for (int group = 0; group < groups; ++group)
+                {
+                    const int slot = family.SlotOfGroup(group);
+                    if (slot < 0 || static_cast<size_t>(slot) >= authored.surfaces.size())
+                        continue;
+                    const int base = family.firstSurfaceStage + group * family.stageStride;
+                    const std::string colour = textureOfStage(base + family.colourOffset);
+                    if (colour.empty())
+                        continue;
+                    authored.surfaces[static_cast<size_t>(slot)] = RStringB(colour.c_str());
+                    const std::string normal = textureOfStage(base + family.normalOffset);
+                    if (!normal.empty())
+                        authored.surfaceNormals[static_cast<size_t>(slot)] = RStringB(normal.c_str());
+                    if (const auto* stage = stageAt(base + family.colourOffset))
+                        authored.surfaceUvs[static_cast<size_t>(slot)] = uvForStage(*stage);
                     authored.surfaceCount =
                         std::max(authored.surfaceCount, static_cast<unsigned char>(slot + 1));
                 }
@@ -2010,19 +2029,41 @@ bool Landscape::LoadOprwModern(const char* path)
             // The mask is `_lca` and the detail layers are `_nopx`/`_co` pairs.
             // Taking the first `_co` that is not a detail layer picks a close-range
             // surface, which is what the legacy cell frame can actually sample.
-            for (const auto& stage : material.stages)
+            //
+            // Arma 1 needs the family record for this too, and for a reason that
+            // cost a whole world: EVERY Sahrani surface colour is named
+            // `<surface>_detail_co.paa`, so the "not a detail layer" filter -- which
+            // exists to skip Arma 2/3's `_detail_*` helpers -- rejected all four of
+            // them, on all 4,859 tiles. No material resolved a legacy texture and
+            // the terrain drew white. Take slot 0's colour directly from the family
+            // instead of pattern-matching a filename.
+            if (isTerrainFamily && family.slotsFromShaderId)
             {
-                const std::string& texture = stage.texture.raw;
-                if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
-                    continue;
-                std::string lower = texture;
-                for (char& c : lower)
-                    c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                if (lower.find("_co.paa") == std::string::npos || lower.find("detail") != std::string::npos)
-                    continue;
-                SetTexture(static_cast<int>(i), RStringB(texture.c_str()));
-                ++resolved;
-                break;
+                const int slot0Group = 0;
+                const int base = family.firstSurfaceStage + slot0Group * family.stageStride;
+                const std::string colour = textureOfStage(base + family.colourOffset);
+                if (!colour.empty())
+                {
+                    SetTexture(static_cast<int>(i), RStringB(colour.c_str()));
+                    ++resolved;
+                }
+            }
+            else
+            {
+                for (const auto& stage : material.stages)
+                {
+                    const std::string& texture = stage.texture.raw;
+                    if (texture.empty() || Poseidon::Asset::Material::RvTextureRef::LooksProcedural(texture))
+                        continue;
+                    std::string lower = texture;
+                    for (char& c : lower)
+                        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                    if (lower.find("_co.paa") == std::string::npos || lower.find("detail") != std::string::npos)
+                        continue;
+                    SetTexture(static_cast<int>(i), RStringB(texture.c_str()));
+                    ++resolved;
+                    break;
+                }
             }
         }
         LOG_DEBUG(World, "LoadOprw25 {}: {} of {} terrain materials resolved to a satellite texture", path, resolved,

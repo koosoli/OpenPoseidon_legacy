@@ -235,6 +235,15 @@ pub struct Grass {
     blade_sampler: wgpu::Sampler,
     have_blade_atlas: bool,
     tuft_view: wgpu::TextureView,
+    // Pixels per radian of the current view: (viewport_height/2) * proj[1][1].
+    // Set from render_frame, where both are already in scope. 0 = not yet known,
+    // which disables the projected-size clamp rather than collapsing the ring.
+    px_per_radian: f32,
+    // The last params the game pushed, unmodified. Kept so a resize can re-derive
+    // the clamp without waiting for the next push -- the derivation runs forward
+    // from the raw slider values, and re-clamping an already-clamped radius would
+    // ratchet it down every frame.
+    last_raw_params: WgrGrassParams,
     have_tuft: bool,
     // have_tuft = the PAA loaded; tuft_enabled = the Grass tab also asked for it.
     // Default off: the procedural mid ribbons are the known-good look.
@@ -1022,6 +1031,8 @@ impl Grass {
             blade_sampler,
             have_blade_atlas: false,
             tuft_view,
+            px_per_radian: 0.0,
+            last_raw_params: bytemuck::Zeroable::zeroed(),
             have_tuft: false,
             tuft_enabled: false,
             near_grid_dim: 256,
@@ -1177,8 +1188,42 @@ impl Grass {
         // Spacing and radius are now independent. The lower spacing bound is the
         // real density ceiling ("boost the coverage far more"): 0.10 m limited a
         // clump grid to 0.32 m centres no matter what the Grass tab asked for.
+        self.last_raw_params = params;
         let spacing = params.spacing.clamp(0.02, 0.75);
         let near_radius = params.near_radius.clamp(8.0, 200.0);
+        // Stop the near ring where its blades stop being resolvable.
+        //
+        // The near clump is 12 five-segment ribbons (360 vertices) against the mid
+        // clump's 6 three-segment ones (108), and that detail is only worth paying
+        // for while a blade is at least a pixel wide. A blade is 32-86 mm across
+        // (`mix(0.016, 0.043)` half-width in grass.wgsl), so it subtends one pixel
+        // at `width * px_per_radian` metres: about 31 m at 800x600, 55 m at 1080p
+        // and 74 m at 1440p, against a slider that goes to 200.
+        //
+        // A FIXED metric radius is therefore wrong at every resolution but one,
+        // which is the actual defect here -- not the vertex count. Deriving it
+        // makes the crossover invisible by construction: nothing that could be
+        // resolved is ever removed.
+        //
+        // Applied BEFORE the grid derivation below on purpose. That is where the
+        // saving is: a smaller radius means a smaller candidate grid, so the
+        // placement dispatch shrinks too rather than merely rejecting more
+        // candidates. It is also what makes the clamp visible without new
+        // plumbing -- `near_candidates` in GrassStats is near_grid_dim squared.
+        let near_radius = {
+            // Mean authored half-width, scaled by the same slider the shader uses.
+            let half_width = 0.0295 * params.blade_width_scale.clamp(0.25, 6.0);
+            let resolvable = half_width * 2.0 * self.px_per_radian;
+            // A zero or non-finite projection, and a zero viewport height during a
+            // resize, must fall through to the slider rather than collapse the
+            // ring. The 8 m floor is the slider's own lower bound.
+            if self.px_per_radian.is_finite() && self.px_per_radian > 0.0 && resolvable.is_finite()
+            {
+                near_radius.min(resolvable.max(8.0))
+            } else {
+                near_radius
+            }
+        };
         // Must mirror cs_place's `near_spacing`.
         let near_spacing = spacing
             * if params.clump_renderer != 0.0 {
@@ -1325,6 +1370,36 @@ impl Grass {
         // The photo cards need BOTH the texture and the dev-tool opt-in.
         self.tuft_enabled = self.have_tuft && params.use_photo_tuft != 0.0;
         queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&params));
+    }
+
+    /// Pixels per radian of the current view: `(viewport_height / 2) * proj[1][1]`.
+    ///
+    /// One number rather than a matrix and a viewport, because that is all the
+    /// near-ring clamp needs and it keeps the projection convention on the side
+    /// that owns it. Safe to call every frame: it only re-derives the params when
+    /// the value actually moves, so a steady resolution costs one comparison.
+    ///
+    /// Passing 0, a negative, or a non-finite value disables the clamp and leaves
+    /// the slider radius alone -- which is what a zero viewport height mid-resize,
+    /// or an orthographic/degenerate projection, must do.
+    pub fn set_screen_metrics(&mut self, queue: &wgpu::Queue, px_per_radian: f32) {
+        let clean = if px_per_radian.is_finite() && px_per_radian > 0.0 {
+            px_per_radian
+        } else {
+            0.0
+        };
+        // Only on a material change: 1% of the metric is far under a pixel of
+        // crossover movement, and re-deriving every frame would be pointless work.
+        if (clean - self.px_per_radian).abs() <= self.px_per_radian.max(1.0) * 0.01 {
+            return;
+        }
+        self.px_per_radian = clean;
+        let raw = self.last_raw_params;
+        // Zeroed until the game pushes params once; deriving from that would size
+        // the candidate grid off a zero radius.
+        if raw.near_radius > 0.0 {
+            self.set_params(queue, raw);
+        }
     }
 
     pub fn prepare_terrain(
