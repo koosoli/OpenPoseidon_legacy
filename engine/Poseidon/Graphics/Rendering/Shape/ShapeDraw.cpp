@@ -40,6 +40,8 @@
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -288,6 +290,23 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
     }
     else
     {
+        // WGR_ROAD_TRACE: an OnSurface shape that fell to the CPU FaceArray::Draw branch. The
+        // gate above is `GetTL() && EnableHWTLState && tlAble && _buffer`; GL33 and wgpu agree
+        // on the first three (both return true from GetTL and GetTLOnSurface), so `_buffer` --
+        // CreateVertexBuffer returning null -- is the ONLY structural place the two backends
+        // can diverge for a road. A road that never appears in the DrawSectionTL trace but does
+        // appear here is that divergence, and the absence is itself the answer.
+        if (const char* rt = std::getenv("WGR_ROAD_TRACE");
+            rt && std::strcmp(rt, "0") != 0 && (spec & (OnSurface | IsOnSurface)) != 0)
+        {
+            static std::unordered_set<const void*> loggedCpuShapes;
+            if (loggedCpuShapes.insert(static_cast<const void*>(this)).second)
+            {
+                LOG_INFO(Graphics, "ROAD_CPUPATH shape={} nv={} buffer={} tlAble={} spec=0x{:x}",
+                         static_cast<const void*>(this), NVertex(), _buffer ? 1 : 0, tlAble ? 1 : 0,
+                         unsigned(spec));
+            }
+        }
         DoAssert(_face._sections.Size() == 0 || _face._sections[_face._sections.Size() - 1].end == EndFaces());
 
         // The section-class filter can split sections only on the hardware-T&L path

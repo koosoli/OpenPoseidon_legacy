@@ -225,6 +225,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/P3D/MLOD/test_mlod_lod_dispatch.cpp
     Asset/Formats/P3D/MLOD/test_odol_revision.cpp
     Asset/Formats/P3D/test_odol_named_selections.cpp
+    Asset/Formats/P3D/test_odol40_arma1.cpp
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
     Foundation/Algorithms/test_lzo1x.cpp

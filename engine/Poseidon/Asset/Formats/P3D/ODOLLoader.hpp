@@ -3,6 +3,7 @@
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/Asset/Formats/P3D/P3DStructures.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/P3D/Odol40.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
@@ -86,6 +87,12 @@ class ODOLLoader
         // same unsupported-revision failure, carrying the constraint that broke.
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 73)
             return loadOdol73Static(reader, size, sourcePath, revision);
+        // AST-013: revision 40 is Arma 1's only revision, and its layout differs
+        // from the A2 family in more than version gates -- LZSS rather than LZO,
+        // full-float UVs and normals, clip flags in the LOD header -- so it gets
+        // its own reader rather than another gate inside Odol49.
+        if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 40)
+            return loadOdol40Static(reader, size, sourcePath, revision);
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 48)
             return loadOdol48Static(reader, size, sourcePath, revision);
         if (revision.support == P3D::OdolSupport::NarrowSubset && revision.version == 49)
@@ -117,6 +124,17 @@ class ODOLLoader
         {
             throw P3D::UnsupportedOdolRevision(revision, error.what());
         }
+    }
+
+    static Model loadOdol40Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)
+    {
+        // measuredBasis is false: AST-018's winding conclusion was measured on a
+        // revision-73 fixture and rests on that revision's packed-normal scale
+        // being negative. Revision 40 stores full-float normals with no such
+        // factor, so the same conclusion does not carry across untested.
+        try { return convertOdolStatic(P3D::ReadOdol40StaticModel(reader, size), sourcePath, 40, "ODOL40", false); }
+        catch (const P3D::UnsupportedOdolRevision&) { throw; }
+        catch (const std::runtime_error& error) { throw P3D::UnsupportedOdolRevision(revision, error.what()); }
     }
 
     static Model loadOdol48Static(BinaryReader& reader, int size, const std::string& sourcePath, const P3D::OdolRevisionInfo& revision)

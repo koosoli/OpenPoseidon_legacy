@@ -55,10 +55,14 @@ inline OdolRevisionInfo DescribeOdolRevision(uint32_t version)
     switch (version)
     {
         case 7:  return {7,  OdolSupport::Parsed,     "Operation Flashpoint / Cold War Assault"};
-        // Naming it turns every Arma 1 model in a census from "unrecognised
-        // revision" -- which reads as a corrupt file -- into a named, countable
-        // gap. No reader is claimed: nothing of revision 40 parses today.
-        case 40: return {40, OdolSupport::Recognised, "Armed Assault (Arma 1)"};
+        // AST-013 implemented it. Odol40.hpp is a port of a reference parser that
+        // closed 18,697 of 18,697 LOD bodies EXACTLY on their declared boundary
+        // across the whole local A1 corpus (2,580 models, 95 PBOs), so the claim
+        // here is measured at container level. It stays NarrowSubset rather than
+        // Parsed for the same reason the A2 family does: what is read is the
+        // static shape of a LOD, and anything the reader cannot close on its own
+        // declared boundary comes back as a refusal naming the constraint.
+        case 40: return {40, OdolSupport::NarrowSubset, "Armed Assault (Arma 1)"};
         case 48: return {48, OdolSupport::NarrowSubset, "Arma 2"};
         case 49: return {49, OdolSupport::NarrowSubset, "Arma 2 / Arma 2 Operation Arrowhead"};
         case 50: return {50, OdolSupport::NarrowSubset, "Arma 2 Operation Arrowhead"};

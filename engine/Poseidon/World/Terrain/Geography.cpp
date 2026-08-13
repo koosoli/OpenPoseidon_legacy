@@ -129,7 +129,23 @@ void Landscape::InitGeography()
         }
     }
 
-    DoAssert(_landRange == _terrainRange);
+    // The precondition is not that the two grids are the same size -- they are not
+    // on any Arma 1 world (Sahrani: 512 land, 2048 terrain), and they are not on an
+    // OFP world once SubdivideTerrain has run. It is that terrain is a whole
+    // power-of-two REFINEMENT of land, so every land cell maps onto an exact
+    // terrain footprint and the land-space loops below can address elevation at
+    // all. Dim() already rejects non-power-of-two ranges, so this only has to
+    // exclude a terrain grid coarser than the land grid.
+    const int terrainLog = TerrainPerLandLog();
+    const int terrainPerLand = TerrainPerLand();
+    DoAssert(terrainLog >= 0 && _terrainRange == (_landRange << terrainLog));
+    if (terrainLog < 0)
+    {
+        // Unreachable with any container this build reads. Bail rather than shift
+        // a land index by a negative amount, which is undefined behaviour and not
+        // the kind of bug an assert-and-continue build would ever pin down.
+        return;
+    }
 
     int x, z;
     for (z = 0; z < _landRange; z++)
@@ -150,12 +166,30 @@ void Landscape::InitGeography()
                 // AbstractTexture *texture=_texture[tIndex];
                 // check (x,z) gradient
                 // gradient is in interval 0..+7 (0 == level)
-                float y = GetData(x, z);
-                float yNextX = GetData(x + 1, z);
-                float yNextZ = GetData(x, z + 1);
-                float yNextXZ = GetData(x + 1, z + 1);
-                float yMin = floatMin(floatMin(y, yNextX), floatMin(yNextZ, yNextXZ));
-                float yMax = floatMax(floatMax(y, yNextX), floatMax(yNextZ, yNextXZ));
+                // The land cell's four corners, in terrain coordinates. The loop
+                // skipped the last row and column above, so x+1 and z+1 are at most
+                // _landRangeMask and (x+1)<<terrainLog stays inside _terrainRange.
+                const int tx = x << terrainLog;
+                const int tz = z << terrainLog;
+                float y = GetData(tx, tz);
+                float yNextX = GetData(tx + terrainPerLand, tz);
+                float yNextZ = GetData(tx, tz + terrainPerLand);
+                float yNextXZ = GetData(tx + terrainPerLand, tz + terrainPerLand);
+                // Water is decided over the cell's whole terrain footprint rather
+                // than its corners. "Check if the current square is in water" is a
+                // question about the ground inside the square, and once a land cell
+                // spans 4x4 terrain cells a channel or a spit can sit entirely
+                // between the corners and go unseen. At ratio 1 the footprint IS
+                // the four corners, so this is bit-identical on OFP/CWA worlds.
+                float yMin = y, yMax = y;
+                for (int fz = 0; fz <= terrainPerLand; fz++)
+                {
+                    for (int fx = 0; fx <= terrainPerLand; fx++)
+                    {
+                        const float yFoot = GetData(tx + fx, tz + fz);
+                        saturateMin(yMin, yFoot), saturateMax(yMax, yFoot);
+                    }
+                }
                 if (yMin < 0.1)
                 {
                     if (yMin < -0.8)
@@ -517,19 +551,24 @@ void Landscape::InitMountains()
     {
         for (int x = 1; x < _landRangeMask; x++)
         {
-            float h11 = GetData(x, z);
+            // A local maximum at LAND granularity, which is what a mountain is here
+            // -- the position recorded below is x*_landGrid, so the stencil has to
+            // step by a land cell too. GetLandData does the terrain-space lookup;
+            // the loop bounds keep x-1 >= 0 and x+1 <= _landRange-1, so every
+            // sample maps inside the terrain grid.
+            float h11 = GetLandData(x, z);
             if (h11 <= 0)
             {
                 continue;
             }
-            float h00 = GetData(x - 1, z - 1);
-            float h01 = GetData(x, z - 1);
-            float h02 = GetData(x + 1, z - 1);
-            float h10 = GetData(x - 1, z);
-            float h12 = GetData(x + 1, z);
-            float h20 = GetData(x - 1, z + 1);
-            float h21 = GetData(x, z + 1);
-            float h22 = GetData(x + 1, z + 1);
+            float h00 = GetLandData(x - 1, z - 1);
+            float h01 = GetLandData(x, z - 1);
+            float h02 = GetLandData(x + 1, z - 1);
+            float h10 = GetLandData(x - 1, z);
+            float h12 = GetLandData(x + 1, z);
+            float h20 = GetLandData(x - 1, z + 1);
+            float h21 = GetLandData(x, z + 1);
+            float h22 = GetLandData(x + 1, z + 1);
 
             if (h11 > h00 && h11 > h01 && h11 > h02 && h11 > h10 && h11 >= h12 && h11 >= h20 && h11 >= h21 &&
                 h11 >= h22)
@@ -612,7 +651,8 @@ void Landscape::InitSoundMap()
         for (x = 0; x < _landRange; x++)
         {
             // some places are quiet
-            float height = GetData(x, z);
+            // Land-space loop, terrain-space heightmap: sample the cell's corner.
+            float height = GetLandData(x, z);
             if (height > 170)
             {
                 SetSound(x, z, 3); // wind on highlands

@@ -239,6 +239,11 @@ struct Odol73StaticRestData
     // Packed tangent/binormal pairs, retained unconverted: no consumer needs
     // them yet and guessing their basis convention would be a claim, not a read.
     std::vector<std::array<uint32_t, 2>> stCoords;
+    // The same data at revision 40, where the pair is 24 bytes rather than 8 and
+    // so cannot be carried by the field above. Kept separate rather than widened
+    // in place: an A1 entry and an A2/A3 entry are not the same encoding, and a
+    // consumer must not be able to read one as the other by accident.
+    std::vector<std::array<uint8_t, 24>> stCoordsFull;
     // Per-vertex skinning: a count followed by eight bytes of (bone, weight)
     // pairs. Retained, not applied -- the static path ignores it, but discarding
     // it would throw away the only record that these vertices are skinned at all.
@@ -677,10 +682,40 @@ inline Odol73StaticLodHeader ReadOdol73StaticLodHeader(BinaryReader& reader, uin
     return result;
 }
 
+// One stage texture, with the exact version gates the BIS reference applies:
+// the filter appears at material version 5, the stage id only at 8, and the
+// world-env-map flag only at 11. The stage id used to be read unconditionally,
+// which is four bytes too many on a version-6 or -7 material.
+inline std::string ReadOdol73StageTexture(BinaryReader& reader, uint32_t version, const char* field)
+{
+    if (version >= 5)
+        (void)reader.read<uint32_t>(); // texture filter
+    std::string texture = ReadBoundedAsciiz(reader, field);
+    if (version >= 8)
+        (void)reader.read<uint32_t>(); // stage id
+    if (version >= 11)
+        (void)reader.read<bool>(); // use world environment map
+    return texture;
+}
+
+inline Odol73EmbeddedMaterial::TexGen ReadOdol73StageTransform(BinaryReader& reader)
+{
+    Odol73EmbeddedMaterial::TexGen transform;
+    transform.uvSource = reader.read<uint32_t>();
+    for (float& element : transform.matrix)
+        element = reader.read<float>();
+    return transform;
+}
+
 inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryReader& reader)
 {
     const uint32_t count = reader.read<uint32_t>();
-    if (count > 64)
+    // 64 was below the data. AST-013 measured the whole Arma 1 corpus and found
+    // characters.pbo : material_wounds.p3d carrying 154 embedded materials -- a
+    // wounds material library, not a corrupt file: every one of the 154 is a
+    // valid version-9 entry. The guard is here to refuse a desynced stream, so
+    // it only has to stay well under an implausible u32.
+    if (count > 256)
         throw std::runtime_error("ODOL 73 LOD has too many embedded materials");
     std::vector<Odol73EmbeddedMaterial> materials;
     materials.reserve(count);
@@ -706,30 +741,37 @@ inline std::vector<Odol73EmbeddedMaterial> ReadOdol73EmbeddedMaterials(BinaryRea
         const uint32_t texGens = material.version > 8 ? reader.read<uint32_t>() : stages;
         if (stages > 32 || texGens > 32)
             throw std::runtime_error("ODOL 73 material stage count is invalid");
-        for (uint32_t stage = 0; stage < stages; ++stage)
+        material.stageTextures.resize(stages);
+        material.texGens.resize(texGens);
+        if (material.version < 8)
         {
-            (void)reader.read<uint32_t>(); // texture filter
-            material.stageTextures.push_back(ReadBoundedAsciiz(reader, "embedded stage texture"));
-            (void)reader.read<uint32_t>(); // stage id (material revision >= 9 here)
-            if (material.version >= 11)
-                (void)reader.read<bool>(); // use-world-env-map
+            // AST-013: below version 8 the reference INTERLEAVES the pair, one
+            // transform then its texture, instead of writing all textures and
+            // then all transforms. At v<8 texGens is not an independent count --
+            // it equals the stage count -- so the two arrays are the same length
+            // here by construction.
+            //
+            // Latent, not live: every Arma 1 material is version 9 (6,932 of
+            // 6,932 sampled) and Arma 2/3 are 9 or above, so no file in any local
+            // corpus reaches this branch. It matches the reference because a
+            // reader that silently disagrees with it is a trap for whoever meets
+            // the first v6/v7 file.
+            for (uint32_t stage = 0; stage < stages; ++stage)
+            {
+                material.texGens[stage]       = ReadOdol73StageTransform(reader);
+                material.stageTextures[stage] = ReadOdol73StageTexture(reader, material.version, "embedded stage texture");
+            }
         }
-        for (uint32_t texGen = 0; texGen < texGens; ++texGen)
+        else
         {
-            Odol73EmbeddedMaterial::TexGen transform;
-            transform.uvSource = reader.read<uint32_t>();
-            for (float& element : transform.matrix)
-                element = reader.read<float>();
-            material.texGens.push_back(transform);
+            for (uint32_t stage = 0; stage < stages; ++stage)
+                material.stageTextures[stage] =
+                    ReadOdol73StageTexture(reader, material.version, "embedded stage texture");
+            for (uint32_t texGen = 0; texGen < texGens; ++texGen)
+                material.texGens[texGen] = ReadOdol73StageTransform(reader);
         }
         if (material.version >= 10)
-        {
-            (void)reader.read<uint32_t>();
-            (void)ReadBoundedAsciiz(reader, "thermal stage texture");
-            (void)reader.read<uint32_t>();
-            if (material.version >= 11)
-                (void)reader.read<bool>();
-        }
+            (void)ReadOdol73StageTexture(reader, material.version, "thermal stage texture");
         materials.push_back(std::move(material));
     }
     return materials;

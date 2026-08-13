@@ -1928,8 +1928,13 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             const char* rname = t->Name();
             if (rname && *rname)
             {
-                static std::unordered_set<std::string> loggedRoadSections;
-                if (loggedRoadSections.insert(rname).second)
+                // Key on the drawn SHAPE, not the texture. A light and a dark trapezoid share
+                // dirt_tak_ca.paa, so a texture key collapses them onto one line and can never
+                // see a per-draw difference -- which is exactly what the measurements now say
+                // this is: identical materials, identical normals, identical section spec, one
+                // path, and still alternating.
+                static std::unordered_set<const void*> loggedRoadShapes;
+                if (loggedRoadShapes.insert(static_cast<const void*>(&sMesh)).second)
                 {
                     const ShapeSection& sec = sMesh.GetSection(beg);
                     float nx = 0.0f, ny = 0.0f, nz = 0.0f;
@@ -1951,14 +1956,25 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                              "ROAD_TRACE tex={} branch={} nv={} meanNorm=({:.3f},{:.3f},{:.3f}) "
                              "amb=({:.3f},{:.3f},{:.3f}) dif=({:.3f},{:.3f},{:.3f}) "
                              "emi=({:.3f},{:.3f},{:.3f}) fdif=({:.3f},{:.3f},{:.3f}) specPow={} "
-                             "specFlags=0x{:x} secSpec=0x{:x}",
+                             "specFlags=0x{:x} secSpec=0x{:x}"
+                             // Per-DRAW state. Materials, normals and section spec are already
+                             // known to be identical across light and dark trapezoids, so the
+                             // discriminator has to be here: the spec BeginMeshTL stored (i.e.
+                             // the specAdj Object::Draw computed), the model-to-world the draw
+                             // was handed, and whether a vertex buffer existed at all -- the
+                             // last being the only structural place GL33 and wgpu can diverge
+                             // for a road. camRelPos + the camera position gives absolute world
+                             // XZ, which is how a line is matched to a trapezoid on screen.
+                             " | meshSpec=0x{:x} vbuf={} camRelPos=({:.1f},{:.1f},{:.1f}) scale={:.4f}",
                              rname, sec.surfMat ? "Combine(surfMat)" : "object-material", nv, nx, ny, nz,
                              _curMaterial.ambient.R(), _curMaterial.ambient.G(), _curMaterial.ambient.B(),
                              _curMaterial.diffuse.R(), _curMaterial.diffuse.G(), _curMaterial.diffuse.B(),
                              _curMaterial.emmisive.R(), _curMaterial.emmisive.G(), _curMaterial.emmisive.B(),
                              _curMaterial.forcedDiffuse.R(), _curMaterial.forcedDiffuse.G(),
                              _curMaterial.forcedDiffuse.B(), _curMaterial.specularPower,
-                             unsigned(_curMaterial.specFlags), unsigned(sec.properties.Special()));
+                             unsigned(_curMaterial.specFlags), unsigned(sec.properties.Special()),
+                             unsigned(_meshSpec), buf ? 1 : 0, _worldM.Position().X(),
+                             _worldM.Position().Y(), _worldM.Position().Z(), _worldM.Scale());
                 }
             }
         }

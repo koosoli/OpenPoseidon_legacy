@@ -516,6 +516,22 @@ class Landscape : public SerializeClass
     float GetData(int x, int z) const { return RawToHeight(_data(x, z)); }
     void SetData(int x, int z, float data) { _data(x, z) = HeightToRaw(data); }
 
+    // Elevation lives on the TERRAIN grid; _geography, _objects, _tex, _random and
+    // this_InRange are all LAND space. The two coincided in OFP at load time and
+    // nowhere else: SubdivideTerrain refines terrain under a fixed land grid, and
+    // since Arma 1 the container itself ships them apart (Sahrani is 512 land
+    // against 2048 terrain). Land-space code that wants "the height at the corner
+    // of this land cell" must come through here -- passing a land index straight to
+    // GetData silently samples the top-left 1/ratio^2 of the map and reports it as
+    // the whole world.
+    int TerrainPerLandLog() const { return _terrainRangeLog - _landRangeLog; }
+    int TerrainPerLand() const { return 1 << TerrainPerLandLog(); }
+    float GetLandData(int x, int z) const
+    {
+        const int log = TerrainPerLandLog();
+        return GetData(x << log, z << log);
+    }
+
     int GetTex(int x, int z) const { return _tex(x, z); }
     void SetTex(int x, int z, int data) { _tex(x, z) = data; }
 
