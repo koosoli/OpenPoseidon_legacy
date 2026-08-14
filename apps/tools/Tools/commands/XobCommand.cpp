@@ -50,8 +50,9 @@
 //     0.5 / 0.15 / 0.02 / 0.005 / 0.001 with 3,216 / 1,188 / 336 / 98 / 6 triangles,
 //     so threshold 0.5 is the FINEST and it is index 0. Selecting the minimum
 //     threshold -- which "coarsest first" invites -- yields the 6-triangle billboard
-//     and every check short of looking at the triangle count still passes. This
-//     selects by MAXIMUM threshold and reports the count it took.
+//     and every check short of looking at the triangle count still passes. The
+//     converter therefore orders every graphical LOD by DESCENDING threshold and
+//     emits the full ladder, rather than collapsing the source to either extreme.
 //
 //  2. WINDING. Measured over the whole of LOD0 on three corpus models (1,500 + 457 +
 //     3,216 triangles): the cross product of the first two edges of an `.xob` index
@@ -61,7 +62,7 @@
 //     reverse winding on load while MLODLoader.hpp:384 does. So an MLOD file whose
 //     on-disk cross points ALONG the normal reaches the IR with the same handedness
 //     an ODOL file does, and `.xob` triples are already in that order. They are
-//     therefore written VERBATIM. `--flip-winding` exists because the ODOL premise
+//     therefore written VERBATIM at every graphical LOD. `--flip-winding` exists because the ODOL premise
 //     rests on a packed-normal sign no render has confirmed, not because anything
 //     measured here is uncertain.
 //
@@ -822,7 +823,7 @@ class TextureBaker
 
 struct ConvertOptions
 {
-    float resolution = 1.0f;  //!< the LOD's viewing distance; anything under 1e5 is Visual
+    float resolution = 1.0f;  //!< runtime detail value at which the first coarser LOD becomes active
     bool secondUv = false;    //!< emit both #UVSet# blocks when a part declares two sets
     bool flipWinding = false; //!< see the winding note at the top of this file
     bool materialAsRvmat = false;
@@ -833,6 +834,8 @@ struct ConvertStats
 {
     size_t lodIndex = 0;
     size_t lodCount = 0;
+    size_t lodsWritten = 0;
+    size_t lodsDropped = 0;
     float threshold = 0.0f;
     size_t parts = 0;
     size_t points = 0;
@@ -858,6 +861,16 @@ size_t FinestLodIndex(const XobHeader& header)
     return best;
 }
 
+//! XOB thresholds and this engine's resolutions do not have proven compatible
+//! units. Use the native content convention instead: measured Arma 3 tree and rock
+//! ladders are 1/2/3/4[/5], independent of their very different bounds. `base`
+//! remains an explicit calibration multiplier rather than hiding a guessed unit
+//! conversion in the exporter.
+float VisualLodResolution(size_t rank, float base)
+{
+    return base * static_cast<float>(rank + 1);
+}
+
 bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options, TextureBaker* baker,
                 Fmt::MLOD::WriteModel& out, ConvertStats& stats, std::string& error)
 {
@@ -873,155 +886,173 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         return false;
     }
 
+    if (!(options.resolution > 0.0f) || !std::isfinite(options.resolution))
+    {
+        error = "LOD resolution anchor must be finite and positive";
+        return false;
+    }
+
     stats.lodCount = header.lods.size();
     stats.lodIndex = FinestLodIndex(header);
     stats.threshold = header.lods[stats.lodIndex].threshold;
-
-    XobLod lod;
-    if (!ReadXobLod(bytes.data(), bytes.size(), header, stats.lodIndex, lod, error))
-        return false;
-
-    Fmt::MLOD::WriteLod writeLod;
-    writeLod.resolution = options.resolution;
-    bool anySecondSet = false;
     std::unordered_set<std::string> materialPaths;
-
     float boxMin[3] = {1e30f, 1e30f, 1e30f};
     float boxMax[3] = {-1e30f, -1e30f, -1e30f};
 
-    for (const XobPart& part : lod.parts)
+    // The corpus is already finest-first, but order by threshold here so a valid
+    // file with descriptors in another order still reaches MLOD's ascending
+    // resolution contract. Equal thresholds are impossible in the measured corpus.
+    std::vector<size_t> lodOrder(header.lods.size());
+    for (size_t i = 0; i < lodOrder.size(); ++i)
+        lodOrder[i] = i;
+    std::stable_sort(lodOrder.begin(), lodOrder.end(),
+                     [&](size_t a, size_t b) { return header.lods[a].threshold > header.lods[b].threshold; });
+
+    out.lods.clear();
+    for (size_t rank = 0; rank < lodOrder.size(); ++rank)
     {
-        if (part.uvSets.empty() || part.uvSets[0].size() != part.positions.size())
+        const size_t lodIndex = lodOrder[rank];
+        XobLod lod;
+        std::string lodError;
+        if (!ReadXobLod(bytes.data(), bytes.size(), header, lodIndex, lod, lodError))
         {
-            // The corpus's one nUV == 0 part (Billiard_01_ball LOD1) is refused by
-            // the reader already; this catches the same shape reaching here another
-            // way rather than writing a model with UVs silently at the origin.
-            error = "part has no usable UV set 0";
+            if (rank == 0)
+            {
+                error = "LOD " + std::to_string(lodIndex) + ": " + lodError;
+                return false;
+            }
+            stats.lodsDropped++;
+            continue;
+        }
+
+        Fmt::MLOD::WriteLod writeLod;
+        writeLod.resolution = VisualLodResolution(rank, options.resolution);
+        if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
+        {
+            error = "LOD " + std::to_string(lodIndex) + " maps outside the visual resolution range";
+            return false;
+        }
+        bool anySecondSet = false;
+
+        for (const XobPart& part : lod.parts)
+        {
+            if (part.uvSets.empty() || part.uvSets[0].size() != part.positions.size())
+            {
+                error = "LOD " + std::to_string(lodIndex) + " part has no usable UV set 0";
+                return false;
+            }
+
+            // Only referenced source vertices become points. Every point must be
+            // referenced for the round-trip check below to be an identity.
+            std::vector<int32_t> remap(part.positions.size(), -1);
+            for (uint16_t index : part.indices)
+                if (index < remap.size())
+                    remap[index] = 0;
+
+            for (size_t v = 0; v < part.positions.size(); ++v)
+            {
+                if (remap[v] != 0)
+                {
+                    stats.droppedUnreferenced++;
+                    continue;
+                }
+                remap[v] = static_cast<int32_t>(writeLod.points.size());
+
+                Fmt::MLOD::WritePoint point;
+                point.position = {part.positions[v].x, part.positions[v].y, part.positions[v].z};
+                point.flags = 0;
+                writeLod.points.push_back(point);
+                writeLod.normals.push_back({part.normals[v].x, part.normals[v].y, part.normals[v].z});
+
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const float value = axis == 0   ? part.positions[v].x
+                                        : axis == 1 ? part.positions[v].y
+                                                    : part.positions[v].z;
+                    boxMin[axis] = std::min(boxMin[axis], value);
+                    boxMax[axis] = std::max(boxMax[axis], value);
+                }
+            }
+
+            std::string materialSource;
+            if (part.materialIndex < header.materials.size())
+                materialSource = header.materials[part.materialIndex].path;
+            std::string texturePath;
+            if (baker && !materialSource.empty())
+                texturePath = baker->TextureFor(materialSource);
+            if (!texturePath.empty())
+                stats.partsTextured++;
+
+            std::string materialPath = materialSource;
+            if (options.materialAsRvmat && EndsWith(LowerCopy(materialPath), ".emat"))
+                materialPath = materialPath.substr(0, materialPath.size() - 5) + ".rvmat";
+            if (!materialPath.empty())
+                materialPaths.insert(materialPath);
+
+            const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
+            anySecondSet = anySecondSet || hasSecond;
+
+            for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
+            {
+                uint16_t corner[3] = {part.indices[t], part.indices[t + 1], part.indices[t + 2]};
+                if (options.flipWinding)
+                    std::swap(corner[0], corner[1]);
+
+                {
+                    const XobVec3& p0 = part.positions[corner[0]];
+                    const XobVec3& p1 = part.positions[corner[1]];
+                    const XobVec3& p2 = part.positions[corner[2]];
+                    const float e1[3] = {p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
+                    const float e2[3] = {p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
+                    const float cross[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
+                                            e1[0] * e2[1] - e1[1] * e2[0]};
+                    float mean[3] = {0.0f, 0.0f, 0.0f};
+                    for (int c = 0; c < 3; ++c)
+                    {
+                        mean[0] += part.normals[corner[c]].x;
+                        mean[1] += part.normals[corner[c]].y;
+                        mean[2] += part.normals[corner[c]].z;
+                    }
+                    if (cross[0] * mean[0] + cross[1] * mean[1] + cross[2] * mean[2] > 0.0f)
+                        stats.crossAlongNormal++;
+                }
+
+                Fmt::MLOD::WriteFace face;
+                face.vertexCount = 3;
+                face.flags = 0;
+                face.material = materialPath;
+                face.texture = texturePath;
+                for (int c = 0; c < 3; ++c)
+                {
+                    const int32_t point = remap[corner[c]];
+                    face.vertices[c].point = point;
+                    face.vertices[c].normal = point;
+                    face.vertices[c].u = part.uvSets[0][corner[c]].u;
+                    face.vertices[c].v = part.uvSets[0][corner[c]].v;
+                    if (hasSecond)
+                    {
+                        face.vertices[c].u1 = part.uvSets[1][corner[c]].u;
+                        face.vertices[c].v1 = part.uvSets[1][corner[c]].v;
+                    }
+                }
+                writeLod.faces.push_back(std::move(face));
+            }
+        }
+
+        if (writeLod.points.empty() || writeLod.faces.empty())
+        {
+            error = "LOD " + std::to_string(lodIndex) + " has no geometry";
             return false;
         }
 
-        // Only referenced source vertices become points. Every point must be
-        // referenced for the round-trip check below to be an identity: MLODLoader
-        // creates vertices from face corners, so an unreferenced point produces no
-        // vertex and shifts every index after it.
-        std::vector<int32_t> remap(part.positions.size(), -1);
-        for (uint16_t index : part.indices)
-            if (index < remap.size())
-                remap[index] = 0;
-
-        for (size_t v = 0; v < part.positions.size(); ++v)
-        {
-            if (remap[v] != 0)
-            {
-                stats.droppedUnreferenced++;
-                continue;
-            }
-            remap[v] = static_cast<int32_t>(writeLod.points.size());
-
-            Fmt::MLOD::WritePoint point;
-            point.position = {part.positions[v].x, part.positions[v].y, part.positions[v].z};
-            // Deliberately 0: POINT_* bits are an OFP concept the source has no
-            // equivalent for, and MLODLoader turns 0 into ClipAll, which is what an
-            // ordinary visual point wants.
-            point.flags = 0;
-            writeLod.points.push_back(point);
-            writeLod.normals.push_back({part.normals[v].x, part.normals[v].y, part.normals[v].z});
-
-            for (int axis = 0; axis < 3; ++axis)
-            {
-                const float value = axis == 0   ? part.positions[v].x
-                                    : axis == 1 ? part.positions[v].y
-                                                : part.positions[v].z;
-                boxMin[axis] = std::min(boxMin[axis], value);
-                boxMax[axis] = std::max(boxMax[axis], value);
-            }
-        }
-
-        std::string materialSource;
-        if (part.materialIndex < header.materials.size())
-            materialSource = header.materials[part.materialIndex].path;
-
-        // The albedo, resolved from the SOURCE `.emat` -- the rename below is a
-        // naming convention for the material field and must not reach the baker.
-        std::string texturePath;
-        if (baker && !materialSource.empty())
-            texturePath = baker->TextureFor(materialSource);
-        if (!texturePath.empty())
-            stats.partsTextured++;
-
-        std::string materialPath = materialSource;
-        if (options.materialAsRvmat && EndsWith(LowerCopy(materialPath), ".emat"))
-            materialPath = materialPath.substr(0, materialPath.size() - 5) + ".rvmat";
-        if (!materialPath.empty())
-            materialPaths.insert(materialPath);
-
-        const bool hasSecond = part.uvSets.size() > 1 && part.uvSets[1].size() == part.positions.size();
-        anySecondSet = anySecondSet || hasSecond;
-
-        for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
-        {
-            uint16_t corner[3] = {part.indices[t], part.indices[t + 1], part.indices[t + 2]};
-            if (options.flipWinding)
-                std::swap(corner[0], corner[1]);
-
-            // Winding evidence, accumulated over every triangle actually written --
-            // a spot check on one face proves nothing about a mesh with mixed parts.
-            {
-                const XobVec3& p0 = part.positions[corner[0]];
-                const XobVec3& p1 = part.positions[corner[1]];
-                const XobVec3& p2 = part.positions[corner[2]];
-                const float e1[3] = {p1.x - p0.x, p1.y - p0.y, p1.z - p0.z};
-                const float e2[3] = {p2.x - p0.x, p2.y - p0.y, p2.z - p0.z};
-                const float cross[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
-                                        e1[0] * e2[1] - e1[1] * e2[0]};
-                float mean[3] = {0.0f, 0.0f, 0.0f};
-                for (int c = 0; c < 3; ++c)
-                {
-                    mean[0] += part.normals[corner[c]].x;
-                    mean[1] += part.normals[corner[c]].y;
-                    mean[2] += part.normals[corner[c]].z;
-                }
-                if (cross[0] * mean[0] + cross[1] * mean[1] + cross[2] * mean[2] > 0.0f)
-                    stats.crossAlongNormal++;
-            }
-
-            Fmt::MLOD::WriteFace face;
-            face.vertexCount = 3;
-            face.flags = 0;
-            face.material = materialPath;
-            // The `.emat` path itself never goes in the texture slot: it is a shader
-            // description, not an image, and ShapeAdapter.cpp:300-307 would hand it
-            // straight to GlobLoadTexture. What goes here is the `.paa` the baker
-            // wrote out of the material's BCRMap -- see fact 4 at the top. Empty
-            // without `--textures`, which leaves the old behaviour intact.
-            face.texture = texturePath;
-            for (int c = 0; c < 3; ++c)
-            {
-                const int32_t point = remap[corner[c]];
-                face.vertices[c].point = point;
-                face.vertices[c].normal = point;
-                face.vertices[c].u = part.uvSets[0][corner[c]].u;
-                face.vertices[c].v = part.uvSets[0][corner[c]].v;
-                if (hasSecond)
-                {
-                    face.vertices[c].u1 = part.uvSets[1][corner[c]].u;
-                    face.vertices[c].v1 = part.uvSets[1][corner[c]].v;
-                }
-            }
-            writeLod.faces.push_back(std::move(face));
-        }
+        writeLod.secondUVChannel = options.secondUv && anySecondSet;
+        stats.parts += lod.parts.size();
+        stats.points += writeLod.points.size();
+        stats.triangles += writeLod.faces.size();
+        stats.lodsWritten++;
+        out.lods.push_back(std::move(writeLod));
     }
 
-    if (writeLod.points.empty() || writeLod.faces.empty())
-    {
-        error = "LOD has no geometry";
-        return false;
-    }
-
-    writeLod.secondUVChannel = options.secondUv && anySecondSet;
-    stats.parts = lod.parts.size();
-    stats.points = writeLod.points.size();
-    stats.triangles = writeLod.faces.size();
     stats.materials = materialPaths.size();
     for (int axis = 0; axis < 3; ++axis)
     {
@@ -1029,9 +1060,7 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         stats.bboxMax[axis] = boxMax[axis];
     }
 
-    out.lods.clear();
-    out.lods.push_back(std::move(writeLod));
-    return true;
+    return !out.lods.empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -1051,6 +1080,7 @@ struct RoundTrip
     std::string reason;
     size_t vertices = 0;
     size_t triangles = 0;
+    size_t resolutionMismatches = 0;
     size_t positionMismatches = 0;
     size_t uvMismatches = 0;
     size_t topologyMismatches = 0;
@@ -1076,62 +1106,73 @@ RoundTrip VerifyRoundTrip(const std::string& filePath, const Fmt::MLOD::WriteMod
             "LOD count " + std::to_string(loaded.lodLevels.size()) + " != " + std::to_string(written.lods.size());
         return result;
     }
-    const auto& source = written.lods[0];
-    const auto& mesh = loaded.lodLevels[0].mesh;
-    result.vertices = mesh.vertices.size();
-    result.triangles = mesh.triangles.size();
+    for (size_t lodIndex = 0; lodIndex < written.lods.size(); ++lodIndex)
+    {
+        const auto& source = written.lods[lodIndex];
+        const auto& loadedLod = loaded.lodLevels[lodIndex];
+        const auto& mesh = loadedLod.mesh;
+        result.vertices += mesh.vertices.size();
+        result.triangles += mesh.triangles.size();
 
-    if (mesh.vertices.size() != source.points.size())
-    {
-        result.reason = "vertex count " + std::to_string(mesh.vertices.size()) + " != point count " +
-                        std::to_string(source.points.size());
-        return result;
-    }
-    if (mesh.triangles.size() != source.faces.size() || !mesh.quads.empty())
-    {
-        result.reason = "face count " + std::to_string(mesh.triangles.size()) + " (+" +
-                        std::to_string(mesh.quads.size()) + " quads) != " + std::to_string(source.faces.size());
-        return result;
-    }
-
-    for (size_t i = 0; i < source.points.size(); ++i)
-    {
-        const auto& want = source.points[i].position;
-        const auto& got = mesh.vertices[i].position;
-        if (got.x != want.x || got.y != want.y || got.z != want.z)
-            result.positionMismatches++;
-    }
-
-    for (size_t f = 0; f < source.faces.size(); ++f)
-    {
-        const auto& face = source.faces[f];
-        const auto& triangle = mesh.triangles[f];
-        // MLODLoader.hpp:384 swaps corners 0 and 1 on load; undo it to compare.
-        const uint32_t got[3] = {triangle.indices[1], triangle.indices[0], triangle.indices[2]};
-        for (int c = 0; c < 3; ++c)
+        if (loadedLod.resolution != source.resolution)
+            result.resolutionMismatches++;
+        if (mesh.vertices.size() != source.points.size())
         {
-            if (got[c] != static_cast<uint32_t>(face.vertices[c].point))
+            result.reason = "LOD " + std::to_string(lodIndex) + " vertex count " +
+                            std::to_string(mesh.vertices.size()) + " != point count " +
+                            std::to_string(source.points.size());
+            return result;
+        }
+        if (mesh.triangles.size() != source.faces.size() || !mesh.quads.empty())
+        {
+            result.reason = "LOD " + std::to_string(lodIndex) + " face count " + std::to_string(mesh.triangles.size()) +
+                            " (+" + std::to_string(mesh.quads.size()) +
+                            " quads) != " + std::to_string(source.faces.size());
+            return result;
+        }
+
+        for (size_t i = 0; i < source.points.size(); ++i)
+        {
+            const auto& want = source.points[i].position;
+            const auto& got = mesh.vertices[i].position;
+            if (got.x != want.x || got.y != want.y || got.z != want.z)
+                result.positionMismatches++;
+        }
+
+        for (size_t f = 0; f < source.faces.size(); ++f)
+        {
+            const auto& face = source.faces[f];
+            const auto& triangle = mesh.triangles[f];
+            // MLODLoader.hpp:384 swaps corners 0 and 1 on load; undo it to compare.
+            const uint32_t got[3] = {triangle.indices[1], triangle.indices[0], triangle.indices[2]};
+            for (int c = 0; c < 3; ++c)
             {
-                result.topologyMismatches++;
-                break;
+                if (got[c] != static_cast<uint32_t>(face.vertices[c].point))
+                {
+                    result.topologyMismatches++;
+                    break;
+                }
+            }
+            for (int c = 0; c < 3; ++c)
+            {
+                const uint32_t vertex = got[c];
+                if (vertex >= mesh.vertices.size())
+                    continue;
+                if (mesh.vertices[vertex].uv.u != face.vertices[c].u ||
+                    mesh.vertices[vertex].uv.v != face.vertices[c].v)
+                {
+                    result.uvMismatches++;
+                    break;
+                }
             }
         }
-        for (int c = 0; c < 3; ++c)
-        {
-            const uint32_t vertex = got[c];
-            if (vertex >= mesh.vertices.size())
-                continue;
-            if (mesh.vertices[vertex].uv.u != face.vertices[c].u || mesh.vertices[vertex].uv.v != face.vertices[c].v)
-            {
-                result.uvMismatches++;
-                break;
-            }
-        }
     }
 
-    result.ok = result.positionMismatches == 0 && result.uvMismatches == 0 && result.topologyMismatches == 0;
+    result.ok = result.resolutionMismatches == 0 && result.positionMismatches == 0 && result.uvMismatches == 0 &&
+                result.topologyMismatches == 0;
     if (!result.ok)
-        result.reason = std::to_string(result.positionMismatches) + " positions, " +
+        result.reason = std::to_string(result.resolutionMismatches) + " resolutions, " +
+                        std::to_string(result.positionMismatches) + " positions, " +
                         std::to_string(result.uvMismatches) + " UVs, " + std::to_string(result.topologyMismatches) +
                         " triangles differ";
     return result;
@@ -1233,8 +1274,11 @@ void PrintModelLine(const ModelResult& result)
         return;
     }
     const ConvertStats& s = result.stats;
-    std::cout << std::right << std::setw(7) << s.triangles << " tri " << std::setw(7) << s.points << " vtx  LOD"
-              << s.lodIndex << "/" << s.lodCount << " thr " << std::fixed << std::setprecision(3) << s.threshold
+    std::cout << std::right << std::setw(7) << s.triangles << " tri " << std::setw(7) << s.points << " vtx  LODs "
+              << s.lodsWritten << "/" << s.lodCount;
+    if (s.lodsDropped)
+        std::cout << " (" << s.lodsDropped << " refused)";
+    std::cout << " finest " << s.lodIndex << " thr " << std::fixed << std::setprecision(3) << s.threshold
               << "  bbox " << std::setprecision(2) << s.Extent(0) << " x " << s.Extent(1) << " x " << s.Extent(2)
               << " m  tex " << s.partsTextured << "/" << s.parts << "  "
               << (result.roundTrip.ok ? "round-trips" : "ROUND-TRIP: " + result.roundTrip.reason) << "\n";
@@ -1694,7 +1738,8 @@ void XobCommand::Setup(CLI::App& app)
         cmd->add_option("-o,--output", output, "Output root; files land at <root>/<virtual path>")->required();
         cmd->add_option("--virtual-prefix", prefix, "Virtual path prefix (default reforger\\everon\\models)");
         cmd->add_option("-n,--limit", limit, "Stop after this many models (default 50)");
-        cmd->add_option("--resolution", options.resolution, "LOD resolution written into the file (default 1.0)");
+        cmd->add_option("--resolution", options.resolution,
+                        "Visual LOD resolution step (default 1.0 writes 1/2/3/...)");
         cmd->add_flag("--second-uv", options.secondUv, "Emit both #UVSet# blocks when a part declares two UV sets");
         cmd->add_flag("--flip-winding", options.flipWinding, "Reverse triangle winding (see the winding note)");
         cmd->add_flag("--material-rvmat", options.materialAsRvmat, "Name materials .rvmat instead of .emat");
@@ -1718,7 +1763,8 @@ void XobCommand::Setup(CLI::App& app)
         cmd->add_option("--max-placements", options.maxPlacements, "Cap on manifest lines (default 20000)");
         cmd->add_option("--resmap-cache", options.resmapCache,
                         "Read/write the GUID->path map here so a rerun skips the corpus scan");
-        cmd->add_option("--resolution", options.convert.resolution, "LOD resolution written into each file");
+        cmd->add_option("--resolution", options.convert.resolution,
+                        "Visual LOD resolution step (default 1.0 writes 1/2/3/...)");
         cmd->add_flag("--second-uv", options.convert.secondUv, "Emit both #UVSet# blocks");
         cmd->add_flag("--flip-winding", options.convert.flipWinding, "Reverse triangle winding");
         cmd->add_flag("--material-rvmat", options.convert.materialAsRvmat, "Name materials .rvmat instead of .emat");
