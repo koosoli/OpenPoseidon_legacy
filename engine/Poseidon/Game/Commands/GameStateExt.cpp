@@ -470,6 +470,27 @@ GameValue CamDestroy(const GameState* state, GameValuePar oper1);
 GameValue CenterCreate(const GameState* state, GameValuePar oper1);
 GameValue CenterDelete(const GameState* state, GameValuePar oper1);
 GameValue ConfigLoad(const GameState* state, GameValuePar oper1);
+GameValue DatabaseNew(const GameState* state);
+GameValue DatabaseLoad(const GameState* state, GameValuePar oper1);
+GameValue DatabaseGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseSave(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPush(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPushMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListPop(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListRemove(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseListSize(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashSetMany(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashGet(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashDelete(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashExists(const GameState* state, GameValuePar oper1, GameValuePar oper2);
+GameValue DatabaseHashKeys(const GameState* state, GameValuePar oper1, GameValuePar oper2);
 GameValue CtrlEnable(const GameState* state, GameValuePar oper1);
 GameValue CtrlEnabled(const GameState* state, GameValuePar oper1);
 GameValue CtrlGetText(const GameState* state, GameValuePar oper1);
@@ -1490,6 +1511,7 @@ static const GameNular* GetExtNular(int& count)
         GameNular(GameObject, "cameraOn", CameraOn),
 
         GameNular(GameFile, "newConfig", ConfigNew),
+        GameNular(GameDatabase, "dbNew", DatabaseNew),
         GameNular(GameArray, "listConfigNames", ConfigListNames),
         GameNular(GameString, "missionName", MissionName),
         GameNular(GameArray, "missionStart", MissionStart),
@@ -1791,6 +1813,7 @@ static const GameFunction* GetExtUnary(int& count)
         GameFunction(GameNothing, "remoteExecRemove", RemoteExecRemove, GameString),
 
         GameFunction(GameFile, "loadConfig", ConfigLoad, GameString),
+        GameFunction(GameDatabase, "dbLoad", DatabaseLoad, GameString),
 
         GameFunction(GameNothing, "VBS_addHeader", AddMPReportHeader, GameString),
         GameFunction(GameNothing, "VBS_addEvent", AddMPReportEvent, GameString),
@@ -2097,6 +2120,25 @@ static const GameOperator* GetExtBinary(int& count)
         GameOperator(GameNothing, "setObjectTexture", function, ObjSetTexture, GameObject, GameArray),
 
         GameOperator(GameNothing, "saveConfig", function, ConfigSave, GameFile, GameString),
+        GameOperator(GameVoid, "dbGet", function, DatabaseGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbSet", function, DatabaseSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbDelete", function, DatabaseDelete, GameDatabase, GameString),
+        GameOperator(GameBool, "dbExists", function, DatabaseExists, GameDatabase, GameString),
+        GameOperator(GameArray, "dbKeys", function, DatabaseKeys, GameDatabase, GameString),
+        GameOperator(GameBool, "dbSave", function, DatabaseSave, GameDatabase, GameString),
+        GameOperator(GameScalar, "dbListPush", function, DatabaseListPush, GameDatabase, GameArray),
+        GameOperator(GameScalar, "dbListPushMany", function, DatabaseListPushMany, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbListPop", function, DatabaseListPop, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbListGet", function, DatabaseListGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbListSet", function, DatabaseListSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbListRemove", function, DatabaseListRemove, GameDatabase, GameArray),
+        GameOperator(GameScalar, "dbListSize", function, DatabaseListSize, GameDatabase, GameString),
+        GameOperator(GameBool, "dbHashSet", function, DatabaseHashSet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashSetMany", function, DatabaseHashSetMany, GameDatabase, GameArray),
+        GameOperator(GameVoid, "dbHashGet", function, DatabaseHashGet, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashDelete", function, DatabaseHashDelete, GameDatabase, GameArray),
+        GameOperator(GameBool, "dbHashExists", function, DatabaseHashExists, GameDatabase, GameArray),
+        GameOperator(GameArray, "dbHashKeys", function, DatabaseHashKeys, GameDatabase, GameString),
         GameOperator(GameFile, "openClass", function, ClassOpen, GameFile, GameString),
         GameOperator(GameFile, "addClass", function, ClassAdd, GameFile, GameString),
         GameOperator(GameVoid, "getValue", function, ValueGet, GameFile, GameString),
@@ -2191,6 +2233,7 @@ INIT_MODULE(GameStateExt, 2)
     GGameState.NewType("SIDE", GameSide, CreateGameDataSide, LocalizeString(IDS_EVAL_TYPESIDE));
     GGameState.NewType("GROUP", GameGroup, CreateGameDataGroup, LocalizeString(IDS_EVAL_TYPEGROUP));
     GGameState.NewType("FILE", GameFile, CreateGameDataFile, "File");
+    GGameState.NewType("DATABASE", GameDatabase, CreateGameDataDatabase, "Database");
 
     int extUnaryCount;
     const GameFunction* ExtUnary = GetExtUnary(extUnaryCount);
