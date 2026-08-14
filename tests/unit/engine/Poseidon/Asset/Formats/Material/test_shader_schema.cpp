@@ -585,14 +585,52 @@ class Stage2 { texture="a3\map_data\gdt_concrete_co.paa"; uvSource="tex"; };
     REQUIRE(ir.suffixDisagreements.empty());
 }
 
-TEST_CASE("NormalMapDetailMacroASSpecularDIMap stays unmapped at n=2", "[asset][material][mat-030][normalmap-cluster]")
+// Was "stays unmapped at n=2". DZ-001 raised the evidence: DayZ has 8 of these and
+// all 8 agree on one shape -- Stage1 _nohq, Stage2 _dt, Stage3 _mc, Stage4 _as,
+// Stage5 _smdi, i.e. Super tail without Super Stage0 colour. The old bar was "two
+// materials do not describe a family", right on the evidence then; it is mapped now
+// because the evidence changed, not because the name was tempting.
+TEST_CASE("NormalMapDetailMacroASSpecularDIMap is mapped on DayZ evidence",
+          "[asset][material][mat-030][dz-001][normalmap-cluster]")
 {
-    // Its name predicts its stages exactly like the rest of the cluster, which is precisely
-    // the temptation. Two materials do not describe a family -- the same bar that left
-    // Super's and Skin's Stage7 tails alone.
-    REQUIRE_FALSE(translate(R"CFG(
+    const MaterialIR ir = translate(R"CFG(
 PixelShaderID="NormalMapDetailMacroASSpecularDIMap";
-class Stage1 { texture="a3\structures_f_enoch\furniture\cases\case_d\data\case_d_nohq.paa"; uvSource="tex"; };
-)CFG")
-                      .schemaKnown);
+class Stage1 { texture="dz\data\case_d_nohq.paa"; uvSource="tex"; };
+class Stage2 { texture="dz\data\case_d_dt.paa"; uvSource="tex"; };
+class Stage5 { texture="dz\data\case_d_smdi.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 1);
+    REQUIRE(ir.Slot(MaterialSlot::Detail).sourceStage == 2);
+    REQUIRE(ir.Slot(MaterialSlot::SpecularDetail).sourceStage == 5);
+    // Stage0 is absent in all 8, so colour comes from the face texture.
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::BaseColour).present);
+}
+
+// CalmWater rvmats are two lines -- the two shader ids, no stages, no colours. An
+// empty stage list is the accurate description and stops the translator hunting for
+// an albedo nobody authored. This does not make a pond look like water.
+TEST_CASE("CalmWater is known and declares no stages", "[asset][material][dz-001]")
+{
+    const MaterialIR ir = translate(R"CFG(
+PixelShaderID="CalmWater";
+VertexShaderID="CalmWater";
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::BaseColour).present);
+    REQUIRE_FALSE(ir.Slot(MaterialSlot::NormalMap).present);
+}
+
+// DayZ Grass puts its colour at Stage3, not Stage0 -- the one family in the tail
+// whose layout the name does not predict.
+TEST_CASE("Grass carries colour at Stage3", "[asset][material][dz-001]")
+{
+    const MaterialIR ir = translate(R"CFG(
+PixelShaderID="Grass";
+class Stage2 { texture="dz\data\grass_nohq.paa"; uvSource="tex"; };
+class Stage3 { texture="dz\data\grass_co.paa"; uvSource="tex"; };
+)CFG");
+    REQUIRE(ir.schemaKnown);
+    REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 2);
+    REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 3);
 }

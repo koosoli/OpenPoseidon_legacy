@@ -394,6 +394,50 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
     static const ShaderSchema kNormalMapDiffuse{
         "NormalMapDiffuse",
         {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::BaseColour}};
+    // DZ-001: DayZ's families. MEASURED across every rvmat in the owner's install
+    // (25,000+ parsed), counting what texture role sits at each stage. DayZ is
+    // overwhelmingly served by the families above -- TerrainX 16,623, Super 5,447,
+    // Multi 1,628, TreeAdv 664 -- so what follows is the whole remaining tail, ~144
+    // materials. Without them these fall through to the unknown path, which is what
+    // made DayZ's ponds render as flat colour.
+    //
+    //   Grass  n=108  Stage2 normal (57 _nohq, 37 procedural nohq)
+    //                 Stage3 colour (91 _co, 4 _ca, 1 procedural mca)
+    //                 Stages 0/1 absent -- colour is at 3, not 0.
+    static const ShaderSchema kGrass{
+        "Grass",
+        {MaterialSlot::Count, MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::BaseColour}};
+    //   Tree   n=11   Stage1 normal (6 _nohq, 3 _non, 2 procedural no)
+    //                 Stage2 macro  (6 procedural mca, 3 procedural mc, 2 _mc)
+    //                 Stage4 colour (8 _co). Distinct from TreeAdv, which has no Stage4.
+    static const ShaderSchema kTree{
+        "Tree",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::Macro, MaterialSlot::Count,
+         MaterialSlot::BaseColour}};
+    //   n=8    Stage1 _nohq, Stage2 _dt, Stage3 _mc, Stage4 _as, Stage5 _smdi.
+    //          Super's tail without Super's Stage0 colour.
+    static const ShaderSchema kNormalMapDetailMacroASSpecularDIMap{
+        "NormalMapDetailMacroASSpecularDIMap",
+        {MaterialSlot::Count, MaterialSlot::NormalMap, MaterialSlot::Detail, MaterialSlot::Macro,
+         MaterialSlot::AmbientShadow, MaterialSlot::SpecularDetail}};
+    //   n=1    Stage1 procedural dt, Stage2 procedural mc, Stage3 _as.
+    static const ShaderSchema kDetailMacroAS{
+        "DetailMacroAS",
+        {MaterialSlot::Count, MaterialSlot::Detail, MaterialSlot::Macro, MaterialSlot::AmbientShadow}};
+    //   Glass  n=2    Stage1 procedural, Stage2 colour (_co).
+    static const ShaderSchema kGlass{
+        "Glass",
+        {MaterialSlot::Count, MaterialSlot::Count, MaterialSlot::BaseColour}};
+    // CalmWater, AlphaShadow and AlphaNoShadow declare NO Stage classes at all --
+    // CalmWater's rvmat is literally two lines, the two shader ids and nothing else.
+    // An empty stage list is the accurate description: it stops the translator
+    // hunting for an albedo that was never authored. It does NOT make a pond look
+    // like water -- CalmWater needs routing to the engine's water surface, which is
+    // renderer work and is not done here. Until then a pond has no material of its
+    // own, which is honest rather than neon.
+    static const ShaderSchema kCalmWater{"CalmWater", {}};
+    static const ShaderSchema kAlphaShadow{"AlphaShadow", {}};
+    static const ShaderSchema kAlphaNoShadow{"AlphaNoShadow", {}};
     static const ShaderSchema* kAll[] = {&kNormal,
                                          &kNormalMap,
                                          &kSuper,
@@ -408,7 +452,15 @@ inline const ShaderSchema* FindShaderSchema(const std::string& family)
                                          &kNormalMapDetailSpecularMap,
                                          &kNormalMapDetailSpecularDIMap,
                                          &kNormalMapMacroASSpecularDIMap,
-                                         &kNormalMapDiffuse};
+                                         &kNormalMapDiffuse,
+                                         &kGrass,
+                                         &kTree,
+                                         &kNormalMapDetailMacroASSpecularDIMap,
+                                         &kDetailMacroAS,
+                                         &kGlass,
+                                         &kCalmWater,
+                                         &kAlphaShadow,
+                                         &kAlphaNoShadow};
 
     for (const ShaderSchema* schema : kAll)
     {

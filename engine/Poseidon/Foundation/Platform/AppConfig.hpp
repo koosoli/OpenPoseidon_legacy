@@ -235,6 +235,8 @@ class AppConfig
     // for. The only way to point the engine at an Arma 3 world today: those live
     // in CfgWorlds entries this build has no configs for.
     const std::string& GetTestWorldPath() const { return _testWorldPath; }
+    // 0 = no cap. Triage lever for DayZ-scale worlds (2.97M placements).
+    int GetTestWorldMaxObjects() const { return _testWorldMaxObjects; }
     // Where to stand once the substituted world is up. A mission written for one
     // world puts the player at coordinates that mean nothing in another -- the
     // OFP training start lands in open sea on Stratis.
@@ -456,6 +458,7 @@ class AppConfig
     std::string _testMissionPath;
     std::vector<std::string> _testModelPaths;
     std::string _testWorldPath;
+    int _testWorldMaxObjects = 0;
     std::vector<float> _testWorldPos;
     float _testWorldYaw = 0.0f;
     std::vector<float> _testWorldLookAt;

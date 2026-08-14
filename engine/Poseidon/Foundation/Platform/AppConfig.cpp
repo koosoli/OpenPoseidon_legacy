@@ -648,6 +648,11 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                                           "Load this .wrp as the landscape instead of the one the mission names "
                                           "(the only way to reach an Arma 3 world without its configs)"),
                    CliHelpVisibility::Dev);
+        showOption(debugGroup->add_option("--test-world-max-objects", _testWorldMaxObjects,
+                                          "Stop creating world objects after this many placements "
+                                          "(0 = no cap; triage lever for DayZ-scale worlds)")
+                       ->check(CLI::NonNegativeNumber),
+                   CliHelpVisibility::Dev);
         showOption(debugGroup
                        ->add_option("--test-world-pos", _testWorldPos,
                                     "Move the player to world X Z once the mission reaches gameplay "

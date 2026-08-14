@@ -2112,8 +2112,13 @@ bool Landscape::LoadOprwModern(const char* path)
 
     int created = 0;
     int refused = 0;
+    // Triage lever (--test-world-max-objects). Chernarus places 2,971,218 objects,
+    // 18x Stratis; capping is how you tell a scale limit from a compatibility one.
+    const int maxObjects = AppConfig::Instance().GetTestWorldMaxObjects();
     for (const auto& placement : world.objects)
     {
+        if (maxObjects > 0 && created >= maxObjects)
+            break;
         const RStringB name(world.models[placement.modelIndex].c_str());
 
         // Rows are [aside, up, dir, pos] in both representations, which is why
