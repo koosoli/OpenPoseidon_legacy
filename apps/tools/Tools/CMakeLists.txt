@@ -23,6 +23,8 @@ add_executable(PoseidonTools
     commands/ImageCommand.hpp
     commands/PboCommand.cpp
     commands/PboCommand.hpp
+    commands/PakCommand.cpp
+    commands/PakCommand.hpp
     commands/TerrainCommand.cpp
     commands/TerrainCommand.hpp
     commands/FontCommand.cpp

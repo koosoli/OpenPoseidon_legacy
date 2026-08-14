@@ -51,7 +51,7 @@ Four independent criteria, all of which must hold, on every archive:
 3. the directory tree is consumed exactly — no trailing bytes, no truncation
 4. the entries' extents **tile the DATA chunk with zero gaps and zero overlaps**
 
-**16 / 16 archives pass all four.** 222,566 files, 12,763 directories. Criterion 4 is the one that
+**16 / 16 archives pass all four.** 222,566 files, 12,263 directories. Criterion 4 is the one that
 would catch a wrong field width that criteria 1–3 tolerate.
 
 A fifth, independent check: extracting all 10,312 `.emat` produced **10,631,067 bytes**, matching

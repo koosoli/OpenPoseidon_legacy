@@ -232,6 +232,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Textures/test_edds_reader.cpp
     Graphics/Textures/test_dds_texture_source.cpp
     Graphics/Textures/test_block_compression.cpp
+    Asset/Formats/Enfusion/test_pak_archive.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Foundation/Algorithms/test_lz4block.cpp
     Foundation/Algorithms/test_sha256.cpp

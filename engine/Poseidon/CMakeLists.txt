@@ -280,6 +280,12 @@ target_link_libraries(Poseidon PUBLIC cjson)
 find_package(zstd CONFIG REQUIRED)
 target_link_libraries(Poseidon PRIVATE zstd::libzstd)
 
+# zlib: Enfusion's .pak archives store every compressed entry as a raw zlib stream
+# (method 6 -- the only compressed method that occurs in Arma Reforger's 222,566
+# files; the only other is "stored"). Already present transitively via libpng.
+find_package(ZLIB REQUIRED)
+target_link_libraries(Poseidon PRIVATE ZLIB::ZLIB)
+
 # libcurl: the single cross-platform HTTP/HTTPS client for the master-server publisher
 # (Schannel on Windows, OpenSSL elsewhere — see vcpkg.json).
 find_package(CURL CONFIG REQUIRED)

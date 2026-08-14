@@ -86,7 +86,7 @@ identical across both runs, so nothing was measured against a half-written archi
 
 Held to four independent closures — FORM size, chunk walk to EOF, directory consumed exactly, and
 **entry extents tiling DATA with zero gaps and zero overlaps** — **16/16 pass all four**:
-**222,566 files, 12,763 directories**.
+**222,566 files, 12,263 directories**.
 
 ### Enfusion has two container idioms, and we implement one
 

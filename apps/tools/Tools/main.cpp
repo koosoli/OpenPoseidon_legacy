@@ -63,6 +63,7 @@ class ToolApplication : public Poseidon::Application
 #include "commands/ModelCommand.hpp"
 #include "commands/ImageCommand.hpp"
 #include "commands/PboCommand.hpp"
+#include "commands/PakCommand.hpp"
 #include "commands/TerrainCommand.hpp"
 #include "commands/FontCommand.hpp"
 #include "commands/SoundCommand.hpp"
@@ -103,6 +104,7 @@ int main(int argc, char** argv)
     PoseidonTools::ModelCommand::Setup(app);
     PoseidonTools::ImageCommand::Setup(app);
     PoseidonTools::PboCommand::Setup(app);
+    PoseidonTools::PakCommand::Setup(app);
     PoseidonTools::TerrainCommand::Setup(app);
     PoseidonTools::FontCommand::Setup(app);
     PoseidonTools::SoundCommand::Setup(app);
