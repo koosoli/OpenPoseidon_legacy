@@ -29,9 +29,15 @@
 //   Quad[nQuads]             56 bytes then f32[3]*n; n == 4 in every observed record
 //
 // A LOD descriptor lives in HEAD and points at a payload in LODS by ABSOLUTE file
-// offset. The coarsest LOD sits FIRST in the file and thresholds run strictly
-// descending, LOD0 always 0.5 (571 / 571 multi-LOD files); the per-LOD extents tile
-// the LODS chunk with no gap (15809 / 15809 files).
+// offset. Index 0 is the FINEST LOD and thresholds run strictly descending from
+// 0.5 (571 / 571 multi-LOD files); the per-LOD extents tile the LODS chunk with no
+// gap (15809 / 15809 files).
+//
+// This comment previously said the coarsest LOD came first, and that is wrong in a
+// way no structural check catches: `t_picea_abies_3f` carries thresholds
+// 0.5 / 0.15 / 0.02 / 0.005 / 0.001 against 3216 / 1188 / 336 / 98 / 6 triangles,
+// so picking the MINIMUM threshold yields a six-triangle billboard that parses,
+// closes and round-trips perfectly while being the wrong mesh. Select the maximum.
 //
 // The payload is a chain of LZ4 blocks despite the `LZO4` fourcc on every one of the
 // 56,771 LOD descriptors -- LZO1X does not decode these streams and plain LZ4 does,
@@ -263,7 +269,7 @@ struct XobModel
     XobVec3 bboxMin, bboxMax, sphereCenter;
     float sphereRadius = 0.0f;
     std::vector<XobMaterial> materials;
-    std::vector<XobLod> lods; //!< in file order: the COARSEST LOD is index 0
+    std::vector<XobLod> lods; //!< in file order: index 0 is the FINEST LOD (threshold 0.5)
     std::string error;
 
     bool valid() const { return error.empty(); }

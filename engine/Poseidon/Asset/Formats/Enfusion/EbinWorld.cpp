@@ -16,8 +16,16 @@ using EbinDetail::GuidToText;
 struct Declaration
 {
     std::string name;   //!< the last identifier seen -- the property or class name
-    std::string prefab; //!< the GUID this entity is an instance of, if any
-    bool sawColon = false;
+    std::string prefab; //!< the GUID this entity declares as its type (tag 0x44 / 0x45)
+    //! The GUID after a `:` in the declaration -- `Class : {prefabGUID} { ... }`.
+    //!
+    //! Kept apart from `prefab` because the two are not the same field and the
+    //! declared type wins when both are present, which is the rule the textual form
+    //! shows: `SCR_IndestructibleEnvironmentalEntity : "{29EA...}Granite_...02.et"`.
+    std::string parent;
+
+    //! What a placement here is an instance of.
+    const std::string& Prefab() const { return prefab.empty() ? parent : prefab; }
 };
 
 class Reader
@@ -49,10 +57,42 @@ class Reader
                     if (index >= _world.names.size())
                         return Refuse("identifier index out of range");
                     const std::string& name = _world.names[index];
-                    if (name == ":")
-                        decl.sawColon = true;
-                    else
+                    if (name != ":")
+                    {
                         decl.name = name;
+                        continue;
+                    }
+
+                    // `:` is a decl token whose OPERAND is an ordinary value -- almost
+                    // always tag 0x05, an interned GUID -- and that operand is the
+                    // prefab reference. Reading `:` as a bare token and letting the
+                    // operand fall through to the value handler ends the record: the
+                    // declaration is cleared before the entity block that follows ever
+                    // sees it. That is what left all 1,230,897 of Everon's placements
+                    // with an empty prefabGuid while byte accounting still closed on
+                    // 103 / 103 files -- consuming the right number of bytes is not the
+                    // same as attributing them to the right field.
+                    if (!_c.Has(1))
+                        return Refuse("':' has no operand");
+                    const uint8_t operand = _c.data[_c.at];
+                    _c.at += 1;
+                    if (operand == 0x05)
+                    {
+                        if (!_c.Has(2))
+                            return Refuse("':' GUID index truncated");
+                        const uint16_t guidIndex = _c.U16();
+                        if (guidIndex >= _world.guids.size())
+                            return Refuse("':' GUID index out of range");
+                        if (decl.parent.empty())
+                            decl.parent = _world.guids[guidIndex];
+                        continue;
+                    }
+                    // Any other operand is walked for byte accounting and contributes
+                    // no prefab reference. The declaration is deliberately NOT reset:
+                    // the class name in front of the colon belongs to the record that
+                    // follows.
+                    if (!Value(operand, end, decl, inherited, depth))
+                        return false;
                     continue;
                 }
                 case 0x43: // instance name
@@ -223,7 +263,7 @@ class Reader
 
             EbinPlacement placement;
             placement.className = decl.name.empty() ? inherited.name : decl.name;
-            placement.prefabGuid = decl.prefab.empty() ? inherited.prefab : decl.prefab;
+            placement.prefabGuid = decl.Prefab().empty() ? inherited.Prefab() : decl.Prefab();
 
             EbinPlacement* outer = _current;
             _world.placements.push_back(placement);
