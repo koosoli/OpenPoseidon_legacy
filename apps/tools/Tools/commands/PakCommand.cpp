@@ -2,6 +2,7 @@
 
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 
 #include <algorithm>
@@ -129,14 +130,66 @@ int ListEntries(const std::string& root, const std::string& filter)
         {
             if (!needle.empty() && LowerCopy(entry.path).find(needle) == std::string::npos)
                 continue;
-            std::cout << std::left << std::setw(22) << std::filesystem::path(path).filename().string()
-                      << std::setw(12) << entry.realSize << (entry.compressed() ? "zlib  " : "store ") << entry.path
-                      << "\n";
+            std::cout << std::left << std::setw(22) << std::filesystem::path(path).filename().string() << std::setw(12)
+                      << entry.realSize << (entry.compressed() ? "zlib  " : "store ") << entry.path << "\n";
             shown++;
         }
     }
     std::cout << "\n" << shown << " entry(ies).\n";
     return 0;
+}
+
+//! Reads every `.ent` under the archives and reports EBIN closure plus placements.
+//!
+//! The check that matters is byte accounting over the WHOLE set: a record-stream
+//! walk that is one field width wrong still consumes most small files and only
+//! diverges on the large ones, so a spot check passes where the census does not.
+int Worlds(const std::string& root, const std::string& filter)
+{
+    size_t files = 0, closed = 0, placements = 0;
+    uint64_t declaredBytes = 0, consumedBytes = 0;
+    const std::string needle = LowerCopy(filter);
+
+    for (const std::string& path : FindPaks(root))
+    {
+        PakArchive archive;
+        if (!archive.Open(path))
+            continue;
+        for (const PakEntry& entry : archive.Entries())
+        {
+            const std::string lower = LowerCopy(entry.path);
+            if (lower.size() < 4 || lower.compare(lower.size() - 4, 4, ".ent") != 0)
+                continue;
+            if (!needle.empty() && lower.find(needle) == std::string::npos)
+                continue;
+            std::vector<uint8_t> bytes;
+            if (!archive.Read(entry, bytes))
+            {
+                std::cout << "  READ FAILED " << entry.path << ": " << archive.Error() << "\n";
+                continue;
+            }
+            files++;
+            declaredBytes += bytes.size();
+            const auto world = ReadEbin(bytes.data(), bytes.size());
+            if (world.valid())
+            {
+                closed++;
+                consumedBytes += world.consumed;
+                placements += world.placements.size();
+                if (world.placements.size() > 10000)
+                    std::cout << "  " << std::left << std::setw(46) << entry.path << std::setw(12)
+                              << world.placements.size() << " placements, " << world.entityBlocks << " entity blocks\n";
+            }
+            else
+            {
+                std::cout << "  NOT CLOSED  " << entry.path << ": " << world.error << "\n";
+            }
+        }
+    }
+    std::cout << "\n" << closed << " / " << files << " .ent files close their byte accounting.\n";
+    std::cout << consumedBytes << " / " << declaredBytes << " bytes accounted for.\n";
+    std::cout << placements << " placements with a transform.\n";
+    return closed == files ? 0 : 1;
 }
 
 //! Assembles a world's tiles into one heightfield and writes a shaded PNG.
@@ -184,8 +237,8 @@ int RenderTerrain(const std::string& root, const std::string& world, const std::
                 if (underscore == std::string::npos)
                     continue;
                 const std::string digits = lower.substr(underscore + 1, lower.size() - underscore - 7);
-                if (digits.empty() || !std::all_of(digits.begin(), digits.end(),
-                                                   [](unsigned char c) { return std::isdigit(c) != 0; }))
+                if (digits.empty() ||
+                    !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
                     continue;
                 tiles[static_cast<uint32_t>(std::stoul(digits))] = {i, &entry};
             }
@@ -346,17 +399,23 @@ int RenderTerrain(const std::string& root, const std::string& world, const std::
                 const float t = std::clamp(here / 380.0f, 0.0f, 1.0f);
                 if (t < 0.04f)
                 {
-                    r = 0.80f; g = 0.76f; b = 0.58f;
+                    r = 0.80f;
+                    g = 0.76f;
+                    b = 0.58f;
                 }
                 else if (t < 0.35f)
                 {
                     const float k = (t - 0.04f) / 0.31f;
-                    r = 0.36f + 0.22f * k; g = 0.52f - 0.06f * k; b = 0.24f + 0.06f * k;
+                    r = 0.36f + 0.22f * k;
+                    g = 0.52f - 0.06f * k;
+                    b = 0.24f + 0.06f * k;
                 }
                 else
                 {
                     const float k = (t - 0.35f) / 0.65f;
-                    r = 0.58f + 0.30f * k; g = 0.46f + 0.40f * k; b = 0.30f + 0.46f * k;
+                    r = 0.58f + 0.30f * k;
+                    g = 0.46f + 0.40f * k;
+                    b = 0.30f + 0.46f * k;
                 }
             }
 
@@ -368,7 +427,8 @@ int RenderTerrain(const std::string& root, const std::string& world, const std::
         }
     }
 
-    if (!Poseidon::PNGWriter::WriteRGBA(outputPath.c_str(), static_cast<int>(outW), static_cast<int>(outH), rgba.data()))
+    if (!Poseidon::PNGWriter::WriteRGBA(outputPath.c_str(), static_cast<int>(outW), static_cast<int>(outH),
+                                        rgba.data()))
     {
         std::cerr << "Error: could not write " << outputPath << "\n";
         return 1;
@@ -396,6 +456,14 @@ void PakCommand::Setup(CLI::App& app)
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-f,--filter", filter, "Only paths containing this substring (case-insensitive)");
         cmd->callback([]() { std::exit(ListEntries(root, filter)); });
+    }
+    {
+        static std::string root;
+        static std::string filter;
+        auto* cmd = pak->add_subcommand("worlds", "Read every .ent (EBIN) world and report closure and placements");
+        cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
+        cmd->add_option("-f,--filter", filter, "Only paths containing this substring");
+        cmd->callback([]() { std::exit(Worlds(root, filter)); });
     }
     {
         static std::string root;
