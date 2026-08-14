@@ -48,9 +48,21 @@ struct Frame {
     //   foliagec = (gi_strength, tree_bend, tree_crown_y, _)
     // `foliageb`/`foliagec` not `foliage2`/`foliage3`: naga_oil forbids composable identifiers
     // ending in a digit.
+    //   foliaged = (sway_strength, sway_speed, wind_dir_x, wind_dir_z)
+    //   foliagee = (sway_time, wind_gust, sway_leaf, sway_stiffness)
+    // VEG-SWAY: geometric wind on vegetation MODELS, read by BOTH object vertex shaders
+    // (shader3d::vs_main and gpu_driven::vs_gpu). Until this existed the wgpu path animated
+    // grass and nothing else, so a forest stood dead still in a gale. The wind vector is the
+    // World/Weather/WindModel sample -- the same one the grass field and the cloud deck read,
+    // pushed from EngineWgpu -- so all three lean together instead of each inventing air.
+    // `sway_time` rather than reusing `wateranim.x`: that lane is 0.0 on any world whose
+    // water params were never set (lib.rs `underwater_params().unwrap_or(0.0)`), which would
+    // silently freeze the canopy on exactly the imported worlds this was built for.
     foliage: vec4<f32>,
     foliageb: vec4<f32>,
     foliagec: vec4<f32>,
+    foliaged: vec4<f32>,
+    foliagee: vec4<f32>,
     // xyz = plane normal, w = offset; zero normal disables clipping. This is appended
     // by Rust, keeping WgrCamera's C++ ABI unchanged.
     clip_plane: vec4<f32>,
@@ -97,6 +109,61 @@ struct Frame {
     // ending in a digit (see `ctlb` above).
     wateranim: vec4<f32>,
 };
+
+// ---------------------------------------------------------------------------
+// VEG-SWAY -- geometric wind on vegetation MODELS.
+//
+// Shared by both object vertex shaders so a tree cannot sway on one path and stand still on
+// the other; that split is exactly the class of bug this codebase keeps paying for (the
+// per-draw and GPU-driven paths already have to agree about conform and canopy normals).
+//
+// The model is deliberately DATA-FREE: it needs no vertex colour, no extra UV set and no bone
+// weights, only the vertex's own MODEL-space Y. OFP, Arma and Enfusion vegetation is all
+// authored with its origin on the ground, so model Y already IS "height above the trunk
+// base". That matters because the .xob reader deliberately skips bones -- anything that
+// needed a skinned sway channel would not have the data to drive it.
+//
+// `height_ref` is the canopy height (m) that `sway_strength` is quoted at, so the same
+// amplitude reads sensibly on a 1 m bush and a 25 m spruce.
+const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
+
+// `model_y`  : the vertex's UNDEFORMED model-space height (metres above the model origin).
+// `phase_xz` : an ABSOLUTE world XZ used only to decorrelate neighbouring plants. Absolute,
+//              not camera-relative: both shaders work camera-relative, and seeding the phase
+//              from a camera-relative position makes every plant swim as the camera walks.
+// `leaf`     : 1 on cutout (leaf) sections, 0 on the solid trunk -- flutter is leaves-only,
+//              otherwise a trunk visibly buzzes.
+// Returns a WORLD-space horizontal offset (Y is always 0: this bends, it does not lift).
+fn veg_sway_offset(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
+    let amp = frame.foliaged.x;
+    if (amp <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let t = frame.foliagee.x * frame.foliaged.y;
+    let dir = vec2<f32>(frame.foliaged.z, frame.foliaged.w);
+    // Height response. Clamped so a merged forest patch or a mis-scaled import cannot throw a
+    // vertex hundreds of metres -- an unbounded pow() here is a whole-world corruption, not a
+    // cosmetic error.
+    let hn = clamp(max(model_y, 0.0) / VEG_SWAY_HEIGHT_REF, 0.0, 3.0);
+    // Exponent > 1 keeps the lower trunk planted, so the tree bends instead of sliding.
+    let hs = pow(hn, frame.foliagee.w);
+    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    // Two incommensurate frequencies, so the canopy builds and decays instead of ticking like
+    // a metronome. The gust term rides in from the wind AUTHORITY (WindSample::gustFraction),
+    // the same number the grass field and the cloud deck answer to.
+    let gust = 1.0 + 0.65 * frame.foliagee.y;
+    let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
+    var bend = dir * (amp * hs * s * gust);
+    if (leaf > 0.0) {
+        // Leaf flutter: small, fast, and ACROSS the wind as well as along it. Along-wind-only
+        // flutter reads as the whole tree shaking; the cross term is what reads as leaves.
+        let f = frame.foliagee.z * leaf;
+        let perp = vec2<f32>(-dir.y, dir.x);
+        bend = bend + (dir * sin(t * 5.7 + ph * 3.1) + perp * sin(t * 4.3 + ph * 2.3)) *
+                          (amp * hs * 0.22 * f * gust);
+    }
+    return vec3<f32>(bend.x, 0.0, bend.y);
+}
 
 // Material Debug accessors. `flags` is a bitfield carried in a float lane, so it is
 // rounded before masking rather than compared.

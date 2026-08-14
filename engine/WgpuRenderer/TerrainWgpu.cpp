@@ -2484,6 +2484,20 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     {
         GLandscape->UpdateModernObjectResidency(camera->Position());
         UpdateGroundTexturePages(land, *camera, uploaded);
+        // The object working set is a memory policy, so its cost has to be readable in the
+        // same log as its counts -- otherwise "the world loads more now" is an unpriced claim.
+        // Rate-limited to once every 128 terrain draws; the residency rows above are on a
+        // similar cadence, so the two interleave without either drowning the other.
+        if ((++_residencyMemoryLogTick % 128) == 0)
+        {
+            WgrMemoryStats memory{};
+            if (wgr_get_memory_stats(_renderer, &memory))
+                LOG_INFO(Graphics,
+                         "Wgpu tracked residency: {:.1f} MB tracked of {:.1f} MB budget; object textures={} "
+                         "retired geometry={:.1f} MB",
+                         memory.tracked_bytes / (1024.0 * 1024.0), memory.budget_bytes / (1024.0 * 1024.0),
+                         memory.object_texture_count, memory.geometry_retired_bytes / (1024.0 * 1024.0));
+        }
     }
     if (_rootIndex < 0)
     {

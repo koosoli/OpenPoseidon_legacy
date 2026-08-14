@@ -9,6 +9,7 @@
 
 use bytemuck::Zeroable;
 use glam::{Mat4, Vec3, Vec4};
+use std::sync::mpsc;
 
 // --- GPU buffer layouts (the CPU side of the structs in cull.wgsl) ---
 
@@ -207,7 +208,61 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 // CULL_VARIANT_COUNT): the global out_records bump allocator (the "records cursor") the
 // instancing-collapse EMIT pass carves per-section runs from (docs §3.6). The count reads only
 // touch words 0..CULL_VARIANT_COUNT, so the extra word is invisible to them.
-const COUNTER_WORDS: u64 = CULL_VARIANT_COUNT as u64 + 1;
+// --- PERF-005 object accounting -------------------------------------------------------------
+// The accounting lives in the TAIL of each view's existing `counters` buffer, not in a buffer of
+// its own. The cull bind layout already holds 8 storage buffers and the baseline
+// `max_storage_buffers_per_shader_stage` is 8 — a 9th binding is rejected outright by the
+// headless test device, so a dedicated stats buffer would have traded compatibility with every
+// 8-storage-buffer GPU for one saved indexing offset. Word 3 is spare padding so STAT_BASE_WORD
+// lands on a round number; keep in lockstep with STAT_BASE in cull.wgsl.
+const STAT_BASE_WORD: u64 = 4;
+pub const STATS_WORDS: usize = 16;
+const COUNTER_WORDS: u64 = STAT_BASE_WORD + STATS_WORDS as u64;
+// Which readback slot each cull view's counters are gathered into. Sky-visibility views
+// deliberately SHARE the last slot: there are 5 of them (sky_vis::DIRECTION_COUNT) and their
+// numbers are not what this instrumentation is about, so they land in a scratch slot whose sum
+// across directions is meaningless and is never reported.
+pub const STATS_VIEW_MAIN: usize = 0;
+pub const STATS_VIEW_COLOR: usize = 1;
+pub const STATS_VIEW_REFLECTION: usize = 2;
+pub const STATS_VIEW_SHADOW0: usize = 3;
+pub const STATS_MAX_CASCADES: usize = 4;
+pub const STATS_VIEW_SKY_SCRATCH: usize = STATS_VIEW_SHADOW0 + STATS_MAX_CASCADES;
+pub const STATS_VIEW_COUNT: usize = STATS_VIEW_SKY_SCRATCH + 1;
+// Word map — must stay in lockstep with the atomicAdd indices in cull.wgsl.
+pub const STAT_INSTANCES: usize = 0;
+pub const STAT_RECORDS: usize = 1;
+pub const STAT_TRIS: usize = 2;
+pub const STAT_DRAWS: usize = 3;
+pub const STAT_DRAWS_V0: usize = 4;
+pub const STAT_TRIS_V0: usize = 6;
+pub const STAT_LOD_HIST: usize = 8;
+pub const STAT_LOD_BUCKETS: usize = 8;
+/// Bytes gathered per view into a readback slot (the accounting tail of its counters buffer).
+const STATS_SLOT_BYTES: u64 = STATS_WORDS as u64 * 4;
+
+/// One view's decoded PERF-005 counters.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct ViewStats {
+    pub instances: u32,
+    pub records: u32,
+    pub tris: u32,
+    pub draws: u32,
+    pub draws_solid: u32,
+    pub draws_alpha: u32,
+    pub tris_solid: u32,
+    pub tris_alpha: u32,
+    pub lod_hist: [u32; STAT_LOD_BUCKETS],
+}
+
+/// The whole frame's object accounting, one entry per cull view.
+#[derive(Clone, Copy, Default)]
+pub struct CullStats {
+    pub views: [ViewStats; STATS_VIEW_COUNT],
+    /// False until a readback has landed; the C++ side reports "pending" rather than zeros,
+    /// because a zeroed count and an un-harvested count look identical and mean opposite things.
+    pub valid: bool,
+}
 
 // One extra cull VIEW for a shadow cascade (docs/gpu-culling-and-depth-plan.md §6, multi-view).
 // The retained tables + instance buffer are SHARED with the main view (owned by CullState);
@@ -226,6 +281,10 @@ struct ShadowCullView {
     sec_count_cap: u64,
     bind: Option<wgpu::BindGroup>,
     params: CullParamsGpu,
+    // PERF-005: which 256 B slice of the shared stats buffer this view accounts into
+    // (STATS_VIEW_*). Assigned by the owner right after construction; defaults to the sky
+    // scratch slot so an unassigned view can never silently pollute the main-view numbers.
+    stats_view: usize,
 }
 
 impl ShadowCullView {
@@ -239,9 +298,11 @@ impl ShadowCullView {
         let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_shadow_counters"),
             size: COUNTER_WORDS * 4,
+            // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
-                | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         Self {
@@ -254,6 +315,7 @@ impl ShadowCullView {
             sec_count_cap: 0,
             bind: None,
             params: CullParamsGpu::zeroed(),
+            stats_view: STATS_VIEW_SKY_SCRATCH,
         }
     }
 }
@@ -348,7 +410,23 @@ pub struct CullState {
     // Full-chain Hi-Z view the color bind samples (cloned from Gfx3d's HiZ when it (re)allocs).
     // The color view is only prepared when this is Some.
     hiz_view: Option<wgpu::TextureView>,
+
+    // PERF-005 accounting: a non-blocking readback ring (modelled on gpu_timers.rs) that gathers
+    // every view's counters tail into one staging buffer. A blocking map here would serialise the
+    // frame and change the very timings this instrumentation exists to measure.
+    stats_readback: Vec<(wgpu::Buffer, StatsSlot)>,
+    stats_latest: CullStats,
 }
+
+// Readback slot state, mirroring gpu_timers.rs's ring so the two behave identically under
+// device loss and ring saturation (a saturated ring drops the frame's sample, never blocks).
+enum StatsSlot {
+    Idle,
+    Pending,
+    InFlight(mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>),
+}
+
+const STATS_RING_SLOTS: usize = 3;
 
 impl CullState {
     // Byte size of one CullParamsGpu (the uniform is fixed-size).
@@ -483,9 +561,11 @@ impl CullState {
         let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_counters"),
             size: COUNTER_WORDS * 4,
+            // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
-                | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
         let color_params_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -497,11 +577,30 @@ impl CullState {
         let color_counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_cull_color_counters"),
             size: COUNTER_WORDS * 4,
+            // COPY_SRC: PERF-005 gathers this buffer's accounting tail into the readback ring.
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::INDIRECT
-                | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        // PERF-005 readback ring: 3 slots (same depth as the GPU timers' — enough to ride out
+        // triple-buffered presentation without ever blocking), each holding every view's
+        // gathered counters tail.
+        let stats_bytes = STATS_SLOT_BYTES * STATS_VIEW_COUNT as u64;
+        let stats_readback = (0..STATS_RING_SLOTS)
+            .map(|i| {
+                (
+                    device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some(&format!("wgr_cull_stats_readback_{i}")),
+                        size: stats_bytes,
+                        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                        mapped_at_creation: false,
+                    }),
+                    StatsSlot::Idle,
+                )
+            })
+            .collect();
 
         Self {
             count_pipeline,
@@ -557,6 +656,130 @@ impl CullState {
             color_params: CullParamsGpu::zeroed(),
             color_bind: None,
             hiz_view: None,
+            stats_readback,
+            stats_latest: CullStats::default(),
+        }
+    }
+
+    /// PERF-005: the latest harvested per-view object accounting (see CullStats).
+    pub fn stats(&self) -> CullStats {
+        self.stats_latest
+    }
+
+    /// Zero every view's counters (including the PERF-005 accounting tail). MUST be recorded
+    /// into the frame encoder before the frame's first cull dispatch. Whole-buffer and
+    /// every-view, so a view that does NOT dispatch this frame reads back honest zeros instead
+    /// of repeating its last live frame — the same stale-value trap the GPU timers had to solve,
+    /// and the reason `record_collapse`'s own clear is not enough on its own.
+    pub fn begin_frame_stats(&self, encoder: &mut wgpu::CommandEncoder) {
+        for (_, buf) in self.stats_sources() {
+            encoder.clear_buffer(buf, 0, None);
+        }
+    }
+
+    /// (readback slot, counters buffer) for every cull view that owns one. The single place the
+    /// view -> slot mapping is enumerated, so clear / resolve / harvest cannot disagree.
+    fn stats_sources(&self) -> Vec<(usize, &wgpu::Buffer)> {
+        let mut v: Vec<(usize, &wgpu::Buffer)> = vec![
+            (STATS_VIEW_MAIN, &self.counter_buf),
+            (STATS_VIEW_COLOR, &self.color_counter_buf),
+        ];
+        if let Some(r) = self.reflection_view.as_ref() {
+            v.push((r.stats_view, &r.counter_buf));
+        }
+        for sv in &self.shadow_views {
+            v.push((sv.stats_view, &sv.counter_buf));
+        }
+        // Sky views all carry STATS_VIEW_SKY_SCRATCH and would overwrite each other in the
+        // gather; they are deliberately excluded rather than reported as a meaningless sum.
+        v
+    }
+
+    /// Gather every view's accounting tail into a free readback slot. Called from the frame
+    /// encoder AFTER every cull dispatch and before submit. Skips silently when the ring is
+    /// saturated — dropping a sample is correct; stalling to collect one would distort the
+    /// frame it is measuring.
+    pub fn resolve_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        let sources: Vec<(usize, wgpu::Buffer)> = self
+            .stats_sources()
+            .into_iter()
+            .map(|(i, b)| (i, b.clone()))
+            .collect();
+        let Some((dst, state)) = self
+            .stats_readback
+            .iter_mut()
+            .find(|(_, s)| matches!(s, StatsSlot::Idle))
+        else {
+            return;
+        };
+        for (slot, src) in sources {
+            if slot >= STATS_VIEW_COUNT {
+                continue;
+            }
+            encoder.copy_buffer_to_buffer(
+                &src,
+                STAT_BASE_WORD * 4,
+                dst,
+                slot as u64 * STATS_SLOT_BYTES,
+                STATS_SLOT_BYTES,
+            );
+        }
+        *state = StatsSlot::Pending;
+    }
+
+    /// Kick map_async on freshly copied slots and drain completed ones (non-blocking).
+    /// Called once per frame after queue.submit, alongside GpuTimers::harvest.
+    pub fn harvest_stats(&mut self, device: &wgpu::Device) {
+        for (buf, state) in &mut self.stats_readback {
+            if matches!(state, StatsSlot::Pending) {
+                let (tx, rx) = mpsc::channel();
+                buf.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+                    let _ = tx.send(r);
+                });
+                *state = StatsSlot::InFlight(rx);
+            }
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buf, state) in &mut self.stats_readback {
+            let StatsSlot::InFlight(rx) = state else {
+                continue;
+            };
+            match rx.try_recv() {
+                Ok(Ok(())) => {
+                    {
+                        let data = buf.slice(..).get_mapped_range();
+                        let word = |i: usize| {
+                            u32::from_le_bytes(data[i * 4..i * 4 + 4].try_into().unwrap())
+                        };
+                        for v in 0..STATS_VIEW_COUNT {
+                            let b = v * STATS_WORDS;
+                            let mut st = ViewStats {
+                                instances: word(b + STAT_INSTANCES),
+                                records: word(b + STAT_RECORDS),
+                                tris: word(b + STAT_TRIS),
+                                draws: word(b + STAT_DRAWS),
+                                draws_solid: word(b + STAT_DRAWS_V0),
+                                draws_alpha: word(b + STAT_DRAWS_V0 + 1),
+                                tris_solid: word(b + STAT_TRIS_V0),
+                                tris_alpha: word(b + STAT_TRIS_V0 + 1),
+                                lod_hist: [0; STAT_LOD_BUCKETS],
+                            };
+                            for (k, h) in st.lod_hist.iter_mut().enumerate() {
+                                *h = word(b + STAT_LOD_HIST + k);
+                            }
+                            self.stats_latest.views[v] = st;
+                        }
+                        self.stats_latest.valid = true;
+                    }
+                    buf.unmap();
+                    *state = StatsSlot::Idle;
+                }
+                Ok(Err(_)) | Err(mpsc::TryRecvError::Disconnected) => {
+                    // Mapping failed (device loss etc.) — recycle the slot, keep last values.
+                    *state = StatsSlot::Idle;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
         }
     }
 
@@ -678,7 +901,17 @@ impl CullState {
     // tail views (their buffers free with them).
     pub fn set_shadow_view_count(&mut self, device: &wgpu::Device, n: usize) {
         while self.shadow_views.len() < n {
-            self.shadow_views.push(ShadowCullView::new(device));
+            let mut v = ShadowCullView::new(device);
+            // PERF-005: cascade c accounts into slot SHADOW0 + c. Cascades past STATS_MAX_CASCADES
+            // (4, matching gfx3d MAX_CASCADES) would alias, so they fall into the sky scratch slot
+            // rather than being added to cascade 0's totals.
+            let c = self.shadow_views.len();
+            v.stats_view = if c < STATS_MAX_CASCADES {
+                STATS_VIEW_SHADOW0 + c
+            } else {
+                STATS_VIEW_SKY_SCRATCH
+            };
+            self.shadow_views.push(v);
         }
         self.shadow_views.truncate(n);
     }
@@ -698,9 +931,11 @@ impl CullState {
 
     pub fn set_reflection_params(&mut self, device: &wgpu::Device, mut params: CullParamsGpu) {
         params.debug_flags = self.debug_flags;
-        let view = self
-            .reflection_view
-            .get_or_insert_with(|| ShadowCullView::new(device));
+        let view = self.reflection_view.get_or_insert_with(|| {
+            let mut v = ShadowCullView::new(device);
+            v.stats_view = STATS_VIEW_REFLECTION;
+            v
+        });
         view.params = params;
     }
 
@@ -854,9 +1089,15 @@ impl CullState {
                         v.out_records.as_ref(),
                         v.sec_count.as_ref(),
                     ) {
-                        (Some(a), Some(r), Some(sc)) => {
-                            self.build_view_bind(device, &v.params_buf, a, &v.counter_buf, r, sc)
-                        }
+                        (Some(a), Some(r), Some(sc)) => self.build_view_bind(
+                            device,
+                            &v.params_buf,
+                            a,
+                            &v.counter_buf,
+                            r,
+                            sc,
+                            v.stats_view,
+                        ),
                         _ => None,
                     }
                 };
@@ -943,9 +1184,15 @@ impl CullState {
                 view.out_records.as_ref(),
                 view.sec_count.as_ref(),
             ) {
-                (Some(a), Some(r), Some(sc)) => {
-                    self.build_view_bind(device, &view.params_buf, a, &view.counter_buf, r, sc)
-                }
+                (Some(a), Some(r), Some(sc)) => self.build_view_bind(
+                    device,
+                    &view.params_buf,
+                    a,
+                    &view.counter_buf,
+                    r,
+                    sc,
+                    view.stats_view,
+                ),
                 _ => None,
             };
         }
@@ -968,6 +1215,7 @@ impl CullState {
             &self.counter_buf,
             records,
             sec,
+            STATS_VIEW_MAIN,
         );
     }
 
@@ -1062,6 +1310,7 @@ impl CullState {
         count_pl: &wgpu::ComputePipeline,
         emit_pl: &wgpu::ComputePipeline,
         scatter_pl: &wgpu::ComputePipeline,
+        stats_view: usize,
     ) {
         // Counters (incl. the trailing records cursor) and the per-section scratch reset to 0;
         // out_args zeroed so unfilled arg slots stay instance_count = 0 no-op draws. Records need
@@ -1069,6 +1318,12 @@ impl CullState {
         encoder.clear_buffer(counters, 0, None);
         encoder.clear_buffer(args, 0, None);
         encoder.clear_buffer(sec_count, 0, None);
+        // PERF-005 note: this view's stats slice is NOT cleared here. begin_frame_stats() zeroes
+        // the WHOLE buffer once per frame instead, so a view that does not dispatch at all this
+        // frame reports honest zeros rather than repeating its last dispatch's numbers — the
+        // same stale-region trap the GPU timers already had to solve. `stats_view` is kept in the
+        // signature so each dispatch site still states which slice it writes.
+        let _ = stats_view;
         let inst_groups = self.params.instance_count.div_ceil(64);
         // EMIT is one thread per GLOBAL section; a scene with no registered sections skips it.
         let sec_groups = (self.sections.len() as u32).div_ceil(64);
@@ -1113,6 +1368,7 @@ impl CullState {
             &self.count_pipeline,
             &self.emit_pipeline,
             &self.scatter_pipeline,
+            STATS_VIEW_MAIN,
         );
     }
 
@@ -1144,6 +1400,7 @@ impl CullState {
             &self.count_pipeline,
             &self.emit_pipeline,
             &self.scatter_pipeline,
+            view.stats_view,
         );
     }
 
@@ -1171,6 +1428,7 @@ impl CullState {
             &self.count_pipeline,
             &self.emit_pipeline,
             &self.scatter_pipeline,
+            view.stats_view,
         );
     }
 
@@ -1201,6 +1459,7 @@ impl CullState {
             &self.count_pipeline,
             &self.emit_pipeline,
             &self.scatter_pipeline,
+            view.stats_view,
         );
     }
 
@@ -1229,6 +1488,7 @@ impl CullState {
             &self.occlude_count_pipeline,
             &self.occlude_emit_pipeline,
             &self.occlude_scatter_pipeline,
+            STATS_VIEW_COLOR,
         );
     }
 
@@ -1298,6 +1558,7 @@ impl CullState {
     // SHARED retained tables (instances/models/lods/sections). Factored out of rebuild_bind so
     // the main view and every shadow-cascade view bind identically over the same read-only data.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn build_view_bind(
         &self,
         device: &wgpu::Device,
@@ -1306,6 +1567,10 @@ impl CullState {
         counter_buf: &wgpu::Buffer,
         out_records: &wgpu::Buffer,
         sec_count: &wgpu::Buffer,
+        // PERF-005 readback slot this view gathers into. Not a binding any more (the accounting
+        // rides `counter_buf`'s tail) — kept in the signature so every call site still states
+        // which slot it owns, which is what stops two views silently sharing one.
+        _stats_view: usize,
     ) -> Option<wgpu::BindGroup> {
         let (Some(inst), Some(models), Some(lods), Some(sections)) = (
             self.instance_buf.buf.as_ref(),
@@ -2759,6 +3024,120 @@ pub(crate) mod tests {
     // ONE instanced DrawArgs (instance_count = N) with N contiguous records, and instances that
     // land on a DIFFERENT LOD must get a separate draw. Proves the three-pass count->emit->scatter
     // carves per-section runs correctly.
+    // PERF-005 — the accounting must be REAL, not a readback of zeros that happens to compile.
+    // The scene is built so every number has an independently known right answer:
+    //   5 instances at LOD1 (global section 1) + 3 instances at LOD0 (global section 0),
+    //   each section 3 indices = 1 triangle.
+    // So: 8 survivors, LOD histogram {3 at lod0, 5 at lod1}, 2 draw args, 8 records, 8 triangles.
+    // A vacuous readback (all zeros) and a double-counted one (SCATTER re-recording what COUNT
+    // already did, which would give 16) both fail this.
+    #[test]
+    fn object_stats_count_survivors_lods_and_triangles() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let mut cull = CullState::new(&device);
+        let sections = [
+            SectionGpu {
+                first_index: 0,
+                index_count: 3,
+                base_vertex: 0,
+                variant: 0,
+            },
+            SectionGpu {
+                first_index: 3,
+                index_count: 3,
+                base_vertex: 0,
+                variant: 0,
+            },
+        ];
+        let lods = [
+            LodGpu {
+                resolution: 0.0,
+                section_base: 0,
+                section_count: 1,
+                is_decal: 0,
+            },
+            LodGpu {
+                resolution: 10.0,
+                section_base: 1,
+                section_count: 1,
+                is_decal: 0,
+            },
+        ];
+        let materials = [SectionMaterialGpu::zeroed(); 2];
+        let model = cull.register_model(1.0, &lods, &sections, &materials);
+        let mk = |z: f32| InstanceGpu {
+            world: Mat4::IDENTITY.to_cols_array(),
+            center: [0.0, 0.0, z, 1.0],
+            model,
+            flags: 0,
+            cull_radius: 0,
+            _pad: 0,
+            conform0: [0.0; 4],
+            conform1: [0.0; 4],
+            conform2: [0.0; 4],
+        };
+        for _ in 0..5 {
+            cull.instance_add(mk(-5.0)); // far -> LOD1
+        }
+        for _ in 0..3 {
+            cull.instance_add(mk(5.0)); // near -> LOD0
+        }
+
+        let eye = Vec3::new(0.0, 0.0, 10.0);
+        let mut view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let proj = Mat4::perspective_infinite_reverse_rh(60f32.to_radians(), 1.0, 0.1);
+        let mut params = CullParamsGpu::zeroed();
+        params.frustum = frustum_planes(proj * view);
+        params.cam_pos = [eye.x, eye.y, eye.z, 0.0];
+        params.objects_z2 = 1.0e6;
+        params.lod_scale = 1.0;
+        params.lod_inv_width = 1.0;
+        params.pixel_limit = 0.0;
+        cull.set_params(params);
+        cull.prepare(&device, &queue);
+
+        let mut enc =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        cull.begin_frame_stats(&mut enc);
+        cull.dispatch(&mut enc);
+        cull.resolve_stats(&mut enc);
+        queue.submit(std::iter::once(enc.finish()));
+        // The harvest is deliberately non-blocking, so pump it until the ring drains rather than
+        // asserting on the first (necessarily empty) attempt.
+        for _ in 0..64 {
+            cull.harvest_stats(&device);
+            if cull.stats().valid {
+                break;
+            }
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        }
+        let stats = cull.stats();
+        assert!(stats.valid, "a stats readback must land within 64 polls");
+        let m = stats.views[STATS_VIEW_MAIN];
+        assert_eq!(m.instances, 8, "every surviving instance counted exactly once");
+        assert_eq!(m.lod_hist[0], 3, "the three near instances chose LOD 0");
+        assert_eq!(m.lod_hist[1], 5, "the five far instances chose LOD 1");
+        assert_eq!(
+            m.lod_hist[2..].iter().sum::<u32>(),
+            0,
+            "no instance chose a LOD this model does not have"
+        );
+        assert_eq!(m.draws, 2, "one instanced draw arg per surviving section");
+        assert_eq!(m.draws_solid, 2, "both sections are variant 0 (solid)");
+        assert_eq!(m.draws_alpha, 0);
+        assert_eq!(m.records, 8, "one record per (instance, section) pair");
+        assert_eq!(m.tris, 8, "3 indices per section x 8 collapsed instances");
+        assert_eq!(m.tris_solid, 8);
+        // A view that never dispatched must read zeros, not another view's numbers — this is the
+        // stale-region trap the GPU timers document, in its counter form.
+        let unused = stats.views[STATS_VIEW_REFLECTION];
+        assert_eq!(unused.instances, 0);
+        assert_eq!(unused.draws, 0);
+    }
+
     #[test]
     #[allow(deprecated)] // glam look_at_rh / perspective_infinite_reverse_rh, test-only
     fn instancing_collapse_end_to_end() {

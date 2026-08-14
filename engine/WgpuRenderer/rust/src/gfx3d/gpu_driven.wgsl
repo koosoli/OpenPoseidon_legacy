@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV}
 #import shading::{shade, ShadeMaterial}
 #import gbuffer::{oct_encode, a2c_coverage}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -421,6 +421,33 @@ fn vs_gpu(
         let gz = select(-d0111, d1000, triA) * s;
         normal_ws = vec3<f32>(normal_ws.x - gx * normal_ws.y, normal_ws.y, normal_ws.z - gz * normal_ws.y);
     }
+    // VEG-SWAY. Applied AFTER conform and deliberately so: the conform above evaluates the
+    // terrain height at `world_pos_abs.xz`, so swaying first would make every plant ride the
+    // ground height of wherever the wind had just pushed it — a vertical bobble that reads as
+    // the tree sinking into the terrain, not as wind. A pure horizontal offset added after
+    // conform cannot do that.
+    //
+    // Gated on the same per-instance canopy flags the canopy-normal block below uses, so only
+    // vegetation moves; a fence post or a wall sharing the retained path is untouched.
+    let canopy = inst.flags & (INST_CANOPY_BUSH | INST_CANOPY_TREE | INST_CANOPY_FOREST);
+    if (canopy != 0u && frame.foliaged.x > 0.0) {
+        // Phase seed: this plant's own ABSOLUTE world XZ. For a MERGED FOREST patch the
+        // instance centre spans many trees, so every tree in the patch would share one phase
+        // and the whole wood would rock as a single rigid slab. The per-tree crown centroids
+        // (BuildForestCrownComponents, EngineWgpu.cpp) already exist for canopy normals and
+        // index the same way, so each tree gets its own phase for free.
+        //
+        // conform_sel carries the crown index ONLY on forest patches; on mode-2 ClipLand
+        // vegetation the same location carries the conform selector (0/1/2), so this must be
+        // gated on the FOREST flag rather than on the array being present.
+        var phase_xz = inst.center.xz;
+        if ((inst.flags & INST_CANOPY_FOREST) != 0u) {
+            let cw = world * vec4<f32>(crown_centres[conform_sel].xyz, 1.0);
+            phase_xz = cw.xz;
+        }
+        let leaf = select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0);
+        world_pos = world_pos + veg_sway_offset(pos.y, phase_xz, leaf);
+    }
     // Spherical / canopy normals (docs/foliage-translucency-plan.md Stage 3): bend a leaf's normal
     // toward a radial "crown" normal from the object centre, so the low-poly canopy shades as a
     // rounded volume instead of splitting hard per-card — this is what lets a card facing away from
@@ -430,7 +457,7 @@ fn vs_gpu(
     // trunk, so it wants a larger lift). Applied at all distances (a normal is smoothing, not the
     // glowy SSS fill), so it also helps distant billboards. Blended here — after conform, in the
     // same world/outward space fs_gpu expects — so no fragment-shader change.
-    let canopy = inst.flags & (INST_CANOPY_BUSH | INST_CANOPY_TREE | INST_CANOPY_FOREST);
+    // (`canopy` is computed once above, by the VEG-SWAY block.)
     if (canopy != 0u && section_materials[rec.section].alpha_ref > 0.0) {
         // Forests share the tree bend/crown-Y knobs (both shade around a mid-crown centre, unlike a
         // bush whose centre is the whole blob).

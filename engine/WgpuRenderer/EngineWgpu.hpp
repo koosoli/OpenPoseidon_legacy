@@ -239,6 +239,13 @@ class EngineWgpu : public EngineDummy
     // WgrGpuTimerRegion index contract.
     int GetWaterGpuTimings(float* outMs, int maxCount) const override;
     const char* GetWaterGpuTimingName(int region) const override;
+    // PERF-005 — per-region CPU encode ms (same indices) and this frame's object accounting.
+    int GetCpuTimings(float* outMs, int maxCount) const override;
+    // Rate-limited periodic object-cost log row. On the unconditional frame path, NOT beside
+    // the water rows in WaterWgpu.cpp — those are gated on the water pipeline running, and
+    // object cost is exactly what needs measuring on worlds with no water.
+    void LogObjectPerfRow();
+    bool GetObjectStats(ObjectStatsOut& out) const override;
     uint32_t GetRuntimeCapabilityFlags() const override;
 
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.

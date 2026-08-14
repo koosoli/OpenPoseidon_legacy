@@ -1537,6 +1537,7 @@ void EngineWgpu::NextFrame()
         frame.water_batches = _waterBatches;
         frame.grass_batches = _grassBatches;
         wgr_render_frame(_renderer, &frame);
+        LogObjectPerfRow();
         if (_wbank)
             _wbank->TrimResidency();
         if (std::getenv("WGR_RESIDENCY_TRACE") &&
@@ -4839,8 +4840,200 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "AO bilateral blur",              // WGR_GPU_TIMER_GTAO_BLUR
         "Terrain: depth+normal prepass",   // WGR_GPU_TIMER_TERRAIN_PREPASS
         "Terrain: main colour",            // WGR_GPU_TIMER_TERRAIN_COLOR
+        "Objects: cull (main)",            // WGR_GPU_TIMER_OBJ_CULL_MAIN
+        "Objects: cull (shadow cascades)", // WGR_GPU_TIMER_OBJ_CULL_SHADOW
+        "Objects: Hi-Z + occlusion cull",  // WGR_GPU_TIMER_OBJ_CULL_COLOR
+        "Objects: prepass solid",          // WGR_GPU_TIMER_OBJ_PREPASS_SOLID
+        "Objects: prepass alpha-test",     // WGR_GPU_TIMER_OBJ_PREPASS_ALPHA
+        "Objects: colour solid",           // WGR_GPU_TIMER_OBJ_COLOR_SOLID
+        "Objects: colour alpha-test",      // WGR_GPU_TIMER_OBJ_COLOR_ALPHA
+        "[container] Prepass pass total",  // WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT (overlaps leaves)
+        "[container] 3D colour sub-pass",  // WGR_GPU_TIMER_OBJ_COLOR_SEGMENT (overlaps leaves)
+        "Shadow cascade 0",                // WGR_GPU_TIMER_SHADOW_CASCADE_0
+        "Shadow cascade 1",                // WGR_GPU_TIMER_SHADOW_CASCADE_1
+        "Shadow cascade 2",                // WGR_GPU_TIMER_SHADOW_CASCADE_2
+        "Shadow cascade 3",                // WGR_GPU_TIMER_SHADOW_CASCADE_3
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
+}
+
+// PERF-005 — the region-nesting rule exists in TWO headers: WgrGpuTimerContainedBy (the C ABI,
+// for consumers of wgr_get_gpu_timings that have no Engine.hpp) and Engine::GpuTimerContainedBy
+// (backend-agnostic, used by the capture-metrics JSON writer). If they ever disagree, one
+// reporter double-counts and the other does not, and the resulting "totals" look like
+// measurements rather than the bug they are. This is the one place that includes both headers,
+// so the agreement is checked here — at COMPILE time, for every region, so the tables cannot
+// drift silently.
+namespace
+{
+constexpr bool NestingTablesAgree()
+{
+    for (int r = 0; r < Engine::kGpuRegionEnd; ++r)
+    {
+        const uint32_t abi = WgrGpuTimerContainedBy(static_cast<uint32_t>(r));
+        const int engine = Engine::GpuTimerContainedBy(r);
+        const bool abiOuter = (abi == WGR_GPU_TIMER_NONE);
+        const bool engineOuter = (engine == Engine::kNoGpuRegion);
+        if (abiOuter != engineOuter)
+            return false;
+        if (!abiOuter && static_cast<int>(abi) != engine)
+            return false;
+    }
+    return true;
+}
+static_assert(NestingTablesAgree(),
+              "WgrGpuTimerContainedBy (wgpu_renderer.hpp) and Engine::GpuTimerContainedBy "
+              "(Engine.hpp) disagree about GPU timer region nesting; a reporter would double-count");
+} // namespace
+
+// PERF-005 — the periodic object-cost row. Deliberately NOT in WaterWgpu.cpp beside the other
+// GPU-timing rows: those sit inside the water CDLOD selection and are gated on the water
+// pipeline having run, so on a dry world (and on a paused/frozen sea) they never print. Object
+// cost is exactly what you want measured on worlds with no water at all, so this lives on the
+// unconditional frame path with its own budget.
+//
+// Rate: one burst every 2 s, matching the water rows. At 50+ FPS an unlimited row produced ~25
+// lines/second in the equivalent water case, which floods the log the capture is read from.
+void EngineWgpu::LogObjectPerfRow()
+{
+    static std::chrono::steady_clock::time_point lastLog{};
+    const auto now = std::chrono::steady_clock::now();
+    if ((now - lastLog) < std::chrono::seconds(2))
+        return;
+    lastLog = now;
+
+    float gpu[kGpuRegionEnd] = {};
+    const int n = GetWaterGpuTimings(gpu, kGpuRegionEnd);
+    if (n < kGpuRegionEnd)
+        return;
+    float cpu[kGpuRegionEnd] = {};
+    const int cpuN = GetCpuTimings(cpu, kGpuRegionEnd);
+    // -1 means "did not run this frame" and must never be summed as if it were 0 ms of work —
+    // that is how a skipped pass silently becomes part of an "accounted for" total.
+    const auto pos = [](float v) { return v > 0.0f ? v : 0.0f; };
+    const auto cpuOf = [&](int r) { return (r < cpuN) ? cpu[r] : -1.0f; };
+
+    const float cullTotal = pos(gpu[WGR_GPU_TIMER_OBJ_CULL_MAIN]) + pos(gpu[WGR_GPU_TIMER_OBJ_CULL_SHADOW]) +
+                            pos(gpu[WGR_GPU_TIMER_OBJ_CULL_COLOR]);
+    float cascades = 0.0f;
+    for (int c = kShadowCascadeGpuRegionBegin; c < kShadowCascadeGpuRegionEnd; ++c)
+        cascades += pos(gpu[c]);
+    // Frame accounting: sum ONLY the outermost regions (WgrGpuTimerContainedBy == NONE). Adding
+    // every region instead double-counts grass-shadow inside the cascades and the whole colour
+    // sub-pass inside its own leaves, which on Everon's 00training produced a "total" 1.5 ms
+    // larger than the frame it was supposed to explain.
+    float outerSum = 0.0f;
+    for (int r = 0; r < kGpuRegionEnd; ++r)
+    {
+        if (r == kFrameGpuRegionTotal || GpuTimerContainedBy(r) != kNoGpuRegion)
+            continue;
+        outerSum += pos(gpu[r]);
+    }
+    const float frame = pos(gpu[WGR_GPU_TIMER_FRAME_TOTAL]);
+    LOG_INFO(Graphics, "Frame accounting: attributed={:.3f} of frame={:.3f} ms | residual={:.3f} ms ({:.1f}%)",
+             outerSum, frame, frame - outerSum, frame > 0.0f ? (frame - outerSum) / frame * 100.0f : 0.0f);
+
+    LOG_INFO(Graphics,
+             "Objects GPU ms: cull_main={:.3f} cull_shadow={:.3f} cull_hiz={:.3f} cull_total={:.3f} | "
+             "prepass_solid={:.3f} prepass_alpha={:.3f} colour_solid={:.3f} colour_alpha={:.3f}",
+             gpu[WGR_GPU_TIMER_OBJ_CULL_MAIN], gpu[WGR_GPU_TIMER_OBJ_CULL_SHADOW],
+             gpu[WGR_GPU_TIMER_OBJ_CULL_COLOR], cullTotal, gpu[WGR_GPU_TIMER_OBJ_PREPASS_SOLID],
+             gpu[WGR_GPU_TIMER_OBJ_PREPASS_ALPHA], gpu[WGR_GPU_TIMER_OBJ_COLOR_SOLID],
+             gpu[WGR_GPU_TIMER_OBJ_COLOR_ALPHA]);
+    LOG_INFO(Graphics,
+             "Shadow GPU ms: c0={:.3f} c1={:.3f} c2={:.3f} c3={:.3f} cascades_total={:.3f} | frame={:.3f}",
+             gpu[WGR_GPU_TIMER_SHADOW_CASCADE_0], gpu[WGR_GPU_TIMER_SHADOW_CASCADE_1],
+             gpu[WGR_GPU_TIMER_SHADOW_CASCADE_2], gpu[WGR_GPU_TIMER_SHADOW_CASCADE_3], cascades,
+             gpu[WGR_GPU_TIMER_FRAME_TOTAL]);
+    // Containers overlap their leaves; printed with the leaf sum beside them so the difference
+    // (the CPU-replayed Draw3D ops, which cannot be timed individually) is readable directly.
+    const float prepassLeaves = pos(gpu[WGR_GPU_TIMER_OBJ_PREPASS_SOLID]) +
+                                pos(gpu[WGR_GPU_TIMER_OBJ_PREPASS_ALPHA]) +
+                                pos(gpu[WGR_GPU_TIMER_TERRAIN_PREPASS]) + pos(gpu[WGR_GPU_TIMER_GRASS_PREPASS]);
+    const float colourLeaves = pos(gpu[WGR_GPU_TIMER_OBJ_COLOR_SOLID]) + pos(gpu[WGR_GPU_TIMER_OBJ_COLOR_ALPHA]) +
+                               pos(gpu[WGR_GPU_TIMER_TERRAIN_COLOR]) + pos(gpu[WGR_GPU_TIMER_GRASS_COLOR]);
+    LOG_INFO(Graphics,
+             "Segment GPU ms: prepass_pass={:.3f} (leaves={:.3f} residual={:.3f}) | "
+             "colour_pass={:.3f} (leaves={:.3f} residual={:.3f})",
+             gpu[WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT], prepassLeaves,
+             pos(gpu[WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT]) - prepassLeaves,
+             gpu[WGR_GPU_TIMER_OBJ_COLOR_SEGMENT], colourLeaves,
+             pos(gpu[WGR_GPU_TIMER_OBJ_COLOR_SEGMENT]) - colourLeaves);
+    LOG_INFO(Graphics,
+             "Objects CPU ms (encode): cull_main={:.3f} cull_shadow={:.3f} cull_hiz={:.3f} "
+             "prepass_pass={:.3f} colour_pass={:.3f} cascades={:.3f}/{:.3f}/{:.3f}/{:.3f}",
+             cpuOf(WGR_GPU_TIMER_OBJ_CULL_MAIN), cpuOf(WGR_GPU_TIMER_OBJ_CULL_SHADOW),
+             cpuOf(WGR_GPU_TIMER_OBJ_CULL_COLOR), cpuOf(WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT),
+             cpuOf(WGR_GPU_TIMER_OBJ_COLOR_SEGMENT), cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_0),
+             cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_1), cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_2),
+             cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_3));
+
+    ObjectStatsOut o;
+    if (!GetObjectStats(o))
+        return;
+    if (!o.valid)
+    {
+        LOG_INFO(Graphics, "Objects counts: readback pending (registered={})", o.registeredInstances);
+        return;
+    }
+    LOG_INFO(Graphics,
+             "Objects counts: registered={} | main inst={} sections={} tris={} | "
+             "colour inst={} sections={} (solid={} alpha={}) tris={} (solid={} alpha={}) | "
+             "direct calls={} indirect={} tris={}",
+             o.registeredInstances, o.mainInstances, o.mainDraws, o.mainTris, o.colorInstances, o.colorDraws,
+             o.colorDrawsSolid, o.colorDrawsAlpha, o.colorTris, o.colorTrisSolid, o.colorTrisAlpha, o.directCalls,
+             o.directIndirectCalls, o.directTris);
+    LOG_INFO(Graphics, "Objects shadow counts: c0={}/{} c1={}/{} c2={}/{} c3={}/{} (instances/tris)",
+             o.shadowInstances[0], o.shadowTris[0], o.shadowInstances[1], o.shadowTris[1], o.shadowInstances[2],
+             o.shadowTris[2], o.shadowInstances[3], o.shadowTris[3]);
+    // The LOD histogram is the row that tests the standing hypothesis directly: if most distant
+    // objects sit in lod0, detail is being held too far out and that is the finding.
+    LOG_INFO(Graphics, "Objects LOD histogram (main view): lod0={} lod1={} lod2={} lod3={} lod4={} lod5={} lod6={} lod7+={}",
+             o.mainLodHist[0], o.mainLodHist[1], o.mainLodHist[2], o.mainLodHist[3], o.mainLodHist[4],
+             o.mainLodHist[5], o.mainLodHist[6], o.mainLodHist[7]);
+}
+
+int EngineWgpu::GetCpuTimings(float* outMs, int maxCount) const
+{
+    if (!_renderer || !outMs || maxCount <= 0)
+        return 0;
+    return (int)wgr_get_cpu_timings(_renderer, outMs, (uint32_t)maxCount);
+}
+
+bool EngineWgpu::GetObjectStats(ObjectStatsOut& out) const
+{
+    if (!_renderer)
+        return false;
+    WgrObjectStats s{};
+    if (wgr_get_object_stats(_renderer, &s) == 0)
+        return false;
+    out.registeredInstances = s.registered_instances;
+    out.valid = s.valid != 0;
+    out.mainInstances = s.main_instances;
+    out.mainRecords = s.main_records;
+    out.mainDraws = s.main_draws;
+    out.mainTris = s.main_tris;
+    out.colorInstances = s.color_instances;
+    out.colorRecords = s.color_records;
+    out.colorDraws = s.color_draws;
+    out.colorTris = s.color_tris;
+    out.colorDrawsSolid = s.color_draws_solid;
+    out.colorDrawsAlpha = s.color_draws_alpha;
+    out.colorTrisSolid = s.color_tris_solid;
+    out.colorTrisAlpha = s.color_tris_alpha;
+    for (int c = 0; c < 4; ++c)
+    {
+        out.shadowInstances[c] = s.shadow_instances[c];
+        out.shadowDraws[c] = s.shadow_draws[c];
+        out.shadowTris[c] = s.shadow_tris[c];
+    }
+    for (int l = 0; l < 8; ++l)
+        out.mainLodHist[l] = s.main_lod_hist[l];
+    out.directCalls = s.direct_calls;
+    out.directIndirectCalls = s.direct_indirect_calls;
+    out.directInstances = s.direct_instances;
+    out.directTris = s.direct_tris;
+    return true;
 }
 
 bool EngineWgpu::GetGrassStats(GrassStatsOut& out) const
@@ -5563,11 +5756,64 @@ void EngineWgpu::PushRenderParams()
         0u,
     };
 
+    // VEG-SWAY — geometric wind on vegetation MODELS. Resolved here, next to the lighting
+    // knobs it ships alongside, because this is the one place that already holds both the
+    // foliage settings and the engine clock.
+    //
+    // The wind VECTOR is read from the AUTHORITY (World/Weather/WindModel), exactly as the
+    // grass field at PushGrass and the cloud deck below do — so canopy, grass and cloud all
+    // lean the same way instead of each inventing air. What is local to foliage is only the
+    // RESPONSE: amplitude scaled by speed against a reference, which is what makes a calm day
+    // barely stir and a squall visibly work the canopy.
+    float swayAmp = std::max(_foliage.swayStrength, 0.0f);
+    float swayDirX = 1.0f;
+    float swayDirZ = 0.0f;
+    float swayGust = 0.0f;
+    {
+        // A/B override for automation. There is no CLI flag for wind strength anywhere in this
+        // engine (the grass sliders are dev-panel only), and a motion feature cannot be proven
+        // without a wind-OFF control frame — so expose one the same way the renderer already
+        // exposes WGR_FOLIAGE_A2C. `POSEIDON_VEG_SWAY=0` is the control; any other value is a
+        // multiplier on the authored amplitude.
+        static const float envScale = []() -> float {
+            const char* v = std::getenv("POSEIDON_VEG_SWAY");
+            if (v == nullptr || *v == '\0')
+                return 1.0f;
+            char* end = nullptr;
+            const float parsed = std::strtof(v, &end);
+            if (end == v)
+                return 1.0f;
+            LOG_INFO(Graphics, "VEG-SWAY: POSEIDON_VEG_SWAY={} — vegetation sway amplitude scaled by {:.3f}", v,
+                     parsed);
+            return std::max(parsed, 0.0f);
+        }();
+        swayAmp *= envScale;
+        if (_foliage.swayUseLiveWind && GWind.IsActive())
+        {
+            const WindSample& wind = GWind.Sample();
+            const float reference = std::max(_foliage.swayWindReference, 0.1f);
+            swayAmp *= std::clamp(wind.speed / reference, 0.0f, 2.5f);
+            if (wind.speed > 0.001f)
+            {
+                swayDirX = std::cos(wind.directionRad);
+                swayDirZ = std::sin(wind.directionRad);
+            }
+            swayGust = std::clamp(wind.gustFraction, -1.0f, 1.0f);
+        }
+    }
+    // The SAME clock the water surface and the cloud deck run on (Glob.time), and frozen by the
+    // same switch — so a deterministic test frame stays deterministic with sway on, and a paused
+    // simulation freezes the canopy instead of leaving it stirring over a stopped world.
+    const float swayTime = _waterLook.freeze.freezeTime ? _waterLook.freeze.fixedTime : Glob.time.toFloat();
+
     // Foliage lighting (emulated leaf SSS for alpha-tested vegetation); rides the Frame UBO.
     p.foliage = {
-        _foliage.transScale,   _foliage.distortion, _foliage.transPower,   _foliage.wrap,
-        _foliage.ambientBoost, _foliage.normalBend, _foliage.crownYOffset, _foliage.fillFadeEnd,
-        _foliage.giStrength,   _foliage.treeBend,   _foliage.treeCrownY,   0.0f,
+        _foliage.transScale,   _foliage.distortion,  _foliage.transPower,   _foliage.wrap,
+        _foliage.ambientBoost, _foliage.normalBend,  _foliage.crownYOffset, _foliage.fillFadeEnd,
+        _foliage.giStrength,   _foliage.treeBend,    _foliage.treeCrownY,   0.0f,
+        swayAmp,               _foliage.swaySpeed,   swayDirX,              swayDirZ,
+        swayTime,              swayGust,             _foliage.swayLeafFlutter,
+        std::clamp(_foliage.swayStiffness, 0.25f, 4.0f),
     };
 
     // Screen-space AO (GTAO). `enabled` gates the whole pass renderer-side; the debug view is

@@ -113,6 +113,20 @@ struct Record {
 // into it, pass EMIT reads that count and overwrites the slot with the section's out_records run
 // base, pass SCATTER bumps it to fill the run. Cleared to 0 each frame before COUNT.
 @group(0) @binding(9) var<storage, read_write> sec_count: array<atomic<u32>>;
+// PERF-005 — per-view accounting, living in the TAIL of the existing `counters` buffer rather
+// than a binding of its own. A tenth binding is not available: this layout already holds 8
+// storage buffers and `max_storage_buffers_per_shader_stage` is 8 on the baseline adapter (the
+// headless test device rejects a 9th outright), so a separate stats buffer would have cost
+// compatibility with every 8-storage-buffer GPU to save one indexing offset.
+// `counters` words 0..variant_count are the arg cursors + the records cursor (see above);
+// word 3 is spare padding and STAT_BASE onwards is this accounting. Word map — keep in lockstep
+// with STAT_* in cull.rs:
+//   +0 surviving instances       +1 instance-section records    +2 triangles
+//   +3 draw args emitted         +4/+5 draw args by variant     +6/+7 triangles by variant
+//   +8..+15 LOD histogram (level 0..6, 7 = "7 or coarser")
+// The histogram is the point of this block: the standing hypothesis is that detailed building
+// and vegetation LODs stay active too far out, and only a per-level population count can test it.
+const STAT_BASE: u32 = 4u;
 
 fn outside_frustum(center: vec3<f32>, radius: f32) -> bool {
     for (var i = 0u; i < 6u; i++) {
@@ -224,12 +238,17 @@ fn classify(idx: u32) -> CullResult {
 // separate draws. No prefix sum — a single atomic bump per section carves the contiguous runs.
 
 // Pass COUNT (1 thread / surviving instance): tally this instance into each section of its LOD.
+// Also the only place that sees (surviving instance, chosen LOD) together, so the PERF-005
+// survivor count + LOD histogram are recorded here. SCATTER re-derives the same survivors but
+// must NOT record — it would double every count.
 fn count_sections(idx: u32, level: u32) {
     let lod_base = models[instances[idx].model].lod_base;
     let lod = lods[lod_base + level];
     for (var s = 0u; s < lod.section_count; s++) {
         atomicAdd(&sec_count[lod.section_base + s], 1u);
     }
+    atomicAdd(&counters[STAT_BASE + 0u], 1u);
+    atomicAdd(&counters[STAT_BASE + 8u + min(level, 7u)], 1u);
 }
 
 // Pass SCATTER (1 thread / surviving instance): append this instance's record into each of its
@@ -391,6 +410,16 @@ fn emit_args(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let out_i = v * cull.variant_capacity + slot;
     out_args[out_i] = DrawArgs(sec.index_count, c, sec.first_index, i32(sec.base_vertex), base);
+    // PERF-005: recorded only for args that SURVIVED every cap above, so these are the counts
+    // the GPU will really execute, not the counts the cull wanted to execute. Triangles =
+    // index_count/3 per instance x the collapsed instance count. u32 holds ~4.3e9 — a frame
+    // measured at tens of millions of triangles has three orders of magnitude of headroom.
+    let tris = (sec.index_count / 3u) * c;
+    atomicAdd(&counters[STAT_BASE + 1u], c);
+    atomicAdd(&counters[STAT_BASE + 2u], tris);
+    atomicAdd(&counters[STAT_BASE + 3u], 1u);
+    atomicAdd(&counters[STAT_BASE + 4u + min(v, 1u)], 1u);
+    atomicAdd(&counters[STAT_BASE + 6u + min(v, 1u)], tris);
 }
 
 // SCATTER half (main / prepass / shadow views). No Hi-Z.

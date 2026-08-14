@@ -986,6 +986,66 @@ void LODShape::Load(QIStream& f, bool reversed)
         {
             // LOG_DEBUG(Graphics, "{}: No map type {}",(const char *)(const char *)_name,mapType);
             _mapType = MapHide;
+            // VEG-SWAY / ARF -- Enfusion (Arma Reforger) vegetation converted from .xob carries
+            // NO named properties at all, so `map` is absent and every spruce, hazel and willow
+            // lands on MapHide. MEASURED, not assumed: of the 94 vegetation .p3d deployed from
+            // Reforger's Everon, 90 contain no `map` token anywhere in the file.
+            //
+            // MapHide is not merely a map-symbol choice. The renderer keys its whole vegetation
+            // treatment off MapType -- canopy/spherical leaf normals (EngineWgpu.cpp
+            // BuildGpuInstance, INST_CANOPY_*), the per-draw foliage kind (Object.cpp
+            // GCurrentFoliageKind) and now wind sway. On MapHide an imported tree is shaded and
+            // animated as though it were masonry.
+            //
+            // The fallback is deliberately narrow so it cannot reach OFP/Arma content, which
+            // always authors `map` explicitly: it requires BOTH an Enfusion "vegetation"
+            // directory segment in the path AND that generation's `t_` / `b_` basename prefix
+            // (t_picea_abies_3s, b_corylus_avellana_1). A rock or a fence cannot match.
+            // Precedent for name-keyed classification is already in-tree: IsGrassSurfaceName
+            // (TerrainWgpu.cpp) picks grass surfaces out of authored terrain material names.
+            if (const char* path = _name; path && *path)
+            {
+                // Local, because there is no shared case-insensitive substring helper reachable
+                // from this translation unit (the two in-tree ContainsNoCase are private statics
+                // in DisplayUI and Landscape).
+                auto containsNoCase = [](const char* hay, const char* needle) -> bool
+                {
+                    const size_t n = std::strlen(needle);
+                    if (n == 0)
+                        return true;
+                    for (const char* p = hay; *p; ++p)
+                    {
+                        size_t i = 0;
+                        while (i < n && p[i] &&
+                               std::tolower(static_cast<unsigned char>(p[i])) ==
+                                   std::tolower(static_cast<unsigned char>(needle[i])))
+                        {
+                            ++i;
+                        }
+                        if (i == n)
+                            return true;
+                    }
+                    return false;
+                };
+                if (containsNoCase(path, "vegetation"))
+                {
+                    char base[256];
+                    GetFilename(base, path);
+                    const bool isTreeName = (base[0] == 't' || base[0] == 'T') && base[1] == '_';
+                    const bool isBushName = (base[0] == 'b' || base[0] == 'B') && base[1] == '_';
+                    // A stump is not a canopy: it has no crown to bend and no leaves to flutter,
+                    // and swaying one would read as the ground moving.
+                    const bool isStump = containsNoCase(base, "stump") || containsNoCase(base, "fallen");
+                    if (isTreeName && !isStump)
+                    {
+                        _mapType = MapTree;
+                    }
+                    else if (isBushName && !isStump)
+                    {
+                        _mapType = MapBush;
+                    }
+                }
+            }
         }
         else if (stricmp(mapType, "TREE") == 0)
         {

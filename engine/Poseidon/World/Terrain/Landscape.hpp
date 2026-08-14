@@ -587,10 +587,16 @@ class Landscape : public SerializeClass
     bool _modernObjectResidencyPending = false;
     int _modernObjectCenterX = -0x3fffffff;
     int _modernObjectCenterZ = -0x3fffffff;
+    // Starting window size, not a ceiling: UpdateModernObjectResidency doubles it until the
+    // object budget is the bound, so a world smaller than the budget loads whole.
     int _modernObjectRadius = 64;
     uint32_t _modernObjectBudget = 20000;
     uint32_t _modernObjectCreatesPerUpdate = 128;
     uint32_t _modernResidentObjectCount = 0;
+    // Cadence counter for the residency progress row (see UpdateModernObjectResidency).
+    uint32_t _modernObjectUpdateCount = 0;
+    // WGR_OBJECT_STREAM_WINDOW_GROWTH=0 pins the window at _modernObjectRadius (diagnostic A/B).
+    bool _modernObjectWindowGrowth = true;
     uint32_t _modernObjectTestUpdate = 0;
     int _modernObjectTestPhase = -1;
     // Only the small subset of streamed objects that actually emits imported

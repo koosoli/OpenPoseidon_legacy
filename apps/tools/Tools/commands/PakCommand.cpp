@@ -1,14 +1,21 @@
 #include "PakCommand.hpp"
 
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionIff.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Asset/Formats/World/Oprw25.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
+#include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/PAAEncoder.hpp>
+#include <Poseidon/Graphics/Textures/PixelFormat.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -19,6 +26,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -198,6 +206,317 @@ int Worlds(const std::string& root, const std::string& filter)
     return closed == files ? 0 : 1;
 }
 
+//! `.ttile`'s TMAT chunk: which authored surface material covers each square metre.
+//!
+//! TMAT holds one nested `BMAT` chunk per 64 m sub-cell -- `u16 subX, u16 subY,
+//! u16 count, count x u16 matIdx` (indices into the `.terr` MATS list), then a
+//! blend payload that is empty exactly when count == 1. The payload is a
+//! quadtree over a 64x64 mask of the sub-cell, one texel per metre.
+//!
+//! The palette is the trap. Every TMAT palette is sorted ASCENDING by material
+//! index, so entry 0 is the lowest index present and NOT the base layer. Reading
+//! entry 0 as "the material here" renders Everon as 41% dirt.
+namespace Tmat
+{
+
+//! Bits per palette entry in a packed sample block: ceil(log2(count)), min 1.
+inline int BitsFor(size_t count)
+{
+    int bits = 1;
+    while ((static_cast<size_t>(1) << bits) < count)
+        ++bits;
+    return bits;
+}
+
+//! Little-endian bit order within each byte, `width` bits per sample.
+inline uint8_t SampleAt(const uint8_t* data, size_t index, int width)
+{
+    uint32_t value = 0;
+    for (int k = 0; k < width; ++k)
+    {
+        const size_t bit = index * static_cast<size_t>(width) + static_cast<size_t>(k);
+        value |= static_cast<uint32_t>((data[bit >> 3] >> (bit & 7)) & 1u) << k;
+    }
+    return static_cast<uint8_t>(value);
+}
+
+//! One sub-cell's records, pointing into the caller's TMAT payload.
+struct SubCell
+{
+    uint16_t subX = 0;
+    uint16_t subY = 0;
+    std::vector<uint16_t> palette;
+    const uint8_t* blend = nullptr;
+    size_t blendSize = 0;
+};
+
+//! Walk TMAT's nested BMAT chunks. BMAT sizes are big-endian like every other
+//! Enfusion chunk header; the records themselves are little-endian.
+inline bool ReadSubCells(const uint8_t* data, size_t size, std::vector<SubCell>& out, std::string& error)
+{
+    size_t at = 0;
+    while (at + 8 <= size)
+    {
+        if (ReadBe32(data + at) != FourCC("BMAT").value)
+        {
+            error = "TMAT: expected BMAT";
+            return false;
+        }
+        const size_t chunk = ReadBe32(data + at + 4);
+        if (at + 8 + chunk > size || chunk < 6)
+        {
+            error = "TMAT: BMAT overruns";
+            return false;
+        }
+        const uint8_t* p = data + at + 8;
+        SubCell cell;
+        cell.subX = ReadLe16(p, 0);
+        cell.subY = ReadLe16(p, 2);
+        const size_t count = ReadLe16(p, 4);
+        if (count == 0 || 6 + 2 * count > chunk)
+        {
+            error = "TMAT: BMAT palette overruns";
+            return false;
+        }
+        cell.palette.resize(count);
+        for (size_t i = 0; i < count; ++i)
+            cell.palette[i] = ReadLe16(p, 6 + 2 * i);
+        cell.blend = p + 6 + 2 * count;
+        cell.blendSize = chunk - (6 + 2 * count);
+        out.push_back(std::move(cell));
+        at += 8 + chunk;
+    }
+    if (at != size)
+    {
+        error = "TMAT: chunk walk did not close";
+        return false;
+    }
+    return true;
+}
+
+constexpr int kMaskEdge = 64;
+
+//! One packed run of per-texel palette entries, pointing into the payload.
+struct MaskBlock
+{
+    size_t texels = 0;
+    const uint8_t* bits = nullptr;
+};
+
+//! Depth-first walk of the blend quadtree, in the order the mask blocks are stored.
+//!
+//! Pre-order and strictly quadrant-ordered: a masked leaf consumes the next block
+//! the moment it is reached, and an internal child is descended into immediately,
+//! so its whole subtree consumes its blocks before the parent moves on to the next
+//! quadrant. Any other order -- deferring the children to a work stack, say --
+//! still visits every node and still fills every texel, and pairs the wrong block
+//! with the wrong leaf. It shows up as `mask block does not match its leaf` on the
+//! 3% of sub-cells whose tree is deep enough for the orders to diverge, and
+//! anywhere the block sizes happen to agree it would silently place the wrong
+//! materials instead. Depth is bounded by the 64x64 mask, so six levels.
+struct Walk
+{
+    const uint8_t* codes = nullptr;
+    uint16_t nodes = 0;
+    size_t count = 0;
+    int width = 1;
+    const std::vector<MaskBlock>* masks = nullptr;
+    uint8_t* out = nullptr;
+    std::vector<bool> seen;
+    size_t used = 0;
+    size_t visited = 0;
+    std::string error;
+
+    bool Node(uint16_t node, int y, int x, int size)
+    {
+        static constexpr int kQuad[4][2] = {{0, 0}, {0, 1}, {1, 0}, {1, 1}};
+        if (node >= nodes || seen[node])
+        {
+            error = "blend node revisited or out of range";
+            return false;
+        }
+        seen[node] = true;
+        ++visited;
+        const int half = size / 2;
+        if (half < 1)
+        {
+            error = "blend internal node below 1x1";
+            return false;
+        }
+        for (int q = 0; q < 4; ++q)
+        {
+            const uint16_t code = ReadLe16(codes, static_cast<size_t>(node) * 8 + static_cast<size_t>(q) * 2);
+            const int yy = y + kQuad[q][0] * half;
+            const int xx = x + kQuad[q][1] * half;
+            if ((code & 0x8000) != 0)
+            {
+                const uint16_t v = code & 0x3FFF;
+                if (v >= count)
+                {
+                    error = "uniform leaf out of palette";
+                    return false;
+                }
+                for (int dy = 0; dy < half; ++dy)
+                    std::fill_n(out + static_cast<size_t>(yy + dy) * kMaskEdge + xx, half, static_cast<uint8_t>(v));
+            }
+            else if ((code & 0x4000) != 0)
+            {
+                if (used >= masks->size())
+                {
+                    error = "ran out of blend mask blocks";
+                    return false;
+                }
+                const MaskBlock& block = (*masks)[used++];
+                if (block.texels != static_cast<size_t>(half) * half)
+                {
+                    error = "blend mask block does not match its leaf";
+                    return false;
+                }
+                for (int dy = 0; dy < half; ++dy)
+                    for (int dx = 0; dx < half; ++dx)
+                    {
+                        const uint8_t v = SampleAt(block.bits, static_cast<size_t>(dy) * half + dx, width);
+                        if (v >= count)
+                        {
+                            error = "blend mask sample out of palette";
+                            return false;
+                        }
+                        out[static_cast<size_t>(yy + dy) * kMaskEdge + xx + dx] = v;
+                    }
+            }
+            else if (!Node(code, yy, xx, half))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+//! Decode one sub-cell's blend payload into 64x64 PALETTE ENTRY indices.
+//!
+//! `flags == 0x4000` is a raw block of 4096 packed samples. `flags == 0` is a
+//! quadtree: each node holds four child codes in (top-left, top-right,
+//! bottom-left, bottom-right) order, where `0x8000|v` is a uniform leaf,
+//! `0x4000|v` a leaf that consumes the next packed mask block, and anything else
+//! an internal node index. Mask blocks appear in DFS order and each block's
+//! declared texel count is exactly the leaf's area, which is what pins the
+//! traversal down.
+inline bool DecodeBlend(const uint8_t* data, size_t size, size_t count, uint8_t* out, std::string& error)
+{
+    if (size < 4)
+    {
+        error = "blend payload shorter than its header";
+        return false;
+    }
+    const uint16_t nodes = ReadLe16(data, 0);
+    const uint16_t flags = ReadLe16(data, 2);
+    const int width = BitsFor(count);
+
+    if (flags == 0x4000)
+    {
+        if (size < 10 || ReadLe16(data, 4) != 1 || ReadLe32(data, 6) != 4096)
+        {
+            error = "raw blend header";
+            return false;
+        }
+        const size_t need = static_cast<size_t>(4096) * static_cast<size_t>(width) / 8;
+        if (10 + need != size)
+        {
+            error = "raw blend size";
+            return false;
+        }
+        for (size_t i = 0; i < 4096; ++i)
+        {
+            const uint8_t v = SampleAt(data + 10, i, width);
+            if (v >= count)
+            {
+                error = "raw blend sample out of palette";
+                return false;
+            }
+            out[i] = v;
+        }
+        return true;
+    }
+    if (flags != 0)
+    {
+        error = "unknown blend flags";
+        return false;
+    }
+
+    const size_t codesBytes = static_cast<size_t>(nodes) * 8;
+    if (4 + codesBytes > size)
+    {
+        error = "blend node table overruns";
+        return false;
+    }
+    const uint8_t* codes = data + 4;
+    size_t at = 4 + codesBytes;
+
+    // The mask-block count is omitted entirely when there are no masked leaves.
+    size_t maskCount = 0;
+    if (at != size)
+    {
+        if (at + 2 > size)
+        {
+            error = "blend mask count overruns";
+            return false;
+        }
+        maskCount = ReadLe16(data, at);
+        at += 2;
+    }
+    std::vector<MaskBlock> masks;
+    masks.reserve(maskCount);
+    for (size_t i = 0; i < maskCount; ++i)
+    {
+        if (at + 4 > size)
+        {
+            error = "blend mask header overruns";
+            return false;
+        }
+        const size_t texels = ReadLe32(data, at);
+        at += 4;
+        const size_t bytes = texels * static_cast<size_t>(width) / 8;
+        if ((texels % 16) != 0 || at + bytes > size)
+        {
+            error = "blend mask block overruns";
+            return false;
+        }
+        masks.push_back({texels, data + at});
+        at += bytes;
+    }
+    if (at != size)
+    {
+        error = "blend payload did not close";
+        return false;
+    }
+
+    Walk walk;
+    walk.codes = codes;
+    walk.nodes = nodes;
+    walk.count = count;
+    walk.width = width;
+    walk.masks = &masks;
+    walk.out = out;
+    walk.seen.assign(nodes, false);
+    if (!walk.Node(0, 0, 0, kMaskEdge))
+    {
+        error = walk.error;
+        return false;
+    }
+    // Both closures are required. Reaching every texel is not the same as
+    // consuming every block: a traversal in the wrong order can fill the mask
+    // completely and still have paired blocks with the wrong leaves.
+    if (walk.used != masks.size() || walk.visited != nodes)
+    {
+        error = "blend payload left nodes or mask blocks unused";
+        return false;
+    }
+    return true;
+}
+
+} // namespace Tmat
+
 //! One world's descriptor plus its tiles assembled into a single heightfield.
 //!
 //! Shared by `pak terrain` (which shades it to a PNG) and `pak export` (which
@@ -213,6 +532,13 @@ struct AssembledTerrain
     size_t tilesFound = 0;
     size_t tilesPlaced = 0;
     size_t tilesFailed = 0;
+    //! MATS index per mask texel, `materialEdge` square, row 0 at Z 0 like the
+    //! heightfield. 0xFF where no BMAT covered it. Only filled when asked for.
+    std::vector<uint8_t> materials;
+    uint32_t materialEdge = 0;
+    size_t subCells = 0;
+    size_t subCellsFailed = 0;
+    std::string materialError; //!< first blend-decode failure, for the summary
     std::string error;
 
     bool valid() const { return error.empty(); }
@@ -222,7 +548,7 @@ struct AssembledTerrain
     }
 };
 
-AssembledTerrain AssembleTerrain(const std::string& root, const std::string& world)
+AssembledTerrain AssembleTerrain(const std::string& root, const std::string& world, bool wantMaterials = false)
 {
     AssembledTerrain out;
     const std::vector<std::string> paks = FindPaks(root);
@@ -318,6 +644,11 @@ AssembledTerrain AssembleTerrain(const std::string& root, const std::string& wor
         {
             out.tileEdge = tile.samples - 1;
             out.tilesX = (gridW - 1) / out.tileEdge;
+            if (wantMaterials && out.descriptor.subPerTileEdge > 0)
+            {
+                out.materialEdge = out.tilesX * out.descriptor.subPerTileEdge * Tmat::kMaskEdge;
+                out.materials.assign(static_cast<size_t>(out.materialEdge) * out.materialEdge, 0xFF);
+            }
         }
         const uint32_t row = index / out.tilesX;
         const uint32_t col = index % out.tilesX;
@@ -337,6 +668,56 @@ AssembledTerrain AssembleTerrain(const std::string& root, const std::string& wor
             }
         }
         out.tilesPlaced++;
+
+        // The surface assignment rides along here rather than in a second pass:
+        // the tile bytes are already decompressed and in hand, and re-reading
+        // 2,500 tiles to get at a chunk we already hold is pure cost.
+        if (!out.materials.empty())
+        {
+            const IffFile iff = ReadIff(tileBytes.data(), tileBytes.size());
+            const IffChunk* tmat = iff.valid() ? iff.Find(FourCC("TMAT")) : nullptr;
+            if (tmat == nullptr)
+                continue;
+            std::vector<Tmat::SubCell> cells;
+            std::string error;
+            if (!Tmat::ReadSubCells(tileBytes.data() + tmat->offset, tmat->size, cells, error))
+            {
+                if (out.materialError.empty())
+                    out.materialError = error;
+                continue;
+            }
+            std::array<uint8_t, Tmat::kMaskEdge * Tmat::kMaskEdge> mask{};
+            for (const Tmat::SubCell& cell : cells)
+            {
+                ++out.subCells;
+                const size_t baseZ = static_cast<size_t>(cell.subY) * Tmat::kMaskEdge;
+                const size_t baseX = static_cast<size_t>(cell.subX) * Tmat::kMaskEdge;
+                if (baseZ + Tmat::kMaskEdge > out.materialEdge || baseX + Tmat::kMaskEdge > out.materialEdge)
+                {
+                    ++out.subCellsFailed;
+                    continue;
+                }
+                if (cell.blendSize == 0)
+                {
+                    // A single-material sub-cell carries no payload at all.
+                    mask.fill(0);
+                }
+                else if (!Tmat::DecodeBlend(cell.blend, cell.blendSize, cell.palette.size(), mask.data(), error))
+                {
+                    ++out.subCellsFailed;
+                    if (out.materialError.empty())
+                        out.materialError = error;
+                    mask.fill(0);
+                }
+                for (int mz = 0; mz < Tmat::kMaskEdge; ++mz)
+                    for (int mx = 0; mx < Tmat::kMaskEdge; ++mx)
+                    {
+                        const uint8_t entry = mask[static_cast<size_t>(mz) * Tmat::kMaskEdge + mx];
+                        out.materials[(baseZ + mz) * out.materialEdge + baseX + mx] =
+                            static_cast<uint8_t>(cell.palette[entry]);
+                    }
+            }
+        }
     }
     return out;
 }
@@ -513,6 +894,728 @@ int RenderTerrain(const std::string& root, const std::string& world, const std::
 // survive. It is bilinear rather than nearest so a ridge line does not alias into a
 // staircase. Everything else in the file is either exact (the extent, the height
 // scale) or synthesised and marked as such below.
+// ===========================================================================
+//  Terrain surface materials
+// ===========================================================================
+//
+// Everon's ground is authored as 22 Enfusion surface materials plus a per-square-
+// metre assignment (TMAT). The runtime wants the Arma 3 shape instead: one
+// `TerrainSNX` RVMAT per land-cell region, holding a satellite colour image, an
+// indexed selector mask, and a stack of at most five tiling ground surfaces.
+// This translates one into the other.
+namespace Surfaces
+{
+
+//! Every `.pak` under a root, opened once, with a case-insensitive path index.
+//! `PakArchive` resolves within a single archive only, and a Reforger world's
+//! materials and textures are spread across several.
+class PakSet
+{
+  public:
+    bool Open(const std::string& root)
+    {
+        const std::vector<std::string> paks = FindPaks(root);
+        if (paks.empty())
+            return false;
+        _archives.resize(paks.size());
+        for (size_t i = 0; i < paks.size(); ++i)
+        {
+            if (!_archives[i].Open(paks[i]))
+                continue;
+            for (const PakEntry& entry : _archives[i].Entries())
+                _index.emplace(LowerCopy(entry.path), std::make_pair(i, &entry));
+        }
+        return !_index.empty();
+    }
+
+    size_t Size() const { return _index.size(); }
+
+    //! Read by virtual path, case-insensitively, with either separator.
+    bool Read(const std::string& path, std::vector<uint8_t>& out) const
+    {
+        std::string key = LowerCopy(path);
+        std::replace(key.begin(), key.end(), '\\', '/');
+        const auto found = _index.find(key);
+        if (found == _index.end())
+            return false;
+        return _archives[found->second.first].Read(*found->second.second, out);
+    }
+
+  private:
+    std::vector<PakArchive> _archives;
+    std::map<std::string, std::pair<size_t, const PakEntry*>> _index;
+};
+
+// ------------------------------------------------------------------ raP -----
+//
+// RVMATs are the MATERIAL flavour of `\0raP`, not the config flavour, and the
+// difference is not cosmetic: `PoseidonTools config bin` writes version 4 with
+// the source path embedded, and `ParseArmaRapMaterial` throws on it inside a
+// catch that swallows the exception (LandSave.cpp), so the world loads with a
+// material table full of nothing and the ground draws white with no diagnostic.
+//
+// The material flavour is version 0, then `08`, then a u32 offset to the enum
+// table, with the root class body at 0x10. Verified against a shipped Arma 3
+// terrain RVMAT (packages/a3-compat/world/vr/data/layers/p_000-000_l00.rvmat).
+namespace Rap
+{
+
+struct Value
+{
+    enum Kind
+    {
+        String,
+        Float,
+        Int
+    };
+    Kind kind = Float;
+    std::string text;
+    float number = 0.0f;
+    int integer = 0;
+
+    static Value Str(std::string v) { return Value{String, std::move(v), 0.0f, 0}; }
+    static Value F32(float v) { return Value{Float, {}, v, 0}; }
+    static Value I32(int v) { return Value{Int, {}, 0.0f, v}; }
+};
+
+struct Class
+{
+    std::string name;
+    std::vector<std::pair<std::string, std::vector<Value>>> arrays;
+    std::vector<std::pair<std::string, Value>> values;
+    std::vector<Class> classes;
+
+    Class& Array(std::string name, std::vector<Value> v)
+    {
+        arrays.emplace_back(std::move(name), std::move(v));
+        return *this;
+    }
+    Class& Set(std::string name, Value v)
+    {
+        values.emplace_back(std::move(name), std::move(v));
+        return *this;
+    }
+    Class& Sub(Class c)
+    {
+        classes.push_back(std::move(c));
+        return *this;
+    }
+};
+
+inline void PutCompressed(std::vector<uint8_t>& out, size_t n)
+{
+    for (;;)
+    {
+        uint8_t byte = static_cast<uint8_t>(n & 0x7F);
+        n >>= 7;
+        out.push_back(static_cast<uint8_t>(byte | (n != 0 ? 0x80 : 0)));
+        if (n == 0)
+            return;
+    }
+}
+
+inline void PutAsciiz(std::vector<uint8_t>& out, const std::string& text)
+{
+    out.insert(out.end(), text.begin(), text.end());
+    out.push_back(0);
+}
+
+inline void PutRaw(std::vector<uint8_t>& out, const void* data, size_t size)
+{
+    const auto* p = static_cast<const uint8_t*>(data);
+    out.insert(out.end(), p, p + size);
+}
+
+inline uint8_t TypeByte(const Value& v)
+{
+    return v.kind == Value::String ? 0 : (v.kind == Value::Float ? 1 : 2);
+}
+
+inline void PutPayload(std::vector<uint8_t>& out, const Value& v)
+{
+    if (v.kind == Value::String)
+        PutAsciiz(out, v.text);
+    else if (v.kind == Value::Float)
+        PutRaw(out, &v.number, 4);
+    else
+        PutRaw(out, &v.integer, 4);
+}
+
+inline std::vector<uint8_t> Emit(const Class& root)
+{
+    std::vector<uint8_t> out;
+    PutRaw(out, "\0raP", 4);
+    const uint32_t zero = 0, eight = 8;
+    PutRaw(out, &zero, 4);  // version
+    PutRaw(out, &eight, 4); // always 8
+    PutRaw(out, &zero, 4);  // enum table offset, patched at the end
+
+    std::vector<std::pair<size_t, const Class*>> pending;
+    const auto body = [&](const Class& c)
+    {
+        out.push_back(0); // inherited class name: none
+        PutCompressed(out, c.arrays.size() + c.values.size() + c.classes.size());
+        for (const auto& [name, entries] : c.arrays)
+        {
+            out.push_back(2);
+            PutAsciiz(out, name);
+            PutCompressed(out, entries.size());
+            for (const Value& v : entries)
+            {
+                out.push_back(TypeByte(v));
+                PutPayload(out, v);
+            }
+        }
+        for (const auto& [name, v] : c.values)
+        {
+            out.push_back(1);
+            out.push_back(TypeByte(v));
+            PutAsciiz(out, name);
+            PutPayload(out, v);
+        }
+        for (const Class& sub : c.classes)
+        {
+            out.push_back(0);
+            PutAsciiz(out, sub.name);
+            pending.emplace_back(out.size(), &sub);
+            PutRaw(out, &zero, 4); // absolute offset, patched below
+        }
+    };
+
+    body(root);
+    for (size_t i = 0; i < pending.size(); ++i)
+    {
+        const auto [patchAt, klass] = pending[i];
+        const uint32_t here = static_cast<uint32_t>(out.size());
+        std::memcpy(out.data() + patchAt, &here, 4);
+        body(*klass);
+    }
+    const uint32_t enumAt = static_cast<uint32_t>(out.size());
+    std::memcpy(out.data() + 12, &enumAt, 4);
+    PutRaw(out, &zero, 4); // empty enum table: a count of zero, as Arma 3 writes
+    return out;
+}
+
+//! A top-down UV generator: u = scale*worldX + uOffset, v = scale*worldZ + vOffset.
+//!
+//! `uvTransform` is a BASIS, not a pair of row vectors. LandSave reads
+//! u = (aside[0], up[0], dir[0], pos[0]) and v = (aside[1], up[1], dir[1], pos[1])
+//! -- the first component of each of the three axes, not all three of `aside`.
+//! Writing the v scale into `up[2]`, which reads correctly row-wise, leaves v
+//! identically zero: every fragment in the world then samples row 0 of the
+//! satellite, and the ground comes out a single smeared stripe with no hint in
+//! any log that the UVs are degenerate. The v scale belongs in `dir[1]`.
+inline Class TexGen(const std::string& name, float scale, float uOffset, float vOffset)
+{
+    Class transform{"uvTransform"};
+    transform.Array("aside", {Value::F32(scale), Value::F32(0.0f), Value::F32(0.0f)});
+    transform.Array("up", {Value::F32(0.0f), Value::F32(0.0f), Value::F32(scale)});
+    transform.Array("dir", {Value::F32(0.0f), Value::F32(scale), Value::F32(0.0f)});
+    transform.Array("pos", {Value::F32(uOffset), Value::F32(vOffset), Value::F32(0.0f)});
+    Class gen{name};
+    gen.Set("uvSource", Value::Str("worldPos"));
+    gen.Sub(std::move(transform));
+    return gen;
+}
+
+inline Class Stage(int index, const std::string& texture, int texGen)
+{
+    Class stage{"Stage" + std::to_string(index)};
+    stage.Set("texture", Value::Str(texture));
+    stage.Set("texGen", Value::I32(texGen));
+    return stage;
+}
+
+} // namespace Rap
+
+//! One authored surface bound to a mask slot.
+struct Slot
+{
+    int material = -1;      //!< index into the .terr MATS list
+    std::string colourPaa;  //!< virtual path written into the RVMAT
+    float tileMetres = 4.0f;
+};
+
+struct MaterialAssets
+{
+    std::vector<std::string> rvmats; //!< virtual paths, one per region, material-table order
+    std::vector<uint16_t> cellIndex; //!< land cell -> region, or empty for a single region
+    size_t texturesWritten = 0;
+    std::string error;
+};
+
+//! Reforger encodes a surface's authored tiling in its texture filename:
+//! `Soil_2x2_01_BCR`, `Asphalt_01_4x4_BCR`. Anything unlabelled tiles at 4 m.
+inline float TileMetresOf(const std::string& path)
+{
+    std::string name = LowerCopy(std::filesystem::path(path).stem().string());
+    size_t at = 0;
+    while (at < name.size())
+    {
+        size_t next = name.find('_', at);
+        if (next == std::string::npos)
+            next = name.size();
+        const std::string part = name.substr(at, next - at);
+        const size_t x = part.find('x');
+        if (x != std::string::npos && x > 0 && x + 1 < part.size())
+        {
+            const std::string a = part.substr(0, x), b = part.substr(x + 1);
+            const auto digits = [](const std::string& s)
+            { return !s.empty() && std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c) != 0; }); };
+            if (digits(a) && digits(b) && a == b)
+            {
+                const int metres = std::atoi(a.c_str());
+                if (metres > 0 && metres <= 16)
+                    return static_cast<float>(metres);
+            }
+        }
+        at = next + 1;
+    }
+    return 4.0f;
+}
+
+//! Decode a `.edds` out of the paks into straight RGBA8.
+inline bool LoadEdds(const PakSet& paks, const std::string& path, Poseidon::Image& out)
+{
+    std::vector<uint8_t> bytes;
+    if (!paks.Read(path, bytes) || bytes.empty())
+        return false;
+    Poseidon::EddsImage edds = Poseidon::ReadEddsBuffer(bytes.data(), bytes.size());
+    if (!edds.valid() || edds.mipmaps.empty())
+        return false;
+    Poseidon::Image image(edds.width, edds.height, edds.format, std::move(edds.mipmaps[0].data));
+    out = image.ToRGBA();
+    // Every caller walks this as width*height*4 bytes, so a short decode has to
+    // fail here rather than run off the end of the buffer.
+    return out.valid() &&
+           out.data().size() >= static_cast<size_t>(out.width()) * static_cast<size_t>(out.height()) * 4;
+}
+
+//! Everything the RVMAT set needs, resolved per MATS entry.
+struct SourceMaterial
+{
+    std::string ematPath;
+    std::string bcrPath;
+    bool decoded = false;
+    std::array<float, 3> mean{{0.5f, 0.5f, 0.5f}}; //!< sRGB mean of the BCR albedo
+    float tileMetres = 4.0f;
+};
+
+//! Translate a world's authored surfaces into a TerrainSNX RVMAT plus its textures.
+//!
+//! One region, so one material and five slots. TerrainSNX allows five surfaces
+//! and Everon authors 22, so the five with the most area are bound and the other
+//! seventeen are folded into whichever of the five is closest in mean colour --
+//! NOT into slot 0. Slot 0 is the mask's unpainted value, so sweeping the tail
+//! there paints the world's single most common material (on Everon the seabed)
+//! across every unlisted patch of land.
+inline MaterialAssets GenerateTerrainMaterials(const AssembledTerrain& terrain, const std::string& root,
+                                               const std::string& outDir, const std::string& virtualDir,
+                                               int satelliteSize, int maskSize)
+{
+    MaterialAssets assets;
+    const uint32_t edge = terrain.materialEdge;
+    if (edge == 0 || terrain.materials.empty())
+    {
+        assets.error = "no TMAT surface assignment was decoded";
+        return assets;
+    }
+
+    PakSet paks;
+    if (!paks.Open(root))
+    {
+        assets.error = "no .pak files under " + root;
+        return assets;
+    }
+
+    // ---- resolve every MATS entry to its BCR albedo -------------------------
+    const size_t count = terrain.descriptor.materials.size();
+    std::vector<SourceMaterial> sources(count);
+    const auto loadText = [&](const std::string& path, std::string& text)
+    {
+        std::vector<uint8_t> bytes;
+        if (!paks.Read(path, bytes))
+            return false;
+        text.assign(bytes.begin(), bytes.end());
+        return true;
+    };
+    for (size_t i = 0; i < count; ++i)
+    {
+        SourceMaterial& source = sources[i];
+        source.ematPath = terrain.descriptor.materials[i];
+        std::string text;
+        if (!loadText(source.ematPath, text))
+            continue;
+        Poseidon::Asset::Material::EmatMaterial emat = Poseidon::Asset::Material::ParseEmat(text);
+        if (!emat.valid())
+            continue;
+        // 18.3% of Reforger's materials get their maps only from a parent.
+        Poseidon::Asset::Material::ResolveEmatInheritance(emat, loadText);
+        source.bcrPath = emat.TextureOf("BCRMap");
+        if (!source.bcrPath.empty())
+            source.tileMetres = TileMetresOf(source.bcrPath);
+    }
+
+    // Decode each distinct BCR once; several materials share one texture.
+    std::map<std::string, std::array<float, 3>> means;
+    for (SourceMaterial& source : sources)
+    {
+        if (source.bcrPath.empty())
+            continue;
+        const std::string key = LowerCopy(source.bcrPath);
+        auto found = means.find(key);
+        if (found == means.end())
+        {
+            Poseidon::Image image;
+            if (!LoadEdds(paks, source.bcrPath, image))
+                continue;
+            const std::vector<uint8_t>& px = image.data();
+            double sum[3] = {0, 0, 0};
+            const size_t texels = static_cast<size_t>(image.width()) * image.height();
+            for (size_t t = 0; t < texels; ++t)
+                for (int c = 0; c < 3; ++c)
+                    sum[c] += px[t * 4 + c];
+            std::array<float, 3> mean{};
+            for (int c = 0; c < 3; ++c)
+                mean[c] = static_cast<float>(sum[c] / (255.0 * static_cast<double>(texels)));
+            found = means.emplace(key, mean).first;
+        }
+        source.mean = found->second;
+        source.decoded = true;
+    }
+
+    // ---- pick the five slots ------------------------------------------------
+    std::vector<size_t> area(count, 0);
+    for (uint8_t m : terrain.materials)
+        if (m < count)
+            ++area[m];
+    std::vector<int> order;
+    for (size_t i = 0; i < count; ++i)
+        if (area[i] > 0 && sources[i].decoded)
+            order.push_back(static_cast<int>(i));
+    std::sort(order.begin(), order.end(), [&](int a, int b) { return area[a] > area[b]; });
+    if (order.empty())
+    {
+        assets.error = "no MATS entry resolved a BCR albedo";
+        return assets;
+    }
+
+    constexpr int kSlots = 5; // TerrainSNX, ShaderSchema.hpp FindTerrainFamily
+    std::vector<Slot> slots;
+    for (int i = 0; i < kSlots && i < static_cast<int>(order.size()); ++i)
+        slots.push_back(Slot{order[static_cast<size_t>(i)], {}, sources[order[static_cast<size_t>(i)]].tileMetres});
+
+    // Fold the tail onto the nearest slot by mean colour.
+    std::vector<uint8_t> slotOf(256, 0);
+    for (size_t i = 0; i < count; ++i)
+    {
+        if (!sources[i].decoded)
+            continue;
+        float best = 1e30f;
+        for (size_t s = 0; s < slots.size(); ++s)
+        {
+            const auto& a = sources[i].mean;
+            const auto& b = sources[static_cast<size_t>(slots[s].material)].mean;
+            const float d = (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
+                            (a[2] - b[2]) * (a[2] - b[2]);
+            if (d < best)
+            {
+                best = d;
+                slotOf[i] = static_cast<uint8_t>(s);
+            }
+        }
+    }
+    for (size_t s = 0; s < slots.size(); ++s)
+        slotOf[static_cast<size_t>(slots[s].material)] = static_cast<uint8_t>(s);
+
+    // ---- write the files ----------------------------------------------------
+    std::string vdir = virtualDir;
+    while (!vdir.empty() && (vdir.back() == '\\' || vdir.back() == '/'))
+        vdir.pop_back();
+    std::filesystem::path dir(outDir);
+    {
+        std::string rel = vdir;
+        std::replace(rel.begin(), rel.end(), '\\', '/');
+        dir /= rel;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    const auto virtualPath = [&](const std::string& name) { return vdir.empty() ? name : vdir + "\\" + name; };
+    const auto diskPath = [&](const std::string& name) { return (dir / name).string(); };
+
+    // Surfaces. Each is divided by twice its own mean so it enters the shader's
+    // `surface * 2` at unity and MODULATES the satellite. Arma 3's own ground
+    // surfaces already sit there (VR's is 0.4745); Reforger's PBR base colours
+    // average 0.21-0.47, so binding them raw darkens the ground by up to 2.4x.
+    for (size_t s = 0; s < slots.size(); ++s)
+    {
+        SourceMaterial& source = sources[static_cast<size_t>(slots[s].material)];
+        Poseidon::Image image;
+        if (!LoadEdds(paks, source.bcrPath, image))
+        {
+            assets.error = "cannot decode " + source.bcrPath;
+            return assets;
+        }
+        std::vector<uint8_t> px = image.data();
+        const size_t texels = static_cast<size_t>(image.width()) * image.height();
+        for (size_t t = 0; t < texels; ++t)
+            for (int c = 0; c < 3; ++c)
+            {
+                const float gain = 1.0f / std::max(1e-3f, 2.0f * source.mean[c]);
+                px[t * 4 + c] = static_cast<uint8_t>(
+                    std::clamp(static_cast<float>(px[t * 4 + c]) * gain + 0.5f, 0.0f, 255.0f));
+            }
+        const std::string name = "surface" + std::to_string(s) + "_co.paa";
+        if (!Poseidon::PAAEncoder::WritePAA(diskPath(name),
+                                            Poseidon::Image::FromRGBA(image.width(), image.height(), std::move(px)),
+                                            Poseidon::PixelFormat::DXT1))
+        {
+            assets.error = "cannot write " + diskPath(name);
+            return assets;
+        }
+        slots[s].colourPaa = virtualPath(name);
+        ++assets.texturesWritten;
+    }
+
+    // Satellite: the mean colour of whatever material covers each square metre,
+    // area-averaged down. No hillshade and no water tint -- the engine lights and
+    // floods the terrain itself, and baking either in double-counts it.
+    {
+        const int n = satelliteSize;
+        std::vector<uint8_t> rgba(static_cast<size_t>(n) * n * 4, 255);
+        // One output row at a time. The input rows feeding a given output row are
+        // contiguous, so the accumulator is a row rather than a frame: at 4096
+        // square a whole-image accumulator is 400 MB of doubles plus a 67 MB hit
+        // count, on top of the 164 MB raster, and it took the process out.
+        std::vector<double> accum(static_cast<size_t>(n) * 3, 0.0);
+        std::vector<uint32_t> hits(static_cast<size_t>(n), 0);
+        for (int oz = 0; oz < n; ++oz)
+        {
+            std::fill(accum.begin(), accum.end(), 0.0);
+            std::fill(hits.begin(), hits.end(), 0u);
+            const uint64_t zStart = (static_cast<uint64_t>(oz) * edge + n - 1) / n;
+            const uint64_t zEnd = (static_cast<uint64_t>(oz + 1) * edge + n - 1) / n;
+            for (uint64_t z = zStart; z < zEnd && z < edge; ++z)
+            {
+                const uint8_t* row = terrain.materials.data() + static_cast<size_t>(z) * edge;
+                for (uint32_t x = 0; x < edge; ++x)
+                {
+                    const uint8_t m = row[x];
+                    if (m >= count || !sources[m].decoded)
+                        continue;
+                    const size_t ox = static_cast<size_t>(static_cast<uint64_t>(x) * n / edge);
+                    for (int c = 0; c < 3; ++c)
+                        accum[ox * 3 + c] += sources[m].mean[c];
+                    ++hits[ox];
+                }
+            }
+            for (int ox = 0; ox < n; ++ox)
+            {
+                const size_t at = (static_cast<size_t>(oz) * n + ox) * 4;
+                for (int c = 0; c < 3; ++c)
+                    rgba[at + c] =
+                        hits[ox] == 0
+                            ? 128
+                            : static_cast<uint8_t>(std::clamp(
+                                  accum[static_cast<size_t>(ox) * 3 + c] / hits[ox] * 255.0 + 0.5, 0.0, 255.0));
+            }
+        }
+        if (!Poseidon::PAAEncoder::WritePAA(diskPath("satellite.paa"),
+                                            Poseidon::Image::FromRGBA(n, n, std::move(rgba)),
+                                            Poseidon::PixelFormat::DXT1))
+        {
+            assets.error = "cannot write the satellite";
+            return assets;
+        }
+        ++assets.texturesWritten;
+    }
+
+    // Mask. RGB is one-hot and selects slots 1..3; no channel high is slot 0;
+    // alpha 119 selects slot 4 (terrain.wgsl decode_mask).
+    //
+    // DXT3, and that is measured. Of the formats the PAA container advertises,
+    // only DXT1/3/5 survive a WritePAA round-trip -- ARGB4444/1555 and AI88 all
+    // come back "LZW Decode error" and ARGB8888 will not load at all, which
+    // showed up only as `complete=0` in a terrain log line naming no file. DXT3
+    // over DXT5 because its alpha is explicit 4-bit per texel with no
+    // interpolation across the block, so the authored levels stay crisp. Keep
+    // the mask at or below 2048: a 4096 DXT3 comes out with a truncated mip
+    // chain and will not read back.
+    {
+        const int n = maskSize;
+        std::vector<uint8_t> rgba(static_cast<size_t>(n) * n * 4, 0);
+        for (int z = 0; z < n; ++z)
+        {
+            const size_t sz = static_cast<size_t>(static_cast<uint64_t>(z) * edge / n);
+            for (int x = 0; x < n; ++x)
+            {
+                const size_t sx = static_cast<size_t>(static_cast<uint64_t>(x) * edge / n);
+                const uint8_t m = terrain.materials[sz * edge + sx];
+                const uint8_t slot = m < count ? slotOf[m] : 0;
+                const size_t at = (static_cast<size_t>(z) * n + x) * 4;
+                rgba[at + 3] = 255;
+                if (slot >= 1 && slot <= 3)
+                    rgba[at + (slot - 1)] = 255;
+                else if (slot == 4)
+                    rgba[at + 3] = 119;
+            }
+        }
+        if (!Poseidon::PAAEncoder::WritePAA(diskPath("mask.paa"), Poseidon::Image::FromRGBA(n, n, std::move(rgba)),
+                                            Poseidon::PixelFormat::DXT3))
+        {
+            assets.error = "cannot write the mask";
+            return assets;
+        }
+        ++assets.texturesWritten;
+    }
+
+    // ---- the RVMAT ----------------------------------------------------------
+    // TerrainSNX: satellite Stage0, mask Stage1, surface colours from Stage4 with
+    // stride 2 and the normal one stage BELOW its colour, so the colours land on
+    // the even stages 4, 6, 8, 10, 12.
+    const float world = terrain.descriptor.WorldWidth();
+    Rap::Class rvmatRoot{""};
+    rvmatRoot.Array("ambient", {Rap::Value::F32(1.0f), Rap::Value::F32(1.0f), Rap::Value::F32(1.0f), Rap::Value::F32(1.0f)});
+    rvmatRoot.Array("diffuse",
+               {Rap::Value::F32(0.55f), Rap::Value::F32(0.55f), Rap::Value::F32(0.55f), Rap::Value::F32(1.0f)});
+    rvmatRoot.Array("forcedDiffuse", {Rap::Value::F32(0.0f), Rap::Value::F32(0.0f), Rap::Value::F32(0.0f),
+                                 Rap::Value::F32(0.0f)});
+    rvmatRoot.Array("emmisive",
+               {Rap::Value::F32(0.0f), Rap::Value::F32(0.0f), Rap::Value::F32(0.0f), Rap::Value::F32(0.0f)});
+    rvmatRoot.Array("specular",
+               {Rap::Value::F32(0.0f), Rap::Value::F32(0.0f), Rap::Value::F32(0.0f), Rap::Value::F32(0.0f)});
+    rvmatRoot.Set("specularPower", Rap::Value::F32(0.0f));
+    rvmatRoot.Set("PixelShaderID", Rap::Value::Str("TerrainSNX"));
+    rvmatRoot.Set("VertexShaderID", Rap::Value::Str("Terrain"));
+    rvmatRoot.Sub(Rap::Stage(0, virtualPath("satellite.paa"), 0));
+    rvmatRoot.Sub(Rap::Stage(1, virtualPath("mask.paa"), 0));
+    for (size_t s = 0; s < slots.size(); ++s)
+        rvmatRoot.Sub(Rap::Stage(4 + 2 * static_cast<int>(s), slots[s].colourPaa, 1 + static_cast<int>(s)));
+    rvmatRoot.Sub(Rap::TexGen("TexGen0", 1.0f / world, 0.0f, 0.0f));
+    for (size_t s = 0; s < slots.size(); ++s)
+        rvmatRoot.Sub(Rap::TexGen("TexGen" + std::to_string(1 + s), 1.0f / slots[s].tileMetres, 0.0f, 0.0f));
+
+    const std::vector<uint8_t> rvmat = Rap::Emit(rvmatRoot);
+    {
+        std::ofstream file(diskPath("terrain.rvmat"), std::ios::binary);
+        file.write(reinterpret_cast<const char*>(rvmat.data()), static_cast<std::streamsize>(rvmat.size()));
+        if (!file)
+        {
+            assets.error = "cannot write the RVMAT";
+            return assets;
+        }
+    }
+    assets.rvmats.push_back(virtualPath("terrain.rvmat"));
+
+    std::cout << "\nTerrain materials: " << count << " authored, " << means.size() << " distinct albedos, "
+              << assets.texturesWritten << " textures written\n";
+    const double total = static_cast<double>(edge) * edge;
+    for (size_t s = 0; s < slots.size(); ++s)
+    {
+        const SourceMaterial& source = sources[static_cast<size_t>(slots[s].material)];
+        size_t folded = 0;
+        for (size_t i = 0; i < count; ++i)
+            if (sources[i].decoded && slotOf[i] == s && static_cast<int>(i) != slots[s].material)
+                ++folded;
+        std::cout << "  slot " << s << "  " << std::setw(34) << std::left
+                  << std::filesystem::path(source.ematPath).stem().string() << std::right << std::fixed
+                  << std::setprecision(2) << std::setw(7) << 100.0 * area[static_cast<size_t>(slots[s].material)] / total
+                  << "%  tile " << std::setprecision(0) << slots[s].tileMetres << " m  mean " << std::setprecision(3)
+                  << source.mean[0] << " " << source.mean[1] << " " << source.mean[2] << "  +" << folded << " folded\n";
+    }
+    return assets;
+}
+
+} // namespace Surfaces
+
+//! Object placements read from a manifest, ready for the OPRW object table.
+namespace Placements
+{
+
+struct Item
+{
+    int32_t modelIndex = 0;
+    float x = 0.0f, y = 0.0f, z = 0.0f; //!< y is ABSOLUTE world elevation, not a terrain offset
+    float yawDeg = 0.0f;
+    float scale = 1.0f;
+};
+
+struct Set
+{
+    std::vector<std::string> models; //!< virtual .p3d paths, the OPRW model table
+    std::vector<Item> items;
+    size_t skipped = 0; //!< lines rejected as malformed or out of the world
+    std::string error;
+};
+
+//! Tab-separated: `virtualPath, x, y, z, yawDeg, scale`, one placement per line.
+//!
+//! Placements outside the world are dropped rather than clamped. A model index
+//! outside the model table aborts the whole world parse in the reader
+//! (Oprw25.hpp), so the table is built from the paths actually accepted and every
+//! index written is an index into it by construction.
+inline Set Read(const std::string& path, float worldExtent)
+{
+    Set set;
+    std::ifstream file(path);
+    if (!file)
+    {
+        set.error = "cannot open " + path;
+        return set;
+    }
+    std::map<std::string, int32_t> byPath;
+    std::string line;
+    while (std::getline(file, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+        if (line.empty())
+            continue;
+        std::vector<std::string> field;
+        size_t at = 0;
+        while (at <= line.size())
+        {
+            const size_t tab = line.find('\t', at);
+            field.push_back(line.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+            if (tab == std::string::npos)
+                break;
+            at = tab + 1;
+        }
+        if (field.size() < 6 || field[0].empty())
+        {
+            ++set.skipped;
+            continue;
+        }
+        Item item;
+        item.x = std::strtof(field[1].c_str(), nullptr);
+        item.y = std::strtof(field[2].c_str(), nullptr);
+        item.z = std::strtof(field[3].c_str(), nullptr);
+        item.yawDeg = std::strtof(field[4].c_str(), nullptr);
+        item.scale = std::strtof(field[5].c_str(), nullptr);
+        if (!(item.scale > 0.0f) || !std::isfinite(item.x) || !std::isfinite(item.y) || !std::isfinite(item.z) ||
+            item.x < 0.0f || item.x > worldExtent || item.z < 0.0f || item.z > worldExtent)
+        {
+            ++set.skipped;
+            continue;
+        }
+        const auto found = byPath.find(field[0]);
+        if (found == byPath.end())
+        {
+            item.modelIndex = static_cast<int32_t>(set.models.size());
+            byPath.emplace(field[0], item.modelIndex);
+            set.models.push_back(field[0]);
+        }
+        else
+        {
+            item.modelIndex = found->second;
+        }
+        set.items.push_back(item);
+    }
+    return set;
+}
+
+} // namespace Placements
+
 namespace Oprw
 {
 
@@ -712,7 +1815,8 @@ struct ExportOptions
     int landRange = 256;
     int terrainRange = 2048;
     float landCellSize = 50.0f;
-    std::vector<std::string> materials; //!< virtual paths written into the material table
+    std::vector<std::string> materials;               //!< virtual paths written into the material table
+    const Placements::Set* placements = nullptr;      //!< object table, or null for an empty world
 };
 
 //! The world, built in memory. Written in one go so a partial file can never be
@@ -724,6 +1828,8 @@ struct BuiltWorld
     float minHeight = 0.0f, maxHeight = 0.0f;
     float peakX = 0.0f, peakZ = 0.0f; //!< world position of maxHeight, a usable camera anchor
     int materialCount = 0;
+    size_t objectCount = 0;
+    size_t modelCount = 0;
 };
 
 BuiltWorld BuildOprw25(const AssembledTerrain& terrain, const ExportOptions& options)
@@ -834,14 +1940,27 @@ BuiltWorld BuildOprw25(const AssembledTerrain& terrain, const ExportOptions& opt
         }
     }
 
-    out.i32(0); // models
+    const size_t objectCount = options.placements ? options.placements->items.size() : 0;
+    if (options.placements)
+    {
+        out.i32(static_cast<int32_t>(options.placements->models.size()));
+        for (const std::string& model : options.placements->models)
+            out.asciiz(model);
+    }
+    else
+    {
+        out.i32(0); // models
+    }
     out.i32(0); // static entities
 
-    // Per-cell offsets into the object and map-info tables. Both tables are empty,
-    // so both trees are uniform zero; the reader reads and discards them anyway.
+    // Per-cell offsets into the object and map-info tables. The reader reads both
+    // trees and discards them -- it indexes the object table by walking it whole --
+    // so a uniform zero tree is correct rather than merely tolerated.
     const std::vector<uint32_t> zeroOffsets(landCells, 0);
     QuadTreeWriter(land, land, 4, reinterpret_cast<const uint8_t*>(zeroOffsets.data())).Write(out);
-    out.i32(0); // object table bytes
+    // Declared here, but the records themselves are the LAST thing in the file --
+    // after the road network, not after this field.
+    out.i32(static_cast<int32_t>(objectCount * Poseidon::Asset::Formats::World::kOprw25ObjectRecordSize));
     QuadTreeWriter(land, land, 4, reinterpret_cast<const uint8_t*>(zeroOffsets.data())).Write(out);
     out.i32(0); // map info bytes
 
@@ -856,6 +1975,44 @@ BuiltWorld BuildOprw25(const AssembledTerrain& terrain, const ExportOptions& opt
     out.i32(static_cast<int32_t>(landCells * sizeof(int32_t)));
     for (size_t i = 0; i < landCells; ++i)
         out.i32(0);
+
+    // The object table is the last block in the file, and the map-info size the
+    // header declared is checked against whatever is left after it -- so writing
+    // it anywhere else fails the reader's trailing-size check rather than merely
+    // misplacing the objects.
+    if (options.placements)
+    {
+        const size_t models = options.placements->models.size();
+        for (size_t i = 0; i < objectCount; ++i)
+        {
+            const Placements::Item& item = options.placements->items[i];
+            // Range-checked here as well as at parse time: an index outside the
+            // model table makes the reader throw and abandon the whole world.
+            const int32_t modelIndex = (item.modelIndex >= 0 && static_cast<size_t>(item.modelIndex) < models)
+                                           ? item.modelIndex
+                                           : 0;
+            out.i32(static_cast<int32_t>(i + 1)); // objectId, 1-based like a real world
+            out.i32(modelIndex);
+            const float yaw = item.yawDeg * 3.14159265358979323846f / 180.0f;
+            const float c = std::cos(yaw) * item.scale;
+            const float s = std::sin(yaw) * item.scale;
+            out.f32(c);           // aside
+            out.f32(0.0f);
+            out.f32(-s);
+            out.f32(0.0f);        // up
+            out.f32(item.scale);
+            out.f32(0.0f);
+            out.f32(s);           // dir
+            out.f32(0.0f);
+            out.f32(c);
+            out.f32(item.x);      // pos
+            out.f32(item.y);
+            out.f32(item.z);
+            out.i32(0); // shapeParam
+        }
+        built.objectCount = objectCount;
+        built.modelCount = models;
+    }
 
     built.bytes = std::move(out.bytes);
     return built;
@@ -912,7 +2069,11 @@ bool VerifyWorld(const std::string& path, const BuiltWorld& built, const ExportO
     check(world.geography.size() == static_cast<size_t>(options.landRange) * options.landRange, "geography cells");
     check(world.materialIndex.size() == static_cast<size_t>(options.landRange) * options.landRange, "material index cells");
     check(static_cast<int>(world.materials.size()) == built.materialCount, "material table");
-    check(world.objects.empty() && world.models.empty(), "object table empty");
+    // The reader itself throws on a model index outside the table and on a
+    // trailing map-info size that does not match, so reaching here already proves
+    // both. What is worth stating is that every record survived the round trip.
+    check(world.objects.size() == built.objectCount, "object table round-trips");
+    check(world.models.size() == built.modelCount, "model table round-trips");
 
     // The elevation is the payload that matters, and the one an LZO or quadtree
     // mistake would corrupt without changing any size. Compare every sample.
@@ -952,9 +2113,12 @@ bool VerifyWorld(const std::string& path, const BuiltWorld& built, const ExportO
 } // namespace Oprw
 
 int ExportWorld(const std::string& root, const std::string& world, const std::string& outputPath, int landRange,
-                int terrainRange, const std::vector<std::string>& materials)
+                int terrainRange, const std::vector<std::string>& materials, const std::string& assetDir,
+                const std::string& assetVirtualDir, int satelliteSize, int maskSize,
+                const std::string& placementsPath)
 {
-    const AssembledTerrain terrain = AssembleTerrain(root, world);
+    const bool wantMaterials = !assetDir.empty();
+    const AssembledTerrain terrain = AssembleTerrain(root, world, wantMaterials);
     if (!terrain.valid())
     {
         std::cerr << "Error: " << terrain.error << "\n";
@@ -966,11 +2130,58 @@ int ExportWorld(const std::string& root, const std::string& world, const std::st
         std::cerr << "Error: refusing to export a world with unread tiles\n";
         return 1;
     }
+    if (wantMaterials)
+    {
+        std::cout << "Surface cells: " << terrain.subCells << " sub-cells, " << terrain.subCellsFailed << " failed";
+        if (!terrain.materialError.empty())
+            std::cout << "  (first: " << terrain.materialError << ")";
+        std::cout << "  raster " << terrain.materialEdge << "x" << terrain.materialEdge << "\n";
+        if (terrain.subCellsFailed != 0)
+        {
+            std::cerr << "Error: refusing to author materials from a partly decoded surface assignment\n";
+            return 1;
+        }
+    }
 
     Oprw::ExportOptions options;
     options.landRange = landRange;
     options.terrainRange = terrainRange;
     options.materials = materials;
+
+    // Authoring the materials can only ADD to the material table, so it runs
+    // before the world is built and its RVMAT path is appended to whatever
+    // --material already named.
+    if (wantMaterials)
+    {
+        const Surfaces::MaterialAssets assets = Surfaces::GenerateTerrainMaterials(
+            terrain, root, assetDir, assetVirtualDir, satelliteSize, maskSize);
+        if (!assets.error.empty())
+        {
+            std::cerr << "Error: " << assets.error << "\n";
+            return 1;
+        }
+        for (const std::string& rvmat : assets.rvmats)
+            options.materials.push_back(rvmat);
+    }
+
+    Placements::Set placements;
+    if (!placementsPath.empty())
+    {
+        placements = Placements::Read(placementsPath, terrain.descriptor.WorldWidth());
+        if (!placements.error.empty())
+        {
+            std::cerr << "Error: " << placements.error << "\n";
+            return 1;
+        }
+        std::cout << "Placements:  " << placements.items.size() << " objects over " << placements.models.size()
+                  << " models, " << placements.skipped << " skipped\n";
+        if (placements.items.empty())
+        {
+            std::cerr << "Error: the placement manifest yielded no usable objects\n";
+            return 1;
+        }
+        options.placements = &placements;
+    }
     // The land cell size is chosen so the container's extent equals the authored
     // extent exactly, rather than being a round number that nearly matches.
     options.landCellSize = terrain.descriptor.WorldWidth() / static_cast<float>(landRange);
@@ -1088,6 +2299,11 @@ void PakCommand::Setup(CLI::App& app)
         static int landRange = 256;
         static int terrainRange = 2048;
         static std::vector<std::string> materials;
+        static std::string assetDir;
+        static std::string assetVirtualDir;
+        static int satelliteSize = 4096;
+        static int maskSize = 2048;
+        static std::string placements;
         auto* cmd = pak->add_subcommand("export", "Export a world's terrain as an OPRW 25 .wrp the runtime loads");
         cmd->add_option("input", root, "A .pak file, or a directory to search")->required();
         cmd->add_option("-w,--world", world, "Substring naming the world, e.g. worlds/Eden")->required();
@@ -1097,7 +2313,25 @@ void PakCommand::Setup(CLI::App& app)
                         "Terrain grid cells per edge, a power of two multiple of --land-range (default 2048)");
         cmd->add_option("--material", materials,
                         "Virtual path of a terrain surface material, repeatable. Omit for an untextured world.");
-        cmd->callback([]() { std::exit(ExportWorld(root, world, output, landRange, terrainRange, materials)); });
+        cmd->add_option("--terrain-assets", assetDir,
+                        "Author the world's surfaces into this directory: satellite, selector mask, ground "
+                        "surfaces and a TerrainSNX RVMAT, decoded from the .terr MATS list and the .ttile TMAT "
+                        "assignment. The RVMAT is appended to the material table.");
+        cmd->add_option("--terrain-vdir", assetVirtualDir,
+                        "Virtual directory the authored assets are named by, e.g. reforger\\everon\\data. Files "
+                        "are written under --terrain-assets at this path so the tree can be copied to the game "
+                        "directory whole.");
+        cmd->add_option("--satellite-size", satelliteSize, "Satellite edge in texels (default 4096)");
+        cmd->add_option("--mask-size", maskSize,
+                        "Selector mask edge in texels (default 2048; 4096 DXT3 does not round-trip)");
+        cmd->add_option("--placements", placements,
+                        "Object placement manifest: tab-separated virtualPath, x, y, z, yawDeg, scale. "
+                        "y is absolute world elevation.");
+        cmd->callback(
+            []() {
+                std::exit(ExportWorld(root, world, output, landRange, terrainRange, materials, assetDir,
+                                      assetVirtualDir, satelliteSize, maskSize, placements));
+            });
     }
 }
 

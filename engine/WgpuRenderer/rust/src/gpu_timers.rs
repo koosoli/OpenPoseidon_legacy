@@ -76,11 +76,40 @@ pub enum Region {
     // stable. These are in-pass timestamps because terrain shares the world passes.
     TerrainPrepass = 31,
     TerrainColor = 32,
+    // --- PERF-005: object rendering. Measured on Stratis @1280x720 with a ~20K-object working
+    // set the GPU frame was 19.1 ms with only ~4.5 ms attributed (terrain + water + AO +
+    // interior sky); everything below exists to name the other ~14.5 ms. Two of these are
+    // CONTAINERS (PrepassSegment / ColorSegment) that deliberately overlap the leaves inside
+    // them — never sum a container with its leaves, the C++ reporter keeps them apart.
+    ObjCullMain = 33,      // main-view COUNT/EMIT/SCATTER (prepass + occluder set)
+    ObjCullShadow = 34,    // every active cascade's cull dispatch chain
+    ObjCullColor = 35,     // Hi-Z pyramid build + the colour-pass occlusion cull
+    ObjPrepassSolid = 36,  // GPU-driven depth+normal prepass, variant 0 (solid)
+    ObjPrepassAlpha = 37,  // GPU-driven depth+normal prepass, variant 1 (alpha-cutout foliage)
+    ObjColorSolid = 38,    // GPU-driven colour, variant 0 (solid)
+    ObjColorAlpha = 39,    // GPU-driven colour, variant 1 (alpha-cutout foliage)
+    ObjPrepassSegment = 40, // CONTAINER: the whole depth/normal prepass render pass
+    ObjColorSegment = 41,   // CONTAINER: the whole 3D colour sub-pass (incl. terrain/grass/direct)
+    // Per-cascade shadow rendering. One region per cascade because the standing suspicion was
+    // that shadows are among the frame's largest items and "shadows" as a single number cannot
+    // tell you WHICH cascade to shrink. MAX_CASCADES is 4 (gfx3d/mod.rs).
+    ShadowCascade0 = 42,
+    ShadowCascade1 = 43,
+    ShadowCascade2 = 44,
+    ShadowCascade3 = 45,
     FrameTotal = 25,  // all submitted frame work; excludes acquire/present pacing
 }
 
+/// The four per-cascade regions, indexable by cascade number.
+pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
+    Region::ShadowCascade0,
+    Region::ShadowCascade1,
+    Region::ShadowCascade2,
+    Region::ShadowCascade3,
+];
+
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 33;
+pub const REGION_COUNT: usize = 46;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -127,6 +156,14 @@ struct Inner {
 
 pub struct GpuTimers {
     inner: Option<Inner>,
+    // PERF-005 — CPU ENCODE time per region, deliberately OUTSIDE `Inner` so it still reports on
+    // an adapter without timestamp queries (where `inner` is None and every GPU row reads -1).
+    // This measures how long the CPU spends RECORDING that region into the command encoder, not
+    // how long the GPU takes to run it; the two answer different questions and on a GPU-driven
+    // renderer they differ by orders of magnitude. Same -1 = "did not run this frame" convention
+    // as the GPU rows, for the same reason: a stale repeated number reads as a live measurement.
+    cpu_open: [Cell<Option<std::time::Instant>>; REGION_COUNT],
+    cpu_ms: [Cell<f32>; REGION_COUNT],
 }
 
 impl GpuTimers {
@@ -139,7 +176,11 @@ impl GpuTimers {
         inside_passes: bool,
     ) -> Self {
         if !enabled {
-            return Self { inner: None };
+            return Self {
+                inner: None,
+                cpu_open: std::array::from_fn(|_| Cell::new(None)),
+                cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+            };
         }
         let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
             label: Some("wgr_gpu_timers"),
@@ -173,6 +214,8 @@ impl GpuTimers {
                 written: Cell::new(0),
                 latest_ms: [-1.0; REGION_COUNT],
             }),
+            cpu_open: std::array::from_fn(|_| Cell::new(None)),
+            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
         }
     }
 
@@ -185,6 +228,40 @@ impl GpuTimers {
         if let Some(inner) = &self.inner {
             inner.written.set(0);
         }
+        // CPU rows reset to -1 ("did not run this frame"), NOT to 0 and NOT left alone. Leaving
+        // them alone is the documented trap this repo already paid for once: a one-shot pass keeps
+        // advertising its old cost forever and reads as per-frame work.
+        for i in 0..REGION_COUNT {
+            self.cpu_open[i].set(None);
+            self.cpu_ms[i].set(-1.0);
+        }
+    }
+
+    /// Start the CPU encode clock for `region`. Pairs with `cpu_end`; unpaired opens are
+    /// discarded by the next `begin_frame`.
+    pub fn cpu_begin(&self, region: Region) {
+        self.cpu_open[region as usize].set(Some(std::time::Instant::now()));
+    }
+
+    /// Stop the CPU encode clock, ACCUMULATING into this frame's total. Accumulating (rather
+    /// than overwriting) is what lets a region that is recorded in several places — the colour
+    /// variants, the per-cascade shadow draws — report one honest per-frame figure.
+    pub fn cpu_end(&self, region: Region) {
+        let i = region as usize;
+        if let Some(t0) = self.cpu_open[i].replace(None) {
+            let ms = t0.elapsed().as_secs_f32() * 1.0e3;
+            let prev = self.cpu_ms[i].get();
+            self.cpu_ms[i].set(if prev < 0.0 { ms } else { prev + ms });
+        }
+    }
+
+    /// Copy the latest per-region CPU encode ms into `out` (-1 = not recorded this frame).
+    /// Always available — unlike the GPU rows this needs no adapter feature.
+    pub fn cpu_timings(&self, out: &mut [f32]) -> u32 {
+        for (dst, src) in out.iter_mut().zip(self.cpu_ms.iter()) {
+            *dst = src.get();
+        }
+        REGION_COUNT as u32
     }
 
     /// Open a region bracket. Must be called OUTSIDE any render/compute pass (the
@@ -341,7 +418,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 33);
+        assert_eq!(REGION_COUNT, 46);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -363,6 +440,15 @@ mod tests {
         assert_eq!(Region::GtaoBlur as u32, 30);
         assert_eq!(Region::TerrainPrepass as u32, 31);
         assert_eq!(Region::TerrainColor as u32, 32);
+        // PERF-005 object regions. The cascade block must stay contiguous and in order —
+        // SHADOW_CASCADE_REGIONS is indexed by cascade number.
+        assert_eq!(Region::ObjCullMain as u32, 33);
+        assert_eq!(Region::ObjColorAlpha as u32, 39);
+        assert_eq!(Region::ObjPrepassSegment as u32, 40);
+        assert_eq!(Region::ObjColorSegment as u32, 41);
+        for (c, r) in SHADOW_CASCADE_REGIONS.iter().enumerate() {
+            assert_eq!(*r as u32, 42 + c as u32);
+        }
         // Every region's begin/end pair fits the query set.
         assert!(QUERY_COUNT as usize == REGION_COUNT * 2);
         // A u64 written mask covers all regions and leaves append-only room.
@@ -373,9 +459,41 @@ mod tests {
     // still satisfies the FFI contract by reporting 0 regions.
     #[test]
     fn disabled_timers_report_zero_regions() {
-        let timers = GpuTimers { inner: None };
+        let timers = GpuTimers {
+            inner: None,
+            cpu_open: std::array::from_fn(|_| Cell::new(None)),
+            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+        };
         assert!(!timers.enabled());
         let mut out = [0.0f32; REGION_COUNT];
         assert_eq!(timers.timings(&mut out), 0);
+    }
+
+    // PERF-005 — the CPU rows must work with `inner: None` (no timestamp-query adapter), must
+    // ACCUMULATE across repeated brackets, and must reset to -1 (not 0, not stale) each frame.
+    #[test]
+    fn cpu_rows_accumulate_and_reset_without_a_gpu() {
+        let t = GpuTimers {
+            inner: None,
+            cpu_open: std::array::from_fn(|_| Cell::new(None)),
+            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+        };
+        let mut out = [0.0f32; REGION_COUNT];
+        t.begin_frame();
+        assert_eq!(t.cpu_timings(&mut out), REGION_COUNT as u32);
+        assert_eq!(out[Region::ObjColorSolid as usize], -1.0);
+        for _ in 0..2 {
+            t.cpu_begin(Region::ObjColorSolid);
+            t.cpu_end(Region::ObjColorSolid);
+        }
+        t.cpu_timings(&mut out);
+        // Two closed brackets => a non-negative accumulated total, never still -1.
+        assert!(out[Region::ObjColorSolid as usize] >= 0.0);
+        // A region never bracketed stays "not run" rather than reading 0 ms of real work.
+        assert_eq!(out[Region::ObjColorAlpha as usize], -1.0);
+        // Next frame clears it back to "not run" even though it ran last frame.
+        t.begin_frame();
+        t.cpu_timings(&mut out);
+        assert_eq!(out[Region::ObjColorSolid as usize], -1.0);
     }
 }

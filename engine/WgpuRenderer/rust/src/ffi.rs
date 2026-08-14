@@ -619,6 +619,18 @@ pub struct WgrFoliage {
     pub tree_bend: f32, // TREE spherical-normal blend (leaf sections only; trunk keeps its normal)
     pub tree_crown_y: f32, // TREE crown-centre Y lift (larger than a bush — centre sits mid-trunk)
     pub _pad2: f32,
+    // VEG-SWAY - geometric wind on vegetation MODELS. Two further vec4 lanes
+    // (frame.foliaged / frame.foliagee). CameraGroup::new sizes the UBO from
+    // size_of::<WgrFoliage>() and the upload writes the struct whole, so growing it here is
+    // the only Rust-side plumbing change needed.
+    pub sway_strength: f32, // metres of tip travel per metre above the pivot; 0 = OFF
+    pub sway_speed: f32,    // rate multiplier on the trunk oscillation
+    pub wind_dir_x: f32,    // unit vector the wind travels TOWARD
+    pub wind_dir_z: f32,
+    pub sway_time: f32,      // engine seconds (Glob.time) - a paused sim freezes the canopy
+    pub wind_gust: f32,      // WindSample::gustFraction
+    pub sway_leaf: f32,      // extra flutter on cutout (leaf) sections only
+    pub sway_stiffness: f32, // height exponent (1 = linear lean, 2 = stiff trunk)
 }
 
 impl Default for WgrFoliage {
@@ -639,6 +651,18 @@ impl Default for WgrFoliage {
             tree_bend: 0.7,
             tree_crown_y: -0.52,
             _pad2: 0.0,
+            // VEG-SWAY defaults, kept in sync with C++ Engine::FoliageSettings. The wind
+            // vector defaults to the WindConditions base heading (atan2(2,4)) so a frame
+            // rendered before the first push still leans somewhere sensible rather than
+            // snapping east on frame 1.
+            sway_strength: 0.055,
+            sway_speed: 1.0,
+            wind_dir_x: 0.894_427_2,
+            wind_dir_z: 0.447_213_6,
+            sway_time: 0.0,
+            wind_gust: 0.0,
+            sway_leaf: 1.0,
+            sway_stiffness: 1.6,
         }
     }
 }
@@ -1313,10 +1337,10 @@ const _: () = assert!(std::mem::size_of::<WgrTerrainSunShadow>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrTerrainUv>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrTerrainMaterial>() == 336);
 const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
-const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 48);
+const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 464);
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 496);
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);
@@ -2477,6 +2501,134 @@ pub unsafe extern "C" fn wgr_get_gpu_timings(
         let out = unsafe { std::slice::from_raw_parts_mut(out_ms, out_len as usize) };
         let count = renderer.gpu_timings(out);
         count.min(out_len)
+    }))
+    .unwrap_or(0)
+}
+
+/// PERF-005 — copy the latest per-region CPU ENCODE times into `out_ms`, indexed by the SAME
+/// `WgrGpuTimerRegion` values as `wgr_get_gpu_timings`. -1 = the region was not recorded this
+/// frame. Unlike the GPU rows this needs no adapter feature and is never asynchronous: it is
+/// this frame's wall-clock cost of RECORDING the region into the command encoder, which on a
+/// GPU-driven renderer is a very different (and usually much smaller) number than the GPU cost.
+/// Returns the region count written, or 0 for a null renderer/output.
+///
+/// # Safety
+/// `renderer` must be a live `WgrRenderer` or null; `out_ms` must point to at least
+/// `out_len` floats, or be null (in which case 0 is returned).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_cpu_timings(
+    renderer: *mut WgrRenderer,
+    out_ms: *mut f32,
+    out_len: u32,
+) -> u32 {
+    if renderer.is_null() || out_ms.is_null() || out_len == 0 {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        let out = unsafe { std::slice::from_raw_parts_mut(out_ms, out_len as usize) };
+        renderer.cpu_timings(out).min(out_len)
+    }))
+    .unwrap_or(0)
+}
+
+/// PERF-005 — per-frame object accounting, mirroring `WgrObjectStats` in wgpu_renderer.hpp.
+/// The per-view blocks come from atomics written by cull.wgsl and read back through the same
+/// non-blocking ring as the GPU timings (so they lag the displayed frame by ~2-3 frames); the
+/// `direct_*` block is counted on the CPU during the colour replay and is current.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrObjectStats {
+    /// Retained instances registered with the cull (the denominator for the survivor counts).
+    pub registered_instances: u32,
+    /// 1 once a readback has landed. Zero counts with valid = 0 mean "not measured yet",
+    /// which is a different statement from "nothing drew".
+    pub valid: u32,
+
+    /// Main view = frustum + distance + LOD only. This is the PREPASS / occluder set.
+    pub main_instances: u32,
+    pub main_records: u32,
+    pub main_draws: u32,
+    pub main_tris: u32,
+
+    /// Colour view = the main tests plus Hi-Z occlusion. All zero when occlusion is off,
+    /// in which case the colour pass reuses the main view's args and main_* is the truth.
+    pub color_instances: u32,
+    pub color_records: u32,
+    pub color_draws: u32,
+    pub color_tris: u32,
+    pub color_draws_solid: u32,
+    pub color_draws_alpha: u32,
+    pub color_tris_solid: u32,
+    pub color_tris_alpha: u32,
+
+    /// Per shadow cascade (index = cascade). Cascades beyond the active count read zero.
+    pub shadow_instances: [u32; 4],
+    pub shadow_draws: [u32; 4],
+    pub shadow_tris: [u32; 4],
+
+    /// Selected-LOD histogram over the MAIN view's survivors: how many instances chose LOD 0,
+    /// 1, ... 6, and bucket 7 = "LOD 7 or coarser". The direct test of whether detailed
+    /// building/vegetation LODs stay active too far out.
+    pub main_lod_hist: [u32; 8],
+
+    /// CPU-replayed object path (never reaches the cull shader).
+    pub direct_calls: u32,
+    pub direct_indirect_calls: u32,
+    pub direct_instances: u32,
+    pub direct_tris: u32,
+}
+
+/// Fill `out` with this frame's object accounting. Returns 1 on success, 0 when the
+/// renderer or `out` is null.
+///
+/// # Safety
+/// `renderer` must be a live `WgrRenderer` or null; `out` must point to a valid
+/// `WgrObjectStats`, or be null (in which case 0 is returned).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_object_stats(
+    renderer: *mut WgrRenderer,
+    out: *mut WgrObjectStats,
+) -> u32 {
+    if renderer.is_null() || out.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        use crate::gfx3d::cull::{STATS_VIEW_COLOR, STATS_VIEW_MAIN, STATS_VIEW_SHADOW0};
+        let renderer = unsafe { &*renderer };
+        let (cull, direct, registered) = renderer.object_stats();
+        let main = cull.views[STATS_VIEW_MAIN];
+        let color = cull.views[STATS_VIEW_COLOR];
+        let mut s = WgrObjectStats {
+            registered_instances: registered,
+            valid: u32::from(cull.valid),
+            main_instances: main.instances,
+            main_records: main.records,
+            main_draws: main.draws,
+            main_tris: main.tris,
+            color_instances: color.instances,
+            color_records: color.records,
+            color_draws: color.draws,
+            color_tris: color.tris,
+            color_draws_solid: color.draws_solid,
+            color_draws_alpha: color.draws_alpha,
+            color_tris_solid: color.tris_solid,
+            color_tris_alpha: color.tris_alpha,
+            main_lod_hist: main.lod_hist,
+            direct_calls: direct.direct_calls,
+            direct_indirect_calls: direct.indirect_calls,
+            direct_instances: direct.instances,
+            direct_tris: direct.tris,
+            ..Default::default()
+        };
+        for c in 0..4usize {
+            let v = cull.views[STATS_VIEW_SHADOW0 + c];
+            s.shadow_instances[c] = v.instances;
+            s.shadow_draws[c] = v.draws;
+            s.shadow_tris[c] = v.tris;
+        }
+        unsafe { *out = s };
+        1
     }))
     .unwrap_or(0)
 }

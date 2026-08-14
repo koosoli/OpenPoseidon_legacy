@@ -505,6 +505,19 @@ impl Ablate {
     }
 }
 
+/// PERF-005 — per-frame accounting for the CPU-replayed object path (Plan3dOp::Draw3D).
+/// `indirect` draws are ones the plan upgraded to a GPU indirect arg but that still cost a CPU
+/// draw call in the replay; `direct` are the barrier draws (transparent, decal, skinned/baked,
+/// non-standard depth) that can never be GPU-driven. Triangles are the SUBMITTED count
+/// (index_count/3 x instances), not a post-cull count — nothing culls these.
+#[derive(Clone, Copy, Default)]
+pub struct DirectDrawStats {
+    pub direct_calls: u32,
+    pub indirect_calls: u32,
+    pub instances: u32,
+    pub tris: u32,
+}
+
 pub struct Renderer {
     // How much wider the planar reflection's frustum is than the screen's. 1 = the old behaviour,
     // where a grazing reflection ran off the edge of the reflection target and the reflected
@@ -537,6 +550,12 @@ pub struct Renderer {
     // WTR-002 — GPU timestamp brackets around the water-pipeline passes (inert when the
     // adapter lacks TIMESTAMP_QUERY + TIMESTAMP_QUERY_INSIDE_ENCODERS).
     gpu_timers: GpuTimers,
+    // PERF-005 — the CPU-replayed object path (Plan3dOp::Draw3D), counted per frame in the
+    // colour sub-pass. The GPU-driven retained set is accounted for on the GPU (cull.wgsl
+    // stats); these draws never reach that shader, so without this counter they are invisible
+    // in the object totals and their share of the colour container reads as unexplained.
+    // Cell because render_ops replays over &Renderer.
+    direct_draws: std::cell::Cell<DirectDrawStats>,
     runtime_capabilities: u32,
     // Shared dynamic-resource budget. This first slice covers the two unbounded
     // owner-managed pools implicated by the DayZ exhaustion: authored object
@@ -1195,6 +1214,7 @@ impl Renderer {
             water,
             water_visibility,
             gpu_timers,
+            direct_draws: std::cell::Cell::new(DirectDrawStats::default()),
             runtime_capabilities,
             residency_budget_bytes,
             hdr_enabled,
@@ -1437,6 +1457,22 @@ impl Renderer {
     // Non-blocking: values are harvested by render_frame, this is a plain copy.
     fn gpu_timings(&self, out: &mut [f32]) -> u32 {
         self.gpu_timers.timings(out)
+    }
+
+    // PERF-005 — per-region CPU ENCODE ms, same indices as gpu_timings. Always available
+    // (needs no adapter feature); -1 = the region was not recorded this frame.
+    fn cpu_timings(&self, out: &mut [f32]) -> u32 {
+        self.gpu_timers.cpu_timings(out)
+    }
+
+    // PERF-005 — this frame's object accounting: the GPU cull's per-view counters plus the
+    // CPU-replayed direct-draw tally.
+    fn object_stats(&self) -> (crate::gfx3d::cull::CullStats, DirectDrawStats, u32) {
+        (
+            self.gfx3d.object_stats(),
+            self.direct_draws.get(),
+            self.gfx3d.retained_instance_count(),
+        )
     }
 
     // GRS-A — latest grass instance counts (same async-readback discipline).
@@ -2496,11 +2532,16 @@ impl Renderer {
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
         self.gpu_timers.begin_frame();
+        self.direct_draws.set(DirectDrawStats::default());
         self.water_visibility.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
         // GPU completion from acquire/present pacing without summing overlapping
         // individual pass timers.
         self.gpu_timers.begin(&mut encoder, TimerRegion::FrameTotal);
+        // PERF-005: zero every cull view's accounting slice BEFORE the frame's first cull (the
+        // planar-reflection cull, further down, is the earliest). Whole-buffer, so a view that
+        // does not run this frame reports zeros instead of repeating its last live frame.
+        self.gfx3d.begin_frame_object_stats(&mut encoder);
 
         // Grass owns a compact camera-relative candidate grid.  Refresh its borrowed
         // terrain inputs before the placement compute so the pass sees the same terrain
@@ -2794,11 +2835,12 @@ impl Renderer {
         // GPU cull compute (Stage 3): culls + LOD-selects the retained scene into the
         // indirect args the colour pass consumes. Recorded before the render passes so
         // wgpu barriers its storage writes -> the indirect reads. No-op when disabled.
-        self.gfx3d.cull_dispatch(&mut encoder);
+        self.gfx3d.cull_dispatch(&mut encoder, &self.gpu_timers);
         // One extra cull dispatch per shadow cascade (§6 multi-view): each produces that
         // cascade's depth-pass indirect args, consumed by the GPU-driven shadow draw inside
         // render_shadow_passes. No-op when GPU-driven / shadows are off.
-        self.gfx3d.cull_dispatch_shadows(&mut encoder);
+        self.gfx3d
+            .cull_dispatch_shadows(&mut encoder, &self.gpu_timers);
         // And one for the interior sky-visibility map's ortho view (LIT-020). No-op unless the
         // feature is enabled and its target exists.
         self.gfx3d
@@ -3135,6 +3177,18 @@ impl Renderer {
                         kind,
                     } => {
                         if let Some(d) = draws3d.get(*draw as usize) {
+                            // PERF-005: counted in the COLOUR replay only. The prepass replay is
+                            // a separate match arm above; counting both would double every
+                            // figure while describing one set of objects.
+                            let mut ds = renderer.direct_draws.get();
+                            if matches!(kind, crate::gfx3d::DrawKind::Indirect(_)) {
+                                ds.indirect_calls += 1;
+                            } else {
+                                ds.direct_calls += 1;
+                                ds.instances += *count;
+                                ds.tris += (d.index_count / 3) * (*count).max(1);
+                            }
+                            renderer.direct_draws.set(ds);
                             let mode = crate::gfx3d::Pass3dMode::Color { depth_write_off };
                             if let crate::gfx3d::DrawKind::Indirect(off) = kind {
                                 renderer.gfx3d.draw_indirect(
@@ -3244,6 +3298,14 @@ impl Renderer {
             let do_prepass = start == 0;
             if let (true, Some(normal_view)) = (do_prepass, normal.as_ref()) {
                 encoder.push_debug_group("wgr_depth_prepass");
+                // PERF-005 CONTAINER region: the whole depth+normal prepass, so the leaves
+                // inside it (terrain prepass, grass prepass, the GPU-driven solid/alpha
+                // variants) can be subtracted to expose what the CPU-replayed Draw3D ops cost.
+                // Containers OVERLAP their leaves by construction — the C++ reporter never sums
+                // the two together, and neither should any later reader of these numbers.
+                self.gpu_timers.cpu_begin(TimerRegion::ObjPrepassSegment);
+                self.gpu_timers
+                    .begin(&mut encoder, TimerRegion::ObjPrepassSegment);
                 let mut pp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("wgr_depth_prepass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -3349,10 +3411,17 @@ impl Renderer {
                 // Writes depth + view-space normals so the set gets early-Z + SSAO normals.
                 if !self.suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
-                    self.gfx3d
-                        .draw_gpu_driven_prepass(&mut pp, &self.textures, cam_off);
+                    self.gfx3d.draw_gpu_driven_prepass(
+                        &mut pp,
+                        &self.textures,
+                        cam_off,
+                        &self.gpu_timers,
+                    );
                 }
                 drop(pp);
+                self.gpu_timers
+                    .end(&mut encoder, TimerRegion::ObjPrepassSegment);
+                self.gpu_timers.cpu_end(TimerRegion::ObjPrepassSegment);
                 encoder.pop_debug_group();
             }
             // When the prepass ran, the depth (+ stencil 0) it wrote is complete, so the
@@ -3366,8 +3435,16 @@ impl Renderer {
             // read -> color-cull sample -> the colour draw's indirect read. The colour draw
             // (draw_gpu_driven, below) then consumes the occlusion-culled args.
             if prepassed {
+                // PERF-005: the Hi-Z pyramid reduction and the occlusion cull that consumes it
+                // are one logical cost — you cannot have the second without the first — so they
+                // share one encoder-level region rather than reporting two numbers nobody can
+                // act on independently.
+                self.gpu_timers.cpu_begin(TimerRegion::ObjCullColor);
+                self.gpu_timers.begin(&mut encoder, TimerRegion::ObjCullColor);
                 self.gfx3d.build_hiz(&self.device, &mut encoder);
                 self.gfx3d.cull_dispatch_color(&mut encoder);
+                self.gpu_timers.end(&mut encoder, TimerRegion::ObjCullColor);
+                self.gpu_timers.cpu_end(TimerRegion::ObjCullColor);
                 // Screen-space AO (docs/screen-space-ao-plan.md): the normal resolve, the GTAO
                 // compute and its bilateral denoise, all off the prepass depth+normal. Recorded
                 // here — after the prepass has completed the depth buffer, before the colour
@@ -3441,6 +3518,25 @@ impl Renderer {
             // prepass didn't already fill them (stencil to 0 so shadow draws EQUAL 0 /
             // INCR darken each pixel once); colour per the load.
             {
+                // PERF-005 CONTAINER: the WORLD 3D colour sub-pass. Its leaves are the terrain
+                // colour, grass colour and the two GPU-driven colour variants; container minus
+                // leaves is what the CPU-replayed Draw3D ops (transparent, skinned, decal and
+                // any indirect-eligible fallback) actually cost. Measured this way rather than
+                // per-op because one region can only hold ONE begin/end pair per frame — timing
+                // each of hundreds of Draw3D ops would report only the last one's cost.
+                //
+                // Gated on `start == 0` for exactly that reason. This block is re-entered once
+                // per plan segment, and an ungated bracket lets the LAST segment win the query
+                // slot — which is the post-Resolve UI segment. Measured on Stratis that reported
+                // 0.004 ms for a sub-pass containing 0.4 ms of terrain alone, i.e. a container
+                // smaller than its own contents. Same gate the GPU-driven colour draw uses, so
+                // the container and its leaves always describe the same pass.
+                let time_segment = start == 0;
+                if time_segment {
+                    self.gpu_timers.cpu_begin(TimerRegion::ObjColorSegment);
+                    self.gpu_timers
+                        .begin(&mut encoder, TimerRegion::ObjColorSegment);
+                }
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some(&seg_label),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -3485,7 +3581,7 @@ impl Renderer {
                 if start == 0 && !self.suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d
-                        .draw_gpu_driven(&mut pass, &self.textures, cam_off);
+                        .draw_gpu_driven(&mut pass, &self.textures, cam_off, &self.gpu_timers);
                 }
                 render_ops(self, &mut pass, seg_ops, display_2d, false, prepassed);
                 // Debug cull-sphere wireframes (ImGui Culling tab) LAST in the sub-pass: their
@@ -3497,6 +3593,11 @@ impl Renderer {
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
                 }
                 drop(pass);
+                if time_segment {
+                    self.gpu_timers
+                        .end(&mut encoder, TimerRegion::ObjColorSegment);
+                    self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
+                }
             }
 
             // Dedicated water pass. Water is transparent and reconstructs the seabed by SAMPLING
@@ -3852,6 +3953,8 @@ impl Renderer {
         }
         self.gpu_timers.end(&mut encoder, TimerRegion::FrameTotal);
         self.gpu_timers.resolve(&mut encoder);
+        // PERF-005: after every cull dispatch has written its slice, before submit.
+        self.gfx3d.resolve_object_stats(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
         // Geometry-pool growth may have happened after an earlier pass recorded
@@ -3903,6 +4006,7 @@ impl Renderer {
             self.screenshot_requested = false;
         }
         self.gpu_timers.harvest(&self.device);
+        self.gfx3d.harvest_object_stats(&self.device);
         self.water_visibility.harvest(&self.device);
         self.grass.harvest_stats(&self.device);
         Ok(())

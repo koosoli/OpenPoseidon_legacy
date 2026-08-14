@@ -915,6 +915,30 @@ class Engine : public IGraphicsEngine
         // crown lift ends up slightly negative (tuned by eye).
         float treeBend = 0.7f;     // TREE spherical-normal blend (0 = geometric)
         float treeCrownY = -0.52f; // TREE crown-centre Y lift
+        // -- VEG-SWAY: geometric wind on vegetation MODELS (wgpu only) ---------------
+        // Until this existed the wgpu renderer animated GRASS and nothing else: neither
+        // object vertex shader carried a time-varying term, so a forest stood dead still in
+        // a gale while the grass under it rippled. These drive both object paths.
+        //
+        // The wind VECTOR is not authored here — it comes from the one authority
+        // (World/Weather/WindModel, the same sample the grass field and cloud deck read).
+        // What is authored is the response curve, exactly as the design note in
+        // WindModel.hpp intends ("This model replaces the source; consumers keep their own
+        // response curves").
+        //
+        // Amplitude is quoted in METRES OF TIP TRAVEL at a 12 m reference canopy height
+        // (VEG_SWAY_HEIGHT_REF in frame.wgsl) at the reference wind speed below, so one
+        // number reads sensibly on a 1 m bush and a 25 m spruce.
+        float swayStrength = 0.35f;  // 0 = OFF (and the whole term is branched out)
+        float swaySpeed = 1.0f;      // rate multiplier on the trunk oscillation
+        float swayLeafFlutter = 1.0f; // extra fast flutter on cutout (leaf) sections only
+        // Height exponent. 1 = a linear lean (the whole trunk slides), >1 keeps the lower
+        // trunk planted so the tree bends about its base instead of sliding sideways.
+        float swayStiffness = 1.6f;
+        // Wind speed (m/s) at which `swayStrength` is the literal tip travel. The live
+        // sample scales the amplitude by speed/this, clamped, so a calm day barely stirs.
+        float swayWindReference = 6.0f;
+        bool swayUseLiveWind = true; // false = hold the authored direction and a steady breeze
     };
 
     /// Read / replace the foliage lighting knobs (see FoliageSettings). Default base returns
@@ -2079,8 +2103,89 @@ class Engine : public IGraphicsEngine
         // PERF-004 - main terrain, separate from reflected terrain.
         kTerrainGpuRegionBegin = 31,
         kTerrainGpuRegionEnd = 33,
-        kGpuRegionEnd = 33,
+        // PERF-005 - object rendering, sliced by the Objects tab. kObjectGpuContainerBegin
+        // marks where the two CONTAINER regions start: they overlap the leaves before them by
+        // construction, so any code summing regions to compare against kFrameGpuRegionTotal
+        // MUST skip [kObjectGpuContainerBegin, kObjectGpuContainerEnd). Getting this wrong
+        // produces a "total" larger than the frame, which is worse than no measurement.
+        kObjectGpuRegionBegin = 33,
+        kObjectGpuContainerBegin = 40,
+        kObjectGpuContainerEnd = 42,
+        kShadowCascadeGpuRegionBegin = 42,
+        kShadowCascadeGpuRegionEnd = 46,
+        kObjectGpuRegionEnd = 46,
+        kGpuRegionEnd = 46,
+        // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
+        kGrassGpuRegionShadow = 24,
+        kTerrainGpuRegionColor = 32,
+        kGrassGpuRegionColor = 23,
+        kGrassGpuRegionPrepass = 22,
+        kNoGpuRegion = -1,
     };
+
+    // PERF-005 - region nesting, and the ONLY correct way to total the timing array.
+    //
+    // Several regions physically enclose others: the two segment containers enclose the terrain,
+    // grass and GPU-driven object draws recorded inside their render passes, and each shadow
+    // cascade encloses the grass blades drawn into that cascade's depth map. Adding every region
+    // up therefore over-counts. The rule is:
+    //
+    //     frame total ~= sum of every region whose GpuTimerContainedBy() is kNoGpuRegion
+    //
+    // i.e. sum the OUTERMOST regions only. This is not a rounding concern: on Everon's
+    // 00training a naive sum double-counts grass-shadow (0.74 ms) and the entire colour
+    // sub-pass (2.13 ms), producing a "total" LARGER than the frame it claims to explain -
+    // which reads as a measurement rather than as the bug it is. Mirrors
+    // WgrGpuTimerContainedBy in wgpu_renderer.hpp; keep the two in step.
+    // Returns the enclosing region index, or kNoGpuRegion when the region is outermost.
+    static constexpr int GpuTimerContainedBy(int region)
+    {
+        // Inside the depth/normal prepass render pass.
+        if (region == kTerrainGpuRegionBegin || region == kGrassGpuRegionPrepass ||
+            (region >= kObjectGpuRegionBegin + 3 && region <= kObjectGpuRegionBegin + 4))
+            return kObjectGpuContainerBegin;
+        // Inside the 3D colour sub-pass.
+        if (region == kTerrainGpuRegionColor || region == kGrassGpuRegionColor ||
+            (region >= kObjectGpuRegionBegin + 5 && region <= kObjectGpuRegionBegin + 6))
+            return kObjectGpuContainerBegin + 1;
+        // Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so its
+        // one region already sits inside the per-cascade brackets. Attributed to cascade 0
+        // because a region can name only one parent, and grass shadows are a near-field effect.
+        if (region == kGrassGpuRegionShadow)
+            return kShadowCascadeGpuRegionBegin;
+        // The whole-frame envelope is never part of a sum - it IS the thing summed against.
+        if (region == kFrameGpuRegionTotal)
+            return kFrameGpuRegionTotal;
+        return kNoGpuRegion;
+    }
+
+    // PERF-005 - backend-agnostic mirror of WgrObjectStats. Counts come from the GPU cull's
+    // atomics via a non-blocking readback (so they lag the displayed frame by ~2-3 frames)
+    // except directCalls/directTris, which are counted on the CPU during the colour replay.
+    struct ObjectStatsOut
+    {
+        uint32_t registeredInstances = 0;
+        // False until a readback lands. Zeros with valid == false mean "not measured yet",
+        // which is a different statement from "nothing drew" - report them differently.
+        bool valid = false;
+
+        uint32_t mainInstances = 0, mainRecords = 0, mainDraws = 0, mainTris = 0;
+        uint32_t colorInstances = 0, colorRecords = 0, colorDraws = 0, colorTris = 0;
+        uint32_t colorDrawsSolid = 0, colorDrawsAlpha = 0;
+        uint32_t colorTrisSolid = 0, colorTrisAlpha = 0;
+        uint32_t shadowInstances[4] = {}, shadowDraws[4] = {}, shadowTris[4] = {};
+        // LOD 0..6 plus a "7 or coarser" bucket, over the MAIN view's survivors.
+        uint32_t mainLodHist[8] = {};
+        uint32_t directCalls = 0, directIndirectCalls = 0, directInstances = 0, directTris = 0;
+    };
+
+    // PERF-005 - per-region CPU ENCODE ms, indexed exactly like GetWaterGpuTimings
+    // (-1 = the region was not recorded this frame). Answers a different question from the GPU
+    // rows: how long the CPU spent RECORDING the region, not how long the GPU ran it.
+    // APPENDED at the class end (vtable-slot note above).
+    virtual int GetCpuTimings(float* /*outMs*/, int /*maxCount*/) const { return 0; }
+    // PERF-005 - this frame's object accounting. False when the backend has none.
+    virtual bool GetObjectStats(ObjectStatsOut& /*out*/) const { return false; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

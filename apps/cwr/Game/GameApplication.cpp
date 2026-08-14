@@ -96,16 +96,78 @@ bool WriteCaptureMetrics(const std::string& path)
     cJSON_AddNumberToObject(root, "schema_version", 1);
     cJSON_AddStringToObject(root, "renderer", GEngine->GetRendererName().Data());
     cJSON_AddStringToObject(root, "runtime", GEngine->GetDebugName().Data());
-    float timings[32] = {};
-    const int count = GEngine->GetWaterGpuTimings(timings, 32);
+    // Sized off kGpuRegionEnd, NOT a literal. This was `float timings[32]` while the region
+    // count was 33, and wgr_get_gpu_timings clamps to out_len — so "Terrain: main colour" was
+    // silently missing from EVERY capture ever written. A hardcoded buffer here does not fail
+    // loudly when regions are appended, it just truncates the newest ones, which is the exact
+    // failure mode this file exists to avoid.
+    constexpr int kRegionCap = Engine::kGpuRegionEnd;
+    float timings[kRegionCap] = {};
+    const int count = GEngine->GetWaterGpuTimings(timings, kRegionCap);
     cJSON_AddBoolToObject(root, "gpu_timestamps_available", count > 0);
+    // PERF-005: CPU encode ms per region, same indices. Always available (no adapter feature),
+    // so a run without timestamp queries still reports where the CPU's recording time went.
+    float cpuMs[kRegionCap] = {};
+    const int cpuCount = GEngine->GetCpuTimings(cpuMs, kRegionCap);
     cJSON* regions = cJSON_AddArrayToObject(root, "gpu_timings_ms");
     for (int i = 0; i < count; ++i)
     {
         cJSON* region = cJSON_CreateObject();
         cJSON_AddStringToObject(region, "name", GEngine->GetWaterGpuTimingName(i));
         cJSON_AddNumberToObject(region, "milliseconds", timings[i]);
+        cJSON_AddNumberToObject(region, "index", i);
+        // Region nesting. Several regions physically enclose others (the two segment containers
+        // enclose terrain/grass/object draws; each shadow cascade encloses its grass blades), so
+        // a consumer that adds every row up over-counts. Emitted per row rather than documented
+        // elsewhere because the only readers of this file are scripts:
+        //     frame total ~= sum of rows where contained_by == -1
+        cJSON_AddNumberToObject(region, "contained_by", (double)Engine::GpuTimerContainedBy(i));
+        cJSON_AddBoolToObject(region, "container",
+                              i >= Engine::kObjectGpuContainerBegin && i < Engine::kObjectGpuContainerEnd);
+        if (i < cpuCount)
+            cJSON_AddNumberToObject(region, "cpu_milliseconds", cpuMs[i]);
         cJSON_AddItemToArray(regions, region);
+    }
+    // PERF-005 object accounting. Emitted as its own object rather than folded into the region
+    // array because these are counts, not times, and the two are summed differently.
+    Engine::ObjectStatsOut objects;
+    if (GEngine->GetObjectStats(objects))
+    {
+        cJSON* o = cJSON_AddObjectToObject(root, "objects");
+        // valid == false means no readback has landed yet; every count below is then unknown,
+        // not zero. Consumers must check this before drawing conclusions from a quiet frame.
+        cJSON_AddBoolToObject(o, "valid", objects.valid);
+        cJSON_AddNumberToObject(o, "registered_instances", objects.registeredInstances);
+        cJSON_AddNumberToObject(o, "main_instances", objects.mainInstances);
+        cJSON_AddNumberToObject(o, "main_records", objects.mainRecords);
+        cJSON_AddNumberToObject(o, "main_draws", objects.mainDraws);
+        cJSON_AddNumberToObject(o, "main_tris", objects.mainTris);
+        cJSON_AddNumberToObject(o, "color_instances", objects.colorInstances);
+        cJSON_AddNumberToObject(o, "color_records", objects.colorRecords);
+        cJSON_AddNumberToObject(o, "color_draws", objects.colorDraws);
+        cJSON_AddNumberToObject(o, "color_tris", objects.colorTris);
+        cJSON_AddNumberToObject(o, "color_draws_solid", objects.colorDrawsSolid);
+        cJSON_AddNumberToObject(o, "color_draws_alpha", objects.colorDrawsAlpha);
+        cJSON_AddNumberToObject(o, "color_tris_solid", objects.colorTrisSolid);
+        cJSON_AddNumberToObject(o, "color_tris_alpha", objects.colorTrisAlpha);
+        cJSON_AddNumberToObject(o, "direct_calls", objects.directCalls);
+        cJSON_AddNumberToObject(o, "direct_indirect_calls", objects.directIndirectCalls);
+        cJSON_AddNumberToObject(o, "direct_instances", objects.directInstances);
+        cJSON_AddNumberToObject(o, "direct_tris", objects.directTris);
+        cJSON* cascades = cJSON_AddArrayToObject(o, "shadow_cascades");
+        for (int c = 0; c < 4; ++c)
+        {
+            cJSON* entry = cJSON_CreateObject();
+            cJSON_AddNumberToObject(entry, "cascade", c);
+            cJSON_AddNumberToObject(entry, "instances", objects.shadowInstances[c]);
+            cJSON_AddNumberToObject(entry, "draws", objects.shadowDraws[c]);
+            cJSON_AddNumberToObject(entry, "tris", objects.shadowTris[c]);
+            cJSON_AddItemToArray(cascades, entry);
+        }
+        // Index 0..6 = LOD 0..6, index 7 = "LOD 7 or coarser". Over the MAIN view's survivors.
+        cJSON* lods = cJSON_AddArrayToObject(o, "main_lod_histogram");
+        for (int l = 0; l < 8; ++l)
+            cJSON_AddItemToArray(lods, cJSON_CreateNumber(objects.mainLodHist[l]));
     }
     Engine::GrassStatsOut grass;
     if (GEngine->GetGrassStats(grass))

@@ -4,7 +4,7 @@
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
 
-#import frame::{frame, reverse_z, fog_factor, terrain_sun_shadow, apply_fog, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, terrain_sun_shadow, apply_fog, veg_sway_offset, matdbg_flag, MATDBG_DISABLE_FRESNEL_ENV}
 #import shadow::shadow_strength
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
@@ -303,6 +303,25 @@ fn vs_main(
         let gz = select(-d0111, d1000, triA) * s;
         normal_ws = vec3<f32>(normal_ws.x - gx * normal_ws.y, normal_ws.y, normal_ws.z - gz * normal_ws.y);
     }
+    // VEG-SWAY, the direct-path twin of gpu_driven::vs_gpu. Applied AFTER conform for the same
+    // reason: conform samples terrain height at the vertex's XZ, so swaying first would make the
+    // plant ride the ground height of wherever the wind had just pushed it.
+    //
+    // The vegetation gate is `sun_ambient.w` (1 = bush, 2 = tree/forest) — the direct path's
+    // equivalent of the retained path's INST_CANOPY_* instance flags. Unlike the canopy-normal
+    // block below, sway is NOT restricted to alpha-cut sections: a trunk has to lean with its
+    // own crown or the tree tears apart at the bark line.
+    let foliage_kind = materials[instance].sun_ambient.w;
+    if (foliage_kind > 0.5 && frame.foliaged.x > 0.0) {
+        // world[3] is the object origin, already camera-relative on this path (the C++ side
+        // offsets the world matrix by the camera position), so the camera position is added
+        // back to seed the phase from an ABSOLUTE world XZ. Seeding from the camera-relative
+        // value would make every plant swim as the camera walks.
+        let phase_xz = world[3].xz + frame.cam_pos.xz;
+        let leaf = select(0.0, 1.0, alpha_ref > 0.0);
+        let sway = veg_sway_offset(pos.y, phase_xz, leaf);
+        world_pos = vec4<f32>(world_pos.xyz + sway, world_pos.w);
+    }
     // REGRESSION GUARD (CWA stock-tree canopies): legacy leaf cards have arbitrary authored
     // normals, so a visible card can point sideways or downward and receive almost no daylight
     // or directional sky. Without this direct-path radial-crown correction, standard CWA trees
@@ -310,7 +329,6 @@ fn vs_main(
     // their PAC texture and alpha cutout are correct. The retained/GPU-driven path already bends
     // cutout canopy normals this way; keep this direct-path equivalent. sun_ambient.w carries
     // 1=bush or 2=tree/forest, so only alpha-cut vegetation changes.
-    let foliage_kind = materials[instance].sun_ambient.w;
     if (alpha_ref > 0.0 && foliage_kind > 0.5) {
         let is_tree = foliage_kind > 1.5;
         let crown_y = select(frame.foliageb.z, frame.foliagec.z, is_tree);

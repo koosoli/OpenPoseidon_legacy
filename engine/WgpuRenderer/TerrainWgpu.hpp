@@ -116,6 +116,9 @@ class TerrainWgpu : public ITerrainRenderer
     uint32_t _terrainPageLayerBudget = 1024;
     uint32_t _terrainPageTestUpdate = 0;
     int _terrainPageTestPhase = -1;
+    // Cadence counter for the tracked-residency memory row emitted beside the object
+    // residency rows, so the working set's coverage and its cost read from one log.
+    uint32_t _residencyMemoryLogTick = 0;
 
     std::vector<CdlodNode> _tree;
     int _rootIndex = -1;

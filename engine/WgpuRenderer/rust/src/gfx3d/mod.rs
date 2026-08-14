@@ -10,7 +10,7 @@ use pool::{GeometryPool, MeshAlloc};
 // retained-scene FFI) and dispatch/submission land in Stage 3b, so the items are unused
 // for now.
 #[allow(dead_code)]
-mod cull;
+pub mod cull;
 
 // Hi-Z depth pyramid for GPU-driven occlusion culling (docs/gpu-culling-and-depth-plan.md §5).
 mod gtao_depth_mips;
@@ -4537,6 +4537,18 @@ impl Gfx3d {
             .zip(self.shadow_caster_bind.as_ref());
 
         for c in 0..count.min(target.layers) as usize {
+            // PERF-005: one region PER CASCADE. Shadows were the largest single unattributed
+            // suspect and a single "shadows" number cannot tell you which cascade to shrink —
+            // cascade 0 covers metres and cascade 3 covers hundreds of them, so their costs and
+            // their fixes are unrelated. Bracketed on the ENCODER around the whole cascade pass,
+            // which needs no TIMESTAMP_QUERY_INSIDE_PASSES and captures the depth clear too.
+            let region = crate::gpu_timers::SHADOW_CASCADE_REGIONS
+                .get(c)
+                .copied();
+            if let Some(r) = region {
+                timers.cpu_begin(r);
+                timers.begin(encoder, r);
+            }
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wgr_shadow_cascade"),
                 color_attachments: &[],
@@ -4632,6 +4644,13 @@ impl Gfx3d {
             // or when the cascade has no survivors). Drawn last into the same depth attachment.
             self.draw_gpu_driven_shadow(&mut rp, textures, pass_ubo_off, c);
             grass.draw_shadow(&mut rp, pass_bind, pass_ubo_off, timers);
+            // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
+            // is alive is a validation error, not a slightly wrong number.
+            drop(rp);
+            if let Some(r) = region {
+                timers.end(encoder, r);
+                timers.cpu_end(r);
+            }
         }
     }
 
@@ -6560,11 +6579,49 @@ impl Gfx3d {
 
     // Record the cull compute dispatch (before the render passes that read its args). No-op
     // when GPU-driven rendering is off or nothing is registered.
-    pub fn cull_dispatch(&self, encoder: &mut wgpu::CommandEncoder) {
+    // --- PERF-005 object accounting (see cull.rs STATS_*) ---
+
+    /// Latest harvested per-view counts: instances, records, draw args, triangles and the
+    /// selected-LOD histogram.
+    pub fn object_stats(&self) -> cull::CullStats {
+        self.cull.stats()
+    }
+
+    /// Registered retained instances (the denominator the per-view survivor counts divide into).
+    pub fn retained_instance_count(&self) -> u32 {
+        self.cull.instance_count()
+    }
+
+    /// Zero every cull view's stats slice. Must be recorded before the frame's first cull.
+    pub fn begin_frame_object_stats(&self, encoder: &mut wgpu::CommandEncoder) {
+        self.cull.begin_frame_stats(encoder);
+    }
+
+    /// Copy this frame's stats into the readback ring (after every cull dispatch, before submit).
+    pub fn resolve_object_stats(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        self.cull.resolve_stats(encoder);
+    }
+
+    /// Drain completed stats readbacks (after queue.submit, alongside GpuTimers::harvest).
+    pub fn harvest_object_stats(&mut self, device: &wgpu::Device) {
+        self.cull.harvest_stats(device);
+    }
+
+    pub fn cull_dispatch(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timers: &crate::gpu_timers::GpuTimers,
+    ) {
         if !self.gpu_driven_enabled {
             return;
         }
+        // PERF-005: encoder-level bracket (the cull is three standalone compute passes), so this
+        // measures the whole COUNT -> EMIT -> SCATTER chain including the clears in front of it.
+        timers.cpu_begin(crate::gpu_timers::Region::ObjCullMain);
+        timers.begin(encoder, crate::gpu_timers::Region::ObjCullMain);
         self.cull.dispatch(encoder);
+        timers.end(encoder, crate::gpu_timers::Region::ObjCullMain);
+        timers.cpu_end(crate::gpu_timers::Region::ObjCullMain);
     }
 
     pub fn cull_dispatch_reflection(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -6767,13 +6824,25 @@ impl Gfx3d {
     // Record one cull dispatch per active shadow cascade (§6 multi-view), producing each
     // cascade's depth-pass indirect args. Recorded before render_shadow_passes so wgpu barriers
     // the compute writes -> the depth pass's indirect reads. No-op when GPU-driven is off.
-    pub fn cull_dispatch_shadows(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn cull_dispatch_shadows(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timers: &crate::gpu_timers::GpuTimers,
+    ) {
         if !self.gpu_driven_enabled {
             return;
         }
+        // PERF-005: ONE bracket over every cascade's cull, not one per cascade. The per-cascade
+        // question this instrumentation exists to answer is about the DEPTH RENDER cost
+        // (ShadowCascade0..3), which is where the geometry actually rasterises; splitting the
+        // cull too would spend four more query pairs to resolve a sub-0.1 ms item.
+        timers.cpu_begin(crate::gpu_timers::Region::ObjCullShadow);
+        timers.begin(encoder, crate::gpu_timers::Region::ObjCullShadow);
         for c in 0..self.cull.shadow_view_count() {
             self.cull.dispatch_shadow(encoder, c);
         }
+        timers.end(encoder, crate::gpu_timers::Region::ObjCullShadow);
+        timers.cpu_end(crate::gpu_timers::Region::ObjCullShadow);
     }
 
     // Draw the GPU-driven retained set into cascade `c`'s depth map, INSIDE that cascade's
@@ -6858,6 +6927,7 @@ impl Gfx3d {
         pass: &mut wgpu::RenderPass<'_>,
         textures: &SharedTextures,
         cam_off: u32,
+        timers: &crate::gpu_timers::GpuTimers,
     ) {
         let (args, group1, counters) = if self.occlusion_active() {
             (
@@ -6880,6 +6950,13 @@ impl Gfx3d {
             args,
             group1,
             counters,
+            Some((
+                timers,
+                [
+                    crate::gpu_timers::Region::ObjColorSolid,
+                    crate::gpu_timers::Region::ObjColorAlpha,
+                ],
+            )),
         );
     }
 
@@ -6901,6 +6978,7 @@ impl Gfx3d {
             self.cull
                 .reflection_counter_buf()
                 .unwrap_or(self.cull.counter_buf()),
+            None,
         );
     }
 
@@ -6913,6 +6991,7 @@ impl Gfx3d {
         pass: &mut wgpu::RenderPass<'_>,
         textures: &SharedTextures,
         cam_off: u32,
+        timers: &crate::gpu_timers::GpuTimers,
     ) {
         self.draw_gpu_driven_impl(
             pass,
@@ -6922,6 +7001,13 @@ impl Gfx3d {
             self.cull.out_args(),
             self.gpu_group1_bind.as_ref(),
             self.cull.counter_buf(),
+            Some((
+                timers,
+                [
+                    crate::gpu_timers::Region::ObjPrepassSolid,
+                    crate::gpu_timers::Region::ObjPrepassAlpha,
+                ],
+            )),
         );
     }
 
@@ -6935,6 +7021,12 @@ impl Gfx3d {
         args: Option<&wgpu::Buffer>,
         group1: Option<&wgpu::BindGroup>,
         counters: &wgpu::Buffer,
+        // PERF-005: optional per-VARIANT timer regions, [solid, alpha-cutout], matching the
+        // variant partition the loop below already draws in. Passed in rather than derived
+        // because this one impl serves the prepass, the colour pass and the planar reflection,
+        // and only the first two are worth four query pairs — the reflection's objects are
+        // already covered end-to-end by WGR_GPU_TIMER_PLANAR_OBJECTS.
+        regions: Option<(&crate::gpu_timers::GpuTimers, [crate::gpu_timers::Region; 2])>,
     ) {
         if !self.gpu_driven_enabled {
             return;
@@ -6962,7 +7054,16 @@ impl Gfx3d {
             // full conservative capacity of instance_count = 0 no-ops each frame.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
+                if let Some((t, r)) = r {
+                    t.cpu_begin(r);
+                    t.begin_pass(pass, r);
+                }
                 pass.multi_draw_indexed_indirect_count(args, offset, counters, v as u64 * 4, cap);
+                if let Some((t, r)) = r {
+                    t.end_pass(pass, r);
+                    t.cpu_end(r);
+                }
             }
         } else {
             // Conservative fallback (e.g. Metal, no MULTI_DRAW_INDIRECT_COUNT): one multi_draw
@@ -6970,7 +7071,16 @@ impl Gfx3d {
             // no-ops.
             for v in 0..cull::CULL_VARIANT_COUNT {
                 let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+                let r = regions.and_then(|(t, rs)| rs.get(v as usize).map(|r| (t, *r)));
+                if let Some((t, r)) = r {
+                    t.cpu_begin(r);
+                    t.begin_pass(pass, r);
+                }
                 pass.multi_draw_indexed_indirect(args, offset, cap);
+                if let Some((t, r)) = r {
+                    t.end_pass(pass, r);
+                    t.cpu_end(r);
+                }
             }
         }
     }

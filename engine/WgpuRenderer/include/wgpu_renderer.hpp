@@ -580,6 +580,23 @@ struct WgrFoliage
     float tree_bend;      /* TREE spherical-normal blend (leaf sections only; trunk unaffected) */
     float tree_crown_y;   /* TREE crown-centre Y lift (larger than bush — centre sits mid-trunk) */
     float _pad2;
+    /* VEG-SWAY — geometric wind on vegetation MODELS (trees/bushes/forest patches). Before this,
+     * the wgpu path animated grass and nothing else: neither object vertex shader had any
+     * time-varying term, so a forest stood dead still in a gale. These eight floats extend the
+     * Frame UBO by exactly two vec4 lanes (frame.foliaged / frame.foliagee) — the bind size is
+     * computed from sizeof(WgrFoliage), so extending here is enough on the Rust side.
+     *
+     * The wind vector is NOT re-derived in the renderer: it is the same World/Weather/WindModel
+     * sample the grass field and the cloud deck use, pushed from EngineWgpu so all three lean
+     * the same way. */
+    float sway_strength;  /* master amplitude, metres of tip travel at 1 m above the pivot; 0 = OFF */
+    float sway_speed;     /* rate multiplier on the trunk oscillation (1 = authored) */
+    float wind_dir_x;     /* unit vector the wind travels TOWARD (world +X) */
+    float wind_dir_z;     /* unit vector the wind travels TOWARD (world +Z) */
+    float sway_time;      /* engine clock in seconds — Glob.time, so a pause freezes the canopy */
+    float wind_gust;      /* WindSample::gustFraction, roughly [-1, 1] */
+    float sway_leaf;      /* extra high-frequency flutter on cutout (leaf) sections only */
+    float sway_stiffness; /* height exponent: 1 = linear lean, 2 = stiff trunk / loose crown */
 };
 
 /* Screen-space ambient occlusion (GTAO) — see docs/screen-space-ao-plan.md. Computed from the
@@ -1187,7 +1204,121 @@ enum WgrGpuTimerRegion : uint32_t
     /* PERF-004 - main-view terrain; in-pass timestamps, append-only ABI slots. */
     WGR_GPU_TIMER_TERRAIN_PREPASS = 31,
     WGR_GPU_TIMER_TERRAIN_COLOR = 32,
-    WGR_GPU_TIMER_REGION_COUNT = 33,
+    /* PERF-005 - object rendering. Measured on Arma 3's Stratis @1280x720 with a ~20K-object
+     * working set: the GPU frame was 19.1 ms of which only ~4.5 ms was attributed (terrain,
+     * water, AO, interior sky). These regions exist to name the other ~14.5 ms.
+     *
+     * Two of them are CONTAINERS that deliberately OVERLAP the leaves inside them. Never add a
+     * container to its own leaves - the difference is the point (it is what bounds the cost of
+     * the CPU-replayed Draw3D ops, which cannot be timed individually because one region holds
+     * only one begin/end pair per frame). WgrGpuTimerIsContainer() below is the authority. */
+    WGR_GPU_TIMER_OBJ_CULL_MAIN = 33,       // main-view COUNT/EMIT/SCATTER (prepass + occluder set)
+    WGR_GPU_TIMER_OBJ_CULL_SHADOW = 34,     // every active cascade's cull dispatch chain
+    WGR_GPU_TIMER_OBJ_CULL_COLOR = 35,      // Hi-Z pyramid build + the colour-pass occlusion cull
+    WGR_GPU_TIMER_OBJ_PREPASS_SOLID = 36,   // GPU-driven depth+normal prepass, variant 0 (solid)
+    WGR_GPU_TIMER_OBJ_PREPASS_ALPHA = 37,   // ... variant 1 (alpha-cutout foliage)
+    WGR_GPU_TIMER_OBJ_COLOR_SOLID = 38,     // GPU-driven colour, variant 0 (solid)
+    WGR_GPU_TIMER_OBJ_COLOR_ALPHA = 39,     // ... variant 1 (alpha-cutout foliage)
+    WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT = 40, // CONTAINER: the whole depth/normal prepass pass
+    WGR_GPU_TIMER_OBJ_COLOR_SEGMENT = 41,   // CONTAINER: the whole 3D colour sub-pass
+    /* One region PER CASCADE: a single "shadows" number cannot say which cascade to shrink,
+     * and cascade 0 (metres) and cascade 3 (hundreds of metres) have unrelated fixes. */
+    WGR_GPU_TIMER_SHADOW_CASCADE_0 = 42,
+    WGR_GPU_TIMER_SHADOW_CASCADE_1 = 43,
+    WGR_GPU_TIMER_SHADOW_CASCADE_2 = 44,
+    WGR_GPU_TIMER_SHADOW_CASCADE_3 = 45,
+    WGR_GPU_TIMER_REGION_COUNT = 46,
+};
+
+/* PERF-005 - region nesting, and the ONLY correct way to total this array.
+ *
+ * Several regions physically enclose others: the two segment containers enclose the terrain,
+ * grass and GPU-driven object draws recorded inside their render passes, and each shadow
+ * cascade encloses the grass blades drawn into that cascade's depth map. Adding every region
+ * up therefore over-counts. The rule is:
+ *
+ *     frame total ~= sum of every region whose WgrGpuTimerContainedBy() is WGR_GPU_TIMER_NONE
+ *
+ * i.e. sum the OUTERMOST regions only. Getting this wrong is not a rounding error: on Everon's
+ * 00training it double-counts grass-shadow (0.74 ms) and the whole colour sub-pass (2.13 ms),
+ * producing a "total" larger than the frame, which reads as a measurement rather than a bug.
+ * Returns the enclosing region, or WGR_GPU_TIMER_NONE when the region is outermost. */
+enum : uint32_t
+{
+    WGR_GPU_TIMER_NONE = 0xFFFFFFFFu
+};
+
+constexpr uint32_t WgrGpuTimerContainedBy(uint32_t region)
+{
+    switch (region)
+    {
+        /* Recorded inside the depth/normal prepass render pass. */
+        case WGR_GPU_TIMER_TERRAIN_PREPASS:
+        case WGR_GPU_TIMER_GRASS_PREPASS:
+        case WGR_GPU_TIMER_OBJ_PREPASS_SOLID:
+        case WGR_GPU_TIMER_OBJ_PREPASS_ALPHA:
+            return WGR_GPU_TIMER_OBJ_PREPASS_SEGMENT;
+        /* Recorded inside the 3D colour sub-pass. */
+        case WGR_GPU_TIMER_TERRAIN_COLOR:
+        case WGR_GPU_TIMER_GRASS_COLOR:
+        case WGR_GPU_TIMER_OBJ_COLOR_SOLID:
+        case WGR_GPU_TIMER_OBJ_COLOR_ALPHA:
+            return WGR_GPU_TIMER_OBJ_COLOR_SEGMENT;
+        /* Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so
+         * its one region is already inside the per-cascade brackets. Attributed to cascade 0
+         * because a region can name only one parent; grass shadows are a near-field effect and
+         * cascade 0 is where nearly all of that cost lands. */
+        case WGR_GPU_TIMER_GRASS_SHADOW:
+            return WGR_GPU_TIMER_SHADOW_CASCADE_0;
+        /* The whole-frame envelope: never part of a sum, it IS the thing summed against. */
+        case WGR_GPU_TIMER_FRAME_TOTAL:
+            return WGR_GPU_TIMER_FRAME_TOTAL;
+        default:
+            return WGR_GPU_TIMER_NONE;
+    }
+}
+
+/* PERF-005 - per-frame object accounting (mirrors WgrObjectStats in rust/src/ffi.rs).
+ * The per-view blocks are atomics written by cull.wgsl and read back through the same
+ * non-blocking ring as the GPU timings, so they lag the displayed frame by ~2-3 frames.
+ * `direct_*` is counted on the CPU during the colour replay and is current. */
+struct WgrObjectStats
+{
+    uint32_t registered_instances; // retained instances the cull knows about (the denominator)
+    uint32_t valid;                // 0 = no readback has landed yet; zeros then mean "unknown"
+
+    /* Main view: frustum + distance + sub-pixel + LOD. This is the PREPASS / occluder set. */
+    uint32_t main_instances;
+    uint32_t main_records; // surviving (instance, section) pairs
+    uint32_t main_draws;   // indirect args emitted == sections drawn
+    uint32_t main_tris;
+
+    /* Colour view: the main tests plus Hi-Z occlusion. All zero when occlusion is off, in
+     * which case the colour pass reuses the main args and main_* is the truth for both. */
+    uint32_t color_instances;
+    uint32_t color_records;
+    uint32_t color_draws;
+    uint32_t color_tris;
+    uint32_t color_draws_solid;
+    uint32_t color_draws_alpha;
+    uint32_t color_tris_solid;
+    uint32_t color_tris_alpha;
+
+    uint32_t shadow_instances[4];
+    uint32_t shadow_draws[4];
+    uint32_t shadow_tris[4];
+
+    /* Selected-LOD histogram over the MAIN view's survivors: instances that chose LOD 0..6,
+     * bucket 7 = "LOD 7 or coarser". This is the direct test of the standing hypothesis that
+     * detailed building and vegetation LODs stay active too far out. */
+    uint32_t main_lod_hist[8];
+
+    /* The CPU-replayed object path (transparent, decal, skinned/baked, non-standard depth).
+     * These never reach the cull shader, so they are invisible in every count above. */
+    uint32_t direct_calls;
+    uint32_t direct_indirect_calls;
+    uint32_t direct_instances;
+    uint32_t direct_tris;
 };
 
 /* GRS-A — grass instance accounting (mirrors WgrGrassStats in rust/src/ffi.rs).
@@ -1421,10 +1552,10 @@ static_assert(sizeof(WgrSkyLook) == 192, "WgrSkyLook layout must match the Rust 
 static_assert(sizeof(WgrSkyRuntime) == 112, "WgrSkyRuntime layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrTerrainSunShadow) == 16, "WgrTerrainSunShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrFoliage) == 48, "WgrFoliage layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 464, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrRenderParams) == 496, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");
@@ -1728,6 +1859,16 @@ extern "C"
 
     /* GRS-A — latest grass instance counts. Returns 1 on success, 0 when unavailable. */
     WGR_API uint32_t wgr_get_grass_stats(WgrRenderer* renderer, WgrGrassStats* out);
+
+    /* PERF-005 — per-region CPU ENCODE times, same WgrGpuTimerRegion indices as
+     * wgr_get_gpu_timings; -1 = the region was not recorded this frame. Needs no adapter
+     * feature and is never asynchronous — this is the wall-clock cost of RECORDING the region
+     * into the command encoder, which on a GPU-driven renderer is a very different number from
+     * the GPU cost. Returns the region count written, 0 on a null renderer/output. */
+    WGR_API uint32_t wgr_get_cpu_timings(WgrRenderer* renderer, float* out_ms, uint32_t out_len);
+
+    /* PERF-005 — this frame's object accounting. Returns 1 on success, 0 when unavailable. */
+    WGR_API uint32_t wgr_get_object_stats(WgrRenderer* renderer, WgrObjectStats* out);
 
     /* Current dynamic-resource residency accounting. Returns 1 on success. */
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);

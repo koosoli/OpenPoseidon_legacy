@@ -2144,6 +2144,12 @@ bool Landscape::LoadOprwModern(const char* path)
                 std::clamp<long>(std::strtol(budget, nullptr, 10), 1000, 1000000));
         else
             _modernObjectBudget = 20000;
+        // Diagnostic opt-out, in the same spirit as WGR_OBJECT_STREAMING=0: pin the window at
+        // the configured radius so the pre-growth coverage and memory can be measured from the
+        // same binary. Not a gameplay setting -- with it set, a world smaller than the budget
+        // loads only the part of itself that happens to fall inside the radius.
+        if (const char* growth = std::getenv("WGR_OBJECT_STREAM_WINDOW_GROWTH"))
+            _modernObjectWindowGrowth = std::strcmp(growth, "0") != 0;
         if (const char* batch = std::getenv("WGR_OBJECT_STREAM_CREATES_PER_UPDATE"))
             _modernObjectCreatesPerUpdate = static_cast<uint32_t>(
                 std::clamp<long>(std::strtol(batch, nullptr, 10), 1, 100000));
@@ -2332,11 +2338,39 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         uint32_t index;
         uint32_t distance2;
     };
+    // The live set must be bounded by the OBJECT BUDGET, not by geometry. The radius is a
+    // second, independent bound, and on any world whose whole placement database already fits
+    // the budget it is the one that binds -- silently, because nothing reports it. Reforger's
+    // Everon carries 19,644 placements against a 20,000-object budget, but its land grid is
+    // 256x256 at 50 m, so a fixed 64-cell window spans 6.4 km of a 12.8 km world and enclosed
+    // only 9,176 of them. 10,468 objects were refused for want of nothing: half the island
+    // stayed empty while 10,824 budget slots went unused. Grow the window geometrically until
+    // the budget is the bound or the window covers the map, so the radius is a starting size
+    // rather than a ceiling. Worlds where the budget already binds (Stratis requests 19,998 of
+    // 163,953 inside the first 64 cells, ChernarusPlus far sooner) never enter the loop and
+    // keep their measured behaviour and memory exactly.
+    const auto enclosedPlacements = [&](int radius)
+    {
+        const int ex0 = std::max(0, centerX - radius);
+        const int ez0 = std::max(0, centerZ - radius);
+        const int ex1 = std::min(_landRange, centerX + radius + 1);
+        const int ez1 = std::min(_landRange, centerZ + radius + 1);
+        uint64_t total = 0;
+        for (int z = ez0; z < ez1 && total < _modernObjectBudget; ++z)
+            for (int x = ex0; x < ex1; ++x)
+                total += _modernObjectCells[static_cast<size_t>(z) * _landRange + x].size();
+        return total;
+    };
+    int windowRadius = std::clamp(_modernObjectRadius, 1, _landRange);
+    if (_modernObjectWindowGrowth)
+        while (windowRadius < _landRange && enclosedPlacements(windowRadius) < _modernObjectBudget)
+            windowRadius = std::min(_landRange, windowRadius * 2);
+
     std::vector<CellCandidate> candidates;
-    const int x0 = std::max(0, centerX - _modernObjectRadius);
-    const int z0 = std::max(0, centerZ - _modernObjectRadius);
-    const int x1 = std::min(_landRange, centerX + _modernObjectRadius + 1);
-    const int z1 = std::min(_landRange, centerZ + _modernObjectRadius + 1);
+    const int x0 = std::max(0, centerX - windowRadius);
+    const int z0 = std::max(0, centerZ - windowRadius);
+    const int x1 = std::min(_landRange, centerX + windowRadius + 1);
+    const int z1 = std::min(_landRange, centerZ + windowRadius + 1);
     candidates.reserve(static_cast<size_t>(x1 - x0) * (z1 - z0));
     for (int z = z0; z < z1; ++z)
     {
@@ -2454,11 +2488,22 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             break;
         }
     }
-    if (centerChanged || !_modernObjectResidencyPending)
+    // Report progress, not just the endpoints. The original condition logged only on a centre
+    // change and on convergence, so a run that was still filling emitted exactly one line --
+    // `resident=128 pending=1` -- and stayed silent for however long the fill took. Two
+    // independent readers took that single line as proof of a stalled streamer on worlds that
+    // were in fact converging (Everon in 1.4 s, Stratis in 2.5 s). Silence during the only
+    // interesting interval is how a working set that grows gets reported as one that does not,
+    // so emit a rate-limited progress row whenever the fill is still outstanding.
+    ++_modernObjectUpdateCount;
+    constexpr uint32_t ProgressLogEveryUpdates = 16;
+    const bool progressRow =
+        _modernObjectResidencyPending && (_modernObjectUpdateCount % ProgressLogEveryUpdates) == 0;
+    if (centerChanged || !_modernObjectResidencyPending || progressRow)
         LOG_INFO(World,
-                 "Modern object residency: centre=({}, {}) requested={} resident={} created={} released={} refused={} "
-                 "budget={} pending={}",
-                 centerX, centerZ, requested, _modernResidentObjectCount, created, released, refused,
+                 "Modern object residency: centre=({}, {}) window={} cells requested={} resident={} created={} "
+                 "released={} refused={} budget={} pending={}",
+                 centerX, centerZ, windowRadius, requested, _modernResidentObjectCount, created, released, refused,
                  _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0);
 }
 
