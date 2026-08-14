@@ -17,6 +17,8 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <memory>
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cctype>
 #include <cstring>
 #include <exception>
@@ -1082,6 +1084,200 @@ void TerrainCommand::Setup(CLI::App& app)
                 if (filter)
                     std::cout << "\n"
                               << shown << " object(s) within " << nearArg[2] << " m of (" << nx << ", " << nz << ").\n";
+
+                std::exit(0);
+            });
+    }
+    {
+        // A placement's Y and the heightfield under it are stored in two unrelated
+        // parts of the file, so "does this quad sit on the ground or in a hollow?"
+        // is not answerable by reading either alone -- and answering it for one
+        // pond says nothing about the other 669. This probes both together, either
+        // at a named point or across every placement whose model matches a
+        // substring, and reports the *distribution* of (placement Y - terrain Y).
+        static std::string inputFile;
+        static std::vector<double> atArg;
+        static std::string modelFilter;
+        static int histogramBuckets = 12;
+        auto* cmd = terrain->add_subcommand("probe", "Sample terrain height and geography under a point or a model");
+        cmd->add_option("input", inputFile, "WRP terrain file")->required()->check(CLI::ExistingFile);
+        cmd->add_option("--at", atArg, "Probe one world point: --at X Z")->expected(2);
+        cmd->add_option("--model", modelFilter,
+                        "Probe under every placement whose model path contains this substring "
+                        "(case-insensitive) and summarise the height deltas");
+        cmd->add_option("--buckets", histogramBuckets, "Histogram bucket count for --model (default 12)");
+        cmd->callback(
+            []()
+            {
+                QIFStream file;
+                file.open(inputFile.c_str());
+                if (file.fail())
+                {
+                    std::cerr << "Error: cannot open " << inputFile << "\n";
+                    std::exit(1);
+                }
+                Asset::Formats::BinaryReader probeReader(file);
+                if (Asset::Formats::World::PeekOprwModernRevision(probeReader) == 0)
+                {
+                    std::cerr << "Error: terrain probe requires a revision-18/20/24/25 world; " << inputFile
+                              << " is not one.\n";
+                    std::exit(1);
+                }
+
+                Asset::Formats::World::Oprw25World world;
+                try
+                {
+                    world = Asset::Formats::World::ReadOprwModern(probeReader);
+                }
+                catch (const std::exception& e)
+                {
+                    std::cerr << "Error: " << e.what() << "\n";
+                    std::exit(1);
+                }
+
+                const auto& header = world.header;
+                const float terrainCell = header.TerrainCellSize();
+                const float landCell = header.landCellSize;
+                if (terrainCell <= 0.0f || landCell <= 0.0f)
+                {
+                    std::cerr << "Error: world declares a non-positive cell size.\n";
+                    std::exit(1);
+                }
+
+                // Bilinear over the four surrounding terrain samples. Elevation is
+                // stored per grid *vertex*, so cell (i,j) spans [i,i+1] and a world
+                // point maps to a fractional index, not a cell index.
+                auto clampIndex = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+                auto heightAt = [&](double wx, double wz)
+                {
+                    const double fx = wx / terrainCell;
+                    const double fz = wz / terrainCell;
+                    const int x0 = clampIndex(static_cast<int>(std::floor(fx)), header.terrainRangeX - 1);
+                    const int z0 = clampIndex(static_cast<int>(std::floor(fz)), header.terrainRangeY - 1);
+                    const int x1 = clampIndex(x0 + 1, header.terrainRangeX - 1);
+                    const int z1 = clampIndex(z0 + 1, header.terrainRangeY - 1);
+                    const double tx = fx - std::floor(fx);
+                    const double tz = fz - std::floor(fz);
+                    const double h00 = world.ElevationAt(x0, z0);
+                    const double h10 = world.ElevationAt(x1, z0);
+                    const double h01 = world.ElevationAt(x0, z1);
+                    const double h11 = world.ElevationAt(x1, z1);
+                    return (h00 * (1.0 - tx) + h10 * tx) * (1.0 - tz) + (h01 * (1.0 - tx) + h11 * tx) * tz;
+                };
+                auto geographyAt = [&](double wx, double wz)
+                {
+                    Asset::Formats::World::Oprw25Geography g;
+                    if (world.geography.empty())
+                        return g;
+                    const int lx = clampIndex(static_cast<int>(std::floor(wx / landCell)), header.landRangeX - 1);
+                    const int lz = clampIndex(static_cast<int>(std::floor(wz / landCell)), header.landRangeY - 1);
+                    g.bits = world.geography[static_cast<size_t>(lz) * header.landRangeX + lx];
+                    return g;
+                };
+
+                std::cout << "World:       " << inputFile << "\n";
+                std::cout << "Terrain:     " << header.terrainRangeX << " x " << header.terrainRangeY << " @ "
+                          << std::fixed << std::setprecision(2) << terrainCell << " m\n";
+                std::cout << "Land:        " << header.landRangeX << " x " << header.landRangeY << " @ " << landCell
+                          << " m\n";
+
+                if (atArg.size() == 2)
+                {
+                    const double wx = atArg[0];
+                    const double wz = atArg[1];
+                    const int x0 = clampIndex(static_cast<int>(std::floor(wx / terrainCell)), header.terrainRangeX - 1);
+                    const int z0 = clampIndex(static_cast<int>(std::floor(wz / terrainCell)), header.terrainRangeY - 1);
+                    const auto g = geographyAt(wx, wz);
+                    std::cout << "\nPoint (" << std::setprecision(1) << wx << ", " << wz << "):\n";
+                    std::cout << "  height        " << std::setprecision(3) << heightAt(wx, wz) << " m\n";
+                    std::cout << "  cell          [" << x0 << ", " << z0 << "] corners "
+                              << world.ElevationAt(x0, z0) << " "
+                              << world.ElevationAt(clampIndex(x0 + 1, header.terrainRangeX - 1), z0) << " "
+                              << world.ElevationAt(x0, clampIndex(z0 + 1, header.terrainRangeY - 1)) << " "
+                              << world.ElevationAt(clampIndex(x0 + 1, header.terrainRangeX - 1),
+                                                   clampIndex(z0 + 1, header.terrainRangeY - 1))
+                              << "\n";
+                    std::cout << "  geography     waterDepth " << static_cast<int>(g.MinWaterDepth()) << ".."
+                              << static_cast<int>(g.MaxWaterDepth()) << "  gradient "
+                              << static_cast<int>(g.Gradient()) << "  forest " << (g.Forest() ? 1 : 0) << "  road "
+                              << (g.Road() ? 1 : 0) << "  objects " << (g.SomeObjects() ? 1 : 0) << "\n";
+                }
+
+                if (!modelFilter.empty())
+                {
+                    std::string needle = modelFilter;
+                    std::transform(needle.begin(), needle.end(), needle.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                    std::vector<double> deltas;
+                    std::array<int, 4> minDepthHistogram{};
+                    std::array<int, 4> maxDepthHistogram{};
+                    for (const auto& obj : world.objects)
+                    {
+                        std::string lowered = world.models[static_cast<size_t>(obj.modelIndex)];
+                        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                        if (lowered.find(needle) == std::string::npos)
+                            continue;
+                        const auto& position = obj.transform.rows[3];
+                        deltas.push_back(position.y - heightAt(position.x, position.z));
+                        const auto g = geographyAt(position.x, position.z);
+                        minDepthHistogram[g.MinWaterDepth()]++;
+                        maxDepthHistogram[g.MaxWaterDepth()]++;
+                    }
+
+                    std::cout << "\nPlacements matching '" << modelFilter << "': " << deltas.size() << "\n";
+                    if (deltas.empty())
+                        std::exit(0);
+
+                    std::sort(deltas.begin(), deltas.end());
+                    double sum = 0.0;
+                    for (double d : deltas)
+                        sum += d;
+                    auto quantile = [&](double q)
+                    { return deltas[static_cast<size_t>(q * static_cast<double>(deltas.size() - 1))]; };
+                    std::cout << std::setprecision(3);
+                    std::cout << "  placementY - terrainY   min " << deltas.front() << "  p05 " << quantile(0.05)
+                              << "  median " << quantile(0.5) << "  p95 " << quantile(0.95) << "  max "
+                              << deltas.back() << "  mean " << (sum / static_cast<double>(deltas.size())) << "\n";
+                    // The sign question the whole defect turns on: a quad sunk into a
+                    // hollow is negative, a quad lying on the ground is ~0.
+                    int within10cm = 0;
+                    for (double d : deltas)
+                        if (d > -0.10 && d < 0.10)
+                            within10cm++;
+                    std::cout << "  |delta| < 0.10 m        " << within10cm << " / " << deltas.size() << " ("
+                              << std::setprecision(1) << (100.0 * within10cm / static_cast<double>(deltas.size()))
+                              << "%)\n";
+                    std::cout << std::setprecision(3);
+
+                    const int buckets = histogramBuckets < 2 ? 2 : histogramBuckets;
+                    const double lo = deltas.front();
+                    const double hi = deltas.back();
+                    const double span = (hi - lo) > 1e-9 ? (hi - lo) : 1.0;
+                    std::vector<int> counts(static_cast<size_t>(buckets), 0);
+                    for (double d : deltas)
+                    {
+                        int b = static_cast<int>((d - lo) / span * buckets);
+                        if (b >= buckets)
+                            b = buckets - 1;
+                        counts[static_cast<size_t>(b)]++;
+                    }
+                    std::cout << "  histogram:\n";
+                    for (int b = 0; b < buckets; ++b)
+                    {
+                        std::cout << "    [" << std::setw(8) << (lo + span * b / buckets) << ", " << std::setw(8)
+                                  << (lo + span * (b + 1) / buckets) << ")  " << std::setw(6)
+                                  << counts[static_cast<size_t>(b)] << "\n";
+                    }
+                    std::cout << "  geography minWaterDepth under them: ";
+                    for (int i = 0; i < 4; ++i)
+                        std::cout << i << "=" << minDepthHistogram[static_cast<size_t>(i)] << " ";
+                    std::cout << "\n  geography maxWaterDepth under them: ";
+                    for (int i = 0; i < 4; ++i)
+                        std::cout << i << "=" << maxDepthHistogram[static_cast<size_t>(i)] << " ";
+                    std::cout << "\n";
+                }
 
                 std::exit(0);
             });
