@@ -229,10 +229,16 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/P3D/test_odol40_material_layout.cpp
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
+    Graphics/Textures/test_edds_reader.cpp
+    Graphics/Textures/test_dds_texture_source.cpp
+    Graphics/Textures/test_block_compression.cpp
     Foundation/Algorithms/test_lzo1x.cpp
+    Foundation/Algorithms/test_lz4block.cpp
     Foundation/Algorithms/test_sha256.cpp
     Asset/Cache/test_derived_asset_key.cpp
     Asset/Formats/Material/test_rv_material_source.cpp
+    Asset/Formats/Material/test_emat_source.cpp
+    Asset/Formats/Material/test_emat_material_adapter.cpp
     Asset/Formats/Material/test_shader_schema.cpp
     Asset/Formats/Material/test_terrain_family.cpp
     Asset/Formats/Material/test_material_channels.cpp

@@ -3,6 +3,8 @@
 #include <Poseidon/Graphics/Textures/DXTCompressor.hpp>
 #include <Poseidon/Graphics/Textures/PAAEncoder.hpp>
 #include <Poseidon/Graphics/Textures/DDSConverter.hpp>
+#include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/BMPWriter.hpp>
 #include <Poseidon/Graphics/Shared/TGAWriter.hpp>
@@ -38,7 +40,8 @@ size_t ComputeDataSize(int width, int height, PixelFormat fmt)
     {
         int bw = (width + 3) / 4;
         int bh = (height + 3) / 4;
-        int blockBytes = (fmt == PixelFormat::DXT1) ? 8 : 16;
+        // BC1 and BC4 are the 8-byte block formats; BC2/BC3/BC5/BC7 are 16.
+        int blockBytes = (fmt == PixelFormat::DXT1 || fmt == PixelFormat::BC4) ? 8 : 16;
         return static_cast<size_t>(bw) * bh * blockBytes;
     }
     return static_cast<size_t>(width) * height * info.bitsPerPixel / 8;
@@ -378,6 +381,31 @@ bool ConvertPixels(const void* src, void* dst, int width, int height, PixelForma
             case PixelFormat::DXT5:
                 decompressDXT5(srcBytes, dstBytes, width, height);
                 return true;
+            // The DXGI-era formats, reachable only through a DDS/EDDS "DX10"
+            // header. BC4 lands in R and BC5 in R,G -- neither invents the
+            // channels it does not carry (see BlockCompression.hpp).
+            case PixelFormat::BC4:
+                DecodeBc4Image(srcBytes, dstBytes, width, height);
+                return true;
+            case PixelFormat::BC5:
+                DecodeBc5Image(srcBytes, dstBytes, width, height);
+                return true;
+            case PixelFormat::BC7:
+                // A false return is the reserved mode-8 encoding, which no
+                // encoder emits; the rest of the image is still decoded.
+                return DecodeBc7Image(srcBytes, dstBytes, width, height);
+            case PixelFormat::R8:
+                // Published as R with an opaque alpha, matching BC4: a mask's
+                // one channel is the information, and replicating it to grey
+                // would make a caller unable to tell mask from luminance.
+                for (int i = 0; i < width * height; ++i)
+                {
+                    dstBytes[i * 4 + 0] = srcBytes[i];
+                    dstBytes[i * 4 + 1] = 0;
+                    dstBytes[i * 4 + 2] = 0;
+                    dstBytes[i * 4 + 3] = 255;
+                }
+                return true;
             default:
                 return false;
         }
@@ -435,9 +463,43 @@ Image Image::FromFile(const std::string& path)
         return {w, h, PixelFormat::RGBA8888, std::move(data)};
     }
 
-    // DDS: read first mipmap, decode DXT if needed → RGBA8888
-    if (ext == ".dds")
+    // DDS / Enfusion .edds: read the largest mipmap. Which reader applies is decided by
+    // the file's own 'ENF1' marker rather than by the extension, because DayZ names the
+    // two interchangeably and an .edds handed to the plain DDS reader does not fail --
+    // it takes the first bytes of the chunk table as pixels and returns garbage (DZ-002).
+    if (ext == ".dds" || ext == ".edds")
     {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (file)
+        {
+            const auto size = file.tellg();
+            if (size > 0)
+            {
+                std::vector<uint8_t> bytes(static_cast<size_t>(size));
+                file.seekg(0);
+                file.read(reinterpret_cast<char*>(bytes.data()), size);
+                if (IsEddsBuffer(bytes.data(), bytes.size()))
+                {
+                    EddsImage edds = ReadEddsBuffer(bytes.data(), bytes.size());
+                    if (!edds.valid())
+                        return {};
+                    auto pixels = std::move(edds.mipmaps[0].data);
+                    if (edds.format == PixelFormat::ARGB8888)
+                    {
+                        // Stored B,G,R,A in memory; Image's RGBA8888 means what it says,
+                        // and everything downstream (PNG, BMP, TGA) writes it verbatim --
+                        // so the swap happens here or the image comes out with red and
+                        // blue exchanged.
+                        for (size_t i = 0; i + 3 < pixels.size(); i += 4)
+                            std::swap(pixels[i], pixels[i + 2]);
+                        return {edds.width, edds.height, PixelFormat::RGBA8888, std::move(pixels)};
+                    }
+                    // Block formats are held compressed; ToRGBA()/ConvertTo() decode them.
+                    return {edds.width, edds.height, edds.format, std::move(pixels)};
+                }
+            }
+        }
+
         auto dds = DDSConverter::ReadDDS(path);
         if (!dds.valid())
             return {};

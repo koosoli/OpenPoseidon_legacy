@@ -8,8 +8,10 @@ using namespace Poseidon;
 
 TEST_CASE("PixelFormatRegistry: all formats have info", "[Graphics][PixelFormat]")
 {
+    // 10 Arma-era formats plus the four the DXGI/DX10 header reaches: BC4, BC5,
+    // BC7 and the single-channel R8 (ARF-001).
     const auto count = PixelFormatRegistry::AllFormatsCount();
-    REQUIRE(count == 10);
+    REQUIRE(count == 14);
 
     const auto* formats = PixelFormatRegistry::AllFormats();
     for (size_t i = 0; i < count; ++i)
@@ -177,5 +179,5 @@ TEST_CASE("PixelFormatRegistry: compressed formats", "[Graphics][PixelFormat]")
 TEST_CASE("PixelFormatRegistry: FormatCount matches AllFormatsCount", "[Graphics][PixelFormat]")
 {
     REQUIRE(PixelFormatRegistry::FormatCount() == static_cast<int>(PixelFormatRegistry::AllFormatsCount()));
-    REQUIRE(PixelFormatRegistry::FormatCount() == 10);
+    REQUIRE(PixelFormatRegistry::FormatCount() == 14);
 }

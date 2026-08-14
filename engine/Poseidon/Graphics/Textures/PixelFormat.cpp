@@ -17,6 +17,10 @@ static constexpr PixelFormatInfo kFormats[] = {
     {PixelFormat::DXT1,     "DXT1",     "BC1 - RGB 5:6:5, 1-bit alpha", 4,  true,  true,  0xFF01},
     {PixelFormat::DXT3,     "DXT3",     "BC2 - RGB 5:6:5, explicit 4-bit alpha", 8,  true,  true,  0xFF03},
     {PixelFormat::DXT5,     "DXT5",     "BC3 - RGB 5:6:5, interpolated 8-bit alpha", 8, true, true,  0xFF05},
+    {PixelFormat::BC4,      "BC4",      "BC4 - single channel, interpolated",       4,  true,  false, 0x0000},
+    {PixelFormat::BC5,      "BC5",      "BC5 - two channels, interpolated",         8,  true,  false, 0x0000},
+    {PixelFormat::BC7,      "BC7",      "BC7 - RGBA, mode-switched partitions",     8,  true,  true,  0x0000},
+    {PixelFormat::R8,       "R8",       "8-bit single channel (mask)",              8,  false, false, 0x0000},
 };
 // clang-format on
 

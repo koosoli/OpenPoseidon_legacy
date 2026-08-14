@@ -20,6 +20,13 @@ enum class PixelFormat : uint8_t
     DXT1,     // BC1 — 4bpp, 1-bit alpha
     DXT3,     // BC2 — 8bpp, explicit alpha
     DXT5,     // BC3 — 8bpp, interpolated alpha
+    // The DXGI-era block formats. Reachable only through a DDS/EDDS "DX10"
+    // header — the Arma-era PAA container has no magic word for them, which is
+    // why their paaMagic is 0 and PAA round-tripping does not offer them.
+    BC4,  // 4bpp, one channel
+    BC5,  // 8bpp, two channels
+    BC7,  // 8bpp, RGBA
+    R8,   // 8bpp uncompressed single channel — a mask, not a palette index (cf. P8)
     Count
 };
 
