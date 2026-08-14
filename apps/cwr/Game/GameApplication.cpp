@@ -1266,6 +1266,28 @@ void GameApplication::RunMainLoop()
                     // camera it did not create, so a command-line flight had neither
                     // a coordinate readout on the Game tab nor "Beam player here".
                     Dev::DebugOverlay::AdoptFreeFlyCamera(camera);
+                    // Put the player on solid ground under the camera.
+                    //
+                    // The camera above deliberately does not disturb the player, which is
+                    // right for the pose but leaves the player wherever the mission put it
+                    // -- coordinates authored for a different island. On Sahrani and
+                    // Chernarus that is frequently open sea, so the player drowns, and
+                    // GModeArcade's end-mission check (WorldImpl: no unit or LSDead ->
+                    // EMKilled) ends the mission, which exits the whole app. The session
+                    // died about half a minute into a flight with exit code 0 and nothing
+                    // in the log resembling a fault, which is a miserable thing to debug.
+                    //
+                    // Only the position moves; the camera effect still owns the view, so
+                    // the captured pose is unchanged.
+                    if (cameraOn && GLandscape)
+                    {
+                        const float groundY = GLandscape->SurfaceY(x, z) + 1.8f;
+                        cameraOn->Move(Vector3(x, groundY, z));
+                        LOG_INFO(Core,
+                                 "--test-world-freefly: grounded the player at {}, {}, {} so a"
+                                 " drowning player cannot end the mission",
+                                 x, groundY, z);
+                    }
                     LOG_INFO(Core,
                              "--test-world-freefly: camera at {}, {}, {}; azimuth {} elevation {} degrees{}", x,
                              target[2], z, target[3], target[4],
