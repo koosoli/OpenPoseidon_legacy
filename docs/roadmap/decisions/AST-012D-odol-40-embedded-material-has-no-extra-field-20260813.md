@@ -1,4 +1,12 @@
-# AST-013 — ODOL revision 40's embedded material is ODOL 73's, and one speculative field was hiding it
+# AST-012D — ODOL revision 40's embedded material is ODOL 73's, and one speculative field was hiding it
+
+> **Renumbered 2026-08-13.** This record was filed as `AST-013`, which was already
+> taken: `AST-013` is *PAA storage semantics and deterministic texture decode* in the
+> ledger, the canonical roadmap (§ AST-013) and the overlay's authorised set. Two
+> different subjects under one id defeats the traceability the ledger exists for, so
+> the ODOL-40 work takes `AST-012D` — beside `AST-012A/B/C`, which are the rest of the
+> versioned-ODOL family. The `AST-013` references in `OdolRevision.hpp` and
+> `ODOLLoader.hpp` still name the old id and need the same correction.
 
 **Date:** 2026-08-13
 **Status:** Measured, and implemented. Format solved on the whole local A1 corpus; the C++ reader

@@ -195,6 +195,20 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
     return kind;
 }
 
+void TextureWgpu::EvictGpu()
+{
+    if (_dynamic || _gpuHandle == 0 || !_bank)
+    {
+        return;
+    }
+    if (WgrRenderer* r = _bank->Renderer())
+    {
+        wgr_texture_destroy(r, _gpuHandle);
+    }
+    _gpuHandle = 0;
+    _uploadTried = false;
+}
+
 bool TextureWgpu::HasAlphaHoles()
 {
     // The cutout decision is reached only for a decoded multi-bit-alpha texture in the
@@ -264,6 +278,10 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 
 uint64_t TextureWgpu::EnsureUploaded()
 {
+    if (_bank)
+    {
+        _bank->NoteTextureUse(this);
+    }
     if (_gpuHandle || _uploadTried)
     {
         return _gpuHandle;

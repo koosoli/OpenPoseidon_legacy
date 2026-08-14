@@ -1040,9 +1040,16 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             GCurrentFoliageKind = isTree ? 2.0f : (isBush ? 1.0f : 0.0f);
         }
 
-        // if neccessary, split it
+        // Legacy backends need an all-ClipLandOn road physically split at every
+        // terrain triangle before drawing. WGPU already publishes the mode-2
+        // heightfield conform above and carries the authored ClipLand selector in
+        // the vertex buffer, so drawing the original shared mesh produces the same
+        // fitted surface in the vertex shader. Avoiding ShadowCache::Shadow here is
+        // important on road-heavy modern worlds: that path allocates a unique split
+        // Shape + vertex buffer per visible placement even though every placement
+        // shares one source road model. GL33 keeps the established CPU split path.
         if (render::Has(specT.routing, render::Routing::OnSurface) &&
-            (sShape->GetAndHints() & ClipLandMask) == ClipLandOn)
+            (sShape->GetAndHints() & ClipLandMask) == ClipLandOn && !GGpuTerrainConform)
         {
             // if all point are LandOn, we can split cache
             Ref<Shape> split = GScene->GetShadowCache().Shadow(this, VUp, forceLOD, *this, true);

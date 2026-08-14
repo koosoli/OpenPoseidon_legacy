@@ -298,7 +298,7 @@ systems:
     plan: engine/WgpuRenderer/docs/procedural-sky-plan.md
     status: PARTIAL
     owner: null
-    audited: 2026-08-10
+    audited: 2026-08-14
     completeness: >-
       Considerably further than "stages 0 and 1 landed" (the RND-030 summary) and
       further than the plan's own "Stage 2 in progress".
@@ -324,10 +324,37 @@ systems:
       re-asserting — and real constellations would need a star catalogue (Yale BSC or
       similar), which is a data job rather than a shader one.
 
-      The moon remains undone: moon_dir is
-      plumbed into the sky UBO and its own comment says the phase is "unused here";
-      nothing in sky.wgsl renders a moon disc, and there are no stars. Grepping for
-      "star" matches only the word "start".
+      CORRECTED 2026-08-14. The paragraph here previously read "nothing in sky.wgsl
+      renders a moon disc, and there are no stars", which contradicted this same
+      scalar's own "STARS DONE 2026-08-05" four paragraphs above and was stale on
+      both counts. `star_field` is at sky.wgsl:641 and `moon_disc` at sky.wgsl:1211.
+      The moon landed in cc8a219 and is verified BY CAPTURE, not by reading: hour 3
+      on Sahrani reports draw=YES at an angular radius of 0.256 degrees against a
+      true 0.26, drawn as a Lommel-Seeliger sphere with real sub-solar direction and
+      earthshine, on a Meeus/Schlyter ephemeris agreeing with an independent
+      implementation to 0.001 in phase.
+
+      Moonlight is also a real directional light, measured 2026-08-14 as a controlled
+      pair on one camera with byte-identical moon geometry: ground and buildings mean
+      luminance 0.0262 with moonlight on against 0.0108 off (2.42x), centre-ground
+      0.0175 against 0.0002 (109x), and the engine's own skySun readout exactly zero
+      with it off -- so at night the entire directional radiance of the scene is the
+      moon. Under an occluder the ground is pure black without it.
+
+      Two gaps remain and neither is a rendering defect. It is calibrated about two
+      orders of magnitude too dim to read: moonIntensity 0.06 times a phase function
+      giving 0.09 at quarter times a ~0.48 cloud dim at the default 0.50 cover puts
+      the lit ground at roughly 1/255, below the 8-bit floor. That is a look decision
+      and is the owner's. And moonlight casts NO shadow: the cascades are built from
+      the moon-swung ShadowDirection, but Scene.cpp:798-802 multiplies the shadow
+      factor by (1 - NightEffect()), which is zero at full night -- wired up and then
+      multiplied away.
+
+      One caution for anyone re-checking this. The moon disc was invisible in the
+      owner's deployed build for reasons entirely outside the sky code: a stale
+      PoseidonGame.exe beside a newer wgpu_renderer.dll, across a WgrSkyRuntime that
+      had grown 80 -> 112 bytes without an ABI bump. See CORE-NEG-003. Verify the
+      binary pair before concluding anything about this system.
     production_call_sites:
       - file: engine/WgpuRenderer/rust/src/sky/mod.rs
         symbol: pub fn render
@@ -399,7 +426,14 @@ systems:
       the knob, and it now has a reason to be turned.
     known_gap: >-
       Cost at Tier 1 resolution is ~32% of the GPU frame, against a headline figure of 8%
-      measured in an 800x600 window. Needs a quality/cost decision, not a re-measurement.
+      measured in an 800x600 window. RESOLVED 2026-08-13: the quality/cost decision this
+      called for was taken -- GTAO renders at half resolution by default (gtao_scale
+      default 2, 6f54385). The remaining gap is that the saving has not been measured on
+      a quiet machine. The one interleaved measurement predating the change put
+      WGR_ABLATE=ao at -2.99 ms against a 34.36 ms base at 1080p, so about 9% of the
+      frame, and the half-res default should recover part of that. Do not quote an
+      absolute here until it is re-measured interleaved: a degraded machine on this
+      project has produced consistently slow numbers with tight spread more than once.
     production_call_sites:
       - file: engine/WgpuRenderer/include/wgpu_renderer.hpp
         symbol: WgrGtao
@@ -512,3 +546,425 @@ unbuilt_candidates: >-
   screen-space-ao was on this list and has been removed: it shipped on 2026-08-05 and is
   registered above as RSYS-GTAO. A stale "unbuilt" entry is worse than a stale "shipped"
   one — it invites someone to build a system twice.
+# Additions to docs/roadmap/renderer-systems-ledger.yaml
+# Audit of 2026-08-14: four shipped renderer systems had no entry at all.
+# Section 1 below is a bare YAML sequence, indented to sit under `systems:` —
+# paste it in as-is. Section 2 is the known_gap proposal set, as comments.
+#
+# VALIDATOR NOTE ON `plan:` (read before editing the three no-plan entries).
+# scripts/validate_renderer_ledger.py:107 matches `^    plan: (\S+)` and feeds
+# whatever it captures to `git ls-files --error-unmatch`. There is therefore NO
+# legal way to write a prose "no plan exists" value: `null`, `"none"`, a quoted
+# sentence and a `>-` block scalar all capture a first token that git cannot
+# resolve, and each fails the whole ledger. The regex does not fire when the
+# value is empty or when two spaces separate `plan:` from a `#` comment, and the
+# `    plan:` required-field check still passes. So the three plan-less systems
+# are written as `plan:  # NONE — ...`, and the same fact is restated inside
+# `completeness`, which is where it can actually be read. If you would rather
+# the ledger carry this in the value, the validator needs a sentinel (e.g. skip
+# the tracked check when the value is exactly `none`) — that is a change to the
+# script, not to this fragment.
+#
+# Every (file, symbol) pair below was checked on 2026-08-14 with
+# `git ls-files --error-unmatch <file>` and a literal grep for the symbol.
+
+
+# =================================================================================
+# SECTION 1 — four new `systems:` entries
+# =================================================================================
+
+  - id: RSYS-TERRAIN
+    title: GPU heightfield terrain rendering
+    plan:  # NONE — no plan document for terrain rendering exists under engine/WgpuRenderer/docs/ (checked 2026-08-14)
+    status: PARTIAL
+    owner: null
+    audited: 2026-08-14
+    completeness: >-
+      PERF-004 OVERRIDE (later on 2026-08-14; supersedes the historical audit
+      below). Modern WGPU worlds now preserve their authored coarse land grid
+      and fine elevation grid, reducing semantic cells 16x on Sahrani and 64x
+      on Takistan, Stratis and ChernarusPlus versus the old bridge. A
+      camera-centred 64-cell / 1,024-layer material window replaces whole-map
+      binding for modern worlds; CWA deliberately keeps the eager policy. The
+      DayZ out-and-back page test moved 918 materials / 337 layers -> 2,120 /
+      541 -> 918 / 337, evicting 308 then 510 old page textures with no drops or
+      validation errors. Authored A3 tile normals are now sampled through their
+      TexGen axes. Main terrain prepass and colour have named GPU timer regions,
+      and final captures pass on CWA, A1, A2/OA, A3 and DayZ. See PERF-004.
+
+      NO PLAN DOCUMENT EXISTS. engine/WgpuRenderer/docs/ holds three terrain-named
+      plans and none of them is this system: terrain-fractal-detail-plan.md and
+      gpu-terrain-water-cull-plan.md are both in this file's own
+      `unbuilt_candidates`, and terrain-conform-vegetation-roads-plan.md is about
+      conforming OTHER geometry onto the terrain, not about drawing it. (The
+      terrain-sun-shadows-plan.md that terrain-conform links to is a dangling
+      link; there is no such file.) So PARTIAL here is measured against the
+      code's own declared inputs, not against a plan — see the two items below.
+
+      WHAT SHIPS, and it is the only terrain path on this backend. The legacy
+      per-segment Shape path is GL33-only; EngineWgpu constructs TerrainWgpu
+      unconditionally. C++ side owns CDLOD node selection (BuildQuadtree,
+      SelectVisibleCdlod in TerrainWgpu::DrawTerrain, feeding WgrTerrainNode);
+      Rust side owns an instanced GRID_N=32 patch mesh with vertex morph and
+      skirts (skirt_k, default 4.0). Ground textures are a bindless
+      binding_array; the cap is TERRAIN_MAX_GROUND_LAYERS, mirrored as
+      WGR_TERRAIN_MAX_GROUND_LAYERS in wgpu_renderer.hpp, and BOTH now read 4096.
+      That 1,024 -> 4,096 move is the fix for WLD-017, where Takistan asked for
+      3,293 bindings, had everything past the 1,024th dropped, and then had 2,269
+      of its materials clamped onto index 1,023 — two thirds of the map on one
+      texture. Terrain materials themselves live in a storage buffer with no cap
+      (CELL_LAYER_MASK allows 32,767); the two index spaces are different and
+      conflating them is what caused WLD-017.
+
+      Also live: the authored Arma 2/OA/A3 surface composition (satellite as
+      colour authority, LCA mask decoded per WLD-019 as a one-hot RGB + three-level
+      alpha INDEXED selector over six slots, not a weight field), default ON —
+      a3_surface_blend defaults 1.0, WGR_TERRAIN_A3_SURFACES=0 reverts. Per-surface
+      `_nopx` normals with two independent distance bands (colour 600/900 m,
+      normal 150/300 m). MAT-040 parallax IS implemented and on: terrain_parallax
+      defaults 0.02, single-step offset from `_nopx` red, faded out by view
+      distance — terrain-only, which MAT-040 established is also where Bohemia
+      puts it. Plus the sun-shadow ceiling mask, sky-visibility (registered
+      separately as RSYS-SKY-VIS-AO), a jitter map, procedural detail noise, the
+      animated coast wet/swash band keyed to the water's own sea level, an
+      fs_terrain_prepass depth/normal variant, and an HDR-vs-LDR `linear`
+      specialisation constant.
+
+      DOC DRIFT WORTH KNOWING. WLD-018 (2026-08-12) states the authored
+      composition is "still gated behind WGR_TERRAIN_A3_SURFACES (default 0)".
+      That was true when written and is false now — WLD-019, same day, flipped it
+      to 1.0 on the owner's look call. Read WLD-019 as the later of the two.
+
+      NOT CHECKED, and I am recording it rather than guessing: nothing here was
+      run. This is a read of the branch only (the machine was committed to a GPU
+      measurement), so no visual or numeric claim in this entry is a capture.
+      Terrain LOD/morph quality, the skirt behaviour and the off-map border were
+      not looked at. Neither was GL33 parity.
+    known_gap: >-
+      HISTORICAL PRE-PERF-004 FINDINGS, BOTH SUPERSEDED. The live tile-normal
+      sampling and main-terrain timer regions now invalidate both paragraphs
+      below; they remain only to preserve the audit trail.
+
+      (1) Arma 3's per-tile terrain normal is plumbed to the GPU and never
+      sampled. LandSave decodes Stage14 into A3TerrainMaterial::tileNormal, it
+      crosses the FFI as WgrTerrainMaterial::tile_normal, and terrain.wgsl
+      declares `tile_normal: u32` in its TerrainMaterial struct at line 71 — and
+      that is the ONLY occurrence in the shader. It is a dead input. Takistan is
+      unaffected (Arma 2/OA author no Stage14; their normals are the per-surface
+      `_nopx` maps), so this costs A3 worlds only.
+
+      (2) Cost is entirely unmeasured. gpu_timers.rs has no terrain region at all
+      — the enum runs water, grass, interior sky and GTAO, and the only terrain
+      token in it is PlanarTerrain, which times the REFLECTION pass, not the main
+      one. So the bindless ground array, the six-slot authored composition, the
+      two detail bands and the parallax tap have no per-pass number on any
+      configuration, and nothing in this entry should be quoted as a cost.
+
+      Not a gap, recorded so it is not mistaken for one: CDLOD node selection is
+      CPU-side by design. Moving it is gpu-terrain-water-cull-plan.md, which this
+      file already lists as unbuilt.
+
+      CURRENT GAP: CDLOD selection/submission is still CPU-side. Move it only if
+      the new GPU regions plus a CPU profile show a material cost. Reforger has
+      an XOB parser foothold but no Enfusion world/terrain ingestion, so no
+      terrain renderer is claimed for that layer yet.
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/terrain/mod.rs
+        symbol: TERRAIN_MAX_GROUND_LAYERS
+      - file: engine/WgpuRenderer/rust/src/terrain/terrain.wgsl
+        symbol: fn fs_terrain
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: TerrainWgpu::DrawTerrain
+      - file: engine/WgpuRenderer/include/wgpu_renderer.hpp
+        symbol: WGR_TERRAIN_MAX_GROUND_LAYERS
+
+  - id: RSYS-GODRAYS
+    title: Volumetric sun shafts (god rays / crepuscular rays)
+    plan:  # NONE — no god-rays plan document exists under engine/WgpuRenderer/docs/ (checked 2026-08-14)
+    status: SHIPPED
+    owner: null
+    audited: 2026-08-14
+    completeness: >-
+      NO PLAN DOCUMENT EXISTS. There is no god-rays plan in
+      engine/WgpuRenderer/docs/, so SHIPPED here is the weaker of the two claims
+      this file distinguishes: the system is present and complete against its own
+      module contract and is on by default. It is NOT a statement that a plan
+      landed, because there is no plan to land. The module arrived with commit
+      f88f0ea.
+
+      Two fullscreen passes. fs_march (godrays.wgsl) is a world-space ray march at
+      a screen-resolution divisor, writing in-scattered sun radiance plus source
+      depth to a small Rgba16Float target; fs_composite is a depth-aware upsample.
+      It is a march rather than a radial blur, and it reads three occluders it does
+      not own, all through existing accessors and with no geometry pass or extra
+      shadow render of its own: the sky's CLD-020 cloud transmittance map, the
+      terrain sun-shadow ceiling mask, and gfx3d's cascade shadow array.
+
+      DEFAULTS AND WIRING, both halves checked. C++ Engine::SkySettings has
+      godRays=true, godRayIntensity=4.0, godRayDensity=6.0e-5, distance 3000 m,
+      g 0.60, cloudInfluence 1.0, steps 16, resDiv 2. The Rust GodRaySettings
+      Default is the same set of values, and the C++ side pushes on every Sky-tab
+      edit so the panel wins the moment it is touched. Density is deliberately an
+      artistic MULTIPLIER on the atmosphere's own aerosol coefficient rather than
+      an absolute: DENSITY_REF = 1.2e-5 is the 1.0x anchor, so the shipped 6.0e-5
+      is 5x and the Sky tab reads it as 60. A unit test asserts the default weather
+      coefficient lands within 0.1e-5 of DENSITY_REF. WGR_GODRAYS=<enabled>[,
+      intensity[,density x1e-6[,steps[,div]]]] is the startup override, and exists
+      because an A/B capture runs --no-dev where the Sky tab is unreachable.
+
+      THREE RUNTIME CONDITIONS, none of them defects, all worth knowing before
+      concluding the effect is broken. First, the pass only EXISTS when HDR is on:
+      lib.rs builds it as `hdr_enabled.then(|| GodRays::new(...))`, so WGR_HDR=0
+      removes it entirely rather than disabling it. Second, it is skipped
+      underwater — the submerged compositor has its own shafts and every occluder
+      this pass reads is above the surface. Third, `active()` returns false for a
+      night or near-overhead sun before the depth resolve the march needs, so such
+      a frame costs nothing at all. It composites into the linear HDR scene after
+      the MSAA resolve (one blended sample per pixel, not sample_count) and before
+      bloom/exposure/tonemap, so the shafts bloom and drive exposure.
+
+      NOT CHECKED. Nothing was run — no capture, no A/B, no look judgement. Cost
+      is unmeasured: gpu_timers.rs has no god-ray region, so the module header's
+      own arithmetic ("~25M taps at 1080p with div 2 / 16 steps") is an estimate
+      and not a measurement, and should not be quoted as one. res_div and steps
+      are the two knobs if it ever needs to be cheap.
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/godrays.rs
+        symbol: DENSITY_REF
+      - file: engine/WgpuRenderer/rust/src/godrays.wgsl
+        symbol: fn fs_march
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: fn render_god_rays
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: godRayIntensity
+
+  - id: RSYS-ROADS
+    title: Road / path rendering (terrain-conformed on-surface geometry)
+    plan: engine/WgpuRenderer/docs/terrain-conform-vegetation-roads-plan.md
+    status: PARTIAL
+    owner: null
+    audited: 2026-08-14
+    completeness: >-
+      PERF-004 OVERRIDE (later on 2026-08-14; supersedes the historical audit
+      below). WGPU no longer sends all-ClipLandOn roads through per-placement
+      ShadowCache SurfaceSplit. It draws the shared authored mesh through the
+      existing heightfield-conform vertex path; GL33 retains its established
+      CPU split. The exact WLD-021 Takistan camera is now smooth and continuous,
+      and an instrumented run emitted zero road surface-split copies. This closes
+      the unbounded per-placement split Shape/VB growth and the banding symptom.
+
+      READ THE PLAN LINK NARROWLY. That document's Part B is the only plan text
+      covering roads, and its scope is moving the per-frame conform COST off the
+      CPU — not road rendering. The appearance of roads has no plan document at
+      all. PARTIAL is true against both halves, and for two independent reasons.
+
+      REASON 1 — Part B is entirely unimplemented. B1 (memoize the SurfaceSplit
+      result on the road shape, keyed to a terrain generation) has not landed:
+      there is no conform cache, no split cache and no terrain-generation key
+      anywhere in engine/Poseidon/. FaceArray::SurfaceSplit is still called from
+      ClipShape.cpp:241 on the per-frame draw path, and Shape::SurfaceSplit
+      (ShapeLand.cpp:28) still fits every vertex to the landscape. B2 (bake to a
+      resident static VB at level load, and drop roads from the OnSurface
+      per-frame branch) has not landed either. Roads remain excluded from vertex
+      buffers and drawn from a transient CPU tlTable. The plan's own status block
+      says "proposed", and unlike several other plans in this file it is telling
+      the truth.
+
+      What DID land on the wgpu side, and it is not Part B: GPU terrain conform.
+      GGpuTerrainConform is set true in EngineWgpu (WGR_GPU_CONFORM=0 forces the
+      GL33 behaviour), and Object::PublishConformPlane publishes a mode-2
+      per-vertex ClipLand conform plane for any shape carrying ClipLandKeep or
+      ClipLandOn — which roads do. GL33 never sets this, which is exactly why it
+      is the one per-draw path a road can reach on wgpu and not on GL33, and why
+      WLD-021 ablated it. I did NOT establish whether publishing that plane
+      actually removes the CPU SurfaceSplit for roads or merely runs alongside it;
+      that needs tracing and I did not trace it.
+
+      Also fixed and worth recording: EngineWgpu was inheriting EngineDummy's ZERO
+      ZShadowEpsilon/ZRoadEpsilon while GL33 returns 0.01/0.005, so under wgpu a
+      road was laid EXACTLY coplanar with the terrain it was cut against. Now at
+      GL33 parity (0.005). Real defect, genuinely fixed — and it did not change the
+      banding by one pixel, which is the second reason.
+
+      REASON 2 — see known_gap. Roads render, and they render WRONG, and it is
+      open. Do not write this system up as clean.
+
+      Scale, from WLD-020: Takistan places 13,501 road links over 122 segment
+      models, all parsing, all eight roads_e RVMATs conventional and none declaring
+      a Stage0. Not a missing asset, not a parse failure, not a material-family
+      gap.
+
+      NOT CHECKED. No capture was taken and nothing was run; the decisive test
+      WLD-021 specifies has not been run either (see known_gap). Bridges and tyre
+      tracks are on the same OnSurface family and were not looked at.
+    known_gap: >-
+      HISTORICAL PRE-PERF-004 DEFECT, NOW SUPERSEDED — the Arma 2 / OA road banding (WLD-020,
+      WLD-021). Takistan roads render as an alternating light/dark "piano key" run
+      of trapezoids, one key per placed segment, fixed in world space, reproduced
+      on the first capture. The road is FULLY drawn — no holes, no depth fight,
+      both tones are road surface — and the dark pieces are ambient-only: sampled
+      at 08:00/12:00/16:00 the light pieces track the sun (in opposite directions,
+      which only real geometry can do) and the dark ones do not move at all.
+
+      THE CONTROL THAT MAKES THIS A RENDERER BUG: same world, same camera, same
+      data, --render gl33 is CLEAN. That removes the WRP, the placements, the
+      segment models, the RVMATs and the road class logic from suspicion — GL33
+      consumes all of them identically.
+
+      Nine hypotheses eliminated by measurement: the decal depth bias, the missing
+      z-epsilons, mirrored placements (all 438,906 Takistan placements read out of
+      the WRP; zero negative determinants, `up` exactly (0,1,0) on all 13,420 road
+      placements), per-model normal data (LOD0 normals exactly (0,+1,0) on every
+      vertex of four road families, and every placement is a pure yaw, so no two
+      can differ in N·L), the two-lighting-path fork, the depth prepass
+      (WGR_PREPASS=0), MSAA (WGR_MSAA=0), GPU terrain conform, and terrain
+      LOD/morph. The per-draw material family is dead too: all 501 road shapes
+      traced byte-identical with diffuse (1,1,1).
+
+      CURRENT LEADING HYPOTHESIS, 2026-08-14 amendment, NOT YET TESTED. The CSM
+      receiver-plane bias was never in the eliminated set and cannot have been:
+      WGR_ABLATE accepts no `shadow` token. Shape::SurfaceSplit fits road vertices
+      to the landscape and never calls InvalidateNormals, so a conformed road keeps
+      its flat authored normal while its triangles tilt — and the two halves of the
+      shadow bias then disagree, the normal-offset term reading the flat stored
+      normal and the receiver-plane gradient reading the true screen-space
+      derivatives of world position. GL33 has a separately written shadow sampler
+      and would be immune by construction, which is the shape of the evidence.
+
+      THE TEST, and it is quantitative rather than presence/absence: add a `shadow`
+      token to WGR_ABLATE at the push site, then sweep the normal-offset multiplier
+      (frame.shadow.ctlb.z) at the reference camera. The two tones should move
+      monotonically and together; if they do not move, the hypothesis is wrong even
+      if ablation happens to change the frame. It has not been run — the machine
+      was committed to a performance measurement.
+
+      Two adjacent items, neither an appearance bug: ShadowCache::Shadow declares
+      `int count = 0` and never updates it, so the eviction guard can never fire
+      (13,420 links each holding a split Shape + VB — real memory growth); and a
+      road model first loaded AFTER the world bulk pass gets OptimizeOneShape
+      before RoadType sets OnSurface, keeps a vertex buffer, and draws with NO
+      terrain conform at all. Latent on Takistan, live for streamed content.
+
+      CURRENT GAP: bridges and tyre tracks share parts of the OnSurface family
+      but were not separately judged at the reference road camera. The shared
+      WGPU conform branch is common to them, so this is an explicit coverage gap,
+      not evidence of a remaining road defect.
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.hpp
+        symbol: ZRoadEpsilon
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: WGR_ROAD_TRACE
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: GGpuTerrainConform
+      - file: engine/Poseidon/Graphics/Rendering/Shape/ShapeLand.cpp
+        symbol: Shape::SurfaceSplit
+      - file: engine/Poseidon/World/Scene/ObjectClasses.hpp
+        symbol: class RoadType
+
+  - id: RSYS-MODERN-RESIDENCY
+    title: Modern-world WGPU terrain, object, model and texture residency
+    plan: docs/roadmap/decisions/PERF-004-wgpu-modern-world-residency-and-terrain-20260814.md
+    status: SHIPPED
+    owner: null
+    audited: 2026-08-14
+    completeness: >-
+      Modern WRP placements remain compact by land cell and a camera-centred
+      working set creates at most 20,000 Objects in 128-object update batches.
+      WGPU model registration captures per-model texture and dedicated mesh
+      ownership; first/last live instance pins/releases it. Unshared object
+      textures evict at last use, a last-used-frame LRU enforces the dynamic
+      memory budget, and geometry-pool retired buffers survive only until the
+      next submitted frame. Terrain plates use an independent camera-centred
+      page owner so generic eviction cannot invalidate its Rust bind group.
+
+      Full ChernarusPlus (2,971,218 placements) and static A1/A2/A3/CWA captures
+      pass. The DayZ object sweep reached 19,982 -> 19,939 -> 19,982 live objects
+      with zero refused and returned to about 1.20 GB tracked; retired geometry
+      remained zero. The independent material-page sweep evicted 308 then 510
+      old page textures and returned to its original bindings.
+    known_gap: >-
+      Rust model/LOD/section metadata is append-only when a streamed C++ model is
+      destroyed and later re-registered. GPU mesh and texture bytes are bounded,
+      but long traversal can grow this small metadata store. Model decode and
+      texture transcode are also synchronous inside the 128-create batch and can
+      still produce traversal micro-hitches.
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Landscape::UpdateModernObjectResidency
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: TerrainWgpu::UpdateGroundTexturePages
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::ReleaseGpuModel
+      - file: engine/WgpuRenderer/TextureBankWgpu.cpp
+        symbol: TextureBankWgpu::TrimResidency
+      - file: engine/WgpuRenderer/rust/src/gfx3d/pool.rs
+        symbol: frame_submitted
+
+  - id: RSYS-CIRRUS
+    title: High cirrus cloud deck (second cloud layer)
+    plan:  # NONE — no cirrus plan document exists; procedural-sky-plan.md never mentions it (checked 2026-08-14)
+    status: SHIPPED
+    owner: null
+    audited: 2026-08-14
+    completeness: >-
+      NO PLAN DOCUMENT EXISTS, and specifically it is NOT covered by
+      procedural-sky-plan.md — that plan's Stage 5 is the cumulus deck, and the
+      string "cirrus" does not occur in it at all. So this is a second, separate
+      cloud layer with no plan of its own, and SHIPPED is the "the system exists
+      and is complete against its own contract" claim, not "a plan landed".
+      Registered separately from RSYS-PROC-SKY for exactly the reason this file
+      exists: it is a distinct system that would otherwise be invisible under
+      another name.
+
+      A high layer centred at CIRRUS_ALT = 7,000 m ASL, well clear of the cumulus
+      deck, in three modes: 0 off, 1 flat sheet (one ray/sphere intersection, one
+      field evaluation), 2 volumetric thin-shell march (CIRRUS_STEPS = 6 through a
+      500–1,400 m shell that thickens with puffiness). DEFAULT IS 2, the
+      volumetric one, on both sides of the FFI — Engine::SkySettings has
+      cirrusEnabled = true and cirrusVolumetric = true, and the Rust
+      cirrus_mode_from_env default is 2. WGR_CIRRUS overrides it, for the same
+      reason WGR_GODRAYS exists: an A/B capture runs --no-dev.
+
+      PUFFINESS is a SHAPE control, not a brightness control, added in 9238f3e:
+      one authored slider (cirrusPuffiness, default 0.5; cirrusPuffVariation,
+      default 0.15) driving five correlated constants through cirrus_mix3 — aspect
+      ratio, fine-octave weight, erosion, optical density and shell thickness —
+      from cirrus fibratus at 0 (7.7:1 wind-sheared streaks) through the shipped
+      look at 0.5 (4:1, ~7 km across and ~28 km long) to cellular lumps at 1. The
+      middle knot IS the previously hard-coded constant, so 0.5 is a no-op against
+      the old look — deliberately, so the control could ship without changing the
+      default appearance. It varies slowly on the sim clock through a drift-driven
+      signal wrapped at 100 km; WGR_CIRRUS_PUFF=<puff>[,<var>[,<phase>]] pins it,
+      the phase field existing because the variation rides the sim clock and a
+      capture needs it reproducible. Both entry points cross the FFI as their own
+      functions (wgr_set_cirrus_mode, wgr_set_cirrus_puffiness) rather than as
+      WgrSkyLook lanes, because that struct's size is part of the ABI handshake —
+      see CORE-NEG-003 for what happens when that rule is broken.
+
+      Also recorded: the layer's two noise periods were once rationally related
+      and made it repeat visibly (cebc50c); the sheet frequency is now
+      1/7,000 m after 1/26,000 produced a single blob filling the sky, with a
+      ~64 km domain warp on top.
+
+      NOT CHECKED. Nothing was run and no frame was looked at, so no claim here is
+      a visual verification. Cost is unmeasured in both modes — gpu_timers.rs has
+      no cirrus or sky region, so the volumetric default's six-step march has no
+      number on any configuration and the flat-vs-volumetric price that WGR_CIRRUS
+      was built to answer has not actually been asked. The grazing-path clamp
+      (thickness / CIRRUS_PATH_SIN_MIN, and CIRRUS_STEPS does not grow with
+      thickness) means the worst case is at puffiness 1, which is where any
+      measurement should start.
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/sky/mod.rs
+        symbol: cirrus_puff_target
+      - file: engine/WgpuRenderer/rust/src/sky/sky.wgsl
+        symbol: fn cirrus_shape
+      - file: engine/WgpuRenderer/rust/src/ffi.rs
+        symbol: wgr_set_cirrus_puffiness
+      - file: engine/Poseidon/Graphics/Core/Engine.hpp
+        symbol: cirrusPuffiness
+      - file: engine/WgpuRenderer/EngineWgpu.hpp
+        symbol: SetSkyCirrus
+
+
+# =================================================================================

@@ -62,6 +62,16 @@ pub struct WgrAbiCheck {
     pub log_callbacks_size: u32,
     pub frame_size: u32,
     pub required_features: u32,
+    /// FNV-1a over the size of every struct that crosses this boundary — see
+    /// `wgr_layout_hash()` and the identical list in `wgpu_renderer.hpp`.
+    ///
+    /// The three explicit sizes above cover only the handshake's own arguments and
+    /// the frame descriptor, so a shared struct could grow on one side and the pair
+    /// still shook hands. That is not hypothetical: `WgrSkyRuntime` went from 5 vec4
+    /// to 7 (80 -> 112 bytes) when the moon disc gained `moon_params` + `moon_sun`,
+    /// and an engine binary from before that change kept passing this check while
+    /// this crate read the two new lanes off the end of an 80-byte stack object.
+    pub layout_hash: u32,
 }
 
 const WGR_ABI_FEATURE_BUILD_ID: u32 = 0x0000_0001;
@@ -229,8 +239,18 @@ pub struct WgrModelSection {
     pub index_begin: u32,
     pub index_count: u32,
     pub variant: u32,
-    pub _pad: u32,
+    // Per-section flags (wgpu_renderer.hpp: WgrModelSectionFlags). Bit 0 =
+    // WGR_MODEL_SECTION_REFLECTIVE, the material named an EnvironmentMap. Was dead
+    // padding; the bit rides here because WgrModelMaterial is size-locked at 192 bytes.
+    pub flags: u32,
 }
+
+// WgrModelSection::flags bit 0: this section's material names an EnvironmentMap, so the
+// GPU-driven fragment shader adds a Fresnel-weighted sky reflection (DZ-003).
+pub const WGR_MODEL_SECTION_REFLECTIVE: u32 = 1;
+
+// WgrDraw3D::flags bit 1: the per-draw twin of WGR_MODEL_SECTION_REFLECTIVE.
+pub const WGR_DRAW3D_REFLECTIVE: u32 = 2;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);
@@ -1324,7 +1344,82 @@ const _: () = assert!(std::mem::size_of::<WgrWaterInteractionParams>() == 96);
 const _: () = assert!(std::mem::align_of::<WgrWaterInteractionParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrSlice<WgrCamera>>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrFrame>() == 576);
-const _: () = assert!(std::mem::size_of::<WgrAbiCheck>() == 24);
+const _: () = assert!(std::mem::size_of::<WgrAbiCheck>() == 28);
+
+// --- Cross-language layout hash ----------------------------------------------
+//
+// FNV-1a over the size of every struct that crosses the C ABI, in a fixed order
+// that wgpu_renderer.hpp's WgrLayoutHash() repeats exactly. Both sides compute it
+// from their OWN definitions, so the number only agrees when the definitions do,
+// and wgr_abi_validate refuses the pair when it does not.
+//
+// The per-struct asserts above catch a layout that drifts within ONE build. This
+// catches a layout that drifted BETWEEN two builds — an engine .exe and a renderer
+// .dll that were compiled at different commits and then deployed together, which
+// links fine, shakes hands fine, and silently reads garbage.
+//
+// Adding a new shared struct? Append it to BOTH lists.
+const fn hash_size(mut h: u32, size: usize) -> u32 {
+    let s = size as u32;
+    let mut i = 0;
+    while i < 4 {
+        h ^= (s >> (i * 8)) & 0xFF;
+        h = h.wrapping_mul(16777619); // FNV-1a 32-bit prime
+        i += 1;
+    }
+    h
+}
+
+const fn wgr_layout_hash() -> u32 {
+    use std::mem::size_of as sz;
+    let mut h = 2166136261u32; // FNV-1a 32-bit offset basis
+    h = hash_size(h, sz::<WgrVertex2D>());
+    h = hash_size(h, sz::<WgrDraw2DBatch>());
+    h = hash_size(h, sz::<WgrMeshVertex>());
+    h = hash_size(h, sz::<WgrDraw3D>());
+    h = hash_size(h, sz::<WgrLight>());
+    h = hash_size(h, sz::<WgrModelSection>());
+    h = hash_size(h, sz::<WgrModelMaterial>());
+    h = hash_size(h, sz::<WgrModelLod>());
+    h = hash_size(h, sz::<WgrInstance>());
+    h = hash_size(h, sz::<WgrTonemap>());
+    h = hash_size(h, sz::<WgrExposure>());
+    h = hash_size(h, sz::<WgrSky>());
+    h = hash_size(h, sz::<WgrSkyLook>());
+    h = hash_size(h, sz::<WgrSkyRuntime>());
+    h = hash_size(h, sz::<WgrTerrainSunShadow>());
+    h = hash_size(h, sz::<WgrTerrainUv>());
+    h = hash_size(h, sz::<WgrTerrainMaterial>());
+    h = hash_size(h, sz::<WgrSkyVisibility>());
+    h = hash_size(h, sz::<WgrFoliage>());
+    h = hash_size(h, sz::<WgrGtao>());
+    h = hash_size(h, sz::<WgrSkyVis>());
+    h = hash_size(h, sz::<WgrRenderParams>());
+    h = hash_size(h, sz::<WgrFrameParams>());
+    h = hash_size(h, sz::<WgrCameraShadow>());
+    h = hash_size(h, sz::<WgrCamera>());
+    h = hash_size(h, sz::<WgrShadowCaster>());
+    h = hash_size(h, sz::<WgrShadowPass>());
+    h = hash_size(h, sz::<WgrCmd>());
+    h = hash_size(h, sz::<WgrOverlayVertex>());
+    h = hash_size(h, sz::<WgrOverlayDraw>());
+    h = hash_size(h, sz::<WgrTerrainParams>());
+    h = hash_size(h, sz::<WgrTerrainNode>());
+    h = hash_size(h, sz::<WgrTerrainBatch>());
+    h = hash_size(h, sz::<WgrGrassBatch>());
+    h = hash_size(h, sz::<WgrGrassTrack>());
+    h = hash_size(h, sz::<WgrGrassDownwash>());
+    h = hash_size(h, sz::<WgrGrassParams>());
+    h = hash_size(h, sz::<WgrWaterParams>());
+    h = hash_size(h, sz::<WgrWaterNode>());
+    h = hash_size(h, sz::<WgrWaterBatch>());
+    h = hash_size(h, sz::<WgrWaterInteractionEvent>());
+    h = hash_size(h, sz::<WgrWaterInteractionParams>());
+    h = hash_size(h, sz::<WgrSurfaceDesc>());
+    h = hash_size(h, sz::<WgrLogCallbacks>());
+    h = hash_size(h, sz::<WgrFrame>());
+    h
+}
 
 pub type WgrRenderer = Renderer;
 
@@ -1343,9 +1438,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(4)
+            .unwrap_or(5)
     } else {
-        4
+        5
     }
 }
 
@@ -1366,7 +1461,21 @@ pub unsafe extern "C" fn wgr_abi_validate(check: *const WgrAbiCheck) -> i32 {
         && check.surface_desc_size == std::mem::size_of::<WgrSurfaceDesc>() as u32
         && check.log_callbacks_size == std::mem::size_of::<WgrLogCallbacks>() as u32
         && check.frame_size == std::mem::size_of::<WgrFrame>() as u32
+        && check.layout_hash == wgr_layout_hash()
         && (check.required_features & !WGR_ABI_SUPPORTED_FEATURES) == 0) as i32
+}
+
+/// The renderer's own cross-language layout hash, for reading a mismatched pair
+/// out of a shipped DLL (dumpbin / GetProcAddress) when the engine log has only
+/// reported its own number.
+///
+/// Deliberately NOT declared in wgpu_renderer.hpp: the engine links this DLL
+/// implicitly, so an entry point the engine imports must exist in every DLL it
+/// might meet, and a missing one kills the process at load before any handshake
+/// can report anything. The gate stays `wgr_abi_validate`.
+#[unsafe(no_mangle)]
+pub extern "C" fn wgr_abi_layout_hash() -> u32 {
+    wgr_layout_hash()
 }
 
 /// Queue one capture of the next fully composited swapchain frame.
@@ -1408,34 +1517,52 @@ pub unsafe extern "C" fn wgr_screenshot_take(
 
 #[cfg(test)]
 mod abi_tests {
-    #[test]
-    fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 4);
-    }
-
-    #[test]
-    fn mismatched_abi_layout_is_refused() {
-        let check = super::WgrAbiCheck {
-            abi_version: super::wgr_abi_version(),
-            struct_size: std::mem::size_of::<super::WgrAbiCheck>() as u32,
-            surface_desc_size: std::mem::size_of::<super::WgrSurfaceDesc>() as u32,
-            log_callbacks_size: std::mem::size_of::<super::WgrLogCallbacks>() as u32,
-            frame_size: 0,
-            required_features: super::WGR_ABI_FEATURE_BUILD_ID,
-        };
-        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
-    }
-
-    #[test]
-    fn unsupported_abi_feature_is_refused() {
-        let check = super::WgrAbiCheck {
+    // A well-formed declaration from a same-commit engine build.
+    fn good_check() -> super::WgrAbiCheck {
+        super::WgrAbiCheck {
             abi_version: super::wgr_abi_version(),
             struct_size: std::mem::size_of::<super::WgrAbiCheck>() as u32,
             surface_desc_size: std::mem::size_of::<super::WgrSurfaceDesc>() as u32,
             log_callbacks_size: std::mem::size_of::<super::WgrLogCallbacks>() as u32,
             frame_size: std::mem::size_of::<super::WgrFrame>() as u32,
-            required_features: 0x8000_0000,
-        };
+            required_features: super::WGR_ABI_FEATURE_BUILD_ID,
+            layout_hash: super::wgr_abi_layout_hash(),
+        }
+    }
+
+    #[test]
+    fn exported_abi_version_matches_the_public_contract() {
+        assert_eq!(super::wgr_abi_version(), 5);
+    }
+
+    #[test]
+    fn matching_abi_declaration_is_accepted() {
+        assert_eq!(unsafe { super::wgr_abi_validate(&good_check()) }, 1);
+    }
+
+    #[test]
+    fn mismatched_abi_layout_is_refused() {
+        let mut check = good_check();
+        check.frame_size = 0;
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
+    // The regression this whole handshake exists for: an engine binary built before
+    // a shared struct grew (WgrSkyRuntime, 80 -> 112 bytes when the moon disc landed)
+    // used to pass, and the renderer then read the moon's radius and illuminated
+    // fraction off the end of an 80-byte stack object. Any size drift in ANY shared
+    // struct now moves the hash, so the pair is refused instead of drawing garbage.
+    #[test]
+    fn drifted_shared_struct_layout_is_refused() {
+        let mut check = good_check();
+        check.layout_hash = super::hash_size(super::wgr_abi_layout_hash(), 80);
+        assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
+    }
+
+    #[test]
+    fn unsupported_abi_feature_is_refused() {
+        let mut check = good_check();
+        check.required_features = 0x8000_0000;
         assert_eq!(unsafe { super::wgr_abi_validate(&check) }, 0);
     }
 }
@@ -2383,6 +2510,22 @@ pub struct WgrGrassStats {
     pub far_vertices: u32,
 }
 
+/// Dynamic WGPU residency lower bound. The byte fields count portable resource
+/// payload/capacity owned by the renderer; driver-private alignment and metadata
+/// are not observable through WebGPU and are therefore not included.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMemoryStats {
+    pub tracked_bytes: u64,
+    pub budget_bytes: u64,
+    pub object_texture_bytes: u64,
+    pub geometry_live_bytes: u64,
+    pub geometry_capacity_bytes: u64,
+    pub geometry_retired_bytes: u64,
+    pub object_texture_count: u32,
+    pub over_budget: u32,
+}
+
 /// Fill `out` with the latest grass instance counts. Returns 1 on success, 0 when
 /// the renderer or `out` is null.
 ///
@@ -2413,6 +2556,28 @@ pub unsafe extern "C" fn wgr_get_grass_stats(
                 far_vertices: s.far_vertices,
             };
         }
+        1
+    }))
+    .unwrap_or(0)
+}
+
+/// Fill `out` with the current dynamic WGPU residency accounting. Returns 1 on
+/// success and 0 for a null renderer/output pointer.
+///
+/// # Safety
+/// `renderer` must be a live `WgrRenderer` or null; `out` must point to one
+/// writable `WgrMemoryStats` or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_memory_stats(
+    renderer: *mut WgrRenderer,
+    out: *mut WgrMemoryStats,
+) -> u32 {
+    if renderer.is_null() || out.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        unsafe { *out = renderer.memory_stats() };
         1
     }))
     .unwrap_or(0)

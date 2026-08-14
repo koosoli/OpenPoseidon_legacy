@@ -205,6 +205,15 @@ static float EnvFloat(const char* name, float fallback)
     return std::strtof(v, nullptr);
 }
 
+static bool IsTerrainPageTextureName(const char* name)
+{
+    // These are world-tile assets, not general material textures. Restricting
+    // eviction to this family avoids invalidating a retained object material
+    // that happens to share a normal surface albedo with the ground.
+    return ContainsNoCase(name, "\\layers\\") || ContainsNoCase(name, "/layers/") ||
+           ContainsNoCase(name, "_lca.") || ContainsNoCase(name, "_lco.");
+}
+
 TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(engine), _renderer(renderer)
 {
     _baseMult = EnvFloat("WGR_TERRAIN_LOD_BASE", 4.0f);
@@ -214,6 +223,10 @@ TerrainWgpu::TerrainWgpu(EngineWgpu& engine, WgrRenderer* renderer) : _engine(en
     // infinite ocean; 1 = map only. Defaults to match the water extent (WGR_WATER_EXTENT)
     // so seabed underlies the whole transparent ocean with no seam at the old map edge.
     _extentFactor = std::max(1.0f, EnvFloat("WGR_TERRAIN_EXTENT", 3.0f));
+    _terrainPageRadius = std::max(8, static_cast<int>(EnvFloat("WGR_TERRAIN_PAGE_RADIUS_CELLS", 64.0f)));
+    _terrainPageLayerBudget = static_cast<uint32_t>(std::clamp(
+        static_cast<int>(EnvFloat("WGR_TERRAIN_PAGE_LAYERS", 1024.0f)), 64,
+        static_cast<int>(WGR_TERRAIN_MAX_GROUND_LAYERS)));
 }
 
 void TerrainWgpu::BuildQuadtree(const Landscape& land)
@@ -283,7 +296,27 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _params.data_scale = 1.0f;
     wgr_terrain_set_heightmap(_renderer, heights.data(), &_params);
 
-    UploadGroundTextures(land);
+    // Legacy worlds have small, reusable tile sets and keep the eager path.
+    // Modern worlds name thousands of per-region LCA/LCO pages; their first
+    // working set is selected below once DrawTerrain has the camera.
+    _pagedGroundMaterials = false;
+    for (int i = 0; i < land.GetNTextures(); ++i)
+    {
+        if (const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+            source != nullptr && source->surfaceCount != 0 && source->mask.GetLength() != 0)
+        {
+            _pagedGroundMaterials = true;
+            break;
+        }
+    }
+    _terrainPageCenterX = -0x3fffffff;
+    _terrainPageCenterZ = -0x3fffffff;
+    _terrainPageTestUpdate = 0;
+    _terrainPageTestPhase = -1;
+    if (!_pagedGroundMaterials)
+    {
+        UploadGroundTextures(land);
+    }
     UploadIndexMap(land);
     UploadGeography(land);
     UploadJitterMap(land);
@@ -306,119 +339,144 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     return true;
 }
 
-void TerrainWgpu::UploadGroundTextures(const Landscape& land)
+void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials)
 {
-    // A terrain material and a ground layer are different things, and conflating
-    // them costs a world its terrain. Materials live in a storage buffer with no
-    // cap; ground layers live in a binding_array of at most
-    // WGR_TERRAIN_MAX_GROUND_LAYERS views. Takistan declares 3,293 materials over
-    // a far smaller set of distinct images, so binding one layer per material
-    // overran the array and left every material past the cap sampling the last
-    // layer that fitted. Deduplicating by texture makes the layer array a
-    // function of the artwork rather than of the material count.
+    // A terrain material and a ground layer are different things. Modern worlds
+    // can declare thousands of per-region material descriptors and page images;
+    // only the camera working set receives its full authored composition. Every
+    // other descriptor keeps a cheap shared surface albedo, so distant terrain
+    // degrades to a plausible coarse material instead of white.
     const int materialCount = std::max(1, land.GetNTextures());
-    std::vector<uint64_t> handles;
-    std::vector<Texture*> boundTextures;
-    // Layer 0 is the renderer's white fallback. Reserving it means every material
-    // whose cell texture is missing or would not upload costs no layer at all.
-    handles.push_back(0);
-    boundTextures.push_back(nullptr);
+    const bool paged = activeMaterials != nullptr;
+    const size_t layerLimit = paged ? _terrainPageLayerBudget : WGR_TERRAIN_MAX_GROUND_LAYERS;
+    std::vector<TextureWgpu*> oldPageTextures = std::move(_terrainPageTextures);
+    _terrainPageTextures.clear();
+
+    std::vector<uint64_t> handles{0};
+    std::vector<Texture*> boundTextures{nullptr};
     size_t dropped = 0;
-    const auto bindLayer = [&](Texture* raw) -> uint32_t
+    const auto bindLayer = [&](Texture* raw, bool terrainPage) -> uint32_t
     {
         if (raw == nullptr)
-        {
             return 0;
-        }
         const auto found = std::find(boundTextures.begin(), boundTextures.end(), raw);
         if (found != boundTextures.end())
         {
+            if (terrainPage)
+            {
+                auto* page = static_cast<TextureWgpu*>(raw);
+                if (std::find(_terrainPageTextures.begin(), _terrainPageTextures.end(), page) ==
+                    _terrainPageTextures.end())
+                    _terrainPageTextures.push_back(page);
+            }
             return static_cast<uint32_t>(found - boundTextures.begin());
         }
-        if (handles.size() >= WGR_TERRAIN_MAX_GROUND_LAYERS)
+        if (handles.size() >= layerLimit)
         {
             ++dropped;
             return 0;
         }
-        const uint64_t handle = static_cast<TextureWgpu*>(raw)->EnsureUploaded();
+        auto* texture = static_cast<TextureWgpu*>(raw);
+        const uint64_t handle = texture->EnsureUploaded();
         if (handle == 0)
-        {
             return 0;
-        }
         boundTextures.push_back(raw);
         handles.push_back(handle);
+        if (terrainPage && std::find(_terrainPageTextures.begin(), _terrainPageTextures.end(), texture) ==
+                               _terrainPageTextures.end())
+            _terrainPageTextures.push_back(texture);
         return static_cast<uint32_t>(handles.size() - 1);
     };
 
-    std::vector<uint32_t> cellLayer(static_cast<size_t>(materialCount), 0);
-    for (int i = 0; i < materialCount; i++)
-    {
-        cellLayer[static_cast<size_t>(i)] = bindLayer(land.GetTexture(i));
-    }
-
-    // Each index-map value is a terrain-material index, not merely a colour
-    // texture.  Legacy worlds have one descriptor per colour texture; OPRW25
-    // descriptors additionally select an LCA mask and base/overlay surfaces.
     std::vector<WgrTerrainMaterial> materials(static_cast<size_t>(materialCount));
     _a3TerrainTextures.clear();
-    size_t authored = 0;
-    size_t complete = 0;
-    // `resolved` says whether the authored image actually reached a layer. It has
-    // to be reported rather than inferred from the returned index: an authored
-    // surface is often the very image the cell already uses -- Stratis's
-    // gdt_strbeach_co is both -- so a correctly deduplicated binding shares the
-    // cell's layer and is indistinguishable from a fallback by index alone.
-    const auto bindTexture = [&](const RStringB& name, uint32_t fallback, bool& resolved) -> uint32_t
+    const auto bindTexture = [&](const RStringB& name, uint32_t fallback, bool& resolved,
+                                 bool terrainPage) -> uint32_t
     {
         resolved = false;
         if (name.GetLength() == 0)
-        {
             return fallback;
-        }
         Ref<Texture> texture = GlobLoadTexture(name);
         Texture* raw = texture;
         if (raw == nullptr)
-        {
             return fallback;
-        }
-        // Retain every Ref we resolve, whether or not it took a new layer.
-        // Landscape owns the cell textures, but nothing else owns these, and
-        // dedup compares raw pointers: releasing one would let a later load
-        // reuse its address and match the wrong layer.
         _a3TerrainTextures.push_back(texture);
-        const uint32_t layer = bindLayer(raw);
+        const uint32_t layer = bindLayer(raw, terrainPage);
         if (layer == 0)
-        {
             return fallback;
-        }
         resolved = true;
         return layer;
     };
-    for (int i = 0; i < materialCount; ++i)
+
+    // The eager compatibility path remains byte-for-byte in spirit: every
+    // legacy tile enters the layer array. On modern worlds, bind only a small
+    // set of distinct surface albedos as the far-field fallback.
+    if (!paged)
     {
-        WgrTerrainMaterial& material = materials[static_cast<size_t>(i)];
-        material.legacy = cellLayer[static_cast<size_t>(i)];
-        material.satellite = material.legacy;
-        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
-        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+        for (int i = 0; i < materialCount; ++i)
         {
-            continue;
+            materials[static_cast<size_t>(i)].legacy = bindLayer(land.GetTexture(i), false);
+            materials[static_cast<size_t>(i)].satellite = materials[static_cast<size_t>(i)].legacy;
         }
+    }
+    else
+    {
+        for (int i = 0; i < materialCount; ++i)
+        {
+            const A3TerrainMaterial* source = land.GetA3TerrainMaterial(i);
+            if (source == nullptr)
+                continue;
+            for (uint32_t slot = 0; slot < source->surfaceCount; ++slot)
+            {
+                if (source->surfaces[slot].GetLength() == 0)
+                    continue;
+                bool resolved = false;
+                const uint32_t fallback = bindTexture(source->surfaces[slot], 0, resolved, false);
+                if (resolved)
+                {
+                    materials[static_cast<size_t>(i)].legacy = fallback;
+                    materials[static_cast<size_t>(i)].satellite = fallback;
+                    break;
+                }
+            }
+        }
+    }
+
+    std::vector<int> eagerIds;
+    if (!paged)
+    {
+        eagerIds.resize(static_cast<size_t>(materialCount));
+        for (int i = 0; i < materialCount; ++i)
+            eagerIds[static_cast<size_t>(i)] = i;
+    }
+    const std::vector<int>& ids = paged ? *activeMaterials : eagerIds;
+    size_t authored = 0;
+    size_t complete = 0;
+    for (const int id : ids)
+    {
+        if (id < 0 || id >= materialCount)
+            continue;
+        WgrTerrainMaterial& material = materials[static_cast<size_t>(id)];
+        if (paged)
+        {
+            const uint32_t detailedFallback = bindLayer(land.GetTexture(id), true);
+            if (detailedFallback != 0)
+            {
+                material.legacy = detailedFallback;
+                material.satellite = detailedFallback;
+            }
+        }
+        const A3TerrainMaterial* source = land.GetA3TerrainMaterial(id);
+        if (source == nullptr || source->surfaceCount == 0 || source->mask.GetLength() == 0)
+            continue;
         ++authored;
-        // Preserve the legacy cell texture solely as a safe fallback. A
-        // TerrainSNX Stage0 is its own low-frequency satellite image and has
-        // its own TexGen; sampling the cell's close-detail texture through
-        // Stage0's coordinates makes an authored material look corrupted.
         const uint32_t fallback = material.legacy;
         bool satelliteResolved = false;
         bool maskResolved = false;
-        material.satellite = bindTexture(source->satellite, fallback, satelliteResolved);
-        material.mask = bindTexture(source->mask, material.satellite, maskResolved);
-        // Normals fall back to 0, not to a colour texture: the shader tests for 0
-        // and keeps the geometric normal, whereas a colour map decoded as a normal
-        // would tilt every surface by whatever its albedo happened to be.
+        material.satellite = bindTexture(source->satellite, fallback, satelliteResolved, paged);
+        material.mask = bindTexture(source->mask, material.satellite, maskResolved, paged);
         bool normalResolved = false;
-        material.tile_normal = bindTexture(source->tileNormal, 0, normalResolved);
+        material.tile_normal = bindTexture(source->tileNormal, 0, normalResolved, false);
         const auto setUvSource = [&](uint32_t slot, const A3TerrainUv& uv)
         {
             if (uv.worldPos)
@@ -434,12 +492,10 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
         bool anySurface = false;
         for (uint32_t slot = 0; slot < material.surface_count; ++slot)
         {
-            // A hole stays a hole. Falling back to another surface here would
-            // give the mask's selector a texture where the source says there is
-            // none, which is how an unpainted slot ends up covering ground.
             bool surfaceResolved = false;
-            material.surfaces[slot] = bindTexture(source->surfaces[slot], 0, surfaceResolved);
-            material.surface_normals[slot] = bindTexture(source->surfaceNormals[slot], 0, normalResolved);
+            material.surfaces[slot] = bindTexture(source->surfaces[slot], 0, surfaceResolved, false);
+            material.surface_normals[slot] =
+                bindTexture(source->surfaceNormals[slot], 0, normalResolved, false);
             anySurface = anySurface || surfaceResolved;
             setUvSource(2 + slot, source->surfaceUvs[slot]);
             std::copy(source->surfaceUvs[slot].u.begin(), source->surfaceUvs[slot].u.end(),
@@ -447,23 +503,30 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land)
             std::copy(source->surfaceUvs[slot].v.begin(), source->surfaceUvs[slot].v.end(),
                       material.surface_uvs[slot].v);
         }
-        // The mask and at least one surface are what make the composition
-        // authored; a Stage0 satellite is optional and most families do not
-        // carry one. This counts materials whose authored images all reached a
-        // layer, not materials whose layer indices happen to differ.
         (void)satelliteResolved;
         if (maskResolved && anySurface)
-        {
             ++complete;
-        }
     }
+
+    // Replace the terrain bind group before destroying pages referenced by the
+    // previous group. Shared texture views then release cleanly on the Rust side.
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
     wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
+    size_t evicted = 0;
+    for (TextureWgpu* old : oldPageTextures)
+    {
+        if (old != nullptr && std::find(boundTextures.begin(), boundTextures.end(), old) == boundTextures.end() &&
+            IsTerrainPageTextureName(old->Name()))
+        {
+            old->EvictGpu();
+            ++evicted;
+        }
+    }
     LOG_INFO(Graphics,
-             "Wgpu terrain materials: {} of {} authored LCA blends bound; {} complete, {} of {} ground layers used, "
-             "{} texture bindings dropped at {}-layer limit",
-             authored, materialCount, complete, handles.size(), WGR_TERRAIN_MAX_GROUND_LAYERS, dropped,
-             WGR_TERRAIN_MAX_GROUND_LAYERS);
+             "Wgpu terrain material pages: mode={} candidates={} authored={} complete={} layers={}/{} dropped={} "
+             "evicted={}",
+             paged ? "paged" : "eager", ids.size(), authored, complete, handles.size(), layerLimit, dropped,
+             evicted);
 }
 
 void TerrainWgpu::UploadIndexMap(const Landscape& land)
@@ -2334,6 +2397,80 @@ void TerrainWgpu::ReportGrassScreenMetric(Scene& scene) const
              width, height, cTop, 1.0f / cTop, pxPerRadian, bladeWidth * pxPerRadian);
 }
 
+void TerrainWgpu::UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force)
+{
+    if (!_pagedGroundMaterials)
+        return;
+    const float grid = std::max(land.GetLandGrid(), 0.001f);
+    Vector3 pos = camera.Position();
+    // Deterministic out-and-back page-cache diagnostic. The camera and final
+    // screenshot remain fixed; only the material working-set centre moves.
+    // Normal gameplay does not enter this path unless explicitly requested.
+    if (const char* sweep = std::getenv("WGR_TERRAIN_PAGE_TEST_SWEEP_CELLS"))
+    {
+        const int range = std::max(1, land.GetLandRange());
+        const int offsetCells = std::clamp(static_cast<int>(std::strtol(sweep, nullptr, 10)), 1, range);
+        const int phase = _terrainPageTestUpdate < 180 ? 0 : (_terrainPageTestUpdate < 360 ? 1 : 2);
+        ++_terrainPageTestUpdate;
+        if (phase == 1)
+        {
+            pos[0] += offsetCells * grid;
+            pos[2] += offsetCells * grid;
+        }
+        if (phase != _terrainPageTestPhase)
+        {
+            _terrainPageTestPhase = phase;
+            LOG_INFO(Graphics, "Wgpu terrain page test sweep: phase={} offsetCells={}", phase,
+                     phase == 1 ? offsetCells : 0);
+        }
+    }
+    int centerX = static_cast<int>(std::floor(pos.X() / grid));
+    int centerZ = static_cast<int>(std::floor(pos.Z() / grid));
+    // An eight-cell hysteresis block avoids rebuilding descriptor arrays for
+    // ordinary camera motion while still refreshing well before the player can
+    // reach the edge of the 64-cell default working set.
+    constexpr int QuantizeCells = 8;
+    centerX = (centerX / QuantizeCells) * QuantizeCells;
+    centerZ = (centerZ / QuantizeCells) * QuantizeCells;
+    if (!force && centerX == _terrainPageCenterX && centerZ == _terrainPageCenterZ)
+        return;
+    _terrainPageCenterX = centerX;
+    _terrainPageCenterZ = centerZ;
+
+    const int range = land.GetLandRange();
+    const int x0 = std::clamp(centerX - _terrainPageRadius, 0, range);
+    const int z0 = std::clamp(centerZ - _terrainPageRadius, 0, range);
+    const int x1 = std::clamp(centerX + _terrainPageRadius + 1, 0, range);
+    const int z1 = std::clamp(centerZ + _terrainPageRadius + 1, 0, range);
+    std::unordered_map<int, uint32_t> nearest;
+    for (int z = z0; z < z1; ++z)
+    {
+        for (int x = x0; x < x1; ++x)
+        {
+            const int id = land.GetTexture(z, x);
+            const int dx = x - centerX;
+            const int dz = z - centerZ;
+            const uint32_t d2 = static_cast<uint32_t>(dx * dx + dz * dz);
+            const auto [it, inserted] = nearest.emplace(id, d2);
+            if (!inserted)
+                it->second = std::min(it->second, d2);
+        }
+    }
+    std::vector<std::pair<int, uint32_t>> ordered(nearest.begin(), nearest.end());
+    std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b)
+              { return a.second < b.second || (a.second == b.second && a.first < b.first); });
+    std::vector<int> materials;
+    materials.reserve(ordered.size());
+    for (const auto& [id, distance] : ordered)
+    {
+        (void)distance;
+        materials.push_back(id);
+    }
+    UploadGroundTextures(land, &materials);
+    LOG_INFO(Graphics, "Wgpu terrain page window: centre=({}, {}) radius={} cells candidateMaterials={}", centerX,
+             centerZ, _terrainPageRadius, materials.size());
+}
+
 void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
 {
     if (_renderer == nullptr || GLandscape == nullptr)
@@ -2341,7 +2478,13 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         return;
     }
     const Landscape& land = *GLandscape;
-    UploadIfNeeded(land);
+    Camera* camera = scene.GetCamera();
+    const bool uploaded = UploadIfNeeded(land);
+    if (camera != nullptr)
+    {
+        GLandscape->UpdateModernObjectResidency(camera->Position());
+        UpdateGroundTexturePages(land, *camera, uploaded);
+    }
     if (_rootIndex < 0)
     {
         return;
@@ -2360,7 +2503,6 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.wet_darken = coast.wetDarken;
     wgr_terrain_set_params(_renderer, &_params);
 
-    Camera* camera = scene.GetCamera();
     if (camera == nullptr)
     {
         return;

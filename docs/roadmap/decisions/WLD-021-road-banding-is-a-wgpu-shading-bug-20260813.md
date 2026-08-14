@@ -106,3 +106,93 @@ that is where to look first.
   path is null-terminated and resynchronises the walk either way. Our A2/A3
   handling is correct but was never actually evidenced; the discriminator is the
   decoded *string*, and the distinct-segment count is the tell.
+
+---
+
+## Amendment, 2026-08-14 — the CSM receiver-plane bias was never in the eliminated set
+
+The `Shape.cpp:1482-1493` material-fork lead above is now **dead**: the per-draw
+trace showed all 501 road shapes byte-identical, `diffuse (1,1,1)` on every one,
+so no road is taking a zero-diffuse material. Every CPU-side input is the same
+between a light trapezoid and a dark one.
+
+That exhausted the per-draw family, and the remaining space was stated as "the
+difference must be in the vertex data itself -- the positions `SurfaceSplit`
+conformed", with the specific worry that the shader might derive something from
+the **geometric** normal rather than the interpolated one.
+
+**It does, and here is where.**
+
+`Shape::SurfaceSplit` (`ShapeLand.cpp:28`) fits every vertex to the landscape and
+never calls `InvalidateNormals`. So a road draped over a slope keeps its authored
+flat normal -- the census measured `meanNorm` exactly `(0,-1,0)` on all 501 shapes
+-- while its triangles tilt with the terrain underneath. Stored normal and true
+facing disagree, by an amount that varies per segment with the local slope.
+
+Both wgpu object shaders compute the true screen-space derivatives of world
+position and hand them to shading: `shader3d.wgsl:242-243` on the per-draw path,
+`gpu_driven.wgsl:343-344` on the retained one, consumed as `dwx`/`dwy`
+(`shading.wgsl:37,46-47`).
+
+Two consumers, and they disagree about what the surface is:
+
+- **The degenerate-normal fallback** (`shading.wgsl:105-111`) reconstructs a
+  geometric normal from `cross(dwx, dwy)` -- but only when `length(normal) < 1e-4`.
+  Road normals are unit length, so **this does not fire for roads.** Not the cause.
+- **The CSM receiver-plane depth bias** (`shadow.wgsl:93-105`, Isidoro) *does*.
+  It builds the receiver's light-space depth gradient `dz_duv` from `dwx`/`dwy`,
+  i.e. from the triangle's **actual tilt**, and every shadow tap is then compared
+  against the plane's exact depth at that tap.
+
+Meanwhile the normal-offset receiver bias a few lines above (`shadow.wgsl:37-40`,
+`:82`) pushes the sample point along `normal_ws * offset`, scaled by `sin_t` from
+that same **flat** stored normal.
+
+So on a conformed road the two halves of the shadow bias are computed from two
+different surfaces: the offset from a flat normal that is identical on every
+segment, and the plane gradient from real geometry that differs per segment. That
+is precisely the configuration the receiver-plane bias exists to fix -- the comment
+at `shadow.wgsl:88-92` says it "kills the texel-quantisation acne bands on
+surfaces nearly parallel to the sun, an error no constant/slope knob can bound" --
+being fed an inconsistent pair, on a surface that is very nearly parallel to the
+sun, laid out as an alternating run of segments.
+
+### Why this survived every previous elimination
+
+Nine hypotheses were killed and **CSM shadowing is not among them.** The dead list
+is: decal bias, z-epsilons, mirrored placements, normals, the two-lighting-path
+fork, prepass, MSAA, GPU terrain conform, terrain LOD/morph, plus `skyvis` and
+`ao` by push-site ablation. There is no `shadow` token in `WGR_ABLATE`
+(`lib.rs:482-487` accepts only `grass`, `ao`/`gtao`, `skyvis`/`interior_sky`,
+`planar`/`reflection`, `clouds`/`cloud`), so the CSM path has never been ablated
+at the push site for this bug.
+
+It also explains the single strongest clue. **GL33 is clean on identical data**,
+and GL33 does not run this kernel -- `shadow.wgsl:85` notes in passing that "wgpu
+texture v runs top-down (vs GL's bottom-up in the GL33 kernel)", i.e. the two
+backends have separately written shadow samplers. A defect living in the wgpu
+receiver-plane solve is invisible to GL33 by construction, which is exactly the
+shape of evidence WLD-021 already has.
+
+### The decisive test, and what it predicts
+
+Add a `shadow` token to `WGR_ABLATE` -- a diagnostic-only gate, default off, at the
+push site so it cannot be silently reverted like the inert `WGR_*` gates. Then at
+the reference camera:
+
+- If `WGR_ABLATE=shadow` **removes the alternation**, the cause is in the CSM
+  path and the fix is to make the two bias halves agree: either call
+  `InvalidateNormals` after `SurfaceSplit` so the stored normal matches the
+  conformed geometry, or feed the normal-offset term the geometric normal.
+- If the alternation **survives**, CSM is eliminated too and the remaining space
+  is the vertex positions themselves rather than anything derived from them.
+
+A quantitative prediction is available and is worth preferring to a
+presence/absence test, for the reason the skirt hypothesis died: the artefact
+should scale with the normal-offset multiplier `frame.shadow.ctlb.z`
+(`shadow.wgsl:81`) and with sun elevation through `sin_t`. Sweeping the multiplier
+should move the two tones **monotonically and together**; if the tones are
+unmoved, the hypothesis is wrong even if ablation happens to change the frame.
+
+Not yet run: the machine was committed to a performance measurement when this was
+written, and interleaving a second GPU workload would have invalidated both.

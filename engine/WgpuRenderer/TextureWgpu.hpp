@@ -29,6 +29,8 @@ class TextureWgpu : public Texture
     PacLevelMem _mipmaps[MAX_MIPMAPS];
 
     uint64_t _gpuHandle = 0;
+    uint64_t _lastUsedFrame = 0;
+    uint32_t _residentPins = 0;
     // don't keep retrying a texture that fails to load
     bool _uploadTried = false;
     bool _dynamic = false;
@@ -52,7 +54,20 @@ class TextureWgpu : public Texture
     ~TextureWgpu() override;
 
     uint64_t EnsureUploaded();
+    // Drop only the GPU allocation while preserving the decoded file source and
+    // Texture object.  Terrain page residency uses this to reload the same
+    // authored page when the camera returns to it.
+    void EvictGpu();
     uint64_t GpuHandle() const { return _gpuHandle; }
+    uint64_t LastUsedFrame() const { return _lastUsedFrame; }
+    uint32_t ResidentPins() const { return _residentPins; }
+    bool IsDynamicTexture() const { return _dynamic; }
+    void PinResident() { ++_residentPins; }
+    void UnpinResident()
+    {
+        if (_residentPins > 0)
+            --_residentPins;
+    }
     void UpdateDynamic(const void* rgba, uint32_t size);
 
     int AWidth(int) const override { return _w; }

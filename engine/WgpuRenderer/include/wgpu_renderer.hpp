@@ -12,7 +12,16 @@
 // Increment when an incompatible change is made to the public C ABI.  The
 // engine checks this before creating a renderer so a matched build fails with a
 // useful diagnostic instead of proceeding with incompatible assumptions.
-#define WGR_ABI_VERSION 4u
+//
+// Bumping this by hand was never reliable: growing a shared struct is a silent,
+// local-looking edit (add a lane, move one static_assert) and nobody remembers
+// that it also invalidates every already-deployed binary of the OTHER language.
+// WgrAbiCheck::layout_hash (see WgrLayoutHash() at the bottom of this file) now
+// makes that automatic — any size change to any shared struct changes the hash
+// and the handshake refuses the pair — so this number only has to move for
+// changes the hash cannot see (an added/removed entry point, a semantic change
+// to an existing one).
+#define WGR_ABI_VERSION 5u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -222,7 +231,12 @@ enum WgrDraw3DFlags : uint32_t
      * engine biased via SetBias(level*5) (e.g. traffic-sign overlay faces). Gets a
      * stronger, level-scaled polygon-offset than a plain surface decal. */
     WGR_DRAW3D_ZBIAS_SHIFT = 8,
-    WGR_DRAW3D_ZBIAS_MASK = 0x300
+    WGR_DRAW3D_ZBIAS_MASK = 0x300,
+
+    /* DZ-003: this draw's material declared itself reflective (its shader family is
+     * CalmWater, DayZ's water), so the fragment shader adds a Fresnel-weighted reflection
+     * of the sky env map. Clear for every other material, which is all of them but water. */
+    WGR_DRAW3D_REFLECTIVE = 2
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -314,7 +328,16 @@ struct WgrModelSection
     uint32_t index_begin;
     uint32_t index_count;
     uint32_t variant;
-    uint32_t _pad;
+    /* Per-section flags (WgrModelSectionFlags). Was dead padding; the reflective bit
+     * rides here rather than in WgrModelMaterial, which is size-locked at 192 bytes. */
+    uint32_t flags;
+};
+
+enum WgrModelSectionFlags : uint32_t
+{
+    /* DZ-003: this section's material declared itself reflective (shader family
+     * CalmWater). Same meaning as WGR_DRAW3D_REFLECTIVE on the per-draw path. */
+    WGR_MODEL_SECTION_REFLECTIVE = 1u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
@@ -801,6 +824,19 @@ struct WgrAbiCheck
     uint32_t log_callbacks_size;
     uint32_t frame_size;
     uint32_t required_features;
+    /* FNV-1a over the sizeof of EVERY struct that crosses this boundary — see
+     * WgrLayoutHash() at the bottom of the file.
+     *
+     * The three explicit sizes above only cover the handshake's own arguments and
+     * the frame descriptor, so a shared struct could grow on one side and the pair
+     * still shook hands. That is not hypothetical: WgrSkyRuntime went from 5 vec4
+     * to 7 (80 -> 112 bytes) when the moon disc gained moon_params + moon_sun, and
+     * an engine binary from before that change kept passing this check while the
+     * renderer read its two new lanes off the end of an 80-byte stack object. The
+     * moon then never drew, with a negative illuminated fraction and a 49-degree
+     * angular radius in the diagnostic, and nothing anywhere said "mismatched
+     * binaries". One field that changes whenever any layout changes closes that. */
+    uint32_t layout_hash;
 };
 
 /* A transient rotor-wash field. Unlike tracks this is rebuilt from the live
@@ -1148,7 +1184,10 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_GTAO_PREP = 28,    // depth resolve + normal resolve + linear-Z mip chain
     WGR_GPU_TIMER_GTAO_COMPUTE = 29, // the horizon march (scales with slices x steps)
     WGR_GPU_TIMER_GTAO_BLUR = 30,    // bilateral denoise (scales with blur radius)
-    WGR_GPU_TIMER_REGION_COUNT = 31,
+    /* PERF-004 - main-view terrain; in-pass timestamps, append-only ABI slots. */
+    WGR_GPU_TIMER_TERRAIN_PREPASS = 31,
+    WGR_GPU_TIMER_TERRAIN_COLOR = 32,
+    WGR_GPU_TIMER_REGION_COUNT = 33,
 };
 
 /* GRS-A — grass instance accounting (mirrors WgrGrassStats in rust/src/ffi.rs).
@@ -1166,6 +1205,20 @@ struct WgrGrassStats
     uint32_t near_vertices;
     uint32_t mid_vertices;
     uint32_t far_vertices;
+};
+
+/* Shared dynamic WGPU residency lower bound. Counts renderer-owned resource
+ * payload/capacity; WebGPU does not expose driver-private alignment/metadata. */
+struct WgrMemoryStats
+{
+    uint64_t tracked_bytes;
+    uint64_t budget_bytes;
+    uint64_t object_texture_bytes;
+    uint64_t geometry_live_bytes;
+    uint64_t geometry_capacity_bytes;
+    uint64_t geometry_retired_bytes;
+    uint32_t object_texture_count;
+    uint32_t over_budget;
 };
 
 enum WgrWaterKind : uint32_t { WGR_WATER_KIND_OCEAN = 0, WGR_WATER_KIND_RIVER = 1 };
@@ -1393,7 +1446,7 @@ static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the 
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
 static_assert(sizeof(WgrWaterInteractionParams) == 96 && alignof(WgrWaterInteractionParams) == 16, "WgrWaterInteractionParams must match Rust");
 static_assert(sizeof(WgrFrame) == 576, "WgrFrame layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrAbiCheck) == 24, "WgrAbiCheck layout must match Rust");
+static_assert(sizeof(WgrAbiCheck) == 28, "WgrAbiCheck layout must match Rust");
 
 // --- Functions ---------------------------------------------------------------
 
@@ -1676,6 +1729,9 @@ extern "C"
     /* GRS-A — latest grass instance counts. Returns 1 on success, 0 when unavailable. */
     WGR_API uint32_t wgr_get_grass_stats(WgrRenderer* renderer, WgrGrassStats* out);
 
+    /* Current dynamic-resource residency accounting. Returns 1 on success. */
+    WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);
+
     /* Push the consolidated ImGui-tweakable render params (tonemap, exposure, sky look,
      * terrain sun-shadow, sky-visibility) in one block. The two terrain setters are diffed
      * renderer-side against the last block, so a per-frame push doesn't thrash the sweep/scan.
@@ -1785,5 +1841,85 @@ extern "C"
                                            uint32_t vert_count, uint32_t res, float* out);
 
 } // extern "C"
+
+// --- Cross-language layout hash ----------------------------------------------
+//
+// FNV-1a over the size of every struct that crosses the C ABI, in a fixed order
+// that rust/src/ffi.rs::wgr_layout_hash() repeats exactly. The two sides compute
+// it independently from their OWN definitions, so the number only agrees when the
+// two definitions agree.
+//
+// This lives here (not in the static_assert block above) because it must be
+// declared after WgrTerrainUv / WgrTerrainMaterial, which are declared inside the
+// extern "C" block for proximity to wgr_terrain_set_materials.
+//
+// What it catches: any struct that changes SIZE on one side only — which is what
+// every field addition to these blocks has been. What it does not catch: a
+// same-size field reorder (swap two floats). For the sky UBO that gap is covered
+// separately by sky/mod.rs's field-ORDER test against the WGSL.
+//
+// Adding a new shared struct? Append it to BOTH lists. Appending (rather than
+// inserting) is not required for correctness — the two lists only have to match
+// each other — but it keeps diffs readable.
+constexpr uint32_t WgrHashSize(uint32_t h, uint32_t size)
+{
+    for (int i = 0; i < 4; ++i)
+    {
+        h ^= (size >> (i * 8)) & 0xFFu;
+        h *= 16777619u; // FNV-1a 32-bit prime; unsigned wraparound is well-defined
+    }
+    return h;
+}
+
+constexpr uint32_t WgrLayoutHash()
+{
+    uint32_t h = 2166136261u; // FNV-1a 32-bit offset basis
+    h = WgrHashSize(h, sizeof(WgrVertex2D));
+    h = WgrHashSize(h, sizeof(WgrDraw2DBatch));
+    h = WgrHashSize(h, sizeof(WgrMeshVertex));
+    h = WgrHashSize(h, sizeof(WgrDraw3D));
+    h = WgrHashSize(h, sizeof(WgrLight));
+    h = WgrHashSize(h, sizeof(WgrModelSection));
+    h = WgrHashSize(h, sizeof(WgrModelMaterial));
+    h = WgrHashSize(h, sizeof(WgrModelLod));
+    h = WgrHashSize(h, sizeof(WgrInstance));
+    h = WgrHashSize(h, sizeof(WgrTonemap));
+    h = WgrHashSize(h, sizeof(WgrExposure));
+    h = WgrHashSize(h, sizeof(WgrSky));
+    h = WgrHashSize(h, sizeof(WgrSkyLook));
+    h = WgrHashSize(h, sizeof(WgrSkyRuntime));
+    h = WgrHashSize(h, sizeof(WgrTerrainSunShadow));
+    h = WgrHashSize(h, sizeof(WgrTerrainUv));
+    h = WgrHashSize(h, sizeof(WgrTerrainMaterial));
+    h = WgrHashSize(h, sizeof(WgrSkyVisibility));
+    h = WgrHashSize(h, sizeof(WgrFoliage));
+    h = WgrHashSize(h, sizeof(WgrGtao));
+    h = WgrHashSize(h, sizeof(WgrSkyVis));
+    h = WgrHashSize(h, sizeof(WgrRenderParams));
+    h = WgrHashSize(h, sizeof(WgrFrameParams));
+    h = WgrHashSize(h, sizeof(WgrCameraShadow));
+    h = WgrHashSize(h, sizeof(WgrCamera));
+    h = WgrHashSize(h, sizeof(WgrShadowCaster));
+    h = WgrHashSize(h, sizeof(WgrShadowPass));
+    h = WgrHashSize(h, sizeof(WgrCmd));
+    h = WgrHashSize(h, sizeof(WgrOverlayVertex));
+    h = WgrHashSize(h, sizeof(WgrOverlayDraw));
+    h = WgrHashSize(h, sizeof(WgrTerrainParams));
+    h = WgrHashSize(h, sizeof(WgrTerrainNode));
+    h = WgrHashSize(h, sizeof(WgrTerrainBatch));
+    h = WgrHashSize(h, sizeof(WgrGrassBatch));
+    h = WgrHashSize(h, sizeof(WgrGrassTrack));
+    h = WgrHashSize(h, sizeof(WgrGrassDownwash));
+    h = WgrHashSize(h, sizeof(WgrGrassParams));
+    h = WgrHashSize(h, sizeof(WgrWaterParams));
+    h = WgrHashSize(h, sizeof(WgrWaterNode));
+    h = WgrHashSize(h, sizeof(WgrWaterBatch));
+    h = WgrHashSize(h, sizeof(WgrWaterInteractionEvent));
+    h = WgrHashSize(h, sizeof(WgrWaterInteractionParams));
+    h = WgrHashSize(h, sizeof(WgrSurfaceDesc));
+    h = WgrHashSize(h, sizeof(WgrLogCallbacks));
+    h = WgrHashSize(h, sizeof(WgrFrame));
+    return h;
+}
 
 #endif // WGPU_RENDERER_HPP

@@ -1299,6 +1299,21 @@ class Engine : public IGraphicsEngine
       };
       virtual bool GetGrassStats(GrassStatsOut& /*out*/) const { return false; }
 
+      // Renderer-owned dynamic GPU residency. Byte totals are portable payload /
+      // buffer-capacity lower bounds; backend-driver metadata is not included.
+      struct GpuMemoryStatsOut
+      {
+          uint64_t trackedBytes = 0;
+          uint64_t budgetBytes = 0;
+          uint64_t objectTextureBytes = 0;
+          uint64_t geometryLiveBytes = 0;
+          uint64_t geometryCapacityBytes = 0;
+          uint64_t geometryRetiredBytes = 0;
+          unsigned objectTextureCount = 0;
+          bool overBudget = false;
+      };
+      virtual bool GetGpuMemoryStats(GpuMemoryStatsOut& /*out*/) const { return false; }
+
       virtual int GetGrassSurfaceCount() const { return 0; }
       virtual const char* GetGrassLoadedMapName() const { return ""; }
       virtual const char* GetGrassSurfaceName(int /*index*/) const { return ""; }
@@ -1627,8 +1642,11 @@ class Engine : public IGraphicsEngine
         // These defaults MUST match godrays::GodRaySettings::default on the renderer side, or the
         // first Sky-tab edit would visibly change settings nobody touched.
         bool godRays = true;
-        float godRayIntensity = 1.0f;      // multiplier on the physical single-scatter estimate
-        float godRayDensity = 1.2e-5f;     // scattering coefficient (1/m); clear-day Mie is 6e-6
+        float godRayIntensity = 4.0f;      // multiplier on the physical single-scatter estimate
+        // Scattering coefficient (1/m); clear-day Mie is 6e-6. The renderer reads it relative to
+        // its DENSITY_REF (1.2e-5 = 1.0x), so this default is a 5x multiplier on the physical
+        // density. The Sky tab shows it in units of 1e-6, i.e. "Air density (x1e-6)" = 60.
+        float godRayDensity = 6.0e-5f;
         // March cap. Short on purpose: the cloud map spans 4 km centred on the camera, so a ray
         // leaves it by ~2-2.9 km and reads fully lit past that, and the aerial froxel already owns
         // sun-shafted haze beyond. What this pass adds over the froxel is cloud shaping and
@@ -2058,7 +2076,10 @@ class Engine : public IGraphicsEngine
         // LIT-010 — sliced by the Amb. Occlusion tab.
         kGtaoGpuRegionBegin = 28,
         kGtaoGpuRegionEnd = 31,
-        kGpuRegionEnd = 31,
+        // PERF-004 - main terrain, separate from reflected terrain.
+        kTerrainGpuRegionBegin = 31,
+        kTerrainGpuRegionEnd = 33,
+        kGpuRegionEnd = 33,
     };
 
   protected:

@@ -39,6 +39,10 @@ STATUS_MEANING = {
     "CAPTURED_NOT_APPLIED": "Read and preserved, but not acted on.",
     "CAPTURED_NOT_INTERPRETED": "Read and preserved; its meaning is not claimed.",
     "NOT_PRODUCED": "Deliberately not derived; a consumer must opt in explicitly.",
+    "SUPERSEDED": (
+        "True at its own verification commit, and later work moved past it. "
+        "The denominator names the ticket that now holds the live claim."
+    ),
 }
 
 

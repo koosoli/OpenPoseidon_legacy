@@ -673,8 +673,8 @@ void PrintTerrainMaterialCensus(const Poseidon::Asset::Formats::World::Oprw25Wor
         {
             stageSample = materialPath + "  [" + source.pixelShaderId + "]\n";
             for (const auto& stage : source.stages)
-                stageSample += "    Stage" + std::to_string(stage.index) + "  texGen=" +
-                               std::to_string(stage.texGen) + "  " + stage.texture.raw + "\n";
+                stageSample += "    Stage" + std::to_string(stage.index) + "  texGen=" + std::to_string(stage.texGen) +
+                               "  " + stage.texture.raw + "\n";
             for (const auto& texGen : source.texGens)
                 stageSample += "    TexGen" + std::to_string(texGen.index) + "  uvSource=" + texGen.uvSource +
                                "  aside.x=" + std::to_string(texGen.uvTransform.aside[0]) + "\n";
@@ -844,8 +844,7 @@ void PrintModelCensus(const Poseidon::Asset::Formats::World::Oprw25World& world,
                     placements = placementsPerModel[i];
             std::cout << (first ? "\n" : ",\n") << "    {\"model\": \"" << JsonEscape(name) << "\", \"outcome\": \""
                       << ModelOutcomeName(result.outcome) << "\", \"revision\": " << result.revision
-                      << ", \"placements\": " << placements << ", \"detail\": \"" << JsonEscape(result.detail)
-                      << "\"}";
+                      << ", \"placements\": " << placements << ", \"detail\": \"" << JsonEscape(result.detail) << "\"}";
             first = false;
         }
         std::cout << (first ? "" : "\n") << "  ]\n}\n";
@@ -982,10 +981,19 @@ void TerrainCommand::Setup(CLI::App& app)
     {
         static std::string inputFile;
         static std::vector<double> nearArg;
+        static std::string modelFilter;
+        static bool withBasis = false;
         auto* cmd = terrain->add_subcommand("objects", "List placed objects with positions");
         cmd->add_option("input", inputFile, "WRP terrain file")->required()->check(CLI::ExistingFile);
         cmd->add_option("--near", nearArg, "Only objects within R metres of map point (X,Z): --near X Z R")
             ->expected(3);
+        cmd->add_option("--model", modelFilter,
+                        "Only objects whose model path contains this substring (case-insensitive)");
+        // A placement's transform is the only per-instance orientation a world file
+        // carries, so anything that wants to know which way a placed mesh points --
+        // a river segment's downstream axis, for one -- has to read the basis, not
+        // just the position. Revision-25-family worlds only.
+        cmd->add_flag("--basis", withBasis, "Also print the aside/up/dir rows of the placement transform");
         cmd->callback(
             []()
             {
@@ -1013,9 +1021,15 @@ void TerrainCommand::Setup(CLI::App& app)
                         const double nx = filter ? nearArg[0] : 0.0;
                         const double nz = filter ? nearArg[1] : 0.0;
                         const double r2 = filter ? nearArg[2] * nearArg[2] : -1.0;
+                        std::string needle = modelFilter;
+                        std::transform(needle.begin(), needle.end(), needle.begin(),
+                                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                         std::cout << std::left << std::setw(8) << "ID" << std::setw(64) << "Model" << std::setw(12)
-                                  << "X" << std::setw(12) << "Y" << std::setw(12) << "Z" << "\n";
-                        std::cout << std::string(108, '-') << "\n";
+                                  << "X" << std::setw(12) << "Y" << std::setw(12) << "Z";
+                        if (withBasis)
+                            std::cout << std::setw(24) << "aside" << std::setw(24) << "up" << std::setw(24) << "dir";
+                        std::cout << "\n";
+                        std::cout << std::string(withBasis ? 180 : 108, '-') << "\n";
                         int shown = 0;
                         for (const auto& obj : world.objects)
                         {
@@ -1027,15 +1041,39 @@ void TerrainCommand::Setup(CLI::App& app)
                                 if (dx * dx + dz * dz > r2)
                                     continue;
                             }
-                            std::cout << std::left << std::setw(8) << obj.objectId << std::setw(64)
-                                      << world.models[static_cast<size_t>(obj.modelIndex)] << std::fixed
-                                      << std::setprecision(1) << std::setw(12) << position.x << std::setw(12)
-                                      << position.y << std::setw(12) << position.z << "\n";
+                            const std::string& model = world.models[static_cast<size_t>(obj.modelIndex)];
+                            if (!needle.empty())
+                            {
+                                std::string lowered = model;
+                                std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                                if (lowered.find(needle) == std::string::npos)
+                                    continue;
+                            }
+                            std::cout << std::left << std::setw(8) << obj.objectId << std::setw(64) << model
+                                      << std::fixed << std::setprecision(1) << std::setw(12) << position.x
+                                      << std::setw(12) << position.y << std::setw(12) << position.z;
+                            if (withBasis)
+                            {
+                                auto row = [](const auto& v)
+                                {
+                                    char buffer[64];
+                                    std::snprintf(buffer, sizeof(buffer), "%.4f,%.4f,%.4f", v.x, v.y, v.z);
+                                    return std::string(buffer);
+                                };
+                                std::cout << std::setprecision(4) << std::setw(24) << row(obj.transform.rows[0])
+                                          << std::setw(24) << row(obj.transform.rows[1]) << std::setw(24)
+                                          << row(obj.transform.rows[2]);
+                            }
+                            std::cout << "\n";
                             shown++;
                         }
                         if (filter)
-                            std::cout << "\n" << shown << " object(s) within " << nearArg[2] << " m of (" << nx
-                                      << ", " << nz << ").\n";
+                            std::cout << "\n"
+                                      << shown << " object(s) within " << nearArg[2] << " m of (" << nx << ", " << nz
+                                      << ").\n";
+                        else if (!needle.empty())
+                            std::cout << "\n" << shown << " object(s) matching '" << modelFilter << "'.\n";
                         std::exit(0);
                     }
                 }

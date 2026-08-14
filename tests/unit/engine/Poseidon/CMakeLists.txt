@@ -222,6 +222,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # P3D format tests
     Asset/Formats/P3D/test_mlod_loader.cpp
+    Asset/Formats/P3D/test_mlod_writer.cpp
     Asset/Formats/P3D/MLOD/test_mlod_lod_dispatch.cpp
     Asset/Formats/P3D/MLOD/test_odol_revision.cpp
     Asset/Formats/P3D/test_odol_named_selections.cpp
@@ -233,6 +234,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Textures/test_dds_texture_source.cpp
     Graphics/Textures/test_block_compression.cpp
     Asset/Formats/Enfusion/test_pak_archive.cpp
+    Asset/Formats/Enfusion/test_xob_model.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Foundation/Algorithms/test_lz4block.cpp
     Foundation/Algorithms/test_sha256.cpp

@@ -264,6 +264,20 @@ void Landscape::Init()
             _objects(x, z).Clear();
         }
     }
+    _modernObjectPlacements.clear();
+    _modernObjectCells.clear();
+    _modernObjectModels.clear();
+    _modernObjectCellActive.clear();
+    _modernObjectCellDesired.clear();
+    _modernObjectCellCursor.clear();
+    _modernObjectStreaming = false;
+    _modernObjectResidencyPending = false;
+    _modernObjectCenterX = -0x3fffffff;
+    _modernObjectCenterZ = -0x3fffffff;
+    _modernResidentObjectCount = 0;
+    _modernObjectTestUpdate = 0;
+    _modernObjectTestPhase = -1;
+    _modernObjectLightOwners.clear();
 
     const ParamEntry& entry = Pars >> "CfgSurfaces" >> "Water";
     _waterSurface._name = entry >> "files";
@@ -1022,6 +1036,10 @@ void Landscape::Dim(int x, int z, int rx, int rz, float landGrid)
     {
         ErrorMessage("Terrain dimensions %dx%d not power of 2", rx, rz);
     }
+    if (rx < x || (rx % x) != 0)
+    {
+        ErrorMessage("Terrain dimensions %dx%d must refine land dimensions %dx%d", rx, rz, x, z);
+    }
 
     _landRange = x;
     _invLandRange = 1.0f / x;
@@ -1040,8 +1058,8 @@ void Landscape::Dim(int x, int z, int rx, int rz, float landGrid)
     _random.Dim(x, z);
 
     _data.Dim(rx, rz);
-    PoseidonAssert(rx == x);
-    PoseidonAssert(rz == z);
+    PoseidonAssert(rx >= x && rz >= z);
+    PoseidonAssert((rx % x) == 0 && (rz % z) == 0);
 
     SetLandGrid(landGrid);
 }
@@ -1050,9 +1068,9 @@ void Landscape::SetLandGrid(float grid)
 {
 #if _DEBUG
     // no object may be present
-    for (int z = 0; z < _terrainRange; z++)
+    for (int z = 0; z < _landRange; z++)
     {
-        for (int x = 0; x < _terrainRange; x++)
+        for (int x = 0; x < _landRange; x++)
         {
             const ObjectList& ol = _objects(x, z);
             PoseidonAssert(ol.Size() == 0);
@@ -2640,7 +2658,17 @@ Object* Landscape::ObjectCreate(int id, const char* name, const Matrix4& transfo
 #endif
 
     AddObject(obj, x, z, avoidRecalculation);
-    AddA3StaticMarkerLights(obj, shape, name, _staticMarkerLights);
+    if (_modernObjectStreaming)
+    {
+        RefArray<LightPoint>& lights = _modernObjectLightOwners[id];
+        AddA3StaticMarkerLights(obj, shape, name, lights);
+        if (lights.Size() == 0)
+            _modernObjectLightOwners.erase(id);
+    }
+    else
+    {
+        AddA3StaticMarkerLights(obj, shape, name, _staticMarkerLights);
+    }
     return obj;
 }
 

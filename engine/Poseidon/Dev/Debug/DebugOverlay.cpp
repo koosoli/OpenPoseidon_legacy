@@ -1072,7 +1072,8 @@ void DrawZeusTab()
         ImGui::SameLine();
         if (ImGui::Button("Beam player here"))
             Defer([] { BeamPlayerToZeusCamera(); });
-        ImGui::SetItemTooltip("Places the real player at the current free-fly X/Z position on the terrain, then exits free-fly.");
+        ImGui::SetItemTooltip(
+            "Places the real player at the current free-fly X/Z position on the terrain, then exits free-fly.");
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -1806,7 +1807,7 @@ void DrawInputContextDiagnostics()
 // where it was meant to go, so the order is stated in the UI rather than assumed.
 namespace
 {
-int  gPosPrecision = 2;
+int gPosPrecision = 2;
 bool gPosCompactHud = false;
 
 // The look-at point: where the view ray first meets the terrain. A camera readout that stops at
@@ -1818,18 +1819,18 @@ bool CameraTargetPoint(const Vector3& origin, const Vector3& dir, float maxDist,
     if (!GLandscape)
         return false;
     const float step = 25.0f;
-    float       prev = 0.0f;
-    bool        prevAbove = true;
+    float prev = 0.0f;
+    bool prevAbove = true;
     for (float t = step; t <= maxDist; t += step)
     {
         const Vector3 p = origin + dir * t;
-        const bool    above = p.Y() > GLandscape->SurfaceY(p.X(), p.Z());
+        const bool above = p.Y() > GLandscape->SurfaceY(p.X(), p.Z());
         if (!above && prevAbove && t > step)
         {
             float lo = prev, hi = t;
             for (int i = 0; i < 24; ++i)
             {
-                const float   mid = 0.5f * (lo + hi);
+                const float mid = 0.5f * (lo + hi);
                 const Vector3 pm = origin + dir * mid;
                 if (pm.Y() > GLandscape->SurfaceY(pm.X(), pm.Z()))
                     lo = mid;
@@ -1890,7 +1891,7 @@ PositionLines BuildPositionLines(int prec)
         // Heading the same way getDir does it: atan2(dir.x, dir.z) in degrees, wrapped to [0,360)
         // so it matches what the console reports.
         const Vector3 d = player->Direction();
-        float         heading = atan2(d.X(), d.Z()) * (180.0f / H_PI);
+        float heading = atan2(d.X(), d.Z()) * (180.0f / H_PI);
         if (heading < 0.0f)
             heading += 360.0f;
         char v[128];
@@ -1930,17 +1931,16 @@ PositionLines BuildPositionLines(int prec)
         if (freeflyAz < 0.0f)
             freeflyAz += 360.0f;
         const float freeflyHoriz = sqrtf(freeflyDir.X() * freeflyDir.X() + freeflyDir.Z() * freeflyDir.Z());
-        const float freeflyEl =
-            atan2(freeflyDir.Y(), freeflyHoriz > 1e-6f ? freeflyHoriz : 1e-6f) * (180.0f / H_PI);
+        const float freeflyEl = atan2(freeflyDir.Y(), freeflyHoriz > 1e-6f ? freeflyHoriz : 1e-6f) * (180.0f / H_PI);
         char v[128];
         FormatVec(v, sizeof(v), "freefly", freeflyPos, prec);
         snprintf(out.freefly, sizeof(out.freefly), "%s  az %.1f  el %.1f  (active)", v, freeflyAz, freeflyEl);
         out.hasFreefly = true;
     }
 
-    Vector3     tgt;
-    float       tgtDist = 0.0f;
-    const bool  hasTgt = CameraTargetPoint(camPos, camDir, 12000.0f, tgt, tgtDist);
+    Vector3 tgt;
+    float tgtDist = 0.0f;
+    const bool hasTgt = CameraTargetPoint(camPos, camDir, 12000.0f, tgt, tgtDist);
     if (hasTgt)
     {
         char v[128];
@@ -2018,18 +2018,18 @@ void DrawPositionHudOverlay()
     const PositionLines out = BuildPositionLines(gPosPrecision);
     if (!out.valid)
         return;
-    ImDrawList*   draw = ImGui::GetForegroundDrawList();
-    const ImU32   fg = IM_COL32(255, 255, 255, 220);
-    const ImU32   bg = IM_COL32(0, 0, 0, 110);
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    const ImU32 fg = IM_COL32(255, 255, 255, 220);
+    const ImU32 bg = IM_COL32(0, 0, 0, 110);
     const char* rows[5] = {out.player, out.cam, out.freefly, out.tgt, out.time};
-    const int   rowCount = out.hasFreefly ? 5 : 4;
+    const int rowCount = out.hasFreefly ? 5 : 4;
     if (!out.hasFreefly)
     {
         rows[2] = out.tgt;
         rows[3] = out.time;
     }
-    const float   lh = ImGui::GetTextLineHeightWithSpacing();
-    float         wmax = 0.0f;
+    const float lh = ImGui::GetTextLineHeightWithSpacing();
+    float wmax = 0.0f;
     for (int i = 0; i < rowCount; ++i)
         wmax = std::max(wmax, ImGui::CalcTextSize(rows[i]).x);
     const ImVec2 org(10.0f, 10.0f);
@@ -2444,6 +2444,25 @@ void DrawMemoryTab()
     }
 
     // ── Live limit controls — set a watermark and watch the tick trim/evict ──
+    Engine::GpuMemoryStatsOut gpu{};
+    if (GEngine && GEngine->GetGpuMemoryStats(gpu))
+    {
+        ImGui::Spacing();
+        ImGui::TextUnformatted("WGPU dynamic residency (portable lower bound)");
+        ImGui::Separator();
+        ImGui::Text("Tracked allocation: %.1f / %.0f MB%s", ToMB(gpu.trackedBytes), ToMB(gpu.budgetBytes),
+                    gpu.overBudget ? "  (OVER BUDGET)" : "");
+        ImGui::Text("Object textures:   %.1f MB in %u textures", ToMB(gpu.objectTextureBytes),
+                    gpu.objectTextureCount);
+        ImGui::Text("Geometry payload:  %.1f MB live", ToMB(gpu.geometryLiveBytes));
+        ImGui::Text("Geometry buffers:  %.1f MB capacity + %.1f MB retired in-flight",
+                    ToMB(gpu.geometryCapacityBytes), ToMB(gpu.geometryRetiredBytes));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("WebGPU does not expose driver-private alignment and metadata.\n"
+                              "These are exact resource payload/buffer sizes and therefore\n"
+                              "a lower bound, not total physical VRAM usage.");
+    }
+
     ImGui::Spacing();
     ImGui::TextDisabled("Set process limits (MB; soft=trim, hard=evict; 0 = unlimited):");
     static int s_softMB = -1, s_hardMB = -1;
@@ -2815,10 +2834,9 @@ void DrawGrassTab()
                  grass.alphaCutoff, grass.cardWiden, grass.photoTuftBrightness, grass.photoTuftMix,
                  grass.photoTuftPatchSize, grass.photoContrast, grass.photoContour, grass.photoSelfShadow,
                  grass.photoRootAo, grass.photoAlphaCutoff, grass.photoSaturation, grass.photoForceLayer,
-                 grass.lodBlend, grass.nearDensity,
-                 grass.midDensity, grass.farDensity, grass.tintProcedural[0], grass.tintProcedural[1],
-                 grass.tintProcedural[2], grass.tintPhoto[0], grass.tintPhoto[1], grass.tintPhoto[2],
-                 grass.photoLayerWeights[0], grass.photoLayerWeights[1], grass.photoLayerWeights[2],
+                 grass.lodBlend, grass.nearDensity, grass.midDensity, grass.farDensity, grass.tintProcedural[0],
+                 grass.tintProcedural[1], grass.tintProcedural[2], grass.tintPhoto[0], grass.tintPhoto[1],
+                 grass.tintPhoto[2], grass.photoLayerWeights[0], grass.photoLayerWeights[1], grass.photoLayerWeights[2],
                  grass.photoLayerWeights[3], grass.photoLayerWeights[4], grass.photoLayerWeights[5],
                  grass.photoLayerWeights[6], grass.photoLayerWeights[7], grass.useLiveWind, grass.windStrength,
                  grass.windDirection);
@@ -3402,8 +3420,8 @@ void DrawGrassTab()
             ImGui::TextDisabled("Far ring is on but empty — check geography exclusions for this map.");
     }
 
-    float gpuMs[32];
-    const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 32);
+    float gpuMs[64];
+    const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 64);
     if (gpuRegions <= 0)
     {
         ImGui::TextDisabled("GPU timings unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
@@ -3716,8 +3734,8 @@ void DrawAmbientOcclusionTab()
     ImGui::Separator();
     ImGui::TextDisabled("GPU cost (last completed frame)");
     {
-        float gpuMs[32];
-        const int regions = GEngine->GetWaterGpuTimings(gpuMs, 32);
+        float gpuMs[64];
+        const int regions = GEngine->GetWaterGpuTimings(gpuMs, 64);
         if (regions <= (int)Engine::kGtaoGpuRegionBegin)
         {
             ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
@@ -3845,8 +3863,7 @@ void DrawInteriorSkyTab()
     if (tiltReach > is.height)
     {
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
-                           "  ! extent too large for height: the TILTED maps clip past %.0f m",
-                           is.height / 0.766f);
+                           "  ! extent too large for height: the TILTED maps clip past %.0f m", is.height / 0.766f);
         ImGui::TextDisabled("  raise Height above %.0f, or lower Extent, or the window-light", tiltReach);
         ImGui::TextDisabled("  directions silently stop contributing at range.");
     }
@@ -3857,8 +3874,8 @@ void DrawInteriorSkyTab()
     ImGui::Separator();
     ImGui::TextDisabled("GPU cost (last completed frame)");
     {
-        float gpuMs[32];
-        const int regions = GEngine->GetWaterGpuTimings(gpuMs, 32);
+        float gpuMs[64];
+        const int regions = GEngine->GetWaterGpuTimings(gpuMs, 64);
         if (regions <= (int)Engine::kInteriorSkyGpuRegionBegin)
         {
             ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
@@ -3980,10 +3997,23 @@ void DrawPerfTab()
         ImGui::Text("Presentation: %s", swapInterval == 0  ? "VSync off"
                                         : swapInterval < 0 ? "Adaptive VSync"
                                                            : "VSync on");
-        float gpuMs[32];
-        const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 32);
+        float gpuMs[64];
+        const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 64);
         if (gpuRegions > Engine::kFrameGpuRegionTotal && gpuMs[Engine::kFrameGpuRegionTotal] >= 0.0f)
             ImGui::Text("GPU submitted frame %.2f ms (excludes present wait)", gpuMs[Engine::kFrameGpuRegionTotal]);
+        if (gpuRegions >= Engine::kTerrainGpuRegionEnd)
+        {
+            const float terrainPrepass = gpuMs[Engine::kTerrainGpuRegionBegin];
+            const float terrainColor = gpuMs[Engine::kTerrainGpuRegionBegin + 1];
+            if (terrainPrepass >= 0.0f)
+                ImGui::Text("Main terrain prepass %.3f ms", terrainPrepass);
+            else
+                ImGui::TextDisabled("Main terrain prepass n/a");
+            if (terrainColor >= 0.0f)
+                ImGui::Text("Main terrain colour %.3f ms", terrainColor);
+            else
+                ImGui::TextDisabled("Main terrain colour n/a");
+        }
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset window"))
@@ -4000,10 +4030,10 @@ void DrawMaterialDebugTab()
     Engine::MaterialDebugSettings settings = GEngine->GetMaterialDebugSettings();
     bool changed = false;
     int view = static_cast<int>(settings.view);
-    changed |= ImGui::Combo("Rendering mode", &view,
-                            "Full Material\0Base Color Only\0Visualize Normal Map\0");
+    changed |= ImGui::Combo("Rendering mode", &view, "Full Material\0Base Color Only\0Visualize Normal Map\0");
     settings.view = static_cast<Engine::MaterialDebugSettings::View>(view);
-    ImGui::TextDisabled("Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
+    ImGui::TextDisabled(
+        "Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
     ImGui::Separator();
     changed |= ImGui::Checkbox("Disable Normal Map", &settings.disableNormalMap);
     if (ImGui::IsItemHovered())
@@ -4033,7 +4063,8 @@ void DrawMaterialDebugTab()
     changed |= ImGui::Checkbox("Disable Ambient Shadow", &settings.disableAmbientShadow);
     changed |= ImGui::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
     changed |= ImGui::Checkbox("Disable Fresnel / Environment", &settings.disableFresnelEnvironment);
-    ImGui::TextDisabled("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic state for their incremental implementation.");
+    ImGui::TextDisabled("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic "
+                        "state for their incremental implementation.");
     if (changed)
         GEngine->SetMaterialDebugSettings(settings);
 
@@ -4284,8 +4315,7 @@ void DrawSkyTab()
         ImGui::TextDisabled("sim date %s  %02d:%02d", dateBuf, static_cast<int>(tod * 24.0f),
                             static_cast<int>(tod * 1440.0f) % 60);
         ImGui::TextDisabled("az %.1f  el %+.1f  lit %.0f%%  size %.3f deg", moonAz, moonEl,
-                            ml->MoonIllumination() * 100.0f,
-                            ml->MoonAngularRadius() * 2.0f * 180.0f / 3.14159265f);
+                            ml->MoonIllumination() * 100.0f, ml->MoonAngularRadius() * 2.0f * 180.0f / 3.14159265f);
         ImGui::TextDisabled("phase brightness %.3f x full   moonlight %.3f", ml->MoonBrightness(),
                             ml->MoonLightAmount());
     }
@@ -4344,22 +4374,21 @@ void DrawSkyTab()
     changed |= ImGui::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
     ImGui::SetItemTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
                           "phase falloff. 0 turns the moon off entirely.");
-    changed |= ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f",
-                                  ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip(
-        "Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
-        "disc's radiance, because they are the same body: the disc/ground ratio is fixed by\n"
-        "the moon's solid angle, so one knob is the honest number of knobs.\n"
-        "\n"
-        "The physical ratio is 2.5e-6, which renders as black -- night vision is scotopic and\n"
-        "this tonemap is not. What it has to beat is the engine's night AMBIENT floor, which\n"
-        "on the HDR sky-lit path works out at ~0.023 radiance at the 22:00 preset. The moon's\n"
-        "directional term is roughly intensity * 0.41, so:\n"
-        "  0.0025  moon =  4% of ambient -- present in the buffer, invisible on screen\n"
-        "  0.02    moon =  35% of ambient -- a hint of directional shading\n"
-        "  0.06    moon = 1.1x ambient -- clear moonlight, readable shadows  <- default\n"
-        "  0.11    moon = 2.0x ambient -- matches the legacy/GL33 path's moonlit look\n"
-        "Scaled by the phase curve on top, so a quarter moon is ~11x dimmer than these.");
+    changed |=
+        ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
+                          "disc's radiance, because they are the same body: the disc/ground ratio is fixed by\n"
+                          "the moon's solid angle, so one knob is the honest number of knobs.\n"
+                          "\n"
+                          "The physical ratio is 2.5e-6, which renders as black -- night vision is scotopic and\n"
+                          "this tonemap is not. What it has to beat is the engine's night AMBIENT floor, which\n"
+                          "on the HDR sky-lit path works out at ~0.023 radiance at the 22:00 preset. The moon's\n"
+                          "directional term is roughly intensity * 0.41, so:\n"
+                          "  0.0025  moon =  4% of ambient -- present in the buffer, invisible on screen\n"
+                          "  0.02    moon =  35% of ambient -- a hint of directional shading\n"
+                          "  0.06    moon = 1.1x ambient -- clear moonlight, readable shadows  <- default\n"
+                          "  0.11    moon = 2.0x ambient -- matches the legacy/GL33 path's moonlit look\n"
+                          "Scaled by the phase curve on top, so a quarter moon is ~11x dimmer than these.");
     changed |= ImGui::Checkbox("Moonlight (directional + shadows)", &s.moonLighting);
     ImGui::SetItemTooltip("On: the moon becomes the scene's directional light once the sun is below -2 deg "
                           "and the moon is above the horizon, and casts shadows. Off: the pre-existing "
@@ -4547,7 +4576,9 @@ void DrawSkyTab()
                           "Capture/benchmark override: WGR_GODRAYS=<on>[,<intensity>[,<density x1e-6>"
                           "[,<steps>[,<res divisor>]]]] -- WGR_GODRAYS=0 is the A/B ablation.");
     ImGui::BeginDisabled(!s.godRays);
-    changed |= ImGui::SliderFloat("Shaft intensity", &s.godRayIntensity, 0.0f, 4.0f, "%.2f");
+    // Range tops out where the renderer's own clamp does (GodRaySettings::sanitized), so the
+    // default of 4 sits mid-scale and can be pushed up as well as down.
+    changed |= ImGui::SliderFloat("Shaft intensity", &s.godRayIntensity, 0.0f, 8.0f, "%.2f");
     ImGui::SetItemTooltip("Multiplier on the physical single-scatter estimate. 1 = as computed from the sun "
                           "radiance, the density below and the phase function.");
     changed |= ImGui::SliderFloat("Cloud shaping", &s.godRayCloudInfluence, 0.0f, 1.0f, "%.2f");
@@ -4558,7 +4589,9 @@ void DrawSkyTab()
                           "At Cloud shadow strength = 0 the map is uniformly lit and there is no cloud shape "
                           "left to read, so this control goes inert -- keep that slider above 0.");
     float rayDensity = s.godRayDensity * 1e6f;
-    if (ImGui::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 60.0f, "%.2f"))
+    // Headroom above the default of 60 (the renderer clamps at 200), so the default is not pinned
+    // to the end of the track and float round-trip through *1e6 cannot land outside the range.
+    if (ImGui::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 120.0f, "%.2f"))
     {
         s.godRayDensity = rayDensity * 1e-6f;
         changed = true;
@@ -5078,8 +5111,8 @@ void DrawWaterTab()
     ImGui::Separator();
     ImGui::TextUnformatted("Ripple diagnostics");
     ImGui::Text("Player water depth: %.3f m", static_cast<double>(GetPlayerWaterDepth()));
-    ImGui::Text("Events submitted (total): %u   drained last frame: %u",
-                TotalWaterInteractionsSubmitted(), LastWaterInteractionsDrained());
+    ImGui::Text("Events submitted (total): %u   drained last frame: %u", TotalWaterInteractionsSubmitted(),
+                LastWaterInteractionsDrained());
     ImGui::TextDisabled("Walk into water and watch these three. Depth stays 0 = ground collision is not "
                         "reporting water under the player, and nothing downstream can help. Depth rises but "
                         "the submitted total does not = the emit conditions in Man::Simulate are not met "
@@ -5326,8 +5359,8 @@ void DrawWaterTab()
     // haven't run since launch (e.g. frozen dispatches, spectrum init after the first frame).
     ImGui::Separator();
     ImGui::TextUnformatted("GPU timings (WTR-002)");
-    float gpuMs[32];
-    const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 32);
+    float gpuMs[64];
+    const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 64);
     if (gpuRegions <= 0)
     {
         ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");

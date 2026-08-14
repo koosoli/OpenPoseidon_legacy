@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Shared/SDLEventWindow.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
+#include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 
 #include <wgpu_renderer.hpp>
@@ -23,6 +24,7 @@ struct SDL_Window;
 namespace Poseidon
 {
 class TextureBankWgpu;
+class TextureWgpu;
 class TerrainWgpu;
 class WaterWgpu;
 class ITerrainRenderer;
@@ -94,20 +96,10 @@ class EngineWgpu : public EngineDummy
                   int specFlags) override;
     void DrawLine(const Line2DAbs& line, PackedColor c0, PackedColor c1, const Rect2DAbs& clip) override;
 
-    // Roads and blob shadows are conformed onto the analytic heightfield by
-    // Shape::SurfaceSplit / FaceArray::Draw, which lift each conformed vertex by
-    // exactly these epsilons. EngineWgpu inherits EngineDummy, whose pair returns
-    // ZERO, so under wgpu the road was laid EXACTLY coplanar with the terrain it
-    // was cut against -- and the depth test then decided it per terrain cell,
-    // which is the alternating light/dark "piano key" pattern along Arma 2 roads.
-    //
-    // The NDC decal offset does not save it: SurfaceSplit's cached split shape has
-    // OnSurface swapped for IsOnSurface (Shadow.cpp), so the draw never classifies
-    // as SurfaceMode::OnSurface and never receives Offset::Decal. Measured:
-    // WGR_DECAL_SCALE=0 changes the road pixels by at most 2/255, i.e. the decal
-    // bias reaches roads not at all. The world-space epsilon is the whole guard.
-    //
-    // Values match GL33 (EngineGL33.hpp), which has never shown this artifact.
+    // Fallback CPU SurfaceSplit paths (projected/blob shadows and the diagnostic
+    // WGR_GPU_CONFORM=0 road path) use the same world-space separation as GL33.
+    // Production WGPU roads retain their shared authored mesh, conform against the
+    // terrain heightmap in the vertex shader, and receive the OnSurface depth bias.
     float ZShadowEpsilon() const override { return 0.01f; }
     float ZRoadEpsilon() const override { return 0.005f; }
 
@@ -144,6 +136,12 @@ class EngineWgpu : public EngineDummy
     void EndMesh(TLVertexTable& mesh) override;
     void PrepareTriangle(const MipInfo& mip, int specFlags) override;
     void DrawSection(const FaceArray& face, Offset beg, Offset end) override;
+    // World-space line / point primitives, fed by the same software-T&L mesh as
+    // DrawSection above (Object::DrawLines / Object::DrawPoints). Without these the
+    // base EngineDummy body is empty, so every world diagnostic line -- ballistics
+    // trails, tracers, AI path debug, the viewer grid -- was computed and discarded.
+    void DrawLine(int beg, int end) override;
+    void DrawPoints(int beg, int end) override;
 
     void SetBias(int value) override { _bias = value; }
     int GetBias() override { return _bias; }
@@ -245,6 +243,7 @@ class EngineWgpu : public EngineDummy
 
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.
     bool GetGrassStats(GrassStatsOut& out) const override;
+    bool GetGpuMemoryStats(GpuMemoryStatsOut& out) const override;
 
     // GPU-driven cull DEBUG (ImGui Culling tab): only meaningful when GPU-driven is on.
     bool SupportsCullDebug() const override { return _renderer != nullptr && _gpuDriven; }
@@ -315,6 +314,18 @@ class EngineWgpu : public EngineDummy
         flags |= _materialDebug.disableNormalMap ? (1u << 0) : 0u;
         flags |= _materialDebug.invertNormalY ? (1u << 1) : 0u;
         flags |= _materialDebug.composeMultiLayers ? (1u << 2) : 0u;
+        // DZ-007 -- bit 3, the dev panel's "Disable Fresnel / Environment" checkbox. It
+        // suppresses the WHOLE water treatment DZ-003 and DZ-005 added: the Fresnel sky
+        // reflection AND the world-space ripple that shapes its normal. One switch that
+        // returns a water surface to its pre-DZ-003 look is what a human wants; splitting
+        // them would leave a rippling near-black quad, which is not a state anyone is trying
+        // to look at. `WGR_WATER_RIPPLE` remains the separate ripple-only control, because a
+        // capture A/B needs one term to move and this one moves two.
+        //
+        // A switch, not baked state: read per fragment out of the frame UBO, for exactly the
+        // reason recorded above this function -- presentation state baked into a retained
+        // material record cannot be changed on a world that is already loaded.
+        flags |= _materialDebug.disableFresnelEnvironment ? (1u << 3) : 0u;
         wgr_set_material_debug(_renderer, view, flags);
     }
     MaterialDebugInfo GetMaterialDebugInfo() const override { return _materialDebugInfo; }
@@ -404,6 +415,12 @@ class EngineWgpu : public EngineDummy
 
     SDL_Window* _window = nullptr;
     WgrRenderer* _renderer = nullptr;
+    // Registers renderer-owned dynamic VRAM alongside the engine's existing RAM
+    // caches, so every compatibility layer uses one budget/debug surface.
+    Foundation::MemoryDomainProbe _gpuMemoryProbe;
+    // Optional low-frequency residency trace used by unattended compatibility
+    // smokes.  It samples the same cross-layer accounting as the Memory tab.
+    uint64_t _residencyTraceFrame = 0;
     RString _pendingScreenshotPath;
     // HDR path enabled (mirrors the renderer's WGR_HDR gate) — gates the tonemap tab.
     // Default on, matching the renderer; WGR_HDR=0 forces it off (see the ctor env read).
@@ -484,6 +501,7 @@ class EngineWgpu : public EngineDummy
     {
         uint32_t model;
         uint32_t slot;
+        const LODShapeWithShadow* shape = nullptr;
         // Debug bookkeeping for the Culling tab's nearby-instance dump: the position + conform
         // mode CAPTURED AT REGISTRATION (what the retained buffer holds), compared against the
         // object's live Position() to expose stale transforms.
@@ -506,6 +524,7 @@ class EngineWgpu : public EngineDummy
         int proxyIndex; // index into the reference LOD's Proxy() list (for the DrawProxies skip)
         uint32_t slot;  // retained-instance slot (for update on move / remove)
         uint32_t model; // the proxy shape's model (for re-composing the transform on move)
+        const LODShapeWithShadow* shape = nullptr;
     };
     struct GpuProxySet
     {
@@ -524,7 +543,15 @@ class EngineWgpu : public EngineDummy
     // directly from shape geometry so they survive ShapeBank::OptimizeAll's release of the
     // shapes' own vertex buffers. Destroyed in the dtor. (Map-change re-registration is a TODO:
     // the shape-keyed _gpuModels map would otherwise go stale when ShapeBank clears.)
-    std::vector<uint64_t> _gpuMeshes;
+    std::unordered_set<uint64_t> _gpuMeshes;
+    // Per-model residency. Model/LOD metadata in Rust is append-only and cheap;
+    // the expensive pool meshes and textures are released when the last streamed
+    // instance leaves the working set, then rebuilt if that shape returns.
+    std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelMeshes;
+    std::unordered_map<const LODShapeWithShadow*, std::vector<TextureWgpu*>> _gpuModelTextures;
+    std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
+    void RetainGpuModel(const LODShapeWithShadow* shape);
+    void ReleaseGpuModel(const LODShapeWithShadow* shape);
     // Register `shape` (all graphical LODs + per-section geometry/material) if not already,
     // returning its model id or WGR_INVALID_MODEL if it is ineligible for the GPU path.
     uint32_t RegisterGpuModel(LODShapeWithShadow* shape);
@@ -590,6 +617,15 @@ class EngineWgpu : public EngineDummy
     // loadable one, or 0. Same reason as the two above: the per-draw path bound it
     // and the retained set, which owns nearly every world section, did not.
     uint64_t ResolveMaterialNormalMap(const ShapeSection& section);
+    // A section's environment (reflection) map when its material names a loadable one,
+    // or 0. DZ-003: DayZ water is authored as a near-black constant plus a reflection,
+    // so a non-zero answer here is what marks a surface reflective for the shader.
+    uint64_t ResolveMaterialEnvironmentMap(const ShapeSection& section);
+    // Whether a section carries a Fresnel-weighted environment reflection: its material's
+    // shader family is CalmWater (the DayZ water stub, which ships with no `.emat` at all
+    // on Chernarus) and nothing else. See the definition for why "names an EnvironmentMap"
+    // was measured and rejected as a trigger.
+    bool MaterialIsReflective(const ShapeSection& section);
     // Multi's mask and its three further layer colours, with each layer's own UV
     // transform. Fills nothing and returns false for any other family.
     bool ResolveMaterialLayers(const ShapeSection& section, WgrModelMaterial& material);

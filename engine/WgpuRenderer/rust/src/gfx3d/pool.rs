@@ -99,6 +99,18 @@ impl RangeAllocator {
         self.cap = new_cap;
         self.free(old, new_cap - old);
     }
+
+    fn used(&self) -> u32 {
+        let free: u64 = self.free.iter().map(|&(_, len)| len as u64).sum();
+        (self.cap as u64).saturating_sub(free) as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GeometryResidency {
+    pub live_bytes: u64,
+    pub capacity_bytes: u64,
+    pub retired_bytes: u64,
 }
 
 // Where one mesh's geometry landed in the pool.
@@ -112,7 +124,7 @@ pub struct GeometryPool {
     ibuf: wgpu::Buffer,
     valloc: RangeAllocator, // over vertices
     ialloc: RangeAllocator, // over indices
-    // Buffers replaced by a growth, kept alive a few generations.
+    // Buffers replaced by a growth, kept alive until the next frame submit.
     //
     // Every draw site fetches vbuf()/ibuf() live, so nothing caches a stale
     // handle -- but a growth can land *between* a pass recording
@@ -123,9 +135,11 @@ pub struct GeometryPool {
     // capacity; an Arma 3 world streams meshes in while frames are rendering and
     // grows the pool repeatedly.
     //
-    // Holding the last few generations covers the frames wgpu can have in flight
-    // and bounds the overhead: the doubling series means the retained tail is at
-    // most about the current capacity.
+    // Queue submission takes ownership of every resource referenced by its command
+    // buffers. Once the renderer has submitted the frame, these application-side
+    // handles can be dropped; wgpu keeps the underlying allocations alive for any
+    // GPU work still in flight. Keeping a fixed number of *growth generations*
+    // instead retained hundreds of MiB indefinitely on dense A3/DayZ worlds.
     retired: Vec<wgpu::Buffer>,
     // Bumped whenever vbuf or ibuf is reallocated by a growth. Cached bind groups /
     // pass state referencing a pool buffer compare against this to know when to rebuild.
@@ -176,17 +190,14 @@ impl GeometryPool {
         })
     }
 
-    // Keeps the replaced buffer alive for a few growths. Four covers more frames
-    // than wgpu will have in flight, and growths are rare enough that the tail
-    // never becomes the dominant allocation.
-    const RETIRED_KEPT: usize = 4;
-
     fn retire(&mut self, old: wgpu::Buffer) {
         self.retired.push(old);
-        if self.retired.len() > Self::RETIRED_KEPT {
-            let drop_count = self.retired.len() - Self::RETIRED_KEPT;
-            self.retired.drain(0..drop_count);
-        }
+    }
+
+    // Called immediately after the renderer's frame command buffer has been
+    // submitted. This is the precise lifetime boundary required by retire().
+    pub fn frame_submitted(&mut self) {
+        self.retired.clear();
     }
 
     pub fn vbuf(&self) -> &wgpu::Buffer {
@@ -199,6 +210,16 @@ impl GeometryPool {
 
     pub fn generation(&self) -> u64 {
         self.epoch
+    }
+
+    pub fn residency(&self) -> GeometryResidency {
+        GeometryResidency {
+            live_bytes: self.valloc.used() as u64 * VERT_SIZE
+                + self.ialloc.used() as u64 * INDEX_SIZE,
+            capacity_bytes: self.valloc.cap as u64 * VERT_SIZE
+                + self.ialloc.cap as u64 * INDEX_SIZE,
+            retired_bytes: self.retired.iter().map(wgpu::Buffer::size).sum(),
+        }
     }
 
     // Suballocate one mesh and upload it. Indices are widened u16 -> Uint32 (values
@@ -308,5 +329,24 @@ impl GeometryPool {
         });
         enc.copy_buffer_to_buffer(old, 0, new, 0, bytes);
         queue.submit(std::iter::once(enc.finish()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RangeAllocator;
+
+    #[test]
+    fn used_tracks_alloc_free_and_growth() {
+        let mut ranges = RangeAllocator::new(16);
+        let a = ranges.alloc(5).unwrap();
+        let b = ranges.alloc(3).unwrap();
+        assert_eq!(ranges.used(), 8);
+        ranges.free(a, 5);
+        assert_eq!(ranges.used(), 3);
+        ranges.grow(32);
+        assert_eq!(ranges.used(), 3);
+        ranges.free(b, 3);
+        assert_eq!(ranges.used(), 0);
     }
 }

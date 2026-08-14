@@ -20,6 +20,7 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Material.hpp> // TexMaterial::Combine (GPU-driven material extract)
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -680,12 +681,35 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
                                sizeof(WgrLogCallbacks),
                                sizeof(WgrFrame),
                                WGR_ABI_FEATURE_BUILD_ID | WGR_ABI_FEATURE_SAFE_DIAGNOSTICS |
-                                   WGR_ABI_FEATURE_RUNTIME_CAPABILITIES};
+                                   WGR_ABI_FEATURE_RUNTIME_CAPABILITIES,
+                               WgrLayoutHash()};
     const uint32_t runtimeAbi = wgr_abi_version();
     if (runtimeAbi != WGR_ABI_VERSION || !wgr_abi_validate(&abiCheck))
     {
-        LOG_ERROR(Graphics, "Wgpu: ABI mismatch (engine {}, renderer {}); refusing renderer startup", WGR_ABI_VERSION,
-                  runtimeAbi);
+        // Name BOTH layout hashes and the renderer's build id: the pairing this rejects
+        // is almost always "the .exe and the .dll were copied from different builds",
+        // and those numbers are what identify which half is stale.
+        //
+        // The renderer's hash is fetched through GetProcAddress, not the import table,
+        // for the same reason GetRuntimeCapabilityFlags does it: an older DLL that
+        // lacks the export must still reach this diagnostic instead of failing Windows
+        // module loading with a bare "Entry Point Not Found".
+        uint32_t rendererLayout = 0;
+#ifdef _WIN32
+        using LayoutHashFn = uint32_t (*)();
+        if (const HMODULE module = GetModuleHandleA("wgpu_renderer.dll"))
+        {
+            if (const auto layoutHash = reinterpret_cast<LayoutHashFn>(GetProcAddress(module, "wgr_abi_layout_hash")))
+            {
+                rendererLayout = layoutHash();
+            }
+        }
+#endif
+        LOG_ERROR(Graphics,
+                  "Wgpu: ABI mismatch (engine abi {} layout {:#010x}, renderer abi {} layout {:#010x} build {}); "
+                  "refusing renderer startup. The engine binary and wgpu_renderer.dll must come "
+                  "from the SAME build — deploy both, not one.",
+                  WGR_ABI_VERSION, WgrLayoutHash(), runtimeAbi, rendererLayout, wgr_build_id());
         SDL_DestroyWindow(_window);
         _window = nullptr;
         return;
@@ -699,6 +723,23 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _window = nullptr;
         return;
     }
+
+    _gpuMemoryProbe.Register(
+        "WGPU.Dynamic", 0.35f,
+        [this] {
+            WgrMemoryStats stats{};
+            return _renderer && wgr_get_memory_stats(_renderer, &stats) ? static_cast<size_t>(stats.tracked_bytes) : 0;
+        },
+        [this] {
+            WgrMemoryStats stats{};
+            return _renderer && wgr_get_memory_stats(_renderer, &stats) ? static_cast<size_t>(stats.budget_bytes) : 0;
+        },
+        [this] {
+            WgrMemoryStats stats{};
+            return _renderer && wgr_get_memory_stats(_renderer, &stats)
+                       ? static_cast<size_t>(stats.object_texture_count)
+                       : 0;
+        });
 
     _wbank = new TextureBankWgpu(_renderer);
     SetGrassSettings(_grass);
@@ -842,6 +883,13 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
     if (const char* invertNormalY = std::getenv("WGR_MATERIAL_INVERT_NORMAL_Y"))
         _materialDebug.invertNormalY = std::strcmp(invertNormalY, "0") != 0;
+    // DZ-007 -- the same field the dev panel's "Disable Fresnel / Environment" checkbox
+    // writes, settable from a capture so the field-to-pixel path is EVIDENCE rather than an
+    // assertion. It is the identical `_materialDebug` member and the identical
+    // PushMaterialDebug upload; the checkbox differs only in writing it mid-run, which the
+    // per-fragment read out of the frame UBO is designed for.
+    if (const char* disableFresnelEnv = std::getenv("WGR_MATERIAL_DISABLE_FRESNEL_ENV"))
+        _materialDebug.disableFresnelEnvironment = std::strcmp(disableFresnelEnv, "0") != 0;
     if (const char* rvmatMatch = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"))
         _materialDebugRvmatMatch = rvmatMatch;
 
@@ -1489,6 +1537,23 @@ void EngineWgpu::NextFrame()
         frame.water_batches = _waterBatches;
         frame.grass_batches = _grassBatches;
         wgr_render_frame(_renderer, &frame);
+        if (_wbank)
+            _wbank->TrimResidency();
+        if (std::getenv("WGR_RESIDENCY_TRACE") &&
+            (++_residencyTraceFrame == 30 || (_residencyTraceFrame % 120) == 0))
+        {
+            GpuMemoryStatsOut stats{};
+            if (GetGpuMemoryStats(stats))
+            {
+                LOG_INFO(Graphics,
+                         "Wgpu residency: tracked={} budget={} textures={} textureBytes={} "
+                         "geometryLive={} geometryCapacity={} geometryRetired={} overBudget={}",
+                         stats.trackedBytes, stats.budgetBytes, stats.objectTextureCount,
+                         stats.objectTextureBytes, stats.geometryLiveBytes,
+                         stats.geometryCapacityBytes, stats.geometryRetiredBytes,
+                         stats.overBudget ? 1 : 0);
+            }
+        }
         FlushPendingScreenshot();
     }
     _verts.clear();
@@ -2131,10 +2196,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 {
                     try
                     {
-                        const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
                         cached = _materialBindings
-                                     .emplace(materialPath, Asset::Material::TranslateSemantics(
-                                                                source, Asset::Material::TranslateMaterial(source)))
+                                     .emplace(materialPath, Asset::Material::LoadTranslatedMaterial(materialPath))
                                      .first;
                     }
                     catch (...)
@@ -2179,10 +2242,47 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 // make Stage0 the draw's base texture so a normal-map smoke
                 // exercises textured shading rather than a white fallback.
                 const char* cpuBaseFrom = "Stage0";
-                if (const auto* base = EffectiveBaseColourStage(translated, cpuBaseFrom);
-                    base && !base->texture.isProcedural && !base->texture.path.empty())
+                const auto* base = EffectiveBaseColourStage(translated, cpuBaseFrom);
+                const bool baseIsImage = base && !base->texture.isProcedural && !base->texture.path.empty();
+                // DZ-006: a procedural CONSTANT colour is a real albedo when the section has no
+                // face texture of its own, and DayZ water is exactly that case. Every DayZ water
+                // quad -- Enoch's `water_bliss` ponds and rivers and Chernarus's older `water`
+                // ponds alike -- names the SAME face texture, `dz\surfaces\data\roadway\
+                // water_ext.paa`. That is a surface-TYPE marker (it decides footstep sounds and
+                // penetration), not an albedo, and it does not upload; the colour lives in the
+                // `CalmWater` material as a constant instead. Enoch's two `.emat` files are the
+                // only ones DayZ ships and they agree exactly on it.
+                //
+                // Refusing procedural stages outright left those sections on the WHITE bindless
+                // fallback, and DZ-003's reflection then added a sky on top of white: Chernarus's
+                // 4,044 water placements rendered as glowing snow patches. Enoch was unaffected
+                // only because its water reaches the RETAINED path, whose RegisterGpuModel has
+                // accepted constants since MAT-045.
+                //
+                // Same precedence as that path, so nothing else changes: `d.texture_id != 0`
+                // means the section already has a face texture, and a constant never overrides a
+                // real image (MAT-045 -- on Arma 3 structures the constant is the placeholder and
+                // the face texture is the baked albedo).
+                //
+                // `CalmWater` is the ONE measured exception, and it is an exception to MAT-045's
+                // premise rather than to its rule. MAT-045 assumes the face texture is the baked
+                // albedo. On DayZ water it is not: `water_ext.paa` lives in
+                // `dz\surfaces\data\roadway\`, the ROADWAY/surface-type set (it decides footstep
+                // sounds and traction), beside `clean_water_ext.paa` and `still_water_ext.paa`.
+                // It is a 128x128 DXT1 at mean RGB (42, 49, 86) -- four times brighter than the
+                // authored water colour (0.0392, 0.0549, 0.0667) and stretched over a 50 m quad,
+                // which is why the reflection blew it out. Every single DayZ water p3d names it,
+                // on both worlds and both addons, so the face texture carries no per-surface
+                // information at all and the constant is the only real albedo on offer.
+                const bool baseIsConstant = base && base->texture.isProcedural &&
+                                            (d.texture_id == 0 || Asset::Material::IsCalmWater(translated)) &&
+                                            render::procedural::Parse(base->texture.raw.c_str()).generated;
+                if (baseIsImage || baseIsConstant)
                 {
-                    Ref<Texture> baseTexture = _wbank->Load(base->texture.path.canonical().c_str());
+                    // A procedural stage is GENERATED from its own name and has no path, so the
+                    // bank is handed the raw declaration; ResolveMaterialBaseColour does the same.
+                    const std::string loadName = baseIsConstant ? base->texture.raw : base->texture.path.canonical();
+                    Ref<Texture> baseTexture = _wbank->Load(loadName.c_str());
                     auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
                     const uint64_t baseHandle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0;
                     if (baseHandle)
@@ -2191,7 +2291,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         static std::unordered_set<std::string> loggedBaseBindings;
                         if (loggedBaseBindings.insert(materialPath).second)
                             LOG_INFO(Graphics, "Wgpu material debug: Stage0 BaseColour resolved path={} uv={}",
-                                     base->texture.path.canonical(), base->uvSource);
+                                     loadName, base->uvSource);
                     }
                     else
                     {
@@ -2204,7 +2304,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                             LOG_WARN(Graphics,
                                      "Wgpu material: Stage0 BaseColour did NOT bind for {} (path={} loaded={} "
                                      "uploaded=0) -- section keeps its face texture",
-                                     materialPath, base->texture.path.canonical(), wgpuBaseTexture ? 1 : 0);
+                                     materialPath, loadName, wgpuBaseTexture ? 1 : 0);
                     }
                 }
                 else
@@ -2212,9 +2312,10 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     static std::unordered_set<std::string> loggedNoBaseSlot;
                     if (loggedNoBaseSlot.insert(materialPath).second)
                         LOG_INFO(Graphics,
-                                 "Wgpu material: no bindable Stage0 for {} (present={} procedural={} emptyPath={})",
+                                 "Wgpu material: no bindable Stage0 for {} (present={} procedural={} emptyPath={} "
+                                 "faceTexture={})",
                                  materialPath, base ? 1 : 0, base && base->texture.isProcedural ? 1 : 0,
-                                 base && base->texture.path.empty() ? 1 : 0);
+                                 base && base->texture.path.empty() ? 1 : 0, d.texture_id != 0 ? 1 : 0);
                 }
                 if (const auto* normal = translated.Find(Asset::Material::MaterialSlot::NormalMap))
                 {
@@ -2290,6 +2391,29 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     d.normal_texture_id = handle;
             }
         }
+    }
+    // DZ-003: the per-draw twin of the retained set's WGR_MODEL_SECTION_REFLECTIVE. A
+    // material naming an EnvironmentMap gets a Fresnel-weighted sky reflection; every
+    // other material is untouched. Folded into d.flags below, where the flags word is
+    // initialised -- setting it here would be clobbered by that `d.flags = 0`.
+    //
+    // DZ-006 gate, and it is a SAFETY property rather than a tweak: never add a reflection to a
+    // surface whose albedo did not bind. `d.texture_id == 0` puts the section on the white
+    // bindless fallback, and a sky reflection mixed into white is a bright wrong answer that
+    // reads as snow, not water -- much harder to recognise as a defect than the dull unreflective
+    // look it replaces. Ordered after MaterialIsReflective so its one-line-per-material
+    // diagnostic still runs and the log still says which materials asked.
+    const bool reflectiveMaterial =
+        materialBindingTarget && MaterialIsReflective(sMesh.GetSection(beg)) && d.texture_id != 0;
+    if (materialBindingTarget && d.texture_id == 0 && MaterialIsReflective(sMesh.GetSection(beg)))
+    {
+        const char* rp = debugMaterialPath ? debugMaterialPath : "<none>";
+        static std::unordered_set<std::string> loggedUnboundReflective;
+        if (loggedUnboundReflective.insert(rp).second)
+            LOG_WARN(Graphics,
+                     "Wgpu material: reflection SUPPRESSED for {} -- its base colour did not bind, "
+                     "so the section is on the white fallback and a reflection would blow it out",
+                     rp);
     }
     std::memcpy(d.world.m, &_world, sizeof(d.world.m));
     // Terrain conform: publish this instance's bilinear plane so the vertex
@@ -2421,6 +2545,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             const uint32_t level = std::clamp(_bias / 5, 1, 3);
             d.flags |= level << WGR_DRAW3D_ZBIAS_SHIFT;
         }
+    }
+    // DZ-003, resolved above (see reflectiveMaterial).
+    if (reflectiveMaterial)
+    {
+        d.flags |= WGR_DRAW3D_REFLECTIVE;
     }
     d.camera = _currentCamera;
     d.palette_slot = _currentPaletteSlot;
@@ -2615,7 +2744,10 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         alphaRef = std::max(alphaRef, 0.5f);
     }
     secOut.variant = alphaRef > 0.0f ? 1u : 0u;
-    secOut._pad = 0;
+    // Flags are filled by the caller (RegisterGpuModel): the reflective bit needs the
+    // material translation cache, which is an EngineWgpu member this free function
+    // cannot reach.
+    secOut.flags = 0;
     // Raw per-section material (folded with the sun in the GPU-driven FS). Base = the
     // shading-type material at neutral accommodation (HDR auto-exposure handles adaptation),
     // then modulated by the section surface material. forcedDiffuse is dropped (the FS has no
@@ -3138,6 +3270,130 @@ uint64_t EngineWgpu::ResolveMaterialNormalMap(const ShapeSection& section)
     return report(handle, handle ? "" : "upload failed", loadName);
 }
 
+// The environment (reflection) map a section's material names, or 0 when it names none.
+//
+// DZ-003. Fourth of the same shape as ResolveMaterialNormalMap above, and the reason it
+// exists is DayZ water: a pond or a river authors `Color 0.0392 0.0549 0.0667` -- RGB
+// (10,14,17) -- and gets its ENTIRE appearance from reflection (`EnvironmentMap`,
+// `ReflectionColor`, `FresnelRange` in the `.emat`). Nothing bound an environment map for
+// model surfaces, so those surfaces drew as flat near-black quads: correct data, missing
+// term.
+//
+// The handle itself is not what the shader samples -- the reflection is taken from the
+// sky's own equirect env map, which is a live render of THIS sky rather than an authored
+// snapshot of some other one. What this resolves is the SIGNAL: a material that names an
+// environment map is declaring "this surface is reflective", and that is what rides to
+// the GPU (one bit in WgrModelSection::flags / WgrDraw3D::flags). Returning the handle
+// rather than a bool keeps the shape identical to its three siblings and leaves the
+// authored texture available the day a per-material env map is worth binding.
+uint64_t EngineWgpu::ResolveMaterialEnvironmentMap(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return 0;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return 0;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return 0; // ResolveMaterialBaseColour fills the cache first
+
+    const auto report = [&](uint64_t handle, const char* why, const std::string& detail)
+    {
+        static std::unordered_set<std::string> logged;
+        if (logged.insert(materialPath).second)
+            LOG_INFO(Graphics, "Wgpu material: environment map {} for {} family={} ({}{}{})", handle ? "bound" : "NONE",
+                     materialPath, cached->second.shaderFamily, why, detail.empty() ? "" : " ", detail);
+        return handle;
+    };
+
+    const auto* env = cached->second.Find(Asset::Material::MaterialSlot::Environment);
+    if (!env)
+        return 0; // Silent: the overwhelming majority of materials name none.
+    std::string loadName = env->texture.path.canonical();
+    if (env->texture.isProcedural)
+    {
+        if (!render::procedural::Parse(env->texture.raw.c_str()).generated)
+            return report(0, "procedural lookup", env->texture.raw);
+        loadName = env->texture.raw;
+    }
+    else if (loadName.empty())
+    {
+        return report(0, "empty path", "");
+    }
+    Ref<Texture> texture = _wbank->Load(loadName.c_str());
+    auto*        wgpuTexture = static_cast<TextureWgpu*>(texture.GetRef());
+    const uint64_t handle = wgpuTexture ? wgpuTexture->EnsureUploaded() : 0;
+    return report(handle, handle ? "" : "upload failed", loadName);
+}
+
+// True when a section's surface should carry a Fresnel-weighted environment reflection.
+//
+// DZ-003. The trigger is the material's shader FAMILY being CalmWater, and ONLY that.
+//
+// Why the family: a DayZ water rvmat is a 79-byte stub naming that family and nothing
+// else, and it is a family the engine is expected to implement -- not a material that
+// failed to describe itself. Chernarus's `dz\water\` addon ships 47 rvmats and ZERO
+// `.emat` files, yet its `ponds/data/water_lake.rvmat` is byte-for-byte the same stub as
+// Enoch's pond. Chernarus has ~4,044 water placements (670 ponds + 3,374 streams/beds)
+// against Enoch's ~1,238, so keying on the `.emat` -- or on the Environment slot it
+// fills -- would light up the smaller map and leave the larger one a flat dark hole.
+//
+// Why NOT "the material names an EnvironmentMap", which was the first thing tried:
+// MEASURED on one Enoch view, 157 perfectly ordinary `Super` materials -- boulders,
+// tree stumps, anthills -- name `dz\data\data\env_land_co.paa` in their Environment slot.
+// In Real Virtuality that stage is a faint, specular-masked tint; treating it as "this
+// surface is a mirror" and mixing the sky in by Schlick turned every rock in the frame
+// bright and hard-edged (grazing angles drive Schlick to 1). The slot says "has an
+// environment stage", not "is reflective", and one capture was enough to show the
+// difference. A material that wants this treatment can still get it by naming the family.
+//
+// What a surface does NOT yet get from a present `.emat`: its `ReflectionColor` and
+// `FresnelRange` are parsed and sit in the EmatMaterial, but carrying them to the GPU
+// needs lanes this ABI does not have free, and Chernarus has no values to carry anyway.
+// Both maps therefore use the same built-in water constant in the shader (ENV_F0 = 0.02,
+// the air/water normal-incidence reflectance). A stated approximation, not a measurement
+// of DayZ's own numbers.
+bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
+{
+    // A/B switch. The reflective bit is baked into the section record at model
+    // registration, so this is read once and cannot be flipped on a loaded world -- which
+    // is exactly what a before/after capture wants: two runs of the SAME binary, same
+    // camera, one term different. WGR_ENV_REFLECTION=0 restores the pre-DZ-003 look.
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ENV_REFLECTION");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    if (!enabled)
+        return false;
+    if (!section.surfMat)
+        return false;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return false;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return false; // ResolveMaterialBaseColour fills the cache first
+
+    // The `.emat` substitution deliberately keeps the rvmat's own family string rather
+    // than inventing one (EmatMaterialAdapter::TranslateEmat), so this test reads the
+    // same on a water_bliss surface and on a bare water one.
+    if (cached->second.shaderFamily != "CalmWater")
+        return false;
+    static std::unordered_set<std::string> logged;
+    if (logged.insert(materialPath).second)
+    {
+        // Whether this water surface brought its own authored environment map is real
+        // information -- Enoch's `water_bliss` ponds do (via the `.emat`), Chernarus's
+        // bare `water` ponds do not -- and it is what a future per-material env map would
+        // bind. It does not change the decision above; both reflect the live sky.
+        const uint64_t authored = ResolveMaterialEnvironmentMap(section);
+        LOG_INFO(Graphics, "Wgpu material: reflective (family=CalmWater, authored env map {}) for {}",
+                 authored ? "present" : "absent", materialPath);
+    }
+    return true;
+}
+
 // Multi's mask and its three further surface layers, each with its own UV transform.
 //
 // MAT-039: the family is a four-layer masked blend and only layer 0 was ever bound, so a
@@ -3239,12 +3495,8 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section, bool
     {
         try
         {
-            const auto source = Asset::Material::ParseRvMaterialFile(materialPath);
             cached =
-                _materialBindings
-                    .emplace(materialPath,
-                             Asset::Material::TranslateSemantics(source, Asset::Material::TranslateMaterial(source)))
-                    .first;
+                _materialBindings.emplace(materialPath, Asset::Material::LoadTranslatedMaterial(materialPath)).first;
         }
         catch (...)
         {
@@ -3334,6 +3586,20 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     {
         return found->second; // already scanned (WGR_INVALID_MODEL if it was ineligible)
     }
+
+    std::vector<TextureWgpu*> modelTextures;
+    std::vector<uint64_t> modelMeshes;
+    if (_wbank)
+        _wbank->BeginModelTextureCapture(modelTextures);
+    struct TextureCaptureScope
+    {
+        TextureBankWgpu* bank;
+        ~TextureCaptureScope()
+        {
+            if (bank)
+                bank->EndModelTextureCapture();
+        }
+    } textureCaptureScope{_wbank};
 
     std::vector<WgrModelLod> lods;
     std::vector<WgrModelSection> sections;
@@ -3517,7 +3783,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             eligible = false;
             break;
         }
-        _gpuMeshes.push_back(mesh);
+        _gpuMeshes.insert(mesh);
+        modelMeshes.push_back(mesh);
         AutoArray<render::mesh::MeshSection> secs;
         render::mesh::BuildSections(*s, secs);
 
@@ -3629,8 +3896,23 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i), &baseFromConstant);
             const bool     faceHasTexture = mat.texture_id != 0;
             // Suppressed: the RVMAT offered only a constant and the face has the real image.
+            // DZ-006: `CalmWater` is the measured exception, kept in step with DrawSectionTL's
+            // copy (which carries the full evidence). Every DayZ water p3d names the same
+            // roadway surface-type texture on its visible face; the material's constant is the
+            // only real albedo, so here the constant wins even when the face has a texture.
+            const bool calmWaterConstant = [&]
+            {
+                if (!baseFromConstant)
+                    return false;
+                const ShapeSection& secW = s->GetSection(i);
+                const char* mpW = secW.surfMat ? secW.surfMat->GetName().Data() : nullptr;
+                if (!mpW || !*mpW)
+                    return false;
+                const auto cachedW = _materialBindings.find(mpW);
+                return cachedW != _materialBindings.end() && Asset::Material::IsCalmWater(cachedW->second);
+            }();
             const bool constantYieldsToFace =
-                baseColour != 0 && baseFromConstant && faceHasTexture && !constantOverridesFace;
+                baseColour != 0 && baseFromConstant && faceHasTexture && !constantOverridesFace && !calmWaterConstant;
             if (constantYieldsToFace)
             {
                 const ShapeSection& secC = s->GetSection(i);
@@ -3721,6 +4003,32 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Stage1. Same ordering dependency: the translation cache is populated
             // by ResolveMaterialBaseColour above.
             mat.normal_texture_id = ResolveMaterialNormalMap(s->GetSection(i));
+            // DZ-003: an EnvironmentMap in the material is the declaration "this surface is
+            // reflective". Rides in the section's flags word (WgrModelMaterial is
+            // size-locked); the shader adds a Fresnel-weighted sky reflection for it and
+            // changes nothing for every material that names none. Same cache ordering.
+            //
+            // DZ-006: and only when the albedo actually bound. mat.texture_id == 0 leaves the
+            // section on the white bindless fallback, where a sky reflection produces a bright
+            // wrong surface instead of a dull one. See the per-draw twin in DrawSectionTL.
+            if (MaterialIsReflective(s->GetSection(i)))
+            {
+                if (mat.texture_id != 0)
+                {
+                    sec.flags |= WGR_MODEL_SECTION_REFLECTIVE;
+                }
+                else
+                {
+                    const ShapeSection& secR = s->GetSection(i);
+                    const char* mpR = secR.surfMat ? secR.surfMat->GetName().Data() : "<none>";
+                    static std::unordered_set<std::string> loggedUnboundReflective;
+                    if (loggedUnboundReflective.insert(mpR ? mpR : "").second)
+                        LOG_WARN(Graphics,
+                                 "Wgpu material: reflection SUPPRESSED for {} -- its base colour did not bind, "
+                                 "so the section is on the white fallback and a reflection would blow it out",
+                                 mpR);
+                }
+            }
             // Multi's further layers, same ordering dependency on the translation cache.
             ResolveMaterialLayers(s->GetSection(i), mat);
             if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
@@ -3764,7 +4072,105 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     {
         _gpuConformShapes.insert(shape);
     }
+    if (model != WGR_INVALID_MODEL)
+    {
+        _gpuModelMeshes[shape] = std::move(modelMeshes);
+        _gpuModelTextures[shape] = std::move(modelTextures);
+    }
+    else
+    {
+        // A late eligibility failure may follow successful LOD uploads. They
+        // never belong to a registered model, so return their pool ranges now.
+        for (uint64_t mesh : modelMeshes)
+        {
+            wgr_mesh_destroy(_renderer, mesh);
+            _gpuMeshes.erase(mesh);
+        }
+    }
     return model;
+}
+
+namespace
+{
+bool IsTerrainPageTexture(const TextureWgpu* texture)
+{
+    const char* name = texture ? texture->Name() : nullptr;
+    if (!name)
+        return false;
+    return ContainsNoCase(name, "\\layers\\") || ContainsNoCase(name, "/layers/") ||
+           ContainsNoCase(name, "_lca.") || ContainsNoCase(name, "_lco.");
+}
+} // namespace
+
+void EngineWgpu::RetainGpuModel(const LODShapeWithShadow* shape)
+{
+    if (!shape)
+        return;
+    uint32_t& refs = _gpuModelRefs[shape];
+    if (refs++ != 0)
+        return;
+    if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
+        for (TextureWgpu* texture : found->second)
+            if (texture)
+                texture->PinResident();
+}
+
+void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
+{
+    if (!shape || !_renderer)
+        return;
+    const auto refIt = _gpuModelRefs.find(shape);
+    if (refIt == _gpuModelRefs.end() || refIt->second == 0)
+        return;
+    if (--refIt->second != 0)
+        return;
+    _gpuModelRefs.erase(refIt);
+
+    uint32_t evictedTextures = 0;
+    if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
+    {
+        for (TextureWgpu* texture : found->second)
+        {
+            if (!texture)
+                continue;
+            texture->UnpinResident();
+            // Terrain owns its own page lifetime and may share a material image
+            // with an object. Never invalidate a handle held by its Rust bind.
+            // A texture may also feed an active direct draw, which has no
+            // retained-model pin. EnsureUploaded touches those every frame.
+            // Keep two submissions of safety so removing a retained model early
+            // in this frame cannot invalidate a direct draw's handle.
+            const bool directUseQuiescent =
+                _wbank && _wbank->ResidencyFrame() >= texture->LastUsedFrame() + 2;
+            if (texture->ResidentPins() == 0 && directUseQuiescent && !IsTerrainPageTexture(texture) &&
+                texture->GpuHandle())
+            {
+                texture->EvictGpu();
+                ++evictedTextures;
+            }
+        }
+        _gpuModelTextures.erase(found);
+    }
+
+    uint32_t releasedMeshes = 0;
+    if (const auto found = _gpuModelMeshes.find(shape); found != _gpuModelMeshes.end())
+    {
+        for (uint64_t mesh : found->second)
+        {
+            wgr_mesh_destroy(_renderer, mesh);
+            _gpuMeshes.erase(mesh);
+            ++releasedMeshes;
+        }
+        _gpuModelMeshes.erase(found);
+    }
+
+    _gpuModels.erase(shape);
+    _gpuModelCoverage.erase(shape);
+    _gpuModelComplement.erase(shape);
+    _gpuConformShapes.erase(shape);
+    if (std::getenv("WGR_MODEL_RESIDENCY_TRACE") && (releasedMeshes || evictedTextures))
+        LOG_INFO(Graphics, "Wgpu model residency release: model={} meshes={} textures={}", shape->Name(),
+                 releasedMeshes, evictedTextures);
 }
 
 // §12d: register the parent's eligible interior furniture proxies as GPU child instances. A
@@ -3821,7 +4227,8 @@ bool EngineWgpu::EmitGpuProxies(Object* parent, LODShapeWithShadow* shape)
         const Matrix4 world = parentT * proxy.obj->Transform();
         const WgrInstance inst = BuildGpuProxyInstance(world, pmodel);
         const uint32_t slot = wgr_instance_add(_renderer, &inst);
-        set.children.push_back(GpuProxyChild{i, slot, pmodel});
+        RetainGpuModel(pshape);
+        set.children.push_back(GpuProxyChild{i, slot, pmodel, pshape});
     }
     if (!set.children.empty())
     {
@@ -3840,6 +4247,7 @@ void EngineWgpu::RemoveGpuProxies(const Object* parent)
     for (const auto& child : it->second.children)
     {
         wgr_instance_remove(_renderer, child.slot);
+        ReleaseGpuModel(child.shape);
     }
     _gpuProxies.erase(it);
 }
@@ -3892,6 +4300,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
     TraceGpuInstance("created", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, model);
     const uint32_t slot = wgr_instance_add(_renderer, &inst);
+    RetainGpuModel(shape);
     // Full (whole object on the GPU) vs Partial (GPU owns the opaque geometry; the CPU still
     // draws proxies + blend/decal sections) — base decision per shape in RegisterGpuModel.
     const auto covIt = _gpuModelCoverage.find(shape);
@@ -3909,7 +4318,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
             cov = GpuDrawCoverage::Full;
         }
     }
-    _gpuInstances[obj] = GpuInstance{model, slot, obj->Transform().Position(), cp.mode, cov};
+    _gpuInstances[obj] = GpuInstance{model, slot, shape, obj->Transform().Position(), cp.mode, cov};
     // Mirror the coverage onto the Object so GpuDrivenCoverage() is an O(1) field read (see there).
     obj->SetGpuCoverage(static_cast<int>(cov));
 }
@@ -3927,7 +4336,9 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
         return;
     }
     wgr_instance_remove(_renderer, it->second.slot);
+    const LODShapeWithShadow* shape = it->second.shape;
     _gpuInstances.erase(it);
+    ReleaseGpuModel(shape);
     obj->SetGpuCoverage(static_cast<int>(GpuDrawCoverage::None)); // back to the CPU path
 }
 
@@ -3945,12 +4356,14 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     LODShapeWithShadow* shape = obj->GetShape();
     // A destroyed object (or a shape swap) can no longer ride the intact GPU model: drop it
     // back to the CPU path, which draws the destroyed/animated geometry.
-    if (!shape || obj->IsDestroyed())
+    if (!shape || shape != it->second.shape || obj->IsDestroyed())
     {
         wgr_instance_remove(_renderer, it->second.slot);
+        const LODShapeWithShadow* residentShape = it->second.shape;
         _gpuInstances.erase(it);
         obj->SetGpuCoverage(static_cast<int>(GpuDrawCoverage::None)); // dropped to the CPU path
         RemoveGpuProxies(obj); // §12d: furniture goes with the parent (CPU draws destroyed geo)
+        ReleaseGpuModel(residentShape);
         return;
     }
     // The conform plane depends on position (mode-1 land cell, mode-2 bcSurfaceY), so recompute
@@ -4424,6 +4837,8 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "AO prep (resolve + mips)",       // WGR_GPU_TIMER_GTAO_PREP
         "AO horizon march",               // WGR_GPU_TIMER_GTAO_COMPUTE
         "AO bilateral blur",              // WGR_GPU_TIMER_GTAO_BLUR
+        "Terrain: depth+normal prepass",   // WGR_GPU_TIMER_TERRAIN_PREPASS
+        "Terrain: main colour",            // WGR_GPU_TIMER_TERRAIN_COLOR
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -4444,6 +4859,24 @@ bool EngineWgpu::GetGrassStats(GrassStatsOut& out) const
     out.nearVertices = s.near_vertices;
     out.midVertices = s.mid_vertices;
     out.farVertices = s.far_vertices;
+    return true;
+}
+
+bool EngineWgpu::GetGpuMemoryStats(GpuMemoryStatsOut& out) const
+{
+    if (!_renderer)
+        return false;
+    WgrMemoryStats stats{};
+    if (wgr_get_memory_stats(_renderer, &stats) == 0)
+        return false;
+    out.trackedBytes = stats.tracked_bytes;
+    out.budgetBytes = stats.budget_bytes;
+    out.objectTextureBytes = stats.object_texture_bytes;
+    out.geometryLiveBytes = stats.geometry_live_bytes;
+    out.geometryCapacityBytes = stats.geometry_capacity_bytes;
+    out.geometryRetiredBytes = stats.geometry_retired_bytes;
+    out.objectTextureCount = stats.object_texture_count;
+    out.overBudget = stats.over_budget != 0;
     return true;
 }
 
@@ -5397,6 +5830,186 @@ void EngineWgpu::DrawSection(const FaceArray& face, Offset beg, Offset end)
             tris.push_back(MakeScreenVertex(verts[idx[k + 1]]));
         }
     }
+    AppendTriangles(_swTexture, _swBlend, _swSampler, _swDepth, tris);
+}
+
+// 3D line primitive: Object::DrawLines projects the shape, then submits every edge
+// through here (Object.cpp, GEngine->DrawLine). It never goes through DrawSection, so
+// with the inherited EngineDummy body -- which is empty -- the whole world-space
+// diagnostic line family drew nothing under wgpu: ballistics trails, tracers, AI path
+// debug, DrawDiagLine / DiagBBox, the viewer floor grid, helicopter debug rects.
+//
+// Mirrors EngineGL33::DrawLine (EngineGL33_2D.cpp): expand the screen-space segment
+// into a 3px-wide quad along its perpendicular, texture it with the preloaded line
+// texture, and submit it as a depth-TESTED, non-depth-writing 2D batch -- occluded by
+// the world, never occluding it, which is what a diagnostic trail wants.
+//
+// Object::DrawLines does NOT call PrepareTriangle, so _swTexture / _swBlend /
+// _swSampler / _swDepth still hold the previous DrawSection's material here. Every
+// piece of state below is therefore resolved locally; reusing the _sw* fields would
+// paint the line with whatever texture the last section happened to leave behind.
+void EngineWgpu::DrawLine(int beg, int end)
+{
+    if (!_swMesh || !_renderer)
+    {
+        return;
+    }
+
+    const TLVertex& tv0 = _swMesh->GetVertex(beg);
+    const TLVertex& tv1 = _swMesh->GetVertex(end);
+
+    Texture* texture = GPreloadedTextures.New(TextureLine);
+    const MipInfo& mip = TextBank()->UseMipmap(texture, 1, 1);
+    if (!mip.IsOK())
+    {
+        return;
+    }
+
+    // Same spec GL33 passes: alpha-blended, clamped, and NoZWrite -> WGR_DEPTH_TEST.
+    const int specFlags = NoZWrite | IsAlpha | ClampU | ClampV | IsAlphaFog;
+
+    float x0 = tv0.pos[0], y0 = tv0.pos[1];
+    float x1 = tv1.pos[0], y1 = tv1.pos[1];
+    const float z0 = tv0.pos[2], z1 = tv1.pos[2];
+    const float w0 = tv0.rhw, w1 = tv1.rhw;
+
+    const float dx = x1 - x0, dy = y1 - y0;
+    const float dSize2 = dx * dx + dy * dy;
+    const float invDSize = dSize2 > 0 ? InvSqrt(dSize2) : 1.0f;
+    const float dSize = dSize2 * invDSize;
+
+    // Direction perpendicular to (dx,dy); the line is a quad of this fixed pixel width.
+    const float pdx = +dy * invDSize, pdy = -dx * invDSize;
+    const float lineW = 3.0f;
+    x0 -= pdx * (lineW * 0.5f);
+    x1 -= pdx * (lineW * 0.5f);
+    y0 -= pdy * (lineW * 0.5f);
+    y1 -= pdy * (lineW * 0.5f);
+    const float x0Side = x0 + pdx * lineW, y0Side = y0 + pdy * lineW;
+    const float x1Side = x1 + pdx * lineW, y1Side = y1 + pdy * lineW;
+
+    Vertex2DAbs vertices[4];
+    vertices[0].x = x0, vertices[0].y = y0, vertices[0].z = z0, vertices[0].w = w0;
+    vertices[0].u = 0, vertices[0].v = 0.25f, vertices[0].color = tv0.color;
+
+    vertices[1].x = x0Side, vertices[1].y = y0Side, vertices[1].z = z0, vertices[1].w = w0;
+    vertices[1].u = 0, vertices[1].v = 1, vertices[1].color = tv0.color;
+
+    vertices[2].x = x1Side, vertices[2].y = y1Side, vertices[2].z = z1, vertices[2].w = w1;
+    vertices[2].u = dSize, vertices[2].v = 1, vertices[2].color = tv1.color;
+
+    vertices[3].x = x1, vertices[3].y = y1, vertices[3].z = z1, vertices[3].w = w1;
+    vertices[3].u = dSize, vertices[3].v = 0.25f, vertices[3].color = tv1.color;
+
+    // Clipped here rather than through DrawPoly: the 2D DrawPoly flattens z/rhw and
+    // forces WGR_DEPTH_NONE, which would put the trail in front of the whole world.
+    // Clip2D interpolates z, w, u, v and colour, so depth survives the clip.
+    constexpr int maxN = 16;
+    Vertex2DAbs scratch1[maxN];
+    Vertex2DAbs scratch2[maxN];
+    int n = 4;
+    const Rect2DAbs clip(0, 0, static_cast<float>(_w), static_cast<float>(_h));
+    const Vertex2DAbs* clipped = ClipPoly2D(vertices, n, clip, scratch1, scratch2);
+    if (!clipped || n < 3)
+    {
+        return;
+    }
+    if (n > maxN)
+    {
+        n = maxN;
+    }
+
+    // fog = 1: unfogged, matching GL33 stuffing specular 0xff000000 into the screen vertex.
+    const auto conv = [](const Vertex2DAbs& v)
+    { return WgrVertex2D{{v.x, v.y, v.z}, v.w, 1.0f, {v.u, v.v}, PackColor(v.color)}; };
+
+    std::vector<WgrVertex2D> tris;
+    tris.reserve(static_cast<size_t>(n - 2) * 3);
+    for (int i = 1; i + 1 < n; i++)
+    {
+        tris.push_back(conv(clipped[0]));
+        tris.push_back(conv(clipped[i]));
+        tris.push_back(conv(clipped[i + 1]));
+    }
+
+    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), DepthForSpec(specFlags),
+                    tris);
+}
+
+// 3D point primitive (stars, laser dots): Object::DrawPoints projects the shape and
+// submits the whole vertex range here. Unlike DrawLines it DOES call PrepareTriangle
+// first, so the _sw* material captured there is the right state to draw with.
+//
+// Mirrors EngineGL33::DrawPoints (EngineGL33_DrawShared.cpp): each point becomes a
+// 2x2-pixel quad whose corner alphas carry the sub-pixel position, which is what makes
+// a one-pixel star fade smoothly instead of snapping between pixels.
+void EngineWgpu::DrawPoints(int beg, int end)
+{
+    if (!_swMesh || !_renderer)
+    {
+        return;
+    }
+
+    const auto fracAlpha = [](float a)
+    {
+        int ia = toInt(a);
+        saturate(ia, 0, 255);
+        return ia;
+    };
+
+    std::vector<WgrVertex2D> tris;
+    for (int i = beg; i < end; i++)
+    {
+        if (_swMesh->Clip(i) & ClipAll)
+        {
+            continue;
+        }
+        const TLVertex& v = _swMesh->GetVertex(i);
+        const PackedColor color = v.color;
+        if (color.A8() < 8)
+        {
+            continue; // do not draw stars that are not visible
+        }
+
+        const int xI = toIntFloor(v.pos[0]);
+        const int yI = toIntFloor(v.pos[1]);
+        const float xFrac = v.pos[0] - xI;
+        const float yFrac = v.pos[1] - yI;
+        const float ixFrac = 1 - xFrac;
+        const float iyFrac = 1 - yFrac;
+        const float a = color.A8();
+
+        TLVertex vs[4];
+        vs[0] = v; // TL
+        vs[0].pos[0] = xI + 0.5f;
+        vs[0].pos[1] = yI + 0.5f;
+        vs[0].color = PackedColorRGB(color, fracAlpha(ixFrac * iyFrac * a));
+        // Screen-space points must not be fogged: MakeScreenVertex reads the fog blend
+        // from specular alpha, so 0xff000000 = keep colour (GL33 parity).
+        vs[0].specular = PackedColor(0xff000000);
+
+        vs[1] = vs[0]; // TR
+        vs[1].pos[0] = xI + 2.5f;
+        vs[1].color = PackedColorRGB(color, fracAlpha(xFrac * iyFrac * a));
+
+        vs[2] = vs[1]; // BR
+        vs[2].pos[1] = yI + 2.5f;
+        vs[2].color = PackedColorRGB(color, fracAlpha(xFrac * yFrac * a));
+
+        vs[3] = vs[2]; // BL
+        vs[3].pos[0] = vs[0].pos[0];
+        vs[3].color = PackedColorRGB(color, fracAlpha(ixFrac * yFrac * a));
+
+        const WgrVertex2D tl = MakeScreenVertex(vs[0]);
+        const WgrVertex2D br = MakeScreenVertex(vs[2]);
+        tris.push_back(tl);
+        tris.push_back(MakeScreenVertex(vs[1]));
+        tris.push_back(br);
+        tris.push_back(tl);
+        tris.push_back(br);
+        tris.push_back(MakeScreenVertex(vs[3]));
+    }
+
     AppendTriangles(_swTexture, _swBlend, _swSampler, _swDepth, tris);
 }
 

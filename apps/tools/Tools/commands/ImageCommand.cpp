@@ -5,6 +5,7 @@
 #include <Poseidon/Graphics/Textures/PAAEncoder.hpp>
 #include <Poseidon/Graphics/Textures/PixelFormat.hpp>
 #include <Poseidon/Graphics/Textures/ImageContainer.hpp>
+#include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/Asset/Probes/AssetPreview.hpp>
 #include <iostream>
@@ -21,7 +22,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <map>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -476,9 +479,111 @@ static void setupImageScan(CLI::App& image)
         });
 }
 
+// Runs the .edds container reader over a file or a directory tree and reports
+// closure, the way `terrain census` does for worlds. The point is the denominator:
+// a reader that takes one texture proves nothing, and the failure mode this guards
+// against -- a field read at the wrong width -- shows up as a count, not a crash.
+static void setupImageEddsCensus(CLI::App& image)
+{
+    auto* cmd = image.add_subcommand("edds", "Decode .edds textures and report container closure");
+    static std::string inputPath;
+    static bool listFailures = false;
+    cmd->add_option("input", inputPath, "An .edds file, or a directory to walk")->required()->check(CLI::ExistingPath);
+    cmd->add_flag("--failures", listFailures, "Print every failure rather than the first ten");
+
+    cmd->callback(
+        []()
+        {
+            std::vector<std::filesystem::path> files;
+            std::error_code ec;
+            if (std::filesystem::is_directory(inputPath, ec))
+            {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(inputPath, ec))
+                {
+                    if (!entry.is_regular_file(ec))
+                        continue;
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (ext == ".edds" || ext == ".dds")
+                        files.push_back(entry.path());
+                }
+                std::sort(files.begin(), files.end());
+            }
+            else
+            {
+                files.emplace_back(inputPath);
+            }
+
+            int decoded = 0, levels = 0;
+            std::map<std::string, int> formats;
+            std::vector<std::pair<std::string, std::string>> failures;
+
+            for (const auto& path : files)
+            {
+                std::ifstream in(path, std::ios::binary | std::ios::ate);
+                if (!in)
+                {
+                    failures.emplace_back(path.string(), "unreadable file");
+                    continue;
+                }
+                const auto size = in.tellg();
+                std::vector<uint8_t> buffer(static_cast<size_t>(size));
+                in.seekg(0);
+                in.read(reinterpret_cast<char*>(buffer.data()), size);
+
+                const Poseidon::EddsImage image = Poseidon::ReadEddsBuffer(buffer.data(), buffer.size());
+                if (!image.valid())
+                {
+                    failures.emplace_back(path.string(), image.error);
+                    continue;
+                }
+                ++decoded;
+                levels += static_cast<int>(image.mipmaps.size());
+                const Poseidon::PixelFormatInfo& info = Poseidon::PixelFormatRegistry::Get(image.format);
+                formats[info.name ? info.name : "?"]++;
+
+                if (files.size() == 1)
+                {
+                    std::cout << "File: " << path.string() << "\n";
+                    std::cout << "Container: Enfusion .edds (ENF1)\n";
+                    std::cout << "Format: " << (info.name ? info.name : "?") << "\n";
+                    std::cout << "Dimensions: " << image.width << "x" << image.height << "\n";
+                    std::cout << "Mipmaps: " << image.mipmaps.size() << "\n";
+                    std::cout << "Alpha: " << (image.hasAlpha ? "yes" : "no") << "\n";
+                    for (size_t i = 0; i < image.mipmaps.size(); ++i)
+                        std::cout << "  level " << i << ": " << image.mipmaps[i].width << "x" << image.mipmaps[i].height
+                                  << ", " << image.mipmaps[i].data.size() << " bytes\n";
+                }
+            }
+
+            if (files.size() > 1)
+            {
+                const double pct = files.empty() ? 0.0 : 100.0 * decoded / static_cast<double>(files.size());
+                std::cout << "files    " << files.size() << "\n";
+                std::cout << "decoded  " << decoded << "  (" << std::fixed << std::setprecision(3) << pct << "%)\n";
+                std::cout << "levels   " << levels << "\n";
+                std::cout << "failed   " << failures.size() << "\n";
+                for (const auto& [name, count] : formats)
+                    std::cout << "  " << std::left << std::setw(12) << name << count << "\n";
+            }
+
+            if (!failures.empty())
+            {
+                const size_t show = listFailures ? failures.size() : std::min<size_t>(10, failures.size());
+                std::cout << "\nfailures:\n";
+                for (size_t i = 0; i < show; ++i)
+                    std::cout << "  " << failures[i].first << ": " << failures[i].second << "\n";
+                if (show < failures.size())
+                    std::cout << "  ... and " << (failures.size() - show) << " more (--failures for all)\n";
+                throw CLI::RuntimeError(1);
+            }
+        });
+}
+
 void ImageCommand::Setup(CLI::App& app)
 {
-    auto* image = app.add_subcommand("image", "Texture operations (PAA/PAC/PNG/BMP)");
+    auto* image = app.add_subcommand("image", "Texture operations (PAA/PAC/PNG/BMP/DDS)");
     image->require_subcommand(1);
 
     setupImageInspect(*image);
@@ -487,6 +592,7 @@ void ImageCommand::Setup(CLI::App& app)
     setupImageFormats(*image);
     setupImageCompare(*image);
     setupImageScan(*image);
+    setupImageEddsCensus(*image);
 }
 
 } // namespace PoseidonTools

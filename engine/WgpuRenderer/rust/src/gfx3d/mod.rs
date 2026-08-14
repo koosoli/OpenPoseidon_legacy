@@ -527,6 +527,9 @@ impl CameraGroup {
             // Stage 2 baked-volume knobs.
             + 16
             // Material Debug lane for the retained path (frame.wgsl `matdbg`).
+            + 16
+            // DZ-005 water surface animation (frame.wgsl `wateranim`): time, ripple
+            // strength, flow strength, flow-map bindless slot.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -1008,6 +1011,10 @@ fn build_group1_bind(
     // read-only storage (plain world array, indexed by instance_index).
     slot0_dynamic: Option<u64>,
     material: &wgpu::Buffer,
+    // DZ-003: Sky's equirect reflection env map + sampler (a 1x1 dummy until Sky lends
+    // the real one), for the Fresnel reflection on materials naming an EnvironmentMap.
+    env_view: &wgpu::TextureView,
+    env_sampler: &wgpu::Sampler,
     label: &str,
 ) -> wgpu::BindGroup {
     let slot0_binding = wgpu::BufferBinding {
@@ -1026,6 +1033,14 @@ fn build_group1_bind(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: material.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(env_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(env_sampler),
             },
         ],
     })
@@ -1856,6 +1871,23 @@ fn normal_resolve_takes_a_single_sample_rather_than_averaging() {
 /// through `Gfx3d::set_gtao_scale`.
 ///
 /// Logs what it resolved to, like the other WGR_* gates, so a benchmark log says which path ran.
+/// DZ-005 — the world-space water ripple's master strength, and its A/B switch.
+///
+/// Fixed once at renderer construction rather than read per frame, for the same reason
+/// `MaterialIsReflective`'s `WGR_ENV_REFLECTION` is: a before/after capture must be two runs
+/// of the SAME binary differing in exactly one term, and a value that can drift mid-run (or
+/// be re-read after a world load) is not that. `WGR_WATER_RIPPLE=0` restores the pre-DZ-005
+/// glassy surface exactly — the shader's whole world-space branch is gated on this being > 0.
+fn water_ripple_strength_from_env() -> f32 {
+    let strength = std::env::var("WGR_WATER_RIPPLE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(1.0)
+        .clamp(0.0, 8.0);
+    eprintln!("[wgr] water ripple strength: {strength} from WGR_WATER_RIPPLE (0 = glassy)");
+    strength
+}
+
 fn gtao_scale_from_env() -> u32 {
     let scale = std::env::var("WGR_GTAO_SCALE")
         .ok()
@@ -2547,6 +2579,16 @@ pub struct Gfx3d {
     group1_plain_bind: Option<wgpu::BindGroup>,
     group1_skinned_bind: Option<wgpu::BindGroup>,
 
+    // DZ-003 -- Sky's equirect reflection env map (linear radiance) + its sampler, lent to
+    // BOTH object paths' group(1). Only sections/draws whose material named an
+    // EnvironmentMap sample it; everything else never touches the binding. Starts as a 1x1
+    // dummy so the layouts are satisfiable from frame one, exactly like water's.
+    env_view: wgpu::TextureView,
+    env_sampler: wgpu::Sampler,
+    // Generation of the bound env view. u64::MAX = the dummy is still bound. The env
+    // texture is created once and never resized, so this flips exactly once.
+    env_gen: u64,
+
     // Pipeline build inputs, kept so variants can be created lazily as draws
     // demand new (blend, depth, polygon-offset, cutout-threshold) combinations.
     shader: wgpu::ShaderModule,
@@ -2613,6 +2655,9 @@ pub struct Gfx3d {
     // UBO each frame. Presentation state, never baked into the material records.
     material_debug_view: u32,
     material_debug_flags: u32,
+    // DZ-005 water surface animation, pushed into frame.wgsl's `wateranim` lane every frame:
+    // (time_s, ripple_strength, flow_strength, flow_map_bindless_slot). See `set_water_anim`.
+    water_anim: [f32; 4],
     // (proj_xx, proj_yy, near) per camera, cached from `prepare` so the GTAO dispatch uses the
     // SAME projection the prepass rasterised with. Recomputing it at dispatch time from a
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
@@ -2823,6 +2868,37 @@ impl Gfx3d {
         );
         let material = StorageArray::new("wgr_3d_material_ssbo");
 
+        // DZ-003 -- 1x1 stand-in for Sky's reflection env map, so both object paths'
+        // group(1) is valid before set_env_view runs (and on any frame Sky is absent).
+        // Rgba16Float to match the real env target; the sampler wraps in U (the equirect
+        // azimuth seam) and clamps V (the poles), same as water's.
+        let dummy_env_view = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_3d_dummy_env"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let env_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("wgr_3d_env_sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+
         // Group 1 for the lit pipelines. Binding 1 (material) is a whole-buffer
         // read-only storage array for both pipelines, indexed by instance_index.
         // Binding 0 differs: the plain pipeline binds the world storage array (also
@@ -2862,6 +2938,25 @@ impl Gfx3d {
                             has_dynamic_offset: false,
                             min_binding_size: wgpu::BufferSize::new(MATERIAL_SIZE),
                         },
+                        count: None,
+                    },
+                    // DZ-003: Sky's equirect reflection env map + its sampler. Read only
+                    // by draws whose material named an EnvironmentMap; every other draw
+                    // never samples it, so this costs one binding and nothing else.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
                 ],
@@ -3138,8 +3233,11 @@ impl Gfx3d {
             &textures.sampler_array_layout,
             &conform.layout,
             surface_format,
-            sample_count,
-            foliage_a2c,
+            // The planar target is resolution-scaled and mip-filtered before water samples
+            // it. Main-scene 4x MSAA here multiplied the complete retained reflection pass for
+            // no useful output quality; cutouts use their normal hard threshold at 1x.
+            1,
+            false,
             wgpu::FrontFace::Ccw,
         );
         // GPU-driven cascade shadow depth pipeline (§6 multi-view): the retained set cast into
@@ -3184,6 +3282,9 @@ impl Gfx3d {
             group1_skinned_layout,
             group1_plain_bind: None,
             group1_skinned_bind: None,
+            env_view: dummy_env_view,
+            env_sampler,
+            env_gen: u64::MAX,
             shader,
             plain_layout: pipeline_layout,
             skinned_layout,
@@ -3212,6 +3313,7 @@ impl Gfx3d {
             gtao_scale: gtao_scale_from_env(),
             material_debug_view: 0,
             material_debug_flags: 1 << 2, // compose Multi layers, matching the C++ default
+            water_anim: [0.0, water_ripple_strength_from_env(), 0.0, 0.0],
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
             hiz: hiz::HiZ::new(device),
@@ -3636,6 +3738,14 @@ impl Gfx3d {
             aabb_max,
         });
         key.data().as_ffi()
+    }
+
+    pub fn geometry_residency(&self) -> pool::GeometryResidency {
+        self.pool.residency()
+    }
+
+    pub fn frame_submitted(&mut self) {
+        self.pool.frame_submitted();
     }
 
     // Attach interleaved per-vertex skin data (4 bone indices + 4 weights).
@@ -4683,6 +4793,19 @@ impl Gfx3d {
     // regrow the dynamic UBOs. `palette` is a flat pool of PALETTE_SIZE-matrix
     // blocks, one per palette slot (world already pre-multiplied in on the C++ side).
     #[allow(clippy::too_many_arguments)]
+    // DZ-003 -- adopt Sky's equirect reflection env map for the object paths' group(1),
+    // mirroring Water::set_env_view. Returns whether the view actually changed, so the
+    // caller rebuilds the bind groups that borrow it. The env texture is created once and
+    // never resized, so `view_gen` is effectively constant and this flips exactly once.
+    fn set_env_view(&mut self, env: &wgpu::TextureView, view_gen: u64) -> bool {
+        if self.env_gen == view_gen {
+            return false;
+        }
+        self.env_view = env.clone();
+        self.env_gen = view_gen;
+        true
+    }
+
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -4710,6 +4833,9 @@ impl Gfx3d {
         skyvis_view: &wgpu::TextureView,
         // CLD-020 cloud sun-transmittance map, owned by the Sky pass.
         cloud_shadow_view: &wgpu::TextureView,
+        // DZ-003 -- Sky's equirect reflection env map (linear radiance), the same view
+        // water already reflects. Lent, not owned; bound into both object paths' group(1).
+        env_view: &wgpu::TextureView,
         foliage: &crate::ffi::WgrFoliage,
         // (camera index, sea level). Only the reflected camera uses this conservative
         // above-water clip; main cameras retain their existing behaviour.
@@ -4722,6 +4848,14 @@ impl Gfx3d {
         // (group 4) so vs_main can conform ClipLand vegetation to SurfaceY per vertex.
         self.conform
             .ensure(device, queue, heightmap_view, heightmap_gen, conform_params);
+        // DZ-003: take Sky's reflection env map. The env texture is created once and never
+        // resized, so gen 0 binds it exactly once and this is a no-op every frame after.
+        // Both the per-draw group-1 binds (below) and the GPU-driven group-1 binds
+        // (rebuild_gpu_group1) borrow it, so a change forces both to rebuild.
+        let env_changed = self.set_env_view(env_view, 0);
+        if env_changed {
+            self.gpu_group1_bind = None;
+        }
         // Frame-global lights into the group-0 storage buffer (shared with
         // terrain via the camera bind group). The per-camera count is in cam_pos.w.
         self.cameras.upload_lights(queue, lights);
@@ -4896,10 +5030,10 @@ impl Gfx3d {
                     if baked_on && sv.debug { 1.0 } else { 0.0 },
                 ];
                 queue.write_buffer(buf, knob_off + 32, bytemuck::cast_slice(&knobs_c));
-                // Material Debug (frame.wgsl `matdbg`), the LAST lane of the block. Written
-                // unconditionally and derived from bind_size rather than from the sky offsets
-                // above, which live inside a conditional: the retained shader reads this every
-                // frame and a stale lane would leave a debug view stuck on.
+                // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
+                // from bind_size rather than from the sky offsets above, which live inside a
+                // conditional: the retained shader reads this every frame and a stale lane
+                // would leave a debug view stuck on.
                 let matdbg = [
                     self.material_debug_view as f32,
                     self.material_debug_flags as f32,
@@ -4908,8 +5042,16 @@ impl Gfx3d {
                 ];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 16,
+                    base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&matdbg),
+                );
+                // DZ-005 water surface animation (frame.wgsl `wateranim`), the LAST lane.
+                // Same reasoning as matdbg: unconditional, so a world that stops publishing
+                // water params cannot leave the ripple frozen at a stale time.
+                queue.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&self.water_anim),
                 );
             }
         }
@@ -4996,11 +5138,18 @@ impl Gfx3d {
                         light_diffuse: d.mat_light_diffuse,
                         light_ambient: d.mat_light_ambient,
                         specular: d.mat_specular,
+                        // w is a small BITFIELD, not a bool: bit 0 = invert the normal
+                        // map's Y (the material-debug toggle it already carried), bit 1 =
+                        // DZ-003 reflective (the material named an EnvironmentMap). Kept
+                        // in this lane because WgrDraw3D is ABI-frozen and MaterialUbo's
+                        // seven vec4s are otherwise fully spoken for.
                         normal_map: [
                             f32::from_bits(normal_packed),
                             (d._pad & 0xff) as f32,
                             if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
-                            if d._pad & 0x100 != 0 { 1.0 } else { 0.0 },
+                            (u32::from(d._pad & 0x100 != 0)
+                                | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
+                                    << 1)) as f32,
                         ],
                     })
                 }));
@@ -5030,13 +5179,15 @@ impl Gfx3d {
         if let (Some(world_buf), Some(mat_buf)) =
             (self.world.buf.as_ref(), self.material.buf.as_ref())
         {
-            if world_grew || material_grew || self.group1_plain_bind.is_none() {
+            if world_grew || material_grew || env_changed || self.group1_plain_bind.is_none() {
                 self.group1_plain_bind = Some(build_group1_bind(
                     device,
                     &self.group1_plain_layout,
                     world_buf,
                     None,
                     mat_buf,
+                    &self.env_view,
+                    &self.env_sampler,
                     "wgr_3d_group1_plain_bind",
                 ));
             }
@@ -5044,13 +5195,15 @@ impl Gfx3d {
         if let (Some(pal_buf), Some(mat_buf)) =
             (self.palette.buf.as_ref(), self.material.buf.as_ref())
         {
-            if palette_grew || material_grew || self.group1_skinned_bind.is_none() {
+            if palette_grew || material_grew || env_changed || self.group1_skinned_bind.is_none() {
                 self.group1_skinned_bind = Some(build_group1_bind(
                     device,
                     &self.group1_skinned_layout,
                     pal_buf,
                     Some(self.palette.bind_size),
                     mat_buf,
+                    &self.env_view,
+                    &self.env_sampler,
                     "wgr_3d_group1_skinned_bind",
                 ));
             }
@@ -5697,9 +5850,15 @@ impl Gfx3d {
         let gpu_sections: Vec<cull::SectionGpu> =
             srcs.iter().map(|s| self.resolve_section(s)).collect();
         self.gpu_section_src.extend_from_slice(&srcs);
+        // `materials` is parallel to `sections` (one material per section), so the
+        // section's flags word rides across here -- DZ-003's reflective bit lives in
+        // WgrModelSection::flags because WgrModelMaterial is size-locked at 192 bytes.
+        // zip() stops at the shorter of the two, which is the same defensive length rule
+        // the section/material pairing already relies on.
         let gpu_materials: Vec<cull::SectionMaterialGpu> = materials
             .iter()
-            .map(|m| cull::SectionMaterialGpu {
+            .zip(sections.iter())
+            .map(|(m, s)| cull::SectionMaterialGpu {
                 emissive: m.emissive,
                 ambient: m.ambient,
                 diffuse: m.diffuse,
@@ -5715,7 +5874,8 @@ impl Gfx3d {
                     textures.texture_slot(m.layer_texture_id[1]),
                     textures.texture_slot(m.layer_texture_id[2]),
                 ],
-                _pad_layer: [0; 3],
+                flags: s.flags,
+                _pad_layer: [0; 2],
                 layer_uv: m.layer_uv,
             })
             .collect();
@@ -6085,6 +6245,7 @@ impl Gfx3d {
         cam: &WgrCamera,
         shadow: &WgrShadowPass,
         reflected_cam: Option<&WgrCamera>,
+        reflection_detail_reduction: f32,
     ) {
         if !self.gpu_driven_enabled {
             return;
@@ -6105,9 +6266,16 @@ impl Gfx3d {
             let view = glam::Mat4::from_cols_array(&cam.view);
             let proj = glam::Mat4::from_cols_array(&cam.proj);
             let pos = glam::Vec3::new(cam.cam_pos[0], cam.cam_pos[1], cam.cam_pos[2]);
+            // The planar target is both lower resolution and wider-FOV than the main view.
+            // Reusing the main viewport's LOD metric made the reflection render model detail
+            // that cannot occupy a pixel in its target. Correct the metric, shared by every
+            // retained compatibility layer, while preserving draw distance and frustum rules.
+            let reflection_inputs = self
+                .cull_inputs
+                .for_reduced_view(reflection_detail_reduction);
             self.cull.set_reflection_params(
                 device,
-                cull::params_from_camera(view, proj, pos, self.cull_inputs),
+                cull::params_from_camera(view, proj, pos, reflection_inputs),
             );
         } else {
             self.cull.clear_reflection_view();
@@ -6297,6 +6465,17 @@ impl Gfx3d {
                         binding: 5,
                         resource: vdata.as_entire_binding(),
                     },
+                    // DZ-003: Sky's equirect reflection env map + sampler, for sections
+                    // whose material named an EnvironmentMap. A 1x1 dummy until Sky lends
+                    // the real view, so the layout is satisfied from the first frame.
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&self.env_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Sampler(&self.env_sampler),
+                    },
                 ],
             })
         };
@@ -6440,6 +6619,23 @@ impl Gfx3d {
     pub fn set_material_debug(&mut self, view: u32, flags: u32) {
         self.material_debug_view = view;
         self.material_debug_flags = flags;
+    }
+
+    /// DZ-005 — publish this frame's water surface animation into the frame UBO.
+    ///
+    /// `time` is the engine's own water clock (`WgrWaterParams.time` = `Glob.time`), so the
+    /// ripple pauses exactly when the simulation does and two launches of the same test
+    /// mission animate identically. The ripple strength is *not* taken from the caller: it is
+    /// an A/B switch fixed at construction from `WGR_WATER_RIPPLE`, so a before/after capture
+    /// is two runs of one binary with one term different, which is the only comparison that
+    /// cannot drift.
+    ///
+    /// `flow_slot` is the bindless slot of the world's river flow map (0 = none; Chernarus
+    /// ships none at all), and `flow_strength` its `StreamSpeedInfl`.
+    pub fn set_water_anim(&mut self, time: f32, flow_slot: u32, flow_strength: f32) {
+        self.water_anim[0] = time;
+        self.water_anim[2] = flow_strength;
+        self.water_anim[3] = flow_slot as f32;
     }
 
     pub fn gtao_settings(&self) -> &GtaoSettings {

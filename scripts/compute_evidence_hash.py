@@ -101,11 +101,17 @@ def rewrite_ledger(updates: dict[str, str]) -> list[str]:
     for block in blocks[1:]:
         ticket = block.splitlines()[0].strip()
         wanted = updates.get(ticket)
-        current = re.search(r"    evidence_hash: ([0-9a-f]{64})", block)
+        # `null` has to match too, not just an existing digest. It did not, and the
+        # effect was the opposite of the intent: a ticket promoted to VALIDATED with
+        # the field still null was skipped by every sweep, so the one state that
+        # needs a hash was the one state that never got one. Seven records reached
+        # VALIDATED that way before the validator -- which fails on the first bad
+        # ticket -- ever got far enough down the file to notice.
+        current = re.search(r"    evidence_hash: ([0-9a-f]{64}|null)", block)
         if wanted and current and current.group(1) != wanted:
             changed.append(ticket)
             block = re.sub(
-                r"    evidence_hash: [0-9a-f]{64}",
+                r"    evidence_hash: (?:[0-9a-f]{64}|null)",
                 "    evidence_hash: " + wanted,
                 block,
                 count=1,

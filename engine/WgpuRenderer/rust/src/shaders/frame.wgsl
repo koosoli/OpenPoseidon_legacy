@@ -85,6 +85,17 @@ struct Frame {
     // rather than being baked into the material records at registration -- baking
     // them is why the toggles did nothing on a world that was already loaded.
     matdbg: vec4<f32>,
+    // DZ-005 — DayZ water surface animation, read by BOTH object paths for sections that
+    // declared themselves reflective (the CalmWater family). One frame-global lane rather
+    // than a per-material field, because Enoch ships exactly ONE river flow map for all 804
+    // river segments and the ripple constants are identical across every water `.emat`.
+    //   x = engine time in seconds (WgrWaterParams.time, i.e. Glob.time — pauses when it does)
+    //   y = ripple strength; 0 disables the world-space normal sample entirely (A/B switch)
+    //   z = flow strength (StreamSpeedInfl); 0 = no scrolling along the flow map
+    //   w = the flow map's BINDLESS texture slot, 0 when the world ships none (Chernarus)
+    // `wateranim` and not `water_anim0`/`water2`: naga_oil forbids composable identifiers
+    // ending in a digit (see `ctlb` above).
+    wateranim: vec4<f32>,
 };
 
 // Material Debug accessors. `flags` is a bitfield carried in a float lane, so it is
@@ -94,6 +105,11 @@ fn matdbg_flag(bit: u32) -> bool { return (u32(frame.matdbg.y + 0.5) & (1u << bi
 const MATDBG_DISABLE_NORMAL: u32 = 0u;
 const MATDBG_INVERT_NORMAL_Y: u32 = 1u;
 const MATDBG_COMPOSE_MULTI: u32 = 2u;
+// DZ-007 -- the dev panel's "Disable Fresnel / Environment" checkbox
+// (Engine::MaterialDebugSettings::disableFresnelEnvironment). SET suppresses both the
+// Fresnel sky reflection and the world-space water ripple, returning a CalmWater surface to
+// its pre-DZ-003 look at runtime with no restart. Read by both object paths.
+const MATDBG_DISABLE_FRESNEL_ENV: u32 = 3u;
 
 // One frame-global point or spot light. Positions are ABSOLUTE world space so a
 // single upload serves every camera; the shader reconstructs the camera-relative

@@ -37,6 +37,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SYSTEMS = ROOT / "docs" / "roadmap" / "renderer-systems-ledger.yaml"
 TICKETS = ROOT / "docs" / "roadmap" / "status-ledger.yaml"
 OUTPUT = ROOT / "docs" / "release" / "preview0" / "capability-matrix.md"
+PREVIEW0_OVERLAY = "PREVIEW0-EXEC-001"
 
 STATUS_LABEL = {
     "SHIPPED": "Works",
@@ -151,7 +152,17 @@ def cell(text: str) -> str:
 def render() -> str:
     systems_text, tickets_text = read(SYSTEMS), read(TICKETS)
     systems = records(systems_text)
-    tickets = records(tickets_text)
+    # Preview-0 tickets only. `status-ledger.yaml` is shared between overlays --
+    # PREVIEW0-EXEC-001 owns 7 records, COMPAT-C1-EXEC-001 owns the rest -- and this
+    # generator had no filter, unlike generate_compat_capability_matrix.py, which
+    # scopes by overlay. Without it every compat ticket is published in a table
+    # headed "These are the Preview-0 release blockers", which is a false claim
+    # about the release, manufactured by regenerating the file. The compat ledger
+    # grew from 37 to 53 records on 2026-08-14, so the next regeneration would have
+    # published 53 of them that way.
+    tickets = [t for t in records(tickets_text) if t.get("overlay") == PREVIEW0_OVERLAY]
+    if not tickets:
+        sys.exit(f"no ledger record declares overlay {PREVIEW0_OVERLAY}")
 
     lines: list[str] = []
     add = lines.append

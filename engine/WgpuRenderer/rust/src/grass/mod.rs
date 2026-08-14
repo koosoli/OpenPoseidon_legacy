@@ -175,6 +175,12 @@ enum StatsSlot {
 
 pub struct Grass {
     enabled: bool,
+    // `WGR_GRASS=0` as an AUTHORITATIVE kill switch, not merely an initial default.
+    // The default it seeded in `new()` was overwritten by the first
+    // `SetGrassSettings` upload a few frames later, so a capture launched with
+    // WGR_GRASS=0 still drew a full field -- which silently invalidates any A/B
+    // that uses it to expose the ground under the grass.
+    force_off: bool,
     casts_shadows: bool,
     far_enabled: bool,
     terrain_params: wgpu::Buffer,
@@ -961,6 +967,7 @@ impl Grass {
         });
         Self {
             enabled,
+            force_off: !enabled,
             casts_shadows: true,
             // SetGrassSettings publishes GrassSettings' 800 m far ring on the
             // first frame; start disabled only until that initial upload.
@@ -1281,7 +1288,11 @@ impl Grass {
             density: params.density.clamp(0.0, 1.0),
             spacing,
             near_radius,
-            enabled: if params.enabled != 0.0 { 1.0 } else { 0.0 },
+            enabled: if params.enabled != 0.0 && !self.force_off {
+                1.0
+            } else {
+                0.0
+            },
             blade_height: params.blade_height.clamp(0.10, 3.0),
             wind_strength: params.wind_strength.clamp(0.0, 3.0),
             wind_direction: params.wind_direction,

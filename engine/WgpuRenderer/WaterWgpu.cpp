@@ -1188,6 +1188,11 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                         std::max(ms[WGR_GPU_TIMER_PLANAR_OBJECTS], 0.0f) +
                         std::max(ms[WGR_GPU_TIMER_PLANAR_CLOUDS], 0.0f) + std::max(ms[WGR_GPU_TIMER_PLANAR_MIPS], 0.0f),
                     total);
+                LOG_INFO(Graphics,
+                         "Planar GPU ms: sky={:.3f} terrain={:.3f} objects={:.3f} clouds={:.3f} mips={:.3f}",
+                         ms[WGR_GPU_TIMER_PLANAR_SKY], ms[WGR_GPU_TIMER_PLANAR_TERRAIN],
+                         ms[WGR_GPU_TIMER_PLANAR_OBJECTS], ms[WGR_GPU_TIMER_PLANAR_CLOUDS],
+                         ms[WGR_GPU_TIMER_PLANAR_MIPS]);
                 // LIT-010 / LIT-020 live in the same shared region array. Logged from here for
                 // the reason the water rows are: a tab screenshot cannot be diffed against a
                 // previous build, and a default-ON feature whose cost only exists on screen is
@@ -1207,6 +1212,13 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
                              all[WGR_GPU_TIMER_GTAO_PREP], all[WGR_GPU_TIMER_GTAO_COMPUTE],
                              all[WGR_GPU_TIMER_GTAO_BLUR], ao, all[WGR_GPU_TIMER_INTERIOR_SKY_CULL],
                              all[WGR_GPU_TIMER_INTERIOR_SKY_DRAW], sky, all[WGR_GPU_TIMER_FRAME_TOTAL]);
+                    // PERF-004: this is the main-view terrain, deliberately separate from
+                    // PLANAR_TERRAIN above. Logging it beside the existing periodic timing
+                    // sample makes headless cross-world captures directly comparable.
+                    LOG_INFO(Graphics, "Terrain GPU ms: prepass={:.3f} colour={:.3f} total={:.3f}",
+                             all[WGR_GPU_TIMER_TERRAIN_PREPASS], all[WGR_GPU_TIMER_TERRAIN_COLOR],
+                             std::max(all[WGR_GPU_TIMER_TERRAIN_PREPASS], 0.0f) +
+                                 std::max(all[WGR_GPU_TIMER_TERRAIN_COLOR], 0.0f));
                 }
             }
         }

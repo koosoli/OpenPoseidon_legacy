@@ -53,7 +53,10 @@ struct SectionMaterial {
     layer_slot: array<u32, 3>,
     // Explicit, because WGSL would insert this padding itself to 16-align layer_uv while
     // Rust would not, and the silent 12-byte disagreement corrupts every later field.
-    _pad_layer0: u32,
+    // Per-section flags (DZ-003 reflective bit). Named, not padding, so this mirror of
+    // SectionMaterialGpu keeps matching gpu_driven.wgsl field for field; the shadow pass
+    // has no use for it.
+    flags: u32,
     _pad_layer1: u32,
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).

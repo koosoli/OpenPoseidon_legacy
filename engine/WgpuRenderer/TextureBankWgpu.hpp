@@ -5,6 +5,8 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 
+#include <vector>
+
 struct WgrRenderer;
 
 namespace Poseidon
@@ -20,6 +22,11 @@ class TextureBankWgpu : public AbstractTextBank
     // later draws silently sampled bindless slot 0 (white fallback).
     RefArray<TextureWgpu> _texture;
     WgrRenderer* _renderer;
+    uint64_t _residencyFrame = 0;
+    // RegisterGpuModel brackets its material scan with this optional capture.
+    // It records the Texture objects whose stable WGPU handles are baked into a
+    // retained model, allowing EngineWgpu to pin only models with live instances.
+    std::vector<TextureWgpu*>* _capture = nullptr;
 
   public:
     explicit TextureBankWgpu(WgrRenderer* renderer);
@@ -27,6 +34,14 @@ class TextureBankWgpu : public AbstractTextBank
 
     WgrRenderer* Renderer() const { return _renderer; }
     void Detach() { _renderer = nullptr; }
+    void BeginModelTextureCapture(std::vector<TextureWgpu*>& out);
+    void EndModelTextureCapture();
+    void NoteTextureUse(TextureWgpu* texture);
+    uint64_t ResidencyFrame() const { return _residencyFrame; }
+    // Enforce the shared WGR_DYNAMIC_VRAM_MB budget after submission. Retained
+    // model textures are pinned explicitly; direct-path textures remain resident
+    // while used and become LRU candidates only after a grace period.
+    void TrimResidency();
 
     int Find(RStringB name) const;
     Ref<Texture> Load(RStringB name) override;

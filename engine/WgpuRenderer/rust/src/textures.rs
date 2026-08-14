@@ -81,6 +81,10 @@ pub struct Texture2D {
     // per-instance by the lit-mesh + prepass fragment shaders. Assigned by
     // SharedTextures on create, freed on destroy.
     pub slot: u32,
+    // Exact payload size of every allocated mip level. Driver alignment and
+    // metadata are deliberately excluded: WebGPU does not expose them, so this
+    // is the portable lower bound used by residency diagnostics.
+    resident_bytes: u64,
 }
 
 // Handle 0 is reserved for the white fallback; slotmap versions start at 1, so a
@@ -189,6 +193,11 @@ impl TextureRegistry {
             view,
             bind_group,
             slot,
+            resident_bytes: (0..mip_level_count)
+                .map(|i| {
+                    format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64
+                })
+                .sum(),
         });
         key.data().as_ffi()
     }
@@ -553,6 +562,18 @@ impl SharedTextures {
             self.partially_bound,
         );
         self.bindless_dirty = false;
+    }
+
+    /// Portable authored object-texture payload and live texture count.
+    /// The renderer's 1x1 fallback is not authored content and is excluded.
+    pub fn residency(&self) -> (u64, u32) {
+        let bytes = self
+            .registry
+            .map
+            .values()
+            .map(|texture| texture.resident_bytes)
+            .sum();
+        (bytes, self.registry.map.len() as u32)
     }
 
     fn alloc_slot(&mut self) -> Option<u32> {

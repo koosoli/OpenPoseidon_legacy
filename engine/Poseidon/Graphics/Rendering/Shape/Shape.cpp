@@ -1821,6 +1821,19 @@ void Shape::RecalculateAreas()
             LOG_ERROR(Graphics, "Degenerate face - {} vertices", face.N());
             continue;
         }
+        bool validVertices = true;
+        for (int vertex = 0; vertex < face.N(); ++vertex)
+        {
+            const int index = face.GetVertex(vertex);
+            if (index < 0 || index >= NVertex())
+            {
+                LOG_ERROR(Graphics, "RecalculateAreas: face vertex {} is outside [0,{})", index, NVertex());
+                validVertices = false;
+                break;
+            }
+        }
+        if (!validVertices)
+            continue;
         int index = _textures.Find(face.GetTexture());
         if (index >= 0)
         {

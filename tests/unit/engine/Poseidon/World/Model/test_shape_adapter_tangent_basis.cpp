@@ -75,3 +75,28 @@ TEST_CASE("Model sections preserve a quad-only MLOD material run", "[Model][sect
     REQUIRE(sections.front().startTriangle == 0);
     REQUIRE(sections.front().triangleCount == 1);
 }
+
+TEST_CASE("ShapeAdapter rejects faces outside the legacy signed vertex range",
+          "[ShapeAdapter][odol][vertex-range]")
+{
+    Model model;
+    model.sourceFormat = "ODOL";
+    model.sourcePath = "oversized-test.p3d";
+    LODLevel lodLevel(1.0f);
+    Mesh& mesh = lodLevel.mesh;
+    mesh.vertices.resize(32769);
+    mesh.vertices[0].position = {0.f, 0.f, 0.f};
+    mesh.vertices[1].position = {1.f, 0.f, 0.f};
+    mesh.vertices[2].position = {0.f, 1.f, 0.f};
+    mesh.triangles.emplace_back(0, 1, 2);
+    mesh.triangles.emplace_back(0, 1, 32768);
+    mesh.triangles[0].originalIndex = 0;
+    mesh.triangles[1].originalIndex = 1;
+    model.lodLevels.push_back(std::move(lodLevel));
+
+    std::unique_ptr<LODShapeWithShadow> shape;
+    REQUIRE_NOTHROW(shape.reset(ShapeAdapter::convertToLODShape(model, false)));
+    REQUIRE(shape);
+    REQUIRE(shape->Level(0)->NVertex() == 32768);
+    REQUIRE(shape->Level(0)->NFaces() == 1);
+}

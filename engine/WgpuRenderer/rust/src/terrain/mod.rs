@@ -13,6 +13,7 @@ pub enum TerrainPass {
     Color,
     ColorNoWrite,
     Prepass,
+    Planar,
 }
 
 // Grid mesh resolution: GRID_N quads per axis, (GRID_N+1)^2 vertices, u16 indices.
@@ -208,6 +209,9 @@ pub struct Terrain {
     // prepass pipeline (writes the view-space normal G-buffer + depth).
     pipeline_no_write: wgpu::RenderPipeline,
     prepass_pipeline: wgpu::RenderPipeline,
+    // The reflection is already resolution-scaled and mip-filtered by water. Keeping a
+    // dedicated 1x variant avoids multiplying that secondary view by the main scene's MSAA.
+    planar_pipeline: wgpu::RenderPipeline,
     max_dim: u32,
 }
 
@@ -694,6 +698,19 @@ impl Terrain {
         let detail_normal_start = env_f64("WGR_TERRAIN_DETAIL_NORMAL_START", 150.0);
         let detail_normal_end =
             env_f64("WGR_TERRAIN_DETAIL_NORMAL_END", 300.0).max(detail_normal_start + 1.0);
+        // Whole-tile normal gain (TerrainSNX Stage14). Arma 3 authors one on every material
+        // -- 478 of 478 on Stratis -- and it was parsed, bound and uploaded but never
+        // sampled. 0 compiles the fetch out entirely, which is the "before" side of the A/B.
+        let tile_normal_strength = env_f64("WGR_TERRAIN_TILE_NORMAL", 1.0).max(0.0);
+        // How much of each authored surface's gain is taken from its own measured average
+        // (its coarsest mip) instead of the 0.5 the x2 in terrain.wgsl assumes. The
+        // assumption is right for OFP's `detail_dx.paa` (alpha mean 0.5085) and wrong for
+        // the authored stack (0.105-0.144 on DayZ), where the x2 darkens the ground ~3.5x.
+        //
+        // DEFAULTS TO 0 -- the shipped behaviour, bit for bit. Flipping it changes the look
+        // of every Arma 2 / Arma 3 / DayZ world, so it ships measured and off; make it the
+        // default by changing this 0.0 to 1.0 (and the `override` in terrain.wgsl to match).
+        let surface_normalise = env_f64("WGR_TERRAIN_SURFACE_NORMALISE", 0.0).clamp(0.0, 1.0);
         let vs_constants = [("skirt_k", skirt_k)];
         // HDR path: the color target is Rgba16Float only when HDR is on (see gfx3d),
         // so it signals linear shading (albedo/sun/fog decode + no clamp).
@@ -710,6 +727,8 @@ impl Terrain {
             ("detail_fade_end", detail_fade_end),
             ("detail_normal_start", detail_normal_start),
             ("detail_normal_end", detail_normal_end),
+            ("tile_normal_strength", tile_normal_strength),
+            ("surface_normalise", surface_normalise),
             ("linear", linear),
         ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -743,7 +762,8 @@ impl Terrain {
                              fs_entry: &str,
                              fs_constants: &[(&str, f64)],
                              target: wgpu::TextureFormat,
-                             depth_write: bool| {
+                             depth_write: bool,
+                             pipeline_samples: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -770,7 +790,7 @@ impl Terrain {
                     bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState {
-                    count: sample_count,
+                    count: pipeline_samples,
                     ..Default::default()
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -796,6 +816,7 @@ impl Terrain {
             &fs_constants,
             surface_format,
             true,
+            sample_count,
         );
         let pipeline_no_write = make_pipeline(
             "wgr_terrain_pipeline_no_write",
@@ -803,6 +824,7 @@ impl Terrain {
             &fs_constants,
             surface_format,
             false,
+            sample_count,
         );
         let prepass_pipeline = make_pipeline(
             "wgr_terrain_prepass_pipeline",
@@ -810,6 +832,15 @@ impl Terrain {
             &[],
             NORMAL_FORMAT,
             true,
+            sample_count,
+        );
+        let planar_pipeline = make_pipeline(
+            "wgr_terrain_planar_pipeline",
+            "fs_terrain",
+            &fs_constants,
+            surface_format,
+            true,
+            1,
         );
 
         Terrain {
@@ -878,6 +909,7 @@ impl Terrain {
             pipeline,
             pipeline_no_write,
             prepass_pipeline,
+            planar_pipeline,
             max_dim: device.limits().max_texture_dimension_2d,
         }
     }
@@ -1367,6 +1399,7 @@ impl Terrain {
             TerrainPass::Color => &self.pipeline,
             TerrainPass::ColorNoWrite => &self.pipeline_no_write,
             TerrainPass::Prepass => &self.prepass_pipeline,
+            TerrainPass::Planar => &self.planar_pipeline,
         };
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind, &[camera_offset]);

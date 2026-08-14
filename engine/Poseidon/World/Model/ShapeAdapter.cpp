@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <stdint.h>
 #include <string.h>
 #include <string>
@@ -160,7 +161,15 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
     {
         const LODLevel& lodLevel = model.lodLevels[i];
         const Mesh& mesh = lodLevel.mesh;
-        int vertexCount = static_cast<int>(mesh.vertices.size());
+        const int sourceVertexCount = static_cast<int>(mesh.vertices.size());
+        // The legacy runtime face stream stores VertexIndex as a signed 16-bit
+        // value. Newer ODOLs can contain a larger source vertex table, and a
+        // blind cast turns indices above 32767 negative before RecalculateAreas
+        // dereferences them. Keep the representable prefix and reject only
+        // faces that cannot be expressed by this runtime. This is preferable
+        // to crashing an entire streamed world on first sight of one model.
+        constexpr int maxRuntimeVertices = static_cast<int>(std::numeric_limits<VertexIndex>::max()) + 1;
+        const int vertexCount = std::min(sourceVertexCount, maxRuntimeVertices);
         int triangleCount = static_cast<int>(mesh.triangles.size());
         int quadCount = static_cast<int>(mesh.quads.size());
         bool isODOL = (model.sourceFormat == "ODOL");
@@ -190,10 +199,18 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             int nVerts = static_cast<int>(mesh.edges.vertexIndices.size());
             shape->_lods[i]->_pointToVertex.Resize(nPoints);
             for (int v = 0; v < nPoints; ++v)
-                shape->_lods[i]->_pointToVertex[v] = static_cast<VertexIndex>(mesh.edges.mlodIndices[v]);
+            {
+                const uint32_t index = mesh.edges.mlodIndices[v];
+                shape->_lods[i]->_pointToVertex[v] =
+                    index < static_cast<uint32_t>(maxRuntimeVertices) ? static_cast<VertexIndex>(index) : -1;
+            }
             shape->_lods[i]->_vertexToPoint.Resize(nVerts);
             for (int v = 0; v < nVerts; ++v)
-                shape->_lods[i]->_vertexToPoint[v] = static_cast<VertexIndex>(mesh.edges.vertexIndices[v]);
+            {
+                const uint32_t index = mesh.edges.vertexIndices[v];
+                shape->_lods[i]->_vertexToPoint[v] =
+                    index < static_cast<uint32_t>(maxRuntimeVertices) ? static_cast<VertexIndex>(index) : -1;
+            }
         }
         else
         {
@@ -302,14 +319,37 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         std::vector<FaceRef> faceRefs;
         faceRefs.reserve(triangleCount + quadCount);
 
+        uint32_t rejectedFaces = 0;
         for (int f = 0; f < triangleCount; ++f)
         {
-            faceRefs.push_back({false, static_cast<uint32_t>(f), mesh.triangles[f].originalIndex});
+            const Triangle& triangle = mesh.triangles[f];
+            if (triangle.indices[0] >= static_cast<uint32_t>(vertexCount) ||
+                triangle.indices[1] >= static_cast<uint32_t>(vertexCount) ||
+                triangle.indices[2] >= static_cast<uint32_t>(vertexCount))
+            {
+                ++rejectedFaces;
+                continue;
+            }
+            faceRefs.push_back({false, static_cast<uint32_t>(f), triangle.originalIndex});
         }
         for (int f = 0; f < quadCount; ++f)
         {
-            faceRefs.push_back({true, static_cast<uint32_t>(f), mesh.quads[f].originalIndex});
+            const Quad& quad = mesh.quads[f];
+            if (quad.indices[0] >= static_cast<uint32_t>(vertexCount) ||
+                quad.indices[1] >= static_cast<uint32_t>(vertexCount) ||
+                quad.indices[2] >= static_cast<uint32_t>(vertexCount) ||
+                quad.indices[3] >= static_cast<uint32_t>(vertexCount))
+            {
+                ++rejectedFaces;
+                continue;
+            }
+            faceRefs.push_back({true, static_cast<uint32_t>(f), quad.originalIndex});
         }
+        if (rejectedFaces != 0)
+            LOG_WARN(Graphics,
+                     "ShapeAdapter: {} LOD {} rejected {} faces outside the signed-16-bit runtime vertex range "
+                     "(sourceVertices={} runtimeVertices={})",
+                     model.sourcePath, i, rejectedFaces, sourceVertexCount, vertexCount);
 
         // Sort by originalIndex to restore file order. Loaders split triangles and quads
         // into separate arrays; originalIndex tracks position in the original face stream.
@@ -430,6 +470,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             for (size_t vi = 0; vi < selection.vertexIndices.size(); ++vi)
             {
                 uint32_t vertIdx = selection.vertexIndices[vi];
+                if (vertIdx >= static_cast<uint32_t>(vertexCount))
+                    continue;
                 uint8_t weight =
                     (hasWeights && vi < selection.vertexWeights.size()) ? selection.vertexWeights[vi] : 255;
                 selInfos.push_back(SelInfo(static_cast<VertexIndex>(vertIdx), weight));

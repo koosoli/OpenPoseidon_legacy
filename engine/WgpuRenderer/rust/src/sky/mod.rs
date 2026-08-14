@@ -741,6 +741,8 @@ fn cirrus_puff_from_env() -> Option<(f32, f32, f32)> {
 pub struct Sky {
     // Main fullscreen sky pipeline (targets the scene format).
     sky_pipeline: wgpu::RenderPipeline,
+    // Single-sample twin for the resolution-scaled planar reflection.
+    planar_sky_pipeline: wgpu::RenderPipeline,
     sky_bind: wgpu::BindGroup,
     // Reflection environment map: same group(0) as the sky pass (reuses sky_bind), fs_sky_env
     // entry, baked into env_view each frame. `_tex` keeps the texture alive.
@@ -817,6 +819,7 @@ pub struct Sky {
     // predecessors).
     cloud_lo: Vec<CloudLoTarget>,
     cloud_composite_pipeline: wgpu::RenderPipeline,
+    cloud_composite_planar_pipeline: wgpu::RenderPipeline,
     cloud_composite_layout: wgpu::BindGroupLayout,
     cloud_composite_bind: Option<wgpu::BindGroup>,
     cloud_composite_sampler: wgpu::Sampler,
@@ -984,6 +987,8 @@ impl Sky {
         );
         let sky_pipeline =
             make_pipeline("wgr_sky", &sky_layout, "fs_sky", color_format, sample_count);
+        let planar_sky_pipeline =
+            make_pipeline("wgr_sky_planar", &sky_layout, "fs_sky", color_format, 1);
         // Env-map bake: same group(0) layout as the sky pass, single-sample, LUT_FORMAT target.
         let env_pipeline = make_pipeline("wgr_sky_env", &sky_layout, "fs_sky_env", ENV_FORMAT, 1);
         let env_tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -1573,15 +1578,15 @@ impl Sky {
                     },
                 ],
             });
-        let cloud_composite_pipeline = {
-            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("wgr_cloud_composite"),
-                bind_group_layouts: &[Some(&cloud_composite_layout)],
-                immediate_size: 0,
-            });
+        let cloud_composite_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("wgr_cloud_composite"),
+            bind_group_layouts: &[Some(&cloud_composite_layout)],
+            immediate_size: 0,
+        });
+        let make_cloud_composite = |label: &str, samples: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("wgr_cloud_composite"),
-                layout: Some(&pl),
+                label: Some(label),
+                layout: Some(&cloud_composite_pl),
                 vertex: wgpu::VertexState {
                     module: &composite_shader,
                     entry_point: Some("vs_main"),
@@ -1591,7 +1596,7 @@ impl Sky {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState {
-                    count: sample_count,
+                    count: samples,
                     ..Default::default()
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -1620,6 +1625,10 @@ impl Sky {
                 cache: None,
             })
         };
+        let cloud_composite_pipeline =
+            make_cloud_composite("wgr_cloud_composite", sample_count);
+        let cloud_composite_planar_pipeline =
+            make_cloud_composite("wgr_cloud_composite_planar", 1);
         let cloud_composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wgr_cloud_composite_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -1639,6 +1648,7 @@ impl Sky {
 
         Self {
             sky_pipeline,
+            planar_sky_pipeline,
             sky_bind,
             env_pipeline,
             env_tex,
@@ -1648,6 +1658,7 @@ impl Sky {
             cloud_depth_layout,
             cloud_lo: Vec::new(),
             cloud_composite_pipeline,
+            cloud_composite_planar_pipeline,
             cloud_composite_layout,
             cloud_composite_bind: None,
             cloud_composite_sampler,
@@ -1912,6 +1923,12 @@ impl Sky {
         pass.draw(0..3, 0..1);
     }
 
+    pub fn render_planar(&self, pass: &mut wgpu::RenderPass<'_>) {
+        pass.set_pipeline(&self.planar_sky_pipeline);
+        pass.set_bind_group(0, &self.sky_bind, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     // Clouds are drawn only on the HDR path (the composite blends linear radiance over the HDR scene)
     // and when coverage is non-zero. lib.rs gates the cloud pass + composite on this.
     pub fn clouds_active(&self, sky: &WgrSky) -> bool {
@@ -2047,6 +2064,14 @@ impl Sky {
     pub fn composite_cloud(&self, pass: &mut wgpu::RenderPass<'_>) {
         if let Some(bind) = self.cloud_composite_bind.as_ref() {
             pass.set_pipeline(&self.cloud_composite_pipeline);
+            pass.set_bind_group(0, bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
+    pub fn composite_cloud_planar(&self, pass: &mut wgpu::RenderPass<'_>) {
+        if let Some(bind) = self.cloud_composite_bind.as_ref() {
+            pass.set_pipeline(&self.cloud_composite_planar_pipeline);
             pass.set_bind_group(0, bind, &[]);
             pass.draw(0..3, 0..1);
         }

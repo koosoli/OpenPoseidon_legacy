@@ -8,6 +8,7 @@
 #include <Poseidon/Asset/Formats/P3D/Odol49.hpp>
 #include <Poseidon/Asset/Formats/P3D/Odol73.hpp>
 #include <Poseidon/Asset/Formats/P3D/OdolRevision.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <map>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
@@ -318,6 +319,62 @@ static void setupModelRender(CLI::App& model)
 namespace
 {
 
+// Reads an ODOL through whichever static reader its revision belongs to. Shared so
+// that adding a revision reaches every direct-read subcommand at once -- revision 54
+// was in the loader but not here, so `model selections` refused every DayZ model
+// while `model inspect` read them fine (DZ-002).
+//
+// Returns false and fills `error` rather than exiting, so a directory walk can report
+// a bad file and carry on.
+bool LoadOdolStatic(const std::string& path, Poseidon::Asset::Formats::P3D::Odol73StaticModel& model,
+                    Poseidon::Asset::Formats::P3D::OdolRevisionInfo& revision, std::string& error)
+{
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+    {
+        error = "cannot open";
+        return false;
+    }
+    std::vector<char> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+    if (bytes.size() < 8 || std::memcmp(bytes.data(), "ODOL", 4) != 0)
+    {
+        error = "not an ODOL model";
+        return false;
+    }
+
+    QIStream stream(bytes.data(), static_cast<int>(bytes.size()));
+    Poseidon::Asset::Formats::BinaryReader reader(stream);
+    revision = Poseidon::Asset::Formats::P3D::PeekOdolRevision(reader);
+    try
+    {
+        switch (revision.version)
+        {
+            case 40:
+                model = Poseidon::Asset::Formats::P3D::ReadOdol40StaticModel(reader, static_cast<int>(bytes.size()));
+                return true;
+            case 48:
+            case 49:
+            case 50:
+            case 52:
+            case 54:
+                model = Poseidon::Asset::Formats::P3D::ReadOdolA2StaticModel(reader, static_cast<int>(bytes.size()),
+                                                                             revision.version);
+                return true;
+            case 73:
+                model = Poseidon::Asset::Formats::P3D::ReadOdol73StaticModel(reader, static_cast<int>(bytes.size()));
+                return true;
+            default:
+                error = "ODOL revision " + std::to_string(revision.version) + " has no static reader";
+                return false;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        error = e.what();
+        return false;
+    }
+}
+
 // AST-019 -- what unit is a named selection's `selectedFaces` array in?
 //
 // The question is not academic: the converter turns those entries into triangle
@@ -327,48 +384,12 @@ namespace
 // BYTE OFFSETS -- so the answer is read off real files, per revision.
 void PrintOdolSelections(const std::string& path, bool proxiesOnly)
 {
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-    {
-        std::cerr << "Error: cannot open " << path << "\n";
-        std::exit(1);
-    }
-    std::vector<char> bytes((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-    if (bytes.size() < 8 || std::memcmp(bytes.data(), "ODOL", 4) != 0)
-    {
-        std::cerr << "Error: not an ODOL model: " << path << "\n";
-        std::exit(1);
-    }
-
-    QIStream stream(bytes.data(), static_cast<int>(bytes.size()));
-    Poseidon::Asset::Formats::BinaryReader reader(stream);
-    const auto revision = Poseidon::Asset::Formats::P3D::PeekOdolRevision(reader);
     Poseidon::Asset::Formats::P3D::Odol73StaticModel model;
-    try
+    Poseidon::Asset::Formats::P3D::OdolRevisionInfo revision;
+    std::string error;
+    if (!LoadOdolStatic(path, model, revision, error))
     {
-        switch (revision.version)
-        {
-            case 40:
-                model = Poseidon::Asset::Formats::P3D::ReadOdol40StaticModel(reader, static_cast<int>(bytes.size()));
-                break;
-            case 48:
-            case 49:
-            case 50:
-            case 52:
-                model = Poseidon::Asset::Formats::P3D::ReadOdolA2StaticModel(reader, static_cast<int>(bytes.size()),
-                                                                             revision.version);
-                break;
-            case 73:
-                model = Poseidon::Asset::Formats::P3D::ReadOdol73StaticModel(reader, static_cast<int>(bytes.size()));
-                break;
-            default:
-                std::cerr << "Error: ODOL revision " << revision.version << " has no static reader\n";
-                std::exit(1);
-        }
-    }
-    catch (const std::exception& error)
-    {
-        std::cerr << "parse failed: " << error.what() << "\n";
+        std::cerr << "Error: " << path << ": " << error << "\n";
         std::exit(1);
     }
 
@@ -536,6 +557,266 @@ static void setupModelShow(CLI::App& model)
         });
 }
 
+// Reads Enfusion .emat materials and reports what they declare. Over a directory
+// this is a coverage census, the same shape as `terrain census` and `image edds`:
+// the number that matters is how much of the corpus the parser takes, not that it
+// took one file.
+static void setupModelEmat(CLI::App& model)
+{
+    auto* cmd = model.add_subcommand("emat", "Parse Enfusion .emat materials and report coverage");
+    static std::string inputPath;
+    static bool listKeys = false;
+    cmd->add_option("input", inputPath, "An .emat file, or a directory to walk")->required()->check(CLI::ExistingPath);
+    cmd->add_flag("--keys", listKeys, "Also tabulate every key seen across the corpus");
+
+    cmd->callback(
+        []()
+        {
+            namespace Mat = Poseidon::Asset::Material;
+
+            std::vector<std::filesystem::path> files;
+            std::error_code ec;
+            if (std::filesystem::is_directory(inputPath, ec))
+            {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(inputPath, ec))
+                {
+                    if (!entry.is_regular_file(ec))
+                        continue;
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (ext == ".emat")
+                        files.push_back(entry.path());
+                }
+                std::sort(files.begin(), files.end());
+            }
+            else
+            {
+                files.emplace_back(inputPath);
+            }
+
+            int parsed = 0;
+            int properties = 0;
+            int textures = 0;
+            std::map<std::string, int> classes;
+            std::map<std::string, int> keys;
+            std::vector<std::pair<std::string, std::string>> failures;
+
+            for (const auto& path : files)
+            {
+                std::ifstream in(path, std::ios::binary);
+                if (!in)
+                {
+                    failures.emplace_back(path.string(), "unreadable file");
+                    continue;
+                }
+                const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                const Mat::EmatMaterial material = Mat::ParseEmat(text);
+                if (!material.valid())
+                {
+                    failures.emplace_back(path.string(), material.error);
+                    continue;
+                }
+                ++parsed;
+                classes[material.className]++;
+                properties += static_cast<int>(material.properties.size());
+                for (const auto& property : material.properties)
+                {
+                    keys[property.name]++;
+                    for (const auto& value : property.values)
+                        if (value.isTexture())
+                            ++textures;
+                }
+
+                if (files.size() == 1)
+                {
+                    std::cout << "File: " << path.string() << "\n";
+                    std::cout << "Class: " << material.className << "\n";
+                    if (!material.declaredPath.empty())
+                        std::cout << "Declared path: " << material.declaredPath << "\n";
+                    std::cout << "Properties: " << material.properties.size() << "\n";
+                    for (const auto& property : material.properties)
+                    {
+                        std::cout << "  " << std::left << std::setw(22) << property.name;
+                        for (const auto& value : property.values)
+                        {
+                            if (value.isTexture())
+                                std::cout << " {" << value.guid << "}" << value.text;
+                            else if (value.isNumber)
+                                std::cout << " " << value.number;
+                            else
+                                std::cout << " " << value.text;
+                        }
+                        std::cout << "\n";
+                    }
+                }
+            }
+
+            if (files.size() > 1)
+            {
+                const double pct = 100.0 * parsed / static_cast<double>(files.size());
+                std::cout << "files       " << files.size() << "\n";
+                std::cout << "parsed      " << parsed << "  (" << std::fixed << std::setprecision(3) << pct << "%)\n";
+                std::cout << "properties  " << properties << "\n";
+                std::cout << "textures    " << textures << "\n";
+                std::cout << "failed      " << failures.size() << "\n";
+                std::cout << "classes:\n";
+                for (const auto& [name, count] : classes)
+                    std::cout << "  " << std::left << std::setw(24) << name << count << "\n";
+                if (listKeys)
+                {
+                    std::cout << "keys (" << keys.size() << " distinct):\n";
+                    for (const auto& [name, count] : keys)
+                        std::cout << "  " << std::left << std::setw(28) << name << count << "\n";
+                }
+            }
+
+            if (!failures.empty())
+            {
+                std::cout << "\nfailures:\n";
+                for (size_t i = 0; i < failures.size() && i < 20; ++i)
+                    std::cout << "  " << failures[i].first << ": " << failures[i].second << "\n";
+                throw CLI::RuntimeError(1);
+            }
+        });
+}
+
+// Dumps a LOD's UV sets. Written to answer one question that no other tool could:
+// a DayZ river segment's material names a `WaterStreamMap`, and how the mesh
+// addresses that texture is the last input a flow shader needs (DZ-002). Over a
+// directory it prints one row per model, which is what makes a per-segment pattern
+// visible at all.
+static void setupModelUv(CLI::App& model)
+{
+    auto* cmd = model.add_subcommand("uv", "Dump a LOD's UV sets, or tabulate their extents over a directory");
+    static std::string inputPath;
+    static int lodIndex = 0;
+    static bool perVertex = false;
+    cmd->add_option("input", inputPath, "A P3D file, or a directory to walk")->required()->check(CLI::ExistingPath);
+    cmd->add_option("--lod", lodIndex, "LOD index (default 0)");
+    cmd->add_flag("--vertices", perVertex, "Print every vertex's position and UVs, not just the extents");
+
+    cmd->callback(
+        []()
+        {
+            namespace P3D = Poseidon::Asset::Formats::P3D;
+
+            std::vector<std::filesystem::path> files;
+            std::error_code ec;
+            if (std::filesystem::is_directory(inputPath, ec))
+            {
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(inputPath, ec))
+                {
+                    if (!entry.is_regular_file(ec))
+                        continue;
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (ext == ".p3d")
+                        files.push_back(entry.path());
+                }
+                std::sort(files.begin(), files.end());
+            }
+            else
+            {
+                files.emplace_back(inputPath);
+            }
+
+            const bool table = files.size() > 1;
+            if (table)
+                std::cout << std::left << std::setw(40) << "model" << std::setw(6) << "sets" << std::setw(7) << "verts"
+                          << std::setw(46) << "set0  minU..maxU   minV..maxV"
+                          << "set1  minU..maxU   minV..maxV\n";
+
+            int read = 0;
+            std::vector<std::pair<std::string, std::string>> failures;
+            for (const auto& path : files)
+            {
+                P3D::Odol73StaticModel odol;
+                P3D::OdolRevisionInfo revision;
+                std::string error;
+                if (!LoadOdolStatic(path.string(), odol, revision, error))
+                {
+                    failures.emplace_back(path.filename().string(), error);
+                    continue;
+                }
+                if (lodIndex < 0 || static_cast<size_t>(lodIndex) >= odol.lods.size())
+                {
+                    failures.emplace_back(path.filename().string(), "no LOD " + std::to_string(lodIndex));
+                    continue;
+                }
+                ++read;
+                const auto& lod = odol.lods[static_cast<size_t>(lodIndex)];
+                const auto& rest = lod.rest;
+
+                std::vector<const P3D::Odol73UvSet*> sets{&rest.uv0};
+                for (const auto& extra : rest.extraUvSets)
+                    sets.push_back(&extra);
+
+                auto extents = [](const P3D::Odol73UvSet& set)
+                {
+                    char buffer[64];
+                    std::snprintf(buffer, sizeof(buffer), "%8.3f..%-8.3f %8.3f..%-8.3f", set.minU, set.maxU, set.minV,
+                                  set.maxV);
+                    return std::string(buffer);
+                };
+
+                if (table)
+                {
+                    std::cout << std::left << std::setw(40) << path.filename().string() << std::setw(6) << sets.size()
+                              << std::setw(7) << rest.positions.size() << std::setw(46) << extents(*sets[0]);
+                    if (sets.size() > 1)
+                        std::cout << extents(*sets[1]);
+                    std::cout << "\n";
+                    continue;
+                }
+
+                std::cout << "Model:    " << path.string() << "\n";
+                std::cout << "Revision: " << revision.version << " (" << revision.generation << ")\n";
+                std::cout << "LOD:      " << lodIndex << " of " << odol.lods.size() << "\n";
+                std::cout << "Vertices: " << rest.positions.size() << "\n";
+                std::cout << "UV sets:  " << sets.size() << "\n";
+                for (size_t i = 0; i < sets.size(); ++i)
+                    std::cout << "  set " << i << ": " << extents(*sets[i]) << "\n";
+
+                if (perVertex)
+                {
+                    std::cout << "\n" << std::left << std::setw(6) << "vtx" << std::setw(34) << "position (x, y, z)";
+                    for (size_t i = 0; i < sets.size(); ++i)
+                        std::cout << std::setw(22) << ("uv" + std::to_string(i));
+                    std::cout << "\n";
+                    for (size_t v = 0; v < rest.positions.size(); ++v)
+                    {
+                        char buffer[96];
+                        std::snprintf(buffer, sizeof(buffer), "%10.3f %10.3f %10.3f", rest.positions[v].x,
+                                      rest.positions[v].y, rest.positions[v].z);
+                        std::cout << std::left << std::setw(6) << v << std::setw(34) << buffer;
+                        for (const auto* set : sets)
+                        {
+                            if (v >= set->uv.size())
+                            {
+                                std::cout << std::setw(22) << "-";
+                                continue;
+                            }
+                            std::snprintf(buffer, sizeof(buffer), "%9.5f %9.5f", set->uv[v][0], set->uv[v][1]);
+                            std::cout << std::setw(22) << buffer;
+                        }
+                        std::cout << "\n";
+                    }
+                }
+            }
+
+            if (table)
+                std::cout << "\nread " << read << " of " << files.size() << "\n";
+            if (!failures.empty())
+            {
+                std::cout << "\nfailures:\n";
+                for (size_t i = 0; i < failures.size() && i < 20; ++i)
+                    std::cout << "  " << failures[i].first << ": " << failures[i].second << "\n";
+            }
+        });
+}
+
 void ModelCommand::Setup(CLI::App& app)
 {
     auto* model = app.add_subcommand("model", "P3D model operations");
@@ -546,6 +827,8 @@ void ModelCommand::Setup(CLI::App& app)
     setupModelRender(*model);
     setupModelShow(*model);
     setupModelSelections(*model);
+    setupModelEmat(*model);
+    setupModelUv(*model);
 }
 
 } // namespace PoseidonTools

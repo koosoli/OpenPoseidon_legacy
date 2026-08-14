@@ -124,10 +124,14 @@ pub struct SectionMaterialGpu {
     // Multi's blend: the mask (0 = not layered) and the three further layer colours.
     pub mask_slot: u32,
     pub layer_slot: [u32; 3],
+    // Per-section flags, carried across the ABI in WgrModelSection::flags. Bit 0 =
+    // reflective (the material named an EnvironmentMap). Occupies the first of the three
+    // explicit pad words below, so the layout is unchanged in size.
+    pub flags: u32,
     // WGSL aligns an array<vec4<f32>> to 16 bytes; Rust aligns [[f32; 4]; 4] to 4. Without
     // this the two layouts disagree by 12 bytes and every field from layer_uv on reads the
     // wrong memory -- which renders as white buildings, not as an error.
-    pub _pad_layer: [u32; 3],
+    pub _pad_layer: [u32; 2],
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     pub layer_uv: [[f32; 4]; 4],
 }
@@ -1447,6 +1451,28 @@ impl Default for CullInputs {
     }
 }
 
+impl CullInputs {
+    /// Adjust the main-view LOD metric for a render target with fewer pixels and/or a wider
+    /// field of view. `linear_reduction` is the ratio of main-view pixels-per-radian to the
+    /// secondary view's pixels-per-radian. A half-resolution view is 2; a half-resolution
+    /// view whose projection is widened by 1.35 is 2.7.
+    ///
+    /// The cull shader's detail metric is `distance * lod_inv_width * lod_scale`. Scaling
+    /// `lod_inv_width` therefore selects the same model LOD and sub-pixel cutoff that the
+    /// reduced view would have received if the engine had computed its LOD inputs directly.
+    pub fn for_reduced_view(self, linear_reduction: f32) -> Self {
+        let reduction = if linear_reduction.is_finite() {
+            linear_reduction.clamp(1.0, 64.0)
+        } else {
+            1.0
+        };
+        Self {
+            lod_inv_width: self.lod_inv_width * reduction,
+            ..self
+        }
+    }
+}
+
 // Build this frame's cull params from the main camera + the engine's LOD inputs. `view` must be
 // the engine's camera-relative view (translation zeroed, as PushSceneCamera hands over); all six
 // frustum planes are then extracted directly from `proj * view` (see frustum_planes).
@@ -1532,7 +1558,11 @@ pub fn gpu_group1_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         // 0 instances, 1 records, 2 section materials, 3 per-tree crown centres (forest spherical
         // normals; unused by the shadow VS but present so the shared layout stays compatible),
         // 4 per-model sky-visibility volume metadata + 5 the volume data itself (LIT-020 Stage 2;
-        // both are single-element dummies until a bake runs, so the layout never varies).
+        // both are single-element dummies until a bake runs, so the layout never varies),
+        // 6/7 the sky reflection env map + its sampler (DZ-003), read only by sections whose
+        // material named an EnvironmentMap. Bound from frame one against a 1x1 dummy, so the
+        // layout never varies here either. The shadow VS declares neither and does not have to:
+        // a layout entry a shader does not use is legal.
         entries: &[
             storage(0),
             storage(1),
@@ -1540,6 +1570,22 @@ pub fn gpu_group1_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
             storage(3),
             storage(4),
             storage(5),
+            wgpu::BindGroupLayoutEntry {
+                binding: 6,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 7,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
         ],
     })
 }
@@ -1952,6 +1998,22 @@ pub(crate) mod tests {
         )
         .validate(&module)
         .expect("cull.wgsl validate");
+    }
+
+    #[test]
+    fn reduced_view_scales_only_the_pixel_detail_metric() {
+        let input = CullInputs {
+            objects_z: 1500.0,
+            lod_scale: 0.75,
+            lod_inv_width: 0.001,
+            pixel_limit: 0.125,
+        };
+        let reduced = input.for_reduced_view(2.7);
+        assert_eq!(reduced.objects_z, input.objects_z);
+        assert_eq!(reduced.lod_scale, input.lod_scale);
+        assert!((reduced.lod_inv_width - 0.0027).abs() < 1.0e-7);
+        assert_eq!(reduced.pixel_limit, input.pixel_limit);
+        assert_eq!(input.for_reduced_view(f32::NAN).lod_inv_width, 0.001);
     }
 
     fn inside(planes: &[[f32; 4]; 6], p: Vec3) -> bool {

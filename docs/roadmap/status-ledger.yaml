@@ -320,10 +320,28 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 66ff473fcfe244b09198b43edac7d8d14cca2e07094283e54f1f17d375a46b01
+    evidence_hash: 7fec4b6d9364d8154db19fc15d6adaf5acb3f657a91110a76db3cb4837a10699
     decision_record: null
-    known_failures: []
-    fallback: C++ refuses an ABI mismatch before renderer creation.
+    known_failures:
+      - >-
+        AMENDED 2026-08-14 by CORE-NEG-003. The fallback line below was not true in
+        general when it was written. `WgrAbiCheck` compared `sizeof` for four types
+        -- itself, WgrSurfaceDesc, WgrLogCallbacks and WgrFrame -- out of the 45 that
+        cross the boundary, so drift in any other struct passed the handshake
+        silently. `WgrSkyRuntime` grew 80 -> 112 bytes in `f88f0ea` without an ABI
+        bump, and an engine binary from before that commit shook hands with a
+        renderer from after it and read 32 bytes past the struct: no error, no
+        entry-point failure, wrong pixels. A session was spent diagnosing the
+        resulting garbage as a moon rendering bug that did not exist in the source.
+        The per-build `static_assert`s were correct throughout and could not help,
+        because they only fire when both sides are compiled together -- which is not
+        how this project ships. See
+        `docs/roadmap/decisions/CORE-NEG-003-abi-guard-checked-four-structs-20260814.md`.
+    fallback: >-
+      C++ refuses an ABI mismatch before renderer creation -- true for the four
+      types this ticket's guard named, and from CORE-NEG-003 onward for all 45, via
+      a constexpr hash over the whole set rather than a hand-maintained list. A
+      same-size field reorder still passes on both.
     reviewer: Oliver Kay
     reviewer_method: >-
       Owner smoke test 2026-08-03 on the deployed WGPU build: launched with --render wgpu --window --dev, loaded a mission, flew the camera, opened the dev panel, and quit cleanly. The session ran the C++ client against the Rust cdylib across the versioned ABI for its whole duration with no entry-point or layout failure, which is this ticket's runtime claim. The static guarantee rests on the compile-time size and offset asserts held on both sides of the boundary, not on this session.
@@ -366,7 +384,7 @@ tickets:
         verified_commit: null
     test_ids: [wgpu-capabilities-check, wgpu-windowed-resize-capture, wgpu-normal-loop-minimize-restore, wgpu-lifecycle-repeat-in-session, runtime-diagnostics-once]
     benchmark_artifacts: [docs/roadmap/evidence/preview0-manifest.json]
-    evidence_hash: 5d7d824ec8b384571b2b71ad0b383ec06c8a5f970c89956cc0ef1cbb8948e983
+    evidence_hash: 462aae9af5b26fb1f0c810a003168ab59ff8dc3a22c2bb5f622a98532926c662
     decision_record: null
     known_failures: []
     fallback: Unsupported optional capabilities are reported and feature paths remain gated.
@@ -504,7 +522,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: d5b5e67661a5ee109e351a99052c137a40250b9de713b33a668bf8eec7a74893
     decision_record: null
     known_failures:
       - >-
@@ -650,7 +668,7 @@ tickets:
     production_call_sites: []
     test_ids: [ast-012b-odol73-fixture]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 26afe11314cb9f4138c1b058634ff92b3c55a98281c5f6ba3a9af4040366c214
     decision_record: null
     known_failures:
       - >-
@@ -808,7 +826,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: d59dc1b7e2acaec00b37195d90e4da857b6e5c6055f5b860f7c630785b0b60d3
+    evidence_hash: 432cebea9958253f9e08133f80d1b331318f6a04651249a132f625724d7c2c74
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
@@ -1045,7 +1063,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
     test_ids: [ast-012a, ast-012c]
     benchmark_artifacts: []
-    evidence_hash: 2982808f9681bfea321040b0eab4f70b77b2236f5e70b81b6dc9597201cf18d7
+    evidence_hash: 64d003dda118f577ce99503c533e272d2468a52ab78e637af3b66c072bb089bc
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: ODOL_REVISION_DISPATCH
@@ -1054,10 +1072,15 @@ tickets:
           version 7 routes to the existing reader; 48/49/50/52/73 are recognised
           and refused; synthetic unknown 4242 is refused without a layout fallback
       - capability: LATER_ODOL_BODY_PARSE
-        status: PARTIAL
+        status: SUPERSEDED
         denominator: >-
           1 of 5 later revisions reads one shape of body (73, static LODs only,
-          see AST-012B); 48/49/50/52 parse no body at all
+          see AST-012B); 48/49/50/52 parse no body at all. True at this ticket's
+          own verification commit. SUPERSEDED: WLD-016 at `c536015` parses 48 and
+          49, and AST-012D at `fb6c676` parses Arma 1's revision 40, so the live
+          count is 4 of 6 revisions reading a static body rather than 1 of 5. The
+          rows that hold the current claims are ODOL_A2_STATIC_LOD_PARSE and
+          ODOL40_STATIC_LOD_PARSE.
     known_failures:
       - >-
         Only ODOL revision 7 (OFP/CWA) reaches a parser. Revisions 48, 49, 50,
@@ -1113,7 +1136,7 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     # VALIDATED, not INTEGRATED: revision 73 reaches the common Model IR through
     # the production loader entry point and one real static Arma 3 rock now draws
     # through WGPU with its direct PAA albedo dependency, but RVMAT handling and
@@ -1137,7 +1160,7 @@ tickets:
                ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
                ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 3889e261f21d0c5e116076f424d35ca2ca0f458316cf43138daa78ce6e93872e
+    evidence_hash: 77850e85d0d818b74c00acc6a9050aaae634698d4decec70559a62a1285338eb
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -1190,14 +1213,33 @@ tickets:
           packed ST pairs read and length-checked for all 48 vertices; no basis
           convention claimed and nothing downstream is given a tangent frame
       - capability: ODOL73_SKINNING
-        status: UNSUPPORTED
+        status: SUPERSEDED
         denominator: >-
-          0 skinned models parsed; a populated vertex- or neighbour-bone array
-          raises rather than being skipped
+          0 skinned models parsed; a populated vertex- or neighbour-bone array raises
+          rather than being skipped. True at this ticket's own verification commit.
+          SUPERSEDED by WLD-012 at `fdeca8b`, which reads exactly these sections --
+          model animations, LOD proxies, sub-skeleton mapping and sets, and vertex and
+          neighbour bone references -- across 1,313 models over 1,943,861 placements.
+          The rig is parsed on revisions 40, 48, 49, 50, 52, 54 and 73: skeleton name,
+          bone list with parents, the animation-class table with type-dependent
+          payloads, both bone-to-animation lookup tables, per-bone axes, and the
+          per-vertex bone and weight array. What is missing is downstream, not in the
+          reader: `ODOLLoader.hpp`'s `convertOdolStatic` reads only
+          `source.directory.model` and discards every one of those fields, so nothing
+          reaches the IR. Left reading UNSUPPORTED, this row makes the animation work
+          look like a parser project when it is a plumbing one, which is the estimate
+          error it was about to cause.
       - capability: LATER_ODOL_REVISIONS_48_49_50_52
-        status: UNSUPPORTED
+        status: SUPERSEDED
         denominator: >-
-          0 bodies parsed across the 4 remaining corpus revisions
+          0 bodies parsed across the 4 remaining corpus revisions, measured at this
+          ticket's own verification commit and true there. SUPERSEDED by WLD-016 at
+          `c536015`, whose ODOL_A2_STATIC_LOD_PARSE row is the live claim: 534 of 534
+          Takistan models parse over 438,906 placements on revisions 48 and 49, and
+          `DescribeOdolRevision` now reports 48/49/50/52 as NarrowSubset rather than
+          refusing them. The status is carried here rather than deleted because a
+          claim is a statement about a commit, but left reading UNSUPPORTED it was the
+          one row in this matrix that a reader would act on and be wrong.
     known_failures:
       - >-
         BI Binarize 2.21.0.152929 produces revision 75 from the official editable
@@ -1320,7 +1362,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: 0d3a3328e4453157bc667fcff4bd9048258164693eb0746ef45bc2f17ef14258
+    evidence_hash: ae5a63015b9a87d9c6b33cdb0ff32d4fca614800f13c3a5a0e544620ba3de889
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: PAA_TAGG_CAPTURE
@@ -1434,7 +1476,7 @@ tickets:
         symbol: Preproc::Process
     test_ids: [ast-014]
     benchmark_artifacts: []
-    evidence_hash: e5902c7c43a82ae970748a4555f6f1d23828008b65f0d7d38528db095d51909d
+    evidence_hash: a8ba289ea06e0de192acbfefcd400ac4aae595e48d6c190da541084b32e269e2
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: RVMAT_SOURCE_IR
@@ -1530,7 +1572,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: d04093c5d5e848508abf465aa829c5ad70744e545e398e94993f0018feef53a9
+    evidence_hash: d271557d42ef18effc8cdd51e4f34190dddd0f37137078cc28dc586fb963945c
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: VIRTUAL_PATH_CANONICAL
@@ -1619,14 +1661,15 @@ tickets:
     production_call_sites: []
     test_ids: []
     benchmark_artifacts: []
-    evidence_hash: null
-    decision_record: null
+    evidence_hash: 41b7f31b816c7717d3d5b1a46afd4d49b06d00c6efa478b6caed4f69b5308cc6
+    decision_record: docs/roadmap/decisions/AST-016-017-animation-gap-scoping-20260814.md
     known_failures: []
     fallback: null
     reviewer: null
     reviewer_method: null
     supersedes: []
-    evidence: []
+    evidence:
+      - docs/roadmap/decisions/AST-016-017-animation-gap-scoping-20260814.md
   - id: AST-017
     overlay: COMPAT-C1-EXEC-001
     is_example: false
@@ -1650,14 +1693,15 @@ tickets:
     production_call_sites: []
     test_ids: []
     benchmark_artifacts: []
-    evidence_hash: null
-    decision_record: null
+    evidence_hash: 41b7f31b816c7717d3d5b1a46afd4d49b06d00c6efa478b6caed4f69b5308cc6
+    decision_record: docs/roadmap/decisions/AST-016-017-animation-gap-scoping-20260814.md
     known_failures: []
     fallback: null
     reviewer: null
     reviewer_method: null
     supersedes: []
-    evidence: []
+    evidence:
+      - docs/roadmap/decisions/AST-016-017-animation-gap-scoping-20260814.md
   - id: AST-018
     overlay: COMPAT-C1-EXEC-001
     is_example: false
@@ -1670,7 +1714,7 @@ tickets:
     # they do not cover.
     review_model: AUTOMATED_EVIDENCE
     # AST-007 is INTEGRATED, so the corpus dependency that blocked this is met.
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     # VALIDATED, not INTEGRATED: every axis the ticket names is now
     # represented and unit-verified, but several are represented as Unknown
     # rather than established, and none of it has been confirmed by render.
@@ -1704,7 +1748,7 @@ tickets:
                ast-018-odol73-winding, ast-018-geometry-basis, ast-018-mlod-proxies,
                ast-018-section-face-range]
     benchmark_artifacts: []
-    evidence_hash: cdbe42a1e2fe9159a7d9f3dc59392967ce5c0fedd701e7a3e493a26c30cc1a22
+    evidence_hash: 87c0d02c22a8f6220868b2d87f28cfec48e1cd2f3541201b0339ccf836d78917
     decision_record: null
     capability_claims:
       - capability: LOD_PURPOSE_TYPED
@@ -2062,7 +2106,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: 865e8a03cbb45b4c0992f63e66533e1813824c940fb820f6c64ab914bbb9d708
+    evidence_hash: 0550860d3ef74303258fed56efde9ddd547f2d020b8f8a3c3f5d8f2d47b04f3b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
@@ -2168,7 +2212,7 @@ tickets:
         symbol: Poseidon::Asset::Material::TranslateSemantics
     test_ids: [mat-020]
     benchmark_artifacts: []
-    evidence_hash: 8a36793b84b5c3778574c21e122029e9f45d616b0c6c4f31015269e38aae9260
+    evidence_hash: 95bb03c5f986456eb3f40f83fd8167ce563396d1f1d15f1d2b072e68473e7992
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: SMDI_CHANNEL_SEMANTICS
@@ -2265,7 +2309,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: c3b6163aae014de6b87cd028ee0bfef54e5947ee0e5b2b00993069eadfa5d3c8
+    evidence_hash: d18da7d7866eaaae3851a8ac255a65cff3625037dd253362e60641c28cac81ab
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -2483,7 +2527,7 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
@@ -2500,7 +2544,7 @@ tickets:
     test_ids: [oprw25-synthetic-world, oprw25-quadtree-cell-order,
                oprw25-revision-dispatch, oprw25-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 1dddf7b1b0b0a2f8b6b3a127c9ec97d9ac3d232c8db4150e0fdf7d1bd9ba5acf
     decision_record: docs/roadmap/decisions/WLD-010-oprw25-world-container-20260810.md
     capability_claims:
       - capability: OPRW25_WORLD_PARSE
@@ -2523,7 +2567,14 @@ tickets:
     fallback: >-
       The legacy WrpReader is untouched and continues to handle RVW and OPRW 2/3.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      Four Catch2 cases in tests/unit/engine/Poseidon/Asset/Formats/World/test_oprw25.cpp --
+      synthetic round-trip, quadtree cell order, revision dispatch against 3/17/24/26 negative
+      controls, and a [GameData] case parsing the local Arma 3 worlds -- plus the reader's own
+      byte-exactness requirements on the road network, the trailing map-info length and the
+      60-byte object record. Not checked by any of it: nothing was rendered, the trailing
+      map-info block is retained as opaque bytes and never decoded, and no community or mod
+      world was parsed.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-010-oprw25-world-container-20260810.md
@@ -2537,7 +2588,7 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADOPTED
     owner: null
@@ -2553,9 +2604,9 @@ tickets:
     production_call_sites:
       - file: apps/tools/Tools/commands/TerrainCommand.cpp
         symbol: PoseidonTools::TerrainCommand::Setup
-    test_ids: []
+    test_ids: [terrain-census-a3-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 18ee6230231b1756fb5a9c757a944a5a19a5ace32027df0ad151a90c1bdd66e1
     decision_record: docs/roadmap/decisions/WLD-011-stratis-model-coverage-20260810.md
     capability_claims:
       - capability: WORLD_ASSET_RESOLUTION
@@ -2578,7 +2629,14 @@ tickets:
         for a mod list are not implemented.
     fallback: null
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      A `PoseidonTools terrain census --addons` run over 487 local Arma 3 archives (503,887
+      entries), with the prefix-property effect measured as a controlled pair: 0 of Stratis's
+      350 models resolve without it and 350 with it. The test id names that reproducible CLI
+      harness run rather than a CTest case -- there is no unit test for the census, and that
+      is the weakest part of this record. Not checked: textures and RVMATs the models
+      reference are never followed, and mod load order is assumed to be first-archive-wins
+      rather than verified.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-011-stratis-model-coverage-20260810.md
@@ -2590,7 +2648,7 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
@@ -2608,7 +2666,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::ReadOdol73StaticModel
     test_ids: [oprw25-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: f2f8bd7022baa67277fea51df890e651c878eb5012a1fe75b72eed9bbe9cfed1
     decision_record: docs/roadmap/decisions/WLD-012-odol73-world-prop-coverage-20260810.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -2632,7 +2690,12 @@ tickets:
       - Unrecognised animation types remain a refusal.
     fallback: null
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      The [GameData] OPRW25 corpus case, extended to every model Stratis and Altis reference:
+      1,313 models over 1,943,861 placements, each consumed to its declared end offset. Not
+      checked: this is parse coverage only -- no geometry is asserted correct, no material
+      resolved, no vertex buffer built and nothing drawn; proxies, animations and skinning are
+      retained unused.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-012-odol73-world-prop-coverage-20260810.md
@@ -2645,19 +2708,19 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
     branch: grass-lod-dissolve-photo-cards
     baseline_commit: e22a7b7
-    verification_commit: null
+    verification_commit: c536015
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [WLD-012]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [c536015]
     production_call_sites:
       - file: engine/Poseidon/Asset/Formats/P3D/Odol73.hpp
         symbol: Poseidon::Asset::Formats::P3D::ReadOdol73Animations
@@ -2667,7 +2730,7 @@ tickets:
         symbol: PoseidonTools::TerrainCommand::Setup
     test_ids: [odol-local-fixture, oprw24-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: f5312775de0d829a177291582d7a652081c4749afe186d55c2ebc4ed59dfb03f
     decision_record: docs/roadmap/decisions/WLD-016-takistan-model-coverage-20260812.md
     capability_claims:
       - capability: ODOL_A2_STATIC_LOD_PARSE
@@ -2685,7 +2748,7 @@ tickets:
           capture: 0 "Bad version in LODShape::LoadOptimized", 0 unsupported
           revisions.
       - capability: OPRW24_WORLD_CENSUS
-        status: COMPLETE
+        status: VALIDATED
         denominator: >-
           PoseidonTools terrain census and terrain objects now accept OPRW
           revision 24 as well as 25, matching Landscape::LoadOprwModern. Model
@@ -2706,7 +2769,14 @@ tickets:
       Unknown animation types remain a refusal, and an unknown OPRW revision is
       still rejected explicitly rather than guessed at.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      The [GameData] OPRW24 corpus case over the licensed Arma 2 + Operation Arrowhead corpus
+      (111 archives, 148,218 entries): 534 of 534 Takistan models parse over 438,906 of
+      438,906 placements, with a Takistan runtime capture's log read for `Bad version in
+      LODShape::LoadOptimized` (0) and unsupported revisions (0). Not checked: parse and log
+      evidence only -- no human judged a Takistan frame, and geometry correctness, material
+      resolution, terrain materials, normal maps, vegetation cutouts and road appearance are
+      all outside it.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-016-takistan-model-coverage-20260812.md
@@ -2719,19 +2789,19 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
     branch: grass-lod-dissolve-photo-cards
     baseline_commit: c536015
-    verification_commit: null
+    verification_commit: bfb23e6
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [WLD-016]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [bfb23e6]
     production_call_sites:
       - file: engine/WgpuRenderer/TerrainWgpu.cpp
         symbol: Poseidon::TerrainWgpu::UploadGroundTextures
@@ -2739,18 +2809,18 @@ tickets:
         symbol: Poseidon::TerrainWgpu::UploadIndexMap
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: b5e2ab6e546473c9f26a6f71ff1925eb515eb76b00ae466ac70b7540a45f146b
     decision_record: docs/roadmap/decisions/WLD-017-terrain-materials-are-not-ground-layers-20260812.md
     capability_claims:
       - capability: TERRAIN_GROUND_LAYER_DEDUPLICATION
-        status: COMPLETE
+        status: VALIDATED
         denominator: >-
           Takistan: 3,293 terrain materials resolve to 499 distinct ground layers,
           0 dropped (was 3,033 dropped at the 1,024-layer binding_array cap), and
           2,999 of 2,999 authored LCA blends now bind completely (was 0). Stratis:
           479 materials over 76 layers, 419 of 419 authored blends complete.
       - capability: TERRAIN_CELL_INDEXES_MATERIAL_NOT_LAYER
-        status: COMPLETE
+        status: VALIDATED
         denominator: >-
           UploadIndexMap clamped each cell's material index to the ground-layer
           cap, collapsing 2,269 of Takistan's 3,293 materials onto index 1,023. It
@@ -2768,7 +2838,13 @@ tickets:
       white fallback, and materials past the layer cap are still counted and
       reported rather than silently dropped.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      A measured before/after on two worlds through a live Landscape and renderer -- Takistan
+      3,293 materials to 499 layers with 0 dropped (was 3,033) and 2,999 of 2,999 authored
+      blends binding (was 0), Stratis 479 over 76 with 419 of 419 -- plus the OFP boot smoke
+      as the no-regression arm. Not checked: no unit test covers this path, and the authored
+      LCA composition is bound but not blended, so nothing here verifies the mask-driven
+      detail composition itself.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/WLD-017-terrain-materials-are-not-ground-layers-20260812.md
@@ -2781,29 +2857,29 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
     branch: grass-lod-dissolve-photo-cards
     baseline_commit: 152b9d8
-    verification_commit: null
+    verification_commit: 79b455f
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [WLD-016]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [79b455f]
     production_call_sites:
       - file: engine/Poseidon/World/Model/ShapeAdapter.cpp
         symbol: Poseidon::Model::ShapeAdapter::convertToLODShape
     test_ids: [odol-local-fixture, oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: 6c47fce0613d34f9eecb6b25ffc63d8aa52a3ceac4fc30b912f7feced87345c3
     decision_record: docs/roadmap/decisions/MAT-037-shapeadapter-section-split-assumed-one-stride-20260812.md
     capability_claims:
       - capability: SECTION_FACE_RANGES_ARE_EXACT
-        status: COMPLETE
+        status: VALIDATED
         denominator: >-
           ShapeAdapter re-derived per-section face counts by walking the OFP v7
           face stream (8-byte PolyProperties + 2-byte indices = 16 per triangle)
@@ -2831,7 +2907,13 @@ tickets:
       not report an exact range or the ranges do not account for every face --
       which includes the whole OFP v7 path, whose behaviour is unchanged.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      A measured before/after on three worlds plus the OFP boot smoke, against the per-section
+      face counts the loader independently computed and validated. The Takistan almond LOD0
+      split 5,104/1,914/2,398 was being read as 2,552/957/5,907, drawing 3,509 crown faces
+      with the trunk's bark texture. Not checked: no unit test covers it -- the path needs a
+      Model and a Shape -- and two named defects (sparse OA canopies from the fixed 0.5 alpha
+      reference, and a black cages_ep1.p3d) are untouched by it.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/MAT-037-shapeadapter-section-split-assumed-one-stride-20260812.md
@@ -2844,19 +2926,19 @@ tickets:
     obligation: REQUIRED
     execution_mode: IMPLEMENT
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: ACTIVE
+    scheduling_state: DONE
     status: VALIDATED
     outcome: ADAPTED
     owner: null
     branch: grass-lod-dissolve-photo-cards
     baseline_commit: 01dfa6d
-    verification_commit: null
+    verification_commit: 186c6b6
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [MAT-033, MAT-037]
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [186c6b6]
     production_call_sites:
       - file: engine/WgpuRenderer/EngineWgpu.cpp
         symbol: Poseidon::EngineWgpu::ResolveMaterialNormalMap
@@ -2864,11 +2946,11 @@ tickets:
         symbol: fs_gpu
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check]
     benchmark_artifacts: []
-    evidence_hash: null
+    evidence_hash: f8651560cd38139e93c1118a664b4f2761d1c0a965c3ca2aa58b959c1f217e88
     decision_record: docs/roadmap/decisions/MAT-038-retained-path-had-no-normal-maps-20260812.md
     capability_claims:
       - capability: RETAINED_PATH_NORMAL_MAPS
-        status: COMPLETE
+        status: VALIDATED
         denominator: >-
           The retained GPU-driven material had no normal slot at all, so with
           GPU-driven on by default essentially no world section was normal-mapped
@@ -2893,7 +2975,2821 @@ tickets:
       hard in +X. OFP surfaces come from CfgMaterials with no RVMAT and resolve to
       0, so that path is untouched.
     reviewer: null
-    reviewer_method: null
+    reviewer_method: >-
+      Per-world material binding counts through the production retained path: 358 of 362
+      Takistan and 299 of 334 Stratis materials bind a normal map, every remainder because it
+      declares no NormalMap slot, with no upload failures and no procedural misses; the two
+      ABI size assertions caught the 88 -> 96 byte struct growth at compile time. Not checked:
+      no human judged the resulting frames, and terrain normals are outside it entirely --
+      neither Arma 3's Stage14 per-tile normal nor Arma 2's per-surface _nopx maps reach the
+      terrain shader.
     supersedes: []
     evidence:
       - docs/roadmap/decisions/MAT-038-retained-path-had-no-normal-maps-20260812.md
+
+  - id: WLD-022
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The Arma 1 world container (OPRW revisions 18 and 20)
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 90c4dae
+    verification_commit: 6f54385
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-010]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [f88f0ea, 6f54385]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/World/Oprw20.hpp
+        symbol: Poseidon::Asset::Formats::World::Oprw20
+    test_ids: [oprw20-synthetic-world, oprw20-randomization-array,
+               oprw20-road-links, oprw20-revision-18, oprw20-revision-dispatch,
+               oprw20-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: 4f1c814e40e2091afaef776a977911513097e552efb58d68c7d68df2551054ae
+    decision_record: docs/roadmap/decisions/WLD-022-arma-1-world-container-20260813.md
+    capability_claims:
+      - capability: OPRW18_20_WORLD_PARSE
+        status: VALIDATED
+        denominator: >-
+          Three local Arma 1 worlds parse to their declared byte counts: sara.wrp
+          (revision 20, 512 land / 2048 terrain grid, 40 m cell, 20,480 m extent),
+          sara_dbe1.wrp and saralite.wrp (both revision 18). Revisions 18 and 20 are
+          byte-identical in layout and one reader consumes all three -- a version
+          check written for 20 alone, which is what the known gate was, would have
+          loaded one world in three. Only four fields differ from revision 24: the
+          bulk codec is LZSS rather than LZO, a dense per-land-cell uint16
+          randomization array follows the material-index quadtree (524,288 bytes on
+          sara.wrp, exactly 512x512x2), there is one per-terrain-cell byte array
+          before elevation rather than two, and the road link record carries no
+          per-connection type byte. Everything else -- both header resolutions, all
+          four quadtrees, the mountain list, the terrain material table with its
+          trailing major byte, the model table, the static-entity records, the
+          60-byte object record and the trailing map-info block -- is already the
+          revision-24 layout.
+      - capability: TWO_GRID_HEADER_INDEPENDENT_WITNESS
+        status: VALIDATED
+        denominator: >-
+          Arma 1 is 4:1 at a 40 m land cell. Every previously-read world is 8:1
+          (Stratis, VR, Takistan, Zargabad, Chernarus) or 4:1 at 30 m (Altis), so
+          this is the first independent witness that the two-resolution header is a
+          real pair of grids rather than a ratio that happened to hold.
+    known_failures:
+      - >-
+        World container only. No Arma 1 model reading -- that is AST-012D -- no
+        terrain material families, and no claim about how an Arma 1 world renders.
+      - >-
+        The trailing map-info block is retained as bytes and not decoded, exactly as
+        on revisions 24 and 25.
+      - >-
+        Three official worlds. No Arma 1 community terrain has been parsed.
+    fallback: >-
+      The legacy WrpReader is untouched and still handles RVW and OPRW 2/3.
+      Revisions this profile does not name are refused rather than misread, and the
+      revisions between the two verified groups are refused by their own test.
+    reviewer: null
+    reviewer_method: >-
+      Nine Catch2 cases in tests/unit/engine/Poseidon/Asset/Formats/World/test_oprw20.cpp:
+      a synthetic round-trip of every declared field, the randomization array read at land
+      resolution, road links keeping their whole path, revision 18 through the same layout,
+      per-profile refusal of unnamed revisions, refusal of the revisions between the two
+      verified groups, the shared probe leaving the stream alone, refusal of an object
+      naming a missing model, and a [GameData] case parsing the three local Arma 1 worlds
+      to their declared byte counts. The LZSS payloads each end in a 32-bit checksum the
+      decoder verifies, so a bulk array proves its own declared size at the array rather
+      than desynchronising several fields downstream. Not checked: nothing was rendered and
+      no human judged an Arma 1 frame. Note the tests/ paths are outside the evidence hash,
+      which covers only docs/ and engine/ prefixes.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-022-arma-1-world-container-20260813.md
+      - engine/Poseidon/Asset/Formats/World/Oprw20.hpp
+
+  - id: AST-012D
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Arma 1 ODOL revision 40, and its embedded material
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 6c502e5
+    verification_commit: fb6c676
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [AST-012A, AST-012B]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [7f45f03, fb6c676]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol40.hpp
+        symbol: Poseidon::Asset::Formats::P3D::Odol40
+      - file: engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+        symbol: Poseidon::Asset::Formats::P3D::DescribeOdolRevision
+    test_ids: [odol40-arma1-corpus, odol40-material-layout]
+    benchmark_artifacts: []
+    evidence_hash: 3ab5e436a6e643e74a73848f69be849a5bcae2ce1152c1693777aefcd5cb26b9
+    decision_record: docs/roadmap/decisions/AST-012D-odol-40-embedded-material-has-no-extra-field-20260813.md
+    capability_claims:
+      - capability: ODOL40_STATIC_LOD_PARSE
+        status: PARTIAL
+        denominator: >-
+          Revision 40 is the only revision Arma 1 ships -- 2,580 models across all 95
+          local Arma 1 PBOs, revision 40 without exception, the one non-ODOL P3D found
+          being an MLOD source. The reader closes 18,697 of 18,697 LOD bodies exactly
+          on their declared boundary, so a load is a full read rather than a prefix,
+          and anything it cannot close comes back as a refusal naming the constraint.
+          This stays a static-shape claim with the same limits as the Arma 2 family:
+          skinning, proxies, keyframes and unrecognised animation types are refusals,
+          not silent skips.
+      - capability: ODOL40_EMBEDDED_MATERIAL
+        status: VALIDATED
+        denominator: >-
+          Arma 1's embedded material is byte-identical in layout to ODOL 73's. There
+          is no extra field, and texGens is neither optional nor ambiguous -- a
+          speculative field carried by the prototype is what made the count look
+          present on some materials and absent on others. Every Arma 1 material is
+          version 9: there is no revision-6, -7, -8, -10 or -11 material anywhere in
+          Arma 1, so the older branches are exercised by an authored fixture rather
+          than by a corpus file.
+      - capability: ODOL40_FULL_FLOAT_ATTRIBUTES
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          Arma 1 stores full-float normals and UVs rather than the packed forms, so it
+          cannot witness the -1/511 packed-normal sign question AST-018 left open. It
+          can establish the winding-to-normal-sign convention directly, which would
+          then let a decoded Arma 2/3 packed normal be checked against it. That has
+          not been done.
+    known_failures:
+      - >-
+        Format and load only. No Arma 1 object has been judged on screen. The
+        handover's Arma 1 launch recipe is pitched 20 degrees down and carries a
+        hardcoded date, so captures taken through it do not settle appearance.
+      - >-
+        The v6/v7 material branches are covered by an authored fixture only, because
+        no such material exists in the corpus. Neither branch can fire on Arma 1
+        (uniformly v9) or on Arma 2/3 (v9+), so that code is latent, not live.
+      - >-
+        OdolRevision.hpp and ODOLLoader.hpp still cite this work as AST-013, the id it
+        was filed under before the collision with PAA storage semantics was found.
+    fallback: >-
+      A revision this build cannot read raises UnsupportedOdolRevision naming the
+      revision and the constraint that failed, rather than falling back to another
+      revision's layout. The OFP v7 path is untouched.
+    reviewer: null
+    reviewer_method: >-
+      Two Catch2 suites, test_odol40_arma1.cpp and test_odol40_material_layout.cpp, plus a
+      corpus sweep whose gate is arithmetic rather than judgement: every LOD body must end
+      exactly on its declared boundary, and 18,697 of 18,697 do across 2,580 models in 95
+      PBOs. The v6/v7 material branches are exercised by a fixture the test writes the way
+      the reference implementation describes, which is weaker evidence than a corpus file
+      and is recorded as such rather than counted with the rest. Not checked: nothing was
+      rendered, and no winding or normal convention was judged against a reference image.
+      Note the tests/ paths are outside the evidence hash, which covers only docs/ and
+      engine/ prefixes.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AST-012D-odol-40-embedded-material-has-no-extra-field-20260813.md
+      - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp
+
+  - id: MAT-031
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The NormalMap cluster, SuperAToC, and what "white on Stratis" actually is
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 5fe386f
+    verification_commit: 807762e
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-030]
+    blocked_by: []
+    blocks: [MAT-032, MAT-033]
+    implementation_commits: [807762e]
+    production_call_sites: []
+    test_ids: [oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: bbf6850e18dbd092118dc3752f8af4a20e287e24787e13c1aa31c2ced0fc9892
+    decision_record: docs/roadmap/decisions/MAT-031-normalmap-cluster-and-superatoc-20260810.md
+    capability_claims:
+      - capability: ALBEDO_BIND_FAILURE_ATTRIBUTION
+        status: VALIDATED
+        denominator: >-
+          A per-material diagnostic that reports, once per material, why no albedo
+          was bound. On the Stratis Air Station Mike-26 capture the first run
+          attributed 294 materials to "no BaseColour slot", 84 to "uploaded 0" and 7
+          to "procedural". The 84 were not a texture bug at all: every one named a
+          texture in structures_f_data.pbo, which the mod set did not mount, and
+          hard-linking that archive removed the whole bucket (Multi failures 80 to
+          1). The measurable claim here is the attribution, which is what turned an
+          apparent coverage gap into an unmounted archive.
+    known_failures:
+      - >-
+        A diagnostic, not a renderer feature. It says why a bind failed; it does not
+        make any additional material bind.
+      - >-
+        Measured at one Stratis camera. The counts are that view's, not the world's.
+    fallback: >-
+      With the diagnostic off, binding behaviour is unchanged; a material that binds
+      nothing still falls back to the renderer's white slot 0.
+    reviewer: null
+    reviewer_method: >-
+      A controlled pair on one capture: the same camera measured with and without
+      structures_f_data.pbo mounted, with the per-material reason counts as the
+      readout. That the numbers move exactly as the hypothesis predicted -- one
+      archive accounting for the entire "uploaded 0" bucket -- is the evidence. Not
+      checked: no unit test covers the diagnostic, no human judged the frames, and
+      nothing here verifies that the now-bound materials are shaded correctly.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-031-normalmap-cluster-and-superatoc-20260810.md
+
+  - id: MAT-032
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Generating the textures Real Virtuality writes as names
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 807762e
+    verification_commit: 099d4f3
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-031]
+    blocked_by: []
+    blocks: [MAT-033]
+    implementation_commits: [099d4f3]
+    production_call_sites: []
+    test_ids: [oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: 0a8984c0df48171807ba8bdaa981a05770d54134015b71058abc72cd296057de
+    decision_record: docs/roadmap/decisions/MAT-032-procedural-constant-textures-20260810.md
+    capability_claims:
+      - capability: PROCEDURAL_TEXTURE_COLOR
+        status: PARTIAL
+        denominator: >-
+          A Real Virtuality texture reference can be a generator rather than a path
+          -- `#(argb,8,8,3)color(0.5,0.5,1,1,NOHQ)`. Nothing in this build produced
+          one, so every such reference walked the file-source chain, found no file
+          and failed to upload; for a surface whose whole appearance is an authored
+          flat colour that means nothing to draw, which is exactly what Arma 3's
+          landing and warning lights are. Only `color` is generated, because it is a
+          constant and building it is not a guess.
+      - capability: PROCEDURAL_TEXTURE_LOOKUP_TABLES
+        status: NOT_PRODUCED
+        denominator: >-
+          `fresnel` and `irradiance` are lookup tables computed from their
+          parameters. They parse, and they report which generator they are and that
+          they are not generated, so a caller can name the one it hit rather than
+          reporting a generic failure. Producing a plausible-looking table would be
+          the kind of invention the material work has refused elsewhere.
+    known_failures:
+      - >-
+        Two of the three observed generators are deliberately not produced, so a
+        material depending on `fresnel` or `irradiance` still binds nothing.
+    fallback: >-
+      An ungenerated reference reports its generator by name and falls through to
+      the renderer's white slot 0, as before.
+    reviewer: null
+    reviewer_method: >-
+      Generator parsing and the `color` output are deterministic from the reference
+      string, so the check is that the reference round-trips to the constant it
+      names and that the two ungenerated forms report themselves rather than failing
+      generically. Not checked: no unit test is recorded against this ticket, no
+      human judged a landing-light frame, and the alpha and mip semantics of the
+      generated constant are not independently verified.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-032-procedural-constant-textures-20260810.md
+
+  - id: MAT-033
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Binding the specular map the constant was written for
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 099d4f3
+    verification_commit: 73fd78f
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-031, MAT-032]
+    blocked_by: []
+    blocks: [MAT-038]
+    implementation_commits: [73fd78f]
+    production_call_sites: []
+    test_ids: [oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: e011f8b63de3d104a05eed23e68eee947c5eaf391896bd8110592a61c4697e00
+    decision_record: docs/roadmap/decisions/MAT-033-smdi-in-the-gpu-driven-path-20260810.md
+    capability_claims:
+      - capability: SMDI_SPECULAR_LEVEL_BOUND
+        status: PARTIAL
+        denominator: >-
+          In Arma 3 a material's `specular` constant is the maximum a per-texel map
+          scales toward, so applying it with no map gave every texel that maximum and
+          lit whole rooftops as mirrors; the previous code scaled it to a stated 0.25
+          approximation of a real map's mean. The map could not reach the shader
+          because WgrModelMaterial carried exactly one texture, and a per-draw-only
+          lookup reaches almost nothing -- the GPU-driven retained set owns 6,066
+          Stratis sections against about 7 a frame through DrawSectionTL. The ABI now
+          carries specular_texture_id (80 to 88 bytes, both size assertions updated),
+          SectionMaterialGpu gains specular_slot inside existing tail padding so the
+          GPU-side size is unchanged, and gpu_driven_shadow.wgsl mirrors the rename
+          because it reads the same buffer.
+      - capability: SMDI_GLOSS_TO_EXPONENT
+        status: NOT_PRODUCED
+        denominator: >-
+          SMDI's G is the specular level and B is gloss, measured over 40 sampled
+          textures where R and A are constant 255 while G and B vary. G scales the
+          constant. B is deliberately unused: turning gloss into a Blinn-Phong
+          exponent is a conversion with its own evidence requirement, the same one
+          that keeps GlossToRoughnessUnvalidated out of the translation path and off
+          by default. The map is bound and the channel is present for when that
+          question is answered properly.
+    known_failures:
+      - >-
+        Only the specular level is consumed. Gloss is bound and ignored, so nothing
+        here improves highlight shape.
+      - >-
+        A material with no SpecularDetail slot keeps the constant-only behaviour it
+        had before.
+    fallback: >-
+      An unresolved or unloadable specular map leaves the material on the constant
+      path, and the shader tests for the slot rather than assuming one is present.
+    reviewer: null
+    reviewer_method: >-
+      Structural checks that the compiler and the buffer layout enforce: both
+      WgrModelMaterial size assertions were updated with the 80 to 88 byte growth and
+      are what catch a mismatch, and gpu_driven_shadow.wgsl was renamed in step
+      because a field mismatch would make every field after it read the wrong bytes.
+      The channel semantics come from MAT-020's measurement of 40 SMDI textures
+      rather than from this ticket. Not checked: no unit test covers the resolve
+      path, no human judged the rooftops the 0.25 approximation was standing in for,
+      and no before/after pixel measurement is recorded here.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-033-smdi-in-the-gpu-driven-path-20260810.md
+
+tickets:
+  - id: MAT-034
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Multi has six more stages than the census looked at
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 634e732
+    verification_commit: 472ffc3
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-030, MAT-033]
+    blocked_by: []
+    blocks: [MAT-039]
+    implementation_commits: [472ffc3]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+        symbol: kMulti
+    test_ids: [mat-034-multi-per-surface-stages]
+    benchmark_artifacts: []
+    evidence_hash: 6bc5f320893557e457503007233101d16df0ebc4f7c4a9eb9dd04f456c5bf7dc
+    decision_record: docs/roadmap/decisions/MAT-034-multi-beyond-its-layers-20260810.md
+    capability_claims:
+      - capability: MULTI_PER_SURFACE_STAGES_BOUND
+        status: VALIDATED
+        denominator: >-
+          MAT-030 measured `Multi` as far as Stage8 and stopped three stages short.
+          Re-measured over all 1,628 Multi materials in the Arma 3 corpus: Stage9
+          macro present in 1,626 (`_mc` 1168, procedural mc 443), Stage10 ambient
+          shadow in 1,628 (`_ads` 808, `_as` 388, `_adshq` 274), Stage11 normal map
+          in 1,628 (`_nohq` 1486, procedural nohq 141). Stages 9-11 are per-surface,
+          not layered, so they raise no blending question -- and this build was
+          binding none of them, leaving the second largest object family in Arma 3
+          without a normal map. Denominator is the Arma 3 corpus only; no A2/OA
+          Multi count was taken, and nothing here covers the four layered stages.
+      - capability: DTSMDI_READS_AS_SMDI
+        status: VALIDATED
+        denominator: >-
+          72 `_dtsmdi` textures decoded: A constant 255 in 72/72, R centred on 128 in
+          64/72 (mean of means 135, a detail multiplier around 0.5), G varying in
+          72/72 and flooring at 0 in 70/72 (mean 27), B varying in 58/72 (mean 140).
+          That is SMDI's channel assignment exactly -- G specular level, B gloss --
+          with detail in R, which on a plain SMDI is dead (constant 255, measured
+          n=40 under MAT-020). So no split and no new channel map were needed. Only
+          Stage5 binds, paired with Stage0, because layer 0's colour already stands
+          in for the whole surface; layers 1-3's detail+specular stay unbound.
+      - capability: MULTI_SPECULAR_MAP_BOUND
+        status: VALIDATED
+        denominator: >-
+          Whole-world object census on Stratis, 436 materials reporting a
+          `SpecularDetail` outcome: specular map bound 206 -> 320, `Multi` bound
+          0 of 114 -> 114 of 114, and materials carrying a bright constant (>=0.5)
+          with still no map 90 -> none. Albedo coverage is unchanged (293 with no
+          RVMAT albedo, 291 falling back to a working face texture, 2 unresolvable).
+          One world. The 116 materials still reporting no specular map are `TreeAdv`
+          45, `Normal` 42, `TreeAdvTrunk` 25, `TreeAdvTrans` 4, none of them bright.
+      - capability: MULTI_FOUR_LAYER_BLEND
+        status: NOT_PRODUCED
+        denominator: >-
+          The masked four-layer blend itself is deliberately not attempted here.
+          Stages 1-3 and 6-8 remain unmapped across all 1,628 Multi materials -- the
+          second, third and fourth colour layer have no representation in the slot
+          set -- and the Stage4 mask is preserved but sampled by nothing. That is the
+          real Multi feature and it needs the layered-material design decision
+          MAT-030 asked for; this ticket only stops the family being wrong about
+          everything that is not layered.
+      - capability: ADS_B_CHANNEL_SEMANTICS
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          `_ads` is not `_as`. Measured over 47 textures: R constant 255 in 46, A in
+          47/47, but B varies in 47/47 as well as G, and B's mean tracks G's within 2
+          in only 27 of 47 -- so B is a second quantity, not a copy of G. The
+          `AmbientShadow` channel map declares B unused, which is measured true for
+          `_as` and measured false for `_ads`. Nothing samples the slot yet, so
+          nothing is wrong in effect; the discrepancy is recorded rather than left
+          for whoever first samples it.
+    known_failures:
+      - >-
+        The four-layer blend is not implemented. Three of Multi's four colour layers,
+        and three of its four per-layer detail+specular stages, have no slot at all;
+        the Stage4 mask is carried and read by nothing.
+      - >-
+        `_ads` violates the `AmbientShadow` channel map's `unused` declaration on B
+        (varies in 47/47). The map was not corrected -- only the measurement recorded.
+      - >-
+        `_ads` had been an unrecognised suffix, and it is the majority spelling
+        (808 of 1,628 Stage10 bindings against 388 `_as`), so the second witness had
+        been silent on the commonest form of the commonest layered material.
+    fallback: >-
+      A material with no `SpecularDetail` slot keeps the constant-only behaviour it
+      had before. The `WGR_MATERIAL_SPEC_UNMAPPED` approximation stays in the code
+      although its population on Stratis is now empty, because another world may
+      still present the case; it is simply no longer doing any work here.
+    reviewer: null
+    reviewer_method: >-
+      Corpus counts and channel decodes: 1,628 Multi materials re-measured through
+      Stage11, 72 `_dtsmdi` and 47 `_ads` textures decoded channel by channel, and a
+      whole-world Stratis object census across 436 materials showing specular
+      bindings 206 -> 320 and the bright-constant-unmapped population falling to
+      zero. A unit test pins that Multi's normal, macro and ambient shadow are
+      per-surface rather than per-layer. Not checked: no human judged a frame, no
+      pixel diff is recorded, the 1,628-material figure is Arma 3 only with no A2/OA
+      equivalent taken, and nothing verifies the four-layer blend because it is not
+      implemented -- the census counts bindings, not what they look like.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-034-multi-beyond-its-layers-20260810.md
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+      - engine/Poseidon/Asset/Formats/Material/MaterialChannels.hpp
+
+  - id: MAT-035
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Arma 3's shadow LODs classified as ordinary visual LODs
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 472ffc3
+    verification_commit: c51ea85
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-032, MAT-033]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [c51ea85]
+    production_call_sites:
+      - file: engine/Poseidon/World/Model/LodPurpose.hpp
+        symbol: IsDrawableLod
+      - file: engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+        symbol: IsNormalLevel
+    test_ids: [mat-035-shadow-lods-not-viewing-distances, mat-035-unknown-sentinel-not-drawable]
+    benchmark_artifacts: []
+    evidence_hash: 422472c329f39a861b2c2b66baea49f5e7efbb6db84a77fd413a44ba3a8bb6c1
+    decision_record: docs/roadmap/decisions/MAT-035-shadow-lods-were-drawable-20260811.md
+    capability_claims:
+      - capability: SHADOW_LODS_NOT_DRAWABLE
+        status: VALIDATED
+        denominator: >-
+          `ClassifyLodResolution` caught special LODs at `resolution >= 1e5`, but
+          Arma 3 authors shadow geometry at 10000/10010 (shadow volume) and
+          11000/11010 (shadow buffer), below the cut-off, so they classified as
+          `Visual` with a 10 km viewing distance. `IsNormalLevel` could not catch
+          them either: it compares against the indices `ScanShapes` assigns, one per
+          purpose, and nothing has ever held a shadow index while a model carries two
+          shadow volumes. Measured over sampled models: 36 of 45 Arma 3 structures
+          carry a 10000 LOD and 36 of 45 an 11000 LOD; 0 of 120 CWA/OFP models carry
+          either, so correcting it cannot regress stock content. These are samples,
+          not whole-corpus counts.
+      - capability: UNKNOWN_LOD_NOT_DRAWABLE
+        status: VALIDATED
+        denominator: >-
+          A3 models carry a 4e13 LOD the table does not name. It classified as
+          `Unknown`, which was neither drawable nor geometry-only, so a consumer
+          asking "is this geometry?" drew it. `IsDrawableLod` now states positively
+          which purposes may be drawn, excluding `Unknown` by construction rather
+          than by omission. Measured effect on Stratis: `penetration\*` materials
+          reaching the colour pass 4 -> 0, materials with no albedo 293 -> 291. Those
+          two were the last unresolvable materials left by MAT-032. One world.
+      - capability: SHADOW_LOD_FIX_HAS_VISIBLE_EFFECT
+        status: UNSUPPORTED
+        denominator: >-
+          Same camera and dev mission before and after differ by 19 pixels above a
+          threshold of 20, scattered as antialiasing noise; the frames are otherwise
+          identical. Three claims were made and withdrawn: it does not explain the
+          owner's white orb (never reproduced across three camera positions at noon
+          and at dawn), it does not explain the flat green boxes on the distant
+          hillside (unchanged), and the proposed mechanism is unsupported -- the LOD
+          chooser walks resolutions ascending and stops at the first level too coarse
+          for the required detail, so it does not in practice reach a
+          10000-resolution level. The defect is that these levels were registered as
+          drawable at all, and wasteful of the retained set, not that they were being
+          drawn at this camera.
+      - capability: DEV_MISSION_PIXEL_AB_HARNESS
+        status: VALIDATED
+        denominator: >-
+          Corrects MAT-033's note that captures are not frame-deterministic. That
+          holds for the training mission, which has live AI, an animated player and
+          moving cloud: two runs differ by mean 67/255. The `dev-missions/devtest*.abel`
+          missions have one stationary soldier and no scripts, and two runs of one
+          differ by mean 0.054/255. A/B by pixel diff is therefore available provided
+          the dev mission is used. Denominator: two runs of one mission of each kind.
+      - capability: WHITE_ORB_AND_GREEN_CARD_CAUSES
+        status: PARTIAL
+        denominator: >-
+          A follow-up on the same day found both reported symptoms had independent
+          causes, neither related to LOD classification: WGPU's experimental
+          procedural lens-flare pass drew a sun-strength screen-space flare whenever
+          its ray saw open sky (now off by default, `SkySettings::lensFlare = 0`,
+          with the legacy sun decal also suppressed on WGPU so two solar flares do
+          not stack), and `ClassifyGpuSection` did not apply the CPU path's binary
+          DXT1/PAC alpha cutout rule, so imported foliage marked opaque in the P3D
+          drew its texture's dark background as full cards (now the same
+          `AlphaStats::Cutout` -> `alpha_ref >= 0.5` rule as `DrawSectionTL`).
+          Verified by one installed-game capture: `--render=wgpu`, `WGR_GPU_DRIVEN=1`,
+          `@a3stratis`, `devtest.abel`, world position 2062 5572, frame 400, showing
+          neither the flare blob nor opaque green cards, plus
+          `run_preview0_wgpu_check.ps1`. PARTIAL because those two changes landed in
+          commits after this ticket's verification commit and are not covered by its
+          evidence set, and because one capture at one position is the whole test.
+    known_failures:
+      - >-
+        The shadow-LOD correction explains none of the reported symptoms. Its entire
+        measured visual effect is 19 antialiasing pixels.
+      - >-
+        The RND-alpha-routing hypothesis ("the shadow is not missing, it is being
+        drawn in the wrong place as visible geometry") is only half-answered: shadow
+        LODs really were reaching the drawable set, but whether that produced its
+        night-glow symptom is untested and open.
+      - >-
+        The lens-flare pass is disabled rather than fixed. It stays off until its
+        sun-direction and occlusion contract is validated.
+    fallback: >-
+      `IsDrawableLod` states drawability positively, so an unrecognised or future LOD
+      purpose falls out of the draw path rather than into it -- the failure direction
+      is a missing draw, not a shadow volume rendered as visible geometry. Stock
+      CWA/OFP content carries none of these levels (0 of 120 sampled), so its path is
+      untouched.
+    reviewer: null
+    reviewer_method: >-
+      Per-world material counts through the production path plus a deterministic
+      pixel A/B: `penetration\*` materials reaching the colour pass fall 4 -> 0 and
+      no-albedo materials 293 -> 291 on Stratis; the same camera before and after
+      differs by 19 pixels above threshold 20 in a dev mission whose own run-to-run
+      noise is mean 0.054/255. LOD-purpose classification and the unnamed 4e13
+      sentinel are pinned by two unit tests. Not checked: the model counts (36/45 A3,
+      0/120 CWA) are samples rather than a corpus census; no human judged a frame;
+      the owner's white orb was never reproduced under this change; and the two
+      follow-up fixes described in the record are not in this ticket's verification
+      commit, so its evidence set does not cover them.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-035-shadow-lods-were-drawable-20260811.md
+      - engine/Poseidon/World/Model/LodPurpose.hpp
+      - engine/Poseidon/Graphics/Rendering/Shape/Shape.hpp
+
+  - id: MAT-036
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Arma 2/OA foliage renders as opaque shards, and four causes it is not
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: bfb23e6
+    verification_commit: 91f461b
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-020, MAT-030]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [91f461b]
+    production_call_sites: []
+    test_ids: [mat-036-oa-foliage-alpha-histogram]
+    benchmark_artifacts: []
+    evidence_hash: 41998cbfefad76a1a150dea5b7683e74e86c760c165940fb0f555ea6371812a5
+    decision_record: docs/roadmap/decisions/MAT-036-oa-vegetation-renders-as-shards-20260812.md
+    capability_claims:
+      - capability: OA_FOLIAGE_SHARD_ROOT_CAUSE
+        status: NOT_PRODUCED
+        denominator: >-
+          The symptom is isolated and reproducible but the cause is not established,
+          and no production change was made. Denominator is two models through one
+          identical `--test-model` harness: official OA
+          `ca\plants_e\tree\t_amygdalusc2s_ep1.p3d` renders as opaque dark mottled
+          shards with jagged cut edges, and Arma 3's
+          `a3\plants_f\tree\t_ficusb2s_f.p3d` renders correctly. Both are ODOL, both
+          report the same structure (`TreeAdv` crown sections plus a `TreeAdvTrunk`,
+          `schema=true`, Stage1 NormalMap + Stage2 MacroAmbient, no Stage0), and the
+          OA leaf atlas decodes to a normal 4x3 grid of green branch cards on grey.
+          So it is neither a harness artefact nor bad source art -- but n=2 models.
+      - capability: ALPHA_ROUTE_OVERRIDE_FIRES_FOR_OA
+        status: VALIDATED
+        denominator: >-
+          One texture pair, the only measured difference between the two assets:
+          A3 ficus `_ca.paa` (DXT5, 86.5% clear, 12.5% opaque, 1.0% partial)
+          classifies CUTOUT; OA almond `_can.paa` (DXT5, 88.0% clear, 0.0% opaque,
+          12.0% partial) classifies BLEND under `ClassifyAlpha`'s 2%-partial
+          threshold. The existing shader-family override nonetheless handles it:
+          `GpuSectionMaterialUsesLeafCards` resolves the OA material to `TreeAdv` and
+          returns true (traced live), `HasAlphaHoles()` is true, the texture is not
+          bark-named, so `materialCutout` is true and the section gets
+          `alphaRef = 0.5`. The override fires; alpha routing is not the gap.
+      - capability: A2_SECTION_TEXTURE_AND_FACE_BINDING
+        status: VALIDATED
+        denominator: >-
+          One model, self-checking. LOD0 sections 0 and 1 (the crown) carry
+          `textureIndex=0` -- the leaf atlas -- and section 2 (the trunk)
+          `textureIndex=1`. LOD0 has 9,416 faces and `faceDataSize` is 75,328 =
+          9,416 x 8, matching the A2 record size of 2 header bytes + 3 x 2 index
+          bytes, with the section ranges partitioning it exactly ([0, 40832) = 5,104
+          faces, [40832, 56144) = 1,914, [56144, 75328) = 2,398). `convertOdolStatic`
+          throws if rebuilt offsets disagree with the declared size and does not
+          throw here. That accounts for 7,018 of 9,416 LOD0 faces being crown
+          geometry correctly bound to the leaf atlas, while the render shows mostly
+          bark-like shards.
+      - capability: TREEADV_STATE_VECTOR_FOLD_IS_THE_CAUSE
+        status: UNSUPPORTED
+        denominator: >-
+          OA authors genuinely non-neutral values where A3 does not (OA crown ambient
+          [0.05 0.57 0.30], diffuse [0.50 0.40 0.45], emissive [2.60 2.30 2.00],
+          power 300; A3 crown diffuse [0.50 0.50 0.50], emissive [1.00 1.00 1.00],
+          power 28), and MAT-020 established these are family parameters rather than
+          lighting. Suppressing the `surfMat->Combine` fold for TreeAdv-family
+          sections in `ClassifyGpuSection` changed the render not at all, consistent
+          with MAT-020's finding that the HDR path ignores per-material terms. The
+          change was reverted; it fixes nothing.
+      - capability: UV_SOURCING_HYPOTHESIS
+        status: UNTESTED
+        denominator: >-
+          The leading remaining hypothesis, with no measurement behind it yet. A2
+          rest-data carries `uv0` plus `uvSetCount - 1` extra sets and the TreeAdv
+          MacroAmbient stage is authored `uvSource tex1`; if the crown sections
+          sample the wrong set, or the A2 16-bit UV dequantisation lands in the wrong
+          part of the atlas, each card would show an arbitrary region of a 2048^2
+          atlas whose background is flat grey and whose twigs are dark grey-brown --
+          which is what the render looks like and is consistent with every
+          measurement above. The decisive experiment (dump the decoded UV range per
+          section for both models against the atlas layout) was not run.
+    known_failures:
+      - >-
+        OA foliage still renders as opaque shards. Nothing was fixed.
+      - >-
+        The A2 UV dequantisation uses `(u + 32767) / 65536` where the conventional BI
+        form is `(u + 32767) / 65534`. The difference is ~3e-5 and cannot explain the
+        symptom, but it is wrong and remains uncorrected.
+    fallback: >-
+      Not applicable -- no production change. Both attempted fixes were reverted after
+      measuring that they changed nothing, so no A3, OFP or OA behaviour differs from
+      the previous commit.
+    reviewer: null
+    reviewer_method: >-
+      Per-asset measurement through the production render path: alpha histograms of
+      the two `_ca`/`_can` atlases with their `ClassifyAlpha` verdicts, a live trace
+      showing the TreeAdv leaf-card override firing and applying `alphaRef = 0.5`, and
+      an arithmetic check of the A2 face stream (75,328 = 9,416 x 8, section ranges
+      partitioning it exactly) that `convertOdolStatic` enforces at load. Not checked:
+      the cause is not established and no fix exists; the denominator is two models
+      and one texture pair, not a corpus; the UV-sourcing hypothesis has no
+      measurement at all; and no automated test was added because nothing changed. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-036-oa-vegetation-renders-as-shards-20260812.md
+      - docs/roadmap/decisions/RND-alpha-routing-misclassifies-a3-foliage-20260809.md
+
+  - id: MAT-039
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The Multi family is a four-layer masked blend, and we bind one layer of it
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 82aa1b6
+    verification_commit: aade226
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-030, MAT-034, MAT-038]
+    blocked_by: []
+    blocks: [MAT-040]
+    implementation_commits: [aade226]
+    production_call_sites: []
+    test_ids: [mat-039-multi-stage-table-trace]
+    benchmark_artifacts: []
+    evidence_hash: eff9f83dd924d710503eb83771b53df09ad9be141c43330942c68c16d2207bd4
+    decision_record: docs/roadmap/decisions/MAT-039-multi-family-is-a-four-layer-blend-20260812.md
+    capability_claims:
+      - capability: MULTI_FLAT_SURFACE_CAUSE
+        status: VALIDATED
+        denominator: >-
+          After MAT-038 gave the retained path normal maps and the tangent frame was
+          made scale-invariant, Takistan's brick houses still looked flat while the
+          stone walls beside them looked correct. Every material on those houses does
+          bind a normal map -- traced -- so it is not a missing binding. Read from the
+          source, `ca\structures_e\housek\data\house_k_5_multi.rvmat` (`PixelShaderID
+          Multi`) declares 15 stages: four colour layers at stages 0-3 each with its
+          own TexGen (0,1,2,3), the blend mask at 4, procedural DTSMDI at 5-8, macro
+          at 9, ambient/detail shadow at 10, and four normals at 11-14 (stage 13
+          procedural flat). The fine brick relief lives entirely in layer 1, at layer
+          1's UV scale, and the renderer draws layer 0 -- the rock -- with layer 0's
+          normal at layer 0's UV scale. The building is not missing its normals; it is
+          missing three of its four surfaces. Denominator: one RVMAT read in full, one
+          free-fly viewpoint (5760.49, 5536.90, 312.54) az 67.2 el -1.8 on Takistan
+          with `house_k_5_ep1` ~9 m away and `house_k_8_ep1` ~21 m ahead. No pixel
+          measurement, and the family-wide count of 1,628 Multi materials comes from
+          MAT-030/MAT-034, not from this ticket.
+      - capability: MULTI_FOUR_LAYER_COMPOSITION
+        status: NOT_PRODUCED
+        denominator: >-
+          Not implemented. `ShaderSchema::kMulti` already records the gap honestly --
+          Stage0 is `BaseColour` commented "layer 0 colour, standing in for the base",
+          stages 1-3 are `MaterialSlot::Count` (no slot at all), Stage4 is `Mask`,
+          "preserved unused". Implementing it needs, per section, 4 albedos + 4
+          normals + 1 mask + 4 UV transforms against the retained material's current
+          three texture slots (albedo, specular, normal): `WgrModelMaterial` grows to
+          carry layer arrays and their TexGens or gains an indirection into a
+          per-material layer table, `kMulti` gains slots for stages 1-3 and 12-14, and
+          `gpu_driven.wgsl` composes four layers by mask and blends four tangent-space
+          normals rather than sampling one. The mask sampling and four-way blend are
+          the same shape as the terrain's LCA composition in `terrain.wgsl` and are
+          worth reusing rather than writing twice.
+      - capability: MULTI_IS_A_SHARED_RV_SEMANTIC
+        status: VALIDATED
+        denominator: >-
+          `Multi` is not an A2/OA construct. It is used by Arma 3 as well; Takistan
+          just happens to put it on the buildings you stand next to, which is why the
+          defect surfaced there first. Established by source reading of the shader
+          family, not by a per-generation material count -- no denominator of A3
+          versus A2 Multi usage was taken in this ticket.
+      - capability: PARALLAX_ON_MULTI
+        status: NOT_PRODUCED
+        denominator: >-
+          Deliberately not attempted, and recorded so it is not attempted in the wrong
+          order. Parallax occlusion mapping would be built on the same per-layer
+          height/normal data this record is about, and applying it to a `Multi`
+          surface still drawing one of its four layers would add apparent depth to
+          the wrong texture. Composition first; POM is then a shading change on top of
+          a correct surface and can be judged on its own merits.
+    known_failures:
+      - >-
+        Three of Multi's four surface layers are not drawn at all, so their normals,
+        specular and UV scales never reach the shader. Brick relief on Takistan's
+        `housek` family is invisible for that reason and not for a binding one.
+      - >-
+        The Stage4 mask is carried through the schema and sampled by nothing.
+      - >-
+        Nothing was implemented in this ticket, so the symptom is unchanged.
+    fallback: >-
+      The current behaviour is itself the fallback: Stage0 stands in for the whole
+      surface, so a Multi material draws layer 0's colour with layer 0's normal at
+      layer 0's TexGen rather than failing. It is wrong but it is coherent -- one real
+      layer at its own scale, not a mixture of mismatched layers.
+    reviewer: null
+    reviewer_method: >-
+      Source reading against a live trace: the full 15-stage table of
+      `house_k_5_multi.rvmat` enumerated stage by stage with its per-layer TexGens,
+      and a trace confirming every material on the reported houses does bind a normal
+      map, which is what rules out the missing-binding explanation. Not checked: no
+      pixel measurement, no A/B capture, no unit test, and no implementation -- the
+      claim is a cause, not a fix. The denominator is one RVMAT and one viewpoint; the
+      family-wide 1,628-material figure is inherited from MAT-030/MAT-034 and was not
+      re-measured, and no count of how many Multi materials actually use more than one
+      layer was taken. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-039-multi-family-is-a-four-layer-blend-20260812.md
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+
+  - id: MAT-040
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Parallax has authored height on terrain, on both generations, and nowhere else
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 86b83e5
+    verification_commit: 03a61f2
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [MAT-038, MAT-039, WLD-017]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [03a61f2]
+    production_call_sites: []
+    test_ids: [mat-040-parallax-corpus-histogram]
+    benchmark_artifacts: []
+    evidence_hash: 35572eaf117381d16405691f463a87fd3a0acac76cc6657a89dd97e6fe3f0c09
+    decision_record: docs/roadmap/decisions/MAT-040-parallax-is-terrain-only-on-both-generations-20260812.md
+    capability_claims:
+      - capability: PARALLAX_HEIGHT_IS_TERRAIN_ONLY
+        status: VALIDATED
+        denominator: >-
+          Parallax needs a height field. RV normal maps are DXT5nm (Y in green, X in
+          alpha), leaving red free, and `_nopx` is the suffix that uses it. R channel
+          measured at 256x256 resample over 6 textures: OA object maps `wall_01_nohq`,
+          `wall_brick01_nohq` and `stonewall_01_nohq` hold R flat at 0 -> 0, while
+          terrain surface maps vary it -- OA `tk_hlina_nopx` 106 -> 187, A3
+          `gdt_beach_nopx` 94 -> 163, A3 `gdt_concrete_nopx` 96 -> 124. The split is
+          structural, not incidental: counting normal-map suffixes across
+          `structures_f`, `rocks_f`, `plants_f`, `data_f` and `map_data` (3,874
+          entries) gives `_nohq` 263, `_nopx` 31, `_no` 1, with all 31 `_nopx` in
+          `map_data.pbo` and not one in any object addon. So Arma 3 supports parallax
+          on terrain and not on objects, identically to Arma 2, and one terrain
+          implementation serves both generations. Denominator: 6 sampled textures and
+          a 3,874-entry suffix count over five named A3 addons -- no equivalent
+          corpus-wide suffix count was taken on the A2/OA side, only the three OA
+          textures above.
+      - capability: PARALLAX_ON_OBJECTS
+        status: UNSUPPORTED
+        denominator: >-
+          There is no authored object height on either generation (R flat at zero in
+          every object normal map measured, and zero `_nopx` outside `map_data.pbo`
+          across 3,874 entries). Synthesising height from the normal map is refused
+          on purpose: it swims under camera motion and softens exactly the detail it
+          claims to add. This record exists partly so it is not attempted.
+      - capability: TERRAIN_PARALLAX_IMPLEMENTATION
+        status: NOT_PRODUCED
+        denominator: >-
+          Measured and scoped, not started. The terrain fragment shader has no
+          per-surface normal or height sampling at all -- its normal is a central
+          difference of the heightmap (`sample_normal`), which is geometry, not
+          surface detail -- and although the authored per-surface maps reach the GPU,
+          nothing samples them. They can only be sampled inside `sample_authored_cell`,
+          because a surface's height and normal are meaningless without the mask that
+          says which surface a texel is, and that function is gated:
+          `a3_surface_blend` defaults to 0, is clamped to 0.35, and fades out entirely
+          between 25 and 120 metres. The order is therefore forced -- sample the bound
+          per-surface normals inside the authored composition, resolve the authored
+          composition's own status, then parallax on top -- because displacing a
+          surface that is still mostly the satellite image is not a test of anything.
+      - capability: BI_SECOND_WITNESS_ON_PARALLAX
+        status: VALIDATED
+        denominator: >-
+          Bohemia's own Arma 2 renderer write-up (supplied by the owner) describes
+          parallax occlusion mapping as a double ray casting computed on the GPU and
+          applied to terrain surfaces, adapted from ATI sample code. The corpus
+          measurement reached the same conclusion independently, so there are two
+          witnesses, one measured and one authored. Note the vendor's is a ray cast,
+          not the single-step offset implemented in the preceding commit; that gap is
+          a deliberate cost choice inside an already four-way-blended function, not an
+          oversight.
+      - capability: LCA_MASK_IS_NOT_A_WEIGHT_FIELD
+        status: VALIDATED
+        denominator: >-
+          Histogram of two shipped masks, one per generation. A3 `m_003_000_lca`
+          1024x1024: R distinct=2 (0 in 664,699 texels; 255 in 383,877), G distinct=2,
+          B distinct=3, A distinct=2 with a minimum of 128 and never 0; R+G+B+A ~= 255
+          in 28.6% of texels. OA `m_011_010_lca` 512x512: R/G/B distinct=4 each, A
+          constant 255 everywhere; sum ~= 255 in 0.7% of texels. Two values per
+          channel, 0 and 255, with a few hundred transition texels at the seams -- a
+          blend weight cannot look like this. These channels are flags and the mask is
+          an indexed surface selector, not fractional coverage; A3's two-state alpha
+          is the shape of an extra selector bit, matching BI's description of encoding
+          four channels into six surfaces per segment. The sums show the channels are
+          not mutually exclusive, so the current shader reads several simultaneous
+          weights, renormalises and averages the surfaces together -- which is the
+          measured symptom. Denominator: exactly two mask tiles, one per generation.
+      - capability: LCA_SIX_SURFACE_DECODE
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          What the histograms do not establish is the decode: which bit pattern
+          selects which of the six surfaces, and whether any blending between them is
+          intended at all (the hard binary edges suggest little or none, with the
+          satellite carrying the low-frequency variation). The stated next step is to
+          correlate the pattern against the layer names the tile's own filename lists
+          -- `p_003-000_l02_l04_n_n_n` names its layers in order. Not done.
+      - capability: SATELLITE_FRAME_HYPOTHESIS
+        status: UNSUPPORTED
+        denominator: >-
+          Eliminated by direct test: forcing the satellite through the legacy cell
+          frame tiles it into a repeating grid across the terrain, so its own worldPos
+          TexGen is correct and is not the fault. One ablation on the production path.
+    known_failures:
+      - >-
+        The authored terrain composition looks worse than the legacy path -- washed-out
+        ground with structured banding along the mask's hard binary edges rather than
+        noise -- because it decodes an indexed selector as fractional weights. The
+        blend weights, the mask-weight fix and the per-layer TexGens are all downstream
+        of that.
+      - >-
+        The authored composition has never been judged since WLD-017 changed what it
+        composites: `a3_surface_blend` still defaults to 0, is clamped to 0.35, and
+        fades out between 25 and 120 m, which are an experiment's guard rails.
+      - >-
+        The parallax step implemented in the preceding commit is a single-step offset,
+        not BI's double ray cast. Known and deliberate, but not parity.
+      - >-
+        Terrain parallax proper is not implemented: nothing samples the per-surface
+        normal or height maps that are already bound.
+    fallback: >-
+      The terrain shader continues to derive its normal from a central difference of
+      the heightmap, and the authored per-surface composition stays behind
+      `a3_surface_blend` (default 0, capped 0.35, faded out past 25-120 m), so a world
+      with no usable authored surfaces renders through the legacy satellite path
+      rather than through a half-decoded mask.
+    reviewer: null
+    reviewer_method: >-
+      Corpus measurement and texture histograms: R-channel min/max at 256x256 resample
+      across 6 named normal maps spanning both generations, a 3,874-entry suffix count
+      over five A3 addons placing all 31 `_nopx` in `map_data.pbo`, four-channel
+      histograms of one shipped LCA mask per generation, and one production ablation
+      eliminating the satellite-frame hypothesis. BI's published account is a second,
+      independent witness on the terrain-only conclusion. Not checked: nothing is
+      implemented, so no capability was exercised in a frame; the OA side of the suffix
+      count is three sampled textures rather than a census; the mask evidence is two
+      tiles; the six-surface decode is unresolved, so the mask claim says only what the
+      channels are not; and the amendments recording the BI account and the histograms
+      were appended to the record after this ticket's verification commit. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-040-parallax-is-terrain-only-on-both-generations-20260812.md
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+
+  - id: MAT-041
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Emitter radiance is a target peak, not a multiplier
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: c1241de
+    verification_commit: 0b9cfbd
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [0b9cfbd]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: StaticEmitterRadianceScale
+    test_ids: [preview0-wgpu-check]
+    benchmark_artifacts: []
+    evidence_hash: de7b8417f378ac17c6027b9bc31b9ca5518a1b318e06221f2c5b6d63898b1206
+    decision_record: docs/roadmap/decisions/MAT-041-emitter-radiance-is-a-target-not-a-multiplier-20260812.md
+    capability_claims:
+      - capability: EMITTER_RADIANCE_TARGET_PEAK
+        status: VALIDATED
+        denominator: >-
+          `StaticEmitterRadianceScale` matched material path patterns and multiplied
+          the authored emissive by 0.015 or 0.08, but Arma 2 and 3 author the emissive
+          lane on a legacy 1e2..1e6 scale. Measured across all 66 light materials in
+          A3's `data_f`: `lamp_searchlight` 600000/600000/600000 (what A3 floodlights
+          emit through), `car_beacon_red_emit` 730000/150000/140000, `env_flash`
+          200000/200000/600000, `building_warninglight_red` 180000/2000/1000,
+          `air_positionlight_red` 150000/500/50, `lamp_fluorescent`
+          28500/27400/30000, `lamp_street_white` 300/265/260. 600000 x 0.08 = 48000,
+          which the HDR path sRGB-decodes into an overflow of the `Rgba16Float` scene
+          target long before bloom's 1.0 threshold sees it; landing at the knee would
+          need ~1.7e-6, four orders of magnitude below either constant. No hand-picked
+          absolute multiplier can work because the constant is absolute and the input
+          is not. The family constant is now a target peak with the scale derived per
+          material, matching what the retained path already does in `gpu_driven.wgsl`
+          (`emissive * min(1.0, 0.50 / peak)`). Denominator: 66 A3 `data_f` light
+          materials; no A2/OA light-material count was taken.
+      - capability: PATTERN_LIST_KEYED_ON_EMITTING_MATERIAL
+        status: VALIDATED
+        denominator: >-
+          The old pattern list keyed on the wrong materials: every `\lamps\` and
+          `lamphalogen` RVMAT measures emissive 0, so the tighter 0.015 arm was a
+          measured no-op, while the one material that actually emits sits in the
+          looser 0.08 arm via `\lights\`. `lamp_searchlight` is now in the 0.015 arm,
+          so the floodlight lens is keyed on the material that emits rather than the
+          housing that does not. Measured over the same 66-material set.
+      - capability: OFP_EMISSIVE_UNAFFECTED
+        status: VALIDATED
+        denominator: >-
+          Materials already at or below their target are untouched, which is every
+          stock CWA material: all of `CfgMaterials`' emissive values measure
+          {0,0,0,0}, so OFP is provably unaffected. Whole-config denominator on the
+          CWA side; the claim covers only the emissive lane.
+      - capability: UNMATCHED_EMITTERS_BOUNDED
+        status: VALIDATED
+        denominator: >-
+          The change also bounds the many emitters that match no pattern at all,
+          giving them target 1.0 (the bloom knee) instead of letting them overflow.
+          No count of how many materials fall into the unmatched case is recorded, so
+          the size of this population is unmeasured -- only its new upper bound.
+      - capability: A3_FLOODLIGHT_ORB_ROOT_CAUSE
+        status: NOT_PRODUCED
+        denominator: >-
+          Not fixed and not identified. With the radiance fix in, the Stratis airbase
+          floodlight framed at 35 m is still a screen-filling white disc. Two
+          hypotheses were killed by direct ablation on the production path: zeroing
+          all direct-path mesh emissive produces a pixel-identical frame, so the orb
+          is not the emitter mesh and `StaticEmitterRadianceScale` was never going to
+          fix it whatever its constants; and stubbing `SceneDraw.cpp`'s `DrawFlare`
+          (drawn for any light with non-zero `FlareIntensity`, multiplied by
+          `GetAccomodateEye()` and composited additively with `NoZBuf`) is also
+          pixel-identical. `AddA3StaticMarkerLights` in `Landscape.cpp` creates
+          `StaticMarkerLight` at brightness 0.25 with `FlareIntensity` explicitly
+          overridden to 0, so those are not it either. Remaining candidates, in order:
+          a light-volume cone mesh from the lamp model drawn additively; the local
+          point/spot contribution in `lights_contrib` at very close range; or
+          auto-exposure and bloom on an ordinary bright surface, which is not a lamp
+          bug at all.
+      - capability: ORB_REPRODUCTION_IS_VALID
+        status: UNSUPPORTED
+        denominator: >-
+          The reproduction itself is in doubt, which matters more than either
+          ablation. Four captures at one framing -- camera (1707, 5044, 14) looking at
+          object 76383 at (1677.4, 11.5, 5024.7): in daylight (hour 12) the orb is
+          still there at the same size and place, so it is not night lighting, not eye
+          accommodation and not bloom-on-an-emitter; from ~140 m the airbase renders
+          cleanly with `lamphalogen_f` visible as an ordinary thin pole. A lamp lens
+          is a few tens of centimetres and cannot fill the frame at 36 m, and the far
+          capture shows large pale concrete structures (a fuel tank, hangar aprons)
+          around that spot -- a bright surface a few metres from the camera blowing out
+          under auto-exposure explains a day-and-night, distance-dependent white disc
+          exactly. Chasing it further without a known-good reproduction is guesswork,
+          and two sound ablations have already been spent on it.
+    known_failures:
+      - >-
+        The owner's reported orb is unfixed. This ticket fixes the emissive scale and
+        states plainly that the scale was not the cause.
+      - >-
+        The framing used to chase the orb is very probably not reproducing the owner's
+        bug. What is needed next is the owner's own viewpoint -- a screenshot or the
+        free-fly coordinates from the Dev Tools Game tab -- after which the same
+        ablation method settles it in one build.
+      - >-
+        The 66-material measurement covers Arma 3's `data_f` only. A2/OA light
+        materials sit on the same legacy scale by inspection but were not counted.
+    fallback: >-
+      A material already at or below its family target is left alone, so nothing that
+      was previously in range is changed, and any emitter matching no pattern falls to
+      target 1.0 -- the bloom knee -- rather than overflowing the `Rgba16Float` scene
+      target. Stock CWA emissive is {0,0,0,0} throughout, so the OFP path never reaches
+      the scaling at all.
+    reviewer: null
+    reviewer_method: >-
+      Config measurement plus pixel-identity ablations on the production path: all 66
+      A3 `data_f` light materials read for their authored emissive (showing the
+      1e2..1e6 range and that every `\lamps\`/`lamphalogen` material measures 0), all
+      CWA `CfgMaterials` emissive values read as {0,0,0,0}, the OFP preview-0 WGPU gate
+      passing, and two captures at Stratis night -- wide airbase framing showing
+      plausible light pools, runway lights as small points and no discs. The two orb
+      hypotheses were each disproved by stubbing the mechanism and re-capturing to a
+      pixel-identical frame. Not checked: no human judged the corrected emitter
+      brightness against reference footage, no unit test covers the target-peak
+      derivation, the unmatched-emitter population is unmeasured, the A2/OA light
+      corpus was never counted, and the orb is neither explained nor reliably
+      reproduced -- the 35 m framing is stated in the record as probably not the
+      owner's.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-041-emitter-radiance-is-a-target-not-a-multiplier-20260812.md
+      - engine/WgpuRenderer/EngineWgpu.cpp
+      - docs/roadmap/evidence/mat041-stratis-night-airbase-wide.png
+      - docs/roadmap/evidence/mat041-stratis-floodlight-orb-persists.png
+
+  - id: WLD-013
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: A bank mounts where the archive declares it lives, not where its filename does
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 9d57f46
+    verification_commit: 422a87f
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-011]
+    blocked_by: []
+    blocks: [WLD-014, WLD-015]
+    implementation_commits: [422a87f]
+    production_call_sites:
+      - file: engine/Poseidon/IO/Streams/QBStream.hpp
+        symbol: Poseidon::ResolveBankMountName
+      - file: engine/Poseidon/IO/Streams/QBStream.cpp
+        symbol: Poseidon::BankList::Load
+    test_ids: [bank-mount-declared-prefix, bank-mount-derived-fallback,
+               bank-mount-traversal-refusal, preview0-wgpu-check,
+               original-training-wgpu-capture]
+    benchmark_artifacts: []
+    evidence_hash: fd12db233fe65535bbf317701d042275df8ea301709ab10e458761b1656f2402
+    decision_record: docs/roadmap/decisions/WLD-013-bank-mount-prefix-20260810.md
+    capability_claims:
+      - capability: BANK_MOUNTS_UNDER_ITS_DECLARED_PREFIX
+        status: VALIDATED
+        denominator: >-
+          Surveyed over 716 local archives before the rule was changed. CWA retail:
+          215 archives, 4 carry a header-extension block, 3 declare a prefix, 0
+          declare one that differs from the filename. CWA Demo: 14 archives, 1 with
+          a header extension, 1 declares a prefix, 0 differ. Arma 3: 487 archives,
+          487 carry a header extension, 487 declare a prefix, 483 differ. So
+          preferring the declaration is a measured no-op on all 229 local OFP/CWA
+          archives and corrects 483 of 487 Arma 3 archives. anims_f_data.pbo settles
+          it on principle: it declares the multi-segment root a3\anims_f\data, which
+          no filename-derived rule produces under any separator convention. Does not
+          cover: community or mission PBOs of any generation, Arma 1 and Arma 2/OA
+          installs (not surveyed here), or any archive outside the three local
+          installs.
+      - capability: A3_ARCHIVES_ADDRESSABLE_IN_A_RUNNING_GAME
+        status: UNVERIFIED
+        denominator: >-
+          Zero Arma 3 addons were mounted in a running game at this commit. The whole
+          of the runtime evidence is the unmodified OFP arm: PoseidonCoreTests 792
+          passed / 4 skipped / 6,085 assertions, run_preview0_wgpu_check.ps1 -Backend
+          wgpu boots and mounts its banks, and the mission capture smoke renders
+          identically to the pre-change capture. WLD-015 addendum 2 later measured
+          that this rule never fired outside its unit test, because QFBank::open()
+          reads no header and GetProperty("prefix") was therefore always empty at
+          mount time; the runtime half of this ticket is carried by WLD-015, not
+          here.
+    known_failures:
+      - >-
+        BankList::Unload still derives its search key from the filename and so cannot
+        find a bank mounted under a declared prefix. Left as is and commented, because
+        nothing calls it.
+      - >-
+        The AutoBank de-duplication check in GameState::LoadBanks still tests the
+        filename-derived key, before the archive is opened, so for an archive that
+        declares a different root it now tests a key other than the one the bank
+        mounts under. Untested for A3 content.
+      - >-
+        No A3 world loads, no A3 object is instantiated and no A3 content renders as
+        a result of this change. Addressability only.
+    fallback: >-
+      A declaration containing ".." or ":" or exceeding 240 characters is rejected and
+      the previous caller-derived mount name is used. An archive with no declaration
+      takes the old path unchanged, which is every local OFP/CWA archive that matters
+      and 0 measured behaviour changes there.
+    reviewer: null
+    reviewer_method: >-
+      Machine-checked: three Catch2 [IO][Banks] cases over the free function
+      ResolveBankMountName -- declared-wins, derived fallback, and refusal of a
+      declaration that could escape the namespace -- inside a PoseidonCoreTests run of
+      792 passed / 4 skipped / 6,085 assertions; plus the 716-archive census across
+      three local installs as the safety denominator, and the OFP preview-0 WGPU boot
+      and mission capture smoke as the no-regression arm, with the capture opened and
+      compared rather than merely reported. Not checked: no Arma 3 archive was mounted
+      in a running game, so nothing here verifies the rule fires in production -- WLD-015
+      later measured that it did not; BankList::Unload and the AutoBank de-duplication
+      key were not exercised; and the test file lives under tests/, which the evidence
+      hash ignores.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-013-bank-mount-prefix-20260810.md
+      - engine/Poseidon/IO/Streams/QBStream.hpp
+      - engine/Poseidon/IO/Streams/QBStream.cpp
+
+  - id: WLD-014
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Landscape assumes one grid, and every Arma 3 world has two
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADOPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: 8f50308
+    verification_commit: dd1d077
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-010, WLD-012, WLD-013]
+    blocked_by: []
+    blocks: [WLD-015]
+    implementation_commits: [dd1d077]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Modern world dual grid
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Modern object streaming
+    test_ids: [oprw25-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: e49fdc5a1b4b74b59e8c02277472c97dc22a613791bfcca082f5de440f87a85c
+    decision_record: docs/roadmap/decisions/WLD-014-landscape-assumes-one-grid-20260810.md
+    capability_claims:
+      - capability: TWO_GRID_MISMATCH_IS_THE_BLOCKER
+        status: VALIDATED
+        denominator: >-
+          Landscape::Dim(x, z, rx, rz, landGrid) asserts rx == x and rz == z, so land
+          and terrain grids must be the same size. Every OFP world satisfies it --
+          LandSave calls Dim(256, 256, 256, 256, 50). None of the 3 Arma 3 worlds
+          measured does: Stratis 256 land / 2048 terrain (8:1, 32 m vs 4 m), VR 256 /
+          2048 (8:1, 32 m vs 4 m), Altis 1024 / 4096 (4:1, 30 m vs 7.5 m). Does not
+          cover: Arma 2/OA worlds (none measured at this date), Arma 1 worlds, or any
+          community terrain.
+      - capability: SINGLE_GRID_ASSUMPTION_DEPTH_CENSUS
+        status: VALIDATED
+        denominator: >-
+          Symbol census across engine/Poseidon: LandRange 125 uses over 21 files,
+          LandGrid 121 uses, TerrainRange 6 uses. The split is nominally present
+          (_terrainRange, _terrainRangeMask, _terrainRangeLog, _terrainGrid, and
+          TerrainRange/TerrainInRange/TerrainGrid macros) but 6 uses against 125 says
+          it was designed and never exercised, which Landscape.hpp states directly
+          ("many functions assume ObjRange==LandRange, ObjGrid==LandGrid"). This is a
+          textual symbol count, not a call-graph or type analysis; it does not
+          establish which of the 125 sites are actually grid-ambiguous.
+      - capability: MULTI_RESOLUTION_LANDSCAPE
+        status: VALIDATED
+        denominator: >-
+          PERF-004 implemented option B in the modern WRP mount: land semantics,
+          materials and object cells remain at authored land resolution while
+          elevation remains at terrain resolution; both grids retain the same
+          world extent. Runtime logs measure 16x fewer semantic cells on Sahrani
+          and 64x on Takistan, Stratis and ChernarusPlus versus the temporary
+          bridge. Final WGPU captures pass on CWA, A1, A2/OA, A3 and DayZ. This
+          validates the compatibility mount and renderer paths, not every AI or
+          editor use of the historical 125-site census.
+      - capability: A3_OBJECT_INSTANTIATION
+        status: VALIDATED
+        denominator: >-
+          Modern WRP model placements are retained as compact rows by land cell
+          and instantiated as camera-centred static Objects without requiring
+          CfgVehicles. Measured databases: A1 602,481; A2/OA 438,906; A3 163,953;
+          DayZ 2,971,218. The default live budget is 20,000 with 128 creates per
+          update. Final Stratis reached 19,998 live objects with zero refused;
+          full DayZ traversal reached 19,982 -> 19,939 -> 19,982 with zero refused.
+    known_failures:
+      - >-
+        HISTORICAL WLD-014 CHECKPOINT, superseded by PERF-004. Finding only -- no code changed, so there is no runtime behaviour to verify
+        and no regression arm. The evidence is the grid measurements, the symbol
+        census and the header's own caution comment.
+      - >-
+        The far-terrain HOLD needs re-checking before any of this is attempted: an
+        8192 m world at 4 m cells is a different load from a 12,800 m OFP world at
+        50 m. Not measured here.
+      - >-
+        There is no Zeus mode in this engine to open a map into; Zeus is an Arma 3
+        gameplay feature and this is the 2001 Poseidon lineage. Recorded because it
+        was asked.
+    fallback: >-
+      Modern WRP worlds use the genuine dual-grid mount. CWA/OFP remains on its
+      established same-grid path. `WGR_OBJECT_STREAMING=0` restores eager modern
+      object creation for diagnosis, not as the default.
+    reviewer: null
+    reviewer_method: >-
+      Machine-checked: the land/terrain grid pair read out of 3 parsed Arma 3 worlds
+      (Stratis, VR, Altis) against the OFP Dim(256, 256, 256, 256, 50) baseline, and a
+      symbol census over engine/Poseidon giving LandRange 125 uses in 21 files, LandGrid
+      121, TerrainRange 6. Not checked: nothing was built, run or rendered under this
+      ticket -- no code changed -- the symbol count is textual rather than a call-graph
+      analysis so it does not identify which sites are genuinely grid-ambiguous, and the
+      recommendation between the two migration options is costed reasoning with no
+      prototype behind it.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-014-landscape-assumes-one-grid-20260810.md
+      - docs/roadmap/decisions/PERF-004-wgpu-modern-world-residency-and-terrain-20260814.md
+      - engine/Poseidon/World/Terrain/LandSave.cpp
+
+  - id: WLD-015
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The first Arma 3 world running in the engine, on a temporary single-grid bridge
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: a3-world-compatibility
+    baseline_commit: dd1d077
+    verification_commit: a550288
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-010, WLD-012, WLD-013, WLD-014]
+    blocked_by: []
+    blocks: [WLD-018]
+    implementation_commits: [a550288]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Poseidon::Landscape::LoadOprwModern
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: Poseidon::TerrainWgpu::UploadGeography
+    test_ids: [oprw25-local-corpus, preview0-wgpu-check, original-training-wgpu-capture]
+    benchmark_artifacts: []
+    evidence_hash: 8d161094db8553e8125c09a460abc4137e73b69cdefb5597971b82732532446e
+    decision_record: docs/roadmap/decisions/WLD-015-first-a3-world-in-engine-20260810.md
+    capability_claims:
+      - capability: A3_WORLD_LOADS_AND_TERRAIN_RENDERS
+        status: VALIDATED
+        denominator: >-
+          One world, Stratis, on one camera. From the run log: land 256, terrain 2048,
+          ratio 8, cell 4 m, extent 8192 m; terrain geometry built from the world's own
+          4.2 M elevation samples; the player placed at 1699, 7.3, 5053 and the frame
+          rendered without error. After the three mount faults in addendum 2 were
+          fixed, 478 of 479 Stratis terrain materials resolve to a ground texture (the
+          miss is the empty slot at index 0) and the world draws with its real Arma 3
+          ground textures -- gdt_strconcrete_co, gdt_strbeach_co, gdt_strdrygrass_co,
+          gdt_strgreengrass_co, gdt_strdirt_co, gdt_strrocky_co, gdt_strthistles_co.
+          Evidence is a single capture from the Air Station Mike-26 runway. Does not
+          cover: any other A3 world (VR and Altis parse but were not run), any Arma
+          2/OA world, and object rendering of any kind.
+      - capability: A3_STATIC_OBJECT_RENDERING
+        status: VALIDATED
+        denominator: >-
+          PERF-004 retains all 163,953 authored placements compactly and creates
+          a camera-centred set. The final Stratis run mounted the A3 archives,
+          reached 19,998 live objects with zero refused, bound 96 terrain layers,
+          tracked 1.03 GB with retired geometry at zero, saved a non-black capture
+          containing terrain, foliage and grass, and shut down cleanly with no
+          WGPU validation error. One world and one camera; Altis/VR not run.
+      - capability: A3_ADDON_PRODUCT_GATE_OPENED
+        status: VALIDATED
+        denominator: >-
+          IsAddonMetadataAccepted refused any archive whose declared product is not in
+          ProductList, which held only OFP: Cold War Crisis, OFP: Resistance and VBS.
+          Measured over the local Arma 3 install: 485 archives declare "Arma 3" and 1
+          declares "ArmA 3", so all 487 were refused at mount. StringInList compares
+          case-insensitively so one entry covers both spellings, and no archive
+          anywhere in the local corpora sets pboVersion, so that gate in the same
+          function is inert. Necessary but not sufficient -- with the product gate open
+          the count was still 0 of 479 until the three faults below were fixed.
+      - capability: A3_BANK_LOOKUP_RESOLVES_NESTED_PREFIXES
+        status: VALIDATED
+        denominator: >-
+          Three faults, each hiding the next, kept every A3 asset unreachable.
+          QFBank::open() reads no header, so GetProperty("prefix") at mount time was
+          always empty and WLD-013's rule never fired outside its unit test -- every
+          archive mounted under its filename. AutoBank returned the first prefix match
+          while callers strip exactly GetPrefix().GetLength() characters, so every
+          lookup into a3\map_stratis\data\layers\ was answered by
+          a3\map_stratis\data\; longest match now wins. No OFP prefix is a prefix of
+          another, so this is measurable only on A3's nested namespace. Third, an addon
+          whose config could not be parsed was discarded whole. The gate on all three
+          is the 478-of-479 material count, not a unit test.
+      - capability: A3_CONFIG_PARSING
+        status: UNSUPPORTED
+        denominator: >-
+          Measured: this engine's raP reader cannot parse an Arma 3 config.bin at all.
+          The change is to stop conflating "needs a newer engine" with "we cannot read
+          this config" and keep the bank's files rather than discarding the archive; no
+          A3 config content is read.
+      - capability: MULTI_RESOLUTION_LANDSCAPE
+        status: VALIDATED
+        denominator: >-
+          PERF-004 removed the temporary bridge. Stratis now mounts 256x256 land
+          cells at 32 m and 2048x2048 elevation cells at 4 m, retaining the same
+          8,192 m extent and reducing semantic cells 64x. Cross-generation runtime
+          checks also cover Sahrani, Takistan and ChernarusPlus. AI/editor use of
+          every historical land-grid call site is not claimed.
+      - capability: TERRAIN_MATERIAL_FULL_COMPOSITION
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          The RVMAT reduction is lossy by construction: one detail/ground _co layer per
+          cell, with the mask and the remaining detail layers parsed and dropped. 479
+          Stratis terrain materials pass through it. The authored composition is not
+          attempted here -- that is WLD-018 and WLD-019.
+    known_failures:
+      - >-
+        HISTORICAL WLD-015 CHECKPOINT, superseded by PERF-004. Mounting A3 model archives turns the entire frame black including sky and UI.
+        Not diagnosed; the leading candidate is a failed texture still occupying a
+        bindless slot with no valid view, which would invalidate the bind group.
+      - >-
+        Geography is translated field by field, not copied: Arma 3 carries a min and a
+        max water depth where the engine has one, and the engine has
+        forestInner/forestOuter/track/slow where Arma 3 has a single forest bit and no
+        equivalent for the rest. Fields with no counterpart are left zero rather than
+        guessed. Geography drives AI pathing, so a wrong bit is a wrong path -- none of
+        this is tested, and none of it affects whether the world draws.
+      - >-
+        --test-world and --test-world-pos are dev-only flags and the only way to reach
+        an A3 world: A3 worlds are named by CfgWorlds entries this build has no configs
+        for, so nothing would ever route to them.
+      - >-
+        A pre-existing null-safety bug was exposed and fixed, not introduced by A3
+        content: TerrainWgpu::UploadGeography dereferenced land.GetTexture(i) without a
+        null check when building the grass-layer name list, taking the renderer down in
+        DrawGround. An OFP world with an unresolvable ground texture would have hit it
+        identically.
+    fallback: >-
+      The whole A3 path is gated on --test-world being set, so the OFP load path is
+      untouched and its mission capture smoke passes with terrain, buildings, foliage,
+      grass and shadows rendering identically to before.
+    reviewer: null
+    reviewer_method: >-
+      Machine-checked: the Stratis load line (land 256 / terrain 2048 / ratio 8 / cell 4 m
+      / extent 8192 m over 4.2 M elevation samples), the 478-of-479 terrain material
+      resolution count with its seven named gdt_str* ground textures, the 487-archive
+      product-declaration census (485 "Arma 3", 1 "ArmA 3", 0 setting pboVersion), and a
+      three-configuration A/B on one binary isolating the black frame to model archives
+      with HDR, the ground-layer cap and capture timing each ruled out by reproduction.
+      The OFP preview-0 WGPU smoke and mission capture are the no-regression arm and the
+      capture was opened and compared. Not checked: only one A3 world was run and only
+      one camera on it (the Air Station Mike-26 runway), no human judged an A3 frame, the
+      black-frame cause is a hypothesis from log evidence rather than a diagnosis, the
+      geography field translation has no test and drives AI pathing, and no unit test
+      covers any of this path.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-015-first-a3-world-in-engine-20260810.md
+      - docs/roadmap/decisions/PERF-004-wgpu-modern-world-residency-and-terrain-20260814.md
+      - engine/Poseidon/World/Terrain/LandSave.cpp
+      - engine/Poseidon/World/Terrain/Landscape.hpp
+      - engine/Poseidon/Foundation/Platform/AppConfig.hpp
+      - engine/WgpuRenderer/TerrainWgpu.cpp
+
+  - id: WLD-018
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The terrain satellite stage was dropped on both generations
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 79b455f
+    verification_commit: 01dfa6d
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-015, WLD-016, WLD-017]
+    blocked_by: []
+    blocks: [WLD-019]
+    implementation_commits: [01dfa6d]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Poseidon::Landscape::LoadOprwModern
+    test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
+               original-training-wgpu-capture]
+    benchmark_artifacts: []
+    evidence_hash: 59fe5b1ceb0152faa3a88cd92dbc292166e0ba62915ccc16d9a60733492750a9
+    decision_record: docs/roadmap/decisions/WLD-018-satellite-stage-was-dropped-on-both-generations-20260812.md
+    capability_claims:
+      - capability: SATELLITE_STAGE_REACHES_THE_IR
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          LandSave matched Stage0 with find("_co.paa"). The satellite is named
+          _lco.paa, which does not contain that substring, so Stage0 never matched on
+          either generation and A3TerrainMaterial::satellite was always empty --
+          invisibly, because the renderer fell back to the legacy cell texture for the
+          satellite slot. Accepting _lco.paa captures it: ground layers rise from 499
+          to 982 on Takistan and from 76 to 140 on Stratis, the satellite tiles having
+          never been uploaded before. Nothing consumes it yet: the authored composition
+          is still gated behind WGR_TERRAIN_A3_SURFACES, default 0, so neither world's
+          render changes. Two worlds; no Arma 1 world and no community terrain.
+      - capability: TERRAIN_STAGE_ROLES_ARE_SHARED_ACROSS_GENERATIONS
+        status: PARTIAL
+        denominator: >-
+          Read directly from the raw RVMATs of one tile per generation -- Takistan
+          ca\takistan\data\layers\p_011-010_* (PixelShaderID TerrainX) and Stratis
+          a3\map_stratis\data\layers\p_003-000_* (TerrainSNX). Both put the satellite
+          at Stage0, the mask at Stage1, a procedural at Stage2 and per-surface
+          normal/colour pairs from Stage3, so the two generations are the same
+          structure under two shader names and the handover's warning about forcing OA
+          through A3 assumptions does not apply to these stage roles. Two real
+          differences: Arma 3 adds a per-tile terrain normal at Stage14
+          (n_<x>_<y>_no.paa) which Takistan has none of, and the Takistan tile uses
+          five surfaces to this Stratis tile's two. PARTIAL because the denominator is
+          one tile per generation, not a corpus census -- the corpus-wide family counts
+          (3,531/3,531 TerrainX, 478/478 TerrainSNX) were only measured later under
+          WLD-019.
+      - capability: SATELLITE_AS_LEGACY_CELL_TEXTURE
+        status: UNSUPPORTED
+        denominator: >-
+          Tried and wrong, recorded as a negative result. The satellite is one
+          low-frequency image per 1,024 m tile carrying its own worldPos TexGen; the
+          legacy slot is sampled through the 50 m land cell's frame. Binding one as the
+          other tiled a whole tile's image into every cell and produced a corduroy
+          pattern over the entire map. Reverted, with the reason recorded in the code
+          so it is not retried.
+      - capability: TERRAIN_NORMAL_MAPS
+        status: NOT_PRODUCED
+        denominator: >-
+          Terrain normals reach neither the IR nor the renderer on either generation:
+          Arma 3's per-tile Stage14 normal and Arma 2's per-surface odd-stage _nopx
+          maps are both dropped. Shared work rather than an OA-specific port, and
+          deliberately outside this ticket.
+    known_failures:
+      - >-
+        Headroom is now the constraint: 982 of 1,024 ground layers on Takistan, which
+        fits only because WLD-017 deduplicated the array. A larger OA world (Zargabad,
+        or Chernarus if supplied) has more 1,024 m tiles and will exceed the cap. The
+        binder drops and counts rather than corrupting, so the failure is visible in
+        the existing log line, but raising WGR_TERRAIN_MAX_GROUND_LAYERS -- or not
+        binding the satellite while the authored path is off -- is an undecided
+        follow-up.
+      - >-
+        No unit test covers this; the path needs a Landscape and a live renderer. The
+        gate is the before/after layer counts on two worlds plus the two capture arms.
+    fallback: >-
+      An IR-only change with the consuming path gated off, so both worlds render exactly
+      as before and the legacy cell texture still fills the satellite slot. A material
+      whose Stage0 does not match still resolves as it did.
+    reviewer: null
+    reviewer_method: >-
+      Machine-checked: ground-layer counts before and after on two worlds through a live
+      Landscape (Takistan 499 to 982, Stratis 76 to 140), plus three regression arms -- a
+      Takistan day capture at mean 0.12/255 against the previous commit, a Stratis airbase
+      capture at mean 0.47/255 with the delta confined to animated water and cloud, 419 of
+      419 authored blends still completing, and the OFP preview-0 WGPU smoke passing. Not
+      checked: no human judged a frame; the stage-role identity claim rests on one RVMAT
+      tile per generation rather than a census; nothing consumes the captured satellite,
+      so this verifies capture and not composition; and the ground-layer headroom on a
+      larger OA world was not measured.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-018-satellite-stage-was-dropped-on-both-generations-20260812.md
+      - engine/Poseidon/World/Terrain/LandSave.cpp
+
+  - id: WLD-019
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The LCA mask is an indexed selector over six surface slots, never a weight field
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 4847a72
+    verification_commit: c1241de
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-017, WLD-018]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [c1241de]
+    production_call_sites:
+      - file: engine/Poseidon/World/Terrain/LandSave.cpp
+        symbol: Poseidon::Landscape::LoadOprwModern
+      - file: engine/WgpuRenderer/TerrainWgpu.cpp
+        symbol: Poseidon::TerrainWgpu::UploadGroundTextures
+      - file: engine/WgpuRenderer/rust/src/terrain/terrain.wgsl
+        symbol: decode_mask
+      - file: engine/WgpuRenderer/rust/src/terrain/terrain.wgsl
+        symbol: sample_authored_cell
+    test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
+               original-training-wgpu-capture, terrain-census-a3-local-corpus]
+    benchmark_artifacts: []
+    evidence_hash: 77dbedb8e42c26a7692563ce1f2805b760dd6383191a7799dfcc06576e21f773
+    decision_record: docs/roadmap/decisions/WLD-019-lca-mask-is-an-indexed-selector-20260812.md
+    capability_claims:
+      - capability: LCA_MASK_IS_AN_INDEXED_SURFACE_SELECTOR
+        status: VALIDATED
+        denominator: >-
+          Measured over every shipped mask of both generations: 64 Stratis masks
+          (67,108,864 texels) and 220 Takistan masks (57,671,680 texels), decoded twice
+          through independent readers -- PoseidonTools image convert and Bohemia's own
+          ImageToPAA -- which agree byte for byte. RGB is strictly one-hot on both
+          generations: 0.0000% of texels have more than one RGB channel high. Alpha
+          takes three authored levels on OA (255/128/0) and two on A3 (255 at 90.6%,
+          128 at 9.4%). The alpha-to-slot mapping is measured, not inferred, by
+          correlating each tile's mask against the slots its own RVMATs name across 284
+          tiles: alpha 128 appears only on tiles binding a 5th surface (137/137
+          Takistan, 30/30 Stratis) and alpha 0 only on tiles binding a 6th (47/47
+          Takistan), with zero counterexamples. The converse does not hold -- a tile may
+          declare a slot its mask never selects at measurable frequency -- which is
+          expected, since the slot set is the union over a tile's RVMAT variants.
+      - capability: TERRAIN_SHADER_FAMILY_SLOT_LAYOUT
+        status: VALIDATED
+        denominator: >-
+          Two families, read by stage index rather than encounter order. Arma 2/OA
+          TerrainX: 3,531 of 3,531 sampled, six surface slots at Stage4..Stage14, with
+          Stage14 a surface colour in 696 of 696 sampled. Arma 3 TerrainSNX: 478 of
+          478, five slots at Stage4..Stage12, with Stage14 the whole-tile normal
+          n_<x>_<y>_no.paa. Confirmed at runtime: Stratis reports 478 tile normals and
+          0 sixth-slot uses; Takistan 0 tile normals and 344 materials using the sixth
+          slot, Zargabad 57, Chernarus 555.
+      - capability: AUTHORED_SURFACE_COMPOSITION_ON_ARMA_WORLDS
+        status: VALIDATED
+        denominator: >-
+          Four worlds bind completely with 0 dropped: Takistan (OPRW24) 3,292 of 3,293
+          materials bound and complete over 998 ground layers, Zargabad 1,350 of 1,351
+          over 988, Chernarus 1,024 of 1,025 over 2,076, Stratis (OPRW25) 478 of 479
+          over 706. Takistan was 2,999 bound over 499 layers before; the rise is the
+          sixth slot plus 4,796 recovered holes binding their own images. The
+          ground-layer cap had to move from 1,024 to 4,096: the budget is dominated by
+          per-tile images (every satellite segment contributes its own _lco and _lca) so
+          it scales with map area, not surface variety, and at 1,024 Chernarus dropped
+          1,052 bindings leaving 498 of its 1,024 materials incomplete. 4,096 still sits
+          under the 8,192 bindless-texture device limit the renderer already requests
+          unconditionally. Does not cover: no Arma 1 world (none loads at this commit),
+          no OFP world (no authored materials exist there), no community terrain, and
+          no world outside these four.
+      - capability: LCA_DECODE_BUG_CLASS_ELIMINATED
+        status: VALIDATED
+        denominator: >-
+          Five defects, each independently fatal, measured on the corpus. Slots were
+          assigned in encounter order, so a tile leaving a stage empty renumbered every
+          slot after the hole -- holes are the norm, 33,107 of Takistan's RVMAT stage
+          tokens are 'n', and 4,796 Takistan holes are now preserved by reading slots by
+          stage position. Only five slots existed, dropping Arma 2's sixth on 447 of
+          Takistan's 484 tiles. The mask's alpha was read as a fifth weight, so with
+          alpha at 255 over ~90% of texels slot 4 took full coverage nearly everywhere;
+          worse on OA, which ships many masks as DXT1 with no alpha at all, so the
+          decoder's constant 255 covered every tile -- the washed-out ground with
+          banding along mask edges. uvTransform was read as row vectors rather than as a
+          basis, which is harmless for diagonal tex stages and destroys every worldPos
+          stage (Stratis's satellite TexGen made v come from terrain height, smearing
+          the satellite along the slope and making the mask select one surface per
+          tile); a compensating shader swizzle stacked on top of it, and both are gone.
+          And the detail fade measured length() of the absolute world position as camera
+          distance, thousands of metres on every real world, so detail_fade was 0 from
+          the first metre and the authored surface stack had never been drawn at all --
+          which is why an earlier session measured turning the flag up as a 0.047/255
+          mean change.
+      - capability: ARMA1_MASK_ENCODING_CORPUS_WITNESS
+        status: VALIDATED
+        denominator: >-
+          Arma 1 is a third witness in the corpus only, measured offline -- not a
+          runtime or rendering witness. Censused over all 4,859 Sahrani terrain RVMATs
+          in sara.pbo: PixelShaderID Terrain1..Terrain15 (a variant id, not a layer
+          count -- Terrain1, Terrain2, Terrain4 and Terrain8 all carry a single
+          surface), three-stage groups (_mco, _nohq, _co) perfectly regular at 9,598 of
+          9,598, first surface stage at Stage2, max four surfaces, mask named
+          m_<x>_<y>_lco.paa, no tile normal. Its masks measured over 430 files (40.1 M
+          texels): DXT1, no alpha (constant 255), RGB one-hot to within DXT1's block
+          interpolation -- 0.85% of texels have two channels high, all at block edges.
+          Four states for four surfaces, which makes the progression literally BI's own
+          sentence: A1 four surfaces in RGB plus the unpainted base, A2 six by encoding
+          two more into alpha, A3 five with the freed stage spent on a per-tile normal.
+          A1 needs no new mask logic -- its constant-255 alpha lands on the RGB group by
+          construction.
+      - capability: ARMA1_TERRAIN_MATERIAL_FAMILY
+        status: NOT_PRODUCED
+        denominator: >-
+          Deliberately not implemented. sara.wrp is OPRW revision 20 and the modern
+          loader accepted only 24 and 25 at this commit, so no Arma 1 world loads and
+          there is nothing to test against; revision 20 also predates the revision-23
+          switch of the bulk arrays from LZSS to LZO, so it is a genuine format reader
+          rather than a relaxed version check. The material half is small -- a
+          per-family stride (3 vs 2), a first-stage offset (2 vs 4) and the _lco mask
+          suffix, all selectable on pixelShaderId, which RvMaterialSource already
+          carries -- and is left unwritten. _mco is the one A1 field with no home in the
+          current IR and may stay unread.
+      - capability: TERRAIN_NORMAL_MAPS
+        status: NOT_PRODUCED
+        denominator: >-
+          Arma 3's per-tile Stage14 normal is now counted (478 on Stratis) but the
+          per-surface normal maps of both generations remain outside the composition,
+          carried over unchanged from WLD-018.
+    known_failures:
+      - >-
+        Close-range surface tiling is visible on Takistan: a ~5 m repeat with no
+        per-instance variation reads as wallpaper, high-frequency content that does not
+        change as you approach. Breaking the repeat costs fetches and is a look question
+        left to the owner rather than guessed at.
+      - >-
+        The authored ground reads brighter than the legacy path. A look question, not
+        tuned here.
+      - >-
+        No Arma 1 world renders, and no OFP world is affected by construction. The A1
+        evidence is a corpus census only.
+      - >-
+        Amendments appended to the same record after this verification commit are not
+        covered by it: the satellite-modulation compositing model and the Arma 1
+        census (2dd4e9e), the near-ground parallax floor and the tex TexGen scale test
+        (97e213f), and the on-by-default call (5fc1cac). This entry's commit is the
+        decode itself.
+      - >-
+        No unit test covers this; the path needs a Landscape and a live renderer.
+    fallback: >-
+      surface_count == 0 early-returns to the legacy cell path byte for byte, which is
+      every OFP world -- OFP terrain has no authored materials at all. On Arma worlds
+      WGR_TERRAIN_A3_SURFACES=0 restores the pre-decode look; the old 0.35 cap is gone,
+      since it was a guard rail around a mask read as weights, and the flag now spans the
+      full 0..1.
+    reviewer: null
+    reviewer_method: >-
+      Machine-checked: a full-corpus texel census of every shipped mask on both
+      generations -- 64 Stratis masks at 67,108,864 texels and 220 Takistan masks at
+      57,671,680 texels -- decoded through two independent readers (PoseidonTools and
+      Bohemia's ImageToPAA) that agree byte for byte, giving RGB one-hot at 0.0000%
+      multi-channel texels; the alpha-to-slot mapping correlated against each tile's own
+      RVMAT slot set over 284 tiles with zero counterexamples (137/137 and 30/30 for
+      alpha 128, 47/47 for alpha 0); shader-family stage layouts over 3,531 TerrainX and
+      478 TerrainSNX materials; runtime binding counts on four worlds (Takistan 3,292 of
+      3,293, Zargabad 1,350 of 1,351, Chernarus 1,024 of 1,025, Stratis 478 of 479, 0
+      dropped); a 4,859-RVMAT and 430-mask Arma 1 corpus census as an independent third
+      witness for the encoding progression; and the OFP preview-0 WGPU gate plus the
+      original-training mission capture passing unchanged as the no-regression arm. Not
+      checked: appearance. No automated check judges whether the composition looks right
+      -- the decision to turn it on by default was the owner's look call on the captures
+      in docs/roadmap/evidence/, and this ledger entry records no reviewer. Also not
+      checked: no unit test covers the path, no Arma 1 world was loaded or rendered (the
+      A1 evidence is offline census only and the A1 material family is deliberately
+      unimplemented), the close-range tiling and brightness questions are untuned, and
+      the record's later amendments fall outside this verification commit.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-019-lca-mask-is-an-indexed-selector-20260812.md
+      - engine/Poseidon/World/Terrain/LandSave.cpp
+      - engine/Poseidon/World/Terrain/Landscape.hpp
+      - engine/WgpuRenderer/TerrainWgpu.cpp
+      - engine/WgpuRenderer/rust/src/terrain/terrain.wgsl
+      - docs/roadmap/evidence/wld019-takistan-aerial-decoded.png
+      - docs/roadmap/evidence/wld019-takistan-aerial-legacy.png
+      - docs/roadmap/evidence/wld019-takistan-ground-decoded.png
+      - docs/roadmap/evidence/wld019-takistan-ground-legacy.png
+      - docs/roadmap/evidence/wld019-stratis-decoded.png
+      - docs/roadmap/evidence/wld019-stratis-legacy.png
+      - docs/roadmap/evidence/wld019-chernarus-decoded.png
+
+  - id: WLD-020
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Roads census, and what the segment banding is not
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: INVESTIGATE
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADOPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 382fb21
+    verification_commit: c706847
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-016]
+    blocked_by: []
+    blocks: [WLD-021]
+    implementation_commits: [c706847]
+    production_call_sites: []
+    test_ids: [wld-020-takistan-roads-census]
+    benchmark_artifacts: []
+    evidence_hash: 6e7674f933087915ead6305de673b687c679077a3640570d0cedf47ce0bde749
+    decision_record: docs/roadmap/decisions/WLD-020-roads-census-and-the-segment-banding-20260812.md
+    capability_claims:
+      - capability: TAKISTAN_ROAD_ASSET_CENSUS
+        status: VALIDATED
+        denominator: >-
+          13,501 road links placed over 122 segment models on Takistan, all
+          parsing, and all 8 RVMATs in roads_e classified -- 6
+          NormalMapSpecularMap (S1 _nohq, S2 _sm/_smdi) and 2
+          NormalMapDetailSpecularMap (S1 _nohq, S2 procedural
+          (argb,8,8,3)color(0.5,0.5,0.5,1,DT), S3 _sm). Not one declares a
+          Stage0, which is what ShaderSchema already encodes for both families.
+          One segment measured in full -- dirt7_w7_a0_802_r500.p3d, ODOL 49, 3
+          LODs, LOD0 of 10 points, 8 faces, 1 texture. Covers Takistan and
+          roads_e only -- no other world's road net, no Chernarus/Stratis/OFP or
+          Arma 1 road models, and no claim about how any of it looks.
+      - capability: ROAD_BANDING_IS_NOT_ASSET_PARSE_OR_MATERIAL
+        status: VALIDATED
+        denominator: >-
+          Over that same census of 122 models and 8 RVMATs, with every asset
+          resolving, three classes are excluded -- missing asset, parse failure,
+          material-family gap. The symptom is reproduced on one capture at the
+          Takistan village road (camera 2651.7 848.3 383.0 looking at 2663.4
+          855.8 378.6) as alternating light and dark trapezoids, one key per
+          placed segment. The classification is what is claimed; the cause is
+          not isolated at this commit.
+      - capability: ROAD_BANDING_ALBEDO_VS_LIGHTING
+        status: SUPERSEDED
+        denominator: >-
+          0 of 2 -- undecided at this commit and deliberately left undecided.
+          The Materials-tab Base Color Only view was captured and read as
+          evidence, then withdrawn -- road sections are on-surface routed
+          (render::IsOnSurfaceRouting, excluded from the retained set by
+          IsGpuOwnedSection), so they draw on the CPU complement and the
+          retained path's debug views never reach them. SUPERSEDED by WLD-021 at
+          e54ea18, which decided it by a GL33/wgpu control on identical data and
+          also killed both mechanisms proposed here as next steps -- per-segment
+          UV placement and a polygon-offset difference. Carried rather than
+          deleted because it is a true statement about this commit, but a reader
+          who acted on the "leading candidates" line would now be wrong.
+      - capability: ODOL49_UV_DEQUANTISATION_CORRECTNESS
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          1 mapping defect identified and left unfixed. The reader computes
+          1.52587890625e-05 * (u + 32767) * du + minU, so an int16 spans
+          [-1, 65534] of 65536 rather than [0, 65535] of 65535 -- the low end
+          lands below minU and the high end short of maxU. The error is ~1.5e-5
+          relative, four orders of magnitude too small to produce visible
+          per-segment banding. Not corrected here, on purpose -- bundling it with
+          a roads fix would confound two independent changes.
+    known_failures:
+      - >-
+        The cause of the banding is not isolated. This ticket classifies and
+        reproduces it and closes off three wrong answers; it does not fix
+        anything and no code changed at this commit.
+      - >-
+        The retained-path debug views (Materials tab, Base Color Only) do not
+        reach on-surface sections at all, so any reading of roads through them
+        is void. That trap cost one wrong conclusion in this session before it
+        was caught.
+      - >-
+        The ODOL 49 UV dequantisation error is real, understood, and still in
+        the reader.
+    fallback: >-
+      Nothing changed, so nothing can regress -- the roads render exactly as they
+      did. The census and the classification stand on their own, and the ODOL 49
+      UV nit is deliberately left in place so that a later roads fix cannot be
+      confounded with it.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked -- the placement
+      and model counts (13,501 links over 122 segment models) and the RVMAT
+      family split (8 materials, 2 families, no Stage0 anywhere) were read out of
+      the Takistan world and roads_e directly; one segment model was decoded to
+      its LOD0 counts; the banding was reproduced on a capture at a recorded
+      camera; the ODOL 49 dequantisation arithmetic was worked out from the
+      source expression rather than observed. Not checked -- whether the banding
+      is albedo or lighting (the debug view used to test that does not reach
+      on-surface sections, so it answered nothing), any cause at all, any world
+      other than Takistan, any road family outside roads_e, and the ODOL 49 UV
+      correction, which is identified but not applied and has no before/after. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-020-roads-census-and-the-segment-banding-20260812.md
+      - docs/roadmap/evidence/wld020-takistan-road-segment-banding.png
+      - engine/Poseidon/Asset/Formats/Material/ShaderSchema.hpp
+
+  - id: WLD-021
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The Arma 2 road banding is a wgpu shading bug, not data
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADAPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: a610d99
+    verification_commit: e54ea18
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-020, WLD-016]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [e54ea18]
+    production_call_sites:
+      - file: engine/WgpuRenderer/EngineWgpu.hpp
+        symbol: Poseidon::EngineWgpu::ZRoadEpsilon
+      - file: engine/WgpuRenderer/EngineWgpu.hpp
+        symbol: Poseidon::EngineWgpu::ZShadowEpsilon
+      - file: engine/Poseidon/World/Scene/Object.cpp
+        symbol: GGpuTerrainConform
+    test_ids: [wld-021-road-banding-ablation]
+    benchmark_artifacts: []
+    evidence_hash: 0f62376e575fad5706359d12bfef052c0d8519d2f16717b8099462227db6191a
+    decision_record: docs/roadmap/decisions/WLD-021-road-banding-is-a-wgpu-shading-bug-20260813.md
+    capability_claims:
+      - capability: ROAD_BANDING_IS_BACKEND_NOT_DATA
+        status: VALIDATED
+        denominator: >-
+          1 paired capture decides it -- same world, same camera, same data,
+          Takistan at --test-world-freefly 6770.69 6099.78 312.86 230.7 -6.8,
+          noon. --render gl33 is clean, smooth and continuous; wgpu bands. GL33
+          consumes the WRP, the placements, the segment models, the RVMATs and
+          the road class logic identically, so all of those are excluded. Covers
+          one camera on one world at one time of day -- it is not a general GL33
+          vs wgpu divergence census.
+      - capability: DARK_SEGMENTS_ARE_AMBIENT_ONLY
+        status: VALIDATED
+        denominator: >-
+          5 fixed points along the road sampled (red channel) at 3 sun angles.
+          The 4 light points track the sun -- 227/183/155, 194/175/167,
+          150/162/201, 187/206/225 across 08:00/12:00/16:00, and note two of them
+          move in opposite directions, which only a path shading from real
+          geometry can do. The 1 dark point does not track it at all
+          (88/100/101). The road is also fully drawn -- no terrain shows through
+          between pieces, so it is neither a depth fight nor a hole. One dark
+          sample, so "all dark segments share this mechanism" is inferred from
+          the pattern being world-space fixed and per-placed-segment, not
+          measured point by point.
+      - capability: ROAD_BANDING_ROOT_CAUSE
+        status: UNVERIFIED
+        denominator: >-
+          0 of 1 causes isolated -- this is an open bug at this commit. 9
+          hypotheses are eliminated by measurement. Two inherited from WLD-020 --
+          per-segment UV placement and a polygon-offset difference -- both dead.
+          Seven measured here -- (1) the decal depth bias, WGR_DECAL_SCALE=0
+          moves road pixels by at most 2/255; (2) the missing z-epsilons, a real
+          defect now fixed to GL33 parity, banding unchanged; (3) mirrored
+          placements, all 438,906 Takistan placement records read from the WRP
+          with zero negative basis determinants anywhere in the world and up
+          exactly (0,1,0) on every one of the 13,420 road placements, unit to
+          1e-3, so SetUpAndAside is a provable no-op; (4) per-model normal data,
+          LOD0 vertex normals decoded from roads_e.pbo for the asf10_w10_*,
+          dirt7_w7_*, dirt10_w10_* and kr_t_dirt7_* families are exactly
+          (0,+1,0) on every vertex, and every road placement is a pure yaw, so no
+          two placements of one model can differ in N.L; (5) the
+          two-lighting-path fork, a genuine latent bug now fixed, with the
+          instrumented trace showing every road on one path (kind=surface-split)
+          with materials assigned, banding unchanged; (6) the depth prepass,
+          WGR_PREPASS=0, pattern unchanged; (7) MSAA, WGR_MSAA=0, pattern
+          unchanged (dark sample 99 -> 99). What remains is named but untested --
+          a folded TLMaterial whose sun/diffuse term is absent, entering at the
+          surfMat ? Combine(...) : mat split in Shape.cpp:1482-1493 by way of
+          ShapeSection::PrepareTL -> EngineWgpu::SetMaterial. Do not read this
+          row as a fix.
+      - capability: WGPU_ROAD_AND_SHADOW_Z_EPSILON_PARITY
+        status: VALIDATED
+        denominator: >-
+          2 of 2 epsilons corrected. EngineWgpu inherited EngineDummy's zero
+          ZShadowEpsilon/ZRoadEpsilon while GL33 returns 0.01/0.005, so roads
+          were laid exactly coplanar with the terrain they were cut against. Now
+          at GL33 parity. This is a real defect fixed on its own merits; it does
+          not change the banding, which was re-measured after.
+      - capability: ROAD_LIGHTING_PATH_FORK_IS_EXACT_MATCH
+        status: VALIDATED
+        denominator: >-
+          Roads forked per model on (andHints & ClipLandMask) == ClipLandOn being
+          exact, and the two branches read Shape::Norm() with opposite sign
+          conventions -- the GPU path negates it (MeshBuild.cpp:44), the CPU
+          per-vertex path does not (TransLight.cpp:548). Fixed by replacing the
+          land nibble instead of OR-ing into it; the instrumented trace then puts
+          every Takistan road on one path with materials assigned. Measured over
+          Takistan's road set only, and again, the banding is unchanged by it.
+      - capability: SHADOWCACHE_EVICTION_GUARD
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          1 defect found and left alone. ShadowCache::Shadow declares int count =
+          0 (Shadow.cpp:173) and never updates it, so the eviction guard can
+          never fire. With 13,420 road links each holding a split Shape plus a
+          vertex buffer this is real memory growth. Memory only -- not an
+          appearance bug and not what this ticket was chasing.
+      - capability: ROADNET_CONNECTION_TYPE_SELF_CHECK
+        status: UNVERIFIED
+        denominator: >-
+          WLD-010's road-net self-check ("the network consumes exactly its
+          declared size") cannot discriminate the connection-type byte, because
+          the segment path is null-terminated and the walk resynchronises either
+          way. The A2/A3 handling is believed correct and has never actually been
+          evidenced; the real discriminator is the decoded string, and the
+          distinct-segment count is the tell. Nothing was re-run to close this.
+      - capability: WGPU_SHARED_ROAD_HEIGHTFIELD_CONFORM
+        status: VALIDATED
+        denominator: >-
+          PERF-004 bypasses per-placement ShadowCache SurfaceSplit for an
+          all-ClipLandOn shape only when GGpuTerrainConform is active. WGPU draws
+          the shared authored mesh and applies the published mode-2 heightfield
+          selector in the vertex shader; GL33 retains the legacy split. At the
+          exact WLD-021 Takistan camera the final capture is smooth and continuous,
+          and an instrumented 300-frame run emitted zero road surface-split
+          copies. Checked on Takistan; bridges and tyre tracks were not judged.
+    known_failures:
+      - >-
+        HISTORICAL WLD-021 CHECKPOINT, superseded by PERF-004. The banding was NOT fixed. Nine hypotheses are dead and the fault is
+        localised to the wgpu immediate/legacy draw path, but no cause is
+        isolated and no capture shows clean roads under wgpu at this commit.
+      - >-
+        Two real defects were found and fixed along the way -- the zero
+        z-epsilons and the exact-match lighting fork -- and neither changed the
+        symptom. They are corrections, not the fix.
+      - >-
+        HISTORICAL, superseded by streamed model re-registration and shared
+        conform in PERF-004. A road model first loaded after the world bulk pass gets OptimizeOneShape
+        before RoadType sets OnSurface, so it keeps a vertex buffer and draws
+        with no terrain conform at all. Latent on Takistan, where all 122 road
+        models load during world load; a live trap for streamed content.
+      - >-
+        HISTORICAL WGPU ISSUE, made unreachable for all-ClipLandOn roads by
+        PERF-004. ShadowCache eviction can never fire (int count = 0, never updated), which
+        with 13,420 road links is unbounded memory growth. Recorded, not fixed.
+      - >-
+        This commit carries the decision record; the two code corrections it
+        describes are in the surrounding work on the same branch, so the
+        implementation_commits list is not a complete provenance for them.
+    fallback: >-
+      No renderer fallback is required for the measured Takistan road. WGPU now
+      draws it continuously through shared heightfield conform. GL33 remains
+      unchanged but is not a modernisation target.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked -- the GL33 vs wgpu
+      control on identical world, camera and data; five fixed sample points read
+      out of captures at three sun angles; all 438,906 Takistan placement records
+      read from the WRP with their basis determinants computed; LOD0 vertex
+      normals decoded straight out of roads_e.pbo for four road model families;
+      and four ablations re-captured and re-sampled (WGR_DECAL_SCALE=0,
+      WGR_PREPASS=0, WGR_MSAA=0, and the z-epsilon and lighting-fork fixes).
+      Not checked -- the cause. The remaining suspect (the folded TLMaterial at
+      Shape.cpp:1482-1493 through ShapeSection::PrepareTL ->
+      EngineWgpu::SetMaterial) has NOT been dumped or compared between a light
+      and a dark segment; no world other than Takistan, no camera other than the
+      one recorded, and no automated test covers any of this; the claim that
+      every dark segment shares one mechanism rests on one sampled dark point;
+      and the two fixes that landed here have no regression test of their own. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/WLD-021-road-banding-is-a-wgpu-shading-bug-20260813.md
+      - docs/roadmap/decisions/PERF-004-wgpu-modern-world-residency-and-terrain-20260814.md
+      - docs/roadmap/decisions/WLD-020-roads-census-and-the-segment-banding-20260812.md
+      - docs/roadmap/evidence/wld020-takistan-road-segment-banding.png
+      - engine/WgpuRenderer/EngineWgpu.hpp
+      - engine/Poseidon/Graphics/Rendering/Primitives/MeshBuild.cpp
+      - engine/Poseidon/Graphics/Rendering/Lighting/TransLight.cpp
+      - engine/Poseidon/Graphics/Rendering/Shape/Shape.cpp
+      - engine/Poseidon/Graphics/Rendering/Shape/Shadow.cpp
+
+  - id: PERF-002
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The Arma 3 frame is the water reflection
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADOPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 6c502e5
+    verification_commit: c81a899
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [PERF-001]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [c81a899]
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/lib.rs
+        symbol: Ablate::from_env
+      - file: engine/WgpuRenderer/rust/src/water_visibility.rs
+        symbol: WaterVisibility
+      - file: engine/WgpuRenderer/rust/src/gpu_timers.rs
+        symbol: PlanarTerrain
+    test_ids: [perf-002-interleaved-ablation]
+    benchmark_artifacts: []
+    evidence_hash: 102c1225cb209e9111bda1a880a0db4e122f1c2a6f40b894074cabe6f7522eae
+    decision_record: docs/roadmap/decisions/PERF-002-the-arma-3-frame-is-the-water-reflection-20260813.md
+    capability_claims:
+      - capability: PLANAR_REFLECTION_IS_THE_DOMINANT_A3_FRAME_COST
+        status: VALIDATED
+        denominator: >-
+          6 arms x 3 interleaved rounds at 1920x1080, Stratis at
+          --test-world-freefly 2446.86 4413.66 67.97 115.5 -8.2,
+          --screenshot-delay 300, nothing else running. Medians -- base 34.36 ms
+          (30.40-48.00); WGR_ABLATE=planar 26.42 ms (22.52-35.87), -7.94 ms and
+          23%; ao 31.37, -2.99; clouds 32.31, -2.05; grass 39.53, +5.17 (ranges
+          overlap, reads as noise); WGR_MSAA=1 67.41, +33.05. Corroborated
+          independently by named GPU regions from a base run -- Planar terrain
+          3.137 + clouds 1.135 + objects 0.884 = 5.16 ms of named work against a
+          7.94 ms ablation, the difference being the resolve and mip chain. This
+          is one machine, one world, one camera, one resolution, one build. The
+          ranking is what is claimed; the absolute 34.36 ms is not portable, and
+          no other camera, world, GPU or resolution was measured -- in
+          particular, this camera shows the sea as a distant strip, so the result
+          says the cost does NOT scale with water coverage rather than
+          characterising a water-heavy view.
+      - capability: INTERLEAVED_AB_IS_THE_ONLY_TRUSTWORTHY_FORM
+        status: VALIDATED
+        denominator: >-
+          3 identical captures -- same binary, same scene, same settle -- returned
+          18.99 / 20.91 / 55.59 ms, a 2.9x spread, purely because other work was
+          compiling on the machine. The renderer was not varying. Every absolute
+          frame time from a degraded machine is therefore consistently wrong, and
+          only interleaved A/B/C comparisons (A1 B1 C1 A2 B2 C2, never AAA BBB)
+          survive it, because GPU clock ramp and thermal drift move monotonically
+          with wall clock and blocked runs charge all of that drift to whichever
+          arm ran second. Anyone quoting a number from this ticket must quote the
+          delta, not the absolute.
+      - capability: WGR_ENV_GATES_ARE_INERT
+        status: VALIDATED
+        denominator: >-
+          4 gate families measured inert -- WGR_GRASS, WGR_GRASS_DENSITY,
+          WGR_GRASS_DISTANCE, WGR_SKY_VIS*. The C++ side rebuilds and pushes the
+          settings structs every frame, so an env var read once at construction
+          decides frame 0 and is then overwritten; sky_vis.rs says so in a
+          comment. WGR_ABLATE exists because of this and applies at the push
+          site, where nothing downstream can undo it. Not an audit of every WGR_*
+          variable -- only these four were tested, and any other construction-time
+          gate should be assumed inert until measured.
+      - capability: MSAA_1_SAMPLE_PATH_COST
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          WGR_MSAA=1 measured 67.41 ms median (min 59.55) against a 34.36 ms
+          base, +33.05 ms, consistently across all 3 rounds. One sample cannot
+          really cost 33 ms more than four; something in the 1-sample path is
+          pathological -- a missing fast path, a resolve degenerating into a full
+          copy, or a pipeline rebuilt per frame. The number is captured and the
+          mechanism is unknown. Not to be acted on, and not to be quoted as an
+          MSAA policy result.
+      - capability: GRASS_RENDER_COST
+        status: UNVERIFIED
+        denominator: >-
+          0 measured costs for grass exist. WGR_ABLATE=grass came out 5.17 ms
+          SLOWER than base with almost fully overlapping ranges (28.72-59.37 vs
+          30.40-48.00), which reads as noise -- but that leaves two live
+          possibilities that this ticket cannot separate: grass is genuinely free
+          at this camera, or the ablation is not removing the work, which would
+          be a defect in the gate itself.
+      - capability: PLANAR_COVERAGE_GATE
+        status: VALIDATED
+        denominator: >-
+          PERF-004 implemented all 3 recommended changes: an exact water
+          occlusion query with faded coverage policy, dedicated one-sample
+          reflected pipelines, and adaptive below-half-resolution reflection
+          with reduced-view LOD and bounded freshness. Named planar subregions
+          are exposed through the ABI and overlay. On the same DayZ diagnostic
+          scene the earlier policy run recorded 26.92-29.21 ms planar and the
+          final one-sample run recorded 5.356 ms (sky 0.876, terrain 1.147,
+          objects 0.784, clouds 1.773, mips 0.776), about 80% below the 26.92 ms
+          sample. Same machine and scene; not a portable absolute.
+    known_failures:
+      - >-
+        HISTORICAL PERF-002 WARNING, superseded by PERF-004's named timers and
+        exact coverage query. Every frame-time number produced earlier in this session is void, for two
+        independent reasons -- most WGR_* gates silently revert to the pushed
+        value, and the machine was not quiet (2.9x spread across identical
+        captures). A gate that silently reverts is worse than no gate: it yields
+        a plausible number for the wrong configuration.
+      - >-
+        A third trap was in the capture harness -- declared -Width/-Height
+        parameters that were never appended to the command line, so every "1080p"
+        capture silently ran at 800x600. That one cost a wrongly-reverted change.
+      - >-
+        WGR_MSAA=1 measuring 33 ms slower than 4x is unexplained. It may indicate
+        something that also costs at 4x, so it is worth finding regardless of any
+        MSAA policy -- but nothing should be changed on the strength of that
+        number alone.
+      - >-
+        HISTORICAL, superseded by PERF-004. No fix had landed at this checkpoint;
+        the later implementation and runtime measurements are recorded in the
+        PERF-004 decision.
+      - >-
+        No benchmark artefact is tracked in the repository for these runs; the
+        table in the decision record is the record.
+    fallback: >-
+      WGR_ABLATE=planar removes the pass and returns the 23% today. It removes
+      planar water reflections entirely, so it is a quality trade rather than a
+      fix -- but it is measured, available now, and applies at the push site
+      where the frame-by-frame settings push cannot undo it.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked -- 6 arms x 3
+      interleaved rounds captured at a fixed camera and resolution with the
+      medians, minima and maxima recorded; the planar result cross-checked
+      against named GPU timer regions from a base run (5.16 ms of named planar
+      work against a 7.94 ms ablation); the inert gates identified from the
+      per-frame settings push and confirmed against the sky_vis.rs comment; and
+      the machine-noise floor established by three identical repeat captures.
+      Not checked -- any second machine, GPU, world, camera or resolution; the
+      absolute frame times, which a degraded machine makes consistently wrong and
+      which only survive as interleaved deltas; the cause of the WGR_MSAA=1
+      regression; whether the grass ablation removes any work at all; and every
+      recommended remedy, none of which is implemented or measured. No automated
+      test guards any of this. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/PERF-002-the-arma-3-frame-is-the-water-reflection-20260813.md
+      - docs/roadmap/decisions/PERF-004-wgpu-modern-world-residency-and-terrain-20260814.md
+      - engine/WgpuRenderer/rust/src/lib.rs
+      - engine/WgpuRenderer/rust/src/gpu_timers.rs
+      - docs/roadmap/decisions/PERF-001-water-draw-scaling-20260801.md
+
+  - id: AST-012C
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Official Binarize differential-fixture protocol for later ODOL revisions
+    class: OFFLINE_TOOL
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: ADOPTED
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: e4ec99d
+    verification_commit: 2cd4156
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [AST-012B]
+    blocked_by: []
+    blocks: []
+    implementation_commits: [2cd4156]
+    production_call_sites:
+      - file: engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+        symbol: Poseidon::Asset::Formats::P3D::DescribeOdolRevision
+    test_ids: [ast-012c]
+    benchmark_artifacts: []
+    evidence_hash: f861315e8280bb419ae81b85cd62701c505a3696e0e657ff222ea3aa46c7a00a
+    decision_record: docs/roadmap/decisions/AST-012C-binarize-differential-fixtures-20260809.md
+    capability_claims:
+      - capability: BINARIZE_DIFFERENTIAL_FIXTURE_PROTOCOL
+        status: VALIDATED
+        denominator: >-
+          1 controlled source/output pair produced and recorded -- official
+          Arma 3 Samples Test_scope3D_01.p3d (SHA-256
+          a22f4278dcc6bc3d9fae8c71c95f4f715ec69256d1248b7f1e42022c0eccf9f9,
+          302,209 bytes) through BI Binarize 2.21.0.152929 to ODOL revision 75
+          (SHA-256
+          0c3c81997ddaa047c13d6b5535847163991ea08142928372182fb1434931e8b9,
+          61,130 bytes) -- plus 1 material-only variant. The reproduction command
+          and its two traps are recorded: Binarize must run with the current
+          directory at P:\ or it resolves virtual paths wrongly and emits a
+          smaller material-unresolved shell that is not valid evidence, and
+          -binpath must name the Binarize directory, not its bin child. Neither
+          the Samples inputs nor the Binarize outputs are repository artefacts --
+          they live on the owner's P: drive and are identified here by path and
+          hash only, so none of this is reproducible from a clone alone.
+      - capability: BINARIZE_RESPONDS_TO_ISOLATED_SOURCE_CHANGE
+        status: VALIDATED
+        denominator: >-
+          1 variant, changed at exactly one place -- Data/nodiffuse.rvmat Stage 1
+          from color(0.5,0.5,1,1,NOHQ) to color(1,0.5,1,1,NOHQ), binarized from
+          P:\ and restored from a byte-identical backup. Output is ODOL 75,
+          61,128 bytes, SHA-256
+          28279ddb7ea44382331baf27f4d6c3b4905d79bdefdf36e44741e5ce05e1b516. All
+          geometry inputs identical. This establishes the oracle responds; it
+          establishes nothing about the layout.
+      - capability: ODOL75_FIELD_IDENTIFICATION_BY_BYTE_OFFSET
+        status: CAPTURED_NOT_INTERPRETED
+        denominator: >-
+          54,999 differing byte positions between the two 61,130 / 61,128-byte
+          outputs, and the variant is 2 bytes shorter. That is what a repacked or
+          compressed array after an embedded-material change looks like, so 0
+          fields can be identified from offsets alone. The bytes are captured and
+          deliberately not interpreted.
+      - capability: ODOL75_LAYOUT_SUPPORT
+        status: NOT_PRODUCED
+        denominator: >-
+          0 fields of revision 75 decoded and no parser written, deliberately.
+          Revision 75 is a distinct layout family and is expressly NOT a
+          nearest-layout fallback target for the revision-73 reader.
+          DescribeOdolRevision(75) returns Recognised (not Parsed, not
+          NarrowSubset) with generation "Arma 3 Tools Binarize", so a revision-75
+          model refuses with UnsupportedOdolRevision rather than being read
+          through the wrong layout -- pinned by test [ast-012c]. The gate before
+          any parser is at least two controlled variants differing in precisely
+          one source feature (UV count, named selection, non-neutral normal map),
+          candidate fields changing consistently, and the resulting parser
+          consuming every declared range.
+      - capability: NORMAL_MAP_VS_TANGENT_FRAME_SEPARATION
+        status: UNTESTED
+        denominator: >-
+          0 of 1 -- the source deliberately carries a neutral procedural NOHQ
+          Stage 1 normal map (color(0.5,0.5,1,1,NOHQ)), which makes it a good
+          future candidate for separating normal-map channel decoding from
+          tangent-frame errors, but only once project-root mapping resolves its
+          material references repeatably. Not attempted here.
+    known_failures:
+      - >-
+        No new ODOL layout is claimed by this ticket. It is a discovery protocol
+        and two fixtures; revision 75 remains unsupported and refused.
+      - >-
+        The fixtures are unpublishable by design -- publishing either the Arma
+        sample content or retail assets is what keeping them on the P: drive
+        avoids -- so the repository cannot verify them and a reviewer without that
+        drive can only check the recorded hashes against their own regeneration.
+      - >-
+        Byte-offset differencing is dead as a technique on this format: one
+        Stage-1 colour change moved 54,999 byte positions and the length.
+    fallback: >-
+      Revision 75 stays refused. DescribeOdolRevision reports Recognised and the
+      loader raises UnsupportedOdolRevision naming the version, so a revision-75
+      model is distinguishable from a corrupt file and from an unrecognised
+      container, and is never silently read with the revision-73 layout.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review. Machine-checked -- both Binarize
+      outputs hashed and sized (61,130 and 61,128 bytes with their SHA-256s
+      recorded alongside the 302,209-byte source), the byte-difference count
+      between them computed (54,999 positions), and the refusal pinned by unit
+      test -- DescribeOdolRevision(75) is Recognised with generation "Arma 3 Tools
+      Binarize", and ODOLLoader::loadFromBuffer on a revision-75 header throws
+      UnsupportedOdolRevision reporting version 75. Not checked -- any semantic
+      content of revision 75. No LOD, geometry, UV channel, section, selection,
+      proxy, material, skeleton, animation, bounds or tangent-frame field has
+      been decoded or compared; the variant pair is not sufficient to identify a
+      field; the fixtures are not in the repository and CI cannot see them; and
+      the reproduction command has been run by one operator on one machine.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/AST-012C-binarize-differential-fixtures-20260809.md
+      - engine/Poseidon/Asset/Formats/P3D/OdolRevision.hpp
+
+  - id: ARCH-001
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: Simulation and rendering are already separated; do not refactor
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: INVESTIGATE
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: DONE
+    status: VALIDATED
+    outcome: NOT_APPLICABLE
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: 2dd4e9e
+    verification_commit: 12117df
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [12117df]
+    production_call_sites: []
+    test_ids: [arch-001-gengine-call-site-census]
+    benchmark_artifacts: []
+    evidence_hash: f26db57b3b8168a4d89122bfbebb41aeb2250bdcd1122a49042721fbe4693c72
+    decision_record: docs/roadmap/decisions/ARCH-001-simulation-render-separation-audit-20260812.md
+    capability_claims:
+      - capability: SIMULATION_DOES_NOT_READ_RENDERER_STATE
+        status: VALIDATED
+        denominator: >-
+          Every GEngine-> call site in World/, AI/, Game/ and Network/
+          classified by method -- 40 of ~394 files in those trees mention GEngine
+          (~10%), yielding ~200 HUD/text/2D drawing calls (output-only), ~40
+          draw-queue control calls (output-only), ~10 scene-delta pushes, 17
+          GetAccomodateEye/ProceduralSkyActive calls that sit inside draw code
+          (Object.cpp colour paths, SceneDraw.cpp, LandscapeRender.cpp), 4
+          CanGrass calls used only for draw-pass ordering, and 15
+          SamplePixel/GetFrameCounter calls confined to test-only SQF commands in
+          GameStateExtTest*.cpp. 0 gameplay paths read renderer state. This is a
+          static classification over four trees at one commit -- it does not cover
+          Graphics/ or Core/, it is not enforced by anything, and a call added
+          tomorrow would not be caught.
+      - capability: HEADLESS_RUNS_WITHOUT_A_GRAPHICS_BACKEND
+        status: VALIDATED
+        denominator: >-
+          5 binaries already run through the Poseidon::CreateEngineDummy() seam --
+          the dedicated server (ServerApplication.cpp:251), PoseidonFormats
+          (:107,:122), the poseidon lister (:109), pbo (:65) and PoseidonTools
+          (:94). apps/cwr/Server/CMakeLists.txt links GameBase + Poseidon and
+          nothing else -- no PoseidonGL33, no WGPU, no PoseidonOpenAL -- so the
+          build breaks if that is violated. The property holds by link graph, not
+          by a test that would say so.
+      - capability: PUSH_BASED_PRESENTATION_CHANNEL
+        status: VALIDATED
+        denominator: >-
+          3 virtuals with empty default bodies (Engine.hpp:418-420) --
+          SceneObjectCreated/Removed/Moved -- pushed from 4 simulation sites
+          (Landscape.cpp:2131, :2162, :2255, LandSave.cpp:517) and consumed by the
+          WGPU backend at 3 sites (EngineWgpu.cpp:3381, :3450, :3487) into
+          wgr_instance_add / wgr_instance_update. Because the defaults are
+          no-ops, headless costs nothing. The retained path now carries
+          essentially the whole world -- the legacy per-draw path is down to
+          roughly 7 sections per frame.
+      - capability: LARGE_SIM_RENDER_SEPARATION_REFACTOR
+        status: NOT_PRODUCED
+        denominator: >-
+          0 of 11 stated goals are blocked by simulation/render coupling.
+          Goal-by-goal -- headless server already ships; multiplayer authority,
+          deterministic simulation, save/load and late join, replay/rollback,
+          physics, deterministic ballistics and Zeus are all sim-side and gated on
+          a fixed timestep or on serialisation, not on the render boundary;
+          renderer replacement is already true behind GraphicsEngineFactory; and
+          OFP/A1/A2/A3 compatibility is actively helped by leaving it alone. Only
+          AI-agent testing (which wants a stable snapshot to assert on) and later
+          independent render rate benefit. The refactor is therefore deliberately
+          not produced, and an immutable per-frame snapshot is explicitly
+          declined in favour of the existing delta channel.
+      - capability: FIXED_TIMESTEP_SIMULATION
+        status: NOT_PRODUCED
+        denominator: >-
+          0 accumulators or fixed-step loops found anywhere in engine/Poseidon/
+          or apps/. World::Simulate(float deltaT, bool&) (World.cpp:124) takes a
+          variable frame delta, and GameLoop.cpp:60 welds the sim and render ticks
+          1:1 with window focus threaded into the simulation via
+          SetSimulationFocus. This -- not render coupling -- is what blocks
+          deterministic simulation, replay/rollback, MP authority and
+          deterministic ballistics, and it is the one item whose cost grows with
+          every new subsystem written against a variable deltaT.
+      - capability: ARCHITECTURE_GUARD_TEST
+        status: NOT_PRODUCED
+        denominator: >-
+          0 of 2 assertions written -- that the server target links no graphics or
+          audio backend, and that no file under World/, AI/, Game/ or Network/
+          includes a WGPU or GL33 header. The audit names this its
+          highest-value item precisely because the separation currently holds by
+          accident of the link graph, so nothing fails loudly when it erodes.
+      - capability: RENDERER_WRITE_BACK_INTO_SIMULATION
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          3 sites found and left in place -- EngineWgpu.cpp:3467, :3484 and :3505
+          all call obj->SetGpuCoverage(...). It is render-only data parked on the
+          simulation entity and read only by the renderer, harmless today, but it
+          means an Object differs between a rendering client and a headless
+          server. The single inversion of the dependency direction found by the
+          audit; not moved off Object here.
+      - capability: RENDER_CODE_FILED_IN_THE_SIMULATION_TREE
+        status: CAPTURED_NOT_APPLIED
+        denominator: >-
+          4,312 of World/'s 96,624 lines (4.5%) are pure render code --
+          World/Terrain/LandscapeRender.cpp (1,990) and World/Scene/SceneDraw.cpp
+          (2,322) -- plus Object::Draw (Object.hpp:422), a virtual with 38
+          ::Draw( definitions across 20 files. This is the original OFP
+          entities-draw-themselves design and is legacy in practice, but it is
+          what keeps "the renderer reads live simulation state" true on that
+          path. Measured, not changed.
+    known_failures:
+      - >-
+        Nothing was implemented. All four recommended items -- the architecture
+        guard test, closing the SetGpuCoverage write-back, the fixed-step
+        accumulator and the written rule for new features -- remain unwritten at
+        this commit.
+      - >-
+        The separation property that this audit certifies is unenforced. It holds
+        by the link graph and by convention, and the audit's own top
+        recommendation exists precisely because nothing would fail if it stopped
+        holding.
+      - >-
+        The GEngine-> classification is by hand over four trees at one commit,
+        driven by method name. It is a static reading, not a runtime trace, and
+        Graphics/ and Core/ were out of scope.
+      - >-
+        There is no fixed timestep anywhere, so deterministic simulation, replay,
+        rollback and MP authority are all still blocked -- by the timestep, not by
+        anything this audit was asked to look at.
+    fallback: >-
+      No code changed, so there is nothing to roll back and no behaviour to
+      regress -- OFP and A1/A2/A3 behaviour are untouched by construction. The
+      working separation the audit certifies is the existing one: three backends
+      behind GraphicsEngineFactory, with CreateEngineDummy as the headless path
+      that five binaries already take.
+    reviewer: null
+    reviewer_method: >-
+      AUTOMATED_EVIDENCE, not a human review, and no runtime check at all -- this
+      is a static audit of the tree at 12117df. Machine-checked -- the link graph
+      of apps/cwr/Server/CMakeLists.txt against apps/cwr/Game/CMakeLists.txt; the
+      five CreateEngineDummy call sites located by file and line; every GEngine->
+      call site under World/, AI/, Game/ and Network/ enumerated and classified
+      by method (40 of ~394 files, ~10%); the three empty-bodied presentation
+      virtuals at Engine.hpp:418-420 with their four push and three consume
+      sites; the three SetGpuCoverage write-backs; the World/ line counts (4,312
+      of 96,624) and the 38 ::Draw( definitions across 20 files; and a search for
+      any fixed-step accumulator across engine/Poseidon/ and apps/, which
+      returned nothing. Not checked -- nothing was built, run or tested for this
+      ticket, and no test now enforces any of it. The classification is by method
+      name rather than by call-graph analysis, so a renderer read hidden behind a
+      helper would not have been seen; Graphics/ and Core/ were not audited; the
+      "roughly 7 sections per frame" figure on the legacy path is quoted from
+      other work in the session, not re-measured here; and none of the four
+      recommendations has been implemented, so their cost estimates are
+      judgement, not measurement. The test id above names a reproducible measurement run, not a CTest case: no automated test exists for this ticket, and that is the weakest part of this record.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/ARCH-001-simulation-render-separation-audit-20260812.md
+      - apps/cwr/Server/CMakeLists.txt
+      - apps/cwr/Game/CMakeLists.txt
+      - engine/Poseidon/Graphics/Core/Engine.hpp
+      - engine/Poseidon/Core/Game/GameLoop.cpp
+      - engine/Poseidon/World/World.cpp
+
+  - id: CORE-NEG-003
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: ABI layout hash over every struct that crosses the boundary
+    class: BUILD_INFRA
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: fb6c676
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [CORE-NEG-002]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: [matching-abi-declaration-accepted, drifted-shared-struct-layout-refused]
+    benchmark_artifacts: []
+    evidence_hash: 87f60569ae446ec0557f87e41142da9791d36dede42e6b4ef142b663e28ceab4
+    decision_record: docs/roadmap/decisions/CORE-NEG-003-abi-guard-checked-four-structs-20260814.md
+    capability_claims:
+      - capability: ABI_LAYOUT_DRIFT_REFUSED
+        status: UNVERIFIED
+        denominator: >-
+          A constexpr FNV-1a over `sizeof` of all 45 structs that cross the C ABI,
+          carried in `WgrAbiCheck::layout_hash`, with `WGR_ABI_VERSION` 4 -> 5 and
+          `wgr_abi_validate` refusing on mismatch. The gap it closes is measured:
+          the previous guard compared four types, and `WgrSkyRuntime` growing 80 ->
+          112 bytes in `f88f0ea` passed it silently, so a 12 Aug engine binary read
+          32 bytes past the struct handed to it by a 13 Aug renderer. Two Rust tests
+          cover it, one simulating that exact drift. UNVERIFIED rather than
+          VALIDATED because no mismatched pair has been run against the new guard
+          outside the test harness, and the work is not yet committed.
+      - capability: ABI_SAME_SIZE_FIELD_REORDER
+        status: UNSUPPORTED
+        denominator: >-
+          The hash is over sizes, not offsets or names, so swapping two same-size
+          members inside one struct still passes. For the sky UBO that gap is
+          covered by `sky/mod.rs`'s field-order test; elsewhere it is uncovered. A
+          full offset-and-name hash is the honest next step and was not taken.
+    known_failures:
+      - >-
+        Not committed at the time of writing, so this record has no verification
+        commit and no evidence hash. Whoever commits it must supply both and rerun
+        `scripts/compute_evidence_hash.py --all --write`.
+      - >-
+        Semantic drift is not covered: a field that keeps its size and changes
+        meaning passes every check here.
+      - >-
+        `wgr_abi_layout_hash()` is exported from Rust but deliberately not declared
+        in the header. Declaring it would make an older DLL fail at Windows module
+        load, before the handshake could produce its diagnostic.
+    fallback: >-
+      On mismatch the renderer is refused before creation and both layout hashes are
+      logged with the renderer build id and "deploy both, not one", rather than the
+      previous behaviour of proceeding and drawing garbage.
+    reviewer: null
+    reviewer_method: >-
+      Two Rust unit tests (`matching_abi_declaration_is_accepted`,
+      `drifted_shared_struct_layout_is_refused`) plus the arithmetic that identified the
+      original fault: the reported moon `radius`, `lit` and `discScale` were exactly
+      `-dir.x`, `dir.y`, `dir.z`, which is the adjacent stack slot and not any plausible
+      rendering error. Reproduced deliberately against the stale installed binary before
+      the fix. Not checked: no mismatched binary pair has been run against the new guard
+      outside the harness, no offset-level or field-name drift is detected, and the change
+      is uncommitted so nothing has exercised it in a deployed build.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/CORE-NEG-003-abi-guard-checked-four-structs-20260814.md
+      - engine/WgpuRenderer/include/wgpu_renderer.hpp
+      - engine/WgpuRenderer/rust/src/ffi.rs
+      - engine/WgpuRenderer/docs/ffi-contract.md
+
+  - id: RND-031
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The wgpu backend's missing 3D line and point primitives
+    class: RENDERER
+    obligation: REQUIRED
+    execution_mode: IMPLEMENT
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: OPEN
+    status: INTEGRATED
+    outcome: null
+    owner: null
+    branch: grass-lod-dissolve-photo-cards
+    baseline_commit: fb6c676
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: [rnd-031-viewer-floor-grid-capture]
+    benchmark_artifacts: []
+    evidence_hash: 7a72ba51a1c176f6594c5d28aa2bb5cd4bf6d4ff7d557202efa7acd01c062458
+    decision_record: docs/roadmap/decisions/RND-031-wgpu-had-no-3d-line-primitive-20260814.md
+    capability_claims:
+      - capability: WGPU_3D_LINE_PRIMITIVE
+        status: PARTIAL
+        denominator: >-
+          `EngineWgpu` overrode neither `DrawLine(int, int)` nor
+          `DrawPoints(int, int)` and inherited the empty `EngineDummy` bodies, so
+          `Object::DrawLines` built, transformed and perspective-divided every
+          segment and discarded it at the final call. Six diagnostics were dead on
+          the default backend and working under `--render gl33`: ballistics
+          trajectory trails, bullet tracers, AI path lines, `DrawDiagLine` /
+          `DiagBBox`, the viewer floor grid and helicopter debug rects. Both
+          overrides now exist. Verified on one of the six -- the viewer floor grid,
+          21x21, matching GL33 in geometry, extent, spacing and line width, against
+          nothing at all before.
+      - capability: BALLISTICS_TRAJECTORY_TRAILS_ON_SCREEN
+        status: UNVERIFIED
+        denominator: >-
+          The trails, the bullet tracers and the laser dot share the single call
+          site that was fixed and are expected to return, but none has been seen.
+          The recorder is reachable only from its ImGui checkbox -- no CLI flag, no
+          env var, no SQF hook -- and the `diag_enable` route is closed because
+          `_ENABLE_CHEATS` is 0, so verifying it needs a weapon fired by hand in a
+          live mission.
+    known_failures:
+      - >-
+        Not committed at the time of writing, so this record has no verification
+        commit and no evidence hash. Whoever commits it must supply both.
+      - >-
+        GL33 shows a clearer bright/dim split between major and minor grid lines
+        while wgpu renders them closer to uniform. Consistent with the HDR tonemap
+        compressing the 0.45 vs 0.7 alpha, not with the line geometry; not chased.
+      - >-
+        The recorder cannot be armed without a human at the controls. A launch flag
+        or env var would make this the seventh diagnostic checkable automatically,
+        and is the obvious follow-on.
+    fallback: >-
+      `--render gl33` implements both primitives at `EngineGL33_2D.cpp:181` and
+      `EngineGL33_DrawShared.cpp:211` and is unaffected by this change; it is the
+      reference the wgpu output was compared against.
+    reviewer: null
+    reviewer_method: >-
+      A before/after capture pair on the viewer floor grid, plus a GL33 reference run on
+      the same model, chosen because it is the only one of the six diagnostics reachable
+      without interactive play. Four alternative causes were eliminated first with
+      evidence rather than assumed away: the GPU-driven divert (coverage is `None` for
+      these pooled objects), depth and transform state (`ALPHA_SPLIT` is 0, so the opaque
+      levels match), recorder capacity (16 tracks, 192 samples, trails default on), and
+      source filtering (none exists; player-vs-AI is only a colour). Not checked: the
+      ballistics trails, tracers and laser dot themselves, all of which need a fired
+      weapon; and the existing unit suite structurally cannot cover this, since
+      `test_ballistics_recorder.cpp` includes no renderer at all.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/RND-031-wgpu-had-no-3d-line-primitive-20260814.md
+      - engine/WgpuRenderer/EngineWgpu.cpp
+      - engine/WgpuRenderer/EngineWgpu.hpp
+
+  - id: MAT-046
+    overlay: COMPAT-C1-EXEC-001
+    is_example: false
+    title: The Arma 2 and Arma 1 section readers drop the word that hides a proxy
+    class: ENGINE
+    obligation: REQUIRED
+    execution_mode: INVESTIGATE
+    review_model: AUTOMATED_EVIDENCE
+    scheduling_state: OPEN
+    status: RESEARCHED
+    outcome: null
+    owner: null
+    branch: dayz-compat-layer
+    baseline_commit: 361949c
+    verification_commit: null
+    milestone: 2C
+    milestone_role: NON_BLOCKING_VALIDATION
+    depends_on: [WLD-016, AST-012D]
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites: []
+    test_ids: [mat-046-takistan-proxy-section-census]
+    benchmark_artifacts: []
+    evidence_hash: 5eb86b5efd9cfa2ff3bfcac8b2f682a107ad136e9b8ccfb5afe5b728d66978cd
+    decision_record: docs/roadmap/decisions/MAT-046-a2-a1-readers-drop-the-hidden-proxy-flag-20260814.md
+    capability_claims:
+      - capability: HIDDEN_PROXY_FLAG_A2_A1
+        status: UNSUPPORTED
+        denominator: >-
+          `Odol49.hpp:205` and `Odol40.hpp:332` read the section's CommonFaceFlags
+          word as `(void)reader.read<uint32_t>()`. That word sits between
+          `textureIndex` and `materialIndex` and carries `0x10000000`, IsHiddenProxy.
+          `Odol73.hpp:875` already keeps it, which is why Arma 3 hides proxies and
+          Arma 2, OA, DayZ and Arma 1 do not. Measured on Takistan over 513 distinct
+          models and 438,749 placements: 40 models carry proxy records over 2,251
+          placements, 348 proxy marker sections exist across all LODs and 348 of 348
+          are flagged hidden in the file bytes, with the flag word `0x10002000` in 41
+          of 41 LOD-0 cases and no variance -- while the engine reader delivers a
+          non-zero hint on 0 of 6,030 sections in the entire world. 6,313 marker
+          triangles total, 1,898 of them on drawable LODs.
+      - capability: HIDDEN_PROXY_DOWNSTREAM_PATH
+        status: VALIDATED
+        denominator: >-
+          Everything after the reader is already correct and needs no change.
+          `ODOLLoader.hpp:365` masks the word into `Section::hints`,
+          `ShapeAdapter.cpp:561` copies it into `ShapeSection::properties`, and five
+          skips test `Special() & (IsHidden|IsHiddenProxy)`: `EngineWgpu.cpp:3407` and
+          `:3554` on the retained path, `ShapeDraw.cpp:220` on the CPU path, plus the
+          shadow paths. All five currently see 0 on Arma 2/1 content. Proven by the
+          revision-73 control: `offroad_01_unarmed_f.p3d` reports 28 of 267 sections
+          carrying `0x10000000` through the same engine code.
+      - capability: PROXY_MARKER_SHOULD_BE_HIDDEN
+        status: VALIDATED
+        denominator: >-
+          Hiding is the correct behaviour, not a guess. `ShapeAdapter.cpp:760-798`
+          builds a ProxyObject per proxy record and `Object::DrawProxies`
+          (`Object.cpp:871`) draws the resolved model at the marker's transform, so
+          the marker is replaced as well as hidden. The OFP path states the contract
+          outright at `ShapeLOD.cpp:865` -- `OrSpecial(IsHiddenProxy|NoTexMerger)`,
+          `SetTexture(nullptr)`, and a "Proxy face should be hidden" log when the flag
+          is absent.
+    known_failures:
+      - >-
+        Not implemented. The two-line reader change was deliberately not applied on
+        the night it was scoped: a performance measurement held the GPU, so it could
+        not have been built or captured, and applying an unbuilt edit to a shared tree
+        is worse than leaving it.
+      - >-
+        Two routes were eliminated with counts rather than by argument, and neither
+        should be revisited. MAT-044's section-list fallback: 0 of 6,313 `proxy:`
+        selections carry a non-empty sections array (160 of 17,816 selections of any
+        kind do). The face route repaired by `f161d8d`: 726 of 789 LOD-0 proxy
+        selections have zero faces AND zero vertices in the file, the 63 exceptions
+        living in 3 models. Nothing between the reader and the predicate eats the bit
+        -- `OptimizeShapes` only drops LOD levels, and `FindSections()` is never called
+        on the ODOL branch.
+      - >-
+        Three residual sections are a different defect and will survive the fix:
+        `house_c_1_v2_ep1` sec 0, `house_c_12_ep1` sec 0 and `house_c_5_ep1` sec 0
+        carry `0x00002000`, are named by no proxy record, and are not proxies.
+      - >-
+        Two comments become provably false with the fix and should go with it:
+        `ShapeAdapter.cpp:802` ("Oxygen creates sections before marking proxy faces
+        hidden") and the dead MAT-044 branch at `ShapeAdapter.cpp:833-845`.
+    fallback: >-
+      Keep `ODOLLoader.hpp`'s mask to `IsHidden|IsHiddenProxy` rather than passing the
+      word through whole: it also carries NoClamp, ClampU/V, IsAlphaOrdered and ZBias,
+      which `render::IsGpuOwnedSectionSpec` reads to route sections between the
+      retained and CPU paths. Widening what reaches that predicate would change draw
+      routing as a side effect of a visibility fix.
+    reviewer: null
+    reviewer_method: >-
+      Offline model-byte parsing cross-checked against the engine's own reader in both
+      directions, which is what makes this a measurement rather than a reading: an
+      independent parser finds `0x10002000` in the file for `house_k_1_ep1.p3d` (rev 49)
+      and `0x1000c000` for `hilux1_civil_3_open.p3d` (rev 40) while the engine reports
+      `0x0` for both, and the revision-73 control reports a correct non-zero hint through
+      the identical downstream code. The Takistan denominators come from `terrain objects`
+      over the full 513-model world. The test id names that reproducible census, not a
+      CTest case. Not checked: nothing was built, deployed or captured, so no frame has
+      been shown to change; the 38-to-3 prediction below is a prediction, not a result.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-046-a2-a1-readers-drop-the-hidden-proxy-flag-20260814.md
+      - engine/Poseidon/Asset/Formats/P3D/Odol49.hpp
+      - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp

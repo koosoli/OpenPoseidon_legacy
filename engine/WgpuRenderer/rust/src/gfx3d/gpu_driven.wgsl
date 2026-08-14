@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI}
+#import frame::{frame, reverse_z, fog_factor, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV}
 #import shading::{shade, ShadeMaterial}
 #import gbuffer::{oct_encode, a2c_coverage}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -61,9 +61,11 @@ struct SectionMaterial {
     // Multi's blend mask (0 = not layered) and its three further layer colours.
     mask_slot: u32,
     layer_slot: array<u32, 3>,
+    // Per-section flags, carried over the ABI in WgrModelSection::flags. Bit 0 =
+    // SECTION_REFLECTIVE (DZ-003). Occupies the first of the three explicit pad words.
+    flags: u32,
     // Explicit, because WGSL would insert this padding itself to 16-align layer_uv while
     // Rust would not, and the silent 12-byte disagreement corrupts every later field.
-    _pad_layer0: u32,
     _pad_layer1: u32,
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
@@ -87,6 +89,151 @@ struct SectionMaterial {
 // fetches is a small price for a term that only modulates ambient.
 @group(1) @binding(4) var<storage, read> sky_volume_meta: array<vec4<f32>>;
 @group(1) @binding(5) var<storage, read> sky_volume_data: array<vec4<f32>>;
+// DZ-003 -- Sky's reflection environment map (equirect, LINEAR radiance) and its sampler
+// (U wraps across the azimuth seam, V clamps at the poles). The same view water reflects.
+// Sampled only by sections whose material set SECTION_REFLECTIVE; a 1x1 dummy is bound
+// until Sky lends the real view, so the binding is always valid.
+@group(1) @binding(6) var sky_env: texture_2d<f32>;
+@group(1) @binding(7) var sky_env_samp: sampler;
+
+// SectionMaterial.flags bit 0 (WgrModelSection::flags / WGR_MODEL_SECTION_REFLECTIVE):
+// this surface is reflective. Set for DayZ's CalmWater family and nothing else -- water
+// whose authored colour is RGB (10,14,17) and whose whole appearance is the reflection.
+const SECTION_REFLECTIVE: u32 = 1u;
+
+// Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
+// rather than reinvented, so both consumers agree with fs_sky_env's convention in sky.wgsl:
+// u = azimuth (atan2(z, x)/2pi + 0.5, U-wrapped), v = 0 at zenith .. 1 at nadir (acos(y)/pi).
+// `dir` is a world-space direction; the result is LINEAR radiance, which is why the caller
+// only applies it on the HDR path.
+const ENV_TWO_PI: f32 = 6.28318530718;
+fn sky_env_sample(dir: vec3<f32>) -> vec3<f32> {
+    let u = 0.5 + atan2(dir.z, dir.x) / ENV_TWO_PI;
+    let v = acos(clamp(dir.y, -1.0, 1.0)) / (ENV_TWO_PI * 0.5);
+    return textureSampleLevel(sky_env, sky_env_samp, vec2<f32>(u, v), 0.0).rgb;
+}
+
+// Schlick, with the air/water normal-incidence reflectance. 0.02 is the dielectric constant
+// for water and is the same value water.wgsl's godot_water_fresnel mixes toward; DayZ's own
+// FresnelRange is parsed but not carried across the ABI (see MaterialIsReflective in
+// EngineWgpu.cpp), and Chernarus's water rvmats declare no value at all.
+const ENV_F0: f32 = 0.02;
+fn env_fresnel(cos_view_normal: f32) -> f32 {
+    let c = clamp(1.0 - cos_view_normal, 0.0, 1.0);
+    let c2 = c * c;
+    return ENV_F0 + (1.0 - ENV_F0) * (c2 * c2 * c);
+}
+
+// DZ-005 -- the world-space water ripple. Verbatim twin of shader3d.wgsl's copy.
+//
+// DayZ water CANNOT be normal-mapped through its mesh UV, and that is measured on the shipped
+// meshes rather than inferred: all 185 Enoch pond meshes carry UV (0,0) at EVERY vertex, so the
+// cotangent frame below degenerates (frame_scale2 == 0) and the normal map was never applied at
+// all; the 804 river meshes carry one wildly anisotropic set -- ~20,740 m per unit u along the
+// flow against ~57.6 m per unit v across it -- so a 1024-wide map spans about 1.7 texels over a
+// 50 m quad along the river. Both surfaces therefore read as glass.
+//
+// The `.emat` says how it is meant to be addressed instead. `NormalMapping 0.1` on both
+// enoch_river.emat and enoch_pond.emat is a WORLD-space frequency: one tile per 10 m. That is
+// also why the authoring tool never needed real UVs on these quads.
+//
+// Periods/powers are the authored values (`NormalMapping`, `NormalPower`). The second octave is
+// this renderer's, at a deliberately non-integer ratio so the 10 m tile does not read as a grid.
+const WATER_RIPPLE_PERIOD_A: f32 = 10.0;
+const WATER_RIPPLE_PERIOD_B: f32 = 3.3;
+const WATER_RIPPLE_POWER_A: f32 = 1.55;
+const WATER_RIPPLE_POWER_B: f32 = 0.80;
+
+// The still-water drift: the two octaves crawl in DIFFERENT directions at different speeds,
+// which is the standard way two scrolling normal maps animate calm water without the whole
+// surface reading as one rigid sheet sliding sideways. Slow on purpose -- ponds author
+// `WindInfl 0.2` and `TimeMul 0.7` and nothing else, so a pond ripples, it does not flow.
+//
+// Directions are unit vectors; speeds are metres per second of engine time. A river's own
+// flow, read from its `WaterStreamMap`, is NOT this and is not implemented -- see the report.
+const WATER_DRIFT_DIR_A: vec2<f32> = vec2<f32>(0.8, 0.6);
+const WATER_DRIFT_DIR_B: vec2<f32> = vec2<f32>(-0.5547, 0.8321);
+const WATER_DRIFT_SPEED_A: f32 = 0.12;
+const WATER_DRIFT_SPEED_B: f32 = 0.075;
+
+// The per-octave uv scroll for a still surface at time `t`.
+//
+// NEGATIVE: sampling at `uv - d` makes the pattern appear shifted by `+d`, so travelling in
+// `dir` means subtracting it. Divided by the period because the uv is world metres / period.
+fn water_drift(dir: vec2<f32>, speed: f32, period: f32, t: f32) -> vec2<f32> {
+    return -dir * (speed * t / period);
+}
+
+// One octave of the water normal map, sampled in world space, returned as a world-xz SLOPE.
+//
+// `samplers[0]` explicitly (linear, REPEAT on both axes) rather than the material's own
+// sampler: an authored CLAMP would smear one edge texel across a whole lake once the uv is a
+// world coordinate instead of a mesh one.
+//
+// textureSampleGrad, not textureSample: the gradients come from the world-position derivatives
+// taken unconditionally at the top of the fragment, which both keeps the call legal inside this
+// branch and gives a correct mip for a tiling frequency the mesh uv knows nothing about --
+// without one, the far half of a river aliases into static.
+fn water_octave(slot: u32, xz: vec2<f32>, cam_xz: vec2<f32>, dxz_dx: vec2<f32>, dxz_dy: vec2<f32>,
+                period: f32, drift: vec2<f32>) -> vec2<f32> {
+    let inv = 1.0 / period;
+    // fract() on the camera's share keeps the uv small. The absolute world position reaches
+    // 12.8 km on Enoch, and 12800/3.3 = 3879 leaves only ~5e-4 of a uv unit of f32 mantissa --
+    // coarse enough to stair-step the ripple. The tile is periodic, so dropping whole tiles
+    // changes nothing.
+    let uv = xz * inv + fract(cam_xz * inv) + drift;
+    let s = textureSampleGrad(textures[slot], samplers[0], uv, dxz_dx * inv, dxz_dy * inv);
+    // DXT1 RGB, NOT the OFP NOHQ (X in alpha, Y in green) convention the tangent-space path
+    // decodes. Measured on enoch_pond_nohq.edds and enoch_river_nohq.edds (byte-identical
+    // 1024x1024 DXT1, 11 mips): alpha is a constant 255 and R/G/B carry a unit normal (mean
+    // |2v-1| = 0.928, R/G both centred on 128 with a +-28/255 swing). Read as (a, g) those give
+    // a constant (+1.00, -0.02) -- a normal tipped a full 90 degrees, identically everywhere,
+    // which is an independent second reason this surface never rippled.
+    return s.rg * 2.0 - vec2<f32>(1.0);
+}
+
+// The rippled shading normal for a reflective (CalmWater) fragment, or `geometric` unchanged
+// when this world/material cannot supply one. `drift` is the per-octave uv scroll -- zero for a
+// still surface, the flow term for a river.
+fn water_ripple_normal(slot: u32, geometric: vec3<f32>, world_pos: vec3<f32>,
+                       dwx: vec3<f32>, dwy: vec3<f32>, drift_a: vec2<f32>, drift_b: vec2<f32>,
+                       strength: f32) -> vec3<f32> {
+    let xz = vec2<f32>(world_pos.x, world_pos.z);
+    let cam_xz = vec2<f32>(frame.cam_pos.x, frame.cam_pos.z);
+    let dxz_dx = vec2<f32>(dwx.x, dwx.z);
+    let dxz_dy = vec2<f32>(dwy.x, dwy.z);
+    var slope = water_octave(slot, xz, cam_xz, dxz_dx, dxz_dy, WATER_RIPPLE_PERIOD_A, drift_a)
+                * WATER_RIPPLE_POWER_A;
+    slope = slope + water_octave(slot, xz, cam_xz, dxz_dx, dxz_dy, WATER_RIPPLE_PERIOD_B, drift_b)
+                    * WATER_RIPPLE_POWER_B;
+    slope = slope * strength;
+    // These quads are horizontal, so the map's tangent X/Y ARE world X/Z and the slope becomes
+    // a normal exactly the way water.wgsl builds its own: normalize(vec3(-sx, 1, -sy)). The up
+    // axis takes the geometric normal's sign so a quad wound face-down keeps facing down.
+    let up = select(-1.0, 1.0, geometric.y >= 0.0);
+    return normalize(vec3<f32>(-slope.x, up, -slope.y));
+}
+
+// The reflective term itself, shared verbatim with shader3d.wgsl's copy. `world_pos` is
+// CAMERA-RELATIVE, so the camera sits at the origin and the view vector is just -world_pos.
+//
+// Gated on `linear` by the caller: the env map holds linear radiance that routinely exceeds
+// 1.0, and adding it to a non-HDR target would clip to white rather than reflect.
+//
+// `fog` is frame::fog_factor (1 = clear, 0 = fully fogged). shade() has already dissolved
+// the surface into the fog by the time this runs, so the reflection is faded by the same
+// amount rather than painted crisply on top of a fogged-out lake.
+fn env_reflection(shaded: vec3<f32>, normal: vec3<f32>, world_pos: vec3<f32>, fog: f32) -> vec3<f32> {
+    let view_dir = normalize(-world_pos);
+    // Face the normal at the viewer first. A water quad whose winding puts its normal
+    // downward would otherwise reflect straight into the nadir and read as a dark blotch,
+    // which is the exact artefact this term exists to remove.
+    let n = select(-normal, normal, dot(normal, view_dir) >= 0.0);
+    let cos_view_normal = clamp(dot(n, view_dir), 0.0, 1.0);
+    let reflect_dir = reflect(-view_dir, n);
+    let env = sky_env_sample(reflect_dir);
+    return mix(shaded, env, env_fresnel(cos_view_normal) * clamp(fog, 0.0, 1.0));
+}
 
 // Volume dimensions. Must match sky_bake::BakeSettings::default().dims — the one place a Rust
 // value and its WGSL twin can silently disagree here, so a mismatch is a wrong-looking building
@@ -498,6 +645,22 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
                 normalize(tangent * normal_ts.x + bitangent * normal_ts.y + geometric_normal * normal_ts.z);
         }
     }
+    // DZ-005 -- reflective (CalmWater) sections OVERRIDE that tangent-space result with a
+    // world-space sample of the same normal map. See water_ripple_normal: the mesh uv on these
+    // surfaces is either identically zero (ponds) or 360x anisotropic (rivers), so the frame
+    // built above is degenerate or near-degenerate and the surface renders as glass. Nothing
+    // else in the scene reaches this branch, and with WGR_WATER_RIPPLE=0 (wateranim.y == 0)
+    // nothing reaches it at all, which is the A/B control.
+    if ((sm.flags & SECTION_REFLECTIVE) != 0u && sm.normal_slot != 0u
+        && frame.wateranim.y > 0.0 && !matdbg_flag(MATDBG_DISABLE_NORMAL)
+        && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
+        let t = frame.wateranim.x;
+        shading_normal = water_ripple_normal(
+            sm.normal_slot, geometric_normal, in.world_pos, dwx, dwy,
+            water_drift(WATER_DRIFT_DIR_A, WATER_DRIFT_SPEED_A, WATER_RIPPLE_PERIOD_A, t),
+            water_drift(WATER_DRIFT_DIR_B, WATER_DRIFT_SPEED_B, WATER_RIPPLE_PERIOD_B, t),
+            frame.wateranim.y);
+    }
     // Material Debug views. Placed after the tangent frame so Visualize Normal shows the
     // normal that actually shades this fragment, and after the alpha discard so cutouts stay
     // cut out. View 0 (full material) falls straight through.
@@ -517,7 +680,20 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         foliage_shadow_ao,
         veg_cutout, false, veg_cutout, in.clip.xy,
     );
-    return vec4<f32>(rgb, out_a);
+    // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
+    // reflective (DayZ's CalmWater family). Every other section takes the branch
+    // not-taken and is bit-identical to before -- measured: outside the pond quad, the
+    // frame differs by at most 0.12/255 per channel.
+    //
+    // DZ-007: and only while the dev panel's "Disable Fresnel / Environment" checkbox is
+    // clear. Read per fragment from the frame UBO so it takes effect on a world that is
+    // already loaded -- see PushMaterialDebug in EngineWgpu.hpp.
+    var out_rgb = rgb;
+    if ((sm.flags & SECTION_REFLECTIVE) != 0u && linear > 0.5
+        && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
+        out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
+    }
+    return vec4<f32>(out_rgb, out_a);
 }
 
 // Depth+normal PREPASS fragment: no shading — writes ONLY the view-space octahedral normal

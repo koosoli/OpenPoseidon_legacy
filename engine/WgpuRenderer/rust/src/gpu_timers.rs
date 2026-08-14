@@ -72,11 +72,15 @@ pub enum Region {
     GtaoPrep = 28,    // depth resolve + normal resolve + the linear-Z mip chain
     GtaoCompute = 29, // the horizon-march itself
     GtaoBlur = 30,    // bilateral denoise
+    // --- PERF-004: main-view terrain. Appended so every established FFI index stays
+    // stable. These are in-pass timestamps because terrain shares the world passes.
+    TerrainPrepass = 31,
+    TerrainColor = 32,
     FrameTotal = 25,  // all submitted frame work; excludes acquire/present pacing
 }
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 31;
+pub const REGION_COUNT: usize = 33;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -92,11 +96,11 @@ enum SlotState {
     Idle,
     // Copied into by this frame's encoder; map_async is requested after submit.
     Pending {
-        written: u32,
+        written: u64,
     },
     // map_async requested; the channel resolves once the GPU copy completes.
     InFlight {
-        written: u32,
+        written: u64,
         rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     },
 }
@@ -116,7 +120,7 @@ struct Inner {
     // Nanoseconds per timestamp tick (Queue::get_timestamp_period).
     period: f32,
     // Bitmask of regions bracketed since begin_frame (Cell: written from `&self`).
-    written: Cell<u32>,
+    written: Cell<u64>,
     // Latest harvested per-region duration in ms; -1 = never measured (pass absent).
     latest_ms: [f32; REGION_COUNT],
 }
@@ -197,7 +201,7 @@ impl GpuTimers {
             encoder.write_timestamp(&inner.query_set, region as u32 * 2 + 1);
             inner
                 .written
-                .set(inner.written.get() | (1u32 << region as u32));
+                .set(inner.written.get() | (1u64 << region as u32));
         }
     }
 
@@ -219,7 +223,7 @@ impl GpuTimers {
                 pass.write_timestamp(&inner.query_set, region as u32 * 2 + 1);
                 inner
                     .written
-                    .set(inner.written.get() | (1u32 << region as u32));
+                    .set(inner.written.get() | (1u64 << region as u32));
             }
         }
     }
@@ -249,7 +253,7 @@ impl GpuTimers {
         // "now" so the full-range resolve below only ever touches available queries;
         // harvest ignores these zero-duration dummies via the written mask.
         for region in 0..REGION_COUNT as u32 {
-            if written & (1u32 << region) == 0 {
+            if written & (1u64 << region) == 0 {
                 encoder.write_timestamp(&inner.query_set, region * 2);
                 encoder.write_timestamp(&inner.query_set, region * 2 + 1);
             }
@@ -290,7 +294,11 @@ impl GpuTimers {
                             u64::from_le_bytes(data[i * 8..i * 8 + 8].try_into().unwrap())
                         };
                         for region in 0..REGION_COUNT {
-                            if written & (1u32 << region) == 0 {
+                            if written & (1u64 << region) == 0 {
+                                // Report the latest completed frame, not the last historical
+                                // occurrence of each pass. Otherwise a skipped planar reflection
+                                // keeps advertising its old multi-millisecond cost indefinitely.
+                                inner.latest_ms[region] = -1.0;
                                 continue;
                             }
                             let start = tick(region * 2);
@@ -333,7 +341,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 31);
+        assert_eq!(REGION_COUNT, 33);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -353,10 +361,12 @@ mod tests {
         assert_eq!(Region::InteriorSkyDraw as u32, 27);
         assert_eq!(Region::GtaoPrep as u32, 28);
         assert_eq!(Region::GtaoBlur as u32, 30);
+        assert_eq!(Region::TerrainPrepass as u32, 31);
+        assert_eq!(Region::TerrainColor as u32, 32);
         // Every region's begin/end pair fits the query set.
         assert!(QUERY_COUNT as usize == REGION_COUNT * 2);
-        // A u32 written mask covers all regions.
-        assert!(REGION_COUNT <= 32);
+        // A u64 written mask covers all regions and leaves append-only room.
+        assert!(REGION_COUNT <= 64);
     }
 
     // A disabled timer (adapter without the features) must be a total no-op that

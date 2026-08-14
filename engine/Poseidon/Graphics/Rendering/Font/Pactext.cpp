@@ -1999,6 +1999,7 @@ ITextureSource* CreateTextureSourcePac(const char* name, PacLevelMem* mips, int 
 }
 
 } // namespace Poseidon
+#include <Poseidon/Graphics/Textures/DdsImport.hpp>
 #include <Poseidon/Graphics/Textures/JpgImport.hpp>
 namespace Poseidon
 {
@@ -2073,6 +2074,15 @@ ITextureSourceFactory* SelectTextureSourceFactory(const char* name)
         !strcmpi(ext, ".bmp"))
     {
         return GTextureSourceJPEGFactory;
+    }
+    // .dds and Enfusion's .edds share one source; it picks the container by the
+    // 'ENF1' marker rather than by the extension, because DayZ names them
+    // interchangeably. Without these two, every DayZ water texture -- normal map,
+    // caustic, environment, flow map -- reached the resolver and was rejected here
+    // as "Unrecognized texture type '.edds'" (DZ-002).
+    if (!strcmpi(ext, ".dds") || !strcmpi(ext, ".edds"))
+    {
+        return GTextureSourceDDSFactory;
     }
     LOG_ERROR(Graphics, "Unrecognized texture type '{}': '{}'", ext, name);
     return nullptr;

@@ -63,8 +63,9 @@ impl Default for GodRaySettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            intensity: 1.0,
-            density: 1.2e-5,
+            intensity: 4.0,
+            // 5x DENSITY_REF — the Sky tab's "Air density (x1e-6)" reads 60.
+            density: 6.0e-5,
             distance: 3000.0,
             g: 0.60,
             cloud_influence: 1.0,
@@ -101,8 +102,9 @@ impl Default for GodRaySettings {
 // ---------------------------------------------------------------------------------------------
 
 /// The density this pass shipped with, and the unit the dev panel slider and `WGR_GODRAYS` still
-/// speak in. `settings.density / DENSITY_REF` is the artistic multiplier, so the existing default
-/// (1.2e-5) means exactly 1.0x and the captured look is preserved as "average conditions".
+/// speak in. `settings.density / DENSITY_REF` is the artistic multiplier, so 1.2e-5 is exactly
+/// 1.0x — the "average conditions" anchor the calibration below is pinned to. It is NOT the
+/// shipped default any more: that is 6.0e-5, i.e. 5.0x (Sky tab "Air density (x1e-6)" = 60).
 const DENSITY_REF: f32 = 1.2e-5;
 
 /// What fraction of the authored clear-day Mie coefficient survives in genuinely pristine, dry air
@@ -975,11 +977,12 @@ mod tests {
         assert_eq!(capped, 8.0e-5, "the ceiling must hold against garbage");
     }
 
-    // The dev-panel slider is now a MULTIPLIER on the physical value, carried in the old units so
-    // no C++ change was needed. The shipped default must therefore mean exactly 1.0x.
+    // The dev-panel slider is a MULTIPLIER on the physical value, carried in the old units so no
+    // C++ change was needed. DENSITY_REF is the 1.0x anchor; the shipped default is 5.0x.
     #[test]
-    fn the_density_slider_reads_as_a_multiplier_with_the_default_at_one() {
-        assert_eq!(GodRaySettings::default().density_multiplier(), 1.0);
+    fn the_density_slider_reads_as_a_multiplier_with_the_default_at_five() {
+        let shipped = GodRaySettings::default().density_multiplier();
+        assert!((shipped - 5.0).abs() < 1e-4, "default multiplier was {shipped}");
         let sky = sky_at_1700(0.42, 6000.0);
         let (base, _) = aerosol_sigma(&sky, 1.0);
         let doubled = GodRaySettings {

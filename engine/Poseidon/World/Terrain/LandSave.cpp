@@ -35,11 +35,14 @@
 #include <Poseidon/World/Terrain/TerrainProfile.hpp>
 
 #include <time.h>
+#include <cmath>
+#include <cstdlib>
 #include <string>
 #include <cstdio>
 #include <stdint.h>
 #include <string.h>
 #include <utility>
+#include <unordered_set>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -1706,23 +1709,12 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     return true;
 }
 
-// Arma 3 worlds (OPRW revision 25) carry two grids: a coarse "land" grid for the
-// per-cell semantics and a fine "terrain" grid for elevation. Stratis is 256 land
-// against 2048 terrain, Altis 1024 against 4096. Landscape has never supported
-// that -- Dim() asserts the two are equal, LandRange is referenced 125 times
-// against TerrainRange's 6, and the header warns that many functions assume
-// ObjRange==LandRange (WLD-014).
-//
-// So this mounts the world at *terrain* resolution and gives Landscape a single
-// grid, which is the shape it already knows. That discards nothing: a land cell's
-// geography applies to every terrain cell inside it, so replicating its value
-// across the ratio is what the format means, not an invention. Elevation keeps its
-// full authored detail because it was already at terrain resolution.
-//
-// The alternative -- teaching Landscape the split properly -- is the better
-// long-term answer and a much larger change across the terrain core that
-// rendering, AI pathing, occlusion and roads all sit on. This gets a real world
-// running first so that change has something to be measured against.
+// Modern OPRW worlds carry two grids: a coarse "land" grid for cell semantics,
+// materials and object lists, and a fine "terrain" grid for elevation. Preserve
+// that authored split. Landscape's height/surface queries operate in terrain
+// space; geography, roads, objects, randomisation and material lookup operate in
+// land space. Their world extents remain identical because landGrid is
+// terrainGrid * ratio.
 bool Landscape::LoadOprwModern(const char* path)
 {
     namespace Fmt = Poseidon::Asset::Formats;
@@ -1778,8 +1770,8 @@ bool Landscape::LoadOprwModern(const char* path)
     ProgressStart(LocalizeString(IDS_LOAD_WORLD));
     Init();
 
-    Dim(terrain, terrain, terrain, terrain, terrainGrid);
-    SetLandGrid(terrainGrid);
+    const float landGrid = terrainGrid * ratio;
+    Dim(land, land, terrain, terrain, landGrid);
     FlushCache();
 
     // Elevation is already per terrain cell, so it transfers one to one.
@@ -1788,7 +1780,9 @@ bool Landscape::LoadOprwModern(const char* path)
             SetData(x, z, world.elevation[static_cast<size_t>(z) * terrain + x]);
     ProgressRefresh();
 
-    // The per-land-cell grids, replicated across the cells they cover.
+    // The per-land-cell grids stay at their authored resolution. Before the
+    // dual-grid migration these were replicated ratio^2 times (64x on Stratis),
+    // inflating every object/geography/material cell structure to heightmap size.
     //
     // Geography is translated field by field, not copied. The two layouts are not
     // the same 16 bits: Arma 3 carries a min and a max water depth where the
@@ -1798,13 +1792,11 @@ bool Landscape::LoadOprwModern(const char* path)
     // road bits. The fields with no counterpart are left zero rather than guessed;
     // geography drives AI pathing, so a wrong bit here is a wrong path, and none
     // of it affects whether the world draws.
-    for (int z = 0; z < terrain; ++z)
+    for (int z = 0; z < land; ++z)
     {
-        const int lz = z / ratio;
-        for (int x = 0; x < terrain; ++x)
+        for (int x = 0; x < land; ++x)
         {
-            const int lx = x / ratio;
-            const size_t landIndex = static_cast<size_t>(lz) * land + lx;
+            const size_t landIndex = static_cast<size_t>(z) * land + x;
             const Fmt::World::Oprw25Geography source{world.geography[landIndex]};
 
             GeographyInfo info;
@@ -1820,6 +1812,10 @@ bool Landscape::LoadOprwModern(const char* path)
             _tex(x, z) = static_cast<short>(world.materialIndex[landIndex]);
         }
     }
+    LOG_INFO(World,
+             "Modern world dual grid: land {}x{} at {}m, terrain {}x{} at {}m; semantic cells reduced {}x "
+             "versus the compatibility bridge",
+             land, land, landGrid, terrain, terrain, terrainGrid, ratio * ratio);
     ProgressRefresh();
 
     _mountains.Realloc(static_cast<int>(world.mountains.size()));
@@ -2048,6 +2044,25 @@ bool Landscape::LoadOprwModern(const char* path)
                     ++resolved;
                 }
             }
+            // The authored pass above already worked out which stage is slot 0's
+            // colour, from the family record. If it found one, that IS the answer --
+            // no filename needs interrogating. Preferring it costs nothing and closes
+            // the failure the `_co.paa` filter below keeps producing on each new
+            // generation: DayZ names every terrain surface colour `_ca.paa`
+            // (`en_grass1_ca.paa`, `en_soil_ca.paa`, ...), so the filter matched
+            // nothing on any of Enoch's 9,432 materials and the legacy slot stayed
+            // null -- white ground on GL33, and on WGPU a silent single point of
+            // failure the moment the authored path is off.
+            //
+            // That is the third generation to break the same way: Sahrani's
+            // `_detail_co` (see above) and now DayZ's `_ca`. The lesson the comment
+            // above draws -- take the colour from the family, not from the name -- is
+            // simply applied to both branches here.
+            else if (authored.surfaceCount > 0 && authored.surfaces[0].GetLength() != 0)
+            {
+                SetTexture(static_cast<int>(i), authored.surfaces[0]);
+                ++resolved;
+            }
             else
             {
                 for (const auto& stage : material.stages)
@@ -2100,6 +2115,90 @@ bool Landscape::LoadOprwModern(const char* path)
                  _a3TerrainMaterials.Size());
     }
     ProgressRefresh();
+
+    // Retain modern placements as compact authored rows and create only a
+    // camera-centred working set. The opt-out is diagnostic: it preserves the
+    // former eager behaviour for A/B captures without making it the default.
+    const char* streamEnv = std::getenv("WGR_OBJECT_STREAMING");
+    const bool streamObjects = streamEnv == nullptr || std::strcmp(streamEnv, "0") != 0;
+    if (streamObjects)
+    {
+        const int maxObjects = AppConfig::Instance().GetTestWorldMaxObjects();
+        const size_t placementLimit = maxObjects > 0 ? std::min(world.objects.size(), static_cast<size_t>(maxObjects))
+                                                     : world.objects.size();
+        _modernObjectModels.clear();
+        _modernObjectModels.reserve(world.models.size());
+        for (const std::string& model : world.models)
+            _modernObjectModels.emplace_back(model.c_str());
+        _modernObjectPlacements.clear();
+        _modernObjectPlacements.reserve(placementLimit);
+        _modernObjectCells.assign(static_cast<size_t>(_landRange) * _landRange, {});
+        _modernObjectCellActive.assign(_modernObjectCells.size(), 0);
+        _modernObjectCellDesired.assign(_modernObjectCells.size(), 0);
+        _modernObjectCellCursor.assign(_modernObjectCells.size(), 0);
+
+        if (const char* radius = std::getenv("WGR_OBJECT_STREAM_RADIUS_CELLS"))
+            _modernObjectRadius = std::clamp(static_cast<int>(std::strtol(radius, nullptr, 10)), 8, _landRange);
+        if (const char* budget = std::getenv("WGR_OBJECT_STREAM_MAX_OBJECTS"))
+            _modernObjectBudget = static_cast<uint32_t>(
+                std::clamp<long>(std::strtol(budget, nullptr, 10), 1000, 1000000));
+        else
+            _modernObjectBudget = 20000;
+        if (const char* batch = std::getenv("WGR_OBJECT_STREAM_CREATES_PER_UPDATE"))
+            _modernObjectCreatesPerUpdate = static_cast<uint32_t>(
+                std::clamp<long>(std::strtol(batch, nullptr, 10), 1, 100000));
+        else
+            _modernObjectCreatesPerUpdate = 128;
+
+        int highestId = -1;
+        for (size_t i = 0; i < placementLimit; ++i)
+            highestId = std::max(highestId, world.objects[i].objectId);
+        int replacementId = highestId + 1;
+        std::unordered_set<int> usedIds;
+        usedIds.reserve(placementLimit);
+        size_t reassigned = 0;
+        for (size_t i = 0; i < placementLimit; ++i)
+        {
+            const auto& source = world.objects[i];
+            ModernObjectPlacement placement;
+            placement.id = source.objectId;
+            if (!usedIds.insert(placement.id).second)
+            {
+                while (!usedIds.insert(replacementId).second)
+                    ++replacementId;
+                placement.id = replacementId++;
+                ++reassigned;
+            }
+            placement.modelIndex = static_cast<uint32_t>(source.modelIndex);
+            for (size_t row = 0; row < 4; ++row)
+            {
+                placement.rows[row * 3 + 0] = source.transform.rows[row].x;
+                placement.rows[row * 3 + 1] = source.transform.rows[row].y;
+                placement.rows[row * 3 + 2] = source.transform.rows[row].z;
+            }
+            const int x = std::clamp(static_cast<int>(std::floor(placement.rows[9] * _invLandGrid)), 0,
+                                     _landRange - 1);
+            const int z = std::clamp(static_cast<int>(std::floor(placement.rows[11] * _invLandGrid)), 0,
+                                     _landRange - 1);
+            const uint32_t index = static_cast<uint32_t>(_modernObjectPlacements.size());
+            _modernObjectPlacements.push_back(std::move(placement));
+            _modernObjectCells[static_cast<size_t>(z) * _landRange + x].push_back(index);
+            if ((i & 0x3fff) == 0)
+                ProgressRefresh();
+        }
+        _modernObjectStreaming = true;
+        _modernObjectResidencyPending = false;
+        _modernObjectCenterX = -0x3fffffff;
+        _modernObjectCenterZ = -0x3fffffff;
+        _modernResidentObjectCount = 0;
+        LOG_INFO(World,
+                 "Modern object streaming: retained {} compact placements in {} land cells; radius={} cells, "
+                 "resident budget={}, create batch={}, duplicate ids reassigned={}",
+                 _modernObjectPlacements.size(), _modernObjectCells.size(), _modernObjectRadius,
+                 _modernObjectBudget, _modernObjectCreatesPerUpdate, reassigned);
+        ProgressFinish();
+        return true;
+    }
 
     // Keyed by object id, not indexed by it. DayZ ids are sparse handles --
     // Chernarus runs 0x01000000..654,367,047 for 2,971,218 placements -- so an
@@ -2186,6 +2285,181 @@ bool Landscape::LoadOprwModern(const char* path)
 
     ProgressFinish();
     return true;
+}
+
+void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
+{
+    if (!_modernObjectStreaming || _modernObjectCells.empty())
+        return;
+    Vector3 effectivePosition = cameraPosition;
+    // Deterministic residency-turnover smoke hook. It visits a non-overlapping
+    // cell window after 180 updates and returns after 360, while the real camera
+    // stays fixed so the final screenshot remains directly comparable. Normal
+    // gameplay never reads this path unless the explicit diagnostic env is set.
+    if (const char* sweep = std::getenv("WGR_OBJECT_STREAM_TEST_SWEEP_CELLS"))
+    {
+        const int offsetCells = std::clamp(static_cast<int>(std::strtol(sweep, nullptr, 10)), 1, _landRange);
+        const int phase = _modernObjectTestUpdate < 180 ? 0 : (_modernObjectTestUpdate < 360 ? 1 : 2);
+        ++_modernObjectTestUpdate;
+        if (phase == 1)
+        {
+            effectivePosition[0] += offsetCells * _landGrid;
+            effectivePosition[2] += offsetCells * _landGrid;
+        }
+        if (phase != _modernObjectTestPhase)
+        {
+            _modernObjectTestPhase = phase;
+            LOG_INFO(World, "Modern object residency test sweep: phase={} offsetCells={}", phase,
+                     phase == 1 ? offsetCells : 0);
+        }
+    }
+    constexpr int QuantizeCells = 4;
+    int centerX = std::clamp(static_cast<int>(std::floor(effectivePosition.X() * _invLandGrid)), 0, _landRange - 1);
+    int centerZ = std::clamp(static_cast<int>(std::floor(effectivePosition.Z() * _invLandGrid)), 0, _landRange - 1);
+    centerX = (centerX / QuantizeCells) * QuantizeCells;
+    centerZ = (centerZ / QuantizeCells) * QuantizeCells;
+    const bool centerChanged = centerX != _modernObjectCenterX || centerZ != _modernObjectCenterZ;
+    if (!centerChanged && !_modernObjectResidencyPending)
+        return;
+    if (centerChanged)
+    {
+        _modernObjectCenterX = centerX;
+        _modernObjectCenterZ = centerZ;
+    }
+
+    struct CellCandidate
+    {
+        uint32_t index;
+        uint32_t distance2;
+    };
+    std::vector<CellCandidate> candidates;
+    const int x0 = std::max(0, centerX - _modernObjectRadius);
+    const int z0 = std::max(0, centerZ - _modernObjectRadius);
+    const int x1 = std::min(_landRange, centerX + _modernObjectRadius + 1);
+    const int z1 = std::min(_landRange, centerZ + _modernObjectRadius + 1);
+    candidates.reserve(static_cast<size_t>(x1 - x0) * (z1 - z0));
+    for (int z = z0; z < z1; ++z)
+    {
+        for (int x = x0; x < x1; ++x)
+        {
+            const uint32_t index = static_cast<uint32_t>(z * _landRange + x);
+            if (_modernObjectCells[index].empty())
+                continue;
+            const int dx = x - centerX;
+            const int dz = z - centerZ;
+            candidates.push_back({index, static_cast<uint32_t>(dx * dx + dz * dz)});
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const CellCandidate& a, const CellCandidate& b)
+              { return a.distance2 < b.distance2 || (a.distance2 == b.distance2 && a.index < b.index); });
+
+    uint32_t requested = 0;
+    if (centerChanged)
+    {
+        std::fill(_modernObjectCellDesired.begin(), _modernObjectCellDesired.end(), 0);
+        for (const CellCandidate& cell : candidates)
+        {
+            const uint32_t count = static_cast<uint32_t>(_modernObjectCells[cell.index].size());
+            if (requested != 0 && requested + count > _modernObjectBudget)
+                break;
+            _modernObjectCellDesired[cell.index] = 1;
+            requested += count;
+        }
+    }
+    else
+    {
+        for (const CellCandidate& cell : candidates)
+            if (_modernObjectCellDesired[cell.index])
+                requested += static_cast<uint32_t>(_modernObjectCells[cell.index].size());
+    }
+
+    uint32_t released = 0;
+    if (centerChanged)
+    {
+        for (size_t cell = 0; cell < _modernObjectCells.size(); ++cell)
+        {
+            if (_modernObjectCellDesired[cell] ||
+                (!_modernObjectCellActive[cell] && _modernObjectCellCursor[cell] == 0))
+                continue;
+            for (uint32_t index : _modernObjectCells[cell])
+            {
+                ModernObjectPlacement& placement = _modernObjectPlacements[index];
+                Object* object = placement.resident;
+                if (!object)
+                    continue;
+                Ref<Object> keepAlive = object;
+                placement.resident = nullptr;
+                RemoveObject(keepAlive);
+                _objectIds.erase(placement.id);
+                // Scene's light list consists of non-owning links. Dropping this
+                // object's owner entry invalidates those links and prevents marker
+                // lights accumulating each time a streamed cell is revisited.
+                _modernObjectLightOwners.erase(placement.id);
+                ++released;
+            }
+            _modernObjectCellActive[cell] = 0;
+            _modernObjectCellCursor[cell] = 0;
+        }
+    }
+
+    uint32_t created = 0;
+    uint32_t refused = 0;
+    uint32_t attempted = 0;
+    for (const CellCandidate& cell : candidates)
+    {
+        if (!_modernObjectCellDesired[cell.index] || _modernObjectCellActive[cell.index])
+            continue;
+        std::vector<uint32_t>& placements = _modernObjectCells[cell.index];
+        uint32_t& cursor = _modernObjectCellCursor[cell.index];
+        while (cursor < placements.size() && attempted < _modernObjectCreatesPerUpdate)
+        {
+            const uint32_t index = placements[cursor++];
+            ModernObjectPlacement& placement = _modernObjectPlacements[index];
+            if (placement.resident || placement.modelIndex >= _modernObjectModels.size())
+                continue;
+            ++attempted;
+            Matrix4 transform;
+            transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
+            transform.SetDirectionUp(Vector3(placement.rows[3], placement.rows[4], placement.rows[5]));
+            transform.SetDirection(Vector3(placement.rows[6], placement.rows[7], placement.rows[8]));
+            transform.SetPosition(Vector3(placement.rows[9], placement.rows[10], placement.rows[11]));
+            try
+            {
+                placement.resident = ObjectCreate(placement.id, _modernObjectModels[placement.modelIndex], transform,
+                                                  nullptr, nullptr, false, true);
+            }
+            catch (const std::exception&)
+            {
+                placement.resident = nullptr;
+            }
+            if (placement.resident)
+                ++created;
+            else
+                ++refused;
+        }
+        if (cursor >= placements.size())
+            _modernObjectCellActive[cell.index] = 1;
+        if (attempted >= _modernObjectCreatesPerUpdate)
+            break;
+    }
+    _modernResidentObjectCount = released > _modernResidentObjectCount + created
+                                     ? 0
+                                     : _modernResidentObjectCount + created - released;
+    _modernObjectResidencyPending = false;
+    for (const CellCandidate& cell : candidates)
+    {
+        if (_modernObjectCellDesired[cell.index] && !_modernObjectCellActive[cell.index])
+        {
+            _modernObjectResidencyPending = true;
+            break;
+        }
+    }
+    if (centerChanged || !_modernObjectResidencyPending)
+        LOG_INFO(World,
+                 "Modern object residency: centre=({}, {}) requested={} resident={} created={} released={} refused={} "
+                 "budget={} pending={}",
+                 centerX, centerZ, requested, _modernResidentObjectCount, created, released, refused,
+                 _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0);
 }
 
 void Landscape::SaveOptimized(QOStream& f)

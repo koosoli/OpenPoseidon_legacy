@@ -231,6 +231,100 @@ fn authored_surface(colour_tex: u32, normal_tex: u32, uv: vec2<f32>,
     return textureSampleGrad(ground[colour_tex], ground_samp, uv_shifted, dwx, dwy).rgb;
 }
 
+// Reciprocal of an authored surface's own average colour, read from its own coarsest mip.
+//
+// A mip chain IS a box-average pyramid, so its smallest level is the texture's average --
+// no CPU-side table, no per-material ABI field, and correct for ANY source albedo. That is
+// the property the fixed x2 below was reaching for and only achieves on a source that
+// happens to average 0.5.
+//
+// MEASURED CAVEAT: PAA chains bottom out at 4x4, not 1x1 (a 2048^2 `_co` carries 10 levels,
+// 2048 -> 4), so one bilinear tap at the centre of the coarsest level is the mean of the
+// four CENTRE texels of that 4x4 -- i.e. of the four quadrant averages -- not of all
+// sixteen. On a tiling detail image those agree closely, and the residual is a constant per
+// texture rather than a spatial artefact, because the tap coordinate is a constant.
+//
+// FLOORED AND CAPPED: a surface whose average is ~0 (a black or unbound source) must not
+// become an unbounded multiplier. The cap binds below a mean of 1/16; the floor only stops
+// the divide itself.
+const SURFACE_GAIN_MAX: f32 = 16.0;
+fn surface_gain(tex: u32) -> vec3<f32> {
+    let level = f32(textureNumLevels(ground[tex]) - 1u);
+    let mean = textureSampleLevel(ground[tex], ground_samp, vec2<f32>(0.5, 0.5), level).rgb;
+    return min(vec3<f32>(1.0) / max(mean, vec3<f32>(1.0 / 255.0)), vec3<f32>(SURFACE_GAIN_MAX));
+}
+
+// --- Whole-tile normal (TerrainSNX Stage14, `n_<col>_<row>_no.paa`) ---------------
+//
+// CHANNEL CONVENTION, MEASURED on Stratis's own images, not assumed. `n_003_000_no.paa`
+// is DXT1 with alpha min = max = 255 over the whole 1024x1024, so it CANNOT be the
+// DXT5nm/`_nohq` packing the per-surface normals use (X in alpha, Y in green) -- that
+// packing needs a live alpha channel and this one has none. Decoding `2*rgb-1` instead
+// gives a unit vector: mean length 1.0002, sigma 0.0115 over 1M texels. So it is a plain
+// tangent-space RGB = XYZ map with +Z out of the surface, and `authored_surface`'s
+// alpha/green swizzle must NOT be copied here.
+//
+// WHAT IS IN IT is also measured, and it is not what the name suggests. It is a HIGH-PASS
+// of the terrain: box-averaged to 16 m its tangent XY collapses to a mean slope of 0.009
+// (0.5 deg) while the shipped 4 m heightfield's own slope over the same tiles averages
+// 0.34, and its signed correlation with the heightfield gradient is ~0.02. At 1-4 m it
+// carries real structure (|n_xy| mean 0.057-0.115, i.e. 3-7 deg, peaking near 0.6 on
+// cliffs) whose AMPLITUDE tracks terrain steepness (magnitude correlation 0.40 against
+// the heightfield gradient at the tile the filename names, and below 0.23 at every other
+// tile and orientation -- which is also how the tile-to-world mapping was confirmed).
+//
+// So this is the band BETWEEN the heightfield and the per-surface `_nopx` maps: relief
+// finer than the 4 m mesh can express and coarser than a detail texture. The macro shape
+// is already gone from it, so it cannot double-count what `sample_normal` computes, and
+// its 1-4 m features stay above one screen pixel out to kilometres -- long past where the
+// per-surface normal band (150 -> 300 m) has faded to nothing.
+//
+// The TANGENT AXES come from the material's own satellite TexGen rather than a hard-coded
+// guess: Stage14 declares `texGen 3`, the SAME TexGen as Stage0, on every Stratis material
+// -- so the map is authored in the satellite's frame and needs no new transform. Reading
+// that basis (aside/up/dir, transposed at load as LandSave does) gives u = 0.000946*X - 2.89
+// and v = -0.000946*Z + 7.77, i.e. +U is world +X and +V is world -Z. Deriving the frame
+// keeps this correct on a world whose satellite TexGen is signed differently instead of
+// silently shearing its relief.
+fn tile_normal_axis(row: vec4<f32>, world_source: bool, fallback: vec2<f32>) -> vec2<f32> {
+    // A worldPos-sourced row multiplies (X, Y, Z), so its ground direction is (x, z).
+    // A tex-sourced row multiplies (tile_u, tile_v, 0), and the tile UV is itself world
+    // (X, Z) over the land grid, so its ground direction is (x, y).
+    let axis = select(vec2<f32>(row.x, row.y), vec2<f32>(row.x, row.z), world_source);
+    let len = length(axis);
+    return select(fallback, axis / len, len > 1e-12);
+}
+
+fn sample_tile_normal(material: TerrainMaterial, uv: vec2<f32>,
+                      dwx: vec2<f32>, dwy: vec2<f32>) -> vec3<f32> {
+    // Arma 2 spends Stage14's slot on its sixth surface and Arma 1 has no such stage, so
+    // `tile_normal` is 0 on most of the corpus. Returning a flat tangent normal here (not
+    // a decoded black texel) is what makes the whole path a clean no-op on those worlds:
+    // the whiteout blend below reproduces its other input exactly.
+    if (tile_normal_strength <= 0.0 || material.tile_normal == 0u) {
+        return vec3<f32>(0.0, 0.0, 1.0);
+    }
+    let texel = textureSampleGrad(ground[material.tile_normal], ground_samp, uv, dwx, dwy).rgb;
+    let n = texel * 2.0 - vec3<f32>(1.0);
+    let world_source = (material.uv_source_mask & 1u) != 0u;
+    let u_axis = tile_normal_axis(material.satellite_uv.u, world_source, vec2<f32>(1.0, 0.0));
+    let v_axis = tile_normal_axis(material.satellite_uv.v, world_source, vec2<f32>(0.0, 1.0));
+    // Into the terrain's world-aligned tangent frame (T = +X, B = +Z), the same frame the
+    // per-surface normals already use, so both layers compose without a tangent stream.
+    let ground_xy = (n.x * u_axis + n.y * v_axis) * tile_normal_strength;
+    return normalize(vec3<f32>(ground_xy, max(n.z, 1e-3)));
+}
+
+// Whiteout blend: add the tangent XY, multiply the Z. Chosen over replace-or-lerp for two
+// reasons. It is EXACT at both identities -- a flat (0,0,1) on either side reproduces the
+// other bit for bit, which is what lets the unauthored path and the far side of the
+// per-surface normal fade cost nothing and change nothing -- and it keeps both layers'
+// slopes instead of averaging them away, which a mix() toward one of them does precisely
+// where both have something to say (a 4 deg tile ridge under a 30 deg surface grain).
+fn blend_normal_ts(base: vec3<f32>, detail: vec3<f32>) -> vec3<f32> {
+    return normalize(vec3<f32>(base.x + detail.x, base.y + detail.y, base.z * detail.z));
+}
+
 // Decode the LCA selector into one weight per surface slot.
 //
 // The mask is NOT a weight field. Measured over every shipped mask of both
@@ -312,6 +406,14 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let mask_dwy = terrain_uv_gradient(material.mask_uv, 1u, material.uv_source_mask, material_dwy, ddy);
     let satellite = textureSampleGrad(ground[material.satellite], ground_samp,
                                       satellite_uv, satellite_dwx, satellite_dwy).rgb;
+    // The whole-tile normal rides the SATELLITE's UV and gradients -- Stage14 names the
+    // same TexGen as Stage0 -- so it is fetched here, beside the satellite and BEFORE the
+    // detail-band early-out below. That placement is the point of the feature: past
+    // `detail_fade_end` the ground is a bare satellite photo lit by the 4 m mesh normal
+    // alone, and this is the only surface relief left out there. It costs one fetch on a
+    // fragment that was already paying for one, and its own mip chain fades it out at the
+    // range where 1 m features stop resolving, so it needs no distance band of its own.
+    let tile_normal = sample_tile_normal(material, satellite_uv, satellite_dwx, satellite_dwy);
     // Work out the detail's strength BEFORE fetching any of it. Past the fade the gain is
     // 1 and every surface sample is multiplied away, so computing the stack there is pure
     // waste -- and in any landscape view most of the screen is past it. Bailing here is
@@ -329,7 +431,7 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     let detail_fade = 1.0 - smoothstep(detail_fade_start, detail_fade_end, view_dist);
     let blend = authored_weight * detail_fade;
     if (blend <= 0.001) {
-        return AuthoredCell(satellite, vec3<f32>(0.0, 0.0, 1.0));
+        return AuthoredCell(satellite, tile_normal);
     }
     let mask = textureSampleGrad(ground[material.mask], ground_samp, mask_uv, mask_dwx, mask_dwy).rgba;
     // `var`, not `let`: the loop below indexes it with a non-constant slot.
@@ -370,19 +472,35 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
         let slot_dwy = terrain_uv_gradient(material.surface_uvs[i], 2u + i, material.uv_source_mask, material_dwy, ddy);
         var slot_normal_ts = vec3<f32>(0.0, 0.0, 1.0);
         let slot_normal_tex = select(0u, material.surface_normals[i], want_normal);
+        // The gain a slot enters with, applied PER SLOT and inside the weighted sum rather
+        // than once to the blended result: each surface has its own average, so one shared
+        // divisor would leave a brightness step wherever the mask crosses from a dark
+        // surface to a light one -- exactly the boundary the LCA exists to draw.
+        //
+        // Blended, not switched, and 2.0 is the identity: `surface_normalise = 0` is
+        // BIT-EXACT legacy, since scaling every addend of a sum by a power of two scales
+        // the sum by it exactly. The fetch is inside the branch so the off path also costs
+        // exactly what it costs today.
+        var slot_gain = vec3<f32>(2.0);
+        if (surface_normalise > 0.0) {
+            slot_gain = mix(vec3<f32>(2.0), surface_gain(colour_tex), surface_normalise);
+        }
         surface += authored_surface(colour_tex, slot_normal_tex, slot_uv,
                                     slot_dwx, slot_dwy, view_ts, parallax,
-                                    &slot_normal_ts) * weights[i];
+                                    &slot_normal_ts) * slot_gain * weights[i];
         normal_ts += slot_normal_ts * weights[i];
         bound_weight += weights[i];
     }
     if (bound_weight <= 0.0) {
         // Every slot the mask selected here is a hole. The satellite is still the
         // right answer for the colour, so fall through with no detail at all
-        // rather than dividing by zero.
+        // rather than dividing by zero. The tile normal is a property of the TILE, not of
+        // the slots the mask selected, so it still applies here.
         return AuthoredCell(sample_cell(material.legacy, cell, tile_uv, ddx, ddy),
-                            vec3<f32>(0.0, 0.0, 1.0));
+                            tile_normal);
     }
+    // `surface` already carries each slot's gain (the x2, or 1/its own average), applied
+    // per slot inside the sum above. From here it IS the multiplier the satellite takes.
     surface = surface / bound_weight;
     normal_ts = normal_ts / bound_weight;
     // The satellite is the colour authority at EVERY range, and the surface stack
@@ -403,23 +521,40 @@ fn sample_authored_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
     // world scale. And this renderer already carries the convention for OFP's own
     // detail layer a few lines below: `rgb *= 2.0 * detail.a`.
     //
-    // So the surface enters as a gain around mid-grey, x2 to keep a ~0.5-average
-    // detail neutral, and the distance fade now fades that gain to 1.0 rather than
-    // fading the colour back to the satellite. Zero remains the exact legacy
-    // fallback. The override is no longer capped at 0.35: that cap was a guard rail
-    // around a mask read as weights.
+    // So the surface enters as a gain around mid-grey, and the distance fade now fades that
+    // gain to 1.0 rather than fading the colour back to the satellite. Zero remains the
+    // exact legacy fallback. The override is no longer capped at 0.35: that cap was a guard
+    // rail around a mask read as weights.
+    //
+    // WHAT "AROUND MID-GREY" MUST MEAN, and what the x2 assumed it meant. x2 is neutral
+    // only where the source averages 0.5. That is TRUE of OFP's own detail layer --
+    // `data\detail_dx.paa` alpha means 0.5085, so `rgb *= 2.0 * detail.a` a few lines below
+    // is neutral by construction and must not be touched -- and FALSE of the authored
+    // surface stack, which measures 0.105 (`en_grass1_ca`) to 0.144 (`en_soil_ca`) on DayZ.
+    // At those averages x2 is a 3.5x DARKENING, not a neutral gain, and it is measurable
+    // from outside the terrain entirely: grass drawn over the ground it replaces reads
+    // 3.46x brighter than that ground on Enoch and 1.38x on Stratis against 1.09x on stock
+    // OFP, where the stack is inert. Grass colour is world-independent, so a mismatch that
+    // moves with the world cannot be the grass.
+    //
+    // `surface_normalise` replaces the assumed 0.5 with each surface's measured own average
+    // (see `surface_gain`). It defaults to 0 -- the shipped x2 -- because turning it on
+    // changes the look of every authored world.
     //
     // Stage 0 is not a repeating close-detail texture: both families provide a
     // separate TexGen for their continuous, low-frequency satellite colour.
     // Sampling it through the old cell frame is what made a genuine layered
     // A3 material look like a tiled single texture.
-    let gain = mix(vec3<f32>(1.0), 2.0 * surface, blend);
+    let gain = mix(vec3<f32>(1.0), surface, blend);
     // The normal follows its OWN (shorter) fade, so a surface whose normal is no longer
     // fetched contributes exactly a flat tangent-space normal and the caller's guard falls
     // back to the geometric one. At normal_blend = 0 this is (0,0,1) exactly, which is what
     // makes dropping the fetch above a no-op rather than a discontinuity.
+    // The tile normal joins AFTER that fade, not inside it: the two layers live on
+    // different bands and must not share a distance ramp.
     return AuthoredCell(satellite * gain,
-                        normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)));
+                        blend_normal_ts(normalize(mix(vec3<f32>(0.0, 0.0, 1.0), normal_ts, normal_blend)),
+                                        tile_normal));
 }
 
 struct VsOut {
@@ -511,6 +646,21 @@ override detail_fade_end: f32 = 900.0;
 // fetch per selected slot); set it low to buy frame time back.
 override detail_normal_start: f32 = 150.0;
 override detail_normal_end: f32 = 300.0;
+// Gain on the whole-tile normal's tangent XY (WGR_TERRAIN_TILE_NORMAL). 1 = as authored,
+// 0 = off and the fetch is compiled out, >1 exaggerates the relief. This is the A/B switch
+// for the feature: it toggles on ONE binary, so a before/after pair cannot drift on
+// anything but the tile normal.
+override tile_normal_strength: f32 = 1.0;
+// How much of the authored surface's gain comes from its OWN measured average instead of
+// the assumed 0.5 behind the x2 (WGR_TERRAIN_SURFACE_NORMALISE). 0 = the shipped x2, exactly;
+// 1 = `surface / mean(surface)`, neutral by construction for any source albedo; between =
+// a lerp of the two gains, which is the tuning knob if the full correction reads too flat.
+//
+// DEFAULT 0 ON PURPOSE. This changes the ground of every authored world (Arma 2, Arma 3,
+// DayZ) and nothing else, so the flip is a look decision, not a correctness one, and it is
+// the owner's. To make it the default, change this line and the fallback in
+// `terrain/mod.rs` to 1.0.
+override surface_normalise: f32 = 0.0;
 // HDR path (docs/hdr-pipeline-plan.md): 1 = decode ground albedo + sun/light/fog
 // colours from sRGB to linear and drop the [0,1] radiance clamp. 0 = gamma-naive.
 override linear: f32 = 0.0;

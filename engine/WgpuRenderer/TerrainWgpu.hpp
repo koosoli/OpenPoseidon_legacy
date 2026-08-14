@@ -14,6 +14,8 @@ namespace Poseidon
 {
 class EngineWgpu;
 class Landscape;
+class Camera;
+class TextureWgpu;
 
 // Draws the terrain via wgpu: uploads the heightmap once per map, builds a CDLOD
 // quadtree, and each frame emits the selected grid nodes as GPU instances.
@@ -56,7 +58,11 @@ class TerrainWgpu : public ITerrainRenderer
     // (Re)uploads and rebuilds the quadtree when the map changes; returns true if it did.
     bool UploadIfNeeded(const Landscape& land);
     void BuildQuadtree(const Landscape& land);
-    void UploadGroundTextures(const Landscape& land);
+    // `activeMaterials == nullptr` is the eager legacy path. Modern OPRW worlds
+    // pass a near-to-far camera working set and keep the remaining materials on
+    // a shared coarse surface fallback.
+    void UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials = nullptr);
+    void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
     void UploadGeography(const Landscape& land);
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
@@ -99,6 +105,17 @@ class TerrainWgpu : public ITerrainRenderer
     // Landscape::_texture.  Keep references alive while their bindless handles
     // are resident in the renderer.
     std::vector<Ref<Texture>> _a3TerrainTextures;
+    // Only terrain-page images (LCA/LCO and map layer plates) are eligible for
+    // GPU eviction. Shared surface albedos stay resident because object models
+    // may legitimately reference the same Texture object.
+    std::vector<TextureWgpu*> _terrainPageTextures;
+    bool _pagedGroundMaterials = false;
+    int _terrainPageCenterX = -0x3fffffff;
+    int _terrainPageCenterZ = -0x3fffffff;
+    int _terrainPageRadius = 64;
+    uint32_t _terrainPageLayerBudget = 1024;
+    uint32_t _terrainPageTestUpdate = 0;
+    int _terrainPageTestPhase = -1;
 
     std::vector<CdlodNode> _tree;
     int _rootIndex = -1;

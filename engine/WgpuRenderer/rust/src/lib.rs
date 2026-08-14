@@ -16,6 +16,7 @@ mod textures;
 mod tonemap;
 mod underwater;
 mod water;
+mod water_visibility;
 
 use std::sync::{Arc, Mutex};
 
@@ -42,6 +43,7 @@ use crate::textures::{SharedTextures, TextureData, TextureFormat};
 use crate::tonemap::Tonemap;
 use crate::underwater::Underwater;
 use crate::water::Water;
+use crate::water_visibility::WaterVisibility;
 
 // Offscreen HDR scene target format (see docs/hdr-pipeline-plan.md §0.2). Alpha kept
 // for blending; full float precision to avoid banding in dark skies at night.
@@ -57,7 +59,6 @@ struct PlanarTarget {
     depth_view: wgpu::TextureView,
     // Always a single-sample DepthOnly view: clouds use it for their depth-aware march.
     depth_sample_view: wgpu::TextureView,
-    depth_resolve: Option<crate::gfx3d::DepthResolve>,
     size: (u32, u32),
 }
 
@@ -509,6 +510,13 @@ pub struct Renderer {
     // where a grazing reflection ran off the edge of the reflection target and the reflected
     // clouds ended in a visible line.
     planar_reflection_pad: f32,
+    // DZ-005 — the world's river flow map, resolved to a bindless slot, and its
+    // `StreamSpeedInfl`. One pair for the whole world, not one per material: Enoch's 804
+    // river segments all name the same `enoch_river.emat`, and Chernarus's 4,044 water
+    // placements name no flow map at all (its older `dz\water\` addon ships zero `.emat`),
+    // which is what slot 0 means here. Set once per world by `wgr_water_set_flow_map`.
+    water_flow_slot: u32,
+    water_flow_strength: f32,
     log: LogSink,
     runtime_diagnostics: Arc<RuntimeDiagnostics>,
     // `'static` is sound because C++ keeps the window alive until after `wgr_destroy`.
@@ -523,10 +531,17 @@ pub struct Renderer {
     terrain: Terrain,
     grass: Grass,
     water: Water,
+    // Actual depth-tested water coverage from the previous completed frame. This corrects the
+    // world-sized sea quadtree's conservative CPU bounds before paying for a planar reflection.
+    water_visibility: WaterVisibility,
     // WTR-002 — GPU timestamp brackets around the water-pipeline passes (inert when the
     // adapter lacks TIMESTAMP_QUERY + TIMESTAMP_QUERY_INSIDE_ENCODERS).
     gpu_timers: GpuTimers,
     runtime_capabilities: u32,
+    // Shared dynamic-resource budget. This first slice covers the two unbounded
+    // owner-managed pools implicated by the DayZ exhaustion: authored object
+    // textures and merged model geometry. Zero means observability-only.
+    residency_budget_bytes: u64,
     // HDR pipeline (docs/hdr-pipeline-plan.md). When enabled, the 3D/terrain/2D
     // scene renders into `hdr` (linear once Stage 2 lands) and `tonemap` resolves it
     // to the swapchain; the dev overlay + (later) screen-space UI composite after.
@@ -787,6 +802,17 @@ impl Renderer {
         // doesn't pad an enormous array (a level with more unique textures overflows to
         // the white slot — 8192 comfortably covers OFP content). Must be >= terrain's 512.
         let object_texture_cap = 8192u32.max(terrain::TERRAIN_MAX_GROUND_LAYERS);
+        let residency_budget_mb = std::env::var("WGR_DYNAMIC_VRAM_MB")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(2048);
+        let residency_budget_bytes = residency_budget_mb.saturating_mul(1024 * 1024);
+        log.log(
+            log_level::INFO,
+            &format!(
+                "wgpu dynamic residency budget: {residency_budget_mb} MB (WGR_DYNAMIC_VRAM_MB; 0 = unlimited)"
+            ),
+        );
 
         // BOTH binding-array limits DEFAULT TO 0 even on devices that fully support
         // binding arrays, so both must be requested explicitly or layout creation panics
@@ -1105,6 +1131,7 @@ impl Renderer {
         let sky = Sky::new(&device, &queue, color_format, sample_count);
         // WTR-002 — the timestamp query set + readback ring (inert when unsupported).
         let gpu_timers = GpuTimers::new(&device, &queue, ts_enabled, ts_inside_passes);
+        let water_visibility = WaterVisibility::new(&device);
         if gpu_timers.enabled() {
             log.log(
                 log_level::INFO,
@@ -1149,6 +1176,10 @@ impl Renderer {
             // grazing view, without giving away more angular resolution than the mip-filtered
             // planar sample can absorb.
             planar_reflection_pad: 1.35,
+            // No flow until a world publishes one; slot 0 is the bindless white fallback and
+            // the shader reads it as "this world has no river flow map".
+            water_flow_slot: 0,
+            water_flow_strength: 0.0,
             log,
             runtime_diagnostics,
             surface,
@@ -1162,8 +1193,10 @@ impl Renderer {
             terrain,
             grass,
             water,
+            water_visibility,
             gpu_timers,
             runtime_capabilities,
+            residency_budget_bytes,
             hdr_enabled,
             hdr: None,
             hdr_resolve: None,
@@ -1409,6 +1442,26 @@ impl Renderer {
     // GRS-A — latest grass instance counts (same async-readback discipline).
     fn grass_stats(&self) -> crate::grass::GrassStats {
         self.grass.stats()
+    }
+
+    fn memory_stats(&self) -> ffi::WgrMemoryStats {
+        let (object_texture_bytes, object_texture_count) = self.textures.residency();
+        let geometry = self.gfx3d.geometry_residency();
+        let tracked_bytes = object_texture_bytes
+            .saturating_add(geometry.capacity_bytes)
+            .saturating_add(geometry.retired_bytes);
+        ffi::WgrMemoryStats {
+            tracked_bytes,
+            budget_bytes: self.residency_budget_bytes,
+            object_texture_bytes,
+            geometry_live_bytes: geometry.live_bytes,
+            geometry_capacity_bytes: geometry.capacity_bytes,
+            geometry_retired_bytes: geometry.retired_bytes,
+            object_texture_count,
+            over_budget: u32::from(
+                self.residency_budget_bytes != 0 && tracked_bytes > self.residency_budget_bytes,
+            ),
+        }
     }
 
     // Record the FAR-reduce MSAA depth resolve, unless one already recorded on this encoder is
@@ -1810,22 +1863,20 @@ impl Renderer {
         }
         let mip_count = PlanarMips::mip_count(size.0, size.1);
         let color = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("wgr_planar_color_msaa"),
+            label: Some("wgr_planar_color_attachment"),
             size: wgpu::Extent3d {
                 width: size.0,
                 height: size.1,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: self.sample_count,
+            sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: HDR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | if self.sample_count == 1 {
-                    wgpu::TextureUsages::TEXTURE_BINDING
-                } else {
-                    wgpu::TextureUsages::empty()
-                },
+            // Keep the frequently written target attachment-only. Copying it into the sampled
+            // mip chain after the reflection preserves framebuffer compression on the 1x path;
+            // rendering directly into a mipped sampled texture was measurably pathological.
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let sampled = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -1839,7 +1890,9 @@ impl Renderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: HDR_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let depth = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -1850,7 +1903,7 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: self.sample_count,
+            sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: crate::gfx3d::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
@@ -1862,14 +1915,7 @@ impl Renderer {
             aspect: wgpu::TextureAspect::DepthOnly,
             ..Default::default()
         });
-        let (depth_sample_view, depth_resolve) = if self.sample_count > 1 {
-            let mut resolve =
-                crate::gfx3d::DepthResolve::new(&self.device, self.sample_count, true);
-            let view = resolve.resize(&self.device, size.0, size.1, &depth_aspect);
-            (view, Some(resolve))
-        } else {
-            (depth_aspect, None)
-        };
+        let depth_sample_view = depth_aspect;
         let mip_views: Vec<_> = (0..mip_count)
             .map(|level| {
                 sampled.create_view(&wgpu::TextureViewDescriptor {
@@ -1881,11 +1927,7 @@ impl Renderer {
                 })
             })
             .collect();
-        let color_view = if self.sample_count > 1 {
-            color.create_view(&Default::default())
-        } else {
-            mip_views[0].clone()
-        };
+        let color_view = color.create_view(&Default::default());
         self.planar = Some(PlanarTarget {
             color_view,
             _color: color,
@@ -1894,7 +1936,6 @@ impl Renderer {
             mip_views,
             depth_view,
             depth_sample_view,
-            depth_resolve,
             _depth: depth,
             size,
         });
@@ -2064,10 +2105,18 @@ impl Renderer {
         // microseconds, and it is available BEFORE the reflection is recorded. An occlusion query
         // would be exact but only answers one frame late, which is the wrong shape for a gate that
         // decides whether to render at all.
-        let water_coverage = planar_sea
+        let cpu_water_coverage = planar_sea
             .and_then(|sea| cameras.get(water_camera).map(|cam| (sea, cam)))
             .map(|(sea, cam)| screen_coverage_of_water(water_nodes, cam, sea))
             .unwrap_or(0.0);
+        // The quadtree estimate intentionally errs toward ON, but on large worlds its sea plane
+        // extends below dry land and can report 100% for a frame with zero visible water. Once an
+        // asynchronous depth-tested water query is available, it is the tighter upper bound.
+        let water_coverage = self
+            .water_visibility
+            .coverage(self.config.width, self.config.height, self.sample_count)
+            .map(|visible| visible.min(cpu_water_coverage))
+            .unwrap_or(cpu_water_coverage);
         let planar_cfg = *PLANAR_CFG.get_or_init(PlanarConfig::from_env);
         // Hysteresis-free by construction: the weight fades to 0 across a narrow band just above
         // `cut` BEFORE the pass is skipped below it, so the handover to the environment-map
@@ -2089,7 +2138,15 @@ impl Renderer {
         // agreement first.
         if planar_active {
             let want = planar_cfg.divisor_for(water_coverage);
-            if want == self.planar_div {
+            // There is no previous image to preserve on first use, so start at the correct
+            // coverage-derived resolution immediately. Applying the normal 20-frame hold here
+            // made low-coverage A3/DayZ cameras render an unnecessarily large reflection during
+            // their entire warm-up, exactly when streaming pressure is already highest.
+            if self.planar.is_none() {
+                self.planar_div = want;
+                self.planar_div_want = want;
+                self.planar_div_hold = 0;
+            } else if want == self.planar_div {
                 self.planar_div_hold = 0;
             } else if want == self.planar_div_want {
                 self.planar_div_hold += 1;
@@ -2118,6 +2175,19 @@ impl Renderer {
                 self.planar_div,
             );
         }
+        // DZ-005 — hand the object paths the engine's own water clock and this world's river
+        // flow map, for the reflective (CalmWater) sections. Deliberately the SAME `time` the
+        // ocean's FFT runs on rather than a wall clock private to gfx3d: it is `Glob.time`, so
+        // a paused simulation freezes the pond exactly as it freezes the sea, and two runs of
+        // the same test mission ripple identically at the same frame.
+        self.gfx3d.set_water_anim(
+            self.water
+                .underwater_params()
+                .map(|(_, time, _)| time)
+                .unwrap_or(0.0),
+            self.water_flow_slot,
+            self.water_flow_strength,
+        );
         let mut prepared_cameras = cameras.to_vec();
         let mut reflected_vp = [0.0f32; 16];
         let reflected_camera = if planar_active {
@@ -2185,6 +2255,10 @@ impl Renderer {
             self.sky.sh_buffer(),
             &skyvis_view,
             self.sky.cloud_shadow_view(),
+            // DZ-003: the same equirect reflection env map water already reflects, lent to
+            // the object paths so a material declaring itself reflective (DayZ's CalmWater
+            // family) samples the real sky instead of drawing as a flat near-black quad.
+            self.sky.env_view(),
             &self.foliage_params,
             reflected_camera.zip(planar_sea),
             main_scene_cam,
@@ -2202,6 +2276,7 @@ impl Renderer {
                 cam,
                 shadow,
                 reflected_camera.map(|i| &prepared_cameras[i]),
+                self.planar_div as f32 * self.planar_reflection_pad,
             );
         }
         self.ensure_hdr(self.config.width, self.config.height);
@@ -2421,6 +2496,7 @@ impl Renderer {
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
         self.gpu_timers.begin_frame();
+        self.water_visibility.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
         // GPU completion from acquire/present pacing without summing overlapping
         // individual pass timers.
@@ -2501,7 +2577,7 @@ impl Renderer {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &planar.color_view,
                         depth_slice: None,
-                        resolve_target: (self.sample_count > 1).then_some(&planar.mip_views[0]),
+                        resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                             store: wgpu::StoreOp::Store,
@@ -2512,7 +2588,7 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                self.sky.render(&mut sky_pass);
+                self.sky.render_planar(&mut sky_pass);
                 drop(sky_pass);
                 self.gpu_timers.end(&mut encoder, TimerRegion::PlanarSky);
                 self.gpu_timers
@@ -2522,7 +2598,7 @@ impl Renderer {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &planar.color_view,
                         depth_slice: None,
-                        resolve_target: (self.sample_count > 1).then_some(&planar.mip_views[0]),
+                        resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
@@ -2549,7 +2625,7 @@ impl Renderer {
                             off,
                             batch.first_node,
                             batch.node_count,
-                            crate::terrain::TerrainPass::Color,
+                            crate::terrain::TerrainPass::Planar,
                         );
                     }
                 }
@@ -2566,7 +2642,7 @@ impl Renderer {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &planar.color_view,
                         depth_slice: None,
-                        resolve_target: (self.sample_count > 1).then_some(&planar.mip_views[0]),
+                        resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
@@ -2590,9 +2666,6 @@ impl Renderer {
                 drop(object_pass);
                 self.gpu_timers
                     .end(&mut encoder, TimerRegion::PlanarObjects);
-                if let Some(resolve) = planar.depth_resolve.as_ref() {
-                    resolve.resolve(&mut encoder);
-                }
                 if !ablate.clouds && self.sky.clouds_active(&self.sky_params) {
                     self.gpu_timers
                         .begin(&mut encoder, TimerRegion::PlanarClouds);
@@ -2608,7 +2681,7 @@ impl Renderer {
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &planar.color_view,
                             depth_slice: None,
-                            resolve_target: (self.sample_count > 1).then_some(&planar.mip_views[0]),
+                            resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Load,
                                 store: wgpu::StoreOp::Store,
@@ -2619,10 +2692,32 @@ impl Renderer {
                         occlusion_query_set: None,
                         multiview_mask: None,
                     });
-                    self.sky.composite_cloud(&mut cloud_pass);
+                    self.sky.composite_cloud_planar(&mut cloud_pass);
                     drop(cloud_pass);
                     self.gpu_timers.end(&mut encoder, TimerRegion::PlanarClouds);
                 }
+                // Transfer the finished attachment into mip 0, then generate the roughness
+                // chain sampled by water. The copy is cheaper than carrying main-scene MSAA
+                // through the entire reflected scene and keeps the hot attachment dedicated.
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &planar._color,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &planar._sampled,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: planar.size.0,
+                        height: planar.size.1,
+                        depth_or_array_layers: 1,
+                    },
+                );
                 self.gpu_timers.begin(&mut encoder, TimerRegion::PlanarMips);
                 self.planar_mips
                     .render(&self.device, &mut encoder, &planar.mip_views);
@@ -3076,8 +3171,14 @@ impl Renderer {
                                 crate::terrain::TerrainPass::Color
                             };
                             renderer
+                                .gpu_timers
+                                .begin_pass(pass, TimerRegion::TerrainColor);
+                            renderer
                                 .terrain
                                 .draw(pass, cam, off, b.first_node, b.node_count, kind);
+                            renderer
+                                .gpu_timers
+                                .end_pass(pass, TimerRegion::TerrainColor);
                         }
                     }
                     Plan3dOp::Grass(arg) => {
@@ -3211,6 +3312,8 @@ impl Renderer {
                                 (terrain_batches.get(*arg as usize), self.gfx3d.camera_bind())
                             {
                                 let off = (b.camera as u64 * self.gfx3d.camera_stride()) as u32;
+                                self.gpu_timers
+                                    .begin_pass(&mut pp, TimerRegion::TerrainPrepass);
                                 self.terrain.draw(
                                     &mut pp,
                                     cam,
@@ -3219,6 +3322,8 @@ impl Renderer {
                                     b.node_count,
                                     crate::terrain::TerrainPass::Prepass,
                                 );
+                                self.gpu_timers
+                                    .end_pass(&mut pp, TimerRegion::TerrainPrepass);
                             }
                         }
                         Plan3dOp::Grass(arg) => {
@@ -3484,6 +3589,7 @@ impl Renderer {
                     // (they are fragment work, not separable passes; see gpu_timers.rs).
                     self.gpu_timers.begin(&mut encoder, TimerRegion::WaterDraw);
                     encoder.push_debug_group("wgr_water");
+                    let visibility_query = self.water_visibility.claim();
                     let mut wpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_water_pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -3501,9 +3607,13 @@ impl Renderer {
                             stencil_ops: None,
                         }),
                         timestamp_writes: None,
-                        occlusion_query_set: None,
+                        occlusion_query_set: visibility_query
+                            .then_some(self.water_visibility.query_set()),
                         multiview_mask: None,
                     });
+                    if visibility_query {
+                        wpass.begin_occlusion_query(0);
+                    }
                     for op in seg_ops {
                         if let Plan3dOp::Water(arg) = op {
                             if let Some(b) = water_batches.get(*arg as usize) {
@@ -3512,6 +3622,9 @@ impl Renderer {
                                     .draw(&mut wpass, cam, off, b.first_node, b.node_count);
                             }
                         }
+                    }
+                    if visibility_query {
+                        wpass.end_occlusion_query();
                     }
                     drop(wpass);
                     encoder.pop_debug_group();
@@ -3739,7 +3852,13 @@ impl Renderer {
         }
         self.gpu_timers.end(&mut encoder, TimerRegion::FrameTotal);
         self.gpu_timers.resolve(&mut encoder);
+        self.water_visibility.resolve(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
+        // Geometry-pool growth may have happened after an earlier pass recorded
+        // the old pool buffer. Submission is the safe boundary for releasing
+        // those superseded application-side handles; wgpu retains resources for
+        // command buffers that are still executing on the GPU.
+        self.gfx3d.frame_submitted();
         frame.present();
         if let Some((buffer, width, height, bytes_per_row, padded_bytes_per_row, is_bgra)) =
             screenshot_staging
@@ -3784,6 +3903,7 @@ impl Renderer {
             self.screenshot_requested = false;
         }
         self.gpu_timers.harvest(&self.device);
+        self.water_visibility.harvest(&self.device);
         self.grass.harvest_stats(&self.device);
         Ok(())
     }

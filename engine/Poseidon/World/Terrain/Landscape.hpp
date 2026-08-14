@@ -8,6 +8,7 @@
 
 #include <array>
 #include <unordered_map>
+#include <vector>
 
 namespace Poseidon
 {
@@ -565,6 +566,38 @@ class Landscape : public SerializeClass
     // of links. The map costs a hash per lookup and is bounded by the object count
     // rather than by the largest id any world happens to use.
     std::unordered_map<int, OLink<Object>> _objectIds;
+    // Modern WRP placement database. Arma 3/DayZ worlds contain enough static
+    // placements that instantiating every Object, retained mesh, and texture at
+    // load time dominates both startup and VRAM. Keep the compact authored rows
+    // for the whole map and instantiate a camera-centred cell budget instead.
+    struct ModernObjectPlacement
+    {
+        int id = -1;
+        uint32_t modelIndex = 0;
+        std::array<float, 12> rows{};
+        OLink<Object> resident;
+    };
+    std::vector<ModernObjectPlacement> _modernObjectPlacements;
+    std::vector<std::vector<uint32_t>> _modernObjectCells;
+    std::vector<RStringB> _modernObjectModels;
+    std::vector<uint8_t> _modernObjectCellActive;
+    std::vector<uint8_t> _modernObjectCellDesired;
+    std::vector<uint32_t> _modernObjectCellCursor;
+    bool _modernObjectStreaming = false;
+    bool _modernObjectResidencyPending = false;
+    int _modernObjectCenterX = -0x3fffffff;
+    int _modernObjectCenterZ = -0x3fffffff;
+    int _modernObjectRadius = 64;
+    uint32_t _modernObjectBudget = 20000;
+    uint32_t _modernObjectCreatesPerUpdate = 128;
+    uint32_t _modernResidentObjectCount = 0;
+    uint32_t _modernObjectTestUpdate = 0;
+    int _modernObjectTestPhase = -1;
+    // Only the small subset of streamed objects that actually emits imported
+    // marker lights needs ownership state. Scene keeps non-owning links, so
+    // erasing an entry also removes its lights without a map-sized per-placement
+    // container.
+    std::unordered_map<int, RefArray<LightPoint>> _modernObjectLightOwners;
     // id to data conversion
 
     RefArray<Object> _arrows;
@@ -643,10 +676,12 @@ class Landscape : public SerializeClass
     void SaveSubdivCache(int targetSubdivLog);
 
     bool LoadOptimized(QIStream& f, float landGrid); // wrapper around SerializeBin - true if OK
-    // Loads an Arma 2/OA (OPRW 24) or Arma 3 (OPRW 25) world. See LandSave.cpp
-    // for why it mounts at terrain resolution rather than teaching Landscape the
-    // two-grid split.
+    // Loads modern OPRW worlds while preserving their authored coarse land grid
+    // and fine elevation grid. See LandSave.cpp for the ownership split.
     bool LoadOprwModern(const char* path);
+    // No-op for legacy worlds. Called by the WGPU terrain path once the live
+    // camera exists; updates only when the camera crosses a small cell block.
+    void UpdateModernObjectResidency(Vector3Par cameraPosition);
     void SaveOptimized(QOStream& f);
     void SaveOptimized(const char* name);
 
