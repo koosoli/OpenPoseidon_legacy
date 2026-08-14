@@ -81,6 +81,53 @@ then copy `assets\reforger` and the model tree into the game directory.
 Staged results: **1,132 models, 99.0% prefab coverage, 1,216,138 objects**, 1.39 GB model tree.
 The unresolved 1.0% is 562 GUIDs — 451 in no resource map, 111 with no mesh and no parent.
 
+| stage | models | model tree | coverage | `.wrp` | objects |
+|---|---|---|---|---|---|
+| A | 50 | 19.1 MB | 78.3% | 31.0 MB | 19,644 |
+| B | 200 | 118.1 MB | 95.8% | 100.5 MB | 1,177,900 |
+| C | 500 | 342.0 MB | 98.2% | 102.3 MB | 1,207,337 |
+| D | **1,132** | **1,392.4 MB** | **99.0%** | 102.9 MB | **1,216,138** |
+
+Every model round-tripped through `MLODLoader`; every `.wrp` re-read with the runtime's own reader,
+so no `modelIndex` was ever out of range.
+
+**What actually bounds the picture is the 20,000-object streaming budget, and it is a tunable.**
+`WGR_OBJECT_STREAM_MAX_OBJECTS=200000` moves resident 19,884 → 153,600 and yields a frame
+**pixel-equivalent to loading all 1.2M** (172.0/169.4/145.4 in both; local 8x8 18.59 vs 18.57) at 60%
+of the GPU cost. Past ~150k resident there is nothing further to gain at that camera. Object capacity
+itself was never reached: eager mode built 1,216,009 objects and drew 41,420 instances /
+**297,553,823 triangles** in one frame without crashing.
+
+**Cost, which is the real problem:**
+
+| objects in file | resident | registered | drawn inst | local 8x8 | GPU frame |
+|---|---|---|---|---|---|
+| 0 (control) | 8 | 8 | 8 | 7.03 | — |
+| 19,644 | 19,644 | 19,652 | 3,787 | 7.81 | 35.6 ms |
+| 98,161 | 20,000 | 20,007 | 7,323 | 9.04 | 16.9 ms |
+| 392,632 | 19,991 | 19,999 | 7,244 | 13.31 | 28.4 ms |
+| 1,216,138 | 19,884 | 19,892 | 8,522 | 16.76 | 35.6 ms |
+| 1,216,138 (budget 200k) | 153,600 | 153,592 | 19,531 | 18.59 | 74.2 ms |
+| 1,216,138 (all live) | 1,216,009 | — | 41,420 | 18.57 | 124.9 ms |
+
+So the populated view is **~13 FPS**. Ledger: `...\rf\scaleup_results.txt` (381 lines).
+
+### The residency fix (uncommitted detail is in the diff; here is the reasoning)
+
+`LandSave.cpp:2336-2339` built the candidate window from a **fixed `_modernObjectRadius` of 64 land
+cells, applied *before* the budget test** — a second, unreported bound. On any world whose placement
+database already fits the budget, that radius is the one that binds. Everon is 256x256 land cells at
+50 m, so 64 cells spans 6.4 km of a 12.8 km world: **9,176 of 19,644 placements (46.7%) requested
+with 10,824 of 20,000 budget slots unused.** Half the island was empty for want of nothing.
+
+The radius is now a *starting* size that doubles until the budget binds or the window covers the map
+(`LandSave.cpp:2335-2361`). **No cap was raised** — a bound was stopped from pre-empting the cap
+already chosen. Everon `window=64 requested=9176` → `window=256 requested=19644`, converging to
+19,644 in 2.2 s at **92.2 MB → 92.2 MB, 0.0 MB retired**: 2.14x the objects for no measurable GPU
+cost, because they reuse resident models. Stratis is provably unchanged (the growth loop is never
+entered where the budget already binds). A moving camera converges at every phase with `refused=0`.
+`WGR_OBJECT_STREAM_WINDOW_GROWTH=0` restores the old behaviour for A/B.
+
 ---
 
 ## The traps. Hand every one of these to every agent.
@@ -189,7 +236,23 @@ This is the most transferable lesson here, and it cost the most time.
 
    Notes: `...\rf\water_findings.txt`.
 4. **Only 50 of 1,132 models are textured.** `xob export --textures` did the first 50; the rest draw
-   white. Also unwired: normal maps, and `MatPBRMulti` 4-layer blends (only `BCR_1` binds).
+   white. Re-run it with a higher `--max-models` — the mechanism works and needs no new code.
+
+   How it resolves, since it is not obvious: the **MLOD face texture slot**, not the material slot.
+   Per part, read the `.emat` from the `.pak`, run `ResolveEmatInheritance` (18.3% of Reforger
+   materials get their maps only from a parent), take `BCRMap` as albedo and `OpacityMap` as the
+   cutout mask (falling back to `BCR_1` for `MatPBRMulti`), decode both `.edds`, fold opacity into
+   alpha, downscale to 1024, write `.paa`, **round-trip it back through the PAA reader**, and name it
+   in the face texture slot. Result: `UNTEXTURED` sections 32 → **0**; 68/68 materials resolve an
+   albedo; 85/85 written parts name a texture. Frame-wide means barely move because the objects cover
+   0.24–0.42% of the frame, but every changed pixel went white → green-brown (greenness +1.79 →
+   +15.02, luma −63).
+
+   Still unwired: **normal maps** (Reforger's `NTCMap`/`NMOMap` are not plain tangent normal maps),
+   and **`MatPBRMulti` 4-layer blends** — 2 of 68 materials, `GraniteCliff_01` (9,445 placements) and
+   `t_picea_abies_stump_01` (8,275), bind only `BCR_1`. A material-side route would need `BCRMap`/
+   `NMOMap`/`OpacityMap` added to `TranslateEmat`'s key list in `EmatMaterialAdapter.hpp`, and would
+   still not give the cutout, which comes from the face texture.
 5. **Terrain exposure.** `ambient`/`diffuse` in the rvmat are **ignored** by the WGPU terrain path
    (1.0/0.55 and 0.1/0.1 give byte-identical captures); measured transfer from authored albedo to
    pixel is ~3.0x and compressive. A suspected exposure regression on Stratis versus `aa24c32`'s
