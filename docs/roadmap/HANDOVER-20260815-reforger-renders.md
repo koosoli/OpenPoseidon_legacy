@@ -195,13 +195,50 @@ This is the most transferable lesson here, and it cost the most time.
 1. **Object performance.** 35.6 ms at 19,884 objects → 74.2 ms at 153,600 → 124.9 ms with all
    1.2M live. The populated view is ~13 FPS. **This is the blocker for playability.**
    The new timers exist for exactly this — see below.
-2. **Grass and wind — UNFINISHED, an agent was mid-flight.** Reforger's clutter (`.conf` collections,
-   `c_GrassAtlas_*_MASK.edds` as R8) is decoded but unused; the terrain still uses OFP clutter, and
-   nothing sways. Its running notes are at `C:\Users\mail\AppData\Local\Temp\rf\wind_findings.txt`.
-   Establish the WGPU vegetation-animation mechanism with `file:line` **first**; if sway data lives
-   in a `.xob` field `XobModel` discards (it skips bones), report that rather than guessing. **Motion
-   needs a different proof from a still image**: difference two frames at different frame numbers,
-   with a wind-off control, since clouds and shadows drift on their own.
+2. **Wind and clutter.** Full notes: `C:\Users\mail\AppData\Local\Temp\rf\wind_findings.txt` (689
+   lines, self-contained).
+
+   **The finding: the WGPU renderer does not animate vegetation MODELS at all. Only grass.**
+   There is one wind authority, `World/Weather/WindModel.hpp:100-137` (`GWind` at `:142`), a closed
+   form in conditions/overcast/time. Grass consumes it (`EngineWgpu.cpp:5377-5384` →
+   `grass/grass.wgsl:37-38`, `sample_wind_field` `:427-455`, blades `:975-989`), as do clouds and the
+   FFT ocean. **Both object vertex shaders have no time-varying term whatsoever** —
+   `gfx3d/gpu_driven.wgsl:362-487` and `gfx3d/shader3d.wgsl`. Two plausible-looking leads are not
+   wind: `ForestPlain::Animate` is a static terrain conform (`ObjectClasses.cpp:401` says so:
+   *"Forests and terrain don't move, so this is computed once"*), and `tree_bend` is a lighting knob
+   that blends the leaf normal toward a radial crown normal (`Engine.hpp:915-917`). So sway had to be
+   **built**, not hooked up.
+
+   **Sway is built and measured working** on OFP pines (Malden), needing **no per-vertex channel** —
+   only model-space Y, since this vegetation is authored origin-on-ground. That makes the "does
+   `XobModel` discard the sway data with bones?" question moot. Against a `POSEIDON_VEG_SWAY=0`
+   control at an identical camera:
+
+   | region | wind on >8 | control >8 | on >16 | control >16 |
+   |---|---|---|---|---|
+   | canopy interior (leaves) | **7.82%** | 2.97% | **4.64%** | 0.66% |
+   | sky only (drift baseline) | 3.41% | **5.10%** | 0.60% | **1.26%** |
+
+   Leaf pixels change 2.6x more (>8) and 7.0x more (>16) while the sky in the same frames changed
+   *less* — and the control ran 10.1 s of elapsed time against the wind-on pair's 6.6 s, so it is
+   conservative.
+
+   **Reforger vegetation does NOT sway yet — root cause found, fix written, NOT measured. Do not
+   report it as working.** Reforger `.p3d` carry no named properties: **90 of 94 have no `map`
+   token**, so `MapType = MapHide` and they receive no canopy flag — hence no sway *and* no canopy
+   normals. That is a pre-existing defect this work merely exposed. A narrow name/path fallback in
+   `ShapeLOD.cpp` (requires a `vegetation` path segment *and* a `t_`/`b_` prefix) compiles but never
+   got pixels; `runmodel.ps1` is written and ready to finish it.
+
+   **Everon grows NO clutter at all** — verified directly, not inferred: `0 surfaces, 0 characters,
+   0 clutter classes`, `0 / 65536 surface cells, 0 renderable`, bare ground in the capture. So the
+   task is "make any clutter grow", not "swap OFP's for Reforger's". Three blockers, all in the
+   import lane: `BuildSurfaceCatalog` finds configs via PBO bank prefixes but Everon ships loose
+   files; `ReadClutterCard` hard-requires ODOL `.p3d` and Reforger ships `.xob`; the fix belongs in
+   `PakCommand.cpp` / `XobCommand.*`.
+
+   Two claims in that area remain **unverified by anyone**: that Reforger's clutter `.conf` is a
+   readable `Clut` format, and that `c_GrassAtlas_*_MASK.edds` is R8. Nobody has opened one.
 3. **Water GPU load — ANSWERED, and it is the water SURFACE DRAW, not the reflection.**
    A user reported 99% GPU facing water at a 60 FPS cap on a 4080. Measured on a 3070, Stratis open
    sea, 1080p, MSAA 4x: turning toward water costs **+16.56 ms of GPU per frame**.
