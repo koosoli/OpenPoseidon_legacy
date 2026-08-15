@@ -233,6 +233,34 @@ this document as "what is available once the retained path is correct", not as c
   (freefly `2736.50, 5993.66, 45.19`, az 4.5, el −27.1) needs a long warmup, or you will
   photograph a clean frame and wrongly conclude it is fixed.
 
+## 3a. Helicopter cockpits are translucent
+
+Reported after the build above. Glass is a multi-bit-alpha BLEND section, so it routes on the
+texture's alpha CLASS, and I changed how that class is computed this session (reading alpha off
+the compressed BC2/BC3 blocks instead of decoding the whole file).
+
+**That change shipped without an A/B, which was my mistake — it now has one.**
+`WGR_ALPHA_BLOCK_SCAN=0` falls back to the original whole-file decode. **Run that first.** If
+cockpits become opaque again, the block scan is misclassifying something and the fix is there;
+if they stay translucent, the block scan is exonerated in one run and the cause is downstream.
+
+Reasons to think it is probably NOT the block scan, so do not stop looking if it is cleared:
+the block path is exact rather than approximate (BC3's alpha half IS a BC4 block, BC2's is a
+low-nibble-first expansion, both feeding the same unmodified `ClassifyAlpha`) and it was
+verified byte-identical on every `AlphaStats` field across six real DXT5 textures. But six is
+not the one that broke.
+
+Other candidates, in order:
+- The cockpit draw is special-cased — `SceneDraw.cpp:1630-1637` sets
+  `PassKindHint::Cockpit` when `drawLOD == obj->InsideLOD(cameraType)`, and the descriptor
+  build picks a different pass for it. Check whether that path still gets the right blend and
+  depth-write state.
+- Pass2's blend branch draws an opaque object's blend sections back-to-front with
+  `GSectionFilter = BlendOnly` and depth-write left ON ("original parity"). A cockpit seen from
+  inside is the case most likely to expose an ordering assumption there.
+- `WGR_TEXTURE_MIP_BIAS` is default 0 and should not be implicated, but confirm from the run's
+  `meta.json` env block rather than assuming.
+
 ## 3b. Water foam — two more specific asks
 
 The lattice is gone but he wants two further changes, and they are separate:

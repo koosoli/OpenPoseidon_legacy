@@ -386,6 +386,28 @@ int TextureWgpu::Init()
 
 bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 {
+    // WGR_ALPHA_BLOCK_SCAN=0 falls back to the original whole-file decode.
+    //
+    // This shipped without an A/B, which was a mistake: the alpha CLASS decides whether a
+    // section draws opaque, cutout or blend, so a wrong verdict here is a visual bug several
+    // layers away from the texture code, and there was no way to rule this out in one run.
+    // The owner has since reported translucent helicopter cockpits -- glass is precisely a
+    // multi-bit-alpha blend section -- and this is the first thing that should be excluded.
+    //
+    // The block path is believed exact, not approximate: BC3's alpha half is a BC4 block and
+    // BC2's is a low-nibble-first expansion, both feeding the SAME unmodified ClassifyAlpha,
+    // and it was verified byte-identical on every AlphaStats field across six real DXT5
+    // textures. But "verified on six" is not "verified on the one that broke", and a lever
+    // costs nothing.
+    static const bool blockScanEnabled = []
+    {
+        const char* v = std::getenv("WGR_ALPHA_BLOCK_SCAN");
+        return !v || v[0] != '0';
+    }();
+    if (!blockScanEnabled)
+    {
+        return false; // caller falls through to ScanTopMipAlphaStats, the original path
+    }
     if (!_src || _nMipmaps <= 0)
     {
         return false;
