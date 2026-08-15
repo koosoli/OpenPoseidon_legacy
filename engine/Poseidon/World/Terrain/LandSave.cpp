@@ -2488,6 +2488,28 @@ static uint32_t ObjectStreamMaxBatchScale()
     return scale;
 }
 
+// WGR_OBJECT_STREAM_MIN_BATCH: how many objects an update must attempt before the time
+// budget is allowed to stop it. See the long note at the admitBudgetSpent site — this floor,
+// not the budget, is what pins the fill-in frame at 200 ms+.
+//
+// Defaults to `legacyBatch` (the per-update create count), which is exactly today's
+// behaviour, so this is inert until somebody measures the trade.
+static uint32_t ObjectStreamMinBatch(uint32_t legacyBatch)
+{
+    static const long parsed = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_MIN_BATCH");
+        return v ? std::strtol(v, nullptr, 10) : -1;
+    }();
+    if (parsed < 0)
+    {
+        return legacyBatch;
+    }
+    // At least one, or an update with a spent budget would admit nothing at all and the
+    // world would never finish streaming.
+    return static_cast<uint32_t>(std::clamp<long>(parsed, 1, static_cast<long>(legacyBatch)));
+}
+
 // WGR_RESIDENCY_CANDIDATE_CACHE=0 rebuilds and re-sorts the residency candidate list on every
 // update, as it used to. See the rebuild guard in UpdateModernObjectResidency.
 static bool ResidencyCandidateCacheEnabled()
@@ -2684,10 +2706,31 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     const auto admitStart = std::chrono::steady_clock::now();
     const float admitBudgetMs = ObjectStreamBudgetMs();
     const uint32_t admitCap = _modernObjectCreatesPerUpdate * ObjectStreamMaxBatchScale();
+    // THE FLOOR, NOT THE BUDGET, IS WHAT MAKES THE FILL-IN STUTTER.
+    //
+    // The time budget cannot be consulted until `floor` objects have been attempted, so a
+    // batch whose objects are cold costs whatever they cost. Measured on Reforger Everon:
+    // 580 ms to admit the mandatory 128 - 145x over a 4 ms budget - which is why frames sit
+    // at 200 ms+ for the whole 107 s fill-in and why the world is under 10 fps while it
+    // loads. The streamer is floor-bound early and cap-bound late; it is time-bound
+    // essentially never, so the budget it advertises does almost nothing.
+    //
+    // The cost is wildly uneven and that is the point: first touch of a distinct MODEL pays
+    // the ODOL decode, LOD conversion and GPU registration, while an object reusing a loaded
+    // model costs ~0.03 ms. A fixed floor charges a frame for however many cold models happen
+    // to fall in its batch.
+    //
+    // WGR_OBJECT_STREAM_MIN_BATCH lowers the floor so the clock is reached sooner. It
+    // DEFAULTS TO THE LEGACY BATCH, i.e. today's behaviour, because the trade is real and
+    // unmeasured: a smaller floor bounds the frame but needs more updates to place the same
+    // objects, and with ~200k objects to admit that can lengthen the total fill even as it
+    // makes it smoother. Which matters more is a judgement about felt experience, so it
+    // wants a measurement and an owner, not a silent default change.
+    const uint32_t admitFloor = ObjectStreamMinBatch(_modernObjectCreatesPerUpdate);
     auto admitBudgetSpent = [&]
     {
-        if (attempted < _modernObjectCreatesPerUpdate)
-            return false; // always honour the legacy batch before consulting the clock
+        if (attempted < admitFloor)
+            return false; // honour the floor before consulting the clock
         if (attempted >= admitCap)
             return true;
         const auto elapsed = std::chrono::steady_clock::now() - admitStart;
