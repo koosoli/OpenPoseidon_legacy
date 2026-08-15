@@ -1857,10 +1857,10 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // Centred on 1.0 so mean coverage is unchanged: this REDISTRIBUTES foam along the shore,
         // it does not add or remove any. 0.52..1.48 is a wide enough spread to read as "heavier
         // here, lighter there" without emptying a stretch of coast completely.
-        let patch = mix(1.0, 0.52 + 0.96 * (patch_a * 0.62 + patch_b * 0.38),
+        let foam_patch = mix(1.0, 0.52 + 0.96 * (patch_a * 0.62 + patch_b * 0.38),
             select(foam_patch_gain, 0.0, shore_foam_legacy > 0.5));
         foam = clamp(foam_band * (base_gain + coast_pattern * pattern_gain) *
-            max(wp.foam_intensity, 0.0) * (1.0 + shore_break * break_gain) * far_fade * patch,
+            max(wp.foam_intensity, 0.0) * (1.0 + shore_break * break_gain) * far_fade * foam_patch,
             0.0, 1.0);
     }
     // evaluate_water_surface already fetched this texel for crest translucency.

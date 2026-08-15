@@ -1579,7 +1579,7 @@ mod tests {
         // The patch must be centred on 1.0 so it redistributes foam rather than adding it, and a
         // fully band-limited vnoise_lod returns 0.5 — so the far field must land on exactly 1.0
         // and switch the term off by construction rather than needing its own distance fade.
-        let patch_at_full_filter = 0.52 + 0.96 * (0.5 * 0.62 + 0.5 * 0.38);
+        let patch_at_full_filter: f64 = 0.52 + 0.96 * (0.5 * 0.62 + 0.5 * 0.38);
         assert!((patch_at_full_filter - 1.0).abs() < 1e-6);
 
         // The new gains must reduce peak drive but still saturate the strongest break, and the
