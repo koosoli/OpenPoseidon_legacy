@@ -3961,10 +3961,35 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // code because this side cannot see the renderer's sample count without a new ABI
             // call, and inventing one to express a dependency between two defaults is worse
             // than saying so here.
+            // REVERTED TO OFF. It shipped on for part of one session and the owner reported
+            // three separate visual regressions, all consistent with this one flag:
+            //
+            //  - buildings stopped casting shadows and interiors were lit through their walls.
+            //    EngineWgpu.cpp:1460 gates the cascades on `!_shadowCasters.empty()`, and
+            //    SceneShadowPass.cpp skips every GpuDrawCoverage::Full object when filling
+            //    that list. Moving foliage to the retained path moves it to Full, which can
+            //    empty the list and disable the cascade system wholesale.
+            //  - pine trunks disappeared again -- a fix that already exists, at
+            //    EngineWgpu.cpp:2711-2727, and lives on the CPU PER-DRAW path: without its
+            //    matching discard "the black transparent texels depth-write in the opaque
+            //    fallback and completely hide the pine's trunk behind its cards". The
+            //    retained path has no equivalent, so retaining the model loses the fix.
+            //  - near trees kept a coarse LOD. RegisterGpuModel skips levels with no
+            //    GPU-owned section, so a model whose LOD 0 is all blend leaf-cards has a
+            //    COARSER shape level as its finest registered LOD, permanently.
+            //
+            // The measured prize is real -- land:obj 42.702 -> 0.185 ms and 17.24 -> 44.69 fps
+            // on Stratis -- but it is one world's framerate against correct shadows, trunks
+            // and near detail on every world. It goes back behind the flag until the retained
+            // path can carry the trunk discard, be counted as a shadow caster, and register
+            // its finest level.
+            //
+            // WGR_TREEADV_RETAINED=1 opts back in. Do not make it the default again without
+            // checking an interior for shadows and a pine for its trunk.
             static const bool treeAdvRetained = []
             {
                 const char* v = std::getenv("WGR_TREEADV_RETAINED");
-                return !v || v[0] != '0';
+                return v && v[0] != '0';
             }();
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
                 texture && texture->GetAlphaClass() == Poseidon::AlphaStats::Blend &&

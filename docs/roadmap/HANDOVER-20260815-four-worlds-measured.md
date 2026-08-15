@@ -192,6 +192,28 @@ inside `AddShadowCaster` and would otherwise be a stale value from an earlier fr
 If that is confirmed and the proper fix is not quick, **turn the default back off**. A 2x
 framerate win on one world does not pay for every building in every world losing its shadow.
 
+## 2b. THE SAME FLAG BROKE PINE TRUNKS — and that is why it is now reverted
+
+He also reports Arma 3 pine trees have lost their trunks again, "something we once fixed".
+It was fixed, and the fix is at `EngineWgpu.cpp:2711-2727` on the **CPU per-draw path**: its
+comment says that without the matching discard "the black transparent texels depth-write in
+the opaque fallback and completely hide the pine's trunk behind its cards". The RETAINED path
+has no equivalent, so moving a pine onto it loses the fix.
+
+That is the third regression traceable to one flag I turned on, alongside the shadows above
+and the near-tree LOD. **I have reverted `WGR_TREEADV_RETAINED` to default OFF** and rebuilt
+and deployed. The measured prize was real (`land:obj` 42.702 -> 0.185 ms, Stratis 17.24 ->
+44.69 fps) but it is one world's framerate against correct shadows, trunks and near detail on
+every world.
+
+**Do not turn it back on until the retained path can do three things**: carry the trunk
+discard, be counted as a shadow caster (the `_shadowCasters` gate), and register a model's
+finest LOD rather than skipping levels that have no GPU-owned section. Then re-check an
+interior for shadows and a pine for its trunk before making it a default again.
+
+This also means **Stratis's 44.69 fps is no longer what ships.** Treat the Stratis figures in
+this document as "what is available once the retained path is correct", not as current.
+
 ## 3. Still broken, unchanged by this session's work
 
 - **Arma 2 roads are still white AND still visible through mountains.** My depth-bias fix
@@ -210,6 +232,36 @@ framerate win on one world does not pay for every building in every world losing
   while to appear — the world must load before they show.** So a capture at his coordinates
   (freefly `2736.50, 5993.66, 45.19`, az 4.5, el −27.1) needs a long warmup, or you will
   photograph a clean frame and wrongly conclude it is fixed.
+
+## 3b. Water foam — two more specific asks
+
+The lattice is gone but he wants two further changes, and they are separate:
+
+- **The foam reaches too far into deep water. Pull it closer to the coast.** That is the
+  band width, `water.wgsl` around the `eff_depth / max(wp.foam_width * 2.2, 0.4)` term — the
+  deep-side extent was already tightened 1.95 -> 1.55 this session and wants to go further.
+  The land side carries a no-hard-line guarantee; tighten the DEEP side only.
+- **It still tiles.** The 1.35 x 5.3 m rectangular lattice was fixed, so this is the residual
+  from the remaining analytic-noise octaves. The LOD-aware filtering added this session fades
+  each octave toward its mean as its cells approach pixel size; the handover for that work
+  flags `base_gain` / `pattern_gain` and the `0.45` in `far_fade`, plus the
+  `smoothstep(0.30, 0.85, ...)` cells-per-pixel handover point, as the knobs. A second
+  decorrelating octave at an incommensurate frequency is the usual next step.
+
+`WGR_WATER_SHORE_FOAM_LEGACY=1` still restores the original for comparison.
+
+## 3c. Feature request — iris/eye adaptation when looking at the sun
+
+His words: "when the player looks in the direction of the sun, the iris adjusts and it gets a
+bit darker, because now the sky is often just almost white out when looking at the sun."
+
+This is auto-exposure / eye adaptation, and it is a FEATURE, not a bug fix — do not conflate
+it with the Arma 3 light-orb bug, which is a different thing (lights mis-read as suns). The
+engine already has an HDR path (`effective gates: hdr=true`), so the question is whether it
+has any adaptation term at all or is tone-mapping at a fixed exposure. Check that before
+designing anything. A slow-adapting luminance feedback on the frame's average or a
+sun-direction-weighted term are the usual approaches; the risk to avoid is adaptation that
+pumps visibly as the camera turns, which is worse than a flat exposure.
 
 ## 4. A target to aim at, in his words
 
