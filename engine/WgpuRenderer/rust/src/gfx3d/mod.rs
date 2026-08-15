@@ -147,7 +147,15 @@ pub(crate) fn env_f32(name: &'static str, default: f32) -> f32 {
         std::env::var(name)
             .ok()
             .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| *v > 0.0)
+            // `> 0.0` here silently swallowed the single most useful value these knobs have.
+            // Every one of them is a SCALE multiplied into an effect, so 0 means "ablate this
+            // and show me the frame without it" — and it was being turned back into 1.0, i.e.
+            // the effect at FULL strength. So `WGR_DECAL_SCALE=0` did not disable the decal
+            // depth bias, it left it exactly as it was, and every prior conclusion of the form
+            // "ablated the decal bias, nothing changed, therefore the bias is not the mechanism"
+            // is void: that ablation never ran. Accept 0, reject only negatives and NaN
+            // (NaN is excluded by the comparison, which is false for NaN in either direction).
+            .filter(|v| *v >= 0.0 && v.is_finite())
             .unwrap_or(default)
     })
 }
@@ -3540,8 +3548,42 @@ impl Gfx3d {
         // Vertex-shader depth bias in [0,1] NDC depth. WGR_DECAL_SCALE / WGR_ZBIAS_SCALE
         // multiply the base unit; ZBias also scales with its 1..3 level.
         const DEPTH_BIAS_UNIT: f32 = 1.0e-5;
+
+        // DECAL is now a SEPARATE unit, because the ndc-squared fix silently rescaled it by four
+        // orders of magnitude and nobody adjusted the constant to match.
+        //
+        // The history: the bias used to be a constant NDC offset. Under reversed-Z, depth is
+        // near/z, so a constant NDC offset is a distance-DEPENDENT world pull — it dragged a road
+        // ~95 m forward at 1 km and 716 m at 3 km, which is why roads appeared through mountains.
+        // The fix multiplied by ndc squared, which is correct in SHAPE: it makes the pull a
+        // constant in WORLD space. But it changed the magnitude at the same time, and the constant
+        // was left at the value that had been tuned for the old meaning.
+        //
+        // With the ndc-squared form the world-space pull is `depth_bias * near`. This file's own
+        // calibration comment upstream uses near = 0.1 m, so 1.0e-5 buys 1.0e-6 m — ONE MICRON.
+        // That is not a small bias, it is no bias: the previous session traded a 716 m over-pull
+        // for zero, which is exactly why applying it did not fix the see-through and why the road
+        // agent's census found the mechanism still live.
+        //
+        // 5.0e-2 * 0.1 m = 0.005 m, which is ZRoadEpsilon (EngineWgpu.hpp:104) — the same
+        // world-space lift GL33 and the CPU path give a road at ClipShape.cpp:240, and which wgpu
+        // loses because GGpuTerrainConform makes the GPU conform pin the vertex flat
+        // (shader3d.wgsl:295 assigns world_pos.y and discards pos.y). So this is not a tuned
+        // magic number; it restores the documented parity value the wgpu path dropped.
+        //
+        // WGR_DECAL_SCALE still scales it, and now that env_f32 accepts 0 (see above) the
+        // ablation arm works for the first time: WGR_DECAL_SCALE=0 is genuinely no bias, and
+        // WGR_DECAL_SCALE=0.0002 reproduces the old 1e-5 behaviour for an A/B.
+        //
+        // ZBias is deliberately LEFT ALONE at the old unit even though the ndc-squared change
+        // nulled it by the same factor. It plausibly has the identical defect — but it is applied
+        // to coplanar geometry all over every world at three different levels, and correcting it
+        // 5000x blind, on a night with no way to check for z-fighting across that surface area,
+        // risks trading one reported bug for an unreported one on content nobody is looking at.
+        // It needs its own measurement. Recorded rather than fixed.
+        const DECAL_BIAS_UNIT: f32 = 5.0e-2;
         let depth_bias = match key.offset {
-            Offset::Decal => decal_scale() * DEPTH_BIAS_UNIT,
+            Offset::Decal => decal_scale() * DECAL_BIAS_UNIT,
             Offset::ZBias(level) => level as f32 * zbias_scale() * DEPTH_BIAS_UNIT,
             _ => 0.0,
         } as f64;
