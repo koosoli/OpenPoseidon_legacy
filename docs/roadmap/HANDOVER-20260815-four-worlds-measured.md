@@ -1,0 +1,137 @@
+# Handover — four worlds, four bottlenecks, and what is still open
+
+**Branch:** `feat/texture-streaming` (contains all 25 `feat/farfield-tier` commits plus this
+session's). Pushed to `safety`.
+**Date:** 2026-08-15
+
+---
+
+## READ THIS FIRST — two traps that cost this session real credibility
+
+1. **`farfield-bench.ps1` defaults to 800×600. The owner plays at 1600×900.** Three times the
+   pixels; on a GPU-bound world the GPU frame scales close to linearly. I quoted "~50 fps" on
+   Everon from an 800×600 run and was told "are you kidding" — the real figure was 40.5.
+   **Always pass `-Width 1600 -Height 900` for any number the owner will read, and state the
+   resolution beside every fps figure.** Use 800×600 only to compare arms with each other.
+
+2. **Instance count is not detail.** I shipped `WGR_LOD_GOVERNOR_RANGE=4` on the claim that
+   Everon "draws the SAME 39,670 instances, so nothing is lost". True and irrelevant: the LOD
+   *distribution* collapsed (LOD-0 population 13,800 → 631) and the owner reported the forest
+   as low-poly. **Check the LOD histogram, not `main_instances`.** It is in every capture
+   JSON as `objects.main_lod_histogram`.
+
+Also: the owner's machine has **C: 100% full at 953 GB**. Builds fail with a German
+"not enough space" error from `cargo`/`ninja` long before anything says "disk".
+
+---
+
+## The four worlds
+
+All settled (`pending=0`), 1600×900, current defaults unless noted.
+
+| world | fps | bound by | status |
+|---|---|---|---|
+| Reforger Everon | 34.1 | GPU geometry | governor decoupling available, off by default |
+| Arma 3 Stratis | — | was Pass1 CPU draw | **fixed** (+159% @ 800×600) |
+| DayZ Chernarus | 26.4 | texture VRAM | renders only with `WGR_TEXTURE_MIP_BIAS=1` |
+| Arma 1 Sahrani | 20.2 | `drw:land` → Pass2 alpha | diagnosed, not fixed |
+
+Every one contradicted the generalisation from the world measured before it. Do not assume a
+fix transfers; measure each.
+
+## What was fixed
+
+- **Stratis**: a whole-model TreeAdv bail rejected 88,084 of 163,953 placements at
+  *registration*, so the CPU drew half the world. Lifting it took `land:obj` 42.702 → 0.185 ms.
+  `WGR_TREEADV_RETAINED` (default **on**). Its own comment said to remove it once retained
+  alpha-to-coverage landed; that had landed and nobody went back.
+- **Chernarus**: renders at all for the first time. The texture LRU was **starved**, not badly
+  tuned — 113 rounds finding 1–31 candidates against 3,552 textures, because
+  `RetainGpuModel` pins every texture of every registered model.
+- **Texture upload**: one VFS open per texture instead of one per mip level; alpha
+  classification read off the compressed blocks (−54% on the hit path).
+- **Instrumentation** — this is what turned three vague "it's slow" reports into named lines:
+  `WGR_PASS1_STATS` (splits `land:obj` six ways + the coverage split + Pass2 five ways),
+  `WGR_LAND_STATS` (splits `drw:land`), `WGR_TEXTURE_STREAM_STATS`.
+
+## Open, in the order I would take them
+
+1. **Arma 1: 778 alpha objects at 36 µs each** = 27.9 ms of a 47 ms frame. They sit in the
+   `none=937` coverage bucket while 97.3% of the world is diverted. **The same 778 are the
+   missing-shadow bug** — CPU-drawn objects go through main-view caster selection and a 250 m
+   `shadowsZ` clamp, hence "shadows pop in depending on viewing angle". One fix, two symptoms.
+   Template: the Stratis bail above.
+2. **The streaming transient** — what the owner sees on every launch. `admitBudgetSpent`
+   cannot consult its 4 ms budget until the floor (128) has been *attempted*, so a batch of
+   cold models costs whatever it costs. `WGR_OBJECT_STREAM_MIN_BATCH=1` halves the stutter
+   (172 → 92 ms median) and lengthens the fill 39% (63 → 88 s). **Neither is playable**: at
+   floor 1 a *single* cold create is ~90 ms, because the ODOL decode, LOD conversion, GPU
+   registration and texture transcode are all synchronous. The real fix is making that
+   asynchronous.
+3. **Reforger materials.** 100% of Everon materials are `.emat` and *none* opens: the section
+   keeps the raw Enfusion path while its textures were rewritten to the deployed root. Even
+   if found, `TranslateEmat` reads DayZ keys (`AlbedoMap`/`NormalMap`) — of 10,312 real
+   Reforger `.emat` files only **2.2%** name any key it reads; the real ones are `BCRMap`,
+   `NMOMap`, `MaskMap`. **Zero normals and zero speculars are bound anywhere on Everon.**
+4. **Reforger ground**: `PakCommand.cpp` hardcodes a 4096 satellite for a 12.8 km world =
+   3.125 m/texel (Stratis ~1.03). It is not imagery — it is the area-averaged mean colour of
+   5 material slots, with 17 of Everon's 22 surfaces folded into the nearest by colour.
+   Raising the resolution sharpens boundaries between flat colours and adds no detail.
+5. **Chernarus texture pinning** — the real fix behind the mip-bias workaround. A pin should
+   mean "recently drawn", not "registered". **It cannot be done from C++**: `register_model`
+   bakes each texture's *bindless slot index* into the retained material table, there is no
+   unregister, and `SharedTextures::destroy` returns the slot to a LIFO free list, so the next
+   upload claims it and the live model silently samples an unrelated texture. Needs Rust-side
+   **stable slots** (reserve a slot per texture identity) or a slot indirection table.
+
+## Levers added this session (all default-off unless stated)
+
+| lever | what it does |
+|---|---|
+| `WGR_TREEADV_RETAINED` | **default ON** — foliage on the retained path (the Stratis fix) |
+| `WGR_LOD_GOVERNOR_TARGET=1` | governor drives on the target point, not a perpendicular distance — makes the range a clamp again. +36% on Everon *with* a real LOD ladder |
+| `WGR_TEXTURE_MIP_BIAS=1` | drops top mip levels. **Costs texture resolution.** The only reason Chernarus renders |
+| `WGR_OBJECT_STREAM_MIN_BATCH` | admission floor; 1 halves fill-in stutter, lengthens the fill |
+| `WGR_WATER_SHORE_FOAM_LEGACY=1` | restores the old coastline foam |
+| `WGR_SHADOW_RECOVER_LOD=1` | recovers a shadow LOD for objects the software occlusion zeroed |
+| `WGR_PASS1_STATS` / `WGR_LAND_STATS` / `WGR_TEXTURE_STREAM_STATS` | the splits above |
+| `WGR_STAGING_STRICT=1` | restores the panic on a failed staging allocation (now degrades) |
+| `WGR_GEO_POOL_GROWTH` | geometry pool growth factor, default 2.0 |
+
+## Things that are true and non-obvious
+
+- **`shadowCasters=0` proves nothing.** `ShadowMapsEnabled()` defaults **true** on wgpu, so
+  the projected accumulator never runs. The "off by default" comments are stale; I wasted a
+  measurement on them.
+- **`geometryRetired=0` is not an eviction failure.** It is a per-frame transient emptied
+  after every submit, so it is zero at any steady-state sample by construction.
+- **`registered=N` is retained *instances*,** a different denominator from resident objects.
+- Pass1 is **linear** in the object set (~3 µs/object). An earlier claim of superlinearity
+  came from comparing two governor arms that differ in LOD as well as count.
+- The **fill-in is ~107 s on Everon at 1600×900** and 253 s on Chernarus. "I launched it and
+  it was under 10 fps" is a report about the fill-in, not the settled frame. Both are true.
+
+## Reported by the owner, diagnosed, not yet fixed
+
+- **Arma 2 roads through mountains** — the decal depth bias is a *constant* NDC offset, but
+  reversed-Z depth is `near/z`, so it pulls a road ~95 m forward at 1 km and 716 m at 3 km.
+  Fixed in `shader3d.wgsl` (scale by ndc²) — **deployed but not visually verified.**
+- **DayZ rails "piano"** — `ObjectClasses.cpp:757` bails on any road model with a geometry
+  LOD, skipping the `ClipLandOn` fix at `:795`. Rail ballast is collidable, so it has one.
+  Likely also the residual Arma 2 road banding, and cheaper to check than WLD-021's standing
+  CSM hypothesis.
+- **"Drunk" swimming normals** — parallax occlusion mapping exists only on the per-draw path,
+  and roads are excluded from the retained set, so roads get it and buildings do not.
+- **Arma 3 light orbs** — pre-existing, reproducible at freefly `2736.50, 5993.66, 45.19`
+  az 4.5 el −27.1, and visible in `.tmp-bench/foam-new/run-01.png`.
+- **Grass self-shadow toggle dead** — plumbing is intact end to end, but `shadow_strength` is
+  only called from `fs_grass_mid_tuft`, bound only when `midPhotoTuft` (default false). Grass
+  casts into the CSM but `fs_grass`/`fs_grass_cards`/`fs_grass_far` sample no cascade at all.
+
+## How to work here
+
+Subagents with **disjoint file ownership** and an explicit list of who else is editing. Ask
+for null results in the brief — the most valuable findings this session were agents refusing
+the premise they were given: the texture-pin agent proved the fix I asked for is impossible
+from C++, and the streaming agent killed three of my four suspects and my "1.1 ms per object"
+figure. Both were worth more than the change I asked for.
