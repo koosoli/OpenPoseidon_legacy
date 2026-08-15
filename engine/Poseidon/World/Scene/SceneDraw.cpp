@@ -1603,6 +1603,12 @@ namespace
 // cost RISES from 15.5 to 24.8 us as the set grows. A flat per-instance cost cannot do that,
 // so the interesting question is which of the six things below is superlinear.
 //
+// The obvious suspect is already eliminated: the software occlusion pre-pass, whose
+// TestBBox-against-a-growing-occluder-buffer WOULD be superlinear, is skipped entirely in
+// every benchmarked arm (see the WGR_OBJ_OCCLUSION comment below). So the answer is in
+// AdjustComplexity, the mergers rebuild, the shape sort, or submission — and the us/object
+// column below is what separates them.
+//
 // Deliberately NOT a FrameProfiler phase. FrameProfiler::Mark is a boundary model — the time
 // lands in whichever phase is current — so a sub-phase inside PhaseDrawLandObjects would be
 // SUBTRACTED from land:obj rather than nested inside it, and would change the phase list that
@@ -1615,7 +1621,7 @@ struct Pass1Stats
     std::atomic<uint64_t> compactUs{0};   // the notUsed sweep
     std::atomic<uint64_t> complexityUs{0};// AdjustComplexity — up to 7 passes over the set
     std::atomic<uint64_t> mergersUs{0};   // _drawMergers rebuild
-    std::atomic<uint64_t> occlusionUs{0}; // software occlusion pre-pass (the superlinear suspect)
+    std::atomic<uint64_t> occlusionUs{0}; // software occlusion pre-pass — SKIPPED under gpu_driven
     std::atomic<uint64_t> sortUs{0};      // SortDrawMergersByShape
     std::atomic<uint64_t> submitUs{0};    // instanced-run batching + DrawSortObject
     std::atomic<uint64_t> objects{0};     // _drawMergers.Size() summed, to divide by
@@ -1800,27 +1806,33 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
 #endif
 
-    // WGR_OBJ_OCCLUSION=0 disables the software occlusion pre-pass for the whole session.
+    // WGR_OBJ_OCCLUSION forces the software occlusion pre-pass off (0) or ON (1).
     //
-    // This exists to make the superlinearity above testable from ONE binary. The pre-pass is
-    // the only part of Pass1 with a mechanism for it: it runs one TestBBox per candidate
-    // against an occluder buffer that RenderShape is CONCURRENTLY growing, so doubling the
-    // object set both doubles the tests and makes each test more expensive. Every other block
-    // here is a linear walk or an n-log-n sort. If land:obj does not collapse with this off,
-    // the pre-pass is exonerated and the counters below say where to look instead.
+    // THE PRE-PASS DOES NOT RUN IN THE BENCHMARKED CONFIGURATION, so do not reach for it as
+    // the explanation of the superlinearity above. EngineWgpu::PushSceneCamera executes
+    // `EnableObjOcc = !_cullDebug.occlusion` EVERY FRAME while the GPU-driven path is on, and
+    // CullDebugSettings::occlusion defaults to true, and _cullDebug is only ever written by
+    // the dev panel's Culling tab, which a non-interactive benchmark never opens. Every
+    // Stratis and Chernarus arm logs `gpu_driven=true`, so `EnableObjOcc` is false in all of
+    // them and this whole block is skipped. Established by inspection, not by a run.
+    //
+    // That is why `1` exists and not only `0`. Pass1 runs after PushSceneCamera, so a value
+    // set here wins for the frame either way — but an off-only switch could only disable
+    // something already disabled, which would have measured as "no effect" and been misread
+    // as "the pre-pass is cheap". It is not cheap; it is absent.
     //
     // Not a revert of anything: the cheat key (Shift-H) already toggles EnableObjOcc at
-    // runtime, and the GPU-driven path already forces it off when Hi-Z occlusion is on. This
-    // only makes the same switch reachable from a non-interactive benchmark run.
+    // runtime. This only makes the same switch reachable from a non-interactive run, in both
+    // directions, so the pre-pass can be priced if anyone wants it back for a CPU-driven path.
     {
-        static const bool occDisabled = []
+        static const int occForce = []
         {
             const char* v = std::getenv("WGR_OBJ_OCCLUSION");
-            return v && v[0] == '0';
+            return v ? (v[0] == '0' ? 0 : 1) : -1;
         }();
-        if (occDisabled)
+        if (occForce >= 0)
         {
-            EnableObjOcc = false;
+            EnableObjOcc = occForce != 0;
         }
     }
     if (EnableObjOcc)
