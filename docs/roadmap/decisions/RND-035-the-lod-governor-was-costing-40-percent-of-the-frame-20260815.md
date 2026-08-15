@@ -51,6 +51,14 @@ Stratis, settled, `pending=0`, 163,953 placements resident in both arms:
 | main instances | 4,337 | **12,477** |
 | LOD histogram | `[8,367,815,2165,536,446,0,0]` | `[66,779,1348,8689,570,1025,0,0]` |
 
+**Magnitude is provisional; the mechanism is not.** Two confounds are being resolved by a
+reversed-arm-order re-run: a build ran 16:04:31-16:09:24 overlapping the legacy arm's first
+repeat, and the new arm degraded monotonically across its repeats (216.9 / 331.1 / 355.7 ms),
+which is a signature of drift rather than a clean measurement. What is NOT in doubt is the
+structural half — main instances 4,337 -> 12,477 and triangles 1.03M -> 3.72M are counts, not
+timings, and they reproduce in every repeat. So the direction and cause are established; treat
+the exact fps figures as pending.
+
 **On Stratis the governor was working.** It sits near the coarse rail and culls hard to
 protect a frame that is slow for an unrelated reason. Capping the range removes that
 protection: 2.9x more instances are drawn and `land:obj` scales almost linearly with them
