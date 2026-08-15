@@ -5,7 +5,7 @@ Two files:
 | file | what it does |
 |---|---|
 | `scripts/farfield-bench.ps1` | runs one **arm** (a label + a set of env vars) N times, writes one metrics JSON + PNG + log per repeat |
-| `scripts/farfield-compare.py` | reads two or more arms and prints the comparison table |
+| `scripts/farfield-compare.py` | reads two or more arms and prints the comparison table — GPU regions **and** the CPU frame phases |
 
 Nothing here builds the game. It measures **whatever binary is installed** in the game
 directory, which is the only way to benchmark while somebody else is mid-edit in `engine/`.
@@ -132,7 +132,11 @@ attributed (sum of top-level)                18.674       18.122       -0.552   
 residual (untimed passes)              11.644 (38%) 11.234 (38%)       -0.410        -3.5%
 ```
 
-Three rules the comparer enforces, none of them optional:
+That is the **GPU** frame. Read the CPU section below it before drawing any conclusion from
+these three rows — on the imported worlds the GPU is a minority of wall clock, so a GPU-only
+delta can be real and still change nothing.
+
+Four rules the comparer enforces, none of them optional:
 
 1. **The cheapest steady frame is quoted, never the mean.** A second process on the GPU
    inflates *every* region by a common factor (RND-033 measured 27.9 ms against 7.6 ms for
@@ -147,12 +151,114 @@ Three rules the comparer enforces, none of them optional:
    capture writer emits that rule per row). Roughly half of every frame is in passes with no
    timer region — main-view sky, the cloud march and composite, bloom, godrays, tonemap, UI —
    so the difference between the frame and the attributed sum is reported, not hidden.
+4. **A missing measurement is never a zero.** `cpu_frame_phases_ms` absent from an old capture
+   prints as absent and says why; it does not default to 0 ms of CPU work.
 
 Useful flags: `--all-regions` (also lists the nested leaves under their containers, which must
-never be added to the top-level sum), `--top N`, `--json out.json`, `--include-contended`.
+never be added to the top-level sum, **and** a second CPU-phase table showing p95), `--top N`,
+`--json out.json`, `--include-contended`.
 
 Exit codes: `0` fine, `1` an arm is missing/malformed/has no usable capture, `2` fewer than
 two `--arm` values.
+
+---
+
+## The CPU section — the one that decides
+
+`WriteCaptureMetrics` also emits `cpu_frame_phases_ms`, straight out of the always-on
+`Poseidon::Dev::FrameProfiler` (`engine/Poseidon/Dev/Diag/FrameProfiler.hpp`). Until it was
+added, the CPU side of the frame was visible only through the dev panel or `triPerfStats` —
+i.e. only to somebody sitting at the keyboard — so every recorded capture in the repo shows
+GPU numbers for a frame that is mostly **not** GPU.
+
+```
+CPU FRAME (ms)
+                                             legacy       tiered        delta            %
+------------------------------------------------------------------------------------------
+sampled frames (profiler ring)                  256          256
+avg fps                                        8.99        11.90       +2.912       +32.4%
+CPU frame (avg)                             111.200       84.000      -27.200       -24.5%
+CPU frame (p95)                             148.300      115.200      -33.100       -22.3%
+CPU frame (max)                             402.100      348.400      -53.700       -13.4%
+GPU frame total (cheapest repeat)            30.403       30.403       +0.000        +0.0%
+------------------------------------------------------------------------------------------
+>> CPU frame MINUS GPU frame                 80.797       53.597      -27.200       -33.7%
+   GPU share of the CPU frame                 27.3%        36.2%
+```
+
+**`>> CPU frame MINUS GPU frame` is the headline.** It is the part of the frame no GPU change
+can touch. If it dominates, a GPU-only win moves nothing a player can see — RND-033 measured
+the GPU at roughly 9% of wall clock on the heavy imported worlds, so a shader that halves a
+3 ms pass buys 1.5 ms out of a 110 ms frame. A **negative** value means the frame genuinely is
+GPU-bound and GPU work is the right target.
+
+Two windows, not one: the CPU rows are **averages over the profiler ring** (up to 256 frames
+of the run), while the GPU row is the single cheapest repeat. The subtraction is a magnitude,
+not two simultaneous measurements. The cheapest-repeat rule still selects the repeat by *GPU*
+frame total, so the CPU numbers quoted come from whichever repeat won on GPU.
+
+### The phase table
+
+```
+CPU PHASES (ms, avg per frame; DESCENDING -- the dominant phase is first)
+land:gnd  <<< +OBJECT STREAMING              58.700       31.500      -27.200       -46.3%
+land:obj                                     14.200       13.900       -0.300        -2.1%
+setup                                        12.400       12.100       -0.300        -2.4%
+...
+attributed (sum of phase avgs)              109.400       81.100      -28.300       -25.9%
+unattributed (frame - phases)            1.800 (2%)   2.900 (3%)       +1.100       +61.1%
+```
+
+Sorted **descending by avg**, so the phase to attack is the first row. The twelve phases are
+`setup`, `drw:init`, `drw:prep`, `land:gnd`, `land:obj`, `drw:land`, `drw:obj`, `drw:post`,
+`hud`, `ai+veh`, `sound`, `swap` — marked sequentially from the frame start, so they partition
+the frame and the **averages** are additive. p95 is **not**: different frames peak in different
+phases, so a sum of p95s describes a frame that never ran. Only avgs are summed; p95 gets its
+own table under `--all-regions`.
+
+`unattributed` is the gap between the frame total and the phase sum — the profiler's last mark
+to `EndFrame`. A couple of percent is normal; a large one means a phase boundary is missing.
+
+### `land:gnd` includes object streaming
+
+The tool prints this in a banner and tags the row, and it is not decoration:
+
+> `UpdateModernObjectResidency` is called from `TerrainWgpu::DrawTerrain`, so object admission
+> is billed **inside** the terrain phase.
+
+A large `land:gnd` on a heavy world is **object cost, not terrain rasterisation cost**. Read it
+as terrain and the next day goes into terrain meshing while the actual cost sits in placement
+admission. Cross-check against `objects.registered_instances` and the streaming levers
+(`WGR_OBJECT_STREAM_MS_PER_UPDATE`, `WGR_OBJECT_STREAM_MAX_OBJECTS`) before touching terrain.
+
+### Healthy vs unhealthy splits
+
+| shape | reading |
+|---|---|
+| no phase over ~35% of the frame, `land:gnd` in line with `land:obj` | **healthy** — cost is spread; there is no single win, only broad ones |
+| `land:gnd` at 40-60% on a heavy imported world | **streaming-bound**, almost never terrain. Attack residency/admission |
+| `setup` dominant | scripts, input, network or landscape sim — not the renderer at all |
+| `ai+veh` dominant | simulation, not rendering. A renderer A/B on this world measures nothing |
+| `swap` dominant | presentation stall: vsync, or the CPU waiting on a GPU that is genuinely the bottleneck. Check the CPU-minus-GPU row — it will be small |
+| CPU frame ≫ GPU frame (GPU share under ~20%) | **CPU-bound.** GPU-side A/Bs on this world are noise-hunting |
+| GPU share above ~80% | GPU-bound; the GPU tables above are the ones to read |
+| p95 more than ~2× avg on one phase | that phase spikes. An average-only comparison will hide it — check the p95 table (`--all-regions`) |
+
+### Old captures
+
+Captures written before the instrumentation have no such block, and they are still perfectly
+good GPU measurements. The comparer prints
+
+```
+  cpu_frame_phases_ms absent (binary predates the instrumentation)
+```
+
+and names the arms, rather than crashing or — much worse — printing zeros. **Absent means
+unrecorded, never zero**: a zero CPU frame is the single most misleading thing this tool could
+say about a CPU-bound world. In a mixed A/B (one arm's binary has the block, the other's does
+not) the missing arm's cells read `absent`, deltas read `n/a`, and the tool tells you that you
+are comparing two different binaries. In `--json`, such an arm gets
+`"cpu": {"present": false, "reason": ...}` — null, not zeros.
 
 ---
 

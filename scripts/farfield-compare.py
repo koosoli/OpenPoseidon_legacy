@@ -3,9 +3,16 @@
 
 Reads the output of scripts/farfield-bench.ps1 (one directory per arm, N repeats each)
 and prints a GPU frame comparison: frame total, the top-level timed regions, the
-residual, object instance/triangle counts and the main-view LOD histogram.
+residual, object instance/triangle counts and the main-view LOD histogram -- plus the
+CPU frame breakdown (`cpu_frame_phases_ms`) when the capturing binary emitted one.
 
 House rules, all of them load-bearing:
+
+  * THE CPU FRAME IS THE ONE THAT DECIDES.  On the heavy imported worlds the GPU is
+    roughly 9% of wall clock (docs/roadmap/decisions/RND-033), so a change that shaves
+    GPU milliseconds off a CPU-bound world moves nothing a player can see.  The headline
+    row is therefore "CPU frame MINUS GPU frame": the part of the frame the GPU is not
+    even involved in.  Shrink that or the frame does not shrink.
 
   * QUOTE THE CHEAPEST STEADY FRAME, NEVER THE MEAN.  A shared GPU inflates every timed
     region by a common factor (docs/roadmap/decisions/RND-033 measured 27.9 ms vs 7.6 ms
@@ -27,6 +34,12 @@ House rules, all of them load-bearing:
     currently in passes with no timer region at all, so the difference between the frame
     and the attributed sum is a first-class row here, not a rounding error.
 
+  * `land:gnd` IS NOT ONLY TERRAIN.  `UpdateModernObjectResidency` is called from
+    `TerrainWgpu::DrawTerrain`, so object streaming is billed inside the terrain phase.
+    A large `land:gnd` on a heavy world is object admission, not terrain rasterisation.
+    The tool shouts this on the row itself, because reading it as terrain cost sends the
+    next day's work at the wrong subsystem.
+
 Usage:
     python scripts/farfield-compare.py --arm A=.tmp-farfield-bench/legacy \
                                        --arm B=.tmp-farfield-bench/tiered
@@ -44,6 +57,20 @@ FRAME_TOTAL_REGION = "GPU frame total"
 DID_NOT_RUN = -1.0
 
 LOD_LABELS = ["LOD 0", "LOD 1", "LOD 2", "LOD 3", "LOD 4", "LOD 5", "LOD 6", "LOD 7+"]
+
+# The CPU-side block WriteCaptureMetrics emits from Poseidon::Dev::FrameProfiler.
+CPU_BLOCK = "cpu_frame_phases_ms"
+
+# UpdateModernObjectResidency runs inside TerrainWgpu::DrawTerrain, so every millisecond of
+# object streaming is billed to the terrain phase.  Anyone reading this row as "terrain is
+# slow" optimises the wrong subsystem, so the row carries the warning wherever it is printed.
+STREAMING_PHASE = "land:gnd"
+STREAMING_TAG = "<<< +OBJECT STREAMING"
+STREAMING_NOTE = (
+    "!! land:gnd INCLUDES OBJECT STREAMING.  UpdateModernObjectResidency is called from\n"
+    "!! TerrainWgpu::DrawTerrain, so object admission is billed inside the terrain phase.\n"
+    "!! A large land:gnd on a heavy world is OBJECT cost, not terrain rasterisation cost."
+)
 
 
 class BadCapture(Exception):
@@ -98,6 +125,88 @@ class Capture:
         )
         self.residual = self.frame_total - self.attributed
 
+        # ---- CPU frame phases ---------------------------------------------------------
+        # Optional on purpose: every capture taken before the instrumentation landed has no
+        # such block, and those captures are still perfectly good GPU measurements.  A
+        # missing block is reported as missing; it is never defaulted to zeros, which would
+        # read as "the CPU did no work" -- the single most misleading thing this tool could
+        # print about a CPU-bound world.
+        block = payload.get(CPU_BLOCK)
+        self.cpu: dict | None = block if isinstance(block, dict) else None
+        self.cpu_phases: dict[str, dict] = {}
+        if self.cpu is not None:
+            phases = self.cpu.get("phases")
+            if isinstance(phases, dict):
+                for name, stats in phases.items():
+                    if isinstance(stats, dict):
+                        self.cpu_phases[str(name)] = stats
+
+    @property
+    def has_cpu(self) -> bool:
+        return self.cpu is not None
+
+    def cpu_value(self, key: str) -> float | None:
+        """A scalar off the CPU block (frame_avg, frame_p95, frame_max, avg_fps, ...)."""
+        if self.cpu is None:
+            return None
+        value = self.cpu.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    def cpu_phase(self, name: str, stat: str = "avg") -> float | None:
+        stats = self.cpu_phases.get(name)
+        if not isinstance(stats, dict):
+            return None
+        value = stats.get(stat)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+
+    @property
+    def cpu_frame(self) -> float | None:
+        return self.cpu_value("frame_avg")
+
+    @property
+    def cpu_attributed(self) -> float | None:
+        """Sum of the per-phase averages.
+
+        The profiler marks phases sequentially from the frame start, so the phases partition
+        the frame and their averages are additive.  (p95 is NOT additive across phases --
+        different frames peak in different phases -- so only the averages are ever summed.)
+        """
+        if self.cpu is None or not self.cpu_phases:
+            return None
+        total = 0.0
+        for name in self.cpu_phases:
+            value = self.cpu_phase(name)
+            if value is not None:
+                total += value
+        return total
+
+    @property
+    def cpu_residual(self) -> float | None:
+        frame = self.cpu_frame
+        attributed = self.cpu_attributed
+        if frame is None or attributed is None:
+            return None
+        return frame - attributed
+
+    @property
+    def cpu_minus_gpu(self) -> float | None:
+        """The headline: wall-clock CPU frame with the GPU frame taken out.
+
+        This is the part of the frame no GPU change can touch.  A negative value means the
+        frame really is GPU-bound and GPU work is the right target -- rare on the imported
+        worlds.  The two terms come from different windows (CPU is an average over the
+        profiler ring, GPU is the single cheapest repeat), so read it as a magnitude, not
+        as an exact subtraction of two simultaneous measurements.
+        """
+        frame = self.cpu_frame
+        if frame is None:
+            return None
+        return frame - self.frame_total
+
     def ms(self, region_name: str) -> float | None:
         row = self.by_name.get(region_name)
         if row is None:
@@ -107,6 +216,15 @@ class Capture:
     @property
     def renderer(self) -> str:
         return str(self.payload.get("renderer", "?"))
+
+    @property
+    def main_instances(self) -> int:
+        """Instances actually drawn in the main view. 0 means the capture landed
+        before the world streamed in, which makes its frame time meaningless."""
+        try:
+            return int(self.objects.get("main_instances", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     @property
     def objects(self) -> dict:
@@ -123,6 +241,8 @@ class Arm:
         self.captures: list[Capture] = []
         self.rejected: list[str] = []
         self.chosen: Capture | None = None
+        # Repeats dropped for having drawn nothing; surfaced so a thin arm is visible.
+        self.degenerate: list[str] = []
 
     def choose(self, include_contended: bool) -> None:
         pool = [c for c in self.captures if not c.contended]
@@ -132,6 +252,30 @@ class Arm:
             pool = list(self.captures)
         if not pool:
             return
+
+        # Reject repeats that drew nothing before applying the cheapest-frame rule.
+        #
+        # "Quote the cheapest steady frame" defends against GPU contention, which
+        # inflates every timed region by a common factor. It does NOT defend against a
+        # repeat that captured before the world finished streaming: such a frame is
+        # genuinely the cheapest in the set (one was observed at 0.923 ms with zero main
+        # instances) and the minimum rule selects it every time. That silently turns an
+        # A/B into a comparison against an empty scene, which is exactly the class of
+        # false finding the rule exists to prevent.
+        #
+        # Only applied when some repeat DID draw, so a legitimately empty scene (an
+        # ocean-facing pose, a world with no objects) still reports rather than erroring.
+        drew = [c for c in pool if c.main_instances > 0]
+        if drew and len(drew) < len(pool):
+            for c in pool:
+                if c.main_instances <= 0:
+                    self.degenerate.append(c.name)
+                    self.rejected.append(
+                        f"{c.name}: 0 main instances -- captured before the world streamed in, "
+                        f"so its {c.frame_total:.3f} ms frame is not a measurement"
+                    )
+            pool = drew
+
         # Cheapest steady frame -- see the module docstring for why this is a minimum.
         self.chosen = min(pool, key=lambda c: c.frame_total)
 
@@ -237,6 +381,28 @@ def delta_cells(base: float | None, other: float | None) -> tuple[str, str]:
     return (f"{delta:+.3f}", f"{(delta / base) * 100.0:+.1f}%")
 
 
+def fmt_cpu_ms(value: float | None) -> str:
+    """CPU timings have no 'did not run' sentinel -- every phase is always entered.
+
+    So a negative number here is a real negative (the CPU-minus-GPU row on a GPU-bound
+    frame), and must print as such rather than being swallowed by the -1 convention that
+    governs the GPU region table.
+    """
+    if value is None:
+        return "absent"
+    return f"{value:.3f}"
+
+
+def delta_cells_plain(base: float | None, other: float | None) -> tuple[str, str]:
+    """Delta for values with no sentinel encoding -- plain subtraction."""
+    if base is None or other is None:
+        return ("n/a", "n/a")
+    delta = other - base
+    if abs(base) < 1e-9:
+        return (f"{delta:+.3f}", "n/a")
+    return (f"{delta:+.3f}", f"{(delta / abs(base)) * 100.0:+.1f}%")
+
+
 def row_line(name: str, cells: list[str], indent: int = 0) -> str:
     label = (" " * indent) + name
     if len(label) > NAME_WIDTH:
@@ -258,6 +424,166 @@ def separator() -> str:
 # ---------------------------------------------------------------------------------------
 # report
 # ---------------------------------------------------------------------------------------
+
+
+def report_cpu(arms: list[Arm], chosen: list[Capture], two_arm: bool, extra: list[str], show_all: bool) -> None:
+    """The CPU side of the frame, and the headline CPU-minus-GPU row.
+
+    Every row here is an AVERAGE over the profiler's ring (up to 256 frames), not the single
+    cheapest frame the GPU table quotes.  The two windows differ; that is stated in the
+    output rather than papered over, because silently mixing them is how a 'CPU frame' gets
+    compared against a GPU frame from a different second and the difference gets believed.
+    """
+    print()
+    print("CPU FRAME (ms)")
+    print(separator())
+
+    missing = [arm.label for arm, capture in zip(arms, chosen) if not capture.has_cpu]
+    if len(missing) == len(arms):
+        print(f"  {CPU_BLOCK} absent (binary predates the instrumentation)")
+        print(f"    arms without it: {', '.join(missing)}")
+        print("    The CPU side of these frames was never recorded. It is NOT zero, and it is")
+        print("    NOT covered by the GPU numbers above -- on the imported worlds the GPU is")
+        print("    about 9% of wall clock. Re-capture with a binary that emits the block")
+        print("    before concluding anything about frame time from this run.")
+        return
+    if missing:
+        print(f"  {CPU_BLOCK} absent (binary predates the instrumentation) in: {', '.join(missing)}")
+        print("    Those arms show 'absent' below -- not zero. A mixed A/B like this compares")
+        print("    two different binaries; re-capture both arms before quoting a CPU delta.")
+
+    print(header_line(arms, extra))
+    print(separator())
+
+    frames_cells = [fmt_count(capture.cpu_value("sampled_frames")) for capture in chosen]
+    print(row_line("sampled frames (profiler ring)", frames_cells))
+
+    fps_cells = []
+    for capture in chosen:
+        value = capture.cpu_value("avg_fps")
+        fps_cells.append("absent" if value is None else f"{value:.2f}")
+    if two_arm:
+        fps_cells += list(delta_cells_plain(chosen[0].cpu_value("avg_fps"), chosen[1].cpu_value("avg_fps")))
+    print(row_line("avg fps", fps_cells))
+
+    for key, label in (("frame_avg", "CPU frame (avg)"), ("frame_p95", "CPU frame (p95)"), ("frame_max", "CPU frame (max)")):
+        cells = [fmt_cpu_ms(capture.cpu_value(key)) for capture in chosen]
+        if two_arm:
+            cells += list(delta_cells_plain(chosen[0].cpu_value(key), chosen[1].cpu_value(key)))
+        print(row_line(label, cells))
+
+    gpu_cells = [f"{capture.frame_total:.3f}" for capture in chosen]
+    if two_arm:
+        gpu_cells += list(delta_cells(chosen[0].frame_total, chosen[1].frame_total))
+    print(row_line("GPU frame total (cheapest repeat)", gpu_cells))
+
+    print(separator())
+    headline_cells = [fmt_cpu_ms(capture.cpu_minus_gpu) for capture in chosen]
+    if two_arm:
+        headline_cells += list(delta_cells_plain(chosen[0].cpu_minus_gpu, chosen[1].cpu_minus_gpu))
+    print(row_line(">> CPU frame MINUS GPU frame", headline_cells))
+
+    share_cells = []
+    for capture in chosen:
+        frame = capture.cpu_frame
+        if frame is None or frame <= 0.0:
+            share_cells.append("absent")
+        else:
+            share_cells.append(f"{capture.frame_total / frame * 100.0:.1f}%")
+    print(row_line("   GPU share of the CPU frame", share_cells))
+    print(separator())
+    print("  >> is the headline. It is the part of the frame no GPU change can touch: if it")
+    print("     dominates, a GPU-only win moves nothing. A NEGATIVE value means the frame")
+    print("     really is GPU-bound (or the two measurement windows drifted -- CPU rows are")
+    print("     averaged over the ring, the GPU row is the single cheapest repeat).")
+
+    # ---- per-phase ---------------------------------------------------------------------
+    ordered: list[str] = []
+    for capture in chosen:
+        for name in capture.cpu_phases:
+            if name not in ordered:
+                ordered.append(name)
+
+    def phase_peak(name: str) -> float:
+        best = None
+        for capture in chosen:
+            value = capture.cpu_phase(name)
+            if value is not None and (best is None or value > best):
+                best = value
+        return -1.0 if best is None else best
+
+    ordered.sort(key=lambda name: -phase_peak(name))
+
+    phaseless = [
+        arm.label for arm, capture in zip(arms, chosen) if capture.has_cpu and not capture.cpu_phases
+    ]
+    if not ordered:
+        print()
+        print("  no arm's CPU block carries a 'phases' object -- there is a frame total but no")
+        print("  breakdown. The frame rows above still stand; nothing below them can be said.")
+        return
+
+    print()
+    print("CPU PHASES (ms, avg per frame; DESCENDING -- the dominant phase is first)")
+    print(separator())
+    if phaseless:
+        print(f"  no 'phases' object in: {', '.join(phaseless)} -- every phase reads 'absent' there,")
+        print("  which means unrecorded, not zero.")
+    print(header_line(arms, extra))
+    print(separator())
+    for name in ordered:
+        label = name
+        if name == STREAMING_PHASE:
+            label = f"{name}  {STREAMING_TAG}"
+        cells = [fmt_cpu_ms(capture.cpu_phase(name)) for capture in chosen]
+        if two_arm:
+            cells += list(delta_cells_plain(chosen[0].cpu_phase(name), chosen[1].cpu_phase(name)))
+        print(row_line(label, cells))
+
+    print(separator())
+    attributed_cells = [fmt_cpu_ms(capture.cpu_attributed) for capture in chosen]
+    if two_arm:
+        attributed_cells += list(delta_cells_plain(chosen[0].cpu_attributed, chosen[1].cpu_attributed))
+    print(row_line("attributed (sum of phase avgs)", attributed_cells))
+
+    residual_cells = []
+    for capture in chosen:
+        residual = capture.cpu_residual
+        frame = capture.cpu_frame
+        if residual is None:
+            residual_cells.append("absent")
+        elif frame and frame > 0.0:
+            residual_cells.append(f"{residual:.3f} ({residual / frame * 100.0:.0f}%)")
+        else:
+            residual_cells.append(f"{residual:.3f}")
+    if two_arm:
+        residual_cells += list(delta_cells_plain(chosen[0].cpu_residual, chosen[1].cpu_residual))
+    print(row_line("unattributed (frame - phases)", residual_cells))
+    print("  (only AVERAGES are summed: p95 is not additive across phases -- different")
+    print("   frames peak in different phases, so summing p95 invents a frame that never ran)")
+
+    if STREAMING_PHASE in ordered:
+        print()
+        print("!" * (NAME_WIDTH + VALUE_WIDTH * 4))
+        print(STREAMING_NOTE)
+        print("!" * (NAME_WIDTH + VALUE_WIDTH * 4))
+
+    if show_all:
+        print()
+        print("CPU PHASES (ms, p95 -- spike behaviour; never add these up)")
+        print(separator())
+        print(header_line(arms, extra))
+        print(separator())
+        for name in ordered:
+            label = name
+            if name == STREAMING_PHASE:
+                label = f"{name}  {STREAMING_TAG}"
+            cells = [fmt_cpu_ms(capture.cpu_phase(name, "p95")) for capture in chosen]
+            if two_arm:
+                cells += list(
+                    delta_cells_plain(chosen[0].cpu_phase(name, "p95"), chosen[1].cpu_phase(name, "p95"))
+                )
+            print(row_line(label, cells))
 
 
 def report(arms: list[Arm], show_all_regions: bool, top: int) -> None:
@@ -318,6 +644,8 @@ def report(arms: list[Arm], show_all_regions: bool, top: int) -> None:
                 f"({capture.attributed:.3f} > {capture.frame_total:.3f} ms). Its region-nesting "
                 "table disagrees with this tool -- do not quote these numbers."
             )
+
+    report_cpu(arms, chosen, two_arm, extra, show_all_regions)
 
     # ---- top-level regions -------------------------------------------------------------
     ordered_names: list[str] = []
@@ -563,6 +891,34 @@ def main(argv: list[str]) -> int:
                 "regions": {row["name"]: float(row["milliseconds"]) for row in capture.top_level},
                 "objects": capture.objects,
             }
+            # null, not 0.0, when the binary predates the CPU instrumentation: a consumer
+            # that sees zeros will believe them.
+            if capture.has_cpu:
+                payload[arm.label]["cpu"] = {
+                    "present": True,
+                    "sampled_frames": (
+                        None
+                        if capture.cpu_value("sampled_frames") is None
+                        else int(capture.cpu_value("sampled_frames"))
+                    ),
+                    "avg_fps": capture.cpu_value("avg_fps"),
+                    "frame_avg_ms": capture.cpu_frame,
+                    "frame_p95_ms": capture.cpu_value("frame_p95"),
+                    "frame_max_ms": capture.cpu_value("frame_max"),
+                    "cpu_minus_gpu_ms": capture.cpu_minus_gpu,
+                    "phases_attributed_ms": capture.cpu_attributed,
+                    "phases_unattributed_ms": capture.cpu_residual,
+                    "phases": {name: dict(stats) for name, stats in capture.cpu_phases.items()},
+                    "note": (
+                        f"{STREAMING_PHASE} includes object streaming "
+                        "(UpdateModernObjectResidency runs inside TerrainWgpu::DrawTerrain)"
+                    ),
+                }
+            else:
+                payload[arm.label]["cpu"] = {
+                    "present": False,
+                    "reason": f"{CPU_BLOCK} absent (binary predates the instrumentation)",
+                }
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=2)
         print(f"wrote {args.json}")
