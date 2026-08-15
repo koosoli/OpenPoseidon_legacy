@@ -147,6 +147,79 @@ figure. Both were worth more than the change I asked for.
 
 ---
 
+# OWNER FEEDBACK AFTER THE SESSION — READ BEFORE TRUSTING ANY NUMBER ABOVE
+
+The owner looked at the deployed build and reported the following. Some of it contradicts
+measurements in this document. **Where they conflict, he is right and the measurement is
+describing a state he never occupies.**
+
+## 1. Reforger is ~4 fps for him, not the 40.5 fps measured here
+
+This is the most important line in the document. Every Reforger figure above comes from a
+FIXED freefly pose, settled to `pending=0`, captured by auto-screenshot. He plays by MOVING.
+If moving re-triggers residency streaming continuously, he is permanently inside the
+fill-in transient (which this document already measures at 200 ms+ frames, i.e. ~5 fps) and
+never reaches the settled frame being quoted.
+
+**Do not report another Reforger number until you have measured a MOVING camera.** The
+harness only does static poses; that is a hole in the methodology, not a detail. If a moving
+camera does sit in the transient permanently, then the streaming transient is not "the thing
+you see at launch" — it is the whole experience, and it outranks everything else here.
+
+## 2. REGRESSION — buildings no longer cast shadows, interiors are lit through walls
+
+He has before/after screenshots: sunlight now falls on an interior hall floor and ignores the
+walls entirely, where it used to be correctly shadowed. He calls it a big regression, and he
+is almost certainly right that it is recent.
+
+**I probably caused this, and here is the mechanism to check first.**
+`EngineWgpu.cpp:1460` gates the whole cascade system on
+
+    shadowActive = _smCascadesValid && !_shadowCasters.empty()
+
+and `SceneShadowPass.cpp:508-512` deliberately SKIPS every `GpuDrawCoverage::Full` object when
+filling `_shadowCasters`. I turned `WGR_TREEADV_RETAINED` **on by default** this session, which
+moves far more objects onto the retained path and therefore to Full coverage — plausibly
+emptying that list and disabling cascades wholesale.
+
+**First test of the night, it is five minutes:** run a world with an interior and compare
+`WGR_TREEADV_RETAINED=0` against the default. If shadows come back with it off, that is the
+cause, and the fix is the one the shadow audit already described — drop `!_shadowCasters.empty()`
+from the gate and gate on `_smCascadesValid && (!_shadowCasters.empty() || gpuDrivenShadowsActive)`,
+**and** set `_smCamPos` from the current camera in `InitDraw`, because today it is written only
+inside `AddShadowCaster` and would otherwise be a stale value from an earlier frame.
+
+If that is confirmed and the proper fix is not quick, **turn the default back off**. A 2x
+framerate win on one world does not pay for every building in every world losing its shadow.
+
+## 3. Still broken, unchanged by this session's work
+
+- **Arma 2 roads are still white AND still visible through mountains.** My depth-bias fix
+  (ndc² scaling in `shader3d.wgsl`) did NOT fix the see-through — so either the bias is not
+  the mechanism, or it is not the only one. The white is a separate, still-undiagnosed bug.
+  **The owner's lead is the one to follow: roads are correct in Arma 1 and DayZ. Diff a
+  working road against a broken one rather than reading the broken one alone.**
+- **Trees near the camera still show a far LOD, and cast no shadow.** Note this persists after
+  the governor default was reverted to 16, so the LOD half is NOT only the governor — see the
+  registered-LOD filter note (a model whose finest GPU-registered LOD is coarse, because
+  `RegisterGpuModel` skips levels with no GPU-owned section, is pinned there permanently).
+- **Stones still transparent from one side** (the known partial-alpha granite case, MAT-047).
+- **Many buildings untextured or drawn wrong** — consistent with the Reforger `.emat` finding
+  above (zero normals and zero speculars bound anywhere).
+- **Arma 3 light orbs persist.** IMPORTANT PRACTICAL NOTE FROM THE OWNER: **the orbs take a
+  while to appear — the world must load before they show.** So a capture at his coordinates
+  (freefly `2736.50, 5993.66, 45.19`, az 4.5, el −27.1) needs a long warmup, or you will
+  photograph a clean frame and wrongly conclude it is fixed.
+
+## 4. A target to aim at, in his words
+
+**Arma 3's lighting looks great. Arma 2's used to, and no longer does.** That is a concrete,
+checkable goal: find what Arma 3 does in the lighting/material path that Arma 2 no longer
+gets. It is likely the same class of finding as the road one — a working reference exists
+in-tree, so diff the two rather than theorising about either.
+
+---
+
 # Working overnight, unattended
 
 The owner is asleep. Nobody will answer a question, so **do not stop to ask one** — pick the
