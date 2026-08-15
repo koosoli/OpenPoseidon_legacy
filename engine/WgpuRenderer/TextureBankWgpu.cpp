@@ -99,15 +99,11 @@ void TextureBankWgpu::TrimResidency()
 
 int TextureBankWgpu::Find(RStringB name) const
 {
-    for (int i = 0; i < _texture.Size(); i++)
-    {
-        TextureWgpu* texture = _texture[i];
-        if (texture && texture->GetName() == name)
-        {
-            return i;
-        }
-    }
-    return -1;
+    // Was a linear scan of _texture comparing `texture->GetName() == name`.
+    // _textureByName uses that same operator== as its equality predicate, so the
+    // result is identical - see the NameHash/NameEqual comment in the header.
+    const auto it = _textureByName.find(name);
+    return it == _textureByName.end() ? -1 : it->second;
 }
 
 Ref<Texture> TextureBankWgpu::Load(RStringB name)
@@ -122,6 +118,10 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     TextureWgpu* texture = new TextureWgpu(this);
     texture->SetName(name);
     _texture[iFree] = texture;
+    // Key off the stored name rather than the argument: SetName copies the RStringB
+    // verbatim, so the two share one interned buffer, and this cannot drift if that
+    // ever stops being true.
+    _textureByName.emplace(texture->GetName(), iFree);
     texture->Init();
     return texture;
 }

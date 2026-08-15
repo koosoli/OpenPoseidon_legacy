@@ -5,6 +5,9 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 
+#include <cstddef>
+#include <functional>
+#include <unordered_map>
 #include <vector>
 
 struct WgrRenderer;
@@ -21,6 +24,32 @@ class TextureBankWgpu : public AbstractTextBank
     // Ref returned by Load() was released, so its WGPU handle was destroyed and
     // later draws silently sampled bindless slot 0 (white fallback).
     RefArray<TextureWgpu> _texture;
+
+    // Name -> index into _texture. Find() used to scan the whole array, which is
+    // O(n) per material bind during model registration and quadratic over a world
+    // that holds several thousand textures.
+    //
+    // Matching semantics are preserved exactly by reusing RStringB::operator==
+    // as the equality predicate. That operator is interned-pointer identity
+    // (RString.hpp: `_ref == with._ref`), and RStringB's bank interns byte-exactly
+    // (MapClassTraits::CmpKey is strcmp), so equality here is case-SENSITIVE and
+    // no normalisation happens anywhere - Texture::SetName stores the RStringB
+    // verbatim. The hash must therefore agree with pointer identity, not with the
+    // characters: equal names always share one interned buffer, so hashing the
+    // address of that buffer is consistent with the predicate.
+    struct NameHash
+    {
+        std::size_t operator()(const RStringB& name) const noexcept
+        {
+            return std::hash<const void*>{}(static_cast<const void*>(name.Data()));
+        }
+    };
+    struct NameEqual
+    {
+        bool operator()(const RStringB& a, const RStringB& b) const noexcept { return a == b; }
+    };
+    std::unordered_map<RStringB, int, NameHash, NameEqual> _textureByName;
+
     WgrRenderer* _renderer;
     uint64_t _residencyFrame = 0;
     // RegisterGpuModel brackets its material scan with this optional capture.
@@ -59,7 +88,12 @@ class TextureBankWgpu : public AbstractTextBank
     Texture* GetTexture(int i) const override { return _texture[i]; }
 
     void FlushTextures() override {}
-    void ReleaseAllTextures() override { _texture.Clear(); }
+    // The only path that removes entries from _texture; the name index has to go with it.
+    void ReleaseAllTextures() override
+    {
+        _texture.Clear();
+        _textureByName.clear();
+    }
     void FlushBank(QFBank*) override {}
 
     Texture* CreateDynamic(int w, int h, const void* rgba, uint32_t size, bool mipmap = false) override;

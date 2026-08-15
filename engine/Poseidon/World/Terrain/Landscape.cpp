@@ -2805,10 +2805,10 @@ int ObjectListFull::CountNonStatic() const
 void ObjectListFull::ChangeNonStaticCount(int val)
 {
     _nNonStatic += val;
-    if (CountNonStatic() != _nNonStatic)
-    {
-        Fail("ChangeNonStaticCount: _nNonStatic not valid.");
-    }
+    // Verifying the counter costs a full O(n) rescan of the cell on every add and every
+    // delete. It is a self-check on the line above, so it belongs in debug builds only -
+    // PoseidonAssert does not evaluate its argument once NDEBUG is defined.
+    PoseidonAssert(CountNonStatic() == _nNonStatic);
 }
 
 void ObjectListFull::StaticChanged() // recalculate what is neccessary
@@ -2826,6 +2826,13 @@ void ObjectListFull::StaticChanged() // recalculate what is neccessary
         saturateMax(_bRadius, dist);
     }
     // assume center is not changed
+}
+
+// One static object's contribution to the bounding radius - the term StaticChanged()
+// folds in per object.
+static inline float StaticBSphereTerm(const Object* obj, Vector3Par center)
+{
+    return obj->Position().Distance(center) + obj->GetRadius();
 }
 
 void ObjectListFull::SetBSphere(Vector3Par center, float radius)
@@ -2858,7 +2865,24 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
     {
         if (!avoidRecalculation)
         {
-            StaticChanged();
+            // A bounding sphere only ever grows on insertion, so the full O(n) rescan
+            // StaticChanged() does here is redundant: it would return exactly
+            // max(_bRadius, term(new object)). Folding the one new object in makes
+            // filling a cell O(k) instead of O(k^2).
+            //
+            // The first static object restarts from the 50 m floor, exactly as
+            // StaticChanged() does, so an empty cell's 100 m default (SetBSphere(x,z))
+            // is not carried over and streaming a cell in reproduces the old radius
+            // bit for bit. Beyond that first object the invariant maintained is
+            // "_bRadius >= the value StaticChanged() would compute", which is the safe
+            // direction: _bRadius is only read as a conservative culling sphere
+            // (World.cpp: Camera::IsClipped / MayBeClipped).
+            if (Size() - _nNonStatic <= 1)
+            {
+                _bRadius = 50;
+            }
+            float dist = StaticBSphereTerm(object, _bCenter);
+            saturateMax(_bRadius, dist);
         }
     }
     else
@@ -2870,11 +2894,19 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
 
 void ObjectListFull::Delete(int index)
 {
-    bool isStatic = Get(index)->Static();
+    Object* obj = Get(index);
+    bool isStatic = obj->Static();
+    // Removing a static object can only shrink the sphere, and only if that object is
+    // the one holding the current bound up. Anything strictly inside leaves
+    // max(50, max term) untouched, so the rescan can be skipped outright.
+    float dist = isStatic ? StaticBSphereTerm(obj, _bCenter) : 0.0f;
     base::Delete(index);
     if (isStatic)
     {
-        StaticChanged();
+        if (dist >= _bRadius)
+        {
+            StaticChanged();
+        }
     }
     else
     {
@@ -2886,10 +2918,9 @@ void ObjectListFull::Clear()
 {
     base::Clear();
     _nNonStatic = 0;
-    if (CountNonStatic() != _nNonStatic)
-    {
-        Fail("Clear: _nNonStatic not valid.");
-    }
+    // Same rescan as ChangeNonStaticCount - debug-only self-check. (After base::Clear()
+    // the list is empty, so the scan can only ever agree.)
+    PoseidonAssert(CountNonStatic() == _nNonStatic);
 }
 
 ObjectListFull::ObjectListFull(int x, int z) : _bRadius(1e10), _nNonStatic(0)
