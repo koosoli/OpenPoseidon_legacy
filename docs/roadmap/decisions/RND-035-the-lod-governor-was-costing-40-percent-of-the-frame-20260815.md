@@ -19,8 +19,16 @@ Settled Everon (`ev_DALL.wrp`), identical residency of 199,881 objects in both a
 | cascade 3 triangles | 20,241,420 | 16,605,599 |
 | LOD histogram | `13800, 25899, 1, 0,0,0,0,0` | `1037, 3526, 4223, 15474, 13902, 1431, 77, 0` |
 
-**+66% framerate from one coefficient**, at identical residency and identical instance
-counts. It also looks *better*: at range 16 the near trees render as sparse pale specks —
+**+66% framerate**, at identical residency and identical instance counts.
+
+**Attribution, stated precisely.** The legacy arm above moved FOUR levers at once
+(governor, admission, texture eviction, far tier), so it does not by itself prove the
+governor did it. The isolation arms settle it: changing the governor ALONE
+(`D old-gov`, 30.51 fps / 32.075 ms) reproduces the legacy result almost exactly, while
+`C no-far` (53.33 fps / 18.467 ms) and `E old-admit` (50.85 fps / 18.950 ms) are
+indistinguishable from the default. The other three levers together account for
+0.85 ms of the 14.1 ms difference. So the isolated governor effect is
+**30.51 -> 50.34 fps**, and the four-lever comparison is merely consistent with it. It also looks *better*: at range 16 the near trees render as sparse pale specks —
 full branch geometry aliasing at multi-kilometre distance — where the coarse LOD is a
 solid canopy.
 
