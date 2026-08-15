@@ -51,7 +51,11 @@ Stratis, settled, `pending=0`, 163,953 placements resident in both arms:
 | main instances | 4,337 | **12,477** |
 | LOD histogram | `[8,367,815,2165,536,446,0,0]` | `[66,779,1348,8689,570,1025,0,0]` |
 
-**Magnitude is provisional; the mechanism is not.** Two confounds are being resolved by a
+**CONFIRMED by a reversed-arm-order re-run.** Legacy is rock-solid at 24.2-26.8 ms across all
+five captures; the new arm swings 16.5 -> 79.7 ms and lands at ~79 ms when run cold and first.
+Ordering and thermal drift are excluded. The regression is real.
+
+**Magnitude was provisional when first written; the mechanism never was.** Two confounds are being resolved by a
 reversed-arm-order re-run: a build ran 16:04:31-16:09:24 overlapping the legacy arm's first
 repeat, and the new arm degraded monotonically across its repeats (216.9 / 331.1 / 355.7 ms),
 which is a signature of drift rather than a clean measurement. What is NOT in doubt is the
@@ -160,6 +164,35 @@ transient, because the cost is per object created and there are 200,000 of them.
 - **It does not reduce streaming fill-in pop.** Measured picture change between 35 s and
   120 s: tier-on 3.94%, tier-off 3.97% — identical. It cannot help, because fill-in happens
   *inside* the object draw distance, where the far tier is not what draws.
+
+## Chernarus — inverts the Everon VRAM finding
+
+`WGR_RESIDENCY_TRACE=1`, final trace before the blocker below:
+
+```
+tracked=6,125,749,884   budget=2,147,483,648   overBudget=1
+textures=3552  textureBytes=3,844,048,508    (3.58 GiB, 62.7%)
+geometryLive=1,442,876,280
+geometryCapacity=2,281,701,376               (2.13 GiB, 37.2%)
+geometryRetired=0
+```
+
+**62.7% textures on Chernarus against 84% geometry pool on Everon.** The two worlds
+oversubscribe for opposite reasons, so neither generalises - and the
+`WGR_EVICT_ON_MODEL_RELEASE` decoupling, which looked like a minority term on Everon, is
+directly relevant here. `geometryRetired=0` means the eviction path never fires once at
+2.85x budget, which is a bug rather than a tuning value. RND-033's "4.23 GB" is superseded:
+it reaches **5.71 GiB against a 2 GiB budget**, and `tracked` is exactly
+`textureBytes + geometryCapacity`.
+
+**Time-to-plateau 253 s** (4.2 minutes), 199,917 objects in 230 s = **1.15 ms per object
+created**, matching Everon's ~1.1 ms. The per-object cost is constant across worlds; the
+object *count* is what scales. Stratis is 0.25 ms/object.
+
+**Blocker found while measuring:** `Buffer with 'wgr_geo_pool_vbuf' label is invalid` fires
+88 s in, long before residency settles. Rendering continues (18.344 ms GPU frame) but with
+only 28,457 of 199,917 registered, and the screenshot's `get_current_texture` then fails - so
+**no capture JSON is producible on Chernarus at all**. Fix this before benchmarking DayZ.
 
 ## Open
 
