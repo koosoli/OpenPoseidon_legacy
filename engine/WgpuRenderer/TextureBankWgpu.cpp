@@ -66,6 +66,21 @@ void TextureBankWgpu::TrimResidency()
         stats.tracked_bytes <= stats.budget_bytes)
         return;
 
+    // NOTE on the ResidentPins() check below, before anyone relaxes it: a pin means "some
+    // REGISTERED model references this", and on DayZ Chernarus that starves this LRU to 1-31
+    // candidates while tracked VRAM climbs past twice the budget. Making pinned textures
+    // evictable is the right goal but CANNOT be done from C++ -- wgr_model_register bakes each
+    // material's bindless SLOT INDEX permanently, and destroying the texture both hands that
+    // slot to the next upload (wrong texture, silently, forever) and leaves the model on the
+    // white fallback even after the re-upload. Full argument at TextureMipBias() in
+    // TextureWgpu.cpp; it needs stable slots or a slot indirection on the Rust side first.
+    //
+    // NOTE on the budget test above: stats.tracked_bytes is textures + geometry, but only
+    // textures are evictable here. A world whose GEOMETRY alone exceeds the budget (Everon is
+    // 84% geometry) therefore evicts every candidate texture every frame chasing a target it
+    // can never reach. Comparing stats.object_texture_bytes against a texture share of the
+    // budget would be the honest test; left alone deliberately, as changing it moves the
+    // numbers currently being benchmarked.
     uint64_t grace = 120;
     if (const char* value = std::getenv("WGR_TEXTURE_EVICT_GRACE_FRAMES"))
         grace = static_cast<uint64_t>(std::clamp<long long>(std::strtoll(value, nullptr, 10), 2, 36000));

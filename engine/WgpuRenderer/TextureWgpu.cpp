@@ -595,10 +595,44 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 // textures, because they are heavily reused.
 //
 // The RIGHT fix is for a pin to mean "recently drawn" rather than "registered", so the LRU
-// can do its job. That is not this change, because evicting a texture a live bind group
-// still references is very plausibly the `Texture with 'wgr_texture' label is invalid`
-// failure already seen, and it cannot be made safe without auditing the retained bind
-// lifetime. Until then this bounds the demand instead of improving the supply.
+// can do its job. That is not this change, and the reason is NOT the one previously written
+// here (a suspected use-after-free on a live bind group). Audited 2026-08-15; the real
+// blocker is that a retained model's texture reference is a BAKED BINDLESS SLOT INDEX, and
+// nothing can re-bake it:
+//
+//   * wgr_model_register resolves every material's handle to a dense slot ONCE, at
+//     registration (gfx3d/mod.rs register_model -> textures.texture_slot), and stores the
+//     integer in the retained SectionMaterialGpu table. gpu_driven.wgsl indexes the bindless
+//     array with that integer (`textures[sm.texture_slot]`).
+//   * There is no wgr_model_unregister and no material-update entry point; cull.rs's model /
+//     section / material tables are append-only. A registered model's slot is final.
+//   * SharedTextures::destroy frees the slot onto a LIFO free list (bindless_free) that
+//     alloc_slot pops first, so the NEXT texture uploaded takes the evicted texture's slot.
+//     The still-live retained model then samples that unrelated texture -- permanently, and
+//     on near objects, not just the far ones the LRU meant to demote.
+//   * Even without recycling it does not self-heal: EvictGpu clears _uploadTried, the
+//     re-upload gets a fresh handle and a fresh slot, and the baked material never learns
+//     the new number. The object stays on the white fallback for the rest of the session.
+//
+// The DIRECT draw path has none of this: gfx3d/mod.rs re-resolves texture_slot(d.texture_id)
+// during material staging every frame, so a destroyed handle costs one white frame and
+// EnsureUploaded restores it. That asymmetry is exactly why unpinned textures are already
+// safe to evict and pinned ones are not.
+//
+// Unblocking it needs a Rust-side change, not a C++ one -- either stable slots (reserve the
+// slot per texture identity so a re-upload reclaims it; an FFI that creates into a named
+// slot) or a slot indirection table the shader dereferences per draw. Neither is reachable
+// from the current FFI, which is create/update/destroy with no way to observe or pin a slot.
+//
+// Separately, the `Texture with 'wgr_texture' label is invalid` failure seen on Chernarus is
+// most likely NOT an eviction race at all: textures.rs calls device.create_texture with no
+// error scope, so an allocation the driver refuses yields an *invalid* texture whose view
+// still enters the bindless array and poisons it every frame afterwards. That is the same
+// failure mode already documented for the geometry pool at lib.rs (`Buffer with
+// 'wgr_geo_pool_vbuf' label is invalid`) -- a creation failure reported late, not a
+// use-after-free.
+//
+// Until the Rust side moves, this bounds the demand instead of improving the supply.
 int TextureMipBias()
 {
     static const int bias = []
