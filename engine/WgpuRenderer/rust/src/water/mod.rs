@@ -612,8 +612,27 @@ impl Water {
         } else {
             0.0
         };
+        // Shoreline foam A/B. The procedural foam field is analytic, so it has no mip chain and
+        // aliased hard at distance; the fix band-limits every octave against the pixel footprint,
+        // replaces the single-octave streak lattice, and cuts the band's gains. `=1` restores the
+        // pre-fix look exactly (unfiltered noise, old lattice, old gains) so a before/after capture
+        // needs one binary and a relaunch, not two builds.
+        let shore_foam_legacy = std::env::var("WGR_WATER_SHORE_FOAM_LEGACY")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        if shore_foam_legacy > 0.5 {
+            eprintln!(
+                "[wgr] shoreline foam: LEGACY (unfiltered, pre-WTR gains) from \
+                 WGR_WATER_SHORE_FOAM_LEGACY"
+            );
+        }
         let vs_constants = [("skirt_k", skirt_k)];
+        // `fs_constants` is shared with the whitewater pipeline below, whose shader declares only
+        // `linear` — wgpu rejects a pipeline whose constant map names an override the module does
+        // not have, so the surface's extra override needs its own array.
         let fs_constants = [("linear", linear)];
+        let water_fs_constants = [("linear", linear), ("shore_foam_legacy", shore_foam_legacy)];
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_water_pipeline_layout"),
@@ -671,7 +690,7 @@ impl Water {
                 module: &shader,
                 entry_point: Some("fs_water"),
                 compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &fs_constants,
+                    constants: &water_fs_constants,
                     ..Default::default()
                 },
                 targets: &[Some(wgpu::ColorTargetState {
@@ -1475,6 +1494,135 @@ mod tests {
         assert!(shader.contains("if (unstructured_foam > 0.001)"));
         assert!(shader.contains("if (raw_length > 0.0)"));
         assert!(!shader.contains("lost_variance = lost_variance"));
+    }
+
+    // The shoreline foam patterned at distance because its noise is ANALYTIC — no mip chain — so
+    // every octave kept full contrast at any number of cells per pixel, and each foam term then
+    // thresholded that aliasing into hard speckle at a fixed world frequency. The streak term was
+    // worse still: one octave of grid noise in the near-constant (alongshore, shoreward) frame,
+    // i.e. a literal rectangular lattice locked to the coast. Lock both halves of the fix, and
+    // lock that the legacy A/B path is still reachable.
+    #[test]
+    fn shoreline_foam_is_band_limited_and_has_no_fixed_frequency_lattice() {
+        let shader = include_str!("water.wgsl");
+        // Every procedural foam sample carries a footprint; none may go through raw vnoise.
+        assert!(shader.contains("fn vnoise_lod(p: vec2<f32>, w: f32) -> f32"));
+        assert!(
+            shader.contains("fn foam_noise_lod(p_world: vec2<f32>, t: f32, w_world: f32) -> f32")
+        );
+        assert!(
+            !shader.contains("fn foam_noise(p_world: vec2<f32>, t: f32) -> f32"),
+            "the unfiltered entry point must be gone, not merely unused, or a later edit \
+             will quietly call it again"
+        );
+        assert!(shader.contains(
+            "let foam_footprint = max(length(dpdx(in.base_xz)), length(dpdy(in.base_xz)))"
+        ));
+        // The four fragment call sites each scale the footprint by their own position pre-scale.
+        assert!(shader.contains("wp.time, foam_fp)"));
+        assert!(shader.contains("wp.time, foam_fp * 1.5)"));
+        assert!(shader.contains("wp.time, foam_fp * 4.6)"));
+        assert!(shader.contains("wp.time, foam_fp * 2.7)"));
+        // The lattice: two incommensurate alongshore octaves plus a warp, not one fixed 0.74.
+        assert!(shader.contains("fn shoreline_streaks("));
+        assert!(shader.contains("let s_warped = s + bend * 9.0"));
+        assert!(shader.contains("let combined = a * 0.58 + b * 0.42"));
+        assert!(
+            !shader.contains("dot(in.base_xz, shoreline_tangent) * 0.74"),
+            "the single-octave streak lattice must not survive"
+        );
+        // Strength is a SEPARATE lever from the band limiting, and both keep a legacy path.
+        assert!(shader.contains("let base_gain = select(0.20, 0.35, shore_foam_legacy > 0.5)"));
+        assert!(shader.contains("let pattern_gain = select(0.66, 0.95, shore_foam_legacy > 0.5)"));
+        assert!(shader.contains("let band_outer = select(1.55, 1.95, shore_foam_legacy > 0.5)"));
+        assert!(shader.contains("override shore_foam_legacy: f32 = 0.0;"));
+
+        // The new gains must reduce peak drive but still saturate the strongest break, and the
+        // legacy gains must reproduce the old 2.14 pre-clamp peak exactly.
+        let peak = |base: f32, pattern: f32, brk: f32| (base + pattern) * (1.0 + brk);
+        assert!((peak(0.35, 0.95, 0.65) - 2.145).abs() < 1e-4);
+        let fixed = peak(0.20, 0.66, 0.45);
+        assert!(fixed > 1.0, "the strongest surf must still reach white");
+        assert!(
+            fixed < 1.30,
+            "but the band must not be clipped flat across most of its width"
+        );
+
+        // vnoise_lod returns the raw octave at a zero footprint, so the legacy path is unfiltered.
+        assert!(shader.contains("if (detail >= 0.999) {"));
+        let detail = |w: f32| 1.0 - smoothstep(0.30, 0.85, w);
+        assert!((detail(0.0) - 1.0).abs() < 1e-6);
+        assert!(
+            detail(1.0) <= 0.001,
+            "a sub-pixel octave must reach the field mean, not merely dim"
+        );
+        assert!(
+            detail(0.5) > 0.0 && detail(0.5) < 1.0,
+            "the handover must be gradual, not a step"
+        );
+    }
+
+    fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+        let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    // naga_oil's compose test validates the WGSL but says nothing about pipeline-constant maps,
+    // and wgpu REJECTS a pipeline whose `constants` names an override the module does not declare
+    // — a panic during InitializeGraphicsEngine with no window and no log. `fs_constants` is
+    // shared by the surface and whitewater pipelines, so adding `shore_foam_legacy` to it (rather
+    // than to a second map) would take the renderer down. Compare the two constant maps against
+    // the overrides the composed naga modules actually declare.
+    //
+    // (Building the real pipelines on a headless device also catches this, and was used to verify
+    // it during development, but a fourth concurrent wgpu device in this process segfaults the
+    // driver about one run in six. Composition reaches the same invariant with no GPU.)
+    #[test]
+    fn shoreline_foam_pipeline_constants_stay_within_their_own_shader() {
+        use naga_oil::compose::NagaModuleDescriptor;
+
+        let overrides_of = |source: &str, file_path: &str| -> Vec<String> {
+            let mut composer = crate::shaders::build_composer();
+            let module = composer
+                .make_naga_module(NagaModuleDescriptor {
+                    source,
+                    file_path,
+                    ..Default::default()
+                })
+                .unwrap_or_else(|e| panic!("{file_path}: {}", e.emit_to_string(&composer)));
+            let mut names: Vec<String> = module
+                .overrides
+                .iter()
+                .filter_map(|(_, o)| o.name.clone())
+                .collect();
+            names.sort();
+            names
+        };
+
+        let surface = overrides_of(include_str!("water.wgsl"), "water/water.wgsl");
+        let whitewater = overrides_of(
+            include_str!("whitewater_render.wgsl"),
+            "water/whitewater_render.wgsl",
+        );
+
+        // Both constant maps below are the literal arrays built in Water::new.
+        for name in ["linear", "shore_foam_legacy"] {
+            assert!(
+                surface.contains(&name.to_string()),
+                "water_fs_constants names `{name}`, which water.wgsl must declare; \
+                 it declares {surface:?}"
+            );
+        }
+        assert!(whitewater.contains(&"linear".to_string()));
+        assert!(
+            !whitewater.contains(&"shore_foam_legacy".to_string()),
+            "whitewater must keep the smaller fs_constants map, not water_fs_constants"
+        );
+        let module = include_str!("mod.rs");
+        assert!(module.contains("let fs_constants = [(\"linear\", linear)];"));
+        assert!(module.contains(
+            "let water_fs_constants = [(\"linear\", linear), (\"shore_foam_legacy\", shore_foam_legacy)];"
+        ));
     }
 
     #[test]

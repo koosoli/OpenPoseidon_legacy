@@ -696,6 +696,11 @@ fn vs_water(
 // HDR path: 1 = decode tint/fog to linear, keep the glint un-clamped so it blooms.
 override linear: f32 = 0.0;
 
+// 1 = restore the pre-WTR shoreline foam exactly: unfiltered noise, the single-octave streak
+// lattice, and the old (much stronger) band gains. Driven from WGR_WATER_SHORE_FOAM_LEGACY so both
+// looks are reachable from one binary for an A/B capture. See the shoreline foam block in fs_water.
+override shore_foam_legacy: f32 = 0.0;
+
 // Water column depth (m) at this fragment: reconstruct the seabed's camera-relative position
 // from the opaque prepass depth and take the vertical gap to the water surface. In the fragment
 // shader `in.clip` is the framebuffer position (window pixels + depth), so its xy indexes the
@@ -764,19 +769,90 @@ fn vnoise(p: vec2<f32>) -> f32 {
     let d = hash2(i + vec2<f32>(1.0, 1.0));
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-// Organic multi-octave domain-warped foam noise (shared by shore swash, persistent breakers, and flecks).
+// Organic multi-octave domain-warped foam noise (shared by shore swash, persistent breakers, and
+// flecks). The unfiltered `foam_noise(p, t)` this replaced is now `foam_noise_lod(p, t, 0.0)`:
+// at a zero footprint every octave returns the raw `vnoise` and the threshold collapses back to
+// the original smoothstep(0.32, 0.64). See the band-limiting note below.
 const FOAM_FREQ: f32 = 0.55; // spatial frequency (per metre)
-fn foam_noise(p_world: vec2<f32>, t: f32) -> f32 {
+
+// ---------------------------------------------------------------------------------------------
+// WTR — band-limited foam noise.
+//
+// `vnoise` is ANALYTIC: unlike a texture it has no mip chain, so every octave keeps full contrast
+// no matter how many of its cells land inside one pixel. FOAM_FREQ's top octave is 8.37 * 0.55 =
+// 4.6 cells/m (22 cm cells) and the spray term multiplies its input by another 4.6, reaching ~5 cm
+// cells; past a few hundred metres thousands of those cells fall in one pixel. Because every foam
+// term then THRESHOLDS the field with a smoothstep, the aliasing does not average out into grey —
+// it resolves into hard-edged speckle that beats against the pixel grid at a fixed world-space
+// frequency, which is the repeating "pattern" a distant coastline shows.
+//
+// The fix is the mip a procedural field never had: fade an octave toward its own mean (0.5, which
+// is exactly what a correctly filtered mip would return) as its cell size approaches the sampling
+// footprint. `w` is that footprint expressed in CELLS OF THIS OCTAVE, so callers must scale it by
+// the same factor they scale the position by.
+fn vnoise_lod(p: vec2<f32>, w: f32) -> f32 {
+    let detail = 1.0 - smoothstep(0.30, 0.85, w);
+    // Sub-pixel: the octave carries no signal, only aliasing. Skip the hash entirely.
+    if (detail <= 0.001) {
+        return 0.5;
+    }
+    // Above-Nyquist near field (and the whole legacy A/B path, which passes w = 0): return the
+    // unfiltered value bit-for-bit rather than routing it through a mix by 1.0.
+    if (detail >= 0.999) {
+        return vnoise(p);
+    }
+    return mix(0.5, vnoise(p), detail);
+}
+
+// Band-limited twin of `foam_noise`. `w_world` is how far `p_world` moves across one pixel, in the
+// same units as `p_world` — a caller that pre-scales its position by k must pass k * footprint.
+//
+// The final threshold has to widen along with the filtering. Leaving it at the sharp
+// smoothstep(0.32, 0.64) would take the converged 0.5 mean and re-sharpen it into a hard on/off
+// decision, putting the aliasing straight back. Widening to a window centred on 0.5 makes the
+// fully-filtered result the field's true mean COVERAGE (0.5) instead of a binary edge, so
+// filtering removes variance only — it is not doing the strength reduction's job.
+fn foam_noise_lod(p_world: vec2<f32>, t: f32, w_world: f32) -> f32 {
     let p0 = p_world * FOAM_FREQ;
-    // Domain warp creates organic filament tendrils instead of grid-aligned blocks
-    let warp = vec2<f32>(vnoise(p0 * 0.45 + vec2<f32>(t * 0.20, -t * 0.15)),
-                         vnoise(p0 * 0.45 + vec2<f32>(-t * 0.15, t * 0.25))) * 1.8 - vec2<f32>(0.9);
+    let w0 = w_world * FOAM_FREQ;
+    let warp = vec2<f32>(vnoise_lod(p0 * 0.45 + vec2<f32>(t * 0.20, -t * 0.15), w0 * 0.45),
+                         vnoise_lod(p0 * 0.45 + vec2<f32>(-t * 0.15, t * 0.25), w0 * 0.45)) * 1.8 - vec2<f32>(0.9);
     let p = p0 + warp;
-    var v = 0.42 * vnoise(p + vec2<f32>(t * 0.60, t * 0.20));
-    v = v + 0.28 * vnoise(vec2<f32>(p.x * 1.83 - p.y * 0.72, p.x * 0.72 + p.y * 1.83) - vec2<f32>(t * 0.30, t * 0.50));
-    v = v + 0.18 * vnoise(vec2<f32>(p.x * 3.91 + p.y * 0.41, -p.x * 0.41 + p.y * 3.91) + vec2<f32>(t * 0.44, -t * 0.17));
-    v = v + 0.12 * vnoise(p * 8.37 + vec2<f32>(17.3, 41.7) + vec2<f32>(-t * 0.18, t * 0.37));
-    return smoothstep(0.32, 0.64, v);
+    // Each rotated octave's frequency is the length of its matrix rows: 1.97 and 3.93.
+    var v = 0.42 * vnoise_lod(p + vec2<f32>(t * 0.60, t * 0.20), w0);
+    v = v + 0.28 * vnoise_lod(vec2<f32>(p.x * 1.83 - p.y * 0.72, p.x * 0.72 + p.y * 1.83) - vec2<f32>(t * 0.30, t * 0.50), w0 * 1.97);
+    v = v + 0.18 * vnoise_lod(vec2<f32>(p.x * 3.91 + p.y * 0.41, -p.x * 0.41 + p.y * 3.91) + vec2<f32>(t * 0.44, -t * 0.17), w0 * 3.93);
+    v = v + 0.12 * vnoise_lod(p * 8.37 + vec2<f32>(17.3, 41.7) + vec2<f32>(-t * 0.18, t * 0.37), w0 * 8.37);
+    let sharp = 1.0 - smoothstep(0.30, 0.85, w0);
+    return smoothstep(mix(0.44, 0.32, sharp), mix(0.56, 0.64, sharp), v);
+}
+
+// Elongated wash streaks that follow the shoreline contour.
+//
+// The version this replaces was ONE octave of grid value noise evaluated in the
+// (alongshore, shoreward) frame at a fixed 0.74 / 0.19 cells per metre, then hard-thresholded.
+// Because that frame is near-constant along a stretch of beach, its cells formed a literal
+// 1.35 m x 5.3 m rectangular lattice locked to the coast — a repeating tile at a fixed world
+// frequency, which is precisely what becomes visible once a whole beach fits in a few pixels.
+//
+// Two things kill it. Incommensurate octaves (0.74 and 0.317 alongshore) remove the single
+// dominant spacing, and a low-frequency warp of the alongshore coordinate bends the rulings so
+// they are not parallel straight lines. Band limiting then removes whatever survives once the
+// cells go sub-pixel: the threshold window slides UP with the footprint so a filtered streak
+// field converges to zero rather than to a flat wash — streaks are a near-field detail and a
+// distant beach should read as an even band, not as a lattice.
+fn shoreline_streaks(xz: vec2<f32>, tangent: vec2<f32>, shoreward: vec2<f32>,
+                     t: f32, drift: f32, w_world: f32) -> f32 {
+    let s = dot(xz, tangent);
+    let d = dot(xz, shoreward);
+    let bend = vnoise_lod(vec2<f32>(s * 0.031, d * 0.047 + t * 0.03), w_world * 0.047) - 0.5;
+    let s_warped = s + bend * 9.0;
+    let a = vnoise_lod(vec2<f32>(s_warped * 0.74 + t * 0.10, d * 0.19 - t * drift), w_world * 0.74);
+    let b = vnoise_lod(vec2<f32>(s_warped * 0.317 - t * 0.07, d * 0.083 + t * drift * 0.55) +
+                       vec2<f32>(23.7, 11.3), w_world * 0.317);
+    let combined = a * 0.58 + b * 0.42;
+    let sharp = 1.0 - smoothstep(0.30, 0.85, w_world * 0.74);
+    return smoothstep(mix(0.60, 0.52, sharp), mix(0.80, 0.72, sharp), combined);
 }
 
 // A small shading-only ripple field. Rotating each octave avoids aligned fBm cells;
@@ -1311,6 +1387,15 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // Receiver-plane derivatives for the CSM bias must be taken in uniform control flow.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    // World metres covered by one pixel on the water plane — the Nyquist limit for every
+    // procedural foam octave below. Taken HERE, in uniform control flow, because each foam term is
+    // behind a coverage branch and a derivative inside non-uniform flow is undefined. It grows
+    // without bound toward the horizon, which is exactly the behaviour the band limiting wants:
+    // grazing pixels integrate a huge patch of sea and must return that patch's average.
+    let foam_footprint = max(length(dpdx(in.base_xz)), length(dpdy(in.base_xz)));
+    // Legacy A/B: a zero footprint disables every band limit, so vnoise_lod is the identity and
+    // foam_noise_lod reduces to foam_noise's original sharp smoothstep(0.32, 0.64).
+    let foam_fp = select(foam_footprint, 0.0, shore_foam_legacy > 0.5);
 
     let interaction_cell = 1.0;
     let h_l = interaction_sample(in.base_xz - vec2<f32>(interaction_cell, 0.0)).r;
@@ -1691,25 +1776,41 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // is clipped by the beach — the deep side already faded. Foam also fades to 0 right at the
     // edge, so the water there is transparent (soft wash over wet sand) rather than opaque white.
     let ft = eff_depth / max(wp.foam_width * 2.2, 0.4);
-    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(0.35, 1.95, ft));
+    // Deep-side extent of the band. Pulled in from 1.95 to 1.55 so the wash sits ON the shoreline
+    // instead of reaching a third further out to sea. This is the DEEP edge, which had already
+    // faded to nothing — the land side, which carries the no-hard-line guarantee, is untouched.
+    let band_outer = select(1.55, 1.95, shore_foam_legacy > 0.5);
+    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(0.35, band_outer, ft));
     // coast_flow points toward land. Sampling x + v*t moves a pattern in -v, so
     // the old wash visibly travelled offshore. x - v*t makes each band advance landward.
     var foam = 0.0;
     if (foam_band > 0.001 && wp.foam_intensity > 0.001) {
         let shore_speed = 0.38 + shore_break * 0.82;
-        let coast_noise = foam_noise(in.base_xz - coast_flow * wp.time * shore_speed + river_flow * wp.time, wp.time);
+        let coast_noise = foam_noise_lod(in.base_xz - coast_flow * wp.time * shore_speed + river_flow * wp.time,
+            wp.time, foam_fp);
 
         // `coast_flow` is the reconstructed water-depth gradient toward land. Build elongated
         // streaks perpendicular to that direction so wash follows the actual shoreline contour.
         let shoreward = normalize(coast_flow + spray_wind * 0.001);
         let shoreline_tangent = vec2<f32>(-shoreward.y, shoreward.x);
-        let shoreline_streak = vnoise(vec2<f32>(
-            dot(in.base_xz, shoreline_tangent) * 0.74 + wp.time * 0.10,
-            dot(in.base_xz, shoreward) * 0.19 - wp.time * shore_speed
-        ));
-        let coast_pattern = max(coast_noise, smoothstep(0.52, 0.72, shoreline_streak));
-        foam = clamp(foam_band * (0.35 + coast_pattern * 0.95) * max(wp.foam_intensity, 0.0) *
-            (1.0 + shore_break * 0.65), 0.0, 1.0);
+        let shoreline_streak = shoreline_streaks(in.base_xz, shoreline_tangent, shoreward,
+            wp.time, shore_speed, foam_fp);
+        let coast_pattern = max(coast_noise, shoreline_streak);
+        // STRENGTH (independent of the band limiting above, which only removes variance): the old
+        // gains ran to 1.30 * 1.65 = 2.14 before the clamp, so every pixel with coast_pattern above
+        // ~0.32 was pure white and the wash read as a solid painted rim rather than as foam with
+        // structure in it. 0.86 * 1.45 = 1.25 keeps a saturating peak on the strongest breaks while
+        // leaving the rest of the band graded.
+        let base_gain = select(0.20, 0.35, shore_foam_legacy > 0.5);
+        let pattern_gain = select(0.66, 0.95, shore_foam_legacy > 0.5);
+        let break_gain = select(0.45, 0.65, shore_foam_legacy > 0.5);
+        // A distant coastline should read as a thin bright line, not as a band of the same
+        // brightness as the surf twenty metres away. Independent of the band limiting: that fixes
+        // WHAT the far foam looks like, this fixes HOW MUCH of it there is.
+        let far = 1.0 - 0.45 * smoothstep(150.0, 1100.0, length(in.world_pos));
+        let far_fade = select(far, 1.0, shore_foam_legacy > 0.5);
+        foam = clamp(foam_band * (base_gain + coast_pattern * pattern_gain) *
+            max(wp.foam_intensity, 0.0) * (1.0 + shore_break * break_gain) * far_fade, 0.0, 1.0);
     }
     // evaluate_water_surface already fetched this texel for crest translucency.
     let foam_history_sample = state.foam_history_sample;
@@ -1725,7 +1826,9 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let jacobian_break = smoothstep(0.035, 0.22, state.compression);
     var breaker_foam = 0.0;
     if (crest_top > 0.001) {
-        let crest_shape = smoothstep(0.42, 0.68, foam_noise(in.base_xz * 1.5 - spray_wind * wp.time * 0.18, wp.time));
+        // Pre-scaling the position by 1.5 scales its per-pixel footprint by 1.5 too.
+        let crest_shape = smoothstep(0.42, 0.68,
+            foam_noise_lod(in.base_xz * 1.5 - spray_wind * wp.time * 0.18, wp.time, foam_fp * 1.5));
         // Ocean vs coast. A wave breaks when it can no longer support its own steepness, and shoaling
         // water forces that much sooner: the bottom compresses the orbital motion, the crest steepens
         // and spills. Over deep water the same sea state carries long swell that mostly does not break.
@@ -1743,8 +1846,12 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     let spray_source = foam_band * shore_break + breaker_foam;
     var spray_flecks = 0.0;
     if (spray_source > 0.001) {
-        spray_flecks = spray_source *
-            smoothstep(0.78, 0.93, foam_noise(in.base_xz * 4.6 + spray_wind * wp.time * 1.8, wp.time)) * 0.26;
+        // The worst aliaser in the shader: 4.6x pre-scale puts the top octave at ~5 cm cells, and
+        // the 0.78..0.93 threshold is the narrowest, so unfiltered it turned into crawling speckle
+        // the moment the surf left the near field. Filtered, the flecks fade out with distance
+        // instead — which is also what sub-pixel spray genuinely does.
+        spray_flecks = spray_source * smoothstep(0.78, 0.93,
+            foam_noise_lod(in.base_xz * 4.6 + spray_wind * wp.time * 1.8, wp.time, foam_fp * 4.6)) * 0.26;
     }
     // "Foam intensity" used to scale ONLY the shoreline band, while persistent foam and breaker
     // whitecaps ignored it — so there was no control anywhere that reduced total foam coverage. That
@@ -1762,7 +1869,10 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         spray_flecks * foam_scale * wave_scale;
     var combined_foam = 0.0;
     if (unstructured_foam > 0.001) {
-        let foam_structure = foam_noise(in.base_xz * 2.7 + spray_wind * wp.time * 0.45, wp.time);
+        // This one multiplies EVERY foam source, so its aliasing was modulating the shoreline
+        // band as well as the whitecaps — a second, finer pattern laid over the first.
+        let foam_structure = foam_noise_lod(in.base_xz * 2.7 + spray_wind * wp.time * 0.45,
+            wp.time, foam_fp * 2.7);
         combined_foam = clamp(unstructured_foam * mix(0.46, 1.0, foam_structure), 0.0, 1.0);
     }
     // Bubbles form a broad, rough dielectric layer: mostly sky/sun-lit diffuse scattering with

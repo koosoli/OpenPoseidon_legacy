@@ -595,36 +595,44 @@ void Scene::SetObjectLODBias(float bias)
 // Default 4 bounds that horizon swing to 4x (that same bush: ~680 m, where fog is doing
 // real work).
 //
-// THE CONDITION FOR 4 BEING CORRECT IS THAT THE FRAME IS GPU-BOUND, and that took three
-// measurements to work out, including one that briefly made 16 the default here.
+// NEITHER 16 NOR 4 SELECTS LOD CORRECTLY, AND THAT IS THE REAL BUG HERE. Measured on
+// Everon at a NEAR pose (camera 38 m up), same build, same frame, ~47,800 instances in both:
 //
-// The governor can be stuck at EITHER rail. Everon's sits at the fine rail, pinning
-// everything to LOD 0/1 for 56M triangles; bounding it gives 30.51 -> 50.34 fps and draws
-// the SAME 39,670 main instances, so nothing is lost -- only the branch geometry that was
-// being rendered into three aliasing pixels. Arma 3 Stratis's sat at the coarse rail
-// instead, and bounding it measured as a catastrophic 12.53 -> 2.89 fps.
+//   range  LOD0   LOD1    LOD2    LOD3    LOD4   triangles   GPU
+//     16   9,186 15,631  23,118       0       0     44.2M   28.2 ms
+//      4     697  1,689   5,153  18,875  18,245      6.4M   18.1 ms
 //
-// That regression was real but its cause was not the governor. Stratis was CPU-bound
-// because a stale foliage guard (WGR_TREEADV_RETAINED, EngineWgpu.cpp) rejected 53.8% of
-// the world at model registration and made the CPU draw it: land:obj 42.7 ms. There the
-// coarse rail WAS protection, and removing it just drew more of what was already too
-// expensive. With the foliage on the retained path that phase costs 0.185 ms, Stratis
-// becomes 94.5% GPU-bound, and this lever is then worth 22.86 -> 44.69 fps on it.
+// At 16 NOTHING is ever coarser than LOD 2, even at multi-kilometre range -- that is the
+// 44M-triangle waste. At 4 the mass sits at LOD 3-4, INCLUDING GEOMETRY CLOSE TO THE CAMERA,
+// which the owner reported as "absolutely low poly even though i am very near to them". The
+// instance count barely moves either way. So this lever does not trade near detail against
+// far waste; it moves EVERY object together, and both ends are wrong at one distance or the
+// other.
 //
-// So one rule covers both worlds -- 4 when GPU-bound, and the fix for a CPU-bound world is
-// to find what the CPU is wrongly drawing, not to coarsen the horizon to hide it. Measured
-// on both: Everon ~30 -> ~50 fps, Stratis 17.24 -> 44.69 fps.
+// 16 is the default because it is the historical behaviour and because I shipped 4 on a
+// claim that turned out to be false. I wrote that Everon "draws the SAME 39,670 instances,
+// so nothing is lost" -- true of the instance COUNT and irrelevant, because I never looked
+// at the LOD distribution. The 56M -> 9M triangle drop I described as free is exactly the
+// detail the owner then reported missing. Checking the count and calling it detail-neutral
+// was the error.
 //
-// WGR_LOD_GOVERNOR_RANGE=16 restores the legacy behaviour from the same binary. Reach for it
-// if a world turns out to be CPU-bound for some reason foliage retention does not fix -- and
-// if you do, treat that as a bug report about the CPU path, not as a tuning result.
+// WGR_LOD_GOVERNOR_RANGE=4 opts into the faster, coarser behaviour from the same binary:
+// worth +56% here (28.2 -> 18.1 ms) and ~2x on Arma 3 Stratis once its foliage reaches the
+// retained path (WGR_TREEADV_RETAINED). Take it if you would rather have the framerate.
+//
+// THE ACTUAL FIX is neither value. `_maxLodInvWidth = quality * range` is documented as a
+// coarseness BOUND, so shrinking the range ought only ever to refine -- it coarsens because
+// the same value also sets the target-line geometry of the framerate feedback loop
+// (SceneDraw.cpp lineT/lineL/lineC), so changing the range moves the loop's operating point
+// instead of just clamping it. Decouple the clamp from the loop's target and the trade above
+// should disappear: fine near, coarse far, at either range.
 static float LodGovernorRange()
 {
     static const float range = []
     {
         const char* v = std::getenv("WGR_LOD_GOVERNOR_RANGE");
-        const float parsed = v ? static_cast<float>(std::atof(v)) : 4.0f;
-        return parsed >= 1.0f ? parsed : 4.0f;
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 16.0f;
+        return parsed >= 1.0f ? parsed : 16.0f;
     }();
     return range;
 }

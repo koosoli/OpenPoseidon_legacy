@@ -70,6 +70,29 @@ constexpr size_t kStaticCasterCacheCap = 1024;
 
 namespace
 {
+// WGR_SHADOW_RECOVER_LOD=1 re-derives a caster LOD for objects the MAIN-VIEW culls
+// zeroed. Both LOD fields are main-view quantities: `drawLOD` is set to
+// LOD_INVISIBLE by the software occlusion pass (SceneDraw.cpp, "occluded - do not
+// draw"), and `shadowLOD` is LOD_INVISIBLE beyond `_shadowFogMaxRange` (<= the
+// 1..250 m `shadowsZ` slider, AdjustShadowComplexity). An object that is occluded
+// in the camera view but sits between shadowsZ and the cascade reach
+// (`shadowDistance`, 400 m by default) therefore has NO usable LOD and is dropped
+// as a caster — even though it is inside the cascades and its shadow is visible.
+// Recovering the LOD from the caster distance puts it back. Off by default: the
+// current behaviour is the default until the owner has looked at it.
+bool ShadowRecoverLodEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_RECOVER_LOD");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+} // namespace
+
+namespace
+{
 // Cascade fit shared by the CPU-soup and GPU-submission depth passes: fit in
 // camera-relative space, snapped to a world grid (BuildShadowCascadesTiered,
 // proven by [ShadowMath] unit tests), so the shadow stays world-anchored while
@@ -330,6 +353,14 @@ void Scene::RenderShadowMapDepthPass(int nDraw)
         // invisible) but whose shadow falls into view — e.g. someone behind the
         // camera — casts from its shadow LOD so the omni tiers still pick it up.
         int geomLOD = (oi->drawLOD != LOD_INVISIBLE) ? oi->drawLOD : oi->shadowLOD;
+        if (geomLOD == LOD_INVISIBLE && ShadowRecoverLodEnabled())
+        {
+            // Both main-view LODs are invisible (occluded in view, and past the
+            // shadowsZ shadow-LOD range) but the object IS inside the cascade
+            // reach — pick a LOD from its own distance so it still casts.
+            geomLOD = LevelFromDistance2(oi->shape, oi->distance2, oi->object->Scale(), oi->object->Direction(),
+                                         GetCamera()->Direction());
+        }
         if (geomLOD == LOD_INVISIBLE)
         {
             continue;
@@ -511,6 +542,14 @@ void Scene::RenderShadowMapDepthPassGpu(int nDraw)
             continue;
         }
         int geomLOD = (oi->drawLOD != LOD_INVISIBLE) ? oi->drawLOD : oi->shadowLOD;
+        if (geomLOD == LOD_INVISIBLE && ShadowRecoverLodEnabled())
+        {
+            // See ShadowRecoverLodEnabled: recover a caster LOD the main-view
+            // occlusion + shadowsZ culls zeroed, for an object still inside the
+            // cascade reach.
+            geomLOD = LevelFromDistance2(oi->shape, oi->distance2, oi->object->Scale(), oi->object->Direction(),
+                                         cam->Direction());
+        }
         if (geomLOD == LOD_INVISIBLE)
         {
             continue;

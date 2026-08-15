@@ -224,7 +224,27 @@ fn finish_vertex(
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
     // Bias toward the camera (larger reversed depth) so decals/overlays win the
     // depth test against coplanar geometry.
-    out.clip.z += depth_bias * out.clip.w;
+    //
+    // SCALED BY DEPTH SQUARED, not constant. This replaced glPolygonOffset(-1,-1),
+    // which is denominated in RESOLVABLE DEPTH UNITS AT THE FRAGMENT and therefore
+    // self-scales with distance; a constant offset in NDC does not, and reversed-Z NDC
+    // is wildly non-linear in distance (stored depth is near/z for this
+    // forward-infinite-far projection). A constant 1e-5 pulls a surface toward the
+    // camera by z^2 * bias / near: about 1 m at 100 m, but ~95 m at 1 km and ~716 m at
+    // 3 km. That is why a road could be seen THROUGH a mountain ridge - it was being
+    // depth-tested as though it stood hundreds of metres in front of itself, and
+    // roads carry NoZWrite so the ridge could not paint back over them.
+    //
+    // ndc^2 undoes exactly that: with depth = near/z, holding (bias * ndc^2) constant in
+    // NDC is holding a constant WORLD-SPACE pull, which is what the GL call meant. Near
+    // geometry is unaffected (ndc ~ 1 there, so this matches the old value), and the
+    // far-field error disappears.
+    //
+    // Not env-gated, unlike most changes on this branch: the constant-NDC form is not a
+    // behaviour worth preserving, it is a porting error with a measured failure mode.
+    // WGR_DECAL_SCALE still tunes the magnitude, and near geometry is unchanged.
+    let ndc_z = select(1.0, out.clip.z / out.clip.w, out.clip.w != 0.0);
+    out.clip.z += depth_bias * ndc_z * ndc_z * out.clip.w;
     out.uv = uv;
     out.world_pos = world_pos.xyz;
     out.normal = normal_ws;
