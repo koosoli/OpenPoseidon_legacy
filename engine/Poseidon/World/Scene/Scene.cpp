@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -574,6 +575,37 @@ void Scene::SetObjectLODBias(float bias)
     // LODSelect compares against the per-LOD pixel-size thresholds.
 }
 
+// How far AdjustComplexity is allowed to coarsen detail before it stops, as a
+// multiple of the quality floor.
+//
+// This governs `_lodInvWidth`, which multiplies distance in BOTH the LOD selector
+// and the GPU sub-pixel cull (`cull.wgsl`: an object is dropped when its projected
+// diameter falls under `pixel_limit * lod_scale * dist * _lodInvWidth`). So the
+// range is not a detail knob — it is the range over which an object's *visibility
+// distance* moves. The legacy value was 16, which collapses a 4 m bush's horizon
+// from ~2.7 km to ~170 m, i.e. to a distance with no fog to hide the transition.
+// That is the pop-in.
+//
+// It is also a feedback loop keyed on WALL-CLOCK frame time while it can only
+// control GPU geometry. On the modern imported worlds the frame is ~90% CPU, so
+// the governor pins itself to the coarse rail chasing GPU time that was never the
+// constraint, and the asymmetric damper in AdjustComplexity makes recovery ~10x
+// harder than degradation.
+//
+// Default 4 keeps the adaptive behaviour but bounds the horizon swing to 4x
+// (that same bush: ~680 m, where fog is doing real work). WGR_LOD_GOVERNOR_RANGE=16
+// restores the legacy behaviour from the same binary, so an A/B needs no rebuild.
+static float LodGovernorRange()
+{
+    static const float range = []
+    {
+        const char* v = std::getenv("WGR_LOD_GOVERNOR_RANGE");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 4.0f;
+        return parsed >= 1.0f ? parsed : 4.0f;
+    }();
+    return range;
+}
+
 void Scene::SetQualitySettings(float val)
 {
     _qualitySettings = val;
@@ -583,7 +615,7 @@ void Scene::SetQualitySettings(float val)
     _lastScaleWorseTime = UITIME_MIN;
 
     _minLodInvWidth = _qualitySettings;
-    _maxLodInvWidth = _qualitySettings * 16;
+    _maxLodInvWidth = _qualitySettings * LodGovernorRange();
 
 #if !DENSITY_LOD
     saturate(_lodInvWidth, _minLodInvWidth, _maxLodInvWidth);

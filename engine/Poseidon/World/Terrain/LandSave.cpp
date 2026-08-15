@@ -1,5 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 
+#include <chrono>
+
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
@@ -2293,6 +2295,35 @@ bool Landscape::LoadOprwModern(const char* path)
     return true;
 }
 
+// Wall-clock budget for one residency admission pass, in milliseconds. See the
+// commentary at the admission loop for why this is time and not a count.
+// WGR_OBJECT_STREAM_MS_PER_UPDATE=0 pins admission to the legacy per-frame batch,
+// so both arms of an A/B come from one binary.
+static float ObjectStreamBudgetMs()
+{
+    static const float ms = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_MS_PER_UPDATE");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 4.0f;
+        return parsed >= 0.0f ? parsed : 4.0f;
+    }();
+    return ms;
+}
+
+// Hard ceiling on the time budget, as a multiple of the legacy batch. Each create is
+// a synchronous model decode plus texture transcode, so an unbounded budget on a
+// stalled frame would trade pop-in for a much worse hitch.
+static uint32_t ObjectStreamMaxBatchScale()
+{
+    static const uint32_t scale = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_MAX_BATCH_SCALE");
+        const long parsed = v ? std::strtol(v, nullptr, 10) : 12;
+        return static_cast<uint32_t>(std::clamp<long>(parsed, 1, 256));
+    }();
+    return scale;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -2439,13 +2470,41 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     uint32_t created = 0;
     uint32_t refused = 0;
     uint32_t attempted = 0;
+
+    // Admission is denominated in TIME, not frames.
+    //
+    // This runs once per rendered frame (TerrainWgpu::DrawTerrain), so a fixed
+    // per-update batch makes the streaming rate proportional to the framerate --
+    // exactly backwards. The sustainable travel speed works out at
+    // `batch * fps / (2 * radius * density)`, so on a dense world at 5 fps the
+    // streamer sustains ~40 m/s and any aircraft outruns it permanently. Worse, the
+    // deficit accumulates: each recentre destroys the trailing objects outright
+    // (there is no cache), so what the camera left behind must be rebuilt if it
+    // turns around.
+    //
+    // The floor is the legacy batch, so nothing streams slower than it used to; the
+    // time budget only lets a slow frame admit MORE. The hard cap bounds the worst
+    // case, because each create is a synchronous model decode + texture transcode.
+    const auto admitStart = std::chrono::steady_clock::now();
+    const float admitBudgetMs = ObjectStreamBudgetMs();
+    const uint32_t admitCap = _modernObjectCreatesPerUpdate * ObjectStreamMaxBatchScale();
+    auto admitBudgetSpent = [&]
+    {
+        if (attempted < _modernObjectCreatesPerUpdate)
+            return false; // always honour the legacy batch before consulting the clock
+        if (attempted >= admitCap)
+            return true;
+        const auto elapsed = std::chrono::steady_clock::now() - admitStart;
+        return std::chrono::duration<float, std::milli>(elapsed).count() >= admitBudgetMs;
+    };
+
     for (const CellCandidate& cell : candidates)
     {
         if (!_modernObjectCellDesired[cell.index] || _modernObjectCellActive[cell.index])
             continue;
         std::vector<uint32_t>& placements = _modernObjectCells[cell.index];
         uint32_t& cursor = _modernObjectCellCursor[cell.index];
-        while (cursor < placements.size() && attempted < _modernObjectCreatesPerUpdate)
+        while (cursor < placements.size() && !admitBudgetSpent())
         {
             const uint32_t index = placements[cursor++];
             ModernObjectPlacement& placement = _modernObjectPlacements[index];
@@ -2473,7 +2532,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         }
         if (cursor >= placements.size())
             _modernObjectCellActive[cell.index] = 1;
-        if (attempted >= _modernObjectCreatesPerUpdate)
+        if (admitBudgetSpent())
             break;
     }
     _modernResidentObjectCount = released > _modernResidentObjectCount + created
