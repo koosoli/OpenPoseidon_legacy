@@ -16,7 +16,8 @@ struct Params {
     up: vec4<f32>,
     world: vec4<f32>,        // grid, n, cover_n, cover_step
     cfg: vec4<f32>,          // grid_dim, spacing, radius, canopy_scale
-    sun: vec4<f32>,
+    sun: vec4<f32>,        // xyz sun; w = mode (0 = vegetation cards, 1 = building prisms)
+    cover_scale: vec4<f32>, // x = canopy scale, y = building scale
 };
 
 struct Instance {
@@ -99,12 +100,27 @@ fn place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (d < P.cam.w) { return; }
 
     let cover = cover_at(wxz);
-    if (cover.x < 0.02) { return; }
-    if (hash01(wkey ^ 0x51ed270bu) > cover.x) { return; }
-
     let terr = height_at(wxz);
-    let canopy = max(cover.y * P.cfg.w, 6.0);
-    let h = canopy * (0.75 + 0.5 * hash01(wkey ^ 0x2545f491u));
+    var h = 0.0;
+
+    if (P.sun.w > 0.5) {
+        // Building mode. Occupancy, not density: a structure is either there or it
+        // is not, and unlike a tree its position is not interchangeable. In a real
+        // implementation this accept would read an authored footprint, not a hash --
+        // the point being measured here is the DRAW cost of N far prisms, not the
+        // legitimacy of inventing their positions.
+        if (cover.z < 0.05 / max(P.cover_scale.z, 1.0)) { return; }
+        // cover_scale.z is a THROUGHPUT multiplier: it inflates how many prisms are
+        // accepted so draw cost can be measured against instance count. It is not a
+        // claim that the world contains that many buildings.
+        if (hash01(wkey ^ 0x51ed270bu) > cover.z * 0.55 * P.cover_scale.z) { return; }
+        h = max(cover.w * P.cover_scale.y, 4.0) * (0.7 + 0.6 * hash01(wkey ^ 0x2545f491u));
+    } else {
+        if (cover.x < 0.02) { return; }
+        if (hash01(wkey ^ 0x51ed270bu) > cover.x) { return; }
+        let canopy = max(cover.y * P.cfg.w, 6.0);
+        h = canopy * (0.75 + 0.5 * hash01(wkey ^ 0x2545f491u));
+    }
 
     // Frustum reject on the card's bounding sphere, in the compute, exactly as the
     // engine's object cull does.

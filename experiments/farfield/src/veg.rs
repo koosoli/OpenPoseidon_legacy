@@ -7,7 +7,7 @@
 use crate::camera::View;
 use crate::gpu::{write_bmp, Gpu, Stat, Timer};
 use crate::raymarch::{read_texture, target};
-use crate::world::{World, WorldGpu, WorldSpec, CANOPY_SCALE, COVER_SHIFT};
+use crate::world::{World, WorldGpu, WorldSpec, BUILDING_SCALE, CANOPY_SCALE, COVER_SHIFT};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec3};
 
@@ -22,6 +22,7 @@ struct Params {
     world: [f32; 4],
     cfg: [f32; 4],
     sun: [f32; 4],
+    cover_scale: [f32; 4],
 }
 
 const INSTANCE_STRIDE: u64 = 32; // vec3 pos + f32 height + f32 seed + vec3 pad
@@ -30,12 +31,14 @@ const MAX_INSTANCES: u64 = 4_000_000;
 pub struct Veg {
     place: wgpu::ComputePipeline,
     draw: wgpu::RenderPipeline,
+    draw_box: wgpu::RenderPipeline,
     bgl: wgpu::BindGroupLayout,
     bgl_draw: wgpu::BindGroupLayout,
     ubo: wgpu::Buffer,
     instances: wgpu::Buffer,
     args: wgpu::Buffer,
     args_init: wgpu::Buffer,
+    args_init_box: wgpu::Buffer,
     color_view: wgpu::TextureView,
     color: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -189,6 +192,39 @@ impl Veg {
                 cache: None,
             });
 
+        let draw_box = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("veg-boxes"),
+                layout: Some(&pl_draw),
+                vertex: wgpu::VertexState {
+                    module: &m_draw,
+                    entry_point: Some("vs_box"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &m_draw,
+                    entry_point: Some("fs_box"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         let ubo = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("veg-ubo"),
             size: std::mem::size_of::<Params>() as u64,
@@ -219,6 +255,14 @@ impl Veg {
         // draw(vertex_count=6, instance_count=0, first_vertex=0, first_instance=0)
         gpu.queue
             .write_buffer(&args_init, 0, bytemuck::cast_slice(&[6u32, 0, 0, 0, 0]));
+        let args_init_box = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("veg-args-init-box"),
+            size: 20,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        gpu.queue
+            .write_buffer(&args_init_box, 0, bytemuck::cast_slice(&[36u32, 0, 0, 0, 0]));
 
         let (color, color_view) = target(gpu, width, height, wgpu::TextureFormat::Rgba8Unorm);
         let depth = gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -234,7 +278,7 @@ impl Veg {
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            place, draw, bgl, bgl_draw, ubo, instances, args, args_init,
+            place, draw, draw_box, bgl, bgl_draw, ubo, instances, args, args_init, args_init_box,
             color, color_view, depth_view, width, height,
         }
     }
@@ -250,6 +294,8 @@ impl Veg {
         radius: f32,
         near_cutoff: f32,
         frames: usize,
+        boxes: bool,
+        accept_scale: f32,
     ) -> (Stat, Stat, u32, Vec<u8>) {
         let b = view.basis();
         let aspect = self.width as f32 / self.height as f32;
@@ -271,7 +317,8 @@ impl Veg {
                 w.spec.grid * (1 << COVER_SHIFT) as f32,
             ],
             cfg: [grid_dim as f32, spacing, radius, CANOPY_SCALE],
-            sun: [0.42, 0.72, 0.55, 0.0],
+            sun: [0.42, 0.72, 0.55, if boxes { 1.0 } else { 0.0 }],
+            cover_scale: [CANOPY_SCALE, BUILDING_SCALE, accept_scale, 0.0],
         };
         gpu.queue.write_buffer(&self.ubo, 0, bytemuck::bytes_of(&p));
 
@@ -311,7 +358,8 @@ impl Veg {
             let mut enc = gpu
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-            enc.copy_buffer_to_buffer(&self.args_init, 0, &self.args, 0, 20);
+            let init = if boxes { &self.args_init_box } else { &self.args_init };
+            enc.copy_buffer_to_buffer(init, 0, &self.args, 0, 20);
             {
                 let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("veg-place"),
@@ -351,7 +399,7 @@ impl Veg {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                rp.set_pipeline(&self.draw);
+                rp.set_pipeline(if boxes { &self.draw_box } else { &self.draw });
                 rp.set_bind_group(0, &bg_draw, &[]);
                 rp.draw_indirect(&self.args, 0);
             }
@@ -392,7 +440,7 @@ pub fn cmd_veg_cards(gpu: &Gpu, c: &crate::Common) {
     for &(radius, spacing) in &[(1000.0f32, 6.0f32), (2000.0, 8.0), (5000.0, 12.0)] {
         let dim = ((2.0 * radius / spacing).ceil() as u32).min(4096);
         for (vname, view) in crate::camera::standard_views(w.spec.extent_m(), w.h_max * 0.5) {
-            let (pl, dr, n, rgba) = v.run(gpu, &w, &wg, &view, dim, spacing, radius, 0.0, c.frames);
+            let (pl, dr, n, rgba) = v.run(gpu, &w, &wg, &view, dim, spacing, radius, 0.0, c.frames, false, 1.0);
             println!(
                 "{:<10} {:>8.0} {:>9.1} {:>10} {:>10} {:>11.0} {:>10.3} {:>10.3}",
                 vname,
@@ -412,6 +460,44 @@ pub fn cmd_veg_cards(gpu: &Gpu, c: &crate::Common) {
                     &rgba,
                 )
                 .ok();
+            }
+        }
+    }
+}
+
+/// EXP-ASSET-001. The same GPU-placement machinery, but emitting extruded footprint
+/// prisms instead of billboards -- the question being whether a far ASSET tier is as
+/// cheap as a far vegetation tier once the geometry stops being a single quad.
+pub fn cmd_buildings(gpu: &Gpu, c: &crate::Common) {
+    std::fs::create_dir_all(&c.out).ok();
+    let spec = WorldSpec { n: c.n, grid: c.grid, seed: c.seed, with_cover: true, veg_cell: 0.0 };
+    let w = World::generate(spec);
+    let wg = WorldGpu::upload(gpu, &w);
+    let v = Veg::new(gpu, c.width, c.height);
+
+    println!();
+    println!("EXP-ASSET-001  far buildings as extruded footprint prisms (36 verts each)");
+    println!(
+        "{:<10} {:>8} {:>10} {:>10} {:>11} {:>10} {:>10}",
+        "view", "radius", "candidates", "placed", "triangles", "place ms", "draw ms"
+    );
+    let views = crate::camera::standard_views(w.spec.extent_m(), w.h_max * 0.5);
+    for &(radius, spacing) in &[(5000.0f32, 14.0f32), (20000.0, 20.0)] {
+        let dim = ((2.0 * radius / spacing).ceil() as u32).min(4096);
+        for &accept in &[1.0f32, 20.0, 120.0, 600.0] {
+            let (vname, view) = &views[1];
+            let (pl, dr, n, rgba) =
+                v.run(gpu, &w, &wg, view, dim, spacing, radius, 0.0, c.frames, true, accept);
+            println!(
+                "{:<10} {:>8.0} {:>10} {:>10} {:>11} {:>10.3} {:>10.3}",
+                format!("{}x{}", vname, accept as u32), radius,
+                dim as u64 * dim as u64, n, n as u64 * 12, pl.min, dr.min
+            );
+            if c.shots && accept > 100.0 && accept < 200.0 {
+                write_bmp(
+                    &format!("{}/EXP-ASSET-001-{}-{}.bmp", c.out, vname, accept as u32),
+                    c.width, c.height, &rgba,
+                ).ok();
             }
         }
     }

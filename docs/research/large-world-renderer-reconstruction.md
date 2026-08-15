@@ -307,6 +307,65 @@ That is what the engine's grass rings already do
 (`engine/WgpuRenderer/rust/src/grass/mod.rs`), and generalising that architecture from
 tufts to trees is the highest-value single change available.
 
+
+### 4f. EXP-ASSET-002 — the real Everon placement set, GPU-culled every frame
+
+The synthetic world was too sparse in structures to stress an asset tier, so this runs
+against the **actual shipped placement set** of the imported Reforger Everon
+(`ev_DALL.wrp`), dumped with `PoseidonTools terrain objects` and converted by
+`experiments/farfield/mkplacements.py`:
+
+**1,216,138 placements — 824,896 vegetation (67.8%), 69,317 structures (5.7%), 321,925
+other (26.5%) — over 12.2 x 12.5 km. Source buffer: 18.6 MB.**
+
+Every placement is uploaded once. Each frame, one compute sweeps the entire array
+(distance, optional sub-pixel, camera-relative frustum) and compacts survivors into an
+indirect draw. No CPU per-object work, no scene objects, no residency budget.
+
+| view | far | sub-px | geometry | visible | triangles | cull ms | draw ms |
+|---|---|---|---|---|---|---|---|
+| ground | 2 km | off | card | 58,379 | 116,758 | 0.057 | 0.068 |
+| ground | 5 km | off | card | 310,862 | 621,724 | 0.088 | 0.330 |
+| ground | **12 km (whole island)** | off | card | **693,525** | 1,387,050 | **0.123** | **0.627** |
+| ground | 12 km | **2 px** | card | **362,120** | 724,240 | 0.094 | **0.393** |
+| ground | 12 km | off | prism | 693,525 | 8,322,300 | 0.138 | 2.489 |
+| ground | 12 km | 2 px | prism | 362,120 | 4,345,440 | 0.095 | 1.412 |
+| helicopter | 12 km | 2 px | card | 325,734 | 651,468 | 0.090 | 0.317 |
+| **aircraft** | 12 km | off | card | 421,323 | 842,646 | 0.102 | 0.314 |
+| **aircraft** | 12 km | **2 px** | card | **22,135** | 44,270 | **0.053** | **0.025** |
+
+Four things fall out of this, and they reframe the asset question:
+
+1. **Sweeping 1.2 M placements on the GPU costs 0.05–0.14 ms.** Culling the entire
+   authored object population of a world, every frame, is free. The engine's 20,000-object
+   residency budget — which limits Chernarus's drawn world to a ~550 m radius — is not
+   protecting the GPU from anything. It is protecting the **CPU** from `SceneObjectCreated`,
+   and a far tier that never creates an `Object` sidesteps it entirely.
+2. **The whole island as far-field cards costs 0.75 ms** (0.123 cull + 0.627 draw) for
+   693,525 visible instances. With sub-pixel rejection, 0.49 ms.
+3. **Sub-pixel rejection is the single highest-value filter, and it is one uniform.**
+   Ground view: −48% instances. **Aircraft view: 421,323 → 22,135, a 95% cut, and draw
+   collapses from 0.314 ms to 0.025 ms.** The aircraft case — the one that is supposed to
+   be the hard case — becomes the *cheapest* case, because from 4 km up almost everything
+   is smaller than a pixel. Without this test it is the most expensive.
+4. **Geometry choice dominates draw cost: prisms cost ~4x cards** (12 triangles vs 2).
+   Cards for vegetation, prisms only where a silhouette with thickness actually reads.
+
+### 4g. EXP-ASSET-001 — a negative result worth keeping
+
+The synthetic-world run first tried to place buildings the same way vegetation is placed:
+a camera-snapped candidate grid with a stochastic accept.
+
+| radius | candidates | placed | hit rate | place ms | draw ms |
+|---|---|---|---|---|---|
+| 20 km | 4,000,000 | 7,150 | **0.18%** | **0.870** | 0.075 |
+
+**The candidate-grid approach is wrong for assets.** It costs 0.87 ms to evaluate 4 M
+candidates and yields 7,150 buildings. For vegetation the hit rate is high and the grid
+pays for itself; for sparse, exactly-positioned structures it is almost pure waste — and
+EXP-ASSET-002 shows the alternative (sweep the actual records) costs 0.1 ms for 1.2 M of
+them. Assets want an **explicit record sweep**, vegetation wants a **density field**.
+
 ### 4e. EXP-COL-001 — the column hypothesis, tested
 
 1,238,591 explicit tree instances generated on a jittered lattice against the forest

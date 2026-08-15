@@ -48,7 +48,22 @@ them if you want to view them somewhere fussier.
 | EXP-VEG-001 | `veg` | Storage arithmetic: per-tree instances vs clusters vs density field |
 | EXP-VEG-002 | `vegcards` | GPU-placed vegetation cards from a density field — cost of a 1/2/5 km ring |
 | EXP-COL-001 | `columns` | Bake explicit trees into 2.5D occupancy columns; compare bilinear vs nearest reconstruction |
+| EXP-ASSET-001 | `buildings` | Far buildings as extruded footprint prisms, throughput sweep |
+| EXP-ASSET-002 | `real` | **Real shipped placement set**, GPU-culled and compacted every frame |
 | — | `scale` | Memory and cost against world extent and sample spacing |
+
+### Running against real world data
+
+`real` needs a binary placement set, built from any world the engine can read:
+
+```bash
+PoseidonTools terrain objects <world>.wrp > objects.txt
+python mkplacements.py objects.txt placements.bin
+cargo run --release -- real --placements placements.bin
+```
+
+Everon (`ev_DALL.wrp`) yields 1,216,138 placements — 824,896 vegetation, 69,317
+structures, 321,925 other — in an 18.6 MB buffer.
 
 ## Measurement hygiene
 

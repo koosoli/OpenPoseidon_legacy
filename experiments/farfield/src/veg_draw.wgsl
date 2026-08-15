@@ -14,6 +14,7 @@ struct Params {
     world: vec4<f32>,
     cfg: vec4<f32>,
     sun: vec4<f32>,
+    cover_scale: vec4<f32>,
 };
 
 struct Instance {
@@ -33,6 +34,53 @@ struct VsOut {
     @location(2) dist: f32,
     @location(3) seed: f32,
 };
+
+// Unit box, 36 vertices, origin at the base centre. Extruding a footprint into a
+// prism is the cheapest far representation that keeps a building's silhouette and
+// its exact position -- which, unlike a tree's, is not negotiable.
+fn box_corner(vi: u32) -> vec3<f32> {
+    var idx = array<u32, 36>(
+        0u,2u,1u, 0u,3u,2u,   4u,5u,6u, 4u,6u,7u,
+        0u,1u,5u, 0u,5u,4u,   1u,2u,6u, 1u,6u,5u,
+        2u,3u,7u, 2u,7u,6u,   3u,0u,4u, 3u,4u,7u);
+    var pos = array<vec3<f32>, 8>(
+        vec3<f32>(-0.5, 0.0, -0.5), vec3<f32>( 0.5, 0.0, -0.5),
+        vec3<f32>( 0.5, 0.0,  0.5), vec3<f32>(-0.5, 0.0,  0.5),
+        vec3<f32>(-0.5, 1.0, -0.5), vec3<f32>( 0.5, 1.0, -0.5),
+        vec3<f32>( 0.5, 1.0,  0.5), vec3<f32>(-0.5, 1.0,  0.5));
+    return pos[idx[vi]];
+}
+
+@vertex
+fn vs_box(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {
+    let inst = instances[ii];
+    let c = box_corner(vi);
+    // Footprint proportional to height, jittered per instance, axis-aligned: a coarse
+    // stand-in for an authored footprint.
+    let w = mix(9.0, 26.0, inst.seed);
+    let dth = mix(8.0, 20.0, fract(inst.seed * 7.31));
+    let world = inst.pos + vec3<f32>(c.x * w, c.y * inst.height, c.z * dth);
+    let rel = world - P.cam.xyz;
+
+    var o: VsOut;
+    o.clip = P.view_proj * vec4<f32>(rel, 1.0);
+    o.uv = vec2<f32>(c.x + 0.5, c.y);
+    o.dist = length(rel);
+    o.seed = inst.seed;
+    // Face shading from which axis the corner sits on: enough to read as a building.
+    let face = select(0.72, 1.0, c.y > 0.99);
+    let tone = 0.45 + 0.30 * inst.seed;
+    o.shade = vec3<f32>(tone, tone * 0.95, tone * 0.88) * face;
+    return o;
+}
+
+@fragment
+fn fs_box(i: VsOut) -> @location(0) vec4<f32> {
+    var col = i.shade;
+    let fog = 1.0 - exp(-i.dist / 26000.0);
+    col = mix(col, vec3<f32>(0.72, 0.80, 0.90) * 1.02, clamp(fog, 0.0, 1.0));
+    return vec4<f32>(pow(col, vec3<f32>(1.0 / 2.2)), 1.0);
+}
 
 @vertex
 fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut {

@@ -15,6 +15,7 @@ mod cdlod;
 mod gpu;
 mod raster;
 mod raymarch;
+mod real;
 mod veg;
 mod world;
 
@@ -282,6 +283,8 @@ fn main() {
         "columns" => cmd_columns(&gpu, &a, veg_cell_arg()),
         "veg" => cdlod::cmd_veg(&a_to_raster(&a)),
         "vegcards" => veg::cmd_veg_cards(gpu_ref(&gpu), &a_to_raster(&a)),
+        "buildings" => veg::cmd_buildings(gpu_ref(&gpu), &a_to_raster(&a)),
+        "real" => real::cmd_real(gpu_ref(&gpu), &placements_arg(), &a_to_raster(&a)),
         other => eprintln!("unknown command {other}"),
     }
 }
@@ -324,4 +327,15 @@ fn veg_cell_arg() -> f32 {
         }
     }
     8.0
+}
+
+/// Path to the binary placement set for the `real` command (--placements).
+fn placements_arg() -> String {
+    let v: Vec<String> = std::env::args().collect();
+    for (i, k) in v.iter().enumerate() {
+        if k == "--placements" {
+            return v.get(i + 1).cloned().unwrap_or_default();
+        }
+    }
+    "placements.bin".to_string()
 }

@@ -138,6 +138,39 @@ compaction, one indirect draw, stochastic dissolve into the next ring.
 Mitigate by using the *authored* placements inside the near/mid bands and the density field
 only beyond the range where a metre of positional error is sub-pixel (~2 km).
 
+### 1b. Far *assets* — the same tier, a different storage rule
+
+Vegetation and assets both need a far tier, but they are not the same problem and must not
+share a mechanism:
+
+| | vegetation | assets (structures, walls, props) |
+|---|---|---|
+| Count on Everon | 824,896 (67.8%) | 69,317 structures + 321,925 other |
+| Is position negotiable? | **Yes** — statistically interchangeable | **No** — authored, and you walk up to it |
+| Storage | density field, **16 MB**, regenerates | explicit records, **16 B each** |
+| Placement | camera-snapped candidate grid | **sweep the record array** |
+| Measured | 0.066 ms place + 0.092 ms draw, 5 km ring | 0.10 ms to cull 1.2 M, 0.63 ms to draw 693 k |
+| Geometry | card (2 tri) | prism or impostor (12 tri, ~4x the draw) |
+
+Do **not** place assets from a candidate grid — measured, that is 0.87 ms to sift 4 M
+candidates for 7,150 buildings, a 0.18% hit rate. Sweep the compact placement rows the
+engine already retains (`_modernObjectPlacements`, `LandSave.cpp:2160-2194`) and cull them
+on the GPU. At 1.2 M placements that costs **0.05–0.14 ms** — the entire authored object
+population of a world, every frame.
+
+**Add sub-pixel rejection first; it is one uniform and it is the biggest single win.**
+Measured on Everon at 12 km: ground −48% instances, and the aircraft view −95%
+(421,323 → 22,135, draw 0.314 → 0.025 ms). It turns the aerial case from the most
+expensive into the cheapest. The engine's cull already has a `pixel_limit`
+(`cull.wgsl:198-204`, 0.125) — a far tier wants its own, far more aggressive, threshold.
+
+The structural change this needs: **a far instance array fed directly from placement rows,
+never through `SceneObjectCreated`**. That bypasses the 20,000-object residency budget
+(which today caps Chernarus's drawn world at a ~550 m radius), and it must be a *separate*
+array from the near retained set — the existing cull sweeps its array once per view across
+up to 12 views x 3 dispatches, and far instances have no business in shadow, reflection or
+sky-visibility passes.
+
 ### 2. Impostor cards for the mid band
 
 Octahedral impostor atlas baked per model, GPU-placed, stochastic cross-fade into the
@@ -248,6 +281,8 @@ concrete payoff of the ownership rule above.
 | Converting `Coord` to `double` | Touches nearly every TU, breaks the size-asserted Rust ABI, and an origin rebase gets the same result for a fraction of the risk |
 | Per-tree GPU instances at range | 3,321 MB vs 16 MB for the density field that regenerates them |
 | Raising view distance before step 0 | GPU is 8.9% of wall clock; the result would be unmeasurable |
+| Candidate-grid placement for assets | 0.87 ms to sift 4 M candidates for 7,150 buildings (0.18% hit rate) vs 0.10 ms to sweep 1.2 M real records |
+| Routing far assets through `SceneObjectCreated` | The residency budget exists to protect the CPU, not the GPU; culling 1.2 M placements costs 0.1 ms |
 | Region streaming before the origin rebase | Would bake f32 world coordinates into a design that exists to escape them |
 
 ---
