@@ -1790,15 +1790,29 @@ namespace
 struct FarTierSettings
 {
     bool enabled = true;
-    // Negative = follow Scene::GetObjectDrawDistance(), i.e. start exactly where real
-    // objects stop. An explicit value is a diagnostic override, not a tuning knob.
+    // Negative = let the active start rule pick its own default (see the resolution site).
+    // An explicit value is a HARD FLOOR under the complement rule, not the start rule.
     float nearCutoff = -1.0f;
     float distance = 12000.0f;
     // PIXELS of projected height. The measured elbow: 2 px took an aircraft view from
     // 421,323 surviving instances to 22,135 and its draw from 0.314 ms to 0.025 ms. 0
     // disables the test entirely, which is the A/B for it.
     float pixelLimit = 2.0f;
+    // WGR_FAR_MODE=distance restores the pre-complement pure-distance start rule, so the two
+    // rules can be A/B'd from ONE binary. The renderer reads the same variable for the
+    // predicate itself (far/mod.rs mode_from_env); this side needs it only to pick the
+    // matching near-cutoff default. Passing it across instead would cost a new
+    // wgr_far_set_params parameter and a WGR_ABI_VERSION bump.
+    bool complement = true;
 };
+
+// The complement rule's default near cutoff — a HARD FLOOR under the accept test, in metres.
+// Small on purpose. Under the old distance rule this number WAS the start rule and had to be
+// hundreds of metres; under the complement it only answers "how close may a crude box get to
+// the eye", and the complement itself is what keeps a proxy off a live model. Leaving it at a
+// fraction of the draw distance would re-open the gap the complement exists to close, since
+// everything the object cull drops inside that radius would go back to being drawn by nothing.
+constexpr float FAR_TIER_HARD_FLOOR_M = 40.0f;
 
 const FarTierSettings& FarSettings()
 {
@@ -1813,6 +1827,15 @@ const FarTierSettings& FarSettings()
             s.distance = static_cast<float>(std::atof(dist));
         if (const char* px = std::getenv("WGR_FAR_PIXEL_LIMIT"))
             s.pixelLimit = static_cast<float>(std::atof(px));
+        if (const char* mode = std::getenv("WGR_FAR_MODE"))
+        {
+            // Case-insensitive by hand rather than _stricmp/strcasecmp: this translation unit
+            // builds for Linux as well, and the two platforms spell that function differently.
+            std::string lowered(mode);
+            for (char& c : lowered)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            s.complement = lowered != "distance";
+        }
         return s;
     }();
     return settings;
@@ -1907,7 +1930,14 @@ void EngineWgpu::PushSceneCamera()
         // the per-frame _lodInvWidth (≈ lodCoef*2/screenWidth). Without these the cull ran with
         // lod_scale/lod_inv_width = 1, making resol2 ~1e6× too large (every model snapped to its
         // coarsest LOD within metres). pixel_limit mirrors LevelFromDistance2's 0.125.
-        if (_gpuDriven && _renderer)
+        // Pushed whenever there is a renderer, NOT only when _gpuDriven. These four numbers
+        // describe the ENGINE's object cull, and the far instance tier now derives its start
+        // rule from them (it accepts exactly what they make the object cull drop) — so gating
+        // them on the GPU-driven path, which is OFF by default here, left the far tier
+        // complementing CullInputs::default() instead of the live cull. When the GPU-driven
+        // path is off the cull dispatch is a no-op and nothing else reads them, so this is a
+        // data push and not a behaviour change for that path.
+        if (_renderer)
         {
             // Draw distance is Scene::GetObjectDrawDistance(), NOT the raw OBJECT_Z: objectsZ
             // is 2/3 of the view distance and doubles as the simulation radius, which put the
@@ -1918,6 +1948,9 @@ void EngineWgpu::PushSceneCamera()
             // culls cannot drift. WGR_OBJECT_DISTANCE_SCALE=1 restores the legacy distance.
             wgr_set_cull_params(_renderer, GScene->GetObjectDrawDistance(), static_cast<float>(camera->Left()),
                                 GScene->GetLodInvWidth(), 0.125f);
+        }
+        if (_gpuDriven && _renderer)
+        {
             // GPU Hi-Z occlusion replaces the engine's software occlusion buffer for the retained
             // set; force the built-in off while it's on so the two don't both cull (and the CPU
             // stops rasterizing the occlusion buffer). Driven per frame so the default (occlusion
@@ -1939,32 +1972,33 @@ void EngineWgpu::PushSceneCamera()
             // `farTier`, not `far`: MSVC's <windows.h> still defines `far` as a segment
             // keyword macro, so a local of that name is a parse error under clang-cl.
             const FarTierSettings& farTier = FarSettings();
-            // Start the far tier WELL INSIDE the object draw distance, not at it.
+            // THE START RULE IS NO LONGER A DISTANCE. It is the complement of the real
+            // object cull, evaluated per placement in far.wgsl from the very cull params
+            // pushed above. What is resolved here is only the HARD FLOOR beneath it.
             //
-            // "Begin where real objects stop" is the obvious default and it is wrong,
-            // because GetObjectDrawDistance() is deliberately anchored to the fog max
-            // range -- SceneDraw.cpp's own comment is that the edge is placed where
-            // "the object is exactly the sky it replaces". A tier that begins there
-            // draws only into fully-fogged pixels, which is exactly what the first
-            // deployed build did: every proxy resolved, nothing was visible, and the
-            // frame differed from the tier-off arm only by water and cloud noise.
+            // Why no distance works, measured against the real 1.2M Everon placement set
+            // with exact per-model bounds (experiments/farfield/cutoff_analysis.py). At
+            // the governor's fine rail a 150 m seam put a proxy on top of a live model
+            // for 92.1% of placements; pulling the seam out to the 880 m fog edge cut
+            // that to 0% but left 5.9% drawn by nothing. At the COARSE rail the same
+            // 880 m seam left 36.2% drawn by nothing -- that is the reported pop-in, and
+            // it is a different number at every framerate, because the real cull is
+            // size-dependent and its coefficient rides the governor. The complement
+            // measures 0% overlap and 0% gap at both rails, by construction.
             //
-            // The band the tier is actually for is the one where an object has been
-            // dropped by the sub-pixel cull but fog has NOT yet hidden it -- which is
-            // precisely where the framerate-governed LOD coefficient makes things
-            // vanish. Measured on Everon: at 150 m the world fills with treelines,
-            // hedgerows and far-shore structures, 8.91% of pixels changed against the
-            // tier-off arm.
-            //
-            // So the default is a fraction of the draw distance rather than all of it.
-            // 0.45 puts the seam around 400 m at the stock 880 m fog edge, comfortably
-            // inside the fog but outside the range where a proxy would be compared
-            // against its own real model.
-            const float nearCutoff = farTier.nearCutoff >= 0.0f
-                                         ? farTier.nearCutoff
-                                         : GScene->GetObjectDrawDistance() * FarTierNearCutoffFraction();
-            wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit,
-                               farTier.enabled ? 1u : 0u);
+            // The floor still matters: the complement legitimately accepts a placement a
+            // few metres away whose real model the sub-pixel cull dropped, and a crude
+            // box that close is compared by eye against the real geometry beside it. A
+            // few tens of metres is enough to own that band, and WGR_FAR_NEAR_CUTOFF
+            // overrides it. Under WGR_FAR_MODE=distance the old fraction-of-draw-distance
+            // start rule comes back unchanged, so the A/B is one variable and no rebuild.
+            float nearCutoff = farTier.nearCutoff;
+            if (nearCutoff < 0.0f)
+            {
+                nearCutoff = farTier.complement ? FAR_TIER_HARD_FLOOR_M
+                                                : GScene->GetObjectDrawDistance() * FarTierNearCutoffFraction();
+            }
+            wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit, farTier.enabled ? 1u : 0u);
         }
     }
 

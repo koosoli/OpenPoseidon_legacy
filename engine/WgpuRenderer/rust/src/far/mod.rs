@@ -23,6 +23,7 @@
 
 use crate::ffi::WgrFarInstance;
 use crate::gfx3d::DEPTH_FORMAT;
+use crate::gfx3d::cull::CullInputs;
 
 /// Compacted-output partition sizes, in instances. One buffer, two fixed partitions: cards
 /// take [0, CARD_CAP) and prisms [CARD_CAP, CARD_CAP + PRISM_CAP). A partition rather than a
@@ -46,13 +47,74 @@ const PRISM_VERTS: u32 = 36;
 const WORKGROUP: u32 = 64;
 const MAX_GROUPS_X: u32 = 65535;
 
+/// The proxy widening floor, mirrored from `MIN_PROXY_RADIUS` in far.wgsl. The shipped rule
+/// lives in the shader; this side needs the constant only to check the replica below against
+/// it, which is why both are test-only.
+#[cfg(test)]
+const MIN_PROXY_RADIUS: f32 = 0.25;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct FarParams {
-    /// x = near cutoff (m), y = far distance (m), z = sub-pixel limit (px), w = source count
+    /// x = near cutoff (m) — a hard floor, not the start rule, y = far distance (m),
+    /// z = sub-pixel limit (px), w = source count
     cfg: [f32; 4],
-    /// x = pixels per radian, y = enabled, z = dispatch row stride (invocations), w spare
+    /// x = pixels per radian, y = enabled, z = dispatch row stride (invocations),
+    /// w = start rule (0 = complement of the real cull, 1 = legacy pure distance)
     tune: [f32; 4],
+    /// The real object cull's own coefficients, refreshed every frame from
+    /// `Gfx3d::cull_inputs()`. x = k = pixel_limit * lod_scale * lod_inv_width, y = objects_z,
+    /// z/w spare. NOT part of the C ABI — FarParams is private to this module and its shader,
+    /// so growing it needs no header change and no wgr_far_set_params parameter.
+    cull: [f32; 4],
+}
+
+/// The far tier's START RULE, as a plain function so it can be tested without a GPU.
+///
+/// This is the complement of gfx3d/cull.wgsl: accept exactly the placements the real object
+/// cull drops, so a proxy is never drawn over a real model (overlap) and a placement inside
+/// the fog radius is never drawn by nothing at all (gap). `k` folds the real cull's
+/// `pixel_limit * lod_scale * lod_inv_width`, which is why a distance cannot substitute for
+/// it — the framerate governor moves `lod_inv_width` while the game runs.
+///
+/// `near_floor` is `WGR_FAR_NEAR_CUTOFF`: a hard floor layered ON TOP of the complement, never
+/// a start rule of its own. The far tier's own sub-pixel limit is applied by the shader AFTER
+/// this and is deliberately not folded in here — it is a cost control, not a correctness rule.
+///
+/// A REPLICA, not the shipped rule: the rule runs per placement in far.wgsl, on the GPU, so
+/// the only way to assert on it in a unit test is to state it twice. That is a real hazard, so
+/// `the_shader_carries_the_complement_rule` below matches the shader's own lines as text — if
+/// either half drifts back into being a distance, one of the two tests fails.
+#[cfg(test)]
+fn far_accepts(
+    d: f32,
+    proxy_radius: f32,
+    k: f32,
+    objects_z: f32,
+    near_floor: f32,
+    far_distance: f32,
+) -> bool {
+    if d > far_distance || d < near_floor {
+        return false;
+    }
+    let proxy_diameter = proxy_radius.max(MIN_PROXY_RADIUS) * 2.0;
+    let real_drawn = d <= objects_z && proxy_diameter >= k * d;
+    !real_drawn
+}
+
+/// `WGR_FAR_MODE=distance` restores the pre-complement pure-distance start rule from the SAME
+/// binary, so an A/B of the two rules is one environment variable and not a rebuild. Anything
+/// else (including unset) is the complement.
+///
+/// Read here AND in EngineWgpu.cpp's `FarSettings()`, which needs it to pick the matching near
+/// cutoff default (the legacy 0.45 x draw distance in distance mode, a small hard floor in
+/// complement mode). Passing it across would mean a new `wgr_far_set_params` parameter and an
+/// ABI bump, which this change is explicitly not allowed to spend.
+fn mode_from_env() -> f32 {
+    match std::env::var("WGR_FAR_MODE") {
+        Ok(v) if v.eq_ignore_ascii_case("distance") => 1.0,
+        _ => 0.0,
+    }
 }
 
 /// Everything that only exists once a world has actually pushed placements. A world with no
@@ -96,7 +158,12 @@ impl Far {
             // Inert until the game pushes real values: a far distance of 0 rejects
             // everything, which is the right state for a frame that has no world yet.
             cfg: [0.0, 0.0, 2.0, 0.0],
-            tune: [0.0, 0.0, WORKGROUP as f32, 0.0],
+            tune: [0.0, 0.0, WORKGROUP as f32, mode_from_env()],
+            // Inert-safe until the first per-frame push, and inert-safe in the same direction
+            // CullInputs::default() is: k = 0 makes every placement inside objects_z "drawn",
+            // so the tier starts at the object cull's radial edge rather than swamping the
+            // frame with proxies over live models.
+            cull: [0.0, CullInputs::default().objects_z, 0.0, 0.0],
         };
         let params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_far_params"),
@@ -350,6 +417,32 @@ impl Far {
         self.upload_params(queue);
     }
 
+    /// The REAL object cull's coefficients for this frame, straight from `Gfx3d::cull_inputs()`
+    /// — the same values `wgr_set_cull_params` feeds gfx3d/cull.wgsl.
+    ///
+    /// Pushed PER FRAME on purpose. `lod_inv_width` is driven by the framerate governor, so the
+    /// real cull's sub-pixel edge walks in and out while the game runs; a start rule sampled
+    /// once at world load would be the complement of a cull that no longer exists. Writes only
+    /// on change, so a settled governor costs nothing.
+    pub fn set_cull_complement(&mut self, queue: &wgpu::Queue, inputs: CullInputs) {
+        let k = inputs.pixel_limit * inputs.lod_scale * inputs.lod_inv_width;
+        let objects_z = inputs.objects_z;
+        // k is ~1e-4 at the fine rail, so the guard has to be far below that to not swallow a
+        // real governor move.
+        if (self.params.cull[0] - k).abs() > 1.0e-9
+            || (self.params.cull[1] - objects_z).abs() > 1.0e-3
+        {
+            self.params.cull[0] = k;
+            self.params.cull[1] = objects_z;
+            self.upload_params(queue);
+        }
+    }
+
+    /// True when the start rule is the complement; false under `WGR_FAR_MODE=distance`.
+    pub fn complement_mode(&self) -> bool {
+        self.params.tune[3] < 0.5
+    }
+
     /// Pixels per radian for the main scene camera, `(viewport_height / 2) * proj[1][1]`.
     /// The sub-pixel test is meaningless without it — a fixed metric threshold is correct at
     /// exactly one resolution — so a zero here disables that test rather than guessing.
@@ -525,6 +618,110 @@ mod tests {
     }
 
     const WGR_FAR_FLAG_PRISM_TEST: u32 = crate::ffi::WGR_FAR_FLAG_PRISM;
+
+    // THE START RULE. This test exists to stop the tier silently regressing to a distance:
+    // every assertion below is at a DIFFERENT distance-vs-outcome pairing than a monotone
+    // "accept beyond X" rule could produce, so no fixed cutoff can satisfy all of them.
+    //
+    // k is the real cull's folded coefficient at the fine rail (pixel_limit 0.125 x
+    // lod_scale 1.13 x lod_inv_width 0.0104), the same value the offline sweep used.
+    #[test]
+    fn the_start_rule_is_the_complement_of_the_object_cull_not_a_distance() {
+        const K: f32 = 0.125 * 1.13 * 0.0104; // ~1.47e-3
+        const OBJECTS_Z: f32 = 880.0; // the stock Everon fog edge
+        const FLOOR: f32 = 40.0;
+        const FAR: f32 = 12_000.0;
+        // A big tree: 10 m of horizontal extent, so radius 5. Sub-pixel seam at 10 / K ~
+        // 6,800 m, i.e. well past objects_z — the real cull only ever drops this one radially.
+        const BIG: f32 = 5.0;
+        // A fence post, narrow enough to be widened to MIN_PROXY_RADIUS: drawn 0.5 m across,
+        // so its sub-pixel seam is 0.5 / K ~ 340 m, less than half of objects_z.
+        const SMALL: f32 = 0.15;
+
+        let accepts = |d: f32, r: f32| far_accepts(d, r, K, OBJECTS_Z, FLOOR, FAR);
+
+        // 1. A LARGE proxy near the camera is REJECTED — the real object is drawn there, and
+        //    a proxy would be a crude box standing in front of its own model.
+        assert!(!accepts(200.0, BIG));
+        assert!(!accepts(600.0, BIG));
+        // Still rejected right up to the object cull's radial edge.
+        assert!(!accepts(OBJECTS_Z - 1.0, BIG));
+
+        // 2. The SAME proxy past objects_z is ACCEPTED — the real cull dropped it radially.
+        assert!(accepts(OBJECTS_Z + 1.0, BIG));
+        assert!(accepts(5_000.0, BIG));
+
+        // 3. A SMALL proxy at MID distance is ACCEPTED at a distance where the large one is
+        //    not: the real cull dropped it for being sub-pixel, not for being far. This is the
+        //    pair no distance rule can reproduce — same d, opposite answers.
+        assert!(accepts(400.0, SMALL));
+        assert!(!accepts(400.0, BIG));
+        // And inside its own sub-pixel seam it is rejected again, because there the real model
+        // IS drawn: the small proxy's seam sits at ~340 m, the big one's at objects_z.
+        assert!(!accepts(150.0, SMALL));
+        assert!(!accepts(300.0, SMALL));
+
+        // 4. The near cutoff is a HARD FLOOR laid over the complement, never a start rule.
+        //    Isolated with a heavy governor (k = 0.05), the one condition under which the
+        //    complement genuinely wants to emit a proxy within arm's reach: the post goes
+        //    sub-pixel at 10 m there, so at 20 m the complement says yes and the floor still
+        //    says no.
+        assert!(far_accepts(20.0, SMALL, 0.05, OBJECTS_Z, 0.0, FAR));
+        assert!(!far_accepts(20.0, SMALL, 0.05, OBJECTS_Z, FLOOR, FAR));
+        // ...and the floor must not become the rule in its own right — the big proxy just
+        // above it is still rejected, because its real model is drawn.
+        assert!(!accepts(FLOOR + 1.0, BIG));
+
+        // 5. The fog wall still caps the tier.
+        assert!(!accepts(FAR + 1.0, BIG));
+
+        // 6. A degenerate zero-extent row (a flagpole's ModelInfo) is measured at the width the
+        //    tier actually DRAWS it, not at zero — otherwise it would be "never real-drawn" and
+        //    accepted at every distance above the floor.
+        assert!(!far_accepts(100.0, 0.0, K, OBJECTS_Z, FLOOR, FAR));
+        assert!(accepts(400.0, 0.0));
+
+        // 7. THE GOVERNOR MOVES THE SEAM. Same proxy, same distance, coarser rail (k x 4, the
+        //    second rail the offline sweep measured): the real cull now drops it, so the tier
+        //    picks it up. A cutoff in metres cannot express this, which is the whole reason
+        //    this rule is not one.
+        assert!(!accepts(200.0, SMALL));
+        assert!(far_accepts(200.0, SMALL, K * 4.0, OBJECTS_Z, FLOOR, FAR));
+    }
+
+    // far_accepts and far.wgsl are two authorings of one rule; nothing else stops the shader
+    // half drifting back into a distance test while the Rust half keeps passing.
+    #[test]
+    fn the_shader_carries_the_complement_rule() {
+        let src = include_str!("far.wgsl");
+        assert!(src.contains("let real_drawn = (d <= objects_z) && (proxy_diameter >= k * d);"));
+        assert!(src.contains("let k = far.cull.x;"));
+        assert!(src.contains("let objects_z = far.cull.y;"));
+        // The mode gate, so WGR_FAR_MODE=distance still has something to switch.
+        assert!(src.contains("if (far.tune.w < 0.5) {"));
+        // The proxy is measured at the width it is drawn at, in both files.
+        assert!(src.contains(&format!(
+            "const MIN_PROXY_RADIUS: f32 = {:?};",
+            MIN_PROXY_RADIUS
+        )));
+        assert!(src.contains("let proxy_diameter = max(s.radius, MIN_PROXY_RADIUS) * 2.0;"));
+    }
+
+    // WGR_FAR_MODE is the A/B switch and must not need a rebuild. Parsed here rather than
+    // exercised through the environment, because a process-wide env var set inside one test
+    // leaks into every other test in the binary.
+    #[test]
+    fn distance_mode_disables_the_complement() {
+        // tune.w = 1 is the legacy pure-distance rule; the shader's gate reads it as "skip".
+        let mut params = FarParams {
+            cfg: [0.0, 0.0, 2.0, 0.0],
+            tune: [0.0, 0.0, WORKGROUP as f32, 1.0],
+            cull: [0.0, 880.0, 0.0, 0.0],
+        };
+        assert!(params.tune[3] >= 0.5);
+        params.tune[3] = mode_from_env(); // unset in the test process -> complement
+        assert_eq!(params.tune[3], 0.0);
+    }
 
     // The compacted partition is addressed by the prism vertex shader as CARD_CAP + index,
     // so the two constants in far.wgsl and the buffer this module allocates have to agree.

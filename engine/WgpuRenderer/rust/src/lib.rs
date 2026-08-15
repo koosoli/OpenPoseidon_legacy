@@ -2876,6 +2876,13 @@ impl Renderer {
                 self.far
                     .set_view_metrics(&self.queue, self.config.height as f32 * 0.5 * cam.proj[5]);
             }
+            // And this frame's REAL object cull coefficients, which are the tier's start rule:
+            // it accepts exactly the placements those coefficients make gfx3d/cull.wgsl drop.
+            // Refreshed here, next to the view metrics and immediately before the sweep, so a
+            // framerate governor that moves lod_inv_width mid-session moves the seam with it —
+            // and so this cannot read a value from before the frame's cull params were pushed.
+            let cull_inputs = self.gfx3d.cull_inputs();
+            self.far.set_cull_complement(&self.queue, cull_inputs);
             let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
             if !self.suppress_world_objects {
                 self.far.dispatch(
@@ -4186,12 +4193,22 @@ impl Renderer {
         self.log.log(
             log_level::INFO,
             &format!(
-                "[wgr] far tier: {} proxies ({} cards, {} prisms), {:.1} MB of source rows",
+                "[wgr] far tier: {} proxies ({} cards, {} prisms), {:.1} MB of source rows, \
+                 start rule = {}",
                 instances.len(),
                 cards,
                 prisms,
                 (instances.len() * std::mem::size_of::<WgrFarInstance>()) as f64
-                    / (1024.0 * 1024.0)
+                    / (1024.0 * 1024.0),
+                // Logged because WGR_FAR_MODE is read on BOTH sides of the ABI (here for the
+                // predicate, in EngineWgpu.cpp for the matching near-cutoff default) and this
+                // line sits next to the C++ one, so a disagreement is visible rather than
+                // silent.
+                if self.far.complement_mode() {
+                    "complement of the object cull"
+                } else {
+                    "legacy distance (WGR_FAR_MODE=distance)"
+                }
             ),
         );
     }

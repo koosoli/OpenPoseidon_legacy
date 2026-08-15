@@ -28,7 +28,9 @@ governor did it. The isolation arms settle it: changing the governor ALONE
 `C no-far` (53.33 fps / 18.467 ms) and `E old-admit` (50.85 fps / 18.950 ms) are
 indistinguishable from the default. The other three levers together account for
 0.85 ms of the 14.1 ms difference. So the isolated governor effect is
-**30.51 -> 50.34 fps**, and the four-lever comparison is merely consistent with it. It also looks *better*: at range 16 the near trees render as sparse pale specks —
+**30.51 -> 50.34 fps**, and the four-lever comparison is merely consistent with it.
+
+It also looks *better*: at range 16 the near trees render as sparse pale specks —
 full branch geometry aliasing at multi-kilometre distance — where the coarse LOD is a
 solid canopy.
 
