@@ -2287,9 +2287,18 @@ bool Landscape::LoadOprwModern(const char* path)
                 Fmt::BinaryReader reader(stream);
                 const Fmt::P3D::ModelProxyBounds bounds = Fmt::P3D::ReadModelProxyBounds(reader);
                 // valid == false covers OFP-era ODOL 7 (whose ModelInfo sits behind every LOD
-                // body, so reading it is not a header read at all), non-ODOL containers and
-                // any header that decoded to nonsense. A proxy sized from any of those is
-                // worse than no proxy, so the model simply gets none.
+                // body, so reading it is not a header read at all), containers that are
+                // neither ODOL nor MLOD, and any input that decoded to nonsense. A proxy
+                // sized from any of those is worse than no proxy, so the model simply gets
+                // none.
+                //
+                // MLOD used to land here too, and that is what emptied this tier on every
+                // imported world: the Reforger models are MLOD 1.1 / P3DM without exception,
+                // so ReadModelProxyBounds refused all 1,132 Everon models, the instance array
+                // came out empty and the renderer released its far buffers at world load.
+                // MLOD now derives its bounds from the first LOD's vertex block. It carries
+                // no average colour anywhere, so those proxies keep the white default --
+                // bounds.colorKnown is what says so.
                 if (!bounds.valid)
                 {
                     ++modelsSkipped;
