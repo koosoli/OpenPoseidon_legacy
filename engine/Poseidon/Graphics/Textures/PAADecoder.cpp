@@ -48,6 +48,27 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
         s.kind = AlphaStats::Cutout;
     else
         s.kind = AlphaStats::Opaque;
+
+    // An alpha channel that is clear EVERYWHERE is not an opacity mask.
+    //
+    // A cutout surface whose alpha is 0 at every texel discards every fragment and
+    // renders completely invisible -- and a texture author has no reason to ship a
+    // mask that hides the whole surface. In practice this is packed data: the
+    // _BCR-family textures carry detail in alpha, not coverage, and three shipped
+    // Reforger materials (glass, mate metal paint, plastic base) are alpha-0 across
+    // 100% of their texels. Classified as cutout, those surfaces disappear entirely.
+    //
+    // This is a structural check on the decoded pixels, deliberately narrow: it only
+    // catches the degenerate all-clear case, which cannot be a legitimate mask under
+    // any authoring intent. Partially-clear alpha -- including heavily dithered packed
+    // alpha -- is left alone, because separating "packed detail" from "aggressive
+    // foliage mask" needs a real perimeter/speckle metric and a policy decision, not a
+    // guard. Falling back to Opaque keeps the surface visible and occluding, which is
+    // the safe failure: a wrongly-opaque surface looks wrong, a wrongly-invisible one
+    // looks broken.
+    if (s.kind == AlphaStats::Cutout && s.aMax == 0)
+        s.kind = AlphaStats::Opaque;
+
     return s;
 }
 

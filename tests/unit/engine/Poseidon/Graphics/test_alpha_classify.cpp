@@ -129,3 +129,36 @@ TEST_CASE("ClassifyTextureAlpha: undecodable multi-bit alpha falls back to Opaqu
     // Decode unavailable -> keep current behavior: occlude + batch, never auto-route to the blend pass.
     REQUIRE(ClassifyTextureAlpha(true, false, false, nullptr) == AlphaStats::Opaque);
 }
+
+TEST_CASE("ClassifyAlpha: an all-clear alpha channel is not a cutout mask", "[Graphics][AlphaClassify]")
+{
+    // Alpha 0 at every texel. Classified as Cutout, every fragment is discarded and
+    // the surface renders completely invisible -- which no texture author intends.
+    // In practice this is packed data in the alpha channel, not coverage: three
+    // shipped Reforger materials (glass, mate metal paint, plastic base) are alpha-0
+    // across 100% of their texels and vanished entirely once a FLAG tagg routed them
+    // down the cutout path.
+    //
+    // Opaque is the safe fallback: a wrongly-opaque surface looks wrong, a
+    // wrongly-invisible one looks broken.
+    auto v = rgbaWithAlphas(std::vector<int>(256, 0));
+    auto s = ClassifyAlpha(v.data(), 256);
+    REQUIRE(s.aMax == 0);
+    REQUIRE(s.pctClear == 100.0);
+    REQUIRE(s.kind == AlphaStats::Opaque);
+}
+
+TEST_CASE("ClassifyAlpha: one opaque texel keeps a mostly-clear mask a Cutout",
+          "[Graphics][AlphaClassify]")
+{
+    // The all-clear guard must be exactly that. A mask that is 99.6% clear is still a
+    // legitimate mask -- narrow foliage and chain-link do exactly this -- so the guard
+    // keys on aMax == 0 rather than on a percentage, and a single opaque texel is
+    // enough to keep it out.
+    std::vector<int> alphas(256, 0);
+    alphas[128] = 255;
+    auto v = rgbaWithAlphas(alphas);
+    auto s = ClassifyAlpha(v.data(), 256);
+    REQUIRE(s.aMax == 255);
+    REQUIRE(s.kind == AlphaStats::Cutout);
+}
