@@ -1056,6 +1056,19 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
 
 #if !DENSITY_LOD
 
+// WGR_LOD_GOVERNOR_TARGET=1 selects the target-point error metric described at the use site.
+// Default OFF: this changes the LOD governor on every world at once, and the only honest way
+// to turn it on is to measure it on more than the world that motivated it.
+static bool LodGovernorTargetDrive()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_LOD_GOVERNOR_TARGET");
+        return v && v[0] != '0';
+    }();
+    return on;
+}
+
 void Scene::AdjustComplexity()
 {
     float oldLodInvWidth = _lodInvWidth;
@@ -1123,6 +1136,40 @@ void Scene::AdjustComplexity()
         float l = _lodInvWidth;
         float t = estDuration;
         float dist = lineL * l + lineT * t + lineC;
+        // WGR_LOD_GOVERNOR_TARGET=1 drives on the TARGET POINT instead of the perpendicular
+        // distance, which is what makes the range a clamp again rather than a gain.
+        //
+        // `dist` above is the signed distance from (l,t) to the target line measured with the
+        // NORMALIZED normal (lineL, lineT) -- and that normal is built from lMax - lMin, i.e.
+        // from the range. So the range does not only bound the loop, it rescales its error
+        // term and therefore its fixed point and its deadband (the thresholds 8 and 4 are
+        // absolute). That is why WGR_LOD_GOVERNOR_RANGE=4 lands COARSER than 16 instead of
+        // finer, which is backwards for something documented as a coarseness bound: measured
+        // on Everon at a near pose, range 16 puts 9,186 instances at LOD 0 and none past
+        // LOD 2, range 4 puts 697 at LOD 0 and the mass at LOD 3-4.
+        //
+        // The line is the same line; only the error metric changes. Solve it for the l the
+        // loop actually wants at this frame time, then drive on l - lTarget expressed as a
+        // FRACTION OF THE RANGE. A fraction is dimensionless, so the same frame time gives
+        // the same relative operating point at any range, and shrinking the range now does
+        // what it says: it lowers the coarse end and everything below it is untouched.
+        if (LodGovernorTargetDrive())
+        {
+            const float tSpan = tMax - tMin;
+            float lTarget = lMin;
+            if (tSpan > 1e-6f)
+            {
+                lTarget = lMin + (t - tMin) * (lMax - lMin) / tSpan;
+            }
+            saturate(lTarget, lMin, lMax);
+            const float lSpan = lMax - lMin;
+            // Same sign convention as the distance form: positive means "too slow, coarsen".
+            // Scaled so a full-range error reads 100, keeping the 8/4 thresholds meaningful
+            // as percentages of the range rather than as absolutes in a rescaled space.
+            dist = lSpan > 1e-9f ? (lTarget - l) / lSpan * 100.0f : 0.0f;
+            // The distance form multiplies by 200 below; pre-divide so one code path applies.
+            dist *= 1.0f / 200.0f;
+        }
 // check distance from line
 // note: we might be in area out of tmin,tmax
 // find nearest point on line
