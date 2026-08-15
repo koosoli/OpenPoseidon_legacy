@@ -433,3 +433,83 @@ ticket against its own acceptance criteria. I checked the ledger's status field,
 records, and the code for the formats I could verify by loading a world. Treat the three
 "demonstrably working" entries as evidence to re-status those tickets, not as proof they meet
 every criterion the roadmap states.
+
+---
+
+# Appendix — every path and command you need
+
+## Work here
+
+| what | where |
+|---|---|
+| **Worktree (work in this one)** | `C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\.claude\worktrees\texstream` |
+| Branch | `feat/texture-streaming` — contains all of `feat/farfield-tier` |
+| Push target | `git push safety feat/texture-streaming` (private mirror) |
+| Main checkout — **do not work here** | repo root; it is on `codex/wgpu-performance-modernisation` and has another session's uncommitted work |
+| Game install (deploy target) | `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault` |
+
+## Build, deploy
+
+`scripts\Build.ps1` does not work from an agent shell. Use:
+
+```bash
+export PATH="$PATH:/c/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64:/d/Program Files/LLVM/bin"
+cmake --build build/win-x64-clang-rwdi --target PoseidonGame -- -j 8
+```
+
+Deploy **both** binaries or the game dies with `Entry Point Not Found`:
+
+```bash
+cp build/win-x64-clang-rwdi/apps/cwr/Game/PoseidonGame.exe   "$G/ColdWarAssault.exe"
+cp build/win-x64-clang-rwdi/apps/cwr/Game/wgpu_renderer.dll  "$G/wgpu_renderer.dll"
+```
+
+Tests: `./build/win-x64-clang-rwdi/tests/unit/engine/Poseidon/PoseidonTests.exe "[texture]"`
+
+## The four worlds — all under %TEMP%, see trap 3
+
+| world | `-World` | extra |
+|---|---|---|
+| Reforger Everon | `C:\Users\mail\AppData\Local\Temp\rf\world\ev_DALL.wrp` | — |
+| Arma 3 Stratis | `C:\Users\mail\AppData\Local\Temp\ff-worlds\stratis\stratis.wrp` | `-Mod a3stratis` |
+| DayZ Chernarus | `C:\Users\mail\AppData\Local\Temp\ff-worlds\chernarus\chernarusplus.wrp` | `-AddonRoot "D:\SteamLibrary\steamapps\common\DayZ\Addons"` |
+| Arma 1 Sahrani | `C:\Users\mail\AppData\Local\Temp\ff-worlds\sahrani\sara.wrp` | `-AddonRoot "<repo>\packages\a1-compat\addons"` |
+
+Arma 2 has **no exported world**; `takistan.wrp` is at
+`C:\Users\mail\AppData\Local\Temp\poseidon-a2oa-takistan-inspect\takistan.wrp` and the addon
+corpus is the 6.2 GB `.tmp-perf-modernisation\a2-addons` in the repo root — **that is the only
+copy of the Arma 2 assets on the machine; do not delete it.**
+
+## Benchmarking
+
+The harness lives in the sibling worktree and measures **whatever binary is installed**:
+
+```
+.claude\worktrees\farfield-tier\scripts\farfield-bench.ps1
+.claude\worktrees\farfield-tier\scripts\farfield-compare.py
+.claude\worktrees\farfield-tier\scripts\README-farfield-bench.md
+```
+
+A complete example (Everon, play resolution, settled, stats on):
+
+```powershell
+.\scripts\farfield-bench.ps1 -Label myarm -Repeats 2 `
+  -Mission "D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\dev-missions\devtest-dawn.abel" `
+  -World "C:\Users\mail\AppData\Local\Temp\rf\world\ev_DALL.wrp" `
+  -Freefly 5200,7000,220,45,-8 -WorldHour 10 -WarmupSeconds 130 `
+  -Width 1600 -Height 900 -Out "<your out dir>" `
+  -Env @{ WGR_OBJECT_STREAM_MAX_OBJECTS='200000'; WGR_PASS1_STATS='1' }
+```
+
+Compare: `python scripts/farfield-compare.py --arm "a=<dir1>" --arm "b=<dir2>"`
+
+Warmup must exceed the fill-in: Everon ~107 s @1600×900, Chernarus ~253 s, Stratis/Sahrani
+~120–150 s. **Grep the log for `pending=0` before quoting any frame number.**
+
+## Documents
+
+- `docs\roadmap\decisions\` — one record per finding, RND-035..038 are this session's
+- `HANDOVER-PROMPT-farfield-session-20260815.md` (repo root) — the previous session, superseded
+- `docs\roadmap\modernisation\` — the 253 KB roadmap; **read the review above before using it**
+- `docs\roadmap\status-ledger.yaml` — 61 tickets, and stale; see the review
+- `.agents\README.md`, `.agents\WGSL_CODING_RULES.md` — mandatory per CLAUDE.md
