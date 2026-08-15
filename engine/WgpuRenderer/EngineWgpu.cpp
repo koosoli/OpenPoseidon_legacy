@@ -4187,6 +4187,17 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 
 namespace
 {
+// Opt-in revert of the model-release texture eviction described at the call site.
+bool EvictTexturesOnModelRelease()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_EVICT_ON_MODEL_RELEASE");
+        return v && *v && *v != '0';
+    }();
+    return on;
+}
+
 bool IsTerrainPageTexture(const TextureWgpu* texture)
 {
     const char* name = texture ? texture->Name() : nullptr;
@@ -4229,19 +4240,42 @@ void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
             if (!texture)
                 continue;
             texture->UnpinResident();
-            // Terrain owns its own page lifetime and may share a material image
-            // with an object. Never invalidate a handle held by its Rust bind.
-            // A texture may also feed an active direct draw, which has no
-            // retained-model pin. EnsureUploaded touches those every frame.
-            // Keep two submissions of safety so removing a retained model early
-            // in this frame cannot invalidate a direct draw's handle.
-            const bool directUseQuiescent =
-                _wbank && _wbank->ResidencyFrame() >= texture->LastUsedFrame() + 2;
-            if (texture->ResidentPins() == 0 && directUseQuiescent && !IsTerrainPageTexture(texture) &&
-                texture->GpuHandle())
+            // Unpin only. Releasing a MODEL is not a reason to destroy a TEXTURE.
+            //
+            // This used to evict here, which turned a model-lifetime event into a
+            // texture eviction with no budget check and no grace period -- it
+            // pre-empted TextureBankWgpu::TrimResidency, which already makes exactly
+            // this decision correctly (budget-gated, ordered by last-used frame, with
+            // a 120-frame grace). The LRU was not choosing badly; it was starved,
+            // because RetainGpuModel pins every texture of every registered model and
+            // TrimResidency skips anything pinned. Measured on DayZ: 1-35 eviction
+            // candidates against 1,043 distinct models in view.
+            //
+            // The cost of evicting here lands on the way back: EvictGpu clears
+            // _uploadTried, and the re-upload re-reads the file once per mip level
+            // (TextureSourcePac::GetMipmapData opens the stream per level), so flying
+            // out of an area and back re-transcodes every mip of every texture.
+            //
+            // Dropping to zero pins now simply makes the texture an eviction
+            // CANDIDATE, and the grace period naturally covers a fly-out-and-back.
+            // WGR_EVICT_ON_MODEL_RELEASE=1 restores the old behaviour so both arms of
+            // an A/B come from one binary.
+            if (EvictTexturesOnModelRelease())
             {
-                texture->EvictGpu();
-                ++evictedTextures;
+                // Terrain owns its own page lifetime and may share a material image
+                // with an object. Never invalidate a handle held by its Rust bind.
+                // A texture may also feed an active direct draw, which has no
+                // retained-model pin. EnsureUploaded touches those every frame.
+                // Keep two submissions of safety so removing a retained model early
+                // in this frame cannot invalidate a direct draw's handle.
+                const bool directUseQuiescent =
+                    _wbank && _wbank->ResidencyFrame() >= texture->LastUsedFrame() + 2;
+                if (texture->ResidentPins() == 0 && directUseQuiescent && !IsTerrainPageTexture(texture) &&
+                    texture->GpuHandle())
+                {
+                    texture->EvictGpu();
+                    ++evictedTextures;
+                }
             }
         }
         _gpuModelTextures.erase(found);
