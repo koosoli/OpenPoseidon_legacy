@@ -665,10 +665,17 @@ class EngineWgpu : public EngineDummy
     int _smCascadeRes = 0;
     bool _smCascadesValid = false;
     std::vector<WgrShadowCaster> _shadowCasters;
-    // Camera position the shadow casters were made camera-relative to (captured in
-    // AddShadowCaster). Used for the depth pass's terrain conform — must match the
-    // caster world matrices, so it is NOT re-read from _currentCamera at frame end
-    // (which may have advanced to a HUD/optics camera during live gameplay).
+    // Camera position the shadow casters were made camera-relative to, and the origin the Rust
+    // side reconstructs absolute world xz from (depth-pass terrain conform) and builds every
+    // shadow-cascade cull frustum around. Must match the caster world matrices, so it is NOT
+    // re-read from _currentCamera at frame end (which may have advanced to a HUD/optics camera
+    // during live gameplay).
+    //
+    // Written in AddShadowCaster (authoritative — same camera as the caster matrices beside it)
+    // AND in SetShadowCascades (same camera, same call chain, one step earlier). The second
+    // write exists because AddShadowCaster early-returns, so a frame with no CPU casters used to
+    // leave this stale from an earlier frame — which only stopped mattering because the old
+    // cascade gate skipped those frames entirely. It no longer does; see both sites.
     float _smCamPos[3] = {0.0f, 0.0f, 0.0f};
 
     // Dev-panel overlay for the current frame

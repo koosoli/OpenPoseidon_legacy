@@ -1161,6 +1161,34 @@ uint64_t ResolveTexture(const MipInfo& mip)
     return 0;
 }
 
+// WGR_SHADOW_LEGACY_GATE=1 restores the pre-fix cascade behaviour EXACTLY: the old
+// `!_shadowCasters.empty()` gate in NextFrame AND the old write-only-in-AddShadowCaster
+// handling of `_smCamPos`. Both, from one switch, because they are one behaviour: the old
+// gate is what made the stale `_smCamPos` harmless (see SetShadowCascades), so restoring
+// either alone would A/B a state that never shipped. The FIXED behaviour is the default.
+bool ShadowLegacyGateEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_LEGACY_GATE");
+        return v && v[0] != '0';
+    }();
+    return on;
+}
+
+// WGR_SHADOW_GATE_TRACE=1 — log the cascade gate's inputs whenever its verdict flips. Separate
+// from the legacy switch on purpose: the trace has to be usable on BOTH arms of the A/B, so
+// folding it into WGR_SHADOW_LEGACY_GATE would leave the arm that reproduces the bug silent.
+bool ShadowGateTraceEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_GATE_TRACE");
+        return v && v[0] != '0';
+    }();
+    return on;
+}
+
 } // namespace
 
 void EngineWgpu::InitDraw(bool clear, PackedColor color)
@@ -1457,7 +1485,78 @@ void EngineWgpu::NextFrame()
         // dimming above), so a fully overcast sky casts no sharp sun shadows. (Terrain self-shadow
         // and the froxel aerial shadow are separate paths — a fuller pass is deferred.)
         const float shadowStrength = (GetShadowFactor() / 256.0f) * (1.0f - cloudDim);
-        const bool shadowActive = _smCascadesValid && !_shadowCasters.empty();
+        // TWO independent caster sets feed the one cascade depth map, and EITHER is enough:
+        //
+        //  - `_shadowCasters`, submitted from C++ (AddShadowCaster, below at :4974).
+        //  - the GPU-driven retained set, which casts ITSELF in Rust — `draw_gpu_driven_shadow`
+        //    (gfx3d/mod.rs:6961), called once per cascade from inside that cascade's already-open
+        //    depth pass (mod.rs:4689).
+        //
+        // The gate was `_smCascadesValid && !_shadowCasters.empty()`, and that is the bug. This
+        // boolean does not merely skip a caster upload: it also decides whether `cameras[i].shadow`
+        // is filled below, which is the ONLY way the colour pass learns the cascade matrices. So
+        // an empty CPU caster list does not degrade to "GPU casters only" — it turns the entire
+        // cascade system off for every receiver in the frame, discarding shadows that the retained
+        // set had rendered perfectly well. The Rust side is already written for exactly this case
+        // and has been since the §6 multi-view slice: `prepare_shadows` (mod.rs:4397-4431) sets up
+        // the shadow target and pass UBO whenever GPU-driven is on and skips ONLY the CPU
+        // bucketing when `casters.is_empty()`. Rust was ready; C++ was never sending the frame.
+        //
+        // The list empties in ordinary play, not in some contrived corner:
+        // SceneShadowPass.cpp:540 deliberately `continue`s on every `GpuDrawCoverage::Full` object
+        // (the retained set casts its own), and `Scene::ObjectForDrawing` diverts Full objects out
+        // of `_drawMergers` upstream, so a view whose visible set is ENTIRELY retained submits zero
+        // CPU casters. An interior does that (the building is the visible set, and a building whose
+        // proxies all moved to the GPU is Full — SceneObjectCreated at :4752). So does any Reforger
+        // world, where the .emat adapter leaves `pixelShaderId` empty and the foliage bail at :4051
+        // therefore never fires, letting ALL vegetation register as well. That is the owner's
+        // report — sun on an interior hall floor, walls not casting — and it does not need
+        // WGR_TREEADV_RETAINED to be on to happen.
+        //
+        // `_gpuDriven && !_gpuInstances.empty()` is the honest C++-visible form of "the retained
+        // set can cast". C++ cannot know how many instances survive a given cascade's cull — that
+        // is decided by the cull compute on the GPU — and it does not need to: a non-empty retained
+        // set is precisely the condition under which draw_gpu_driven_shadow can produce anything,
+        // and the two failure modes are not symmetric. Too eager costs one depth pass over an empty
+        // indirect arg list; too strict costs every shadow in the frame. `_gpuDriven` mirrors the
+        // `gpu_driven_enabled` flag `draw_gpu_driven_depth` tests first (mod.rs:6991), so the two
+        // sides cannot disagree about whether the path exists.
+        //
+        // WGR_SHADOW_LEGACY_GATE=1 restores the old gate (and the old `_smCamPos` handling with it).
+        const bool gpuDrivenShadowCasters = _gpuDriven && !_gpuInstances.empty();
+        const bool shadowActive =
+            _smCascadesValid &&
+            (!_shadowCasters.empty() || (!ShadowLegacyGateEnabled() && gpuDrivenShadowCasters));
+
+        // WGR_SHADOW_GATE_TRACE=1 — the one measurement that decides whether the gate above was
+        // ever the owner's bug. Everything in the comment block is static reading; nobody has
+        // observed `_shadowCasters.size()` in the failing shot.
+        //
+        // The distinction this has to resolve is sharp, and it is why the sizes are logged rather
+        // than just the verdict: the old gate is a KNIFE-EDGE at exactly zero CPU casters, not a
+        // slope. One surviving road, corpse or unit anywhere in view flips it back on and every
+        // building casts normally. So "buildings never cast anywhere, in a scene that still has
+        // other shadows" would NOT be explained by this gate, and seeing casters=3 in the failing
+        // shot refutes the whole theory and moves the fault into the GPU-driven cascade path.
+        // A verdict-only log could not tell those two apart.
+        //
+        // Logged on TRANSITION, not per frame: the interesting event is the flip (and a per-frame
+        // line at 40 fps buries it). `legacy` is echoed so a capture's log states which arm
+        // produced it rather than relying on the meta.json env block being read correctly.
+        if (ShadowGateTraceEnabled())
+        {
+            static int lastTraced = -1;
+            const int state = shadowActive ? 1 : 0;
+            if (state != lastTraced)
+            {
+                lastTraced = state;
+                LOG_INFO(Graphics,
+                         "Wgpu shadow gate: active={} cpuCasters={} gpuInstances={} cascadesValid={} "
+                         "gpuDriven={} legacy={}",
+                         shadowActive, _shadowCasters.size(), _gpuInstances.size(), _smCascadesValid,
+                         _gpuDriven, ShadowLegacyGateEnabled());
+            }
+        }
         // Sun-faded darkness (GL33 parity): full daylight uses tuning.darkness,
         // dusk ramps toward 1 (no darkening) as the sun sets. Cloud cover also ramps it toward 1
         // (1 = no shadow darkening) so an overcast sky casts no sharp cascade shadows — the sun is
@@ -3969,6 +4068,10 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             //    SceneShadowPass.cpp skips every GpuDrawCoverage::Full object when filling
             //    that list. Moving foliage to the retained path moves it to Full, which can
             //    empty the list and disable the cascade system wholesale.
+            //    THAT GATE IS NOW FIXED (:1514): the cascades also stay on for a non-empty
+            //    retained set, so this flag can no longer take the shadows out by itself.
+            //    Unbuilt/unverified at the time of writing, and it does NOT clear the other
+            //    two regressions below, which are why this flag stays off.
             //  - pine trunks disappeared again -- a fix that already exists, at
             //    EngineWgpu.cpp:2711-2727, and lives on the CPU PER-DRAW path: without its
             //    matching discard "the black transparent texels depth-write in the opaque
@@ -4872,6 +4975,47 @@ void EngineWgpu::SetShadowCascades(const shadow::CascadeSet& cascades, int resol
     _smCascades = cascades;
     _smCascadeRes = resolution;
     _smCascadesValid = _renderer != nullptr && cascades.count > 0 && resolution > 0;
+
+    // Capture the cascade origin HERE as well as in AddShadowCaster, so it exists on frames
+    // that add no CPU caster at all.
+    //
+    // `_smCamPos` is the origin every camera-relative shadow quantity is measured from. It
+    // travels as `frame.shadow.cam_pos` and is consumed twice on the Rust side: the depth VS
+    // adds it back to reconstruct absolute world xz for the terrain conform, and every shadow
+    // cascade's CULL frustum is built around it (`params_from_shadow_cascade`, gfx3d/mod.rs:6435).
+    // It used to be written ONLY inside AddShadowCaster, below the early-return at :4976 — so a
+    // frame with no CPU casters left it holding whatever position the last frame that HAD one
+    // wrote, arbitrarily far away. That was survivable only because the old NextFrame gate then
+    // refused to send the shadow frame at all on exactly those frames. Now that the retained set
+    // can drive the frame on its own, a stale origin would displace the whole GPU-driven cascade
+    // cull and its conform — so the gate fix REQUIRES this one; neither ships alone.
+    //
+    // This does not weaken the warnings at the AddShadowCaster write and at the
+    // `frame.shadow.cam_pos` use in NextFrame — that the origin must be the camera the CASTERS
+    // were made relative to, and must NOT be re-read from `_currentCamera` at frame end, when it
+    // may have advanced to a HUD/optics camera. It is the identical camera read strictly earlier
+    // in the same call chain: Scene::RenderShadowMapDepthPassGpu (SceneShadowPass.cpp:500) calls
+    // SetShadowCascades and then every AddShadowCaster from one body with no camera push between
+    // them, and it is the very camera BuildCascadeSet fitted the cascades around — Scene::
+    // GetCamera(), which is also exactly what PushSceneCamera stores in CameraEntry::pos (:1975).
+    // So on any frame that has a caster this writes a bit-identical value to the one
+    // AddShadowCaster then writes over it; the only new frames are the ones that had none.
+    //
+    // InitDraw, where the audit first proposed putting this, cannot work: it CLEARS `_cameras`
+    // and `_haveCamera` (:1188-1190), so there is no current camera at that point in the frame.
+    // Forcing one there would both invent the origin and change camera indexing for the frame.
+    //
+    // Gated on `_smCascadesValid` so EnsureCamera() cannot push a camera on a frame where the
+    // shadow system is off (in practice the scene camera is long since pushed by the time the
+    // pass2 shadow block runs — SceneDraw.cpp:2323 — so this is a no-op read, not a push).
+    if (_smCascadesValid && !ShadowLegacyGateEnabled())
+    {
+        EnsureCamera();
+        const CameraEntry& cam = _cameras[_currentCamera];
+        _smCamPos[0] = cam.pos[0];
+        _smCamPos[1] = cam.pos[1];
+        _smCamPos[2] = cam.pos[2];
+    }
 }
 
 void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld)
@@ -4891,6 +5035,12 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
     const CameraEntry& cam = _cameras[_currentCamera];
     // Remember the camera these casters are made relative to, so the depth pass's terrain
     // conform reconstructs absolute world xz with the RIGHT origin (see _smCamPos).
+    //
+    // Kept as-is now that SetShadowCascades also writes it. This is the AUTHORITATIVE write —
+    // it is made from the same `cam` the caster world matrices on the next lines are offset by,
+    // so it cannot drift from them no matter what a future caller does between the two calls.
+    // SetShadowCascades' write is the fallback that covers the zero-caster frame; on a frame
+    // with casters it writes the same value and this overwrites it with itself.
     _smCamPos[0] = cam.pos[0];
     _smCamPos[1] = cam.pos[1];
     _smCamPos[2] = cam.pos[2];
