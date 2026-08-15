@@ -10,6 +10,9 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -89,6 +92,75 @@ AlphaStats ScanTopMipAlphaStats(const char* name)
         return {};
     }
     return ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
+}
+
+// ---------------------------------------------------------------------------------------
+// Streaming attribution.
+//
+// The Everon fill-in costs ~1.1 ms of CPU per object created and is unattributed WITHIN
+// itself: texture upload, the synchronous ODOL parse and object construction are all inside
+// the same number, so "textures are the problem" has been a hypothesis, not a measurement.
+// This splits the texture side of it into the three things it actually does — read the mip
+// chain, hand the blocks to wgpu, and (only for a multi-bit-alpha format) decode the top mip
+// a second time to classify its alpha — and reports them as totals, not as a per-frame region.
+//
+// Cumulative on purpose. The transient is ~81 s long on Everon; what is wanted is "of the
+// whole fill-in, how much was texture work", which a per-frame timer cannot answer once the
+// frames stop being interesting.
+//
+// WGR_TEXTURE_STREAM_STATS=1 turns it on. Off, this costs one relaxed atomic load per upload
+// and no clock reads at all: an unconditional steady_clock::now() pair per upload would be
+// measuring the measurement on a path this hot.
+struct TextureStreamStats
+{
+    std::atomic<uint64_t> uploads{0};       // EnsureUploaded calls that reached a real load
+    std::atomic<uint64_t> blockBytes{0};    // mip-chain bytes read as compressed blocks
+    std::atomic<uint64_t> readUs{0};        // ...and microseconds spent reading them
+    std::atomic<uint64_t> createUs{0};      // microseconds inside wgr_texture_create
+    std::atomic<uint64_t> fallbacks{0};     // whole-file RGBA8 decodes (block path unavailable)
+    std::atomic<uint64_t> fallbackUs{0};
+    std::atomic<uint64_t> alphaScans{0};    // top-mip decodes done only to classify alpha
+    std::atomic<uint64_t> alphaUs{0};
+};
+
+TextureStreamStats GTextureStreamStats;
+
+bool TextureStreamStatsEnabled()
+{
+    // getenv walks the process environment block and costs ~2.1 us per call — measured on
+    // this machine, and the reason WGR_DRAW_SECTION_ENV_CACHE exists. Read once.
+    static const bool enabled = std::getenv("WGR_TEXTURE_STREAM_STATS") != nullptr;
+    return enabled;
+}
+
+uint64_t NowUs()
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+// Emitted on a power-of-two upload count: dense while the world is filling in (which is the
+// part being attributed) and near-silent once it has settled, without a frame hook or a
+// timer of its own.
+void ReportTextureStreamStats(uint64_t uploads)
+{
+    if ((uploads & (uploads - 1)) != 0)
+    {
+        return;
+    }
+    const uint64_t readUs = GTextureStreamStats.readUs.load(std::memory_order_relaxed);
+    const uint64_t createUs = GTextureStreamStats.createUs.load(std::memory_order_relaxed);
+    const uint64_t fallbackUs = GTextureStreamStats.fallbackUs.load(std::memory_order_relaxed);
+    const uint64_t alphaUs = GTextureStreamStats.alphaUs.load(std::memory_order_relaxed);
+    LOG_INFO(Graphics,
+             "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
+             "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaMs={:.1f} totalMs={:.1f}",
+             uploads, TextureMipOpenCount(),
+             static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
+             readUs / 1000.0, createUs / 1000.0, GTextureStreamStats.fallbacks.load(std::memory_order_relaxed),
+             fallbackUs / 1000.0, GTextureStreamStats.alphaScans.load(std::memory_order_relaxed), alphaUs / 1000.0,
+             (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
 }
 
 } // namespace
@@ -183,8 +255,18 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         {
             if (!_alphaStatsScanned)
             {
+                // A whole second pass over the file: read it, decode the FULL-resolution mip
+                // to RGBA8, then walk every pixel's alpha. Counted separately from the upload
+                // because it is the one part of the texture cost that buys no pixels.
+                const bool timed = TextureStreamStatsEnabled();
+                const uint64_t began = timed ? NowUs() : 0;
                 _alphaStats = ScanTopMipAlphaStats(Name());
                 _alphaStatsScanned = true;
+                if (timed)
+                {
+                    GTextureStreamStats.alphaScans.fetch_add(1, std::memory_order_relaxed);
+                    GTextureStreamStats.alphaUs.fetch_add(NowUs() - began, std::memory_order_relaxed);
+                }
             }
             decoded = _alphaStats;
             decodedPtr = &decoded;
@@ -294,30 +376,53 @@ uint64_t TextureWgpu::EnsureUploaded()
         return 0;
     }
 
+    const bool timed = TextureStreamStatsEnabled();
     const PacFormat dst = _nMipmaps > 0 ? _mipmaps[0].DstFormat() : PacFormatN;
     const int bcFormat = BcFormatFor(dst);
     if (bcFormat >= 0 && _src)
     {
         // Full mip chain, tightly packed as wgr_texture_create expects: PAA mips
         // halve exactly, so level i is (_w>>i, _h>>i).
-        std::vector<uint8_t> blocks;
-        bool ok = true;
+        //
+        // Sized in one pass, then read in ONE call. The old shape — resize the vector
+        // inside the loop, ask the source for one level per iteration — paid twice over
+        // during the streaming transient: the growing resize recopies the chain up to
+        // _nMipmaps times, and TextureSourcePac answers each per-level request by
+        // re-opening the texture through the VFS, so a texture cost _nMipmaps opens
+        // (up to MAX_MIPMAPS = 7) instead of one. GetMipmapChain's default implementation
+        // is the old loop, so nothing changes for a source that has no per-call cost.
+        std::vector<size_t> offsets(static_cast<size_t>(_nMipmaps));
+        size_t total = 0;
         for (int i = 0; i < _nMipmaps; i++)
         {
-            const auto layout = render::mipmap::ComputeLayout(dst, _mipmaps[i]._w, _mipmaps[i]._h);
-            const size_t off = blocks.size();
-            blocks.resize(off + layout.dataSize);
-            if (!_src->GetMipmapData(blocks.data() + off, _mipmaps[i], i))
-            {
-                ok = false;
-                break;
-            }
+            offsets[i] = total;
+            total += render::mipmap::ComputeLayout(dst, _mipmaps[i]._w, _mipmaps[i]._h).dataSize;
+        }
+        // Destinations are resolved only once the buffer is at its final size — a pointer
+        // taken before the allocation would not survive it.
+        std::vector<uint8_t> blocks(total);
+        std::vector<MipmapRead> reads(static_cast<size_t>(_nMipmaps));
+        for (int i = 0; i < _nMipmaps; i++)
+        {
+            reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[i], i};
+        }
+        const uint64_t readBegan = timed ? NowUs() : 0;
+        const bool ok = _src->GetMipmapChain(reads.data(), _nMipmaps);
+        if (timed)
+        {
+            GTextureStreamStats.readUs.fetch_add(NowUs() - readBegan, std::memory_order_relaxed);
+            GTextureStreamStats.blockBytes.fetch_add(total, std::memory_order_relaxed);
         }
         if (ok && !blocks.empty())
         {
+            const uint64_t createBegan = timed ? NowUs() : 0;
             _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                             static_cast<uint32_t>(_nMipmaps), 0, blocks.data(),
                                             static_cast<uint32_t>(blocks.size()));
+            if (timed)
+            {
+                GTextureStreamStats.createUs.fetch_add(NowUs() - createBegan, std::memory_order_relaxed);
+            }
         }
     }
 
@@ -325,6 +430,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     // to RGBA8 via the shared PAA decoder
     if (!_gpuHandle)
     {
+        const uint64_t began = timed ? NowUs() : 0;
         QIFStreamB stream;
         stream.AutoOpen(Name());
         const IFileBuffer* fb = stream.GetBuffer();
@@ -340,11 +446,20 @@ uint64_t TextureWgpu::EnsureUploaded()
                 _h = img.height;
             }
         }
+        if (timed)
+        {
+            GTextureStreamStats.fallbacks.fetch_add(1, std::memory_order_relaxed);
+            GTextureStreamStats.fallbackUs.fetch_add(NowUs() - began, std::memory_order_relaxed);
+        }
     }
 
     if (!_gpuHandle)
     {
         LOG_WARN(Graphics, "Wgpu: failed to upload texture {}", Name());
+    }
+    if (timed)
+    {
+        ReportTextureStreamStats(GTextureStreamStats.uploads.fetch_add(1, std::memory_order_relaxed) + 1);
     }
     return _gpuHandle;
 }

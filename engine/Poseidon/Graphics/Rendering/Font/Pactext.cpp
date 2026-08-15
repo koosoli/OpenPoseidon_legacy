@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 
+#include <atomic>
 #include <vector>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Rendering/Font/Pactext.hpp>
@@ -1822,6 +1823,7 @@ class TextureSourcePac : public ITextureSource
     int GetMipmapCount() const override;
     PacFormat GetFormat() const override;
     bool GetMipmapData(void* mem, const PacLevelMem& mip, int level) const override;
+    bool GetMipmapChain(const MipmapRead* reads, int count) const override;
 
     PackedColor GetAverageColor() const override { return _pal.AverageColor32(); }
 
@@ -1967,23 +1969,78 @@ PacFormat TextureSourcePac::GetFormat() const
     return _format;
 }
 
+//! Every VFS open this file makes to read mip data, from either entry point below.
+//! Relaxed: this is a diagnostic tally, never a synchronisation point, and texture upload
+//! runs on more than one thread.
+static std::atomic<uint64_t> GTextureMipOpens{0};
+
+uint64_t TextureMipOpenCount()
+{
+    return GTextureMipOpens.load(std::memory_order_relaxed);
+}
+
+//! The default batched read: one call per level, which is what every caller did before
+//! GetMipmapChain existed. A source that opens nothing per level (DDS holds the decoded
+//! file, JPEG the decoded pixels) has nothing to gain from overriding it.
+bool ITextureSource::GetMipmapChain(const MipmapRead* reads, int count) const
+{
+    if (!reads)
+    {
+        return count <= 0;
+    }
+    for (int i = 0; i < count; i++)
+    {
+        if (!reads[i].mip || !GetMipmapData(reads[i].mem, *reads[i].mip, reads[i].level))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool TextureSourcePac::GetMipmapData(void* mem, const PacLevelMem& mip, int level) const
 {
-    int ret;
+    const MipmapRead read{mem, &mip, level};
+    return GetMipmapChain(&read, 1);
+}
+
+//! One open for the whole chain.
+//!
+//! PacLevelMem::SeekLevel is an absolute seek to that level's recorded start offset, so
+//! the levels are independent of each other and of the stream's current position — which
+//! is what makes reusing one stream across them legal, and what made re-opening per level
+//! pure waste. On a settled world this path is cold; during the streaming transient it runs
+//! once per texture, and it used to run once per texture per LEVEL.
+bool TextureSourcePac::GetMipmapChain(const MipmapRead* reads, int count) const
+{
+    if (!reads || count <= 0)
+    {
+        return count <= 0;
+    }
+
     QIFStream in;
     GFileServer->Open(in, _name);
-
-    mip.SeekLevel(in);
-    if (_isPaa)
+    GTextureMipOpens.fetch_add(1, std::memory_order_relaxed);
+    if (in.fail())
     {
-        ret = mip.LoadPaa(in, mem, &_pal);
-    }
-    else
-    {
-        ret = mip.LoadPac(in, mem, &_pal);
+        return false;
     }
 
-    return ret == 0;
+    for (int i = 0; i < count; i++)
+    {
+        if (!reads[i].mip)
+        {
+            return false;
+        }
+        const PacLevelMem& mip = *reads[i].mip;
+        mip.SeekLevel(in);
+        const int ret = _isPaa ? mip.LoadPaa(in, reads[i].mem, &_pal) : mip.LoadPac(in, reads[i].mem, &_pal);
+        if (ret != 0)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 ITextureSource* CreateTextureSourcePac(const char* name, PacLevelMem* mips, int maxMips)

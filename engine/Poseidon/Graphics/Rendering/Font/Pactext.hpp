@@ -8,6 +8,8 @@
 
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 
+#include <cstdint>
+
 
 #define DO_FILLS 0 // fill on Alloc and Free
 
@@ -200,6 +202,14 @@ class PacPalette
 };
 
 
+//! One level of a batched mipmap read.  See ITextureSource::GetMipmapChain.
+struct MipmapRead
+{
+	void *mem;					//!< destination, sized for _mip_'s destination format
+	const PacLevelMem *mip;		//!< that level's layout, as Init() filled it in
+	int level;					//!< level index, 0 = full resolution
+};
+
 class ITextureSource
 {
 	public:
@@ -212,13 +222,32 @@ class ITextureSource
 
 	virtual bool IsAlpha() const = 0;
 	virtual bool IsTransparent() const = 0;
-	virtual bool GetMipmapData(void *mem, const PacLevelMem &mip, int level) const = 0;	
+	virtual bool GetMipmapData(void *mem, const PacLevelMem &mip, int level) const = 0;
+
+	//! Read a run of levels in ONE call.  Returns false if any level failed, in which case
+	//! the destinations hold undefined bytes and the caller must not upload them.
+	//!
+	//! Exists because the per-level entry point is where a source pays its per-CALL cost,
+	//! not its per-BYTE cost: TextureSourcePac answers every GetMipmapData by re-opening
+	//! the texture through the VFS, so uploading a texture cost one VFS open per LEVEL --
+	//! up to MAX_MIPMAPS (7) of them, and 3 even for the 64-square test fixture. The
+	//! bytes still have to be LZO-decompressed either way; the opens did not.
+	//! The default implementation is exactly that loop, so a source with no per-call
+	//! overhead (DDS, JPEG) keeps its current behaviour byte for byte.
+	virtual bool GetMipmapChain(const MipmapRead *reads, int count) const;
 
 	virtual PackedColor GetAverageColor() const = 0;
 
 	// Force alpha blending when known from elsewhere.
 	virtual void ForceAlpha() = 0;
 };
+
+//! Count of VFS opens made to read texture mip data, process-wide since start.
+//!
+//! The point of the batched read above is to lower this number, and "structurally less
+//! work" is not a measurement — so the number is readable, both by the unit test that
+//! pins the batching and by whoever is attributing a streaming transient at runtime.
+uint64_t TextureMipOpenCount();
 
 class ITextureSourceFactory
 {
