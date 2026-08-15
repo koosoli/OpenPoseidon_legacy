@@ -1650,6 +1650,22 @@ struct Pass1Stats
     std::atomic<uint64_t> covFull{0};
     std::atomic<uint64_t> covPartial{0};
     std::atomic<uint64_t> covNone{0};
+    // PASS 2, the other half of the object draw, split the same way and reported on the
+    // same line. It is the dominant CPU cost on the two worlds Pass1 does NOT explain:
+    // Arma 1 Sahrani (24.424 ms of a 33.7 ms drw:land) and DayZ Chernarus (23.2 ms of a
+    // 37.9 ms CPU frame). Four blocks, and any one of them could be all of it:
+    //   surfSort  - the road/decal PassOrder sort
+    //   surfDraw  - road/decal blend sections, drawn before the shadow pass on purpose
+    //   shadow    - the projected shadow accumulator, or the shadow-map depth pass
+    //   alphaSort - the back-to-front radix over every merger
+    //   alphaDraw - whole-alpha objects and the blend sections of opaque ones
+    std::atomic<uint64_t> p2SurfSortUs{0};
+    std::atomic<uint64_t> p2SurfDrawUs{0};
+    std::atomic<uint64_t> p2ShadowUs{0};
+    std::atomic<uint64_t> p2AlphaSortUs{0};
+    std::atomic<uint64_t> p2AlphaDrawUs{0};
+    std::atomic<uint64_t> p2ShadowCasters{0};
+    std::atomic<uint64_t> p2AlphaDrawn{0};
 };
 
 Pass1Stats GPass1Stats;
@@ -1676,13 +1692,17 @@ struct Pass1Scope
         : sink(Pass1StatsEnabled() ? &into : nullptr), began(sink ? Pass1NowUs() : 0)
     {
     }
-    ~Pass1Scope()
+    // End the measurement early, where a preprocessor block makes a brace-scoped lifetime
+    // awkward. Idempotent, so the destructor cannot double-count after an explicit Close.
+    void Close()
     {
         if (sink)
         {
             sink->fetch_add(Pass1NowUs() - began, std::memory_order_relaxed);
+            sink = nullptr;
         }
     }
+    ~Pass1Scope() { Close(); }
 };
 
 // Averages per frame and per object, on a power-of-two frame count. Per-OBJECT is the column
@@ -1714,6 +1734,13 @@ void ReportPass1Stats()
              GPass1Stats.occTests.load(std::memory_order_relaxed) / f,
              GPass1Stats.occRenders.load(std::memory_order_relaxed) / f, full,
              covTotal > 0.0 ? full * 100.0 / covTotal : 0.0, partial, none);
+    LOG_INFO(Graphics,
+             "PERF pass2: surfSort={:.3f} surfDraw={:.3f} shadow={:.3f} alphaSort={:.3f} alphaDraw={:.3f} ms/frame "
+             "| shadowCasters={:.0f} alphaDrawn={:.0f}",
+             per(GPass1Stats.p2SurfSortUs), per(GPass1Stats.p2SurfDrawUs), per(GPass1Stats.p2ShadowUs),
+             per(GPass1Stats.p2AlphaSortUs), per(GPass1Stats.p2AlphaDrawUs),
+             GPass1Stats.p2ShadowCasters.load(std::memory_order_relaxed) / f,
+             GPass1Stats.p2AlphaDrawn.load(std::memory_order_relaxed) / f);
 }
 
 } // namespace
@@ -2180,19 +2207,23 @@ void Scene::DrawObjectsAndShadowsPass2()
         // PassOrder, not distance: a fresh decal carries distance2~=0
         // (SetAutoCenter(false)) and would tie the road tile under the vehicle,
         // letting the road repaint over it.  Re-sorted by distance below.
-        SortListByPackedKey<SurfKey>(
-            _drawMergers,
-            [](SortObject* o) -> SurfKey
-            {
-                return {o, o->object ? o->sortPassOrder : 0,
-                        o->object ? static_cast<const void*>(o->object->GetShape()) : nullptr, o->distance2};
-            },
-            [](const SurfKey* p1, const SurfKey* p2, int) -> int
-            {
-                const Poseidon::SurfaceDraw::SurfaceDrawKey k1{p1->passOrder, p1->shape, p1->distance2};
-                const Poseidon::SurfaceDraw::SurfaceDrawKey k2{p2->passOrder, p2->shape, p2->distance2};
-                return Poseidon::SurfaceDraw::CompareSurfaceDraw(k1, k2);
-            });
+        {
+            Pass1Scope scope(GPass1Stats.p2SurfSortUs);
+            SortListByPackedKey<SurfKey>(
+                _drawMergers,
+                [](SortObject* o) -> SurfKey
+                {
+                    return {o, o->object ? o->sortPassOrder : 0,
+                            o->object ? static_cast<const void*>(o->object->GetShape()) : nullptr, o->distance2};
+                },
+                [](const SurfKey* p1, const SurfKey* p2, int) -> int
+                {
+                    const Poseidon::SurfaceDraw::SurfaceDrawKey k1{p1->passOrder, p1->shape, p1->distance2};
+                    const Poseidon::SurfaceDraw::SurfaceDrawKey k2{p2->passOrder, p2->shape, p2->distance2};
+                    return Poseidon::SurfaceDraw::CompareSurfaceDraw(k1, k2);
+                });
+        }
+        Pass1Scope surfDrawScope(GPass1Stats.p2SurfDrawUs);
         for (int i = 0; i < nDraw; i++)
         {
             SortObject* oi = _drawMergers[i];
@@ -2219,7 +2250,9 @@ void Scene::DrawObjectsAndShadowsPass2()
         }
         GEngine->FlushQueues();
         GEngine->EnableReorderQueues(true);
+        surfDrawScope.Close(); // the surface block ends here, before the shadow pass
 
+        Pass1Scope shadowScope(GPass1Stats.p2ShadowUs);
         // Shadow-map depth pass (durable shadow fix; off by default).  Render the
         // visible casters' geometry from the sun into the cascade depth maps.
         // The lit shaders sample it; exclusive with the projected accumulator
@@ -2263,10 +2296,12 @@ void Scene::DrawObjectsAndShadowsPass2()
                     continue;
                 }
                 DrawExShadow(oi);
+                GPass1Stats.p2ShadowCasters.fetch_add(1, std::memory_order_relaxed);
             }
             GEngine->EndShadowPass();
             gShadowFrozenCasters = gShadowFrozenRouted;
         }
+        shadowScope.Close();
     }
 #endif
     // draw alpha parts of roads
@@ -2275,7 +2310,11 @@ void Scene::DrawObjectsAndShadowsPass2()
     // Back-to-front by camera-space depth (farthest first). Single float key => radix
     // (see RadixSortByFloatDesc). CmpRevAlphaSortObj / CompareAlphaDepth produced the same
     // descending-zCoord order; this is O(n) instead of O(n log n).
-    RadixSortByFloatDesc(_drawMergers, [](const SortObject* o) { return o->zCoord; });
+    {
+        Pass1Scope scope(GPass1Stats.p2AlphaSortUs);
+        RadixSortByFloatDesc(_drawMergers, [](const SortObject* o) { return o->zCoord; });
+    }
+    Pass1Scope alphaDrawScope(GPass1Stats.p2AlphaDrawUs);
     // last draw alpha objects (not roads - they are already drawn)
     for (int i = 0; i < nDraw; i++)
     {
@@ -2294,6 +2333,7 @@ void Scene::DrawObjectsAndShadowsPass2()
         if (oi->passNum == 2)
         {
             // whole-alpha object (cloudlets, <0xd0 objects): draw all of it here
+            GPass1Stats.p2AlphaDrawn.fetch_add(1, std::memory_order_relaxed);
             DrawSortObject(oi);
 #if DO_STAT
             Alpha.Count(shape->Name());
@@ -2314,6 +2354,7 @@ void Scene::DrawObjectsAndShadowsPass2()
             // back-to-front order, drawing only the blend sections so they blend over
             // the already-drawn scene behind them (depth-write stays on — original parity).
             GSectionFilter = SectionClassFilter::BlendOnly;
+            GPass1Stats.p2AlphaDrawn.fetch_add(1, std::memory_order_relaxed);
             DrawSortObject(oi);
             GSectionFilter = SectionClassFilter::All;
 #if DO_STAT
@@ -2321,6 +2362,7 @@ void Scene::DrawObjectsAndShadowsPass2()
 #endif
         }
     }
+    alphaDrawScope.Close();
     GEngine->EnableReorderQueues(true);
 }
 
