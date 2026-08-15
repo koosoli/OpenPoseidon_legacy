@@ -56,6 +56,36 @@ linear in the object set. It is simply expensive per object, and there are a lot
 So the target is a flat ~3 µs per object in the submission loop, not an algorithmic blowup.
 At 12k objects that is 35 ms/frame, which is the whole Stratis problem.
 
+## The bigger finding: Stratis is in Pass1 at all, and Everon is not
+
+Same binary, same build, both settled, `WGR_PASS1_STATS=1`:
+
+| | objects/frame reaching Pass1 | registered instances |
+|---|---|---|
+| Reforger Everon | **1** | 199,881 |
+| Arma 3 Stratis | **11,974** | 75,274 |
+
+Everon registers **2.7× more** objects and puts essentially **none** of them through the CPU
+draw path; Stratis registers fewer and puts ~12,000 through it every frame. Pass1 on Everon
+costs 0.068 ms. On Stratis it costs 37.6 ms.
+
+That is the actual difference between the two worlds, and it reframes the problem. Optimising
+the submission loop would be chasing a ~3 µs/object cost that Everon does not pay **at all**,
+because `Scene::ObjectForDrawing` never creates a `SortObject` for a `GpuDrawCoverage::Full`
+object — it is diverted onto the GPU-driven compute/indirect path. Everon's models qualify.
+Stratis's do not.
+
+So the question is not "why is submission 3 µs" but **"why does an Arma 3 model fail the Full
+coverage test when a Reforger model passes it?"** Full coverage requires a self-contained
+shape: no transparent/decal sections, no nested proxies. Something systematic about the
+imported Arma 3 material or section layout is failing that, and fixing it would remove the
+35 ms rather than shrink it.
+
+**Not yet measured:** the actual `gCovFull` / `gCovPartial` / `gCovNone` split, which would
+say this directly rather than by inference. It is logged only by the one-shot PERF-shapes
+dump (`triPerfDumpShapes`), which a non-interactive run never arms. Wiring that to an env var
+is the next cheap step, and it should come before any work on the submission loop itself.
+
 ## Where to look next, in that loop
 
 Not yet measured — these are the candidates the code presents, in the order they are cheap

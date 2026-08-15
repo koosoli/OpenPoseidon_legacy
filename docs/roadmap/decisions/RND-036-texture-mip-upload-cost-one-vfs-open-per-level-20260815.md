@@ -67,6 +67,43 @@ and the two results are compared **byte for byte over the whole packed chain**, 
 read at the wrong offset fails the test rather than showing up as a corrupt mip in game.
 The counter behind this is `TextureMipOpenCount()`, which is also readable at runtime.
 
+## MEASURED IN GAME (added after the run)
+
+Reforger Everon, settled, `WGR_TEXTURE_STREAM_STATS=1`, at 512 uploads:
+
+```
+uploads=512 mipOpens=506 blockMB=234.1 readMs=391.9 createMs=123.3
+fallbacks=12 fallbackMs=23.5 alphaScans=112 alphaMs=357.4 totalMs=896.1
+```
+
+**The fix works: 506 opens for 512 uploads — one per texture.** Before it, each upload cost
+one open per level, so the same 512 textures would have cost up to ~3,500. That is the
+claim this document could not make when it was written, and it is now measured.
+
+**But the fix is not where the time is.** Of 896 ms of texture work:
+
+| | ms | per call | share |
+|---|---|---|---|
+| mip chain read (VFS + LZO) | 391.9 | 0.77 ms | 44% |
+| **alpha classification** | **357.4** | **3.19 ms** | **40%** |
+| `wgr_texture_create` | 123.3 | 0.24 ms | 14% |
+| whole-file fallback decode | 23.5 | 1.96 ms | 3% |
+
+`ScanTopMipAlphaStats` ran for **112 of 512 textures (22%)** and cost **40% of all texture
+time**, at **3.19 ms each** — four times the cost of actually reading and uploading the
+texture. It reads the file a second time, decodes the full-resolution mip to RGBA8, and walks
+every pixel's alpha, purely to decide opaque/cutout/blend. It buys no pixels on screen.
+
+This was flagged in the original write-up as "the most likely thing to be larger than
+expected". It is. **It is now the top texture-streaming target**, ahead of anything else here
+— and it matters most on DayZ Chernarus, which is 62.7% textures by VRAM (3.58 GiB) where
+Everon is 84% geometry.
+
+Care is needed: the top mip is used deliberately (a smaller mip blurs a cutout's crisp 0/255
+holes into false partial-alpha), and the PAA TAGG path is MAT-047's territory on another
+branch. The cheap wins are to cache the classification per texture *file* rather than per
+`TextureWgpu`, and to short-circuit formats whose header already answers the question.
+
 ## What this does not claim
 
 **The share of the streaming transient this removes is unknown.** The transient is ~81 s on
