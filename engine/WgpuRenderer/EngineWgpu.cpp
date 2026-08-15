@@ -1793,6 +1793,19 @@ const FarTierSettings& FarSettings()
     }();
     return settings;
 }
+
+// Fraction of Scene::GetObjectDrawDistance() at which the far tier begins when no
+// explicit cutoff is set. See the resolution site for why this is not 1.0.
+float FarTierNearCutoffFraction()
+{
+    static const float fraction = []
+    {
+        const char* v = std::getenv("WGR_FAR_NEAR_FRACTION");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 0.45f;
+        return (parsed > 0.0f && parsed <= 1.0f) ? parsed : 0.45f;
+    }();
+    return fraction;
+}
 } // namespace
 
 // FAR INSTANCE TIER — hand the renderer the whole proxy set for a world.
@@ -1902,8 +1915,30 @@ void EngineWgpu::PushSceneCamera()
             // `farTier`, not `far`: MSVC's <windows.h> still defines `far` as a segment
             // keyword macro, so a local of that name is a parse error under clang-cl.
             const FarTierSettings& farTier = FarSettings();
-            const float nearCutoff =
-                farTier.nearCutoff >= 0.0f ? farTier.nearCutoff : GScene->GetObjectDrawDistance();
+            // Start the far tier WELL INSIDE the object draw distance, not at it.
+            //
+            // "Begin where real objects stop" is the obvious default and it is wrong,
+            // because GetObjectDrawDistance() is deliberately anchored to the fog max
+            // range -- SceneDraw.cpp's own comment is that the edge is placed where
+            // "the object is exactly the sky it replaces". A tier that begins there
+            // draws only into fully-fogged pixels, which is exactly what the first
+            // deployed build did: every proxy resolved, nothing was visible, and the
+            // frame differed from the tier-off arm only by water and cloud noise.
+            //
+            // The band the tier is actually for is the one where an object has been
+            // dropped by the sub-pixel cull but fog has NOT yet hidden it -- which is
+            // precisely where the framerate-governed LOD coefficient makes things
+            // vanish. Measured on Everon: at 150 m the world fills with treelines,
+            // hedgerows and far-shore structures, 8.91% of pixels changed against the
+            // tier-off arm.
+            //
+            // So the default is a fraction of the draw distance rather than all of it.
+            // 0.45 puts the seam around 400 m at the stock 880 m fog edge, comfortably
+            // inside the fog but outside the range where a proxy would be compared
+            // against its own real model.
+            const float nearCutoff = farTier.nearCutoff >= 0.0f
+                                         ? farTier.nearCutoff
+                                         : GScene->GetObjectDrawDistance() * FarTierNearCutoffFraction();
             wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit,
                                farTier.enabled ? 1u : 0u);
         }
