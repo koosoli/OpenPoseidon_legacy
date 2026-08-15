@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-15
 **Branch:** `feat/farfield-tier`
-**Status:** MEASURED on Reforger Everon. Generalisation to Arma 3 / DayZ **not yet verified**.
+**Status:** MEASURED on Everon. **DOES NOT GENERALISE — it regresses Arma 3 Stratis.**
+See "The governor cuts both ways" below before acting on the headline.
 **Related:** [RND-032](RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md),
 [RND-033](RND-033-cross-layer-frame-profile-objects-are-not-the-bottleneck-20260815.md)
 
@@ -33,6 +34,39 @@ indistinguishable from the default. The other three levers together account for
 It also looks *better*: at range 16 the near trees render as sparse pale specks —
 full branch geometry aliasing at multi-kilometre distance — where the coarse LOD is a
 solid canopy.
+
+## The governor cuts both ways — measured on Stratis, and it reverses the recommendation
+
+`_lodInvWidth` multiplies distance in the sub-pixel cull, so a LARGER value culls MORE
+aggressively. The governor can be stuck at either rail, and the two failures are opposites.
+
+Stratis, settled, `pending=0`, 163,953 placements resident in both arms:
+
+| | `RANGE=16` (legacy) | `RANGE=4` (the "fix") |
+|---|---|---|
+| avg fps | **11.27** | **4.61** |
+| CPU frame | 88.714 ms | **216.888 ms** |
+| GPU frame | 24.592 ms | 16.534 ms |
+| `land:obj` | 75.381 ms | **201.799 ms** |
+| main instances | 4,337 | **12,477** |
+| LOD histogram | `[8,367,815,2165,536,446,0,0]` | `[66,779,1348,8689,570,1025,0,0]` |
+
+**On Stratis the governor was working.** It sits near the coarse rail and culls hard to
+protect a frame that is slow for an unrelated reason. Capping the range removes that
+protection: 2.9x more instances are drawn and `land:obj` scales almost linearly with them
+(~16 us per instance).
+
+Everon's governor was stuck at the *fine* rail doing the opposite — pinning LOD 0/1 and
+burning 56M triangles. Same lever, opposite failure, opposite correct action.
+
+**So `RANGE=4` must not ship as a universal default.** The governor is a symptom-manager;
+clamping it is correct only where it misbehaves. Stratis's disease is the per-instance cost
+in `Scene::DrawObjectsAndShadowsPass1`, and that is what to fix. A per-world or adaptive
+policy is probably the real answer and nobody has designed one.
+
+*(Caveat: 2 repeats in the Stratis new arm against 3 in legacy. The effect is far too large
+to be noise, and both arms are fully settled with identical residency, but the third repeat
+is owed.)*
 
 ## Why the governor was bistable
 
