@@ -291,6 +291,37 @@ designing anything. A slow-adapting luminance feedback on the frame's average or
 sun-direction-weighted term are the usual approaches; the risk to avoid is adaptation that
 pumps visibly as the camera turns, which is worse than a flat exposure.
 
+## 3d. Underwater system — LOW PRIORITY, and a good subagent job
+
+His words: "maybe a subagent can have a look to improve the under water system... because the
+one that we deactivated is not good at all."
+
+It is **disabled by default**: `Engine.hpp:1934`, `underwaterEffect = false`, and every
+related knob (`underwaterEnterDepth`, `underwaterExitDepth`, `underwaterEngageBand`,
+`underwaterDensity`) is documented as inert while it is off. The machinery is real and
+substantial though, so this is improvement work rather than a from-scratch build:
+
+- a fullscreen compositor with its own GPU timer (`gpu_timers.rs:53 UnderwaterComposite`, and
+  a separate `UnderwaterFroxel`), which **substitutes its scratch target for the finished
+  scene** — see the matching notes in `bloom.rs:285` and `exposure.rs:347`, both of which have
+  to cooperate with it;
+- `underwater_params` / `underwater_gate` in the water UBO (`water/mod.rs:347-349`, gate read
+  at `:967`), with the water's own body colour and extinction already exposed at `:932` "so
+  the underwater compositor can fog the scene";
+- debug levers already in place: `WGR_WATER_DEBUG_UNDERWATER_EXTINCTION` and
+  `..._INSCATTER`.
+
+Start by turning it on and capturing what "not good" actually looks like, because nobody has
+written down which part is wrong — the extinction curve, the inscatter, the surface-crossing
+band, or the interaction with bloom/exposure. The two debug levers isolate the first two
+without touching code. **Note the ordering constraint**: the compositor replaces the scene
+target, so anything that reads the finished scene (bloom, exposure) must run after it and be
+verified, and that is the most likely source of a bad-looking result rather than the water
+maths itself.
+
+Low priority per the owner. It is well suited to a subagent: self-contained, owns
+`rust/src/water/**` plus the compositor, and is judged visually rather than by a number.
+
 ## 4. A target to aim at, in his words
 
 **Arma 3's lighting looks great. Arma 2's used to, and no longer does.** That is a concrete,
@@ -332,8 +363,15 @@ Match that. If a number is in the message it must come from a run, not an estima
 3. **Env-gate behavioural changes, safe behaviour as default.** Then A/B from one binary.
 4. **A default is a claim about every world.** Two of this session's three worst mistakes were
    shipping a default validated on one world.
-5. **Subagents with disjoint file ownership**, told who else is editing. Ask for null results
-   explicitly — the best findings were agents refusing the premise they were handed.
+5. **USE SUBAGENTS WHENEVER IT MAKES SENSE — the owner asked for this explicitly.** They were
+   the single highest-leverage thing in this session. Rules that made them work: **disjoint
+   file ownership**, stated in the brief, along with who else is editing right now; a
+   READ-ONLY audit when you want a diagnosis rather than a change; and **ask for null results
+   explicitly**. The best findings were agents refusing the premise they were handed — one
+   proved the fix I requested was impossible from C++ and named the Rust change that would
+   work; another killed three of my four suspects and my headline "1.1 ms per object" figure.
+   Both were worth more than the change I asked for. Run three or four in parallel on
+   independent areas; a stalled one costs nothing if the others are disjoint.
 6. **Do not run the game and build at the same time** if a benchmark matters; and never trust
    a frame number from a run where another game process was resident.
 
