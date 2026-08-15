@@ -20,6 +20,15 @@ session's). Pushed to `safety`.
    as low-poly. **Check the LOD histogram, not `main_instances`.** It is in every capture
    JSON as `objects.main_lod_histogram`.
 
+3. **EVERY TEST WORLD LIVES IN %TEMP%, AND THE DISK IS FULL.** All four worlds
+   (`ff-worlds/{stratis,chernarus,sahrani}` ~299 MB and `rf/world/ev_DALL.wrp` 99 MB), plus
+   the Reforger `.emat` corpus and every derived census, sit under
+   `AppData\Local\Temp`. Windows Storage Sense and Disk Cleanup delete temp directories,
+   and a 100%-full drive is exactly what provokes them. **Check the world file exists before
+   blaming a run that failed to load one** — and if there is somewhere durable to put them,
+   moving them is worth more than any fix in this document. They are hours of export work
+   and no single script rebuilds them all.
+
 Also: the owner's machine has **C: 100% full at 953 GB**. Builds fail with a German
 "not enough space" error from `cargo`/`ninja` long before anything says "disk".
 
