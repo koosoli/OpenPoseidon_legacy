@@ -97,7 +97,14 @@ pub enum Region {
     ShadowCascade1 = 43,
     ShadowCascade2 = 44,
     ShadowCascade3 = 45,
-    FrameTotal = 25,  // all submitted frame work; excludes acquire/present pacing
+    // --- FAR INSTANCE TIER. The cull is a standalone compute pass (encoder-level bracket,
+    // like the water regions); the draw is an op inside the shared 3D colour sub-pass, so it
+    // needs TIMESTAMP_QUERY_INSIDE_PASSES and reads "n/a" without it. Two rows because they
+    // scale with different things: the sweep with the world's total placement count, the draw
+    // with whatever survived sub-pixel rejection.
+    FarCull = 46,
+    FarDraw = 47,
+    FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
 /// The four per-cascade regions, indexable by cascade number.
@@ -109,7 +116,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 46;
+pub const REGION_COUNT: usize = 48;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -418,7 +425,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 46);
+        assert_eq!(REGION_COUNT, 48);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -449,6 +456,9 @@ mod tests {
         for (c, r) in SHADOW_CASCADE_REGIONS.iter().enumerate() {
             assert_eq!(*r as u32, 42 + c as u32);
         }
+        // FAR INSTANCE TIER, appended past the cascade block.
+        assert_eq!(Region::FarCull as u32, 46);
+        assert_eq!(Region::FarDraw as u32, 47);
         // Every region's begin/end pair fits the query set.
         assert!(QUERY_COUNT as usize == REGION_COUNT * 2);
         // A u64 written mask covers all regions and leaves append-only room.

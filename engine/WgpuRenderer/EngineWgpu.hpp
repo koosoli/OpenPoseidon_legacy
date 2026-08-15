@@ -248,6 +248,11 @@ class EngineWgpu : public EngineDummy
     bool GetObjectStats(ObjectStatsOut& out) const override;
     uint32_t GetRuntimeCapabilityFlags() const override;
 
+    // FAR INSTANCE TIER — the whole proxy set for a world, pushed once at load from the
+    // authored placement rows (Landscape::LoadOprwModern). Everything past the object
+    // residency window is invisible without it; nothing here ever becomes an Object.
+    void SetFarProxyInstances(const FarProxyInstance* data, size_t count) override;
+
     // GRS-A — grass instance counts, read back from wgr_get_grass_stats.
     bool GetGrassStats(GrassStatsOut& out) const override;
     bool GetGpuMemoryStats(GpuMemoryStatsOut& out) const override;

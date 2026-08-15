@@ -1279,6 +1279,35 @@ pub struct WgrOverlayDraw {
     pub _pad: u32,
 }
 
+// --- FAR INSTANCE TIER -------------------------------------------------------
+//
+// One cheap proxy per AUTHORED PLACEMENT, uploaded once per world and never turned into an
+// Object. Beyond the object residency window (~900 m on Everon, ~550-711 m on Chernarus) a
+// placement is not merely coarse — it does not exist, so the world is bare ground until the
+// camera closes on it. Sweeping the whole set on the GPU is affordable (measured: 1.2M
+// placements 0.05-0.14 ms, 3.65M 0.15-0.23 ms), which is what makes the tier possible at all.
+//
+// `pos` is ABSOLUTE authored world space: everything downstream subtracts the camera first,
+// because at kilometre-scale coordinates an absolute frustum test shifts the frustum by cam_pos.
+// Mirrored in wgpu_renderer.hpp (size-asserted on both sides and in the layout hash).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct WgrFarInstance {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub height: f32,
+    pub radius: f32,
+    pub colour: u32,
+    pub flags: u32, // bit0: 0 = card (vegetation), 1 = prism (structure)
+    pub pad: u32,
+}
+
+/// `WgrFarInstance::flags` bit 0 — draw an extruded prism instead of a camera-facing card.
+/// Cards are ~4x cheaper to draw (2 triangles against 12), so this is set only where a box
+/// reads better than a billboard.
+pub const WGR_FAR_FLAG_PRISM: u32 = 1;
+
 #[repr(C)]
 pub struct WgrFrame {
     pub clear: WgrVec4,
@@ -1368,6 +1397,7 @@ const _: () = assert!(std::mem::size_of::<WgrWaterInteractionParams>() == 96);
 const _: () = assert!(std::mem::align_of::<WgrWaterInteractionParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrSlice<WgrCamera>>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrFrame>() == 576);
+const _: () = assert!(std::mem::size_of::<WgrFarInstance>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrAbiCheck>() == 28);
 
 // --- Cross-language layout hash ----------------------------------------------
@@ -1442,6 +1472,7 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrSurfaceDesc>());
     h = hash_size(h, sz::<WgrLogCallbacks>());
     h = hash_size(h, sz::<WgrFrame>());
+    h = hash_size(h, sz::<WgrFarInstance>());
     h
 }
 
@@ -1462,9 +1493,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(5)
+            .unwrap_or(6)
     } else {
-        5
+        6
     }
 }
 
@@ -1556,7 +1587,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 5);
+        assert_eq!(super::wgr_abi_version(), 6);
     }
 
     #[test]
@@ -2016,6 +2047,56 @@ pub unsafe extern "C" fn wgr_set_suppress_world_objects(
     let _ = catch_unwind(AssertUnwindSafe(|| {
         let renderer = unsafe { &mut *renderer };
         renderer.set_suppress_world_objects(suppress);
+    }));
+}
+
+/// FAR INSTANCE TIER — replace the whole far-proxy set (one row per AUTHORED PLACEMENT).
+///
+/// Called ONCE per world, straight after the placement list is complete. The renderer copies
+/// the slice into a single GPU buffer and owns it from there: the per-frame cost is one compute
+/// sweep, and nothing on the C++ side walks these again. An empty slice releases the set.
+///
+/// # Safety
+/// `renderer` must be live; `instances` must be a valid slice (data valid for its length, or
+/// null with length 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_far_set_instances(
+    renderer: *mut WgrRenderer,
+    instances: WgrSlice<WgrFarInstance>,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let instances = unsafe { instances.as_slice() };
+        renderer.far_set_instances(instances);
+    }));
+}
+
+/// FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier starts (it should be
+/// the object draw distance, so proxies begin exactly where real objects stop); `far_distance_m`
+/// where it ends; `pixel_limit` the sub-pixel rejection threshold in pixels of projected height,
+/// which is the tier's biggest single win (an aircraft view went 421,323 -> 22,135 instances and
+/// 0.314 -> 0.025 ms of draw at 2 px); `enabled` 0 makes the tier inert without releasing its
+/// buffer. Call once per frame for the main scene camera.
+///
+/// # Safety
+/// `renderer` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_far_set_params(
+    renderer: *mut WgrRenderer,
+    near_cutoff_m: f32,
+    far_distance_m: f32,
+    pixel_limit: f32,
+    enabled: u32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        renderer.far_set_params(near_cutoff_m, far_distance_m, pixel_limit, enabled != 0);
     }));
 }
 

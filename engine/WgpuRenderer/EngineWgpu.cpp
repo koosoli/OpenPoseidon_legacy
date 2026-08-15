@@ -1754,6 +1754,80 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     return buf;
 }
 
+namespace
+{
+// FAR INSTANCE TIER — its four knobs, read from the environment ONCE.
+//
+// Read once and not per frame so that a capture cannot drift halfway through, and so the
+// whole tier is revertible from ONE binary: WGR_FAR_TIER=0 leaves every other code path
+// (the ABI entry points, the load-time build, the timer regions) exactly where it is and
+// simply stops the sweep, which is what makes an A/B of it a measurement rather than a
+// comparison of two builds.
+struct FarTierSettings
+{
+    bool enabled = true;
+    // Negative = follow Scene::GetObjectDrawDistance(), i.e. start exactly where real
+    // objects stop. An explicit value is a diagnostic override, not a tuning knob.
+    float nearCutoff = -1.0f;
+    float distance = 12000.0f;
+    // PIXELS of projected height. The measured elbow: 2 px took an aircraft view from
+    // 421,323 surviving instances to 22,135 and its draw from 0.314 ms to 0.025 ms. 0
+    // disables the test entirely, which is the A/B for it.
+    float pixelLimit = 2.0f;
+};
+
+const FarTierSettings& FarSettings()
+{
+    static const FarTierSettings settings = []
+    {
+        FarTierSettings s;
+        if (const char* on = std::getenv("WGR_FAR_TIER"))
+            s.enabled = std::strcmp(on, "0") != 0;
+        if (const char* cut = std::getenv("WGR_FAR_NEAR_CUTOFF"))
+            s.nearCutoff = static_cast<float>(std::atof(cut));
+        if (const char* dist = std::getenv("WGR_FAR_DISTANCE"))
+            s.distance = static_cast<float>(std::atof(dist));
+        if (const char* px = std::getenv("WGR_FAR_PIXEL_LIMIT"))
+            s.pixelLimit = static_cast<float>(std::atof(px));
+        return s;
+    }();
+    return settings;
+}
+} // namespace
+
+// FAR INSTANCE TIER — hand the renderer the whole proxy set for a world.
+//
+// The layouts are checked rather than repacked: at a few million rows a field-by-field copy
+// would be a visible chunk of the load, and the two structs exist to be the same 32 bytes.
+void EngineWgpu::SetFarProxyInstances(const FarProxyInstance* data, size_t count)
+{
+    static_assert(sizeof(FarProxyInstance) == sizeof(WgrFarInstance),
+                  "Engine::FarProxyInstance must be the WgrFarInstance ABI record");
+    static_assert(offsetof(FarProxyInstance, height) == offsetof(WgrFarInstance, height) &&
+                      offsetof(FarProxyInstance, radius) == offsetof(WgrFarInstance, radius) &&
+                      offsetof(FarProxyInstance, colour) == offsetof(WgrFarInstance, colour) &&
+                      offsetof(FarProxyInstance, flags) == offsetof(WgrFarInstance, flags),
+                  "Engine::FarProxyInstance fields must sit where WgrFarInstance's do");
+    if (!_renderer)
+        return;
+    if (!FarSettings().enabled)
+    {
+        // Do not upload at all when the tier is off: the source rows are ~117 MB on a world
+        // the size of Chernarus, and paying that for a feature that will never sweep them
+        // would make WGR_FAR_TIER=0 a different memory profile as well as a different
+        // picture, which spoils it as a control.
+        LOG_INFO(Graphics, "Wgpu far tier: disabled by WGR_FAR_TIER=0, {} proxies not uploaded", count);
+        return;
+    }
+    if (data == nullptr || count == 0)
+    {
+        wgr_far_set_instances(_renderer, WgrSlice<WgrFarInstance>{nullptr, 0});
+        return;
+    }
+    wgr_far_set_instances(_renderer,
+                          WgrSlice<WgrFarInstance>{reinterpret_cast<const WgrFarInstance*>(data), U32(count)});
+}
+
 void EngineWgpu::PushSceneCamera()
 {
     CameraEntry entry{};
@@ -1812,6 +1886,26 @@ void EngineWgpu::PushSceneCamera()
             // stops rasterizing the occlusion buffer). Driven per frame so the default (occlusion
             // on) applies without opening the Culling tab; the checkbox flips _cullDebug.occlusion.
             EnableObjOcc = !_cullDebug.occlusion;
+        }
+
+        // FAR INSTANCE TIER — its per-frame knobs, pushed beside the cull params because
+        // they answer the same question from the other end: those say where real objects
+        // stop being drawn, these say what stands in past that point.
+        //
+        // The near cutoff DEFAULTS to the object draw distance for exactly that reason. Any
+        // other default leaves either a band where a proxy is drawn over the real model, or
+        // a band where neither is drawn — and the second one looks identical to the bug this
+        // tier exists to fix, which would make it impossible to tell whether the tier is
+        // working.
+        if (_renderer)
+        {
+            // `farTier`, not `far`: MSVC's <windows.h> still defines `far` as a segment
+            // keyword macro, so a local of that name is a parse error under clang-cl.
+            const FarTierSettings& farTier = FarSettings();
+            const float nearCutoff =
+                farTier.nearCutoff >= 0.0f ? farTier.nearCutoff : GScene->GetObjectDrawDistance();
+            wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit,
+                               farTier.enabled ? 1u : 0u);
         }
     }
 
@@ -4853,6 +4947,8 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Shadow cascade 1",                // WGR_GPU_TIMER_SHADOW_CASCADE_1
         "Shadow cascade 2",                // WGR_GPU_TIMER_SHADOW_CASCADE_2
         "Shadow cascade 3",                // WGR_GPU_TIMER_SHADOW_CASCADE_3
+        "Far tier: cull (compute)",        // WGR_GPU_TIMER_FAR_CULL (sweeps every placement)
+        "Far tier: proxy draw",            // WGR_GPU_TIMER_FAR_DRAW (needs in-pass timestamps)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }

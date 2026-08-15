@@ -1,5 +1,6 @@
 mod bloom;
 mod exposure;
+mod far;
 mod ffi;
 mod gfx2d;
 mod gfx3d;
@@ -22,9 +23,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::bloom::Bloom;
 use crate::exposure::Exposure;
+use crate::far::Far;
 use crate::ffi::{
-    WgrCamera, WgrCmd, WgrDraw2DBatch, WgrDraw3D, WgrGrassBatch, WgrGrassParams, WgrInstance,
-    WgrLight, WgrMat4, WgrMeshVertex, WgrModelLod, WgrModelMaterial, WgrModelSection,
+    WgrCamera, WgrCmd, WgrDraw2DBatch, WgrDraw3D, WgrFarInstance, WgrGrassBatch, WgrGrassParams,
+    WgrInstance, WgrLight, WgrMat4, WgrMeshVertex, WgrModelLod, WgrModelMaterial, WgrModelSection,
     WgrOverlayDraw, WgrOverlayVertex, WgrShadowCaster, WgrShadowPass, WgrTerrainBatch,
     WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams, WgrVec4, WgrVertex2D, WgrWaterBatch,
     WgrWaterCascadeConfig, WgrWaterInteractionEvent, WgrWaterInteractionParams, WgrWaterNode,
@@ -543,6 +545,8 @@ pub struct Renderer {
     gfx3d: Gfx3d,
     terrain: Terrain,
     grass: Grass,
+    // FAR INSTANCE TIER — one proxy per authored placement, beyond where real objects live.
+    far: Far,
     water: Water,
     // Actual depth-tested water coverage from the previous completed frame. This corrects the
     // world-sized sea quadtree's conservative CPU bounds before paying for a planar reflection.
@@ -1103,6 +1107,17 @@ impl Renderer {
             sample_count,
             &mut composer,
         );
+        // FAR INSTANCE TIER. Pipelines only — its buffers (~42 MB of compacted output plus
+        // the world's source rows) are not allocated until a world actually pushes
+        // placements, so a world with no far tier and a build launched with WGR_FAR_TIER=0
+        // pay nothing but three shader compiles.
+        let far = Far::new(
+            &device,
+            gfx3d.camera_layout(),
+            color_format,
+            sample_count,
+            &mut composer,
+        );
         let fft_storage_supported = [
             wgpu::TextureFormat::Rgba32Float,
             wgpu::TextureFormat::Rgba16Float,
@@ -1211,6 +1226,7 @@ impl Renderer {
             gfx3d,
             terrain,
             grass,
+            far,
             water,
             water_visibility,
             gpu_timers,
@@ -2845,6 +2861,32 @@ impl Renderer {
         // feature is enabled and its target exists.
         self.gfx3d
             .cull_dispatch_interior_sky(&mut encoder, &self.gpu_timers);
+        // FAR INSTANCE TIER — the proxy sweep, beside the object cull for the same reason:
+        // recorded before the render passes so wgpu barriers its storage writes against this
+        // frame's indirect reads. Deliberately NOT dispatched for the shadow cascades or the
+        // planar reflection: a proxy is a silhouette stand-in, and casting shadows or
+        // reflections from one puts a box's error somewhere the eye can compare it against
+        // the real geometry beside it.
+        if let Some(camera_bind) = self.gfx3d.camera_bind() {
+            // Pixels per radian for THIS camera: (viewport_height / 2) * proj[1][1], the same
+            // derivation the grass ring uses. The sub-pixel test is the tier's largest single
+            // win and a fixed metric threshold is correct at exactly one resolution, so it is
+            // fed the real screen metric or nothing.
+            if let Some(cam) = cameras.get(main_scene_cam) {
+                self.far
+                    .set_view_metrics(&self.queue, self.config.height as f32 * 0.5 * cam.proj[5]);
+            }
+            let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+            if !self.suppress_world_objects {
+                self.far.dispatch(
+                    &self.queue,
+                    &mut encoder,
+                    camera_bind,
+                    offset,
+                    &self.gpu_timers,
+                );
+            }
+        }
 
         for line in self.gfx3d.take_sky_bake_log() {
             self.log.log(log_level::INFO, &line);
@@ -3582,6 +3624,18 @@ impl Renderer {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d
                         .draw_gpu_driven(&mut pass, &self.textures, cam_off, &self.gpu_timers);
+                    // FAR INSTANCE TIER, immediately after the real objects and before the
+                    // CPU-replayed ops. After, because the two overlap in the transition band
+                    // and the real geometry should win the depth test on equal terms rather
+                    // than by draw order; before render_ops for the reason the GPU-driven set
+                    // is there — the CPU set contains alpha-BLENDED draws that read the
+                    // framebuffer, and they must blend against whatever is actually behind
+                    // them. Its own gate is inside: no proxies, or the tier switched off, and
+                    // this costs one branch.
+                    if let Some(camera_bind) = self.gfx3d.camera_bind() {
+                        self.far
+                            .draw(&mut pass, camera_bind, cam_off, &self.gpu_timers);
+                    }
                 }
                 render_ops(self, &mut pass, seg_ops, display_2d, false, prepassed);
                 // Debug cull-sphere wireframes (ImGui Culling tab) LAST in the sub-pass: their
@@ -4118,6 +4172,44 @@ impl Renderer {
     // resident; only this frame's draw submission is skipped. C++ sets it every frame.
     fn set_suppress_world_objects(&mut self, suppress: bool) {
         self.suppress_world_objects = suppress;
+    }
+
+    // FAR INSTANCE TIER — the whole proxy set, uploaded once per world. Logged with the
+    // card/prism split because the two have a measured ~4x draw-cost difference, so the
+    // classifier's output is the number that predicts what this tier costs, not the total.
+    fn far_set_instances(&mut self, instances: &[WgrFarInstance]) {
+        let (cards, prisms) = self.far.set_instances(&self.device, &self.queue, instances);
+        if instances.is_empty() {
+            self.log.log(log_level::INFO, "[wgr] far tier: released");
+            return;
+        }
+        self.log.log(
+            log_level::INFO,
+            &format!(
+                "[wgr] far tier: {} proxies ({} cards, {} prisms), {:.1} MB of source rows",
+                instances.len(),
+                cards,
+                prisms,
+                (instances.len() * std::mem::size_of::<WgrFarInstance>()) as f64
+                    / (1024.0 * 1024.0)
+            ),
+        );
+    }
+
+    fn far_set_params(
+        &mut self,
+        near_cutoff_m: f32,
+        far_distance_m: f32,
+        pixel_limit: f32,
+        enabled: bool,
+    ) {
+        self.far.set_params(
+            &self.queue,
+            near_cutoff_m,
+            far_distance_m,
+            pixel_limit,
+            enabled,
+        );
     }
 
     // ImGui Culling tab (wgr_set_cull_debug): draw the cull-sphere wireframes, skip the GPU

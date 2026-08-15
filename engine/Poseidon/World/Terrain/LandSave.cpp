@@ -30,6 +30,9 @@
 #include <Poseidon/Asset/Formats/World/Oprw20.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Material/RvMaterialSource.hpp>
+// FAR INSTANCE TIER — proxy dimensions read from a model's ModelInfo alone (no LOD body).
+#include <Poseidon/Asset/Formats/P3D/ModelProxyBounds.hpp>
+#include <cctype>
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
@@ -1711,6 +1714,43 @@ bool Landscape::LoadOptimized(QIStream& f, float landGrid)
     return true;
 }
 
+namespace
+{
+// FAR INSTANCE TIER — which proxy shape a model gets, decided from its path alone.
+//
+// The path is all that is available here: the far tier is built from the placement rows
+// before any shape is loaded, and loading a few hundred models to ask each one what it is
+// would cost more than the entire tier saves. Every shipped world sorts its assets into
+// directories by kind, so the path is a reliable classifier and a wrong answer is a
+// cosmetic error at kilometres of distance, not a correctness one.
+//
+// VEGETATION IS TESTED FIRST, deliberately. A misclassified card costs a slightly wrong
+// silhouette; a misclassified prism costs ~4x the draw (12 triangles against 2), and the
+// classes overlap only in directory names like "buildings\...\bush", never the reverse.
+// Anything unrecognised is a card for the same reason.
+bool FarProxyIsPrism(const char* path)
+{
+    if (path == nullptr)
+        return false;
+    std::string lower(path);
+    for (char& c : lower)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    static const char* const kVegetation[] = {"vegetation", "plants", "tree", "bush", "shrub", "grass"};
+    for (const char* needle : kVegetation)
+        if (lower.find(needle) != std::string::npos)
+            return false;
+
+    static const char* const kStructures[] = {"structures", "buildings", "building", "industrial",
+                                              "military",   "houses",    "house",    "misc"};
+    for (const char* needle : kStructures)
+        if (lower.find(needle) != std::string::npos)
+            return true;
+
+    return false;
+}
+} // namespace
+
 // Modern OPRW worlds carry two grids: a coarse "land" grid for cell semantics,
 // materials and object lists, and a fine "terrain" grid for elevation. Preserve
 // that authored split. Landscape's height/surface queries operate in terrain
@@ -2199,6 +2239,115 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectCenterX = -0x3fffffff;
         _modernObjectCenterZ = -0x3fffffff;
         _modernResidentObjectCount = 0;
+
+        // FAR INSTANCE TIER — one cheap proxy per placement, built ONCE, here, because this
+        // is the only point at which the complete authored placement list exists.
+        //
+        // The residency window above is a working set, not a draw distance: it holds ~20,000
+        // objects inside ~900 m on Everon and ~550-711 m on Chernarus, and everything outside
+        // it is not a coarse object but NO object. That is why distant worlds render as bare
+        // ground and why assets appear out of nothing as you fly. This tier answers only the
+        // rendering half of that: it never creates an Object, never simulates, and never
+        // enters the residency accounting.
+        //
+        // Cost control is the per-MODEL cache. A world names a few hundred distinct models and
+        // places them a few million times, so the proxy dimensions are read once per model
+        // from its P3D header alone (ReadModelProxyBounds touches ModelInfo and no LOD body)
+        // and then indexed per placement.
+        if (GEngine != nullptr)
+        {
+            const auto farStart = std::chrono::steady_clock::now();
+            struct FarModelProxy
+            {
+                float height = 0.0f;
+                float baseY = 0.0f; // bbox min Y: the offset from the model origin to its foot
+                float radius = 0.0f;
+                uint32_t colour = 0xFFFFFFFFu;
+                uint32_t flags = 0;
+                bool valid = false;
+            };
+            std::vector<FarModelProxy> perModel(_modernObjectModels.size());
+            size_t modelsRead = 0, modelsSkipped = 0;
+            for (size_t m = 0; m < _modernObjectModels.size(); ++m)
+            {
+                const char* name = _modernObjectModels[m].GetLength() > 0 ? (const char*)_modernObjectModels[m]
+                                                                          : nullptr;
+                if (name == nullptr || !QIFStreamB::FileExist(name))
+                {
+                    ++modelsSkipped;
+                    continue;
+                }
+                QIFStreamB stream;
+                stream.AutoOpen(name);
+                if (stream.fail())
+                {
+                    ++modelsSkipped;
+                    continue;
+                }
+                Fmt::BinaryReader reader(stream);
+                const Fmt::P3D::ModelProxyBounds bounds = Fmt::P3D::ReadModelProxyBounds(reader);
+                // valid == false covers OFP-era ODOL 7 (whose ModelInfo sits behind every LOD
+                // body, so reading it is not a header read at all), non-ODOL containers and
+                // any header that decoded to nonsense. A proxy sized from any of those is
+                // worse than no proxy, so the model simply gets none.
+                if (!bounds.valid)
+                {
+                    ++modelsSkipped;
+                    continue;
+                }
+                FarModelProxy& proxy = perModel[m];
+                proxy.height = bounds.maxY - bounds.minY;
+                proxy.baseY = bounds.minY;
+                proxy.radius = bounds.horizontalExtent * 0.5f;
+                proxy.colour = bounds.color;
+                proxy.flags = FarProxyIsPrism(name) ? 1u : 0u;
+                // A model with no vertical extent has no silhouette to stand in for.
+                proxy.valid = proxy.height > 0.05f;
+                if (proxy.valid)
+                    ++modelsRead;
+                else
+                    ++modelsSkipped;
+            }
+
+            std::vector<Engine::FarProxyInstance> farInstances;
+            farInstances.reserve(_modernObjectPlacements.size());
+            size_t prisms = 0;
+            for (const ModernObjectPlacement& placement : _modernObjectPlacements)
+            {
+                if (placement.modelIndex >= perModel.size())
+                    continue;
+                const FarModelProxy& proxy = perModel[placement.modelIndex];
+                if (!proxy.valid)
+                    continue;
+                Engine::FarProxyInstance instance;
+                instance.x = placement.rows[9];
+                // The proxy stands ON the ground, so its origin is the model's bbox FOOT, not
+                // the model origin. Those differ by minY, which is nonzero for a great many
+                // assets — ignoring it sinks or floats every proxy by up to a few metres, and
+                // a floating forest is the one artefact a distance tier cannot get away with.
+                instance.y = placement.rows[10] + proxy.baseY;
+                instance.z = placement.rows[11];
+                instance.height = proxy.height;
+                instance.radius = proxy.radius;
+                instance.colour = proxy.colour;
+                instance.flags = proxy.flags;
+                prisms += (proxy.flags != 0);
+                farInstances.push_back(instance);
+            }
+            GEngine->SetFarProxyInstances(farInstances.data(), farInstances.size());
+            const auto farMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - farStart)
+                                   .count();
+            // Report the DENOMINATOR, not just the successes: proxies built against
+            // placements retained is the number that says whether the far world is complete,
+            // and models skipped names the reason when it is not.
+            LOG_INFO(World,
+                     "Far instance tier: {} proxies ({} prisms, {} cards) from {} placements; {} of {} models "
+                     "read, {} skipped; {} ms",
+                     farInstances.size(), prisms, farInstances.size() - prisms, _modernObjectPlacements.size(),
+                     modelsRead, _modernObjectModels.size(), modelsSkipped, farMs);
+        }
+
         LOG_INFO(World,
                  "Modern object streaming: retained {} compact placements in {} land cells; radius={} cells, "
                  "resident budget={}, create batch={}, duplicate ids reassigned={}",

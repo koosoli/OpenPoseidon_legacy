@@ -144,6 +144,7 @@ mod tests {
             include_str!("../terrain/terrain_shadow.wgsl"),
             "terrain/terrain_shadow.wgsl",
         );
+        compose(include_str!("../far/far.wgsl"), "far/far.wgsl");
         compose(include_str!("../grass/grass.wgsl"), "grass/grass.wgsl");
         compose(
             include_str!("../grass/grass_shadow.wgsl"),

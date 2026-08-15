@@ -2114,7 +2114,14 @@ class Engine : public IGraphicsEngine
         kShadowCascadeGpuRegionBegin = 42,
         kShadowCascadeGpuRegionEnd = 46,
         kObjectGpuRegionEnd = 46,
-        kGpuRegionEnd = 46,
+        // FAR INSTANCE TIER - the proxy sweep over every authored placement, and the draw of
+        // what survived it. Appended past kObjectGpuRegionEnd so the Objects tab's slice keeps
+        // meaning exactly what it meant: these proxies are never Objects.
+        kFarGpuRegionBegin = 46,
+        kFarGpuRegionCull = 46,
+        kFarGpuRegionDraw = 47,
+        kFarGpuRegionEnd = 48,
+        kGpuRegionEnd = 48,
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,
@@ -2144,8 +2151,10 @@ class Engine : public IGraphicsEngine
         if (region == kTerrainGpuRegionBegin || region == kGrassGpuRegionPrepass ||
             (region >= kObjectGpuRegionBegin + 3 && region <= kObjectGpuRegionBegin + 4))
             return kObjectGpuContainerBegin;
-        // Inside the 3D colour sub-pass.
+        // Inside the 3D colour sub-pass. The far tier draws there too, immediately after the
+        // GPU-driven objects; its CULL is a standalone compute pass and stays outermost.
         if (region == kTerrainGpuRegionColor || region == kGrassGpuRegionColor ||
+            region == kFarGpuRegionDraw ||
             (region >= kObjectGpuRegionBegin + 5 && region <= kObjectGpuRegionBegin + 6))
             return kObjectGpuContainerBegin + 1;
         // Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so its
@@ -2186,6 +2195,29 @@ class Engine : public IGraphicsEngine
     virtual int GetCpuTimings(float* /*outMs*/, int /*maxCount*/) const { return 0; }
     // PERF-005 - this frame's object accounting. False when the backend has none.
     virtual bool GetObjectStats(ObjectStatsOut& /*out*/) const { return false; }
+
+    // FAR INSTANCE TIER - one cheap proxy per AUTHORED PLACEMENT, drawn straight from the
+    // placement rows without ever creating an Object.
+    //
+    // The object residency window stops far short of the view distance (~900 m on Everon,
+    // ~550-711 m on Chernarus). Past it a placement is not a dim, coarse object: it does not
+    // exist at all, so the world is bare ground and every asset pops in as the camera closes.
+    // This carries the whole island's silhouette for the cost of one GPU sweep.
+    //
+    // Layout is deliberately the WgrFarInstance ABI record (checked with a static_assert in the
+    // backend) so the world loader's array can be handed to the renderer without a repack of a
+    // few million rows. Backends that have no such tier ignore it, which is the whole fallback.
+    struct FarProxyInstance
+    {
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        float height = 0.0f;
+        float radius = 0.0f;
+        uint32_t colour = 0xFFFFFFFFu;
+        uint32_t flags = 0; // bit0: 0 = card (vegetation), 1 = prism (structure)
+        uint32_t pad = 0;
+    };
+    // Replace the whole far-proxy set. Called ONCE per world load. Empty releases it.
+    virtual void SetFarProxyInstances(const FarProxyInstance* /*data*/, size_t /*count*/) {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

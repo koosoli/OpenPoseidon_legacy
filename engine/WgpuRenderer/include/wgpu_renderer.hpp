@@ -21,7 +21,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 5u
+#define WGR_ABI_VERSION 6u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1227,7 +1227,14 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_SHADOW_CASCADE_1 = 43,
     WGR_GPU_TIMER_SHADOW_CASCADE_2 = 44,
     WGR_GPU_TIMER_SHADOW_CASCADE_3 = 45,
-    WGR_GPU_TIMER_REGION_COUNT = 46,
+    /* FAR INSTANCE TIER. The cull is a standalone compute pass, so it brackets on the encoder
+     * like the water regions; the draw is an op inside the shared 3D colour sub-pass and so
+     * needs in-pass timestamps (it reads "n/a" without them) AND is contained by that pass's
+     * container region below. Kept as two rows because they answer different questions: the
+     * sweep scales with the world's placement count, the draw with what survived sub-pixel. */
+    WGR_GPU_TIMER_FAR_CULL = 46,
+    WGR_GPU_TIMER_FAR_DRAW = 47,
+    WGR_GPU_TIMER_REGION_COUNT = 48,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -1263,6 +1270,9 @@ constexpr uint32_t WgrGpuTimerContainedBy(uint32_t region)
         case WGR_GPU_TIMER_GRASS_COLOR:
         case WGR_GPU_TIMER_OBJ_COLOR_SOLID:
         case WGR_GPU_TIMER_OBJ_COLOR_ALPHA:
+        /* The far tier draws inside the same colour sub-pass, immediately after the GPU-driven
+         * objects. Its CULL is outermost (a standalone compute pass) and is not listed here. */
+        case WGR_GPU_TIMER_FAR_DRAW:
             return WGR_GPU_TIMER_OBJ_COLOR_SEGMENT;
         /* Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so
          * its one region is already inside the per-cascade brackets. Attributed to cascade 0
@@ -1470,6 +1480,39 @@ struct WgrOverlayDraw
     uint32_t _pad;
 };
 
+// --- Far instance tier -------------------------------------------------------
+
+/* One far-field proxy, uploaded ONCE per world from the authored placement rows.
+ *
+ * This tier exists because the object residency window stops well short of the
+ * view distance (~900 m on Everon, ~550-711 m on Chernarus): beyond it a
+ * placement is never instantiated as an Object at all, so the world is bare
+ * ground and assets pop in as you fly. A proxy is fed straight from the
+ * placement row and never becomes an Object, so the whole island can be
+ * represented for the cost of one compute sweep (measured: 1.2M placements in
+ * 0.05-0.14 ms, 3.65M in 0.15-0.23 ms).
+ *
+ * `x/y/z` is the ABSOLUTE authored world position (the cull and both vertex
+ * shaders subtract the camera before any test or transform -- at kilometre-scale
+ * coordinates an absolute frustum test shifts the frustum by cam_pos).
+ * `height`/`radius` come from the model's ModelInfo bbox, `colour` from its
+ * shape average colour (packed 0xAARRGGBB, the engine's PackedColor order). */
+struct WgrFarInstance
+{
+    float x, y, z;
+    float height;
+    float radius;
+    uint32_t colour;
+    uint32_t flags; /* bit0: 0 = card (vegetation), 1 = prism (structure) */
+    uint32_t pad;
+};
+
+/* WgrFarInstance::flags bit 0: draw this proxy as an extruded prism (a
+ * structure's silhouette) rather than a camera-facing card. Cards cost ~4x less
+ * to draw (2 triangles vs 12), so this bit is set only where a box actually
+ * reads better than a billboard. */
+#define WGR_FAR_FLAG_PRISM 1u
+
 // --- Frame -------------------------------------------------------------------
 
 /* Everything needed to render + present one frame. The renderer clears to
@@ -1576,6 +1619,7 @@ static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Ru
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterInteractionEvent) == 64 && alignof(WgrWaterInteractionEvent) == 16, "WgrWaterInteractionEvent must match Rust");
 static_assert(sizeof(WgrWaterInteractionParams) == 96 && alignof(WgrWaterInteractionParams) == 16, "WgrWaterInteractionParams must match Rust");
+static_assert(sizeof(WgrFarInstance) == 32, "WgrFarInstance layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFrame) == 576, "WgrFrame layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrAbiCheck) == 28, "WgrAbiCheck layout must match Rust");
 
@@ -1682,6 +1726,23 @@ extern "C"
      * the 2D UI. Resources stay resident; only the draw submission is skipped. No-op unless
      * GPU-driven rendering is enabled. Call every frame with the current state. */
     WGR_API void wgr_set_suppress_world_objects(WgrRenderer* renderer, bool suppress);
+
+    /* FAR INSTANCE TIER — replace the whole far-proxy set. Called ONCE per world, right after
+     * the authored placement list is complete: every placement gets a proxy, including the
+     * overwhelming majority that will never be inside the object residency window. The renderer
+     * copies the slice into one GPU buffer and owns it from there (cull + draw), so nothing on
+     * the C++ side walks these per frame. Passing an empty slice releases the set. */
+    WGR_API void wgr_far_set_instances(WgrRenderer* renderer, WgrSlice<WgrFarInstance> instances);
+
+    /* FAR INSTANCE TIER — per-frame knobs. `near_cutoff_m` is where the tier STARTS (proxies
+     * closer than this are the real objects' job, so it should be the object draw distance);
+     * `far_distance_m` is where it stops; `pixel_limit` is the sub-pixel rejection threshold in
+     * PIXELS OF PROJECTED HEIGHT and is the single biggest win in the whole tier (measured on an
+     * aircraft view: 421,323 -> 22,135 surviving instances, 0.314 -> 0.025 ms of draw at 2 px);
+     * `enabled` 0 makes the tier inert without releasing its buffer. Call once per frame for the
+     * main scene camera. */
+    WGR_API void wgr_far_set_params(WgrRenderer* renderer, float near_cutoff_m, float far_distance_m,
+                                    float pixel_limit, uint32_t enabled);
 
     /* Debug/feature toggles for the GPU-driven cull (ImGui Culling tab): `draw_spheres` renders
      * the per-instance frustum-cull sphere wireframes on top of the scene; `no_frustum` skips the
@@ -2060,6 +2121,7 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrSurfaceDesc));
     h = WgrHashSize(h, sizeof(WgrLogCallbacks));
     h = WgrHashSize(h, sizeof(WgrFrame));
+    h = WgrHashSize(h, sizeof(WgrFarInstance));
     return h;
 }
 

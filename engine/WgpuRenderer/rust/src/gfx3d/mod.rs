@@ -7306,3 +7306,14 @@ fn interior_sky_steer_composes_with_the_bent_normal() {
         "the steered direction must be weighted by each direction's own visibility"
     );
 }
+
+// Test-only access to the shared group(0) camera layout.
+//
+// Modules that bind it (terrain, grass, the far tier) can only build their REAL pipelines in
+// a headless test if they can get the REAL layout: a hand-copied stand-in would pass while
+// silently drifting from the thing production uses, which is the precise failure mode a
+// device test exists to rule out.
+#[cfg(test)]
+pub(crate) fn camera_layout_for_tests(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    CameraGroup::new(device).layout
+}
