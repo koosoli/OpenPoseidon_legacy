@@ -20,6 +20,8 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <string>
+#include <unordered_set>
 #include <cstring>
 #include <map>
 #include <string>
@@ -2381,6 +2383,21 @@ void Scene::DrawObjectsAndShadowsPass2()
         {
             // whole-alpha object (cloudlets, <0xd0 objects): draw all of it here
             GPass1Stats.p2AlphaDrawn.fetch_add(1, std::memory_order_relaxed);
+            // NAME them, once per shape, under WGR_PASS1_STATS. On Arma 1 Sahrani these 778
+            // objects are 27.9 ms of a 47 ms CPU frame at ~36 us each, and the counter alone
+            // cannot say whether they are foliage that should be on the retained cutout path
+            // or genuinely un-divertable blend geometry. Those want opposite fixes, so the
+            // list decides it rather than a guess about what an Arma 1 tree is.
+            if (Pass1StatsEnabled() && shape)
+            {
+                static std::unordered_set<std::string> loggedAlpha;
+                const char* nm = shape->Name();
+                if (nm && loggedAlpha.size() < 60 && loggedAlpha.insert(std::string(nm)).second)
+                {
+                    LOG_INFO(Graphics, "PERF pass2 alpha shape: {} passNum={} lod={}", nm, oi->passNum,
+                             oi->drawLOD);
+                }
+            }
             DrawSortObject(oi);
 #if DO_STAT
             Alpha.Count(shape->Name());
