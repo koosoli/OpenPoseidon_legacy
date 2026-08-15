@@ -1,0 +1,6 @@
+target/
+out/
+out-*/
+*.bmp
+*.png
+Cargo.lock

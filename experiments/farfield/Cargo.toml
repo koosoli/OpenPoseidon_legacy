@@ -1,0 +1,23 @@
+[package]
+name = "farfield"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+description = "Isolated far-field terrain rendering experiments (EXP-FAR-*, EXP-TERRAIN-*, EXP-VEG-*)"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Own workspace root: these experiments are deliberately NOT members of the engine
+# workspace, so nothing here can affect the shipping build or its lockfile.
+[workspace]
+
+[dependencies]
+# Same versions the renderer pins, so the shared cargo registry cache resolves
+# them without a network fetch.
+wgpu = "29.0"
+pollster = "0.4"
+bytemuck = { version = "1.25.0", features = ["derive"] }
+glam = { version = "0.33.2", features = ["bytemuck"] }
+
+[profile.release]
+debug = true
