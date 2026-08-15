@@ -1,6 +1,11 @@
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -1512,6 +1517,86 @@ namespace Poseidon
 
 #endif
 
+namespace
+{
+
+// ---------------------------------------------------------------------------------------
+// drw:land sub-phase attribution.
+//
+// `drw:land` is whatever of Landscape::DrawRect follows the land:obj mark, and on Arma 1
+// Sahrani it is 35.839 ms of a 49.584 ms CPU frame -- 72%, and the single largest
+// unexplained number in the project. As one name it covers three unrelated things: the
+// grass layer draws, a queue flush, and Pass2 (alpha objects + shadows). Any of the three
+// could be all of it.
+//
+// Sahrani is not Stratis: Pass1 costs 0.054 ms there and 97.3% of its objects take the GPU
+// divert, so none of the Pass1 work applies. Splitting a phase is what identified the
+// Stratis and Chernarus causes; this is the same move on the world that is now worst.
+//
+// Same shape as Pass1Stats (SceneDraw.cpp) on purpose -- cumulative, power-of-two reporting,
+// separate from FrameProfiler so it cannot disturb the phase list farfield-compare.py reads.
+// WGR_LAND_STATS=1 turns it on; off it costs one cached bool per frame and no clock reads.
+struct LandStats
+{
+    std::atomic<uint64_t> frames{0};
+    std::atomic<uint64_t> grassUs{0};
+    std::atomic<uint64_t> grassLayers{0};
+    std::atomic<uint64_t> flushUs{0};
+    std::atomic<uint64_t> pass2Us{0};
+};
+
+LandStats GLandStats;
+
+bool LandStatsEnabled()
+{
+    static const bool enabled = std::getenv("WGR_LAND_STATS") != nullptr;
+    return enabled;
+}
+
+uint64_t LandNowUs()
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+struct LandScope
+{
+    std::atomic<uint64_t>* sink;
+    uint64_t began;
+    explicit LandScope(std::atomic<uint64_t>& into)
+        : sink(LandStatsEnabled() ? &into : nullptr), began(sink ? LandNowUs() : 0)
+    {
+    }
+    ~LandScope()
+    {
+        if (sink)
+        {
+            sink->fetch_add(LandNowUs() - began, std::memory_order_relaxed);
+        }
+    }
+};
+
+void ReportLandStats()
+{
+    if (!LandStatsEnabled())
+    {
+        return;
+    }
+    const uint64_t frames = GLandStats.frames.fetch_add(1, std::memory_order_relaxed) + 1;
+    if ((frames & (frames - 1)) != 0)
+    {
+        return;
+    }
+    const double f = static_cast<double>(frames);
+    const auto per = [&](const std::atomic<uint64_t>& v) { return v.load(std::memory_order_relaxed) / f / 1000.0; };
+    LOG_INFO(Graphics, "PERF land: frames={} | grass={:.3f} flush={:.3f} pass2={:.3f} ms/frame | grassLayers={:.1f}",
+             frames, per(GLandStats.grassUs), per(GLandStats.flushUs), per(GLandStats.pass2Us),
+             GLandStats.grassLayers.load(std::memory_order_relaxed) / f);
+}
+
+} // namespace
+
 void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 {
     Camera& camera = *scene.GetCamera();
@@ -1607,19 +1692,33 @@ void Landscape::DrawRect(Scene& scene, const LandBegEnd& bigRect)
 #endif
 
         const GrassMode& mode = GrassModes[grassMode - 1];
-        for (int i = 0; i < mode.nLayers; i++)
         {
-            DrawGround(bigRect, scene, mode.layers[i]);
+            LandScope scope(GLandStats.grassUs);
+            for (int i = 0; i < mode.nLayers; i++)
+            {
+                DrawGround(bigRect, scene, mode.layers[i]);
+            }
+            if (LandStatsEnabled())
+            {
+                GLandStats.grassLayers.fetch_add(static_cast<uint64_t>(mode.nLayers), std::memory_order_relaxed);
+            }
         }
         // reset additional clipping to infinity
         camera.SetAdditionalClipping(0, 100000);
     }
 #endif
 #endif
-    GEngine->FlushQueues();
+    {
+        LandScope scope(GLandStats.flushUs);
+        GEngine->FlushQueues();
+    }
 
     // draw alpha objects and shadows
-    scene.DrawObjectsAndShadowsPass2();
+    {
+        LandScope scope(GLandStats.pass2Us);
+        scene.DrawObjectsAndShadowsPass2();
+    }
+    ReportLandStats();
 
     GEngine->EnableReorderQueues(false);
     // clear any outstanding arrows (Buldozer ONLY)
