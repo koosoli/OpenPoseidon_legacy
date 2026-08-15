@@ -1,3 +1,4 @@
+#include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 #include "GameApplication.hpp"
 #include <Poseidon/Foundation/Platform/InitBridge.hpp>
@@ -183,6 +184,44 @@ bool WriteCaptureMetrics(const std::string& path)
         cJSON_AddNumberToObject(grassObject, "mid_vertices", grass.midVertices);
         cJSON_AddNumberToObject(grassObject, "far_vertices", grass.farVertices);
     }
+    // CPU frame phases. FrameProfiler has been recording these on every frame all
+    // along (it is always-on and unconditional), but nothing ever wrote them to a
+    // capture artifact, so the CPU side of the frame was only ever visible through
+    // the dev panel or the triPerfStats console command -- i.e. only to someone
+    // sitting at the keyboard. That is why a world can be 90% CPU-bound and have
+    // every recorded capture show only GPU numbers.
+    //
+    // Read the phase names, not the indices: object streaming currently bills to
+    // `land:gnd` (UpdateModernObjectResidency is called from TerrainWgpu::DrawTerrain,
+    // inside the terrain phase), so a large `land:gnd` on a heavy world is object
+    // work, not terrain work.
+    {
+        const Poseidon::Dev::FrameProfiler& profiler = Poseidon::Dev::GFrameProfiler();
+        if (profiler.FrameCount() > 0)
+        {
+            cJSON* phases = cJSON_AddObjectToObject(root, "cpu_frame_phases_ms");
+            cJSON_AddNumberToObject(phases, "sampled_frames", profiler.FrameCount());
+            cJSON_AddNumberToObject(phases, "avg_fps", profiler.AvgFps());
+            const Poseidon::Dev::FrameProfiler::PhaseStats total = profiler.TotalStats();
+            cJSON_AddNumberToObject(phases, "frame_avg", total.avgMs);
+            cJSON_AddNumberToObject(phases, "frame_p95", total.p95Ms);
+            // The minimum is the figure to quote when comparing arms; the profiler
+            // exposes avg/p95/max, so the cheapest-frame rule is applied downstream
+            // by taking the cheapest repeat rather than the cheapest frame here.
+            cJSON_AddNumberToObject(phases, "frame_max", total.maxMs);
+            cJSON* byPhase = cJSON_AddObjectToObject(phases, "phases");
+            for (int p = 0; p < Poseidon::Dev::FrameProfiler::PhaseCount; ++p)
+            {
+                const Poseidon::Dev::FrameProfiler::PhaseStats s =
+                    profiler.Stats(static_cast<Poseidon::Dev::FrameProfiler::Phase>(p));
+                cJSON* entry = cJSON_AddObjectToObject(byPhase, Poseidon::Dev::FrameProfiler::PhaseName(p));
+                cJSON_AddNumberToObject(entry, "avg", s.avgMs);
+                cJSON_AddNumberToObject(entry, "p95", s.p95Ms);
+                cJSON_AddNumberToObject(entry, "max", s.maxMs);
+            }
+        }
+    }
+
     char* rendered = cJSON_Print(root);
     cJSON_Delete(root);
     if (!rendered)
