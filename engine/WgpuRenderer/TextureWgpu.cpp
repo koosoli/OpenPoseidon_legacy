@@ -579,6 +579,39 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
     return mip.GetPixel(mem.data(), u, v);
 }
 
+// WGR_TEXTURE_MIP_BIAS=N drops the N most detailed mip levels of every block-compressed
+// object texture at upload. 0 (default) uploads the full chain, exactly as before.
+//
+// This is the one lever here that BUYS PERFORMANCE WITH VISUAL QUALITY, so it is off by
+// default and says so. Each level costs 4x the one below it, so a bias of 1 removes ~75% of
+// a texture's bytes and halves its resolution.
+//
+// It exists for DayZ Chernarus, where the alternative is not "slightly softer textures", it
+// is a world that does not render at all. Measured there: 3,552 object textures for 3.84 GB
+// against a 2 GB budget, and the texture LRU starved to 1-31 eviction candidates per round
+// because RetainGpuModel pins every texture of every registered model. Memory climbs
+// unbounded until the driver refuses an allocation, and the world dies at ~22k of 199,917
+// objects. Reforger Everon does not need this at all -- 199,881 objects but only 218 MB of
+// textures, because they are heavily reused.
+//
+// The RIGHT fix is for a pin to mean "recently drawn" rather than "registered", so the LRU
+// can do its job. That is not this change, because evicting a texture a live bind group
+// still references is very plausibly the `Texture with 'wgr_texture' label is invalid`
+// failure already seen, and it cannot be made safe without auditing the retained bind
+// lifetime. Until then this bounds the demand instead of improving the supply.
+int TextureMipBias()
+{
+    static const int bias = []
+    {
+        const char* v = std::getenv("WGR_TEXTURE_MIP_BIAS");
+        const int parsed = v ? std::atoi(v) : 0;
+        // Clamped: a bias large enough to consume the whole chain would leave nothing to
+        // upload, and the floor below keeps at least one level regardless.
+        return parsed > 0 ? std::min(parsed, 4) : 0;
+    }();
+    return bias;
+}
+
 uint64_t TextureWgpu::EnsureUploaded()
 {
     if (_bank)
@@ -612,23 +645,29 @@ uint64_t TextureWgpu::EnsureUploaded()
         // re-opening the texture through the VFS, so a texture cost _nMipmaps opens
         // (up to MAX_MIPMAPS = 7) instead of one. GetMipmapChain's default implementation
         // is the old loop, so nothing changes for a source that has no per-call cost.
-        std::vector<size_t> offsets(static_cast<size_t>(_nMipmaps));
+        // WGR_TEXTURE_MIP_BIAS drops the most detailed levels: the chain simply STARTS
+        // lower. Always leaves at least one level, so a heavily-biased small texture
+        // degrades to its coarsest level rather than to nothing.
+        const int firstLevel = std::min(TextureMipBias(), _nMipmaps - 1);
+        const int levelCount = _nMipmaps - firstLevel;
+        std::vector<size_t> offsets(static_cast<size_t>(levelCount));
         size_t total = 0;
-        for (int i = 0; i < _nMipmaps; i++)
+        for (int i = 0; i < levelCount; i++)
         {
             offsets[i] = total;
-            total += render::mipmap::ComputeLayout(dst, _mipmaps[i]._w, _mipmaps[i]._h).dataSize;
+            const PacLevelMem& mip = _mipmaps[firstLevel + i];
+            total += render::mipmap::ComputeLayout(dst, mip._w, mip._h).dataSize;
         }
         // Destinations are resolved only once the buffer is at its final size — a pointer
         // taken before the allocation would not survive it.
         std::vector<uint8_t> blocks(total);
-        std::vector<MipmapRead> reads(static_cast<size_t>(_nMipmaps));
-        for (int i = 0; i < _nMipmaps; i++)
+        std::vector<MipmapRead> reads(static_cast<size_t>(levelCount));
+        for (int i = 0; i < levelCount; i++)
         {
-            reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[i], i};
+            reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
         }
         const uint64_t readBegan = timed ? NowUs() : 0;
-        const bool ok = _src->GetMipmapChain(reads.data(), _nMipmaps);
+        const bool ok = _src->GetMipmapChain(reads.data(), levelCount);
         if (timed)
         {
             GTextureStreamStats.readUs.fetch_add(NowUs() - readBegan, std::memory_order_relaxed);
@@ -637,8 +676,15 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (ok && !blocks.empty())
         {
             const uint64_t createBegan = timed ? NowUs() : 0;
+            // Dimensions follow the level actually uploaded, not the file's level 0 —
+            // handing wgpu the full-resolution size with a biased chain describes a
+            // texture whose level 0 is missing, which is a validation error, not a
+            // smaller texture. _w/_h are updated below so samplers and any later reader
+            // see the size that really exists on the GPU.
+            _w = _mipmaps[firstLevel]._w;
+            _h = _mipmaps[firstLevel]._h;
             _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
-                                            static_cast<uint32_t>(_nMipmaps), 0, blocks.data(),
+                                            static_cast<uint32_t>(levelCount), 0, blocks.data(),
                                             static_cast<uint32_t>(blocks.size()));
             if (timed)
             {
