@@ -92,15 +92,20 @@ def mlod_bounds(path: str):
 
 
 def load_placements(path: str):
+    """Records are 15 B when a model table exists beside the file (xyz f32, class u8,
+    model u16) and 13 B without it. The model id is what makes the analysis exact
+    rather than class-median, so the wider record is preferred."""
     with open(path, "rb") as f:
         blob = f.read()
     n = struct.unpack_from("<I", blob, 0)[0]
+    stride = 15 if (len(blob) - 4) // max(n, 1) >= 15 else 13
     out = []
     for i in range(n):
-        o = 4 + i * 13
+        o = 4 + i * stride
         x, y, z = struct.unpack_from("<fff", blob, o)
-        out.append((x, y, z, blob[o + 12]))
-    return out
+        mid = struct.unpack_from("<H", blob, o + 13)[0] if stride == 15 else 0xFFFF
+        out.append((x, y, z, blob[o + 12], mid))
+    return out, stride
 
 
 # ---------------------------------------------------------------- the rules
@@ -126,8 +131,24 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=120000, help="placements to sample (0 = all)")
     args = ap.parse_args()
 
-    placements = load_placements(args.placements)
-    print(f"placements: {len(placements):,}")
+    placements, stride = load_placements(args.placements)
+    print(f"placements: {len(placements):,}  (record {stride} B)")
+
+    # Exact per-model bounds, joined through the sidecar table written by
+    # mkplacements.py. This is what removes the class-median approximation.
+    model_size: dict[int, float] = {}
+    table = args.placements + ".models.txt"
+    if stride == 15 and os.path.exists(table):
+        with open(table, encoding="utf-8") as tf:
+            names = [line.strip() for line in tf if line.strip()]
+        resolved = 0
+        for mid, rel in enumerate(names):
+            candidate = os.path.join(args.models, *rel.replace("\\", "/").split("/")[1:])
+            b = mlod_bounds(candidate)
+            if b:
+                model_size[mid] = b[3]
+                resolved += 1
+        print(f"model table: {len(names):,} names, {resolved:,} bounds resolved exactly")
 
     # Bounds per model. The dump carries no model name, so approximate with a size
     # distribution measured from the real P3Ds and assigned by class -- stated plainly
@@ -182,11 +203,11 @@ def main() -> int:
         ]
         for label, (kind, param) in rules:
             overlap = gap = proxy_only = 0
-            for (x, _y, z, cls) in sample:
+            for (x, _y, z, cls, mid) in sample:
                 d = math.hypot(x - cam[0], z - cam[1])
                 if d > args.fog:
                     continue  # beyond fog: nothing to argue about
-                diameter = size.get(cls, 4.0)
+                diameter = model_size.get(mid) or size.get(cls, 4.0)
                 real = real_drawn(d, diameter, k, args.fog)
                 far = d >= param if kind == "fixed" else not real
                 if real and far:
@@ -195,7 +216,7 @@ def main() -> int:
                     gap += 1
                 elif far:
                     proxy_only += 1
-            total = max(1, len([1 for (x, _y, z, _c) in sample
+            total = max(1, len([1 for (x, _y, z, _c, _m) in sample
                                 if math.hypot(x - cam[0], z - cam[1]) <= args.fog]))
             print(f"{rail:<10} {label:<22} {overlap * 100.0 / total:>8.1f}% "
                   f"{gap * 100.0 / total:>8.1f}% {proxy_only * 100.0 / total:>10.1f}%")
