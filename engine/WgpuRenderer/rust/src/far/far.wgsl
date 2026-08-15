@@ -20,12 +20,22 @@
 #import frame::{frame, reverse_z, apply_fog, sky_irradiance, cloud_sun_shadow}
 
 struct FarParams {
-    // x = near cutoff (m, where real objects stop), y = far distance (m),
+    // x = near cutoff (m) — a HARD FLOOR, not the start rule (see cs_cull), y = far distance (m),
     // z = sub-pixel limit in PIXELS OF PROJECTED HEIGHT, w = source instance count
     cfg: vec4<f32>,
     // x = pixels per radian ((viewport_height/2) * proj[1][1]), y = enabled,
-    // z = dispatch row stride in INVOCATIONS (workgroups_x * 64), w spare
+    // z = dispatch row stride in INVOCATIONS (workgroups_x * 64),
+    // w = start rule: 0 = complement of the real cull (default), 1 = legacy pure distance
+    //     (WGR_FAR_MODE=distance)
     tune: vec4<f32>,
+    // THE REAL OBJECT CULL'S OWN COEFFICIENTS, pushed per frame from Gfx3d::cull_inputs — the
+    // same four numbers wgr_set_cull_params hands the object cull.
+    //   x = k = pixel_limit * lod_scale * lod_inv_width   (the sub-pixel coefficient, folded)
+    //   y = objects_z (m)                                 (the object cull's radial edge)
+    //   z, w spare
+    // These MOVE AT RUNTIME: the framerate governor drives lod_inv_width, so k is not a
+    // constant and a start rule expressed as a distance cannot track it.
+    cull: vec4<f32>,
 };
 
 // One authored placement's proxy. Mirrors WgrFarInstance (32 B) exactly.
@@ -56,6 +66,12 @@ struct FarVisible {
 // would cost the same memory and one more binding.
 const CARD_CAP: u32 = 1048576u;
 const PRISM_CAP: u32 = 262144u;
+
+// A zero horizontal extent is a legal ModelInfo (a flagpole, a wire), so the proxy that is
+// actually emitted is widened to this. The complement test measures the SAME clamped value,
+// because the question it asks is about the box this tier would draw, not about a degenerate
+// number in the source row.
+const MIN_PROXY_RADIUS: f32 = 0.25;
 
 @group(1) @binding(0) var<uniform> far: FarParams;
 @group(1) @binding(1) var<storage, read> src: array<FarSource>;
@@ -104,10 +120,48 @@ fn cs_cull(@builtin(global_invocation_id) gid: vec3<u32>) {
     // fails everywhere else on the map.
     let rel = s.pos - frame.cam_pos.xyz;
     let d = length(rel);
-    // The near cutoff is where the real object renderer stops; below it this tier would be
-    // drawing a box on top of the actual model.
+    // The far distance is the fog wall. The near cutoff is a HARD FLOOR and nothing more:
+    // whatever the start rule below concludes, never put a crude box this close to the eye,
+    // where it would be compared against the real model standing beside it.
     if (d > far.cfg.y || d < far.cfg.x) {
         return;
+    }
+
+    // START RULE — THE COMPLEMENT OF THE REAL OBJECT CULL, not a distance.
+    //
+    // No distance can be right, and this was measured rather than argued (see
+    // experiments/farfield/cutoff_analysis.py against the real 1.2M Everon placement set with
+    // exact per-model bounds). At the governor's coarse rail, a cutoff at the fog edge left
+    // 36.2% of the placements inside the fog radius drawn by NOTHING — that is the reported
+    // pop-in — while a cutoff tuned to close that gap put a proxy on top of a real model for
+    // 46.8% of them. The trade exists because the real cull is SIZE-dependent and its
+    // coefficient moves with the framerate governor, so any fixed metre value is wrong in
+    // both directions at once and wrong by a different amount each frame.
+    //
+    // So this tier accepts EXACTLY what the object cull drops. gfx3d/cull.wgsl drops an
+    // instance when either the radial test fails (dist2 > objects_z2) or the sub-pixel test
+    // does (diameter^2 < (pixel_limit*lod_scale)^2 * dist2 * lod_inv_width^2); with k folding
+    // pixel_limit * lod_scale * lod_inv_width, that second one is diameter < k * d. Accept is
+    // the negation of both, which is 0% overlap and 0% gap by construction, at every rail.
+    //
+    // Deliberately NOT replicated: cull.wgsl's legacy near-clamp (a sphere large relative to
+    // its distance is measured from its near surface). It only ever SHRINKS the distance, so
+    // omitting it can only make this tier think the real object was dropped when it was
+    // drawn — i.e. it errs toward a redundant proxy, never toward a hole — and it can only
+    // fire within a few radii of the camera, which the hard floor above already owns.
+    //
+    // The proxy's size term is its own drawn width, 2 * radius (radius is
+    // ModelProxyBounds::horizontalExtent * 0.5, so this is the model's horizontal extent) —
+    // the same quantity the offline analysis swept, and the analogue of cull.wgsl's
+    // `model.bounding_sphere * 2.0 * scale`: a stored half-size doubled into a diameter.
+    if (far.tune.w < 0.5) {
+        let k = far.cull.x;
+        let objects_z = far.cull.y;
+        let proxy_diameter = max(s.radius, MIN_PROXY_RADIUS) * 2.0;
+        let real_drawn = (d <= objects_z) && (proxy_diameter >= k * d);
+        if (real_drawn) {
+            return;
+        }
     }
 
     let h = max(s.height, 0.01);
@@ -156,9 +210,7 @@ fn cs_cull(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     visible[slot].pos = s.pos;
     visible[slot].height = h;
-    // A zero horizontal extent is a legal ModelInfo (a flagpole, a wire); give it enough
-    // width to be a silhouette rather than nothing.
-    visible[slot].radius = max(s.radius, 0.25);
+    visible[slot].radius = max(s.radius, MIN_PROXY_RADIUS);
     visible[slot].colour = s.colour;
     visible[slot].seed = hash01(i ^ 0x9e3779b9u);
     visible[slot].padding = 0.0;

@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-15
 **Branch:** `feat/farfield-tier`
-**Status:** MEASURED on Reforger Everon. Generalisation to Arma 3 / DayZ **not yet verified**.
+**Status:** MEASURED on Everon. **DOES NOT GENERALISE — it regresses Arma 3 Stratis.**
+See "The governor cuts both ways" below before acting on the headline.
 **Related:** [RND-032](RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md),
 [RND-033](RND-033-cross-layer-frame-profile-objects-are-not-the-bottleneck-20260815.md)
 
@@ -28,9 +29,56 @@ governor did it. The isolation arms settle it: changing the governor ALONE
 `C no-far` (53.33 fps / 18.467 ms) and `E old-admit` (50.85 fps / 18.950 ms) are
 indistinguishable from the default. The other three levers together account for
 0.85 ms of the 14.1 ms difference. So the isolated governor effect is
-**30.51 -> 50.34 fps**, and the four-lever comparison is merely consistent with it. It also looks *better*: at range 16 the near trees render as sparse pale specks —
+**30.51 -> 50.34 fps**, and the four-lever comparison is merely consistent with it.
+
+It also looks *better*: at range 16 the near trees render as sparse pale specks —
 full branch geometry aliasing at multi-kilometre distance — where the coarse LOD is a
 solid canopy.
+
+## The governor cuts both ways — measured on Stratis, and it reverses the recommendation
+
+`_lodInvWidth` multiplies distance in the sub-pixel cull, so a LARGER value culls MORE
+aggressively. The governor can be stuck at either rail, and the two failures are opposites.
+
+Stratis, settled, `pending=0`, 163,953 placements resident in both arms:
+
+| | `RANGE=16` (legacy) | `RANGE=4` (the "fix") |
+|---|---|---|
+| avg fps | **11.27** | **4.61** |
+| CPU frame | 88.714 ms | **216.888 ms** |
+| GPU frame | 24.592 ms | 16.534 ms |
+| `land:obj` | 75.381 ms | **201.799 ms** |
+| main instances | 4,337 | **12,477** |
+| LOD histogram | `[8,367,815,2165,536,446,0,0]` | `[66,779,1348,8689,570,1025,0,0]` |
+
+**CONFIRMED by a reversed-arm-order re-run.** Legacy is rock-solid at 24.2-26.8 ms across all
+five captures; the new arm swings 16.5 -> 79.7 ms and lands at ~79 ms when run cold and first.
+Ordering and thermal drift are excluded. The regression is real.
+
+**Magnitude was provisional when first written; the mechanism never was.** Two confounds are being resolved by a
+reversed-arm-order re-run: a build ran 16:04:31-16:09:24 overlapping the legacy arm's first
+repeat, and the new arm degraded monotonically across its repeats (216.9 / 331.1 / 355.7 ms),
+which is a signature of drift rather than a clean measurement. What is NOT in doubt is the
+structural half — main instances 4,337 -> 12,477 and triangles 1.03M -> 3.72M are counts, not
+timings, and they reproduce in every repeat. So the direction and cause are established; treat
+the exact fps figures as pending.
+
+**On Stratis the governor was working.** It sits near the coarse rail and culls hard to
+protect a frame that is slow for an unrelated reason. Capping the range removes that
+protection: 2.9x more instances are drawn and `land:obj` scales almost linearly with them
+(~16 us per instance).
+
+Everon's governor was stuck at the *fine* rail doing the opposite — pinning LOD 0/1 and
+burning 56M triangles. Same lever, opposite failure, opposite correct action.
+
+**So `RANGE=4` must not ship as a universal default.** The governor is a symptom-manager;
+clamping it is correct only where it misbehaves. Stratis's disease is the per-instance cost
+in `Scene::DrawObjectsAndShadowsPass1`, and that is what to fix. A per-world or adaptive
+policy is probably the real answer and nobody has designed one.
+
+*(Caveat: 2 repeats in the Stratis new arm against 3 in legacy. The effect is far too large
+to be noise, and both arms are fully settled with identical residency, but the third repeat
+is owed.)*
 
 ## Why the governor was bistable
 
@@ -116,6 +164,35 @@ transient, because the cost is per object created and there are 200,000 of them.
 - **It does not reduce streaming fill-in pop.** Measured picture change between 35 s and
   120 s: tier-on 3.94%, tier-off 3.97% — identical. It cannot help, because fill-in happens
   *inside* the object draw distance, where the far tier is not what draws.
+
+## Chernarus — inverts the Everon VRAM finding
+
+`WGR_RESIDENCY_TRACE=1`, final trace before the blocker below:
+
+```
+tracked=6,125,749,884   budget=2,147,483,648   overBudget=1
+textures=3552  textureBytes=3,844,048,508    (3.58 GiB, 62.7%)
+geometryLive=1,442,876,280
+geometryCapacity=2,281,701,376               (2.13 GiB, 37.2%)
+geometryRetired=0
+```
+
+**62.7% textures on Chernarus against 84% geometry pool on Everon.** The two worlds
+oversubscribe for opposite reasons, so neither generalises - and the
+`WGR_EVICT_ON_MODEL_RELEASE` decoupling, which looked like a minority term on Everon, is
+directly relevant here. `geometryRetired=0` means the eviction path never fires once at
+2.85x budget, which is a bug rather than a tuning value. RND-033's "4.23 GB" is superseded:
+it reaches **5.71 GiB against a 2 GiB budget**, and `tracked` is exactly
+`textureBytes + geometryCapacity`.
+
+**Time-to-plateau 253 s** (4.2 minutes), 199,917 objects in 230 s = **1.15 ms per object
+created**, matching Everon's ~1.1 ms. The per-object cost is constant across worlds; the
+object *count* is what scales. Stratis is 0.25 ms/object.
+
+**Blocker found while measuring:** `Buffer with 'wgr_geo_pool_vbuf' label is invalid` fires
+88 s in, long before residency settles. Rendering continues (18.344 ms GPU frame) but with
+only 28,457 of 199,917 registered, and the screenshot's `get_current_texture` then fails - so
+**no capture JSON is producible on Chernarus at all**. Fix this before benchmarking DayZ.
 
 ## Open
 

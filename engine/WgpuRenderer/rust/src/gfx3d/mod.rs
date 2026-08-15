@@ -6037,6 +6037,16 @@ impl Gfx3d {
         };
     }
 
+    /// This frame's engine cull + LOD inputs, exactly as last pushed by wgr_set_cull_params.
+    ///
+    /// Read by the FAR INSTANCE TIER, whose start rule is the COMPLEMENT of the object cull:
+    /// it accepts precisely what these four numbers make the object cull drop. Exposed as a
+    /// getter rather than passed through a second C ABI call because the C++ side already
+    /// pushes them once per frame and a second copy could only ever disagree with this one.
+    pub fn cull_inputs(&self) -> cull::CullInputs {
+        self.cull_inputs
+    }
+
     /// Drain queued sky-bake diagnostics (see bake_model_sky_visibility).
     pub fn take_sky_bake_log(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sky_bake_log)
