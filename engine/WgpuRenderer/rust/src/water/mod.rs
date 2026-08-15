@@ -627,12 +627,35 @@ impl Water {
                  WGR_WATER_SHORE_FOAM_LEGACY"
             );
         }
+        // Deep-side extent of the shoreline foam band; see `foam_band_outer` in water.wgsl for
+        // what the number means. The owner reported the wash STILL reaching too far out to sea
+        // after the 1.95 -> 1.55 pull-in, so the default drops again to 1.10 (~0.97 m of column
+        // depth at the default foam_width of 0.4). It is an env override and not a literal
+        // because "how far out is too far" is a judgement about a picture, and settling it
+        // should cost a relaunch rather than a rebuild.
+        let foam_band_outer = std::env::var("WGR_WATER_FOAM_BAND_OUTER")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(1.10);
+        // Large-scale patchiness of the shoreline band, 0..1. `=0` restores the previous
+        // stationary field on its own, which WGR_WATER_SHORE_FOAM_LEGACY=1 cannot do without also
+        // giving back the unfiltered noise, the streak lattice and the old gains — so this is the
+        // lever that isolates the patchiness in an A/B rather than confounding it with all of WTR.
+        let foam_patch_gain = std::env::var("WGR_WATER_FOAM_PATCH")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(1.0);
         let vs_constants = [("skirt_k", skirt_k)];
         // `fs_constants` is shared with the whitewater pipeline below, whose shader declares only
         // `linear` — wgpu rejects a pipeline whose constant map names an override the module does
         // not have, so the surface's extra override needs its own array.
         let fs_constants = [("linear", linear)];
-        let water_fs_constants = [("linear", linear), ("shore_foam_legacy", shore_foam_legacy)];
+        let water_fs_constants = [
+            ("linear", linear),
+            ("shore_foam_legacy", shore_foam_legacy),
+            ("foam_band_outer", foam_band_outer),
+            ("foam_patch_gain", foam_patch_gain),
+        ];
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_water_pipeline_layout"),
@@ -1534,8 +1557,30 @@ mod tests {
         // Strength is a SEPARATE lever from the band limiting, and both keep a legacy path.
         assert!(shader.contains("let base_gain = select(0.20, 0.35, shore_foam_legacy > 0.5)"));
         assert!(shader.contains("let pattern_gain = select(0.66, 0.95, shore_foam_legacy > 0.5)"));
-        assert!(shader.contains("let band_outer = select(1.55, 1.95, shore_foam_legacy > 0.5)"));
+        // The deep-side extent became an override once the owner asked for it a second time:
+        // pinning it as a literal here would mean a rebuild per candidate value, and the value is
+        // settled by looking at a picture. The legacy arm keeps its literal 1.95.
+        assert!(shader.contains("let band_outer = select(foam_band_outer, 1.95, shore_foam_legacy > 0.5)"));
+        assert!(shader.contains("override foam_band_outer: f32 = 1.10;"));
         assert!(shader.contains("override shore_foam_legacy: f32 = 0.0;"));
+
+        // Large-scale patchiness: two low-frequency octaves whose ratio is NOT a simple fraction
+        // (0.0461 / 0.0290 = 1.59). Guard the ratio, not just the presence of the term — a later
+        // "tidy" to 0.04 and 0.02 would restore exactly the commensurate beat the streak-lattice
+        // fix removed, one scale up, and would look fine in a screenshot of a single beach.
+        assert!(shader.contains("override foam_patch_gain: f32 = 1.0;"));
+        assert!(shader.contains("let patch_a = vnoise_lod(in.base_xz * 0.0461"));
+        assert!(shader.contains("let patch_b = vnoise_lod(in.base_xz * 0.0290"));
+        let patch_ratio = 0.0461f32 / 0.0290f32;
+        assert!(
+            (patch_ratio - 2.0).abs() > 0.25 && (patch_ratio - 1.5).abs() > 0.05,
+            "the two patch octaves must not sit at a simple ratio, got {patch_ratio}"
+        );
+        // The patch must be centred on 1.0 so it redistributes foam rather than adding it, and a
+        // fully band-limited vnoise_lod returns 0.5 — so the far field must land on exactly 1.0
+        // and switch the term off by construction rather than needing its own distance fade.
+        let patch_at_full_filter = 0.52 + 0.96 * (0.5 * 0.62 + 0.5 * 0.38);
+        assert!((patch_at_full_filter - 1.0).abs() < 1e-6);
 
         // The new gains must reduce peak drive but still saturate the strongest break, and the
         // legacy gains must reproduce the old 2.14 pre-clamp peak exactly.
@@ -1606,7 +1651,12 @@ mod tests {
         );
 
         // Both constant maps below are the literal arrays built in Water::new.
-        for name in ["linear", "shore_foam_legacy"] {
+        for name in [
+            "linear",
+            "shore_foam_legacy",
+            "foam_band_outer",
+            "foam_patch_gain",
+        ] {
             assert!(
                 surface.contains(&name.to_string()),
                 "water_fs_constants names `{name}`, which water.wgsl must declare; \
@@ -1620,9 +1670,22 @@ mod tests {
         );
         let module = include_str!("mod.rs");
         assert!(module.contains("let fs_constants = [(\"linear\", linear)];"));
-        assert!(module.contains(
-            "let water_fs_constants = [(\"linear\", linear), (\"shore_foam_legacy\", shore_foam_legacy)];"
-        ));
+        // water_fs_constants outgrew one line, so pin each ENTRY rather than the whole literal.
+        // The invariant that matters is that every name checked against the shader above is
+        // really in the array Water::new passes — not how rustfmt chose to wrap it. (Only
+        // water_fs_constants has trailing commas per entry; the one-line fs_constants above does
+        // not, so these cannot match it by accident.)
+        for name in [
+            "linear",
+            "shore_foam_legacy",
+            "foam_band_outer",
+            "foam_patch_gain",
+        ] {
+            assert!(
+                module.contains(&format!("(\"{name}\", {name}),")),
+                "water_fs_constants must pass `{name}` to the surface pipeline"
+            );
+        }
     }
 
     #[test]

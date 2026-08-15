@@ -701,6 +701,18 @@ override linear: f32 = 0.0;
 // looks are reachable from one binary for an A/B capture. See the shoreline foam block in fs_water.
 override shore_foam_legacy: f32 = 0.0;
 
+// Deep-side extent of the shoreline foam band, in units of `ft` (column depth over
+// foam_width * 2.2). The owner's report is that the wash still reaches too far out to sea, so
+// this is the knob that answers it directly and it is an override rather than a literal because
+// "how far out is too far" is a judgement about a picture, and settling it should not need a
+// rebuild. WGR_WATER_FOAM_BAND_OUTER retunes it live; see the band in fs_water for what the
+// number means in metres of depth.
+override foam_band_outer: f32 = 1.10;
+
+// Strength of the large-scale patchiness applied to the shoreline band (0 = the previous
+// stationary field, 1 = full). WGR_WATER_FOAM_PATCH. See the patch block in fs_water.
+override foam_patch_gain: f32 = 1.0;
+
 // Water column depth (m) at this fragment: reconstruct the seabed's camera-relative position
 // from the opaque prepass depth and take the vertical gap to the water surface. In the fragment
 // shader `in.clip` is the framebuffer position (window pixels + depth), so its xy indexes the
@@ -1776,10 +1788,15 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // is clipped by the beach — the deep side already faded. Foam also fades to 0 right at the
     // edge, so the water there is transparent (soft wash over wet sand) rather than opaque white.
     let ft = eff_depth / max(wp.foam_width * 2.2, 0.4);
-    // Deep-side extent of the band. Pulled in from 1.95 to 1.55 so the wash sits ON the shoreline
-    // instead of reaching a third further out to sea. This is the DEEP edge, which had already
-    // faded to nothing — the land side, which carries the no-hard-line guarantee, is untouched.
-    let band_outer = select(1.55, 1.95, shore_foam_legacy > 0.5);
+    // Deep-side extent of the band. 1.95 -> 1.55 -> 1.10 over two passes, both times because the
+    // owner reported the wash reaching too far out to sea. At the default foam_width of 0.4 the
+    // divisor above is 0.88 m, so `ft` IS column depth in units of 0.88 m: the band now ends at
+    // ~0.97 m of water instead of ~1.36 m, a 29% pull-in on top of the previous 21%.
+    // This is the DEEP edge, which had already faded to nothing. The LAND side (the
+    // smoothstep(0.0, 0.06, ft) below) carries the no-hard-line guarantee and is untouched — the
+    // whole point of splitting the band into two independent ends is that this knob cannot
+    // reintroduce the bright clipped line at the beach.
+    let band_outer = select(foam_band_outer, 1.95, shore_foam_legacy > 0.5);
     let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(0.35, band_outer, ft));
     // coast_flow points toward land. Sampling x + v*t moves a pattern in -v, so
     // the old wash visibly travelled offshore. x - v*t makes each band advance landward.
@@ -1809,8 +1826,42 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
         // WHAT the far foam looks like, this fixes HOW MUCH of it there is.
         let far = 1.0 - 0.45 * smoothstep(150.0, 1100.0, length(in.world_pos));
         let far_fade = select(far, 1.0, shore_foam_legacy > 0.5);
+        // LARGE-SCALE PATCHINESS — the residual "it still tiles".
+        //
+        // The 1.35 x 5.3 m streak lattice is gone, but what replaced it is still a STATIONARY
+        // field: statistically identical at every point of every beach. Its largest feature is one
+        // base-octave cell (FOAM_FREQ 0.55, so 1.8 m), which means that along 200 m of coastline
+        // the eye sees the same texture a hundred times with nothing varying at the scale it is
+        // actually looking at. That reads as a repeat even though no two cells are equal — the
+        // tell here is not a visible seam, it is uniformity.
+        //
+        // Real surf is not uniform: bathymetry, refraction and headlands make it heavy in some
+        // places and nearly absent in others, over tens of metres. So modulate the band with a
+        // very low-frequency field. Two octaves at 21.7 m and 34.5 m cells, whose ratio (1.59) is
+        // deliberately not a simple fraction so the pair cannot re-align into a beat of its own at
+        // some third frequency — that re-alignment is exactly the mistake that produced the old
+        // lattice, and repeating it two octaves lower would be a slower, larger version of the
+        // same bug.
+        //
+        // It runs through vnoise_lod on the same footprint as every other octave, so it cannot
+        // reintroduce the aliasing the band-limiting work removed; note that a fully filtered
+        // vnoise_lod returns 0.5, which maps to a patch of exactly 1.0, so this term switches
+        // itself off at distance instead of having to be faded out by hand.
+        //
+        // Drift is near-static (0.004-0.006 m/s). Where surf is heavy is a property of the seabed
+        // and should not visibly slide along the coast, but a dead-static field looks painted on.
+        let patch_a = vnoise_lod(in.base_xz * 0.0461 + vec2<f32>(wp.time * 0.006, -wp.time * 0.004),
+            foam_fp * 0.0461);
+        let patch_b = vnoise_lod(in.base_xz * 0.0290 + vec2<f32>(-wp.time * 0.004, wp.time * 0.005) +
+            vec2<f32>(53.1, 27.9), foam_fp * 0.0290);
+        // Centred on 1.0 so mean coverage is unchanged: this REDISTRIBUTES foam along the shore,
+        // it does not add or remove any. 0.52..1.48 is a wide enough spread to read as "heavier
+        // here, lighter there" without emptying a stretch of coast completely.
+        let patch = mix(1.0, 0.52 + 0.96 * (patch_a * 0.62 + patch_b * 0.38),
+            select(foam_patch_gain, 0.0, shore_foam_legacy > 0.5));
         foam = clamp(foam_band * (base_gain + coast_pattern * pattern_gain) *
-            max(wp.foam_intensity, 0.0) * (1.0 + shore_break * break_gain) * far_fade, 0.0, 1.0);
+            max(wp.foam_intensity, 0.0) * (1.0 + shore_break * break_gain) * far_fade * patch,
+            0.0, 1.0);
     }
     // evaluate_water_surface already fetched this texel for crest translucency.
     let foam_history_sample = state.foam_history_sample;
