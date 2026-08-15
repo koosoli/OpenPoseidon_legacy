@@ -646,6 +646,12 @@ class Landscape : public SerializeClass
     float GetTerrainGrid() const { return _terrainGrid; }
     float GetInvTerrainGrid() const { return _invTerrainGrid; }
 
+    // The compact authored placement rows for the whole map, and the model names
+    // they index. Read-only: a far-field tier draws from the same rows the
+    // residency window streams from, and must not be able to disturb them.
+    const std::vector<ModernObjectPlacement>& ModernObjectPlacements() const { return _modernObjectPlacements; }
+    const std::vector<RStringB>& ModernObjectModels() const { return _modernObjectModels; }
+
   protected:
     void SetLandGrid(float grid);
 
