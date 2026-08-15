@@ -2895,7 +2895,7 @@ impl Renderer {
             }
         }
 
-        for line in self.gfx3d.take_sky_bake_log() {
+        for line in self.gfx3d.take_queued_log() {
             self.log.log(log_level::INFO, &line);
         }
 

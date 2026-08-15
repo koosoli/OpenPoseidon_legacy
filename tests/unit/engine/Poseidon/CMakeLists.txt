@@ -135,6 +135,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_paa_decode_fixtures.cpp
     Graphics/test_paa_decoder.cpp
     Graphics/test_texture_mip_chain.cpp
+    Graphics/test_texture_alpha_block_scan.cpp
     Graphics/test_procedural_texture.cpp
     Graphics/test_shape_loader.cpp
     Graphics/test_pixel_format.cpp

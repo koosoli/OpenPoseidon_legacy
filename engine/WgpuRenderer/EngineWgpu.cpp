@@ -3917,12 +3917,59 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // established direct path until retained alpha-to-coverage matches it exactly. A
             // whole-model fallback is necessary: CPU partial suppression is spec-based and
             // cannot safely hand off the trunk while keeping these opaque-spec leaf cards.
+            //
+            // ---------------------------------------------------------------------------
+            // THIS BAIL IS THE SINGLE LARGEST CPU COST ON ARMA 3, AND ITS PRECONDITION HAS
+            // SINCE BEEN MET.
+            //
+            // Measured on Stratis: it rejects the WHOLE MODEL for 88,084 of 163,953 resident
+            // placements -- every land vegetation model in the world, 53.8% of it. Those
+            // objects never register, so they never reach the coverage test at all; they fall
+            // to GpuDrawCoverage::None by default and ride the CPU draw path. That is the
+            // 11,974 objects/frame in Pass1 costing 37.6 ms, against Everon's 1 object and
+            // 0.068 ms. Arithmetic closes to 0.8%: 163,953 - 88,084 = 75,869 predicted
+            // registered vs 75,274 measured. The control is the underwater bw_set* corals --
+            // same TreeAdv material family, but an OPAQUE texture, so this test does not fire
+            // and they do register.
+            //
+            // Everon is immune only because every Reforger material resolves through the
+            // .emat adapter with an empty pixelShaderId, so GpuSectionMaterialUsesLeafCards
+            // can never match. It is not that Reforger foliage is handled better.
+            //
+            // The comment above says to leave it "until retained alpha-to-coverage matches it
+            // exactly". That landed: gfx3d/mod.rs drives alpha_to_coverage_enabled on the
+            // cutout colour AND prepass pipelines for the per-draw and GPU-driven paths alike,
+            // default-on under MSAA (WGR_FOLIAGE_A2C). ClassifyGpuSection already accepts this
+            // exact case per section (variant=1, alphaRef=0.5). So the bail is stale.
+            //
+            // It is still OFF by default, because "the pipeline now exists" is not "the pixels
+            // now match" -- the failure mode this guards against is solid sheets or black
+            // holes, which is a VISUAL claim and needs a capture A/B, not a frame time.
+            // WGR_TREEADV_RETAINED=1 opts in. Note it is only meaningful under MSAA: with
+            // sample_count == 1 there is no alpha-to-coverage and this would reintroduce
+            // precisely the artefact the bail was added for.
+            static const bool treeAdvRetained = []
+            {
+                const char* v = std::getenv("WGR_TREEADV_RETAINED");
+                return v && v[0] != '0';
+            }();
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
                 texture && texture->GetAlphaClass() == Poseidon::AlphaStats::Blend &&
                 GpuSectionMaterialIsCutout(shSec.surfMat, texture))
             {
-                eligible = false;
-                break;
+                // Named once per model, so a run says WHICH models this costs rather than
+                // only how many. Mirrors the loggedUntextured dedup pattern below.
+                static std::unordered_set<std::string> loggedFoliageBail;
+                if (loggedFoliageBail.insert(std::string(shape->Name() ? shape->Name() : "?")).second)
+                {
+                    LOG_INFO(Graphics, "GpuModel foliage bail: model={} lod={} section={} tex={} retained={}",
+                             shape->Name(), level, i, texture->Name(), treeAdvRetained ? 1 : 0);
+                }
+                if (!treeAdvRetained)
+                {
+                    eligible = false;
+                    break;
+                }
             }
             // The retained material buffer currently carries imported lamp emissive values through a
             // separate update path, so its HDR result can bypass the compact-emitter cap applied by

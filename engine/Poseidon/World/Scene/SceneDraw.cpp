@@ -1636,6 +1636,20 @@ struct Pass1Stats
     std::atomic<uint64_t> objects{0};     // _drawMergers.Size() summed, to divide by
     std::atomic<uint64_t> occTests{0};    // Occlusions::TestBBox calls
     std::atomic<uint64_t> occRenders{0};  // Occlusions::RenderShape calls (occluders ADDED)
+    // THE COVERAGE SPLIT — why an object is in this phase at ALL.
+    //
+    // Tallied per frame in Scene::ObjectForDrawing and, until now, readable only from the
+    // one-shot PERF-shapes dump that `triPerfDumpShapes` arms — i.e. never from a
+    // non-interactive benchmark, which is the only way these worlds get measured. Summed
+    // here so the question "why does Stratis put 11,974 objects through Pass1 when Everon
+    // puts 1" is answered by a number instead of by inference from the object counts.
+    //
+    // full = diverted onto the GPU-driven path, no SortObject, out of this walk entirely.
+    // partial = GPU owns the opaque geometry, the CPU still draws the blend/decal/proxy
+    // complement. none = fully CPU.
+    std::atomic<uint64_t> covFull{0};
+    std::atomic<uint64_t> covPartial{0};
+    std::atomic<uint64_t> covNone{0};
 };
 
 Pass1Stats GPass1Stats;
@@ -1684,16 +1698,22 @@ void ReportPass1Stats()
     const double f = static_cast<double>(frames);
     const double objs = static_cast<double>(GPass1Stats.objects.load(std::memory_order_relaxed));
     const auto per = [&](const std::atomic<uint64_t>& v) { return v.load(std::memory_order_relaxed) / f / 1000.0; };
+    const double full = GPass1Stats.covFull.load(std::memory_order_relaxed) / f;
+    const double partial = GPass1Stats.covPartial.load(std::memory_order_relaxed) / f;
+    const double none = GPass1Stats.covNone.load(std::memory_order_relaxed) / f;
+    const double covTotal = full + partial + none;
     LOG_INFO(Graphics,
              "PERF pass1: frames={} objs/frame={:.0f} | compact={:.3f} complexity={:.3f} mergers={:.3f} "
              "occlusion={:.3f} sort={:.3f} submit={:.3f} ms/frame | occlusion={:.2f} submit={:.2f} us/object "
-             "| occTests/frame={:.0f} occRenders/frame={:.0f}",
+             "| occTests/frame={:.0f} occRenders/frame={:.0f} "
+             "| coverage full={:.0f} ({:.1f}%) partial={:.0f} none={:.0f}",
              frames, objs / f, per(GPass1Stats.compactUs), per(GPass1Stats.complexityUs), per(GPass1Stats.mergersUs),
              per(GPass1Stats.occlusionUs), per(GPass1Stats.sortUs), per(GPass1Stats.submitUs),
              objs > 0 ? GPass1Stats.occlusionUs.load(std::memory_order_relaxed) / objs : 0.0,
              objs > 0 ? GPass1Stats.submitUs.load(std::memory_order_relaxed) / objs : 0.0,
              GPass1Stats.occTests.load(std::memory_order_relaxed) / f,
-             GPass1Stats.occRenders.load(std::memory_order_relaxed) / f);
+             GPass1Stats.occRenders.load(std::memory_order_relaxed) / f, full,
+             covTotal > 0.0 ? full * 100.0 / covTotal : 0.0, partial, none);
 }
 
 } // namespace
@@ -1988,6 +2008,13 @@ void Scene::DrawObjectsAndShadowsPass1()
     if (Pass1StatsEnabled())
     {
         GPass1Stats.objects.fetch_add(static_cast<uint64_t>(_drawMergers.Size()), std::memory_order_relaxed);
+        // Sampled here, at the end of the same frame's walk, because ObjectForDrawing zeroes
+        // these when the visible set is rebuilt — read any earlier and they are last frame's.
+        extern int gCovFull, gCovPartial, gCovNone;
+        GPass1Stats.covFull.fetch_add(static_cast<uint64_t>(gCovFull < 0 ? 0 : gCovFull), std::memory_order_relaxed);
+        GPass1Stats.covPartial.fetch_add(static_cast<uint64_t>(gCovPartial < 0 ? 0 : gCovPartial),
+                                         std::memory_order_relaxed);
+        GPass1Stats.covNone.fetch_add(static_cast<uint64_t>(gCovNone < 0 ? 0 : gCovNone), std::memory_order_relaxed);
     }
     // first of all draw non-alpha objects
 

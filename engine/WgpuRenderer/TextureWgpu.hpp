@@ -49,6 +49,20 @@ class TextureWgpu : public Texture
     int Init();
     void InitDynamic(int w, int h, const void* rgba, uint32_t size);
 
+    // How a needed alpha scan was served. The classification is identical in all three
+    // cases; only the work to reach it differs, and the split is what the streaming stats
+    // report.
+    enum class AlphaScanPath
+    {
+        Handoff,   // the upload had just inflated this level; no file access at all
+        BlockRead, // one level read from the file, alpha decoded off the blocks
+        FullDecode // the whole file re-read and decoded to RGBA8 (non-block formats)
+    };
+    // Fill _alphaStats from the top mip's compressed blocks, if this texture's format
+    // stores alpha in blocks. Returns false when it does not, leaving _alphaStats alone —
+    // the caller then falls back to the whole-file decode.
+    bool ScanTopMipAlphaBlocks(AlphaScanPath& path);
+
   public:
     explicit TextureWgpu(TextureBankWgpu* bank);
     ~TextureWgpu() override;

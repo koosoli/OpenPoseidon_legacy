@@ -22,6 +22,47 @@ use crate::ffi::WgrMeshVertex;
 const VERT_SIZE: u64 = std::mem::size_of::<WgrMeshVertex>() as u64; // 36
 const INDEX_SIZE: u64 = 4; // Uint32
 
+// How much bigger the pool gets when it runs out. 2.0 (the historical behaviour) is the
+// DEFAULT and stays the default.
+//
+// Why it is a lever at all: growth allocates the new buffer BEFORE releasing the old one (it
+// has to — the used prefix is copied across), so a doubling costs 3x the current size in peak
+// VRAM, not 2x. Measured on DayZ Chernarus: the vertex buffer doubled 604 MB -> 1.21 GB, which
+// needs 1.81 GB live at the moment of the copy, on top of ~4 GB of resident textures on an 8 GB
+// card. `create_buffer` came back INVALID (that is how wgpu reports out of memory) and every
+// later draw was rejected with "Buffer with 'wgr_geo_pool_vbuf' label is invalid". The same run
+// finished with 2.28 GB of pool capacity against 1.44 GB live — 839 MB of pure doubling slack.
+//
+// A factor of 1.5 makes that step 604 -> 906 MB (1.51 GB peak instead of 1.81 GB) and lands
+// closer to the live figure, at the cost of more growth copies. It is NOT on by default because
+// each extra growth is an extra full-pool GPU copy plus a bind-group rebuild, and the trade is
+// worth measuring rather than assuming. Clamped to [1.25, 2.0]: below 1.25 the copy count grows
+// faster than the memory saved.
+fn growth_factor() -> f64 {
+    static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *FACTOR.get_or_init(|| {
+        std::env::var("WGR_GEO_POOL_GROWTH")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .map(|v| v.clamp(1.25, 2.0))
+            .unwrap_or(2.0)
+    })
+}
+
+// The capacity to grow to when `n` more units are needed and `cap` are allocated. Always at
+// least `cap + n`, so the caller's pending allocation is guaranteed to fit in the fresh tail.
+fn grown_cap(cap: u32, n: u32) -> u32 {
+    let scaled = (f64::from(cap) * growth_factor()).ceil();
+    let scaled = if scaled >= f64::from(u32::MAX) {
+        u32::MAX
+    } else {
+        scaled as u32
+    };
+    // saturating_add, not `cap + n`: both are u32 unit counts and a debug build panics on the
+    // overflow rather than reporting an allocation that cannot be served.
+    scaled.max(cap.saturating_add(n))
+}
+
 // A first-fit free-list allocator over a linear space of `cap` fixed-size units
 // (vertices for the vbuf, indices for the ibuf). Freed ranges coalesce with adjacent
 // free blocks so fragmentation doesn't accumulate across map changes.
@@ -108,8 +149,19 @@ impl RangeAllocator {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GeometryResidency {
+    // Bytes suballocated to live meshes. Only `free()` (i.e. mesh_destroy) returns bytes here.
     pub live_bytes: u64,
+    // Bytes the two backing buffers occupy. Monotonically non-decreasing: the pool grows and
+    // has NO shrink path, so `capacity - live` is permanent slack once a peak has been touched.
     pub capacity_bytes: u64,
+    // NOT an eviction counter, despite reading like one where it surfaces as "geometryRetired".
+    // It is the transient set of buffers superseded by a growth *this frame*, held only until
+    // `frame_submitted()` (which the renderer calls immediately after every queue submit). It is
+    // therefore ZERO at every sampling point that is not inside a growing frame — which is every
+    // steady-state sample. `retired = 0` means "the pool did not grow in the sampled frame", and
+    // says nothing whatsoever about whether geometry is being released. There is no geometry
+    // eviction path in this module; the only way bytes leave the pool is the engine destroying
+    // a mesh.
     pub retired_bytes: u64,
 }
 
@@ -271,7 +323,7 @@ impl GeometryPool {
             return o;
         }
         let cap = self.valloc.cap;
-        let new_cap = cap.saturating_mul(2).max(cap + n);
+        let new_cap = grown_cap(cap, n);
         let new_buf = Self::make_vbuf(device, new_cap);
         Self::copy_prefix(
             device,
@@ -293,7 +345,7 @@ impl GeometryPool {
             return o;
         }
         let cap = self.ialloc.cap;
-        let new_cap = cap.saturating_mul(2).max(cap + n);
+        let new_cap = grown_cap(cap, n);
         let new_buf = Self::make_ibuf(device, new_cap);
         Self::copy_prefix(
             device,
@@ -334,7 +386,28 @@ impl GeometryPool {
 
 #[cfg(test)]
 mod tests {
-    use super::RangeAllocator;
+    use super::{RangeAllocator, grown_cap};
+
+    // Whatever WGR_GEO_POOL_GROWTH is set to, growth must (a) always serve the allocation that
+    // triggered it and (b) never wrap. `cap + n` used to be a plain add: at a capacity near
+    // u32::MAX that is an overflow panic in a debug build instead of a saturating refusal.
+    #[test]
+    fn growth_always_fits_the_pending_alloc_and_never_overflows() {
+        for &(cap, n) in &[
+            (0u32, 1u32),
+            (1 << 18, 1),
+            (1 << 25, 1 << 26),      // request far larger than a scaled cap
+            (u32::MAX - 4, 8),       // saturates rather than wrapping
+            (u32::MAX, 1),
+        ] {
+            let grown = grown_cap(cap, n);
+            assert!(grown >= cap, "growth must not shrink ({cap} -> {grown})");
+            assert!(
+                grown == u32::MAX || grown - cap >= n,
+                "growth {cap} -> {grown} cannot serve {n} units"
+            );
+        }
+    }
 
     #[test]
     fn used_tracks_alloc_free_and_growth() {

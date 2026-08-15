@@ -2,6 +2,7 @@
 #include "TextureBankWgpu.hpp"
 
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
+#include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -10,10 +11,13 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace Poseidon
@@ -94,6 +98,145 @@ AlphaStats ScanTopMipAlphaStats(const char* name)
     return ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
 }
 
+// The block formats that carry a multi-bit alpha channel, i.e. exactly the ones that can
+// reach the scan above. DXT1 is excluded here for the same reason GetAlphaClass excludes
+// it: one bit of alpha is a punch-through, never a blend, so it is decided from the format
+// alone and never decoded.
+bool IsBlockAlphaFormat(PacFormat fmt)
+{
+    switch (fmt)
+    {
+        case PacDXT2:
+        case PacDXT3:
+        case PacDXT4:
+        case PacDXT5:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// Alpha stats for a BC2/BC3 top mip, taken straight off the compressed blocks.
+//
+// The classification only ever looks at byte 3 of a texel, but the path that produced it
+// decoded all four: DecodePAABuffer runs decompressDXT3/decompressDXT5, which expand both
+// colour endpoints, interpolate the 2- or 4-entry colour palette and memcpy 16 RGBA texels
+// per block into a full-resolution image -- and then ClassifyAlpha reads one byte in four
+// and throws the rest away. Three quarters of that work exists to be discarded.
+//
+// Here only the alpha half of each block is decoded, into a buffer whose colour bytes are
+// never written or read. That is not an approximation of the old answer, it IS the old
+// answer: BC3's alpha half is a BC4 block, and DecodeBc4Block builds the same 8-entry
+// palette by the same rounding (BlockCompression.cpp) that decompressDXT5 builds inline;
+// BC2's is the same low-nibble-first `(n<<4)|n` expansion decompressDXT3 does. The same
+// bytes then go through the same unmodified ClassifyAlpha, so the verdict cannot move.
+//
+// Still the TOP mip -- the buffer is full resolution and every texel is classified. Nothing
+// here samples a smaller level; the crisp 0/255 holes a cutout needs are all present.
+bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, PacFormat fmt, AlphaStats& out)
+{
+    if (!blocks || !IsBlockAlphaFormat(fmt) || w <= 0 || h <= 0)
+    {
+        return false;
+    }
+    const int blockCols = (w + 3) / 4;
+    const int blockRows = (h + 3) / 4;
+    const size_t need = static_cast<size_t>(blockCols) * static_cast<size_t>(blockRows) * 16u;
+    if (size < need)
+    {
+        return false;
+    }
+
+    // RGBA-shaped so ClassifyAlpha can be reused verbatim; only the alpha lane is filled.
+    // The colour lanes stay zero and are read by nobody -- ClassifyAlpha indexes `i*4+3`.
+    std::vector<uint8_t> alphaOnly(static_cast<size_t>(w) * static_cast<size_t>(h) * 4u, 0);
+    const size_t rowPitch = static_cast<size_t>(w) * 4u;
+    const bool bc3 = fmt == PacDXT4 || fmt == PacDXT5;
+
+    for (int by = 0; by < blockRows; by++)
+    {
+        for (int bx = 0; bx < blockCols; bx++)
+        {
+            const uint8_t* block = blocks + (static_cast<size_t>(by) * blockCols + bx) * 16u;
+            uint8_t* dst =
+                alphaOnly.data() + static_cast<size_t>(by) * 4u * rowPitch + static_cast<size_t>(bx) * 16u + 3u;
+            // A partial block at the right/bottom edge writes only the texels that exist,
+            // matching writeDXTBlock's clamp. PAA levels are powers of two so this is the
+            // dormant case, but a clamp that only holds for the common case is not a clamp.
+            const int usableW = std::min(4, w - bx * 4);
+            const int usableH = std::min(4, h - by * 4);
+            if (bc3)
+            {
+                // BC3 = BC4 alpha block, then the colour block we deliberately never touch.
+                DecodeBc4Block(block, dst, rowPitch, 4, usableW, usableH);
+            }
+            else
+            {
+                // BC2: 16 explicit 4-bit alphas in the first 8 bytes, low nibble first.
+                for (int i = 0; i < 16; i++)
+                {
+                    const int py = i / 4;
+                    const int px = i % 4;
+                    if (py >= usableH || px >= usableW)
+                    {
+                        continue;
+                    }
+                    const int nibble = (i & 1) ? (block[i / 2] >> 4) : (block[i / 2] & 0xF);
+                    dst[static_cast<size_t>(py) * rowPitch + static_cast<size_t>(px) * 4u] =
+                        static_cast<uint8_t>((nibble << 4) | nibble);
+                }
+            }
+        }
+    }
+
+    out = ClassifyAlpha(alphaOnly.data(), static_cast<size_t>(w) * static_cast<size_t>(h));
+    return true;
+}
+
+// The top mip's blocks, handed from the upload that just inflated them to the
+// classification that would otherwise read them again.
+//
+// Both wgpu call sites (EngineWgpu's immediate path and ClassifyGpuSection) do
+// `EnsureUploaded()` and then `GetAlphaClass()` on the very next line, so the blocks the
+// upload has in hand are still the right ones one call later. One slot, thread-local:
+// this is a handoff, not a cache. A miss -- classified on a different thread, classified
+// long after some other texture uploaded, or never uploaded at all -- costs nothing and
+// falls back to reading the one level from the file, which is correct, only slower.
+//
+// Storing it is a vector move, so a texture that is uploaded and never classified pays
+// nothing. That matters: computing the stats eagerly at upload time would instead have
+// added a scan for every alpha-format texture nobody ever asks about.
+//
+// Keyed by texture NAME, not by the TextureWgpu address. An address is not an identity
+// here -- a texture released between the park and the claim frees it, and the next
+// allocation can land on it -- and a stale hit would hand one file's holes to another. The
+// name plus the level's dimensions and format names the bytes themselves, so a hit is a
+// hit on the same file or it is not a hit.
+struct TopMipHandoff
+{
+    std::string name;
+    std::vector<uint8_t> blocks;
+    size_t topSize = 0;
+    int w = 0;
+    int h = 0;
+    PacFormat format = PacFormatN;
+
+    bool Matches(const char* forName, int forW, int forH, PacFormat forFormat) const
+    {
+        return topSize > 0 && forName && !name.empty() && format == forFormat && w == forW && h == forH &&
+               name == forName;
+    }
+
+    void Release()
+    {
+        name.clear();
+        topSize = 0;
+        std::vector<uint8_t>().swap(blocks);
+    }
+};
+
+thread_local TopMipHandoff GTopMipHandoff;
+
 // ---------------------------------------------------------------------------------------
 // Streaming attribution.
 //
@@ -121,6 +264,12 @@ struct TextureStreamStats
     std::atomic<uint64_t> fallbackUs{0};
     std::atomic<uint64_t> alphaScans{0};    // top-mip decodes done only to classify alpha
     std::atomic<uint64_t> alphaUs{0};
+    // Of those scans: how many read alpha off the compressed blocks instead of decoding a
+    // full RGBA8 image, and how many of THOSE needed no file access at all because the
+    // upload had just inflated the level. The two together say whether the cost that is
+    // left is decode or I/O, which a single total cannot.
+    std::atomic<uint64_t> alphaBlockScans{0};
+    std::atomic<uint64_t> alphaHandoffs{0};
 };
 
 TextureStreamStats GTextureStreamStats;
@@ -155,11 +304,14 @@ void ReportTextureStreamStats(uint64_t uploads)
     const uint64_t alphaUs = GTextureStreamStats.alphaUs.load(std::memory_order_relaxed);
     LOG_INFO(Graphics,
              "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
-             "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaMs={:.1f} totalMs={:.1f}",
+             "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaBlockScans={} "
+             "alphaHandoffs={} alphaMs={:.1f} totalMs={:.1f}",
              uploads, TextureMipOpenCount(),
              static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
              readUs / 1000.0, createUs / 1000.0, GTextureStreamStats.fallbacks.load(std::memory_order_relaxed),
-             fallbackUs / 1000.0, GTextureStreamStats.alphaScans.load(std::memory_order_relaxed), alphaUs / 1000.0,
+             fallbackUs / 1000.0, GTextureStreamStats.alphaScans.load(std::memory_order_relaxed),
+             GTextureStreamStats.alphaBlockScans.load(std::memory_order_relaxed),
+             GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
 }
 
@@ -232,6 +384,57 @@ int TextureWgpu::Init()
     return 0;
 }
 
+bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
+{
+    if (!_src || _nMipmaps <= 0)
+    {
+        return false;
+    }
+    const PacFormat fmt = _src->GetFormat();
+    // The chain is read in the source's own format only when the destination matches it,
+    // which is what DstFormat() does for every DXT format. If that ever stops being true
+    // the bytes would not be blocks, so check rather than assume.
+    if (!IsBlockAlphaFormat(fmt) || _mipmaps[0].DstFormat() != fmt)
+    {
+        return false;
+    }
+    const int w = _mipmaps[0]._w;
+    const int h = _mipmaps[0]._h;
+    if (w <= 0 || h <= 0)
+    {
+        return false;
+    }
+
+    TopMipHandoff& handoff = GTopMipHandoff;
+    if (handoff.Matches(Name(), w, h, fmt) &&
+        ClassifyAlphaFromBlocks(handoff.blocks.data(), handoff.topSize, w, h, fmt, _alphaStats))
+    {
+        handoff.Release();
+        path = AlphaScanPath::Handoff;
+        return true;
+    }
+
+    // No handoff: read the ONE level being classified. The whole-file scan this replaces
+    // read every level and then decoded only this one.
+    const int need = render::mipmap::ComputeLayout(fmt, w, h).dataSize;
+    if (need <= 0)
+    {
+        return false;
+    }
+    std::vector<uint8_t> blocks(static_cast<size_t>(need));
+    const MipmapRead read{blocks.data(), &_mipmaps[0], 0};
+    if (!_src->GetMipmapChain(&read, 1))
+    {
+        return false;
+    }
+    if (!ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, _alphaStats))
+    {
+        return false;
+    }
+    path = AlphaScanPath::BlockRead;
+    return true;
+}
+
 // Three-way alpha classification for the section-sort renderer (opaque/cutout occlude;
 // blend defers to the back-to-front pass). Mirrors TextureGL33::GetAlphaClass: cheap header
 // flags decide it outright except for a multi-bit-alpha format, which needs the top-mip decode
@@ -255,16 +458,34 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
         {
             if (!_alphaStatsScanned)
             {
-                // A whole second pass over the file: read it, decode the FULL-resolution mip
-                // to RGBA8, then walk every pixel's alpha. Counted separately from the upload
-                // because it is the one part of the texture cost that buys no pixels.
+                // The one part of the texture cost that buys no pixels, so it is timed
+                // separately. It used to be a whole second pass over the file: read every
+                // level, decode the FULL-resolution one to RGBA8, walk every pixel's alpha
+                // and discard the three colour bytes in four that the decode produced.
+                //
+                // A block format now answers it off the compressed alpha alone, from the
+                // level the upload already inflated where it can. Everything else still
+                // takes the old path, unchanged: no format loses its answer, and the answer
+                // it gets is the same one.
                 const bool timed = TextureStreamStatsEnabled();
                 const uint64_t began = timed ? NowUs() : 0;
-                _alphaStats = ScanTopMipAlphaStats(Name());
+                AlphaScanPath path = AlphaScanPath::FullDecode;
+                if (!ScanTopMipAlphaBlocks(path))
+                {
+                    _alphaStats = ScanTopMipAlphaStats(Name());
+                }
                 _alphaStatsScanned = true;
                 if (timed)
                 {
                     GTextureStreamStats.alphaScans.fetch_add(1, std::memory_order_relaxed);
+                    if (path != AlphaScanPath::FullDecode)
+                    {
+                        GTextureStreamStats.alphaBlockScans.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    if (path == AlphaScanPath::Handoff)
+                    {
+                        GTextureStreamStats.alphaHandoffs.fetch_add(1, std::memory_order_relaxed);
+                    }
                     GTextureStreamStats.alphaUs.fetch_add(NowUs() - began, std::memory_order_relaxed);
                 }
             }
@@ -422,6 +643,24 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (timed)
             {
                 GTextureStreamStats.createUs.fetch_add(NowUs() - createBegan, std::memory_order_relaxed);
+            }
+            // Both call sites classify this texture on the line after they upload it. Park
+            // the level they will need so that call reads no file. The condition is exactly
+            // GetAlphaClass's: a texture that will never reach a scan -- no alpha, a 1-bit
+            // format, or a class already decided -- is not worth parking, and one that is
+            // costs only a vector move, never a decode.
+            const char* name = Name();
+            if (_gpuHandle && _alphaClass < 0 && !_alphaStatsScanned && _src->IsAlpha() && IsBlockAlphaFormat(dst) &&
+                name && *name)
+            {
+                TopMipHandoff& handoff = GTopMipHandoff;
+                // offsets[1] is where level 1 begins, i.e. exactly the size of level 0.
+                handoff.topSize = _nMipmaps > 1 ? offsets[1] : total;
+                handoff.blocks = std::move(blocks);
+                handoff.w = _mipmaps[0]._w;
+                handoff.h = _mipmaps[0]._h;
+                handoff.format = dst;
+                handoff.name.assign(name);
             }
         }
     }

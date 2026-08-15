@@ -305,11 +305,13 @@ impl SkyBake {
                 }
                 owned = Some((
                     device.create_buffer_init_slice(
+                        queue,
                         "wgr_sky_bake_vbuf",
                         bytemuck::cast_slice(mesh.positions),
                         wgpu::BufferUsages::VERTEX,
                     ),
                     device.create_buffer_init_slice(
+                        queue,
                         "wgr_sky_bake_ibuf",
                         bytemuck::cast_slice(mesh.indices),
                         wgpu::BufferUsages::INDEX,
@@ -386,6 +388,7 @@ impl SkyBake {
         });
         for (i, vp) in vps.iter().enumerate() {
             let ubo = device.create_buffer_init_slice(
+                queue,
                 "wgr_sky_bake_vp",
                 bytemuck::cast_slice(vp),
                 wgpu::BufferUsages::UNIFORM,
@@ -436,16 +439,19 @@ impl SkyBake {
             bias: [s.bias, 0.0, 0.0, 0.0],
         };
         let params_buf = device.create_buffer_init_slice(
+            queue,
             "wgr_sky_bake_params",
             bytemuck::bytes_of(&params),
             wgpu::BufferUsages::UNIFORM,
         );
         let vp_buf = device.create_buffer_init_slice(
+            queue,
             "wgr_sky_bake_vps",
             bytemuck::cast_slice(&vps),
             wgpu::BufferUsages::STORAGE,
         );
         let dir_buf = device.create_buffer_init_slice(
+            queue,
             "wgr_sky_bake_dirs",
             bytemuck::cast_slice(dirs),
             wgpu::BufferUsages::STORAGE,
@@ -568,6 +574,7 @@ fn direction_vp(centre: glam::Vec3, dir: glam::Vec3, radius: f32) -> glam::Mat4 
 trait CreateInit {
     fn create_buffer_init_slice(
         &self,
+        queue: &wgpu::Queue,
         label: &str,
         bytes: &[u8],
         usage: wgpu::BufferUsages,
@@ -575,18 +582,37 @@ trait CreateInit {
 }
 
 impl CreateInit for wgpu::Device {
+    // Deliberately NOT `wgpu::util::create_buffer_init`. That helper maps the new buffer at
+    // creation and immediately takes `get_mapped_range_mut()`, which PANICS
+    // ("Error in Buffer::get_mapped_range: Validation Error / Buffer with '<label>' label is
+    // invalid") when the create was refused for want of memory — and an out-of-memory create is
+    // precisely what a dense world does to this bake. Measured on DayZ Chernarus at 2.85x the
+    // residency budget: 173 unwinds in one ten-minute run, all on 'wgr_sky_bake_vp', each one
+    // aborting the model that was being baked.
+    //
+    // create_buffer + write_buffer has no mapped range and therefore no panic. If the create did
+    // fail, the buffer stays invalid, the bind group over it is rejected, and the depth pass that
+    // would have written the occlusion maps is dropped — leaving every map at its CLEARED far
+    // value, i.e. a fully OPEN volume, which is what an unbaked model already looks like. The
+    // failure mode degrades toward "no volume", never toward "spuriously enclosed", so a bake
+    // lost to memory pressure cannot darken anything.
     fn create_buffer_init_slice(
         &self,
+        queue: &wgpu::Queue,
         label: &str,
         bytes: &[u8],
         usage: wgpu::BufferUsages,
     ) -> wgpu::Buffer {
-        use wgpu::util::DeviceExt;
-        self.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let buf = self.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
-            contents: bytes,
-            usage,
-        })
+            // Rounded up to the 4-byte copy alignment write_buffer requires; every caller here
+            // passes whole f32/matrix/struct arrays, so this is a no-op in practice.
+            size: bytes.len().next_multiple_of(4) as u64,
+            usage: usage | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&buf, 0, bytes);
+        buf
     }
 }
 

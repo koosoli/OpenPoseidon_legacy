@@ -111,6 +111,30 @@ fn decal_scale() -> f32 {
     env_f32("WGR_DECAL_SCALE", 1.0)
 }
 
+// Restore the historical PANIC when a per-frame staging allocation is refused.
+//
+// OFF by default: a refused allocation is an out-of-memory condition, and unwinding the
+// render thread for it turns a recoverable frame into a lost one. Measured on DayZ
+// Chernarus at 2.85x the residency budget (6.13 GB tracked / 2.15 GB budget): 697 identical
+// `.expect("world staging view")` unwinds in a single ten-minute run. Set
+// WGR_STAGING_STRICT=1 to get the panic (and a backtrace) back for a reproducible failure.
+fn staging_strict() -> bool {
+    static STRICT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *STRICT.get_or_init(|| std::env::var("WGR_STAGING_STRICT").is_ok_and(|v| v != "0"))
+}
+
+// 1, 10, 100, ... — the throttle for a diagnostic whose failure mode repeats every frame.
+fn is_power_of_ten(n: u64) -> bool {
+    let mut v = n;
+    if v == 0 {
+        return false;
+    }
+    while v % 10 == 0 {
+        v /= 10;
+    }
+    v == 1
+}
+
 pub(crate) fn env_f32(name: &'static str, default: f32) -> f32 {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
@@ -996,6 +1020,19 @@ impl StorageArray {
         }));
         self.cap = cap;
         true
+    }
+
+    // Drop the buffer and forget its capacity, so the next `ensure` builds a fresh one.
+    //
+    // `ensure` records the size it ASKED for, not the size it GOT: wgpu answers an
+    // out-of-memory `create_buffer` with an *invalid* buffer handle rather than an error
+    // return, and `cap >= bytes` is then true forever after. Without this, one transient
+    // OOM poisons the field for the rest of the process and every later upload into it is
+    // refused — which is exactly the shape of the 697 consecutive staging failures measured
+    // on DayZ Chernarus, not 697 independent ones.
+    fn invalidate(&mut self) {
+        self.buf = None;
+        self.cap = 0;
     }
 }
 
@@ -2712,8 +2749,14 @@ pub struct Gfx3d {
     // model index -> (volume, padded model-space AABB). CPU-side for now; the GPU atlas + the
     // per-fragment sample are the next step.
     sky_volumes: FxHashMap<u32, (Vec<[f32; 4]>, [f32; 3], [f32; 3])>,
-    // Bake diagnostics awaiting a log sink; drained by lib.rs each frame.
-    sky_bake_log: Vec<String>,
+    // Diagnostics awaiting a log sink (sky bake, staging refusals); drained by lib.rs each
+    // frame. Gfx3d has no log sink of its own, and `eprintln!` never reaches --log-file.
+    queued_log: Vec<String>,
+    // How many per-frame staging uploads wgpu has refused (out of memory) since start, per
+    // buffer. Counted rather than printed per occurrence: the failure mode is one OOM followed
+    // by every subsequent frame failing the same way, so an unthrottled line is thousands of
+    // identical rows in the log and a throttled one with no count hides the scale.
+    staging_refusals: FxHashMap<&'static str, u64>,
     // The volumes packed for the GPU: `sky_volume_meta` is indexed by model id and holds
     // (bbox_min, offset) / (bbox_max, dims-code); `sky_volume_data` is every volume concatenated.
     // Rebuilt when a new model bakes, which is a load-time event, not a per-frame one.
@@ -3346,7 +3389,8 @@ impl Gfx3d {
                 .unwrap_or(true),
             sky_bake: None,
             sky_volumes: FxHashMap::default(),
-            sky_bake_log: Vec::new(),
+            queued_log: Vec::new(),
+            staging_refusals: FxHashMap::default(),
             sky_volume_meta: StorageArray::new("wgr_sky_volume_meta"),
             sky_volume_data: StorageArray::new("wgr_sky_volume_data"),
             sky_volumes_dirty: false,
@@ -5101,77 +5145,112 @@ impl Gfx3d {
             let obj_bytes = (n * OBJ_SZ) as u64;
             world_grew = self.world.ensure(device, obj_bytes);
             if let Some(sz) = wgpu::BufferSize::new(obj_bytes) {
-                let mut view = queue
-                    .write_buffer_with(self.world.buf.as_ref().unwrap(), 0, sz)
-                    .expect("world staging view");
-                let (chunks, _rem) = view.slice(..).into_chunks::<OBJ_SZ>();
-                chunks.write_iter(order.iter().map(|&i| {
-                    let d = &draws[i as usize];
-                    let baked = bake_on
-                        && d.palette_slot != NO_PALETTE
-                        && base_map.contains_key(&d.palette_slot);
-                    let obj = if baked {
-                        ObjectGpu {
-                            world: IDENTITY_MAT4,
-                            conform0: [0.0; 4],
-                            conform1: [0.0; 4],
-                            conform2: [0.0; 4],
+                // `wgpu::Buffer` is a refcounted handle; cloning it (once per frame) releases
+                // the borrow of `self.world` so the failure arm can invalidate it in place.
+                let dst = self.world.buf.clone();
+                let staged = dst.as_ref().and_then(|b| queue.write_buffer_with(b, 0, sz));
+                match staged {
+                    Some(mut view) => {
+                        let (chunks, _rem) = view.slice(..).into_chunks::<OBJ_SZ>();
+                        chunks.write_iter(order.iter().map(|&i| {
+                            let d = &draws[i as usize];
+                            let baked = bake_on
+                                && d.palette_slot != NO_PALETTE
+                                && base_map.contains_key(&d.palette_slot);
+                            let obj = if baked {
+                                ObjectGpu {
+                                    world: IDENTITY_MAT4,
+                                    conform0: [0.0; 4],
+                                    conform1: [0.0; 4],
+                                    conform2: [0.0; 4],
+                                }
+                            } else {
+                                ObjectGpu {
+                                    world: d.world,
+                                    conform0: d.conform0,
+                                    conform1: d.conform1,
+                                    conform2: d.conform2,
+                                }
+                            };
+                            bytemuck::cast::<ObjectGpu, [u8; OBJ_SZ]>(obj)
+                        }));
+                    }
+                    // `write_buffer_with` returns None when wgpu refuses the write: either the
+                    // destination came back invalid from an out-of-memory `create_buffer`, or the
+                    // staging allocation itself was refused. Both are OOM, and neither is worth
+                    // unwinding the render thread for. Degrade: drop the (possibly poisoned)
+                    // buffer so the next frame builds a fresh one, and clear the group-1 binds so
+                    // this frame's direct-path objects are SKIPPED rather than drawn against
+                    // whatever transforms the buffer happens to hold (draw_one already returns
+                    // early on an absent bind).
+                    None => {
+                        if staging_strict() {
+                            panic!("world staging view");
                         }
-                    } else {
-                        ObjectGpu {
-                            world: d.world,
-                            conform0: d.conform0,
-                            conform1: d.conform1,
-                            conform2: d.conform2,
-                        }
-                    };
-                    bytemuck::cast::<ObjectGpu, [u8; OBJ_SZ]>(obj)
-                }));
+                        self.world.invalidate();
+                        self.group1_plain_bind = None;
+                        self.note_staging_refusal("world", obj_bytes, n);
+                    }
+                }
             }
 
             const MAT_SZ: usize = std::mem::size_of::<MaterialUbo>();
             let mat_bytes = (n * MAT_SZ) as u64;
             material_grew = self.material.ensure(device, mat_bytes);
             if let Some(sz) = wgpu::BufferSize::new(mat_bytes) {
-                let mut view = queue
-                    .write_buffer_with(self.material.buf.as_ref().unwrap(), 0, sz)
-                    .expect("material staging view");
-                let (chunks, _rem) = view.slice(..).into_chunks::<MAT_SZ>();
-                chunks.write_iter(order.iter().map(|&i| {
-                    let d = &draws[i as usize];
-                    // Pack the bindless indices into the material's spare emissive.w
-                    // (only emissive.rgb is read for shading): (tex_slot << 3) | sampler.
-                    // The fragment shader unpacks it to index the bindless texture +
-                    // sampler arrays, so texture/sampler need no per-draw bind and drop
-                    // out of the instancing key (plan_3d).
-                    let slot = textures.texture_slot(d.texture_id);
-                    let packed = (slot << 3) | (d.sampler.index() as u32 & 0x7);
-                    let mut emissive = d.mat_emissive;
-                    emissive[3] = f32::from_bits(packed);
-                    let normal_slot = textures.texture_slot(d.normal_texture_id);
-                    let normal_packed = (normal_slot << 3) | (d.sampler.index() as u32 & 0x7);
-                    bytemuck::cast::<MaterialUbo, [u8; MAT_SZ]>(MaterialUbo {
-                        emissive,
-                        sun_ambient: d.mat_sun_ambient,
-                        sun_diffuse: d.mat_sun_diffuse,
-                        light_diffuse: d.mat_light_diffuse,
-                        light_ambient: d.mat_light_ambient,
-                        specular: d.mat_specular,
-                        // w is a small BITFIELD, not a bool: bit 0 = invert the normal
-                        // map's Y (the material-debug toggle it already carried), bit 1 =
-                        // DZ-003 reflective (the material named an EnvironmentMap). Kept
-                        // in this lane because WgrDraw3D is ABI-frozen and MaterialUbo's
-                        // seven vec4s are otherwise fully spoken for.
-                        normal_map: [
-                            f32::from_bits(normal_packed),
-                            (d._pad & 0xff) as f32,
-                            if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
-                            (u32::from(d._pad & 0x100 != 0)
-                                | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
-                                    << 1)) as f32,
-                        ],
-                    })
-                }));
+                let dst = self.material.buf.clone();
+                let staged = dst.as_ref().and_then(|b| queue.write_buffer_with(b, 0, sz));
+                if staged.is_none() {
+                    // Same OOM degrade as the world buffer above. The material array backs BOTH
+                    // group-1 binds, so both go, and both come back on the next frame's `ensure`
+                    // (the rebuild block below is itself guarded on the buffers being present, so
+                    // it will not resurrect a bind over a dropped buffer).
+                    if staging_strict() {
+                        panic!("material staging view");
+                    }
+                    self.material.invalidate();
+                    self.group1_plain_bind = None;
+                    self.group1_skinned_bind = None;
+                    self.note_staging_refusal("material", mat_bytes, n);
+                }
+                if let Some(mut view) = staged {
+                    let (chunks, _rem) = view.slice(..).into_chunks::<MAT_SZ>();
+                    chunks.write_iter(order.iter().map(|&i| {
+                        let d = &draws[i as usize];
+                        // Pack the bindless indices into the material's spare emissive.w
+                        // (only emissive.rgb is read for shading): (tex_slot << 3) | sampler.
+                        // The fragment shader unpacks it to index the bindless texture +
+                        // sampler arrays, so texture/sampler need no per-draw bind and drop
+                        // out of the instancing key (plan_3d).
+                        let slot = textures.texture_slot(d.texture_id);
+                        let packed = (slot << 3) | (d.sampler.index() as u32 & 0x7);
+                        let mut emissive = d.mat_emissive;
+                        emissive[3] = f32::from_bits(packed);
+                        let normal_slot = textures.texture_slot(d.normal_texture_id);
+                        let normal_packed = (normal_slot << 3) | (d.sampler.index() as u32 & 0x7);
+                        bytemuck::cast::<MaterialUbo, [u8; MAT_SZ]>(MaterialUbo {
+                            emissive,
+                            sun_ambient: d.mat_sun_ambient,
+                            sun_diffuse: d.mat_sun_diffuse,
+                            light_diffuse: d.mat_light_diffuse,
+                            light_ambient: d.mat_light_ambient,
+                            specular: d.mat_specular,
+                            // w is a small BITFIELD, not a bool: bit 0 = invert the normal
+                            // map's Y (the material-debug toggle it already carried), bit 1 =
+                            // DZ-003 reflective (the material named an EnvironmentMap). Kept
+                            // in this lane because WgrDraw3D is ABI-frozen and MaterialUbo's
+                            // seven vec4s are otherwise fully spoken for.
+                            normal_map: [
+                                f32::from_bits(normal_packed),
+                                (d._pad & 0xff) as f32,
+                                if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
+                                (u32::from(d._pad & 0x100 != 0)
+                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
+                                        << 1)) as f32,
+                            ],
+                        })
+                    }));
+                }
             }
         }
         // One dynamic-UBO slot per PALETTE_SIZE-matrix block. A block is exactly
@@ -5982,7 +6061,7 @@ impl Gfx3d {
             let mean = vis.iter().map(|v| v[3]).sum::<f32>() / vis.len() as f32;
             // Queued rather than printed: Gfx3d has no log sink, and eprintln! never reaches
             // --log-file, so a diagnostic written that way is missing exactly when it is read.
-            self.sky_bake_log.push(format!(
+            self.queued_log.push(format!(
                     "[wgr] sky bake model {model}: {} voxels, mean vis {mean:.3}, {:.1}% enclosed,                      bbox {:.1}x{:.1}x{:.1} m",
                     vis.len(),
                     enclosed * 100.0,
@@ -6047,9 +6126,28 @@ impl Gfx3d {
         self.cull_inputs
     }
 
-    /// Drain queued sky-bake diagnostics (see bake_model_sky_visibility).
-    pub fn take_sky_bake_log(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.sky_bake_log)
+    /// Drain queued diagnostics (sky bake, staging refusals) for the caller's log sink.
+    pub fn take_queued_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.queued_log)
+    }
+
+    // Record one refused per-frame staging upload and queue a log line on the 1st, 10th,
+    // 100th ... occurrence. Uses the same queue as the bake diagnostics because Gfx3d has no
+    // log sink and `eprintln!` never reaches --log-file — which is exactly where this needs
+    // to be visible, since the condition that produces it is only reproducible in a long run.
+    fn note_staging_refusal(&mut self, which: &'static str, bytes: u64, draws: usize) {
+        let count = self.staging_refusals.entry(which).or_insert(0);
+        *count += 1;
+        let n = *count;
+        if !is_power_of_ten(n) {
+            return;
+        }
+        self.queued_log.push(format!(
+            "[wgr] {which} staging upload REFUSED by wgpu ({bytes} B for {draws} draws) \
+             — out of GPU memory. Occurrence {n}. The buffer is dropped and rebuilt next \
+             frame; this frame's direct-path objects are skipped rather than drawn with \
+             stale transforms. WGR_STAGING_STRICT=1 restores the old panic."
+        ));
     }
 
     pub fn set_interior_sky_settings(&mut self, s: SkyVisSettings) {
@@ -7326,4 +7424,42 @@ fn interior_sky_steer_composes_with_the_bent_normal() {
 #[cfg(test)]
 pub(crate) fn camera_layout_for_tests(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     CameraGroup::new(device).layout
+}
+
+#[cfg(test)]
+mod staging_tests {
+    use super::{StorageArray, is_power_of_ten};
+
+    // The bug this guards: `ensure` caches the size it ASKED for, so once a `create_buffer`
+    // comes back invalid (which is how wgpu reports out of memory) the same poisoned handle is
+    // handed out for the rest of the process and every upload into it is refused. `invalidate`
+    // is the only thing that lets the next frame try again — without it the second `ensure`
+    // below returns false and nothing is ever rebuilt.
+    #[test]
+    fn invalidate_forces_the_next_ensure_to_rebuild() {
+        let Some((device, _queue)) = crate::gfx3d::cull::tests::headless() else {
+            return; // no GPU adapter in this environment
+        };
+        let mut array = StorageArray::new("wgr_test_storage");
+        assert!(array.ensure(&device, 4096), "first ensure must create");
+        assert!(
+            !array.ensure(&device, 4096),
+            "a satisfied capacity must not recreate"
+        );
+        array.invalidate();
+        assert!(array.buf.is_none(), "invalidate must drop the handle");
+        assert_eq!(array.cap, 0, "invalidate must forget the asked-for capacity");
+        assert!(
+            array.ensure(&device, 4096),
+            "after invalidate the next ensure must rebuild"
+        );
+        assert!(array.buf.is_some());
+    }
+
+    #[test]
+    fn refusal_log_throttle_fires_on_decades_only() {
+        let fired: Vec<u64> = (1..=1000).filter(|&n| is_power_of_ten(n)).collect();
+        assert_eq!(fired, vec![1, 10, 100, 1000]);
+        assert!(!is_power_of_ten(0));
+    }
 }
