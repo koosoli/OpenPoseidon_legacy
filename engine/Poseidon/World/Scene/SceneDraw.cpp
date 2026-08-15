@@ -18,6 +18,7 @@
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <string>
 #include <vector>
@@ -886,10 +887,33 @@ static int ShadowFactor(Scene* scene)
     return toIntFloor(shadowFactor * (1 - addLightsFactor) * 255);
 }
 
+// WGR_SHADOW_LOD_STATS=1 dumps, once per Scene::AdjustComplexity (i.e. once per frame), how many
+// objects the complexity re-scan visited and how many shadow-LOD property queries that cost. The
+// re-scan is a loop of up to five iterations plus five more call pairs on the exit paths, so the
+// object count multiplies; the query count is what the LODShape memo removes the string work from.
+static bool ShadowLodStatsEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_LOD_STATS");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+static long long GShadowLodStatObjects = 0;
+static long long GShadowLodStatQueries = 0;
+static long long GShadowLodStatPasses = 0;
+
 int Scene::AdjustShadowComplexity(SortObjectList& objs)
 {
 #if 1
     int totalComplexity = 0;
+    const bool statsOn = ShadowLodStatsEnabled();
+    if (statsOn)
+    {
+        GShadowLodStatPasses++;
+        GShadowLodStatObjects += objs.Size();
+    }
 
     int shadowFactorI = ShadowFactor(this);
 
@@ -909,6 +933,10 @@ int Scene::AdjustShadowComplexity(SortObjectList& objs)
                                                  _mainLight->ShadowDirection());
             if (level != LOD_INVISIBLE)
             {
+                if (statsOn)
+                {
+                    GShadowLodStatQueries++;
+                }
                 level = shape->FindNearestWithoutProperty(level, "lodnoshadow");
                 if (level < 0)
                 {
@@ -1190,6 +1218,14 @@ void Scene::AdjustComplexity()
         avgComplexity += _lastComplexity[i];
     }
     avgComplexity *= 1.0f / NStoreComplexities;
+    if (ShadowLodStatsEnabled())
+    {
+        LOG_INFO(Graphics, "SHADOW_LOD_STATS frame passes={} objectVisits={} propQueries={} drawObjects={}",
+                 GShadowLodStatPasses, GShadowLodStatObjects, GShadowLodStatQueries, _drawObjects.Size());
+        GShadowLodStatPasses = 0;
+        GShadowLodStatObjects = 0;
+        GShadowLodStatQueries = 0;
+    }
 }
 float Scene::GetSmokeGeneralization() const
 {

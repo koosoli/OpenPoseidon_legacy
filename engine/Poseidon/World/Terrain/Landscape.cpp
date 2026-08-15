@@ -270,6 +270,11 @@ void Landscape::Init()
     _modernObjectCellActive.clear();
     _modernObjectCellDesired.clear();
     _modernObjectCellCursor.clear();
+    _modernObjectCandidates.clear();
+    _modernObjectCandidatesValid = false;
+    _modernObjectCandidateCenterX = -0x3fffffff;
+    _modernObjectCandidateCenterZ = -0x3fffffff;
+    _modernObjectCandidateRadius = 0;
     _modernObjectStreaming = false;
     _modernObjectResidencyPending = false;
     _modernObjectCenterX = -0x3fffffff;

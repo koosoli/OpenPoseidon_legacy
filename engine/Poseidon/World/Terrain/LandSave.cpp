@@ -42,6 +42,7 @@
 #include <time.h>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <cstdio>
 #include <stdint.h>
@@ -2178,6 +2179,11 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectCellActive.assign(_modernObjectCells.size(), 0);
         _modernObjectCellDesired.assign(_modernObjectCells.size(), 0);
         _modernObjectCellCursor.assign(_modernObjectCells.size(), 0);
+        _modernObjectCandidates.clear();
+        _modernObjectCandidatesValid = false;
+        _modernObjectCandidateCenterX = -0x3fffffff;
+        _modernObjectCandidateCenterZ = -0x3fffffff;
+        _modernObjectCandidateRadius = 0;
 
         if (const char* radius = std::getenv("WGR_OBJECT_STREAM_RADIUS_CELLS"))
             _modernObjectRadius = std::clamp(static_cast<int>(std::strtol(radius, nullptr, 10)), 8, _landRange);
@@ -2482,6 +2488,18 @@ static uint32_t ObjectStreamMaxBatchScale()
     return scale;
 }
 
+// WGR_RESIDENCY_CANDIDATE_CACHE=0 rebuilds and re-sorts the residency candidate list on every
+// update, as it used to. See the rebuild guard in UpdateModernObjectResidency.
+static bool ResidencyCandidateCacheEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_RESIDENCY_CANDIDATE_CACHE");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    return on;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -2491,7 +2509,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // cell window after 180 updates and returns after 360, while the real camera
     // stays fixed so the final screenshot remains directly comparable. Normal
     // gameplay never reads this path unless the explicit diagnostic env is set.
-    if (const char* sweep = std::getenv("WGR_OBJECT_STREAM_TEST_SWEEP_CELLS"))
+    static const char* const sweepCells = std::getenv("WGR_OBJECT_STREAM_TEST_SWEEP_CELLS");
+    if (const char* sweep = sweepCells)
     {
         const int offsetCells = std::clamp(static_cast<int>(std::strtol(sweep, nullptr, 10)), 1, _landRange);
         const int phase = _modernObjectTestUpdate < 180 ? 0 : (_modernObjectTestUpdate < 360 ? 1 : 2);
@@ -2522,11 +2541,21 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         _modernObjectCenterZ = centerZ;
     }
 
-    struct CellCandidate
-    {
-        uint32_t index;
-        uint32_t distance2;
-    };
+    using CellCandidate = ModernObjectCellCandidate;
+    // Rebuild the candidate list only when the window centre moves.
+    //
+    // Everything below -- the geometric window growth, the candidate gather and the sort -- is a
+    // function of the (quantised) centre alone: the per-cell placement lists are fixed at load,
+    // so `enclosedPlacements` and therefore `windowRadius` are too. The early-out above, however,
+    // only returns while the world is CONVERGED; while the admission backlog is still draining
+    // (`_modernObjectResidencyPending`) the whole derivation ran again on every single frame, and
+    // that is precisely the interval that matters, because it is the interval the world spends
+    // filling. On Everon that is a 256x256 land grid: up to log2(256) passes of `enclosedPlacements`
+    // over the window, a gather over the window and an O(n log n) sort of every non-empty cell in
+    // it, per frame, to arrive at a list identical to the previous frame's.
+    const bool candidateCacheOn = ResidencyCandidateCacheEnabled();
+    const bool rebuildCandidates = !candidateCacheOn || !_modernObjectCandidatesValid || centerChanged ||
+                                   _modernObjectCandidateCenterX != centerX || _modernObjectCandidateCenterZ != centerZ;
     // The live set must be bounded by the OBJECT BUDGET, not by geometry. The radius is a
     // second, independent bound, and on any world whose whole placement database already fits
     // the budget it is the one that binds -- silently, because nothing reports it. Reforger's
@@ -2538,43 +2567,52 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // rather than a ceiling. Worlds where the budget already binds (Stratis requests 19,998 of
     // 163,953 inside the first 64 cells, ChernarusPlus far sooner) never enter the loop and
     // keep their measured behaviour and memory exactly.
-    const auto enclosedPlacements = [&](int radius)
+    if (rebuildCandidates)
     {
-        const int ex0 = std::max(0, centerX - radius);
-        const int ez0 = std::max(0, centerZ - radius);
-        const int ex1 = std::min(_landRange, centerX + radius + 1);
-        const int ez1 = std::min(_landRange, centerZ + radius + 1);
-        uint64_t total = 0;
-        for (int z = ez0; z < ez1 && total < _modernObjectBudget; ++z)
-            for (int x = ex0; x < ex1; ++x)
-                total += _modernObjectCells[static_cast<size_t>(z) * _landRange + x].size();
-        return total;
-    };
-    int windowRadius = std::clamp(_modernObjectRadius, 1, _landRange);
-    if (_modernObjectWindowGrowth)
-        while (windowRadius < _landRange && enclosedPlacements(windowRadius) < _modernObjectBudget)
-            windowRadius = std::min(_landRange, windowRadius * 2);
-
-    std::vector<CellCandidate> candidates;
-    const int x0 = std::max(0, centerX - windowRadius);
-    const int z0 = std::max(0, centerZ - windowRadius);
-    const int x1 = std::min(_landRange, centerX + windowRadius + 1);
-    const int z1 = std::min(_landRange, centerZ + windowRadius + 1);
-    candidates.reserve(static_cast<size_t>(x1 - x0) * (z1 - z0));
-    for (int z = z0; z < z1; ++z)
-    {
-        for (int x = x0; x < x1; ++x)
+        const auto enclosedPlacements = [&](int radius)
         {
-            const uint32_t index = static_cast<uint32_t>(z * _landRange + x);
-            if (_modernObjectCells[index].empty())
-                continue;
-            const int dx = x - centerX;
-            const int dz = z - centerZ;
-            candidates.push_back({index, static_cast<uint32_t>(dx * dx + dz * dz)});
+            const int ex0 = std::max(0, centerX - radius);
+            const int ez0 = std::max(0, centerZ - radius);
+            const int ex1 = std::min(_landRange, centerX + radius + 1);
+            const int ez1 = std::min(_landRange, centerZ + radius + 1);
+            uint64_t total = 0;
+            for (int z = ez0; z < ez1 && total < _modernObjectBudget; ++z)
+                for (int x = ex0; x < ex1; ++x)
+                    total += _modernObjectCells[static_cast<size_t>(z) * _landRange + x].size();
+            return total;
+        };
+        int windowRadius = std::clamp(_modernObjectRadius, 1, _landRange);
+        if (_modernObjectWindowGrowth)
+            while (windowRadius < _landRange && enclosedPlacements(windowRadius) < _modernObjectBudget)
+                windowRadius = std::min(_landRange, windowRadius * 2);
+
+        const int x0 = std::max(0, centerX - windowRadius);
+        const int z0 = std::max(0, centerZ - windowRadius);
+        const int x1 = std::min(_landRange, centerX + windowRadius + 1);
+        const int z1 = std::min(_landRange, centerZ + windowRadius + 1);
+        _modernObjectCandidates.clear();
+        _modernObjectCandidates.reserve(static_cast<size_t>(x1 - x0) * (z1 - z0));
+        for (int z = z0; z < z1; ++z)
+        {
+            for (int x = x0; x < x1; ++x)
+            {
+                const uint32_t index = static_cast<uint32_t>(z * _landRange + x);
+                if (_modernObjectCells[index].empty())
+                    continue;
+                const int dx = x - centerX;
+                const int dz = z - centerZ;
+                _modernObjectCandidates.push_back({index, static_cast<uint32_t>(dx * dx + dz * dz)});
+            }
         }
+        std::sort(_modernObjectCandidates.begin(), _modernObjectCandidates.end(),
+                  [](const CellCandidate& a, const CellCandidate& b)
+                  { return a.distance2 < b.distance2 || (a.distance2 == b.distance2 && a.index < b.index); });
+        _modernObjectCandidateCenterX = centerX;
+        _modernObjectCandidateCenterZ = centerZ;
+        _modernObjectCandidateRadius = windowRadius;
+        _modernObjectCandidatesValid = true;
     }
-    std::sort(candidates.begin(), candidates.end(), [](const CellCandidate& a, const CellCandidate& b)
-              { return a.distance2 < b.distance2 || (a.distance2 == b.distance2 && a.index < b.index); });
+    const std::vector<CellCandidate>& candidates = _modernObjectCandidates;
 
     uint32_t requested = 0;
     if (centerChanged)
@@ -2720,8 +2758,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         LOG_INFO(World,
                  "Modern object residency: centre=({}, {}) window={} cells requested={} resident={} created={} "
                  "released={} refused={} budget={} pending={}",
-                 centerX, centerZ, windowRadius, requested, _modernResidentObjectCount, created, released, refused,
-                 _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0);
+                 centerX, centerZ, _modernObjectCandidateRadius, requested, _modernResidentObjectCount, created,
+                 released, refused, _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0);
 }
 
 void Landscape::SaveOptimized(QOStream& f)

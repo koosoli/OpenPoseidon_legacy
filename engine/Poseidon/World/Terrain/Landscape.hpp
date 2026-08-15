@@ -579,6 +579,21 @@ class Landscape : public SerializeClass
     };
     std::vector<ModernObjectPlacement> _modernObjectPlacements;
     std::vector<std::vector<uint32_t>> _modernObjectCells;
+    // One non-empty cell inside the residency window, with its squared cell distance from the
+    // window centre. The list is a pure function of the (quantised) centre -- the window radius
+    // is derived from it, and the per-cell placement lists never change after load -- so it is
+    // rebuilt only when the centre moves. Draining the admission backlog re-walks it, but does
+    // not re-derive or re-sort it. See UpdateModernObjectResidency.
+    struct ModernObjectCellCandidate
+    {
+        uint32_t index;
+        uint32_t distance2;
+    };
+    std::vector<ModernObjectCellCandidate> _modernObjectCandidates;
+    int _modernObjectCandidateCenterX = -0x3fffffff;
+    int _modernObjectCandidateCenterZ = -0x3fffffff;
+    int _modernObjectCandidateRadius = 0; // window radius the cached list was gathered at
+    bool _modernObjectCandidatesValid = false;
     std::vector<RStringB> _modernObjectModels;
     std::vector<uint8_t> _modernObjectCellActive;
     std::vector<uint8_t> _modernObjectCellDesired;

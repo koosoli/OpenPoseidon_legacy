@@ -522,6 +522,26 @@ int Shape::FindProperty(const char* name) const
     return -1;
 }
 
+bool Shape::HasNoShadowProperty() const
+{
+    const int size = _prop.Size();
+    if (_noShadowPropSize != size)
+    {
+        bool found = false;
+        for (int i = 0; i < size; i++)
+        {
+            if (!strcmp(_prop[i].Name(), "lodnoshadow"))
+            {
+                found = true;
+                break;
+            }
+        }
+        _noShadowProp = found;
+        _noShadowPropSize = size;
+    }
+    return _noShadowProp;
+}
+
 void Shape::SetProperty(const char* name, const char* value)
 {
     int index = FindProperty(name);

@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 #include <utility>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -1663,6 +1665,18 @@ int LODShape::FindSqrtLevel(float resolution2, bool noDecal) const
     return i;
 }
 
+// WGR_SHADOW_LOD_PROP_CACHE=0 restores the uncached per-level Shape::FindProperty walk, so an
+// A/B of the shadow-LOD selection costs an env var rather than a rebuild.
+static bool ShadowLodPropCacheEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_LOD_PROP_CACHE");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    return on;
+}
+
 int LODShape::FindNearestWithoutProperty(int i, const char* property) const
 {
     if (i == LOD_INVISIBLE)
@@ -1671,11 +1685,18 @@ int LODShape::FindNearestWithoutProperty(int i, const char* property) const
     }
     PoseidonAssert(i < _nLods);
     PoseidonAssert(i >= 0);
-    while (i > 0 && _lods[i] && _lods[i]->FindProperty(property) >= 0)
+    // "lodnoshadow" is the only property asked here at draw rate (Scene::AdjustShadowComplexity,
+    // once per drawn object per complexity iteration, up to seven iterations a frame). Shape
+    // memoises that one answer, so recognise it ONCE per call instead of paying FindProperty's
+    // snprintf/strlwr/strcmp assertion machinery once per LOD stepped over.
+    const bool useCache = ShadowLodPropCacheEnabled() && std::strcmp(property, "lodnoshadow") == 0;
+    const auto hasProperty = [&](const Shape* lod)
+    { return useCache ? lod->HasNoShadowProperty() : (lod->FindProperty(property) >= 0); };
+    while (i > 0 && _lods[i] && hasProperty(_lods[i]))
     {
         i--;
     }
-    while (i < _nLods && _lods[i] && _resolutions[i] < 900 && _lods[i]->FindProperty(property) >= 0)
+    while (i < _nLods && _lods[i] && _resolutions[i] < 900 && hasProperty(_lods[i]))
     {
         i++;
     }

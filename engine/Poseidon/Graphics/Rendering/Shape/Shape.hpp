@@ -339,6 +339,17 @@ class Shape: public Poseidon::VertexTable
 	bool _faceNormalsValid;
 	bool _loadWarning; // some warning during load - report filename
 	mutable signed char _hasBlendSections = -1; // cached: any section's texture is alpha-blend (-1 = not computed)
+	// Cached answer to FindProperty("lodnoshadow") >= 0. Scene::AdjustShadowComplexity asks it
+	// for every drawn object on every one of its up-to-seven complexity iterations per frame,
+	// and Shape::FindProperty is not a cheap query: before it compares anything it snprintf()s
+	// the name into a 1 KB buffer and strlwr()s it purely to assert the caller passed lower
+	// case, then linearly scans _prop with strcmp. Validated against the property count rather
+	// than invalidated at each mutation site: every writer either Add()s, Clear()s or
+	// TransferArray()s _prop (all of which move the size), and the one in-place writer
+	// (SetProperty on an existing index) replaces a property with one of the SAME name, so it
+	// cannot change this answer.
+	mutable int _noShadowPropSize = -1; // _prop.Size() the flag below was computed at
+	mutable bool _noShadowProp = false;
 
 	// proxy objects
 	RefArray<ProxyObject> _proxy;
@@ -402,6 +413,8 @@ class Shape: public Poseidon::VertexTable
 	// i.e. this shape owns genuinely-translucent geometry the scene must draw in the
 	// back-to-front pass. Lazily computed (forces texture header load) and cached.
 	bool HasBlendSections() const;
+	// Equivalent to FindProperty("lodnoshadow") >= 0, memoised (see _noShadowPropSize).
+	bool HasNoShadowProperty() const;
 	void AddSection(const ShapeSection &sec); // add section, respect selection boundaries
 	void AddSection
 	(

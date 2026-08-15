@@ -1221,6 +1221,29 @@ void EngineWgpu::FinishDraw()
     Engine::FinishDraw();
 }
 
+// How many times the immediate per-section path actually runs in a frame. Whether hoisting the
+// per-section std::getenv() out of DrawSectionTL is worth anything depends entirely on this
+// number, and nothing reported it. WGR_DRAW_SECTION_STATS=1 emits one row per frame.
+static long long GDrawSectionCalls = 0;
+static bool DrawSectionStatsEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_DRAW_SECTION_STATS");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+static void LogDrawSectionStats()
+{
+    if (!DrawSectionStatsEnabled())
+    {
+        return;
+    }
+    LOG_INFO(Graphics, "DRAW_SECTION_STATS frame drawSectionTL={}", GDrawSectionCalls);
+    GDrawSectionCalls = 0;
+}
+
 void EngineWgpu::NextFrame()
 {
     if (_renderer)
@@ -1538,6 +1561,7 @@ void EngineWgpu::NextFrame()
         frame.grass_batches = _grassBatches;
         wgr_render_frame(_renderer, &frame);
         LogObjectPerfRow();
+        LogDrawSectionStats();
         if (_wbank)
             _wbank->TrimResidency();
         if (std::getenv("WGR_RESIDENCY_TRACE") &&
@@ -2078,8 +2102,61 @@ void EngineWgpu::SetMaterial(const TLMaterial& mat, const LightList& /*lights*/,
     _curMaterial = mat;
 }
 
+// DrawSectionTL runs once per contiguous same-material section run per object draw, i.e. tens
+// of thousands of times a frame on a populated world. Two things inside it were being paid at
+// that rate for diagnostics that are off:
+//
+//  * std::getenv(). On Windows the CRT takes a lock and walks the whole process environment
+//    block; the answer cannot change during a run, so it is read once here instead.
+//  * the one-shot "already logged this material" probes, which hashed a std::string of the
+//    RVMAT path on every section of every draw for the entire session, long after their single
+//    line had been emitted. They are re-keyed on the address of the material cache's own key
+//    string (see the call site) so they admit exactly the same first-occurrences.
+//
+// WGR_DRAW_SECTION_ENV_CACHE=0 restores both, so the cost of either can be measured from one
+// binary without a rebuild.
+static bool DrawSectionEnvCacheEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_DRAW_SECTION_ENV_CACHE");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    return on;
+}
+
+static bool EnvFlagSet(const char* name)
+{
+    const char* v = std::getenv(name);
+    return v && std::strcmp(v, "0") != 0;
+}
+
+static bool RoadTraceEnabled()
+{
+    static const bool cached = EnvFlagSet("WGR_ROAD_TRACE");
+    return DrawSectionEnvCacheEnabled() ? cached : EnvFlagSet("WGR_ROAD_TRACE");
+}
+
+static bool LegacyTextureTraceEnabled()
+{
+    static const bool cached = EnvFlagSet("WGR_LEGACY_TEXTURE_TRACE");
+    return DrawSectionEnvCacheEnabled() ? cached : EnvFlagSet("WGR_LEGACY_TEXTURE_TRACE");
+}
+
+static bool TreeAdvLightTraceEnabled()
+{
+    // Historically tested with plain getenv() != nullptr, so an empty or "0" value still
+    // enabled it. Keep that exact truth test in both arms.
+    static const bool cached = std::getenv("WGR_TREEADV_LIGHT_TRACE") != nullptr;
+    return DrawSectionEnvCacheEnabled() ? cached : (std::getenv("WGR_TREEADV_LIGHT_TRACE") != nullptr);
+}
+
 void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
 {
+    if (DrawSectionStatsEnabled())
+    {
+        ++GDrawSectionCalls;
+    }
     if (!_renderer)
     {
         return;
@@ -2118,7 +2195,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // band both backends; it does not, which is why the PATH matters as much as the
         // values. A road that never appears in this log took the CPU FaceArray::Draw branch
         // instead, and that absence is itself the answer.
-        if (const char* rt = std::getenv("WGR_ROAD_TRACE"); rt && std::strcmp(rt, "0") != 0)
+        if (RoadTraceEnabled())
         {
             const char* rname = t->Name();
             if (rname && *rname)
@@ -2177,7 +2254,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         // base-colour debug view must be allowed to identify whether a black canopy originates
         // in the texture upload or in lighting, without changing either path.  Kept general so
         // it can also diagnose other legacy-only content; keyed by the virtual texture path.
-        if (const char* trace = std::getenv("WGR_LEGACY_TEXTURE_TRACE"); trace && std::strcmp(trace, "0") != 0)
+        if (LegacyTextureTraceEnabled())
         {
             const char* name = t->Name();
             if (name && *name)
@@ -2340,10 +2417,24 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     }
                 }
                 const auto& translated = cached->second;
+                // One line per distinct RVMAT, without hashing the RVMAT path on every section
+                // of every draw for the rest of the session.
+                //
+                // `cached->first` is the material cache's own key: exactly one std::string per
+                // distinct path, allocated once and never moved (unordered_map nodes are stable
+                // across rehash), and the entry outlives every draw that can reach it. Its
+                // ADDRESS is therefore a perfect stand-in for the path text -- the pointer set
+                // admits precisely the first-occurrences the string set admitted -- and a
+                // pointer hash replaces a 40-to-60 byte string hash in the per-section path.
+                const void* materialLogKey = static_cast<const void*>(&cached->first);
+                const bool fastLogKeys = DrawSectionEnvCacheEnabled();
+                auto logOnceForMaterial =
+                    [&](std::unordered_set<const void*>& byKey, std::unordered_set<std::string>& byPath)
+                { return fastLogKeys ? byKey.insert(materialLogKey).second : byPath.insert(materialPath).second; };
                 // One-shot diagnostic for the TreeAdv-family night-lighting investigation.
                 // The source fields have family-specific meanings (not generic emissive), so
                 // capture them verbatim before a family shader starts consuming them.
-                if (std::getenv("WGR_TREEADV_LIGHT_TRACE") &&
+                if (TreeAdvLightTraceEnabled() &&
                     (translated.shaderFamily == "TreeAdv" || translated.shaderFamily == "TreeAdvTrunk" ||
                      translated.shaderFamily == "TreeAdvTrans"))
                 {
@@ -2418,8 +2509,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                     if (baseHandle)
                     {
                         d.texture_id = baseHandle;
-                        static std::unordered_set<std::string> loggedBaseBindings;
-                        if (loggedBaseBindings.insert(materialPath).second)
+                        static std::unordered_set<const void*> loggedBaseBindings;
+                        static std::unordered_set<std::string> loggedBaseBindingsByPath;
+                        if (logOnceForMaterial(loggedBaseBindings, loggedBaseBindingsByPath))
                             LOG_INFO(Graphics, "Wgpu material debug: Stage0 BaseColour resolved path={} uv={}",
                                      loadName, base->uvSource);
                     }
@@ -2429,8 +2521,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                         // fallback: if this bind fails the section draws white, which is what the
                         // Arma 3 castle and brick props do. Logging only the success path is why
                         // that was invisible, so say so once per material.
-                        static std::unordered_set<std::string> loggedBaseFailures;
-                        if (loggedBaseFailures.insert(materialPath).second)
+                        static std::unordered_set<const void*> loggedBaseFailures;
+                        static std::unordered_set<std::string> loggedBaseFailuresByPath;
+                        if (logOnceForMaterial(loggedBaseFailures, loggedBaseFailuresByPath))
                             LOG_WARN(Graphics,
                                      "Wgpu material: Stage0 BaseColour did NOT bind for {} (path={} loaded={} "
                                      "uploaded=0) -- section keeps its face texture",
@@ -2439,8 +2532,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 }
                 else
                 {
-                    static std::unordered_set<std::string> loggedNoBaseSlot;
-                    if (loggedNoBaseSlot.insert(materialPath).second)
+                    static std::unordered_set<const void*> loggedNoBaseSlot;
+                    static std::unordered_set<std::string> loggedNoBaseSlotByPath;
+                    if (logOnceForMaterial(loggedNoBaseSlot, loggedNoBaseSlotByPath))
                         LOG_INFO(Graphics,
                                  "Wgpu material: no bindable Stage0 for {} (present={} procedural={} emptyPath={} "
                                  "faceTexture={})",
@@ -2474,8 +2568,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                                                               : "texture failed to resolve/upload";
                         if (normalHandle)
                         {
-                            static std::unordered_set<std::string> loggedNormalBindings;
-                            if (loggedNormalBindings.insert(materialPath).second)
+                            static std::unordered_set<const void*> loggedNormalBindings;
+                            static std::unordered_set<std::string> loggedNormalBindingsByPath;
+                            if (logOnceForMaterial(loggedNormalBindings, loggedNormalBindingsByPath))
                                 LOG_INFO(Graphics,
                                          "Wgpu material debug: Stage1 NormalMap resolved path={} uv={} "
                                          "decode=X=A,Y=G,Z=reconstructed",
@@ -2642,7 +2737,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.sampler = U32(SamplerForSpec(effectiveSpec));
     d.depth = DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
-    if (const char* trace = std::getenv("WGR_LEGACY_TEXTURE_TRACE"); trace && std::strcmp(trace, "0") != 0)
+    if (LegacyTextureTraceEnabled())
     {
         if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
         {
