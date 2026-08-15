@@ -135,3 +135,101 @@ for null results in the brief — the most valuable findings this session were a
 the premise they were given: the texture-pin agent proved the fix I asked for is impossible
 from C++, and the streaming agent killed three of my four suspects and my "1.1 ms per object"
 figure. Both were worth more than the change I asked for.
+
+---
+
+# Working overnight, unattended
+
+The owner is asleep. Nobody will answer a question, so **do not stop to ask one** — pick the
+interpretation you can defend, write down which one you picked and why, and keep going. A
+blocked agent that waited eight hours is worse than one that made a defensible call and
+recorded it.
+
+## Push after every milestone — this is the recoverable point
+
+```
+git push safety feat/texture-streaming
+```
+
+`safety` is `https://github.com/koosoli/PoseidonWGPU-private-safety-mirror`. It is a **private
+mirror**, not the public repo — push there freely and often. Work on `feat/texture-streaming`
+(it already contains all of `feat/farfield-tier`). The previous session pushed 18 times and
+every push was a recoverable point; this one pushed ~12. Do not let work sit uncommitted
+overnight: an unattended crash with four hours of uncommitted work is the one genuinely
+unrecoverable outcome here.
+
+Commit messages on this branch carry the measurement and the reasoning, not just the change.
+Match that. If a number is in the message it must come from a run, not an estimate.
+
+## The rules that actually produced results
+
+1. **Measure before and after. Quote the resolution.** `-Width 1600 -Height 900`.
+2. **Split the phase before optimising it.** Every real win this session came from turning one
+   number into six: `land:obj` → submission, `drw:land` → Pass2, Pass2 → alphaDraw. Guessing
+   which part was expensive was wrong every single time.
+3. **Env-gate behavioural changes, safe behaviour as default.** Then A/B from one binary.
+4. **A default is a claim about every world.** Two of this session's three worst mistakes were
+   shipping a default validated on one world.
+5. **Subagents with disjoint file ownership**, told who else is editing. Ask for null results
+   explicitly — the best findings were agents refusing the premise they were handed.
+6. **Do not run the game and build at the same time** if a benchmark matters; and never trust
+   a frame number from a run where another game process was resident.
+
+## Ordered work list for the night
+
+Everything below is diagnosed to a file and line in this document or in `docs/roadmap/decisions/`.
+
+1. **Arma 1's 778 alpha objects** — 27.9 ms of a 47 ms frame, *and* the missing-shadow bug.
+   The binary already logs their names under `WGR_PASS1_STATS=1`; one Sahrani run identifies
+   them and picks between the two fixes.
+2. **Verify the three deployed-but-unseen fixes**: road depth bias (needs a road behind a
+   ridge at ≥1 km), shadow LOD recovery, foam at a second pose.
+3. **`WGR_LOD_GOVERNOR_TARGET=1` on Stratis, Chernarus and Sahrani.** It is +36% on Everon
+   with a proper LOD ladder and is off only because one world is not enough to justify a
+   default. Three arms and it can ship.
+4. **DayZ rails / Arma 2 roads** — `ObjectClasses.cpp:757` bails on any road model with a
+   geometry LOD, skipping the `ClipLandOn` fix at `:795`. Confirm with `--log-level debug` and
+   grep `Road with geometry`.
+5. **The streaming transient** — the only real fix is asynchronous model loading; the floor
+   lever is a palliative.
+
+# Review of docs/roadmap/modernisation — read this before working from it
+
+**The ledger is stale, and the roadmap is 253 KB. Do not treat either as a to-do list without
+checking the code first.** `docs/roadmap/status-ledger.yaml` has 61 tickets: 36 VALIDATED,
+15 INTEGRATED, **9 PLANNED**, 1 RESEARCHED. Several of the PLANNED ones are substantially
+done and were never re-statused.
+
+**Marked PLANNED but demonstrably working** (verified by loading the worlds this session, and
+by decision records that postdate the ticket):
+
+- **AST-012 "Later ODOL compatibility"** — has its own sub-decisions AST-012B (ODOL 73),
+  AST-012C, AST-012D (ODOL 40). Arma 1 (rev 40), Arma 2/OA, DayZ (rev 54) and Reforger models
+  all load and render. This is not a PLANNED ticket.
+- **AST-022 "WRP/OPRW world-format expansion"** — `Oprw18/20/24/25` readers exist and
+  WLD-010 covers the OPRW-25 container. This session booted `sara.wrp` (OPRW 20, Arma 1),
+  `stratis.wrp`, `chernarusplus.wrp` and `ev_DALL.wrp`. Four generations, four worlds.
+- **AST-016/017 (model.cfg / RTM animation)** — has a scoping decision, AST-016-017. Check it
+  before assuming the ticket text is current.
+
+**Genuinely open, and worth doing:**
+
+- **MAT-046 (RESEARCHED)** — "the Arma 2 and Arma 1 section readers drop the word that hides a
+  proxy". This is the only RESEARCHED ticket and it sits directly on top of the owner's Arma 2
+  road complaints. Read it early; it may be the same root cause.
+- **AST-023 automated cross-generation conformance harness** — ad-hoc harnesses exist per
+  generation (see the memory notes) but nothing automated ties them together. This is the
+  ticket that would stop compat regressions going unnoticed, and it is a good unattended task
+  because it is verifiable without a human eye.
+- **CLD-015 cloud anti-repetition** — has its own agent prompt in that folder, and the
+  coastline foam work this session is a close analogue (fixed-frequency noise with no distance
+  fade). Same class of bug, same class of fix.
+- **AST-019 clutter/CfgSurfaces semantics** — grass and clutter work, but the owner has open
+  questions about whether grass placement honours the map's own surface definitions. That is
+  precisely this ticket.
+
+**What I did not do:** I did not read the 253 KB roadmap end to end, and I did not check each
+ticket against its own acceptance criteria. I checked the ledger's status field, the decision
+records, and the code for the formats I could verify by loading a world. Treat the three
+"demonstrably working" entries as evidence to re-status those tickets, not as proof they meet
+every criterion the roadmap states.
