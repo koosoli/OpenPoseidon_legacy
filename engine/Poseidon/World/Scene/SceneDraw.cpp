@@ -17,6 +17,8 @@
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
 #include <Poseidon/Foundation/Memory/CheckMem.hpp>
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -1588,28 +1590,124 @@ static void DrawSortObject(SortObject* oi)
     GEngine->SetPassKindHint(savedHint);
 }
 
+namespace
+{
+
+// ---------------------------------------------------------------------------------------
+// Pass1 sub-phase attribution.
+//
+// `land:obj` IS this function, and on a settled Stratis it is 83% of an 87 ms CPU frame —
+// but as one number it names no line of code. Worse, it is not linear in the object set:
+// measured on the reversed-order Stratis arms (both settled, identical residency 163,953),
+// 4,337 -> 12,477 main instances (x2.88) took 67.400 -> 309.530 ms (x4.59), i.e. per-instance
+// cost RISES from 15.5 to 24.8 us as the set grows. A flat per-instance cost cannot do that,
+// so the interesting question is which of the six things below is superlinear.
+//
+// Deliberately NOT a FrameProfiler phase. FrameProfiler::Mark is a boundary model — the time
+// lands in whichever phase is current — so a sub-phase inside PhaseDrawLandObjects would be
+// SUBTRACTED from land:obj rather than nested inside it, and would change the phase list that
+// farfield-compare.py reads. This is a separate cumulative tally that cannot disturb either.
+//
+// WGR_PASS1_STATS=1 turns it on. Off, it costs one cached bool test per frame.
+struct Pass1Stats
+{
+    std::atomic<uint64_t> frames{0};
+    std::atomic<uint64_t> compactUs{0};   // the notUsed sweep
+    std::atomic<uint64_t> complexityUs{0};// AdjustComplexity — up to 7 passes over the set
+    std::atomic<uint64_t> mergersUs{0};   // _drawMergers rebuild
+    std::atomic<uint64_t> occlusionUs{0}; // software occlusion pre-pass (the superlinear suspect)
+    std::atomic<uint64_t> sortUs{0};      // SortDrawMergersByShape
+    std::atomic<uint64_t> submitUs{0};    // instanced-run batching + DrawSortObject
+    std::atomic<uint64_t> objects{0};     // _drawMergers.Size() summed, to divide by
+    std::atomic<uint64_t> occTests{0};    // Occlusions::TestBBox calls
+    std::atomic<uint64_t> occRenders{0};  // Occlusions::RenderShape calls (occluders ADDED)
+};
+
+Pass1Stats GPass1Stats;
+
+bool Pass1StatsEnabled()
+{
+    static const bool enabled = std::getenv("WGR_PASS1_STATS") != nullptr;
+    return enabled;
+}
+
+uint64_t Pass1NowUs()
+{
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+// A scope that bills its lifetime to one counter, and nothing when stats are off.
+struct Pass1Scope
+{
+    std::atomic<uint64_t>* sink;
+    uint64_t began;
+    explicit Pass1Scope(std::atomic<uint64_t>& into)
+        : sink(Pass1StatsEnabled() ? &into : nullptr), began(sink ? Pass1NowUs() : 0)
+    {
+    }
+    ~Pass1Scope()
+    {
+        if (sink)
+        {
+            sink->fetch_add(Pass1NowUs() - began, std::memory_order_relaxed);
+        }
+    }
+};
+
+// Averages per frame and per object, on a power-of-two frame count. Per-OBJECT is the column
+// that matters: a phase whose us/object is flat is linear and uninteresting no matter how big
+// it is, and the one whose us/object climbs with the set is the one to fix.
+void ReportPass1Stats()
+{
+    const uint64_t frames = GPass1Stats.frames.fetch_add(1, std::memory_order_relaxed) + 1;
+    if ((frames & (frames - 1)) != 0)
+    {
+        return;
+    }
+    const double f = static_cast<double>(frames);
+    const double objs = static_cast<double>(GPass1Stats.objects.load(std::memory_order_relaxed));
+    const auto per = [&](const std::atomic<uint64_t>& v) { return v.load(std::memory_order_relaxed) / f / 1000.0; };
+    LOG_INFO(Graphics,
+             "PERF pass1: frames={} objs/frame={:.0f} | compact={:.3f} complexity={:.3f} mergers={:.3f} "
+             "occlusion={:.3f} sort={:.3f} submit={:.3f} ms/frame | occlusion={:.2f} submit={:.2f} us/object "
+             "| occTests/frame={:.0f} occRenders/frame={:.0f}",
+             frames, objs / f, per(GPass1Stats.compactUs), per(GPass1Stats.complexityUs), per(GPass1Stats.mergersUs),
+             per(GPass1Stats.occlusionUs), per(GPass1Stats.sortUs), per(GPass1Stats.submitUs),
+             objs > 0 ? GPass1Stats.occlusionUs.load(std::memory_order_relaxed) / objs : 0.0,
+             objs > 0 ? GPass1Stats.submitUs.load(std::memory_order_relaxed) / objs : 0.0,
+             GPass1Stats.occTests.load(std::memory_order_relaxed) / f,
+             GPass1Stats.occRenders.load(std::memory_order_relaxed) / f);
+}
+
+} // namespace
+
 void Scene::DrawObjectsAndShadowsPass1()
 {
     // select first objects - those with highest visual priority
 
     int s = 0, t = 0;
-    for (; s < _drawObjects.Size(); s++)
     {
-        SortObject* sObj = _drawObjects[s];
-        if (!sObj->notUsed)
+        Pass1Scope scope(GPass1Stats.compactUs);
+        for (; s < _drawObjects.Size(); s++)
         {
-            if (s != t)
+            SortObject* sObj = _drawObjects[s];
+            if (!sObj->notUsed)
             {
-                _drawObjects[t] = sObj;
+                if (s != t)
+                {
+                    _drawObjects[t] = sObj;
+                }
+                t++;
             }
-            t++;
+            else
+            {
+                sObj->object->SetInList(nullptr); // removed from the list
+            }
         }
-        else
-        {
-            sObj->object->SetInList(nullptr); // removed from the list
-        }
+        _drawObjects.Resize(t);
     }
-    _drawObjects.Resize(t);
 
 #if DO_STAT
     Alpha.Clear();
@@ -1619,11 +1717,15 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     // remove all objects that should not be used
 
-    AdjustComplexity();
+    {
+        Pass1Scope scope(GPass1Stats.complexityUs);
+        AdjustComplexity();
+    }
 
     // copy objects to working list (mergers)
     // do not copy objects that are not drawn
     {
+        Pass1Scope scope(GPass1Stats.mergersUs);
         // make smaller only when really necessary
         int objNeed = _drawObjects.Size();
         int objHave = _drawMergers.MaxSize();
@@ -1698,8 +1800,32 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
 #endif
 
+    // WGR_OBJ_OCCLUSION=0 disables the software occlusion pre-pass for the whole session.
+    //
+    // This exists to make the superlinearity above testable from ONE binary. The pre-pass is
+    // the only part of Pass1 with a mechanism for it: it runs one TestBBox per candidate
+    // against an occluder buffer that RenderShape is CONCURRENTLY growing, so doubling the
+    // object set both doubles the tests and makes each test more expensive. Every other block
+    // here is a linear walk or an n-log-n sort. If land:obj does not collapse with this off,
+    // the pre-pass is exonerated and the counters below say where to look instead.
+    //
+    // Not a revert of anything: the cheat key (Shift-H) already toggles EnableObjOcc at
+    // runtime, and the GPU-driven path already forces it off when Hi-Z occlusion is on. This
+    // only makes the same switch reachable from a non-interactive benchmark run.
+    {
+        static const bool occDisabled = []
+        {
+            const char* v = std::getenv("WGR_OBJ_OCCLUSION");
+            return v && v[0] == '0';
+        }();
+        if (occDisabled)
+        {
+            EnableObjOcc = false;
+        }
+    }
     if (EnableObjOcc)
     {
+        Pass1Scope scope(GPass1Stats.occlusionUs);
         // sort only what needs to checked/drawn for occlusion
         // this will remove especially cloudlets from occlusion testing
         // it also helps to maintain _drawMergers sorted
@@ -1793,6 +1919,7 @@ void Scene::DrawObjectsAndShadowsPass1()
                     Vector3 minMax[2];
                     obj->AnimatedMinMax(oi->drawLOD, minMax);
                     // check if object is occluded by objects
+                    GPass1Stats.occTests.fetch_add(1, std::memory_order_relaxed);
                     if (!GetOcclusions()->TestBBox(*oi->object, minMax, oi->orClip))
                     {
                         occluded = true;
@@ -1815,6 +1942,9 @@ void Scene::DrawObjectsAndShadowsPass1()
                     {
                         obj->AnimateViewGeometry();
                         // if object can occlude something, render its components
+                        // Counted: every one of these makes every SUBSEQUENT TestBBox above
+                        // more expensive, which is the proposed superlinear mechanism.
+                        GPass1Stats.occRenders.fetch_add(1, std::memory_order_relaxed);
                         GetOcclusions()->RenderShape(*oi->object, view, shape->GetViewComponents(), oi->orClip);
                         obj->DeanimateViewGeometry();
                     }
@@ -1830,11 +1960,19 @@ void Scene::DrawObjectsAndShadowsPass1()
 
     // Byte-identical to QSort(..., CmpShapeObj) but sorts a packed key array instead
     // of the scattered Ref<SortObject> array (see SortDrawMergersByShape).
-    SortDrawMergersByShape(_drawMergers);
+    {
+        Pass1Scope scope(GPass1Stats.sortUs);
+        SortDrawMergersByShape(_drawMergers);
+    }
+    if (Pass1StatsEnabled())
+    {
+        GPass1Stats.objects.fetch_add(static_cast<uint64_t>(_drawMergers.Size()), std::memory_order_relaxed);
+    }
     // first of all draw non-alpha objects
 
 #if DRAW_OBJS
     {
+        Pass1Scope scope(GPass1Stats.submitUs);
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
         // the head once inside Begin/EndInstancedRun — every TL section then
@@ -1932,6 +2070,10 @@ void Scene::DrawObjectsAndShadowsPass1()
         }
     }
 #endif
+    if (Pass1StatsEnabled())
+    {
+        ReportPass1Stats();
+    }
 }
 
 // A surface overlay (road / decal): OnSurface-routed geometry drawn as a
