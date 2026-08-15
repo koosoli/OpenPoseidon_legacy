@@ -1597,17 +1597,26 @@ namespace
 // Pass1 sub-phase attribution.
 //
 // `land:obj` IS this function, and on a settled Stratis it is 83% of an 87 ms CPU frame —
-// but as one number it names no line of code. Worse, it is not linear in the object set:
-// measured on the reversed-order Stratis arms (both settled, identical residency 163,953),
-// 4,337 -> 12,477 main instances (x2.88) took 67.400 -> 309.530 ms (x4.59), i.e. per-instance
-// cost RISES from 15.5 to 24.8 us as the set grows. A flat per-instance cost cannot do that,
-// so the interesting question is which of the six things below is superlinear.
+// but as one number it names no line of code. This splits it six ways.
 //
-// The obvious suspect is already eliminated: the software occlusion pre-pass, whose
-// TestBBox-against-a-growing-occluder-buffer WOULD be superlinear, is skipped entirely in
-// every benchmarked arm (see the WGR_OBJ_OCCLUSION comment below). So the answer is in
-// AdjustComplexity, the mergers rebuild, the shape sort, or submission — and the us/object
-// column below is what separates them.
+// MEASURED ANSWER (Stratis, settled, governor 16, 1024 frames, 11,974 objects/frame):
+//
+//   compact 0.046 | complexity 1.040 | mergers 0.197 | occlusion 0.000 | sort 0.857
+//   | submit 35.453   ms/frame
+//
+// Submission is 35.45 of 37.59 ms — 94% of the phase. Two leads die on that line:
+// AdjustComplexity is 1.04 ms, so memoising its per-LOD property scan cannot be worth
+// more than ~1 ms of 37; and the occlusion pre-pass is 0.000 with 0 TestBBox calls,
+// confirming by measurement what the WGR_OBJ_OCCLUSION comment below establishes by
+// inspection. The target is the ~3 us per object in the submission loop.
+//
+// AND IT IS NOT SUPERLINEAR — an earlier version of this comment said it was, from
+// comparing the two governor arms (4,337 -> 12,477 instances for 67.4 -> 309.5 ms, x2.88
+// for x4.59). That inference was wrong: those arms differ in LOD as well as count, so the
+// objects are not merely more numerous but individually heavier (238 -> 298 triangles
+// each). Within ONE arm, submit cost per object is 3.27 -> 3.03 -> 2.96 us as the set
+// grows from 3,986 to 11,974 — flat, if anything falling as batching improves. Pass1 is
+// linear; it is simply expensive per object.
 //
 // Deliberately NOT a FrameProfiler phase. FrameProfiler::Mark is a boundary model — the time
 // lands in whichever phase is current — so a sub-phase inside PhaseDrawLandObjects would be
