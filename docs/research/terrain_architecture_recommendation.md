@@ -295,3 +295,62 @@ the authored-LOD tier. It is the only change that is simultaneously the cheapest
 (0.16 ms), the largest storage win (208x), independent of every blocker in this document,
 and aimed at the one thing the engine's own notes say is missing: "There is no far LOD for
 anything. At distance there are no trees and no objects — only terrain."
+
+---
+
+## Measured corrections (2026-08-15, deployed build, Everon)
+
+Three claims in this document and its companion were written from static analysis
+and have since been **measured on the real world**. Two are now falsified. They are
+corrected here rather than edited away, because the reasoning that produced them is
+the reasoning to distrust next time.
+
+### VRAM: it is geometry, not textures — and Everon is not oversubscribed at all
+
+From `WGR_RESIDENCY_TRACE=1` on Everon at the freefly pose:
+
+```
+tracked=1,359,554,648   budget=2,147,483,648   overBudget=0
+textures=476   textureBytes=218,703,960          (16% of tracked)
+geometryLive=805,178,484  geometryCapacity=1,140,850,688   (84%)
+geometryRetired=0
+```
+
+- **`overBudget=0`.** Everon does not oversubscribe. VRAM paging cannot be an
+  explanation for its framerate, and any reasoning that assumed it was is void.
+- **Texture pinning is 218 MB here**, not the bulk. The `RetainGpuModel` fix
+  (decoupling texture eviction from model release) is correct and worth keeping, but
+  it addresses ~16% of tracked VRAM on this world — not the dominant term.
+- **`geometryCapacity` exceeds `geometryLive` by 335 MB.** The pool grows by doubling
+  and never shrinks, and `tracked_bytes` counts *capacity*, so a long traversal
+  permanently inflates the figure that drives eviction decisions. That makes the pool
+  high-water a first-class suspect in the DayZ 4.23 GB reading too, which should be
+  re-taken with this breakdown before it is treated as a texture problem.
+
+### The far tier shipped inert — and the reason generalises
+
+The first deployed build logged `far tier: released` at the same timestamp as
+`retained 1216138 compact placements`: it was handed an empty instance array and
+released its buffers at world load.
+
+Cause: `ReadModelProxyBounds` accepts ODOL revisions 40 / 48-52 / 54 / 73, and the
+imported Reforger models are **MLOD, revision 257** — verified by reading the first
+four bytes of a shipped `.p3d`. Every model returned `valid=false`.
+
+The general lesson is worth more than the fix: the bounds reader was validated
+against a local corpus of 121x rev 49 and 4x rev 73, and **the format the target
+content actually uses was not in it**. A per-format reader validated on a corpus that
+does not contain the target format is untested, however many assertions it passes.
+
+### The CPU frame was recordable all along
+
+`FrameProfiler` has been capturing a 12-phase CPU breakdown on every frame,
+always-on, since long before this work — but nothing wrote it to a capture artifact,
+so it was reachable only from the dev panel or the `triPerfStats` console command.
+That is how an entire session of profiling produced GPU numbers only, on worlds where
+the GPU is ~9% of wall clock. It is now in `--capture-metrics` as
+`cpu_frame_phases_ms`.
+
+Read it with one caveat: **`land:gnd` includes object streaming**, because
+`UpdateModernObjectResidency` is called from `TerrainWgpu::DrawTerrain`. A large
+`land:gnd` on a heavy world is object admission cost wearing terrain's label.
