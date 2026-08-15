@@ -592,36 +592,39 @@ void Scene::SetObjectLODBias(float bias)
 // constraint, and the asymmetric damper in AdjustComplexity makes recovery ~10x
 // harder than degradation.
 //
-// A range of 4 bounds that horizon swing to 4x (that same bush: ~680 m, where fog is
-// doing real work), and on Reforger Everon it is worth +66% -- 30.51 -> 50.34 fps.
+// Default 4 bounds that horizon swing to 4x (that same bush: ~680 m, where fog is doing
+// real work).
 //
-// IT IS NOT THE DEFAULT, BECAUSE IT IS NOT SAFE ON EVERY WORLD.
+// THE CONDITION FOR 4 BEING CORRECT IS THAT THE FRAME IS GPU-BOUND, and that took three
+// measurements to work out, including one that briefly made 16 the default here.
 //
-// The governor can be stuck at EITHER rail, and the two failures are opposites.
-// Everon's sits at the fine rail, pinning everything to LOD 0/1 for 56M triangles, and
-// bounding it is a large win. Arma 3 Stratis's sits at the COARSE rail, culling hard to
-// protect a frame that is slow for an unrelated reason -- there the governor is doing
-// its job, and bounding it removes the protection: main instances 4,337 -> 12,477,
-// triangles 1.03M -> 3.72M, and 12.53 -> 2.89 fps. Both arms settled, identical
-// residency of 163,953, reversed arm order to exclude ordering and thermal drift.
+// The governor can be stuck at EITHER rail. Everon's sits at the fine rail, pinning
+// everything to LOD 0/1 for 56M triangles; bounding it gives 30.51 -> 50.34 fps and draws
+// the SAME 39,670 main instances, so nothing is lost -- only the branch geometry that was
+// being rendered into three aliasing pixels. Arma 3 Stratis's sat at the coarse rail
+// instead, and bounding it measured as a catastrophic 12.53 -> 2.89 fps.
 //
-// So 16 stays the default: it is the value two decades of shipped behaviour agree on,
-// and it is merely suboptimal on Everon where 4 is catastrophic on Stratis. A default
-// validated on one world and refuted on the next is not a default. WGR_LOD_GOVERNOR_RANGE=4
-// opts into the Everon behaviour from the same binary, so an A/B still needs no rebuild.
+// That regression was real but its cause was not the governor. Stratis was CPU-bound
+// because a stale foliage guard (WGR_TREEADV_RETAINED, EngineWgpu.cpp) rejected 53.8% of
+// the world at model registration and made the CPU draw it: land:obj 42.7 ms. There the
+// coarse rail WAS protection, and removing it just drew more of what was already too
+// expensive. With the foliage on the retained path that phase costs 0.185 ms, Stratis
+// becomes 94.5% GPU-bound, and this lever is then worth 22.86 -> 44.69 fps on it.
 //
-// The real fix is neither value. The governor is a symptom-manager keyed on wall-clock
-// frame time while it can only control GPU geometry, so on a CPU-bound world it is
-// steering with the wrong signal entirely. Stratis's actual disease is the ~3 us per
-// object in Pass1's submission loop (94% of that phase -- WGR_PASS1_STATS=1). Fix that,
-// and the governor question can be revisited honestly rather than traded off.
+// So one rule covers both worlds -- 4 when GPU-bound, and the fix for a CPU-bound world is
+// to find what the CPU is wrongly drawing, not to coarsen the horizon to hide it. Measured
+// on both: Everon ~30 -> ~50 fps, Stratis 17.24 -> 44.69 fps.
+//
+// WGR_LOD_GOVERNOR_RANGE=16 restores the legacy behaviour from the same binary. Reach for it
+// if a world turns out to be CPU-bound for some reason foliage retention does not fix -- and
+// if you do, treat that as a bug report about the CPU path, not as a tuning result.
 static float LodGovernorRange()
 {
     static const float range = []
     {
         const char* v = std::getenv("WGR_LOD_GOVERNOR_RANGE");
-        const float parsed = v ? static_cast<float>(std::atof(v)) : 16.0f;
-        return parsed >= 1.0f ? parsed : 16.0f;
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 4.0f;
+        return parsed >= 1.0f ? parsed : 4.0f;
     }();
     return range;
 }

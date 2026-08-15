@@ -3942,16 +3942,29 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // default-on under MSAA (WGR_FOLIAGE_A2C). ClassifyGpuSection already accepts this
             // exact case per section (variant=1, alphaRef=0.5). So the bail is stale.
             //
-            // It is still OFF by default, because "the pipeline now exists" is not "the pixels
-            // now match" -- the failure mode this guards against is solid sheets or black
-            // holes, which is a VISUAL claim and needs a capture A/B, not a frame time.
-            // WGR_TREEADV_RETAINED=1 opts in. Note it is only meaningful under MSAA: with
-            // sample_count == 1 there is no alpha-to-coverage and this would reintroduce
-            // precisely the artefact the bail was added for.
+            // NOW ON BY DEFAULT, on measured frame time AND checked pixels.
+            //
+            // Stratis, settled, identical pose: registration 75,274 -> 163,373, land:obj
+            // 42.702 -> 0.185 ms, and with the LOD governor free to do its job on the
+            // now-GPU-bound frame, 17.24 -> 44.69 fps. The captures show MORE vegetation than
+            // the baseline, at both an aerial and a ground-level pose, with neither of the
+            // artefacts this guard existed for -- no solid sheets, no black holes.
+            //
+            // WGR_TREEADV_RETAINED=0 restores the bail. Reach for it if foliage renders as
+            // sheets or holes on content not tested here.
+            //
+            // ONE REAL PRECONDITION: alpha-to-coverage needs MSAA. With sample_count == 1
+            // gfx3d/mod.rs leaves foliage_a2c off, and lifting the bail there reintroduces
+            // exactly the artefact it was added for. MSAA is on by default (the benchmarked
+            // runs log msaa=4x), so the default pairing is sound -- but a build or config that
+            // disables MSAA should set this to 0 as well. That coupling is not enforced in
+            // code because this side cannot see the renderer's sample count without a new ABI
+            // call, and inventing one to express a dependency between two defaults is worse
+            // than saying so here.
             static const bool treeAdvRetained = []
             {
                 const char* v = std::getenv("WGR_TREEADV_RETAINED");
-                return v && v[0] != '0';
+                return !v || v[0] != '0';
             }();
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
                 texture && texture->GetAlphaClass() == Poseidon::AlphaStats::Blend &&
