@@ -97,7 +97,11 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
     result.model.colorType = reader.read<uint32_t>(); result.model.viewDensity = reader.read<float>();
     readVector(result.model.bboxMin); readVector(result.model.bboxMax);
     if (expectedRevision >= 52) { skipVector(); skipVector(); }
-    for (int i = 0; i < 6; ++i) skipVector();
+    // Bounding centre, geometry centre (still skipped -- see the revision-73
+    // reader for why), then centre of mass and the inverse inertia rows (COL-001).
+    skipVector(); skipVector();
+    readVector(result.model.centerOfMass);
+    for (int i = 0; i < 3; ++i) readVector(result.model.invInertia[i]);
     // Revision 54 (DayZ) widens three fixed-size runs by six bytes in total: one
     // more bool here, one more float after them, and one more filler byte after
     // the mass array. Measured, not inferred from the revision number -- the
@@ -120,11 +124,17 @@ inline Odol73LodDirectory ReadOdol49StaticDirectory(BinaryReader& reader, int fi
             result.bones.push_back({ReadBoundedAsciiz(reader, "bone name"), ReadBoundedAsciiz(reader, "bone parent")});
         (void)ReadBoundedAsciiz(reader, "obsolete pivots name");
     }
-    (void)reader.read<uint8_t>(); (void)ReadOdol49CompressedArray<float>(reader, "mass array", 1'000'000);
-    for (int i = 0; i < 4; ++i) (void)reader.read<float>();
-    for (int i = 0; i < (dayz ? 13 : 12); ++i) (void)reader.read<uint8_t>();
-    (void)reader.read<uint32_t>(); (void)reader.read<bool>(); (void)ReadBoundedAsciiz(reader, "class name");
-    (void)ReadBoundedAsciiz(reader, "damage name"); (void)reader.read<bool>(); (void)reader.read<uint32_t>();
+    (void)reader.read<uint8_t>(); // map type
+    // COL-001: the mass table and totals, kept instead of discarded. A model that
+    // arrives with mass 0 is Object::IsPassable() -- a soldier walks through it.
+    result.model.massArray = ReadOdol49CompressedArray<float>(reader, "mass array", 1'000'000);
+    result.model.mass = reader.read<float>(); result.model.invMass = reader.read<float>();
+    result.model.armor = reader.read<float>(); result.model.invArmor = reader.read<float>();
+    result.model.lodIndexTable.resize(dayz ? 13 : 12);
+    for (int i = 0; i < (dayz ? 13 : 12); ++i) result.model.lodIndexTable[i] = static_cast<int8_t>(reader.read<uint8_t>());
+    (void)reader.read<uint32_t>(); (void)reader.read<bool>();
+    result.model.propertyClass = ReadBoundedAsciiz(reader, "class name");
+    result.model.propertyDamage = ReadBoundedAsciiz(reader, "damage name"); (void)reader.read<bool>(); (void)reader.read<uint32_t>();
     result.hasAnimations = reader.read<bool>();
     // The animation block is the same Real Virtuality structure revision 73 reads,
     // minus the fields revisions 55 and 56 added. Reading it rather than refusing it

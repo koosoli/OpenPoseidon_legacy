@@ -136,7 +136,12 @@ namespace
 // One LOD: three vertices, one triangle, one texture, one embedded material.
 // Small enough that every array stays under the compression threshold, which is
 // what lets the expected bytes be written out by hand.
-std::vector<char> arma1Model()
+//
+// COL-001: `withMass` fills the physical-body fields -- a three-entry mass
+// array (raw, under the threshold), the four totals, and a non-empty class name
+// -- so a test can state that the reader now KEEPS them. Everything else is
+// byte-identical to the massless model, so the closure tests are unaffected.
+std::vector<char> arma1Model(bool withMass = false)
 {
     Bytes b;
     b.data.insert(b.data.end(), {'O', 'D', 'O', 'L'});
@@ -155,12 +160,33 @@ std::vector<char> arma1Model()
     b.f32(0.5f);              // view density
     b.vec3(-1.0f, -2.0f, -3.0f); // bbox min
     b.vec3(1.0f, 2.0f, 3.0f);    // bbox max
-    for (int i = 0; i < 6; ++i) b.vec3(0.0f, 0.0f, 0.0f); // centres and inverse inertia
+    b.vec3(0.0f, 0.0f, 0.0f); // bounding centre
+    b.vec3(0.0f, 0.0f, 0.0f); // geometry centre
+    if (withMass)
+    {
+        b.vec3(0.5f, 1.5f, 2.5f);  // centre of mass
+        b.vec3(1.0f, 0.0f, 0.0f);  // inverse inertia rows: identity
+        b.vec3(0.0f, 1.0f, 0.0f);
+        b.vec3(0.0f, 0.0f, 1.0f);
+    }
+    else
+    {
+        for (int i = 0; i < 4; ++i) b.vec3(0.0f, 0.0f, 0.0f); // centre of mass and inverse inertia
+    }
     b.zeros(11);   // the eleven flag bytes -- 39 typed bytes on the A2 layout
     b.asciiz("");  // no skeleton, so no bone table and no pivots string
     b.u8(0);       // map type
-    b.i32(0);      // mass array
-    b.f32(0.0f); b.f32(0.0f); b.f32(0.0f); b.f32(0.0f); // mass, inverse, armour, inverse
+    if (withMass)
+    {
+        b.i32(3); b.f32(100.0f); b.f32(200.0f); b.f32(300.0f); // mass array, raw (12 bytes < 1024)
+        b.f32(600.0f); b.f32(1.0f / 600.0f);                    // mass, inverse mass
+        b.f32(50.0f); b.f32(1.0f / 50.0f);                      // armour, inverse armour
+    }
+    else
+    {
+        b.i32(0);      // mass array
+        b.f32(0.0f); b.f32(0.0f); b.f32(0.0f); b.f32(0.0f); // mass, inverse, armour, inverse
+    }
     for (int i = 0; i < 12; ++i) b.u8(0xff);            // special-LOD index table
     b.u32(0);
     b.boolean(false);
@@ -342,6 +368,49 @@ TEST_CASE("An ODOL 40 model reaches the common Poseidon model IR", "[p3d][odol][
     // was made on revision 73 and rests on that revision's packed-normal scale
     // being negative, which revision 40 does not have.
     REQUIRE(lod.basis.windingConfidence == Poseidon::Model::BasisConfidence::Unknown);
+}
+
+TEST_CASE("An ODOL 40 model keeps its mass, armour and class name", "[p3d][odol][ast-013][COL-001]")
+{
+    // COL-001. The reader used to consume these fields and throw them away, so
+    // every Arma 1 model arrived at mass 0 -- and Object::IsPassable() is
+    // `GetMass() < 10`, so a soldier walked through it. The bytes are at exactly
+    // the offsets the massless model has always closed on; only their
+    // destination changed.
+    const auto   data = arma1Model(/*withMass=*/true);
+    QIStream     stream(const_cast<char*>(data.data()), static_cast<int>(data.size()));
+    BinaryReader reader(stream);
+    const auto   raw = P3D::ReadOdol40StaticModel(reader, static_cast<int>(data.size()));
+
+    const auto& info = raw.directory.model;
+    REQUIRE(info.massArray == std::vector<float>{100.0f, 200.0f, 300.0f});
+    REQUIRE(info.mass == 600.0f);
+    REQUIRE(info.invMass == Catch::Approx(1.0f / 600.0f));
+    REQUIRE(info.armor == 50.0f);
+    REQUIRE(info.invArmor == Catch::Approx(1.0f / 50.0f));
+    REQUIRE(info.centerOfMass.y == 1.5f);
+    REQUIRE(info.invInertia[0].x == 1.0f);
+    REQUIRE(info.invInertia[1].y == 1.0f);
+    REQUIRE(info.invInertia[2].z == 1.0f);
+    REQUIRE(info.lodIndexTable.size() == 12);
+    REQUIRE(info.propertyClass == "TestVehicle");
+    REQUIRE(info.propertyDamage.empty());
+    // The model still closes on its boundary: the LOD after the preamble is intact.
+    REQUIRE(raw.lods.size() == 1);
+    REQUIRE(raw.lods[0].polygons.faces.size() == 1);
+
+    // ...and all of it reaches the IR through the shared entry point.
+    const auto model = ODOLLoader::loadFromBuffer(data.data(), static_cast<int>(data.size()), "a1.p3d");
+    REQUIRE(model.mass == 600.0f);
+    REQUIRE(model.invMass == Catch::Approx(1.0f / 600.0f));
+    REQUIRE(model.armor == 50.0f);
+    REQUIRE(model.massArray.size() == 3);
+    REQUIRE(model.centerOfMass.y == 1.5f);
+    REQUIRE(model.invInertia[4] == 1.0f);
+    REQUIRE(model.metadata.at("odolPropertyClass") == "TestVehicle");
+    // One visual LOD and nothing else: no geometry level to point at.
+    REQUIRE(model.geometryIdx == -1);
+    REQUIRE(model.landContactIdx == -1);
 }
 
 TEST_CASE("A truncated ODOL 40 model is refused, naming the constraint", "[p3d][odol][ast-013]")

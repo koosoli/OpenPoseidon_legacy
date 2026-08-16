@@ -220,6 +220,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Model/test_shape_adapter_papauto.cpp
     World/Model/test_shape_adapter_odol_animation.cpp
     World/Model/test_shape_adapter_tangent_basis.cpp
+    World/Model/test_shape_adapter_collision.cpp
 
 
     # P3D format tests

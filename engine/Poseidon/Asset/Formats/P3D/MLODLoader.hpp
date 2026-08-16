@@ -104,6 +104,7 @@ class MLODLoader
         convertMaterials(lod.mesh, faceTable);
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
+        convertMass(lod.mesh, taggData, vertexToPoint);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
         // AST-018: MLOD encodes proxies as three-vertex "proxy:" selections.
         // Extraction existed but nothing called it, so every MLOD model reached
@@ -157,6 +158,7 @@ class MLODLoader
         convertMaterials(lod.mesh, faceTable);
         convertSelections(lod.mesh, taggData.namedSelections, vertexTable, faceTable, vertexToPoint);
         convertProperties(lod.mesh, taggData.namedProperties);
+        convertMass(lod.mesh, taggData, vertexToPoint);
         sortVerticesByPointIndex(lod.mesh, vertexToPoint);
         // AST-018: MLOD encodes proxies as three-vertex "proxy:" selections.
         // Extraction existed but nothing called it, so every MLOD model reached
@@ -545,29 +547,28 @@ class MLODLoader
                     }
                 }
             }
-            size_t triIdx = 0;
-            for (size_t faceIdx = 0; faceIdx < sel.faceFlags.size(); ++faceIdx)
+            // COL-001: SOURCE FACE INDICES -- the face's position in the file's
+            // mixed triangle/quad stream, the same numbering Triangle::originalIndex
+            // and Quad::originalIndex carry, and the same unit the ODOL loaders
+            // emit. The previous encoding numbered a triangulated stream (a quad
+            // counted twice) that nothing produced: convertGeometry keeps quads as
+            // quads, and ShapeAdapter mapped the numbers as triangle-array
+            // indices. Every quad in a selection therefore landed on the wrong
+            // face or on none, and a geometry LOD's ComponentXX -- six quads for
+            // a box -- reached InitConvexComponents with fewer than four faces
+            // and was dropped: no components, no collision on any MLOD model.
+            //
+            // The counter mirrors convertGeometry exactly: only faces with three or
+            // four vertices are emitted there, so only those advance the index.
+            uint32_t sourceFace = 0;
+            for (size_t faceIdx = 0; faceIdx < faceTable.faces.size(); ++faceIdx)
             {
-                if (sel.faceFlags[faceIdx])
-                {
-                    const auto& face = faceTable.faces[faceIdx];
-                    if (face.n == 3)
-                    {
-                        selection.triangleIndices.push_back(static_cast<uint32_t>(triIdx));
-                        triIdx++;
-                    }
-                    else if (face.n == 4)
-                    {
-                        selection.triangleIndices.push_back(static_cast<uint32_t>(triIdx));
-                        selection.triangleIndices.push_back(static_cast<uint32_t>(triIdx + 1));
-                        triIdx += 2;
-                    }
-                }
-                else
-                {
-                    const auto& face = faceTable.faces[faceIdx];
-                    triIdx += (face.n == 4) ? 2 : 1;
-                }
+                const auto& face = faceTable.faces[faceIdx];
+                if (face.n != 3 && face.n != 4)
+                    continue;
+                if (faceIdx < sel.faceFlags.size() && sel.faceFlags[faceIdx])
+                    selection.triangleIndices.push_back(sourceFace);
+                ++sourceFace;
             }
             mesh.selections.push_back(selection);
         }
@@ -582,6 +583,39 @@ class MLODLoader
             namedProp.value = prop.value;
             mesh.properties.push_back(namedProp);
         }
+    }
+
+    // COL-001: the `#Mass#` tagg, per point in the source, becomes per-vertex mass
+    // in the mesh. A point that convertGeometry split into several vertices has
+    // its mass divided evenly among them, so the total and the centre of mass
+    // that LODShape::CalculateMass derives are the source's. Must run BEFORE
+    // sortVerticesByPointIndex, which reorders the vector alongside the vertices.
+    static void convertMass(Mesh& mesh, const MLOD::TAGGData& taggData, const std::vector<int32_t>& vertexToPoint)
+    {
+        mesh.vertexMass.clear();
+        if (!taggData.hasMass || mesh.vertices.empty())
+            return;
+        const auto& perPoint = taggData.mass.massPerPoint;
+        std::vector<uint32_t> verticesPerPoint(perPoint.size(), 0);
+        for (size_t v = 0; v < mesh.vertices.size() && v < vertexToPoint.size(); ++v)
+        {
+            const int32_t point = vertexToPoint[v];
+            if (point >= 0 && static_cast<size_t>(point) < verticesPerPoint.size())
+                ++verticesPerPoint[static_cast<size_t>(point)];
+        }
+        mesh.vertexMass.assign(mesh.vertices.size(), 0.0f);
+        bool any = false;
+        for (size_t v = 0; v < mesh.vertices.size() && v < vertexToPoint.size(); ++v)
+        {
+            const int32_t point = vertexToPoint[v];
+            if (point < 0 || static_cast<size_t>(point) >= perPoint.size())
+                continue;
+            const uint32_t share = verticesPerPoint[static_cast<size_t>(point)];
+            mesh.vertexMass[v] = share > 0 ? perPoint[static_cast<size_t>(point)] / static_cast<float>(share) : 0.0f;
+            any = any || mesh.vertexMass[v] != 0.0f;
+        }
+        if (!any)
+            mesh.vertexMass.clear();
     }
 
     static void sortVerticesByPointIndex(Mesh& mesh, const std::vector<int32_t>& vertexToPoint)
@@ -621,6 +655,14 @@ class MLODLoader
         for (const auto& entry : sortEntries)
             sortedVertices.push_back(mesh.vertices[entry.originalIndex]);
         mesh.vertices = std::move(sortedVertices);
+        if (mesh.vertexMass.size() == sortEntries.size())
+        {
+            std::vector<float> sortedMass;
+            sortedMass.reserve(sortEntries.size());
+            for (const auto& entry : sortEntries)
+                sortedMass.push_back(mesh.vertexMass[entry.originalIndex]);
+            mesh.vertexMass = std::move(sortedMass);
+        }
 
         std::vector<uint32_t> invSort(sortEntries.size());
         for (uint32_t i = 0; i < sortEntries.size(); ++i)

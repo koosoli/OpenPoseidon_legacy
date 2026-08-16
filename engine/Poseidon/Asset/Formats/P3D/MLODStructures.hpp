@@ -650,6 +650,14 @@ inline TAGGData readP3DMTAGGSection(BinaryReader& reader, int32_t nPoints, int32
             }
             data.uvSets.push_back(std::move(set));
         }
+        else if (name == "#Mass#" && size == nPoints * static_cast<int32_t>(sizeof(float)) && nPoints > 0)
+        {
+            // COL-001: the geometry LOD's per-point mass. SP3X already read it;
+            // P3DM (Arma samples, Reforger conversions) skipped it, and a model
+            // whose mass never arrives is Object::IsPassable().
+            data.mass    = readTAGGMass(reader, nPoints);
+            data.hasMass = true;
+        }
         else if (!name.empty() && name[0] != '#' && name[0] != '-' && name[0] != '.' &&
                  size == nPoints + nFaces)
         {

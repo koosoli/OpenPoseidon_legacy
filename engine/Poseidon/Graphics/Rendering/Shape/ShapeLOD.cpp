@@ -605,9 +605,14 @@ void LODShape::CalculateMass()
     }
     double totalMass = 0;
     int i;
+    // The mass table is per POINT of the geometry LOD and the native loaders keep
+    // the two the same size. An imported ODOL carries the table exactly as the
+    // binariser wrote it, and its point map may have been dropped as identity, so
+    // the two can disagree; bound the walk rather than read past either.
+    const int n = std::min(shape->_pointToVertex.Size(), _massArray.Size());
     // calculate position of center of mass
     Vector3 sum(VZero);
-    for (i = 0; i < shape->_pointToVertex.Size(); i++)
+    for (i = 0; i < n; i++)
     {
         Vector3Val r = shape->Pos(shape->_pointToVertex[i]);
         float m = _massArray[i];
@@ -624,7 +629,7 @@ void LODShape::CalculateMass()
     }
 
     Matrix3 totalInertia(M3Zero);
-    for (i = 0; i < shape->_pointToVertex.Size(); i++)
+    for (i = 0; i < n; i++)
     {
         //{{FIX inertia
         Vector3Val r = shape->Pos(shape->_pointToVertex[i]) - _centerOfMass;
@@ -659,6 +664,11 @@ void LODShape::DoClear()
     _andHints = _orHints = 0; // default: no hints
     _nLods = 0;
     _remarks = 0;
+    // Never left to fresh memory: MapType's zeroth enumerator is MapTree, which is
+    // the gate for wind sway. Load / SerializeBin / ShapeAdapter all overwrite this,
+    // but a path that forgets to (the MLOD adapter branch did) must not inherit a
+    // tree by accident.
+    _mapType = MapHide;
     _boundingCenter = VZero;
     _geometryCenter = VZero;
     _boundingSphere = 0;

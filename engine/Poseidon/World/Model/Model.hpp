@@ -259,6 +259,15 @@ struct Mesh {
     EdgeData edges;
     std::vector<AnimationFrame> frames;
 
+    // COL-001: per-VERTEX mass, in this mesh's (post-sort) vertex order, or empty
+    // when the source LOD carried no mass. MLOD stores mass per point in the
+    // geometry LOD's `#Mass#` tagg; the loader splits points into vertices at
+    // normal/UV seams, so a point's mass is divided evenly across the vertices
+    // it became -- the total and the centre of mass are preserved, which is all
+    // LODShape::CalculateMass reads. ODOL carries the equivalent table on the
+    // model (Model::massArray, per point) and leaves this empty.
+    std::vector<float> vertexMass;
+
     BoundingBox boundingBox;
     BoundingSphere boundingSphere;
     Vector3 bCenter;      // per-LOD bounding center (ODOL binary)

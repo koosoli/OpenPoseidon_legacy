@@ -20,8 +20,15 @@ def z(text: str) -> bytes:
     return text.encode("latin1") + b"\0"
 
 
-def p3dm_lod(points, faces, uv_sets, resolution, properties=()):
-    """One P3DM LOD, laid out exactly as the format stores it."""
+def p3dm_lod(points, faces, uv_sets, resolution, properties=(), selections=(), mass=None):
+    """One P3DM LOD, laid out exactly as the format stores it.
+
+    `selections` is a sequence of (name, point_indices, face_indices) named
+    selections -- one weight byte per point then one flag byte per face, the
+    layout readTAGGNamedSelection expects. `mass` is one float per point and is
+    written as the `#Mass#` tagg (COL-001). Both default to absent, so the
+    fixtures that predate them are byte-identical.
+    """
     data = b"P3DM" + struct.pack("<IIIIII", 28, 256, len(points), len(points), len(faces), 0)
     for x, y, zz in points:
         data += struct.pack("<fffI", x, y, zz, 0)
@@ -36,6 +43,13 @@ def p3dm_lod(points, faces, uv_sets, resolution, properties=()):
         data += struct.pack("<I", 0) + z(texture) + z(material)
 
     data += b"TAGG"
+    for name, point_indices, face_indices in selections:
+        payload = bytes(1 if i in point_indices else 0 for i in range(len(points)))
+        payload += bytes(1 if i in face_indices else 0 for i in range(len(faces)))
+        data += bytes([1]) + z(name) + struct.pack("<I", len(payload)) + payload
+    if mass is not None:
+        payload = b"".join(struct.pack("<f", m) for m in mass)
+        data += bytes([1]) + z("#Mass#") + struct.pack("<I", len(payload)) + payload
     for key, value in properties:
         payload = key.encode("latin1").ljust(64, b"\0") + value.encode("latin1").ljust(64, b"\0")
         data += bytes([1]) + z("#Property#") + struct.pack("<I", len(payload)) + payload
@@ -132,8 +146,31 @@ def main() -> None:
     unknown = b"MLOD" + struct.pack("<II", 257, 1) + b"XXXX" + b"\0" * 64
     (HERE / "unknown_lod_signature.p3d").write_bytes(unknown)
 
+    # COL-001: a model with a collidable geometry LOD -- a 2 x 3 x 4 m box of six
+    # QUADS in one `Component01` selection, carrying a `#Mass#` tagg (8 x 150 kg).
+    # Quads on purpose: the selection encoding that numbered a triangulated
+    # stream lost every quad, and a box component is nothing but quads. The
+    # winding is the engine's inward-normal convention after the loader's index
+    # reversal, so ConvexComponent::IsInside holds for the box centre.
+    box = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 0.0, 4.0), (0.0, 0.0, 4.0),
+           (0.0, 3.0, 0.0), (2.0, 3.0, 0.0), (2.0, 3.0, 4.0), (0.0, 3.0, 4.0)]
+    box_quads = [(0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)]
+    # The loader swaps slots 0<->1 and 2<->3 of every face on load, so the file
+    # stores the pre-swap order of the sequence the engine should end up with.
+    stored = [(q[1], q[0], q[3], q[2]) for q in box_quads]
+    geometry_box = p3dm_lod(
+        box,
+        [(q, "", "") for q in stored],
+        uv_sets=0,
+        resolution=1.0e13,
+        selections=[("Component01", set(range(8)), set(range(6)))],
+        mass=[150.0] * 8,
+    )
+    geometry_mass = b"MLOD" + struct.pack("<II", 257, 2) + visual + geometry_box
+    (HERE / "p3dm_geometry_mass.p3d").write_bytes(geometry_mass)
+
     for name in ("p3dm_two_lod.p3d", "p3dm_mixed_signatures.p3d", "p3dm_uv_collapse.p3d",
-                 "p3dm_uv_bad_size.p3d", "unknown_lod_signature.p3d"):
+                 "p3dm_uv_bad_size.p3d", "unknown_lod_signature.p3d", "p3dm_geometry_mass.p3d"):
         print(f"wrote {name}: {(HERE / name).stat().st_size} bytes")
 
 

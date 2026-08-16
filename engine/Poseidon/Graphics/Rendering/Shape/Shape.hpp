@@ -930,6 +930,7 @@ class LODShape: public RefCountWithLinks
 
 	void LockAutoCenter( bool autoCenter ) {_lockAutoCenter=autoCenter;}
 	void SetAutoCenter( bool autoCenter ) {_autoCenter=autoCenter;}
+	bool IsAutoCenter() const {return _autoCenter;}
 	void AllowAnimation( bool allow=true ) {_allowAnimation=allow;} // non static usage detected
 	bool GetAllowAnimation() const {return _allowAnimation;} // non static usage detected
 

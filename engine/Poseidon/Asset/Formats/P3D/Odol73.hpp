@@ -36,6 +36,36 @@ struct Odol73Preamble
     float viewDensity = 0.0f;
     Vector3 bboxMin;
     Vector3 bboxMax;
+
+    // COL-001: the physical body. These sit in the same ModelInfo prefix every
+    // later revision (40, 48-54, 73) reads, and every one of those readers used
+    // to consume them and throw them away. That mattered more than it looked:
+    // Object::IsPassable() is `GetMass() < 10`, and GetMass() is the shape's
+    // stored mass, so a model that arrives with mass 0 is something a soldier
+    // walks straight through. That is the whole of "I can walk through walls in
+    // every game except OFP" -- the geometry LODs and their convex components
+    // were loading fine, and the collision code then discarded every hit because
+    // the wall weighed nothing.
+    Vector3 centerOfMass;
+    Vector3 invInertia[3];
+    // The geometry LOD's per-point mass table (compressed float array, one entry
+    // per point of the geometry LOD), then the model totals as the binariser
+    // computed them.
+    std::vector<float> massArray;
+    float mass = 0.0f;
+    float invMass = 0.0f;
+    float armor = 0.0f;
+    float invArmor = 0.0f;
+    // The special-LOD index table exactly as stored: 12 signed bytes at 40-52
+    // (memory, geometry, geometryFire, geometryView, viewPilot, viewGunner,
+    // viewCommander, viewCargo, landContact, roadway, paths, hitpoints), 13 at
+    // 54 and 14 at 73, where the extra bytes are later-engine slots whose position
+    // in the run is not measured here. Kept raw for a census; the converter
+    // derives the runtime indices from the LOD resolutions instead, which is
+    // what LODShape::ScanShapes does anyway.
+    std::vector<int8_t> lodIndexTable;
+    std::string propertyClass;
+    std::string propertyDamage;
 };
 
 struct Odol73Bone
@@ -556,10 +586,17 @@ inline Odol73LodDirectory ReadOdol73StaticDirectory(BinaryReader& reader, int fi
     };
     skipFloat();
     skipFloat(); // density coefficient, draw importance
-    for (int i = 0; i < 5; ++i)
-        skipVec(); // visual bounds, three centres
+    skipVec();
+    skipVec(); // visual bounds
+    // Bounding centre and geometry centre are read but deliberately NOT surfaced
+    // yet: the runtime has been drawing these models with a zero bounding centre
+    // and every proxy / grounding offset is measured against that. Centre of
+    // mass and the inertia rows are physics-only (COL-001).
+    skipVec();
+    skipVec();
+    reader.readBytes(&result.model.centerOfMass, sizeof(result.model.centerOfMass));
     for (int i = 0; i < 3; ++i)
-        skipVec(); // inverse inertia rows
+        reader.readBytes(&result.model.invInertia[i], sizeof(Vector3)); // inverse inertia rows
     for (int i = 0; i < 5; ++i)
         (void)reader.read<bool>();
     for (int i = 0; i < 6; ++i)
@@ -591,16 +628,22 @@ inline Odol73LodDirectory ReadOdol73StaticDirectory(BinaryReader& reader, int fi
         (void)ReadBoundedAsciiz(reader, "obsolete pivots name");
     }
     (void)reader.read<uint8_t>(); // map type
-    const auto mass = reader.readCompressedArray<float>();
-    (void)mass;
-    for (int i = 0; i < 5; ++i)
-        skipFloat(); // mass, inverse mass, armour, inverse armour, explosion shielding
+    // COL-001: the geometry LOD's per-point masses and the model totals. Read
+    // into the preamble instead of discarded; see Odol73Preamble for why a
+    // discarded mass is a wall a soldier walks through.
+    result.model.massArray = reader.readCompressedArray<float>();
+    result.model.mass = reader.read<float>();
+    result.model.invMass = reader.read<float>();
+    result.model.armor = reader.read<float>();
+    result.model.invArmor = reader.read<float>();
+    skipFloat(); // explosion shielding
+    result.model.lodIndexTable.resize(14);
     for (int i = 0; i < 14; ++i)
-        (void)reader.read<uint8_t>();
+        result.model.lodIndexTable[i] = static_cast<int8_t>(reader.read<uint8_t>());
     (void)reader.read<uint32_t>();
     (void)reader.read<bool>();
-    (void)ReadBoundedAsciiz(reader, "class name");
-    (void)ReadBoundedAsciiz(reader, "damage name");
+    result.model.propertyClass = ReadBoundedAsciiz(reader, "class name");
+    result.model.propertyDamage = ReadBoundedAsciiz(reader, "damage name");
     (void)reader.read<bool>();
     (void)reader.read<uint32_t>();
     const size_t count = result.model.resolutions.size();

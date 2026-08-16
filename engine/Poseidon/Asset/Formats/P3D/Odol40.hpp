@@ -136,10 +136,14 @@ inline Odol73LodDirectory ReadOdol40StaticDirectory(BinaryReader& reader, int fi
     result.model.viewDensity = reader.read<float>();
     readVector(result.model.bboxMin);
     readVector(result.model.bboxMax);
-    // Bounding centre, geometry centre, centre of mass, then the three rows of
-    // the inverse inertia tensor.
-    for (int i = 0; i < 6; ++i)
-        skipVector();
+    // Bounding centre, geometry centre (still skipped -- see the revision-73
+    // reader for why), centre of mass, then the three rows of the inverse
+    // inertia tensor (COL-001).
+    skipVector();
+    skipVector();
+    readVector(result.model.centerOfMass);
+    for (int i = 0; i < 3; ++i)
+        readVector(result.model.invInertia[i]);
     // Eleven bytes of model flags. The A2 layout has 39 bytes of typed fields
     // here instead; reading those would put the skeleton name eleven bytes into
     // the wrong place and every later offset with it.
@@ -161,15 +165,20 @@ inline Odol73LodDirectory ReadOdol40StaticDirectory(BinaryReader& reader, int fi
     }
 
     (void)reader.read<uint8_t>(); // map type
-    (void)ReadOdol40CompressedArray<float>(reader, "mass array", 1'000'000);
-    for (int i = 0; i < 4; ++i)
-        (void)reader.read<float>(); // mass, inverse mass, armour, inverse armour
+    // COL-001: the mass table and totals, kept instead of discarded. A model that
+    // arrives with mass 0 is Object::IsPassable() -- a soldier walks through it.
+    result.model.massArray = ReadOdol40CompressedArray<float>(reader, "mass array", 1'000'000);
+    result.model.mass = reader.read<float>();
+    result.model.invMass = reader.read<float>();
+    result.model.armor = reader.read<float>();
+    result.model.invArmor = reader.read<float>();
+    result.model.lodIndexTable.resize(12);
     for (int i = 0; i < 12; ++i)
-        (void)reader.read<uint8_t>(); // the special-LOD index table, one signed byte each
+        result.model.lodIndexTable[i] = static_cast<int8_t>(reader.read<uint8_t>()); // the special-LOD index table
     (void)reader.read<uint32_t>();
     (void)reader.read<bool>();
-    (void)ReadBoundedAsciiz(reader, "class name");
-    (void)ReadBoundedAsciiz(reader, "damage name");
+    result.model.propertyClass = ReadBoundedAsciiz(reader, "class name");
+    result.model.propertyDamage = ReadBoundedAsciiz(reader, "damage name");
     (void)reader.read<bool>();
     (void)reader.read<uint32_t>();
 

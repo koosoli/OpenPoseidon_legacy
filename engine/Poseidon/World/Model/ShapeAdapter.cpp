@@ -141,6 +141,227 @@ static int convertFaceFlagsToSpecial(FaceFlags flags)
     return spec;
 }
 
+// COL-001 -- one line per model, at load, saying whether the runtime can collide
+// with it. Enabled by WGR_COLLISION_STATS=1.
+//
+//   collision: model=<path> src=<fmt>/<rev> geometry lod=<n> geomFaces=<f>
+//              componentSels=<s> withFaces=<t> components=<k> planesOK=<a>/<k>
+//              mass=<m> passable=<0|1> fire=<n> view=<n> landContact=<n>
+//              roadway=<n> paths=<n> autocenter=<0|1> bcenter=<x>,<y>,<z>
+//
+// `components` is what Object::Intersect iterates; zero means no hit is ever
+// produced. `componentSels` is how many ComponentXX named selections the
+// geometry LOD carries and `withFaces` how many of them arrived with the four
+// or more faces InitConvexComponents needs -- a selection short of that is a
+// face-index unit bug in a loader, not a modelling one. `passable` is
+// Object::IsPassable() -- mass under 10 kg -- and a soldier's collision response
+// skips every object for which it is true, which is how a house with a
+// perfectly good geometry LOD was walked through. `planesOK` tests each
+// component's half-spaces against the centroid of its own vertices (always
+// inside a convex hull); a component that fails has its face planes facing the
+// wrong way, i.e. the source winding is not the engine's. `autocenter` and
+// `bcenter` are the shape's origin bookkeeping, for the "partly in the ground"
+// question: a non-zero bcenter is a model whose vertices were moved to their
+// bounding-box centre at load.
+static void LogCollisionStats(LODShapeWithShadow* shape, const Poseidon::Model::Model& model)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_COLLISION_STATS");
+        return v && *v && std::strcmp(v, "0") != 0;
+    }();
+    if (!enabled || !shape)
+        return;
+
+    const int geomLevel = shape->FindGeometryLevel();
+    int components = 0;
+    int planesOk = 0;
+    int geomFaces = 0;
+    int componentSels = 0;
+    int componentSelsWithFaces = 0;
+    if (geomLevel >= 0)
+    {
+        if (Shape* geom = shape->GeometryLevel())
+        {
+            geomFaces = geom->NFaces();
+            for (int s = 0; s < geom->NNamedSel(); ++s)
+            {
+                const ::NamedSelection& sel = geom->NamedSel(s);
+                if (strnicmp(sel.Name(), "component", 9) != 0)
+                    continue;
+                ++componentSels;
+                if (sel.Faces().Size() >= 4)
+                    ++componentSelsWithFaces;
+            }
+        }
+        const ConvexComponents& cc = shape->GetGeomComponents();
+        components = cc.Size();
+        for (int c = 0; c < components; ++c)
+        {
+            const ConvexComponent& component = *cc[c];
+            Shape* geom = component.GetShape();
+            const int n = component.Size();
+            if (!geom || n <= 0 || component.NPlanes() < 4)
+                continue;
+            ::Vector3 centroid(VZero);
+            for (int i = 0; i < n; ++i)
+                centroid += geom->Pos(component[i]);
+            centroid = centroid * (1.0f / static_cast<float>(n));
+            const float tolerance = -1e-3f * std::max(component.GetRadius(), 1e-3f);
+            bool inside = true;
+            for (int p = 0; p < component.NPlanes() && inside; ++p)
+                inside = component.GetPlane(p).Distance(centroid) >= tolerance;
+            if (inside)
+                ++planesOk;
+        }
+    }
+    const ::Vector3 bcenter = shape->BoundingCenter();
+    LOG_INFO(Graphics,
+             "collision: model={} src={}/{} geometry lod={} geomFaces={} componentSels={} withFaces={} components={} "
+             "planesOK={}/{} mass={:.1f} passable={} fire={} view={} landContact={} roadway={} paths={} "
+             "autocenter={} bcenter={:.2f},{:.2f},{:.2f}",
+             model.sourcePath, model.sourceFormat, model.sourceVersion, geomLevel, geomFaces, componentSels,
+             componentSelsWithFaces, components, planesOk, components, shape->Mass(), shape->Mass() < 10.0f ? 1 : 0,
+             shape->FindFireGeometryLevel(), shape->FindViewGeometryLevel(), shape->FindLandContactLevel(),
+             shape->FindRoadwayLevel(), shape->FindPaths(), shape->IsAutoCenter() ? 1 : 0, bcenter.X(), bcenter.Y(),
+             bcenter.Z());
+}
+
+// COL-001 (opt-in, WGR_SYNTH_GEOMETRY_BBOX=1) -- give a model that has NO
+// geometry LOD at all a one-component box built from its bounding box, so it
+// blocks movement instead of being walked through.
+//
+// This exists for the Reforger conversions: `PoseidonTools xob convert` writes
+// visual LODs only, so those models have nothing the collision code can use and
+// no amount of reading fixes that. A box is a crude stand-in -- a house becomes
+// a solid block you cannot enter, and a tree's canopy becomes a wall -- which is
+// why it is off by default and why the real fix is a geometry LOD with convex
+// components in the converter. Returns true when a LOD was added; the caller
+// (a friend of LODShape) then gives it a mass, because a massless box is
+// Object::IsPassable() and would change nothing.
+static bool SynthesizeBoxGeometryIfRequested(LODShapeWithShadow* shape, const char* modelName)
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_SYNTH_GEOMETRY_BBOX");
+        return v && *v && std::strcmp(v, "0") != 0;
+    }();
+    if (!enabled || !shape)
+        return false;
+    if (shape->FindGeometryLevel() >= 0)
+        return false;
+    if (shape->NLevels() < 1 || shape->NLevels() >= MAX_LOD_LEVELS)
+        return false;
+    Shape* visual = shape->Level(0);
+    if (!visual || visual->NVertex() < 3)
+        return false;
+
+    const ::Vector3 mn = visual->Min();
+    const ::Vector3 mx = visual->Max();
+    if (!(mx.X() - mn.X() > 0.05f) || !(mx.Y() - mn.Y() > 0.05f) || !(mx.Z() - mn.Z() > 0.05f))
+        return false;
+
+    // Eight corners, six quads. The winding is checked against the engine's own
+    // convention below rather than assumed: the box is built once, its planes
+    // computed, and if the box centre is not on the inside of every plane the
+    // faces are rebuilt reversed.
+    const ::Vector3 corners[8] = {
+        ::Vector3(mn.X(), mn.Y(), mn.Z()), ::Vector3(mx.X(), mn.Y(), mn.Z()),
+        ::Vector3(mx.X(), mn.Y(), mx.Z()), ::Vector3(mn.X(), mn.Y(), mx.Z()),
+        ::Vector3(mn.X(), mx.Y(), mn.Z()), ::Vector3(mx.X(), mx.Y(), mn.Z()),
+        ::Vector3(mx.X(), mx.Y(), mx.Z()), ::Vector3(mn.X(), mx.Y(), mx.Z()),
+    };
+    static const int quads[6][4] = {
+        {0, 1, 2, 3}, // bottom
+        {4, 7, 6, 5}, // top
+        {0, 4, 5, 1}, // -z
+        {1, 5, 6, 2}, // +x
+        {2, 6, 7, 3}, // +z
+        {3, 7, 4, 0}, // -x
+    };
+    const ::Vector3 center = (mn + mx) * 0.5f;
+
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        const bool reversed = attempt == 1;
+        Ref<Shape> geom = new Shape();
+        geom->Init(8);
+        for (int v = 0; v < 8; ++v)
+        {
+            geom->SetPos(v) = corners[v];
+            geom->SetNorm(v) = (corners[v] - center).Normalized();
+            geom->SetU(v, 0.0f);
+            geom->SetV(v, 0.0f);
+            geom->SetClip(v, ClipAll);
+        }
+        std::vector<SelInfo> selInfos;
+        for (int v = 0; v < 8; ++v)
+            selInfos.push_back(SelInfo(static_cast<VertexIndex>(v), 255));
+        std::vector<VertexIndex> faceIndices;
+        for (int f = 0; f < 6; ++f)
+        {
+            Poly poly;
+            poly.Init();
+            poly.SetN(4);
+            for (int i = 0; i < 4; ++i)
+                poly.Set(i, static_cast<VertexIndex>(quads[f][reversed ? 3 - i : i]));
+            poly.SetTexture(nullptr);
+            poly.SetSpecial(0);
+            geom->AddFace(poly);
+            faceIndices.push_back(static_cast<VertexIndex>(f));
+        }
+        geom->AddNamedSel(::NamedSelection("Component01", selInfos.data(), static_cast<int>(selInfos.size()),
+                                           faceIndices.data(), static_cast<int>(faceIndices.size())));
+        geom->Compact();
+        geom->CalculateMinMax();
+        geom->StoreOriginalMinMax();
+        geom->InitPlanes();
+        geom->RecalculateNormals(true);
+
+        bool inside = true;
+        for (int f = 0; f < 6 && inside; ++f)
+            inside = geom->GetPlane(f).Distance(center) >= 0.0f;
+        if (!inside && !reversed)
+            continue; // rebuild with the other winding
+
+        // GEOMETRY_SPEC: 1e13, the same sentinel every generation stores.
+        shape->AddShape(geom, 1e13f); // AddShape ends in ScanShapes, so _geometry is set here
+        LOG_INFO(Graphics, "ShapeAdapter: {} had no geometry LOD; synthesised a bounding-box component ({}x{}x{} m, {})",
+                 modelName ? modelName : "<unnamed>", mx.X() - mn.X(), mx.Y() - mn.Y(), mx.Z() - mn.Z(),
+                 reversed ? "reversed winding" : "source winding");
+        return true;
+    }
+    return false;
+}
+
+// The friend-scope half of the synthesis: give the box a mass, because
+// Object::IsPassable() is `mass < 10` and a massless box changes nothing. Called
+// from convertToLODShape (a friend of Shape and LODShape); the arrays it fills
+// are protected. 100 t is "static, immovable" for every consumer that reads
+// mass -- soldiers stop at it, vehicles treat it as a wall.
+static void SynthesizeBoxGeometryMass(LODShapeWithShadow* shape, Shape* geom, AutoArray<float>& massArray,
+                                      float& mass, float& invMass, AutoArray<VertexIndex>& pointToVertex,
+                                      AutoArray<VertexIndex>& vertexToPoint)
+{
+    if (!shape || !geom)
+        return;
+    const int n = geom->NVertex();
+    pointToVertex.Resize(n);
+    vertexToPoint.Resize(n);
+    for (int v = 0; v < n; ++v)
+    {
+        pointToVertex[v] = static_cast<VertexIndex>(v);
+        vertexToPoint[v] = static_cast<VertexIndex>(v);
+    }
+    constexpr float kTotal = 100000.0f;
+    massArray.Resize(n);
+    for (int v = 0; v < n; ++v)
+        massArray[v] = n > 0 ? kTotal / static_cast<float>(n) : 0.0f;
+    mass = kTotal;
+    invMass = 1.0f / kTotal;
+    shape->CalculateMass();
+}
+
 // vertex.flags always holds pre-encoded ClipFlags regardless of source format:
 //   ODOL: SaveOptimized() pre-computes ClipFlags (materials 200-203, fog, land, decal);
 //         ODOLLoader stores them directly in vertex.flags.
@@ -366,21 +587,17 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         std::sort(faceRefs.begin(), faceRefs.end(),
                   [](const FaceRef& a, const FaceRef& b) { return a.originalIndex < b.originalIndex; });
 
-        // Index needed for converting selection face indices (MLOD path below)
-        std::vector<uint32_t> triangleToFace(triangleCount, 0xFFFFFFFF);
-        std::vector<uint32_t> quadToFace(quadCount, 0xFFFFFFFF);
+        // COL-001: source face index (originalIndex, the position in the file's
+        // mixed triangle/quad stream) -> final face index in the runtime stream.
+        // Both loaders now number selection faces in that unit, so one table
+        // serves both; it also stays right when a face was rejected above, where
+        // "position == index" silently would not.
+        uint32_t maxOriginal = 0;
+        for (const FaceRef& ref : faceRefs)
+            maxOriginal = std::max(maxOriginal, ref.originalIndex);
+        std::vector<uint32_t> originalToFace(faceRefs.empty() ? 0 : static_cast<size_t>(maxOriginal) + 1, 0xFFFFFFFF);
         for (size_t finalFaceIdx = 0; finalFaceIdx < faceRefs.size(); ++finalFaceIdx)
-        {
-            const FaceRef& ref = faceRefs[finalFaceIdx];
-            if (ref.isQuad)
-            {
-                quadToFace[ref.index] = static_cast<uint32_t>(finalFaceIdx);
-            }
-            else
-            {
-                triangleToFace[ref.index] = static_cast<uint32_t>(finalFaceIdx);
-            }
-        }
+            originalToFace[faceRefs[finalFaceIdx].originalIndex] = static_cast<uint32_t>(finalFaceIdx);
 
         for (const auto& faceRef : faceRefs)
         {
@@ -487,29 +704,15 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 selInfos.push_back(SelInfo(static_cast<VertexIndex>(vertIdx), weight));
             }
 
-            // ODOL face indices are positions in the mixed tri/quad stream and map 1:1 to
-            // faceRefs (already sorted by originalIndex). MLOD needs the triangleToFace remap.
+            // Selection faces are source face indices on both paths (COL-001):
+            // positions in the file's mixed tri/quad stream, remapped through
+            // originalToFace to the runtime face stream.
             std::vector<VertexIndex> faceIndices;
             faceIndices.reserve(selection.triangleIndices.size());
-            if (isODOL)
+            for (uint32_t sourceIdx : selection.triangleIndices)
             {
-                for (uint32_t combinedIdx : selection.triangleIndices)
-                {
-                    if (combinedIdx < faceRefs.size())
-                        faceIndices.push_back(static_cast<VertexIndex>(combinedIdx));
-                }
-            }
-            else
-            {
-                for (uint32_t triIdx : selection.triangleIndices)
-                {
-                    if (triIdx < triangleToFace.size())
-                    {
-                        uint32_t faceIdx = triangleToFace[triIdx];
-                        if (faceIdx != 0xFFFFFFFF)
-                            faceIndices.push_back(static_cast<VertexIndex>(faceIdx));
-                    }
-                }
+                if (sourceIdx < originalToFace.size() && originalToFace[sourceIdx] != 0xFFFFFFFF)
+                    faceIndices.push_back(static_cast<VertexIndex>(originalToFace[sourceIdx]));
             }
 
             ::NamedSelection namedSel(
@@ -972,10 +1175,31 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
 
         // LODShape::SerializeBin IsLoading block
         shape->OptimizeShapes();
+        // COL-001: OptimizeShapes ends in ScanShapes only when GApp exists, and
+        // that scan is what turns the resolutions into _geometry / _landContact /
+        // _roadway once the LOD list has been compacted. Run it explicitly so the
+        // shape is the same object in a tool or a test as it is in the game.
+        shape->ScanShapes();
         shape->CheckForcedProperties();
+        // A file whose mass total is zero while its per-point table is not was
+        // binarised without one; derive it the way the MLOD loader would.
+        if (!(shape->_mass > 0.0f) && shape->_massArray.Size() > 0)
+        {
+            Shape* geom = shape->GeometryLevel();
+            if (geom && geom->_pointToVertex.Size() <= shape->_massArray.Size())
+                shape->CalculateMass();
+        }
+        if (SynthesizeBoxGeometryIfRequested(shape, model.sourcePath.c_str()))
+        {
+            Shape* geom = shape->GeometryLevel();
+            if (geom)
+                SynthesizeBoxGeometryMass(shape, geom, shape->_massArray, shape->_mass, shape->_invMass,
+                                          geom->_pointToVertex, geom->_vertexToPoint);
+        }
         shape->InitConvexComponents();
         shape->_propertyClass = shape->PropertyValue("class");
         shape->_propertyDammage = shape->PropertyValue("dammage");
+        LogCollisionStats(shape, model);
 
         // shapeFile.cpp:588-598
         {
@@ -997,8 +1221,36 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
     }
     else
     {
+        // The `autocenter` property, read the way LODShape::Load reads it -- BEFORE
+        // the first CalculateMinMax, which is where CalculateBoundingSphere moves
+        // every vertex to the bounding-box centre when _autoCenter is set. This
+        // branch never cleared it, so `autocenter=0` was honoured by the IR-level
+        // recentring in Model.cpp and then undone here: the vertices were shifted
+        // anyway and the offset landed in _boundingCenter, which the
+        // authored-elevation placement path (Landscape::ObjectCreate with
+        // preserveAuthoredElevation) never reads. That is one half of "buildings
+        // partly in the ground" on Reforger conversions; the xob converter's
+        // --fix-origin writes the property, and this is what makes it stick.
+        // ScanShapes first so PropertyValue can consult the geometry LOD, exactly
+        // as Load's AddShape has already done by the time it asks.
+        shape->ScanShapes();
+        {
+            const RStringB& autoCenter = shape->PropertyValue("autocenter");
+            if (autoCenter.GetLength() > 0 && atoi(autoCenter) == 0)
+                shape->_autoCenter = false;
+        }
         shape->CalculateMinMax(true);
         shape->OptimizeShapes();
+        // COL-001: see the ODOL branch. Without GApp OptimizeShapes never scans,
+        // and without the scan the geometry LOD is not the geometry LOD.
+        shape->ScanShapes();
+        // MLOD twin of the ODOL branch's map-type resolution: honours the `map`
+        // property the xob converter writes, and the vegetation-path fallback for
+        // models that carry none. Left unassigned, _mapType kept whatever DoClear
+        // left it (now MapHide; before that fresh memory, i.e. MapTree), and every
+        // converted Reforger rock swayed in the wind. After ScanShapes so
+        // PropertyValue's geometry-LOD lookup sees a valid _geometry.
+        shape->_mapType = ResolveMapTypeProperty(shape->PropertyValue("map"), model.sourcePath.c_str());
 
         // Shape.cpp:4961-4971
         for (int i = 0; i < lodCount; i++)
@@ -1006,12 +1258,55 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 shape->_special |= shape->_lods[i]->Special();
 
         shape->CheckForcedProperties();
+        // COL-001: the geometry LOD's `#Mass#` tagg, carried per vertex by the
+        // MLOD loader. LODShape::Load does exactly this for SP3X through the
+        // legacy path; the canonical adapter never did, so every P3DM model
+        // (Arma samples, Reforger conversions) weighed nothing and was passable.
+        {
+            const int geomLevel = shape->FindGeometryLevel();
+            if (geomLevel >= 0 && geomLevel < shape->NLevels() && shape->_lods[geomLevel])
+            {
+                Shape* geom = shape->_lods[geomLevel];
+                // OptimizeShapes may have compacted the LOD list; find the source
+                // LOD by resolution rather than by index.
+                const LODLevel* source = nullptr;
+                for (const LODLevel& candidate : model.lodLevels)
+                    if (Poseidon::Model::ClassifyLodResolution(candidate.resolution) ==
+                        Poseidon::Model::LodPurpose::Geometry)
+                    {
+                        source = &candidate;
+                        break;
+                    }
+                if (source && !source->mesh.vertexMass.empty())
+                {
+                    const int points = geom->_pointToVertex.Size();
+                    shape->_massArray.Resize(points);
+                    for (int p = 0; p < points; ++p)
+                    {
+                        const int vertex = geom->_pointToVertex[p];
+                        shape->_massArray[p] =
+                            vertex >= 0 && static_cast<size_t>(vertex) < source->mesh.vertexMass.size()
+                                ? source->mesh.vertexMass[static_cast<size_t>(vertex)]
+                                : 0.0f;
+                    }
+                    shape->CalculateMass();
+                }
+            }
+        }
+        if (SynthesizeBoxGeometryIfRequested(shape, model.sourcePath.c_str()))
+        {
+            Shape* geom = shape->GeometryLevel();
+            if (geom)
+                SynthesizeBoxGeometryMass(shape, geom, shape->_massArray, shape->_mass, shape->_invMass,
+                                          geom->_pointToVertex, geom->_vertexToPoint);
+        }
         shape->InitConvexComponents();
         shape->ScanProxies();
         shape->ScanProperties();
         shape->CalculateHints();
         shape->_propertyClass = shape->PropertyValue("class");
         shape->_propertyDammage = shape->PropertyValue("dammage");
+        LogCollisionStats(shape, model);
     }
 
     return shape;

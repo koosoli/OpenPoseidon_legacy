@@ -9,6 +9,7 @@
 #include <Poseidon/Asset/Formats/BISBinaryStream.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -229,7 +230,100 @@ class ODOLLoader
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
             model.lodLevels.push_back(std::move(lod));
         }
+
+        // COL-001: the physical body. Until this was carried the converter left
+        // every later-revision model at mass 0, which Object::IsPassable() reads
+        // as "a soldier may walk through this" -- the walk-through-walls report
+        // on every generation except OFP's own ODOL 7, whose converter (below)
+        // always copied these.
+        model.massArray.assign(info.massArray.begin(), info.massArray.end());
+        model.mass     = info.mass;
+        model.invMass  = info.invMass;
+        model.armor    = info.armor;
+        model.invArmor = info.invArmor;
+        model.centerOfMass = Vector3(info.centerOfMass.x, info.centerOfMass.y, info.centerOfMass.z);
+        for (int row = 0; row < 3; ++row)
+        {
+            model.invInertia[row * 3 + 0] = info.invInertia[row].x;
+            model.invInertia[row * 3 + 1] = info.invInertia[row].y;
+            model.invInertia[row * 3 + 2] = info.invInertia[row].z;
+        }
+        model.metadata["odolPropertyClass"]  = info.propertyClass;
+        model.metadata["odolPropertyDamage"] = info.propertyDamage;
+        // The mass total is what the binariser wrote, but a mass array with a
+        // zero total is a file that never had one computed. Sum it here so the
+        // IR carries the same number LODShape::CalculateMass would reach.
+        if (!(model.mass > 0.0f) && !model.massArray.empty())
+        {
+            double total = 0.0;
+            for (float m : model.massArray)
+                total += m;
+            if (total > 0.0)
+            {
+                model.mass    = static_cast<float>(total);
+                model.invMass = static_cast<float>(1.0 / total);
+            }
+        }
+
+        AssignSpecialLodIndices(model);
         return model;
+    }
+
+    // COL-001: the special-LOD index table, derived from the LOD resolutions.
+    //
+    // The file carries the same table as a run of signed bytes, and the runtime
+    // (LODShape::ScanShapes) recomputes it from the resolutions whenever
+    // OptimizeShapes runs, so the resolutions are the authority the engine
+    // actually uses. Deriving here rather than copying the bytes also sidesteps
+    // the one thing not measured about the byte run: revisions 54 and 73 widen
+    // it by one and two slots whose position inside the run is not established.
+    //
+    // The fallbacks mirror ScanShapes exactly: view geometry defaults to the
+    // geometry LOD, fire geometry to the view geometry, and a `firegeometry` /
+    // `viewgeometry` property on the geometry LOD redirects either back to it.
+    static void AssignSpecialLodIndices(Model& model)
+    {
+        model.memoryIdx = model.geometryIdx = model.geometryFireIdx = model.geometryViewIdx = -1;
+        model.geometryViewPilotIdx = model.geometryViewGunnerIdx = -1;
+        model.geometryViewCommanderIdx = model.geometryViewCargoIdx = -1;
+        model.landContactIdx = model.roadwayIdx = model.pathsIdx = model.hitpointsIdx = -1;
+
+        const int lodCount = static_cast<int>(std::min<size_t>(model.lodLevels.size(), 127));
+        for (int i = 0; i < lodCount; ++i)
+        {
+            const int8_t index = static_cast<int8_t>(i);
+            switch (Poseidon::Model::ClassifyLodResolution(model.lodLevels[i].resolution))
+            {
+                case Poseidon::Model::LodPurpose::Geometry:              model.geometryIdx = index; break;
+                case Poseidon::Model::LodPurpose::Memory:                model.memoryIdx = index; break;
+                case Poseidon::Model::LodPurpose::LandContact:           model.landContactIdx = index; break;
+                case Poseidon::Model::LodPurpose::Roadway:               model.roadwayIdx = index; break;
+                case Poseidon::Model::LodPurpose::Paths:                 model.pathsIdx = index; break;
+                case Poseidon::Model::LodPurpose::HitPoints:             model.hitpointsIdx = index; break;
+                case Poseidon::Model::LodPurpose::ViewGeometry:          model.geometryViewIdx = index; break;
+                case Poseidon::Model::LodPurpose::FireGeometry:          model.geometryFireIdx = index; break;
+                case Poseidon::Model::LodPurpose::ViewPilotGeometry:     model.geometryViewPilotIdx = index; break;
+                case Poseidon::Model::LodPurpose::ViewGunnerGeometry:    model.geometryViewGunnerIdx = index; break;
+                case Poseidon::Model::LodPurpose::ViewCommanderGeometry: model.geometryViewCommanderIdx = index; break;
+                case Poseidon::Model::LodPurpose::ViewCargoGeometry:     model.geometryViewCargoIdx = index; break;
+                default: break;
+            }
+        }
+        if (model.geometryViewIdx < 0)
+            model.geometryViewIdx = model.geometryIdx;
+        if (model.geometryFireIdx < 0)
+            model.geometryFireIdx = model.geometryViewIdx;
+        if (model.geometryIdx >= 0)
+        {
+            const auto& properties = model.lodLevels[static_cast<size_t>(model.geometryIdx)].mesh.properties;
+            for (const auto& property : properties)
+            {
+                if (property.name == "firegeometry" && std::atoi(property.value.c_str()) > 0)
+                    model.geometryFireIdx = model.geometryIdx;
+                if (property.name == "viewgeometry" && std::atoi(property.value.c_str()) > 0)
+                    model.geometryViewIdx = model.geometryIdx;
+            }
+        }
     }
 
     static Mesh convertOdol73Mesh(const P3D::Odol73StaticLod& source)
