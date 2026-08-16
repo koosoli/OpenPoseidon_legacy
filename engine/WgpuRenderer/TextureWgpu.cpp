@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -65,6 +66,320 @@ int BcFormatFor(PacFormat fmt)
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// MAT-049 — the alpha SHAPE guard: where a texel's alpha sits, not just how much of it.
+//
+// `ClassifyAlpha` (Graphics/Textures/PAADecoder.cpp) is a pure histogram: >= 2% partial
+// alpha => Blend, else >= 2% clear alpha => Cutout, else Opaque.  It has one structural
+// escape hatch — the all-clear (aMax == 0) demotion — and its own comment names what is
+// missing: "separating packed detail from an aggressive foliage mask needs a real
+// perimeter/speckle metric and a policy decision, not a guard."  This is that metric.
+//
+// WHY IT SUDDENLY MATTERS.  On CWA the histogram was never consulted: every alpha-bearing
+// texture in the retail corpus is DXT1, ARGB4444, AI88 or P8, and `ClassifyTextureAlpha`
+// short-circuits 1-bit alpha to Cutout without decoding anything (MAT-048's census: 5,397
+// DXT1, exactly ONE DXT5 in 6,976 textures).  The imported corpora invert that.  DayZ and
+// Reforger are BC3-dominated, `TextureSourceDDS::Init` sets `_hasAlpha` from the FORMAT
+// alone (`DdsImport.cpp:135` — DXT3/DXT5 => true, unconditionally), and until the block
+// scan landed the old whole-file path could not decode a DDS at all and returned a default
+// `AlphaStats` whose kind is Opaque.  So every BC2/BC3 texture in those worlds classified
+// Opaque by accident, and now classifies by content.  The classifier is being asked
+// questions it has never been asked before, and the two answers it gets wrong are:
+//
+//   1. DITHERED PACKED ALPHA read as a cutout mask.  `_BCR`-family rock textures carry
+//      detail, not coverage, in alpha.  `granite_05_bcr_ca` is 24.1% alpha-zero scattered
+//      as a dither, which the histogram calls Cutout; the draw path then forces a hard
+//      discard (EngineWgpu.cpp:2977-2987, `alphaRef = max(alphaRef, 0.5)`) and punches a
+//      quarter of the rock's texels out.  The owner's "stones are transparent".
+//
+//   2. AN ANTI-ALIASED MASK read as translucency.  A cutout authored with soft edges is
+//      mostly partial alpha AT those edges — the shipped Arma 3 pine leaf is 30.3% partial,
+//      the Enoch birch 5.8%, and 44 of 50 `plants_f` `_ca` textures trip the 2% floor
+//      (ShapeDraw.cpp:67-75, which has complained about exactly this since it was written;
+//      the DayZ leaf cards measure 11.7-12.2% partial).  Blend is not a shading tweak:
+//      `SectionIsBlend` (ShapeDraw.cpp:156) pulls the whole section OUT of the opaque pass
+//      into `Scene::DrawObjectsAndShadowsPass2`'s back-to-front pass, which sorts per OBJECT
+//      by far extent, does not sort sections within an object at all, and (since MAT-048)
+//      does not write depth.  A section that lands there stops occluding, stops casting, and
+//      stops being eligible for the GPU-driven retained path.
+//
+// Note that (2) is INVISIBLE to a pass-descriptor census.  `BuildRenderPassDescriptor` sees
+// only the section SPEC, so it will keep reporting `PassKind::WorldCutout` for a section that
+// `SectionIsBlend` is simultaneously routing to the blend pass.  Measuring the descriptor
+// does not exclude the alpha class, and a census that stops at the descriptor has not.
+//
+// WHAT THIS IS *NOT*, recorded so it is not re-proposed: the DayZ rail track "piano" banding.
+// That was the leading candidate for (2) and the census killed it.  All 57 `Rail_Track*.p3d`
+// reference PAA, not EDDS, so the block scan cannot reach them; their only albedo with any
+// transparency is `embankment_co.paa`, which is DXT1 (1-bit, short-circuited to Cutout
+// without a decode) and 1.47% clear — below the 2% floor — and whose clear texels are 94%
+// one contiguous full-width strip of dead atlas gutter, not a silhouette.  Nor is the
+// 0xc0 alpha-test reference implicated: the count of texels in the 128..192 band that a
+// threshold of 192 discards and 128 keeps is 0.000% on that texture, and 0 across all 133
+// converted Reforger `_ca.paa`.  Both suspects are excluded by measurement; the banding is
+// geometry or lighting, and WLD-021's three-sun-angle sampling is the test that decides it.
+//
+// THE TWO METRICS.  Both are one extra pass over the same top-mip alpha the histogram just
+// walked, and both are run only when they could change the verdict.
+//
+//   * CONTIGUITY, for (1).  The MEAN number of a texel's four orthogonal neighbours that are
+//     also clear, averaged over the clear texels (0..4; out of bounds counts as not-clear).
+//     A real mask's holes are contiguous, so most clear texels are hole interior and score
+//     near 4.  A dither is isolated texels by construction and scores low.
+//
+//     The threshold is not guessed, it is calibrated against a census of the actual corpora
+//     (2026-08-16).  Over ALL 133 converted Reforger `*_ca.paa`: p5 = 3.483, median = 3.894,
+//     and 129 of 133 score >= 3.0.  Adding BI-authored DayZ cutouts as controls:
+//
+//       chain-link `metal_fence_wire_ca`  3.959     `granite_05_bcr_ca`        2.245
+//       wire mesh  `wire_protection_ca`   3.935     `anthill_01_bcr_ca`        2.729
+//       leaf card  `t_betula2w_1_ca`      3.860     `st_metal_rust_rough01_..` 1.941
+//       railing    `woodenfence_01_..`    3.388     `st_plaster_bare_01_bcr_ca`1.169
+//       worst genuine cutout in corpus    3.267
+//
+//     Those are the ONLY four textures in the corpus below 3.0, and all four are `_BCR`
+//     textures whose alpha is a conversion artefact (see the note below).  3.0 therefore
+//     separates every genuine cutout from every artefact with ~1.0 of margin on a 0..4 scale.
+//
+//     WHY THE GRANITE ALPHA EXISTS AT ALL, since it decides whether this guard is a
+//     workaround or the fix.  The Reforger source `Granite_05_BCR.edds` has NO clear texel:
+//     alpha min 101, mean 239, and `_BCR` means base-colour + roughness, so that channel is
+//     roughness.  The asset ships no `_A` opacity map.  The converter nevertheless emitted a
+//     PAA whose alpha is 24.1% zero, and that alpha is uncorrelated with the source — mean
+//     source alpha is 238.8 under the texels it marked clear and 239.0 under the texels it
+//     marked opaque, i.e. indistinguishable.  It is noise.  The real fix is in the converter
+//     (`_BCR` alpha must not become an opacity mask when no `_A` map exists); this guard is
+//     the renderer refusing to act on it, which is worth having anyway because the installed
+//     tree is already full of such files.  MAT-047's FLAG-tagg patch is what made them
+//     visible: before it, granite had no taggs, `hasAlpha` was false and the pixels were
+//     never examined.
+//
+//   * BAND WIDTH, for (2).  Count the mask perimeter P (adjacent clear/non-clear texel
+//     pairs) and divide the partial-texel count by it.  That is the mean thickness, in
+//     texels, of the partial-alpha band.  An anti-aliased edge is 1-3 texels of gradient
+//     wrapped around a long perimeter, so the ratio is small.  Genuine translucency is an
+//     AREA of partial alpha, not a rim: cockpit glass measures ~18% mean alpha across
+//     essentially every texel with no holes at all (MAT-048 read TAGG AVGC 46/255 off
+//     `apach_in_skla.paa`), so its perimeter is zero and the ratio is unbounded.
+//
+// GLASS IS PROTECTED TWICE, deliberately, because demoting a cockpit pane to a hard alpha
+// test would be a far worse bug than the one being fixed: the Blend demotion requires
+// >= 2% CLEAR texels, and then requires the partial band to be thin.  Glass fails both —
+// it is partial everywhere with no holes to have a perimeter around.  Measured on the
+// corpus: DayZ's `window_set_ca.paa` is 0.00% clear / 98.62% partial, and CWA's Apache
+// `apach_in_skla.paa` is TAGG AVGC 46/255 across the pane.  Either test alone keeps them
+// blending; neither is ever reached, because the `pctClear >= 2.0` gate returns first.
+//
+// The rule is applied HERE, in the wgpu texture, rather than in `ClassifyAlpha` — that
+// function is shared with GL33 and with the offline tools, and this is a renderer routing
+// policy, not a truth about the file.  `WGR_ALPHA_SHAPE_GUARD=0` disables it wholesale;
+// both thresholds are separately overridable so a calibration run needs no rebuild.
+struct AlphaShape
+{
+    double meanClearNeighbours = 4.0; // over a==0 texels, mean count of clear 4-neighbours
+    double clusteredClearFrac = 1.0;  // of a==0 texels, share with >= 2 clear neighbours (logged)
+    double partialBandWidth = 0.0;    // partial texels per unit of clear/non-clear perimeter
+    bool measured = false;
+};
+
+double EnvDouble(const char* key, double fallback)
+{
+    const char* v = std::getenv(key);
+    if (!v || !*v)
+    {
+        return fallback;
+    }
+    char* end = nullptr;
+    const double parsed = std::strtod(v, &end);
+    return (end && end != v) ? parsed : fallback;
+}
+
+bool AlphaShapeGuardEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ALPHA_SHAPE_GUARD");
+        return !v || v[0] != '0';
+    }();
+    return enabled;
+}
+
+// The Blend -> Cutout half is DEFAULT OFF, and the asymmetry is deliberate.
+//
+// The Cutout -> Opaque half fixes a reported bug (the perforated granite) on four measured
+// textures, in the direction that keeps a surface visible; it is on.  This half fixes a bug
+// nobody reported.  It is real — ShapeDraw.cpp:67-88 has described its symptoms (no shadow,
+// accumulating canopy, order-dependent dark patches) since it was written, and
+// `SectionMaterialAlphaRoute` already applies exactly this demotion to the TreeAdv families
+// by RVMAT — but by histogram it would reach ALL of them at once: the DayZ leaf cards
+// measure 76.8% clear / 11.7% partial with a band width near 1, so every one flips pass on
+// the first run.  Moving all foliage from the back-to-front pass into the opaque pass with a
+// hard 0.5 discard is a large visual change that wants its own before/after capture, not a
+// side effect of a stones fix.
+//
+// `WGR_ALPHA_MASK_DEMOTE=1` turns it on.  The counter and the trace below report it either
+// way, so a run can measure how many textures it WOULD move before anyone enables it.
+bool AlphaMaskDemoteEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ALPHA_MASK_DEMOTE");
+        return v && v[0] != '0';
+    }();
+    return enabled;
+}
+
+// One pass over the RGBA-shaped buffer (alpha at byte 3), 4 neighbour loads per texel.
+AlphaShape MeasureAlphaShape(const uint8_t* rgba, int w, int h)
+{
+    AlphaShape shape;
+    if (!rgba || w <= 0 || h <= 0)
+    {
+        return shape;
+    }
+    const auto alphaAt = [rgba, w](int x, int y) -> int
+    { return rgba[(static_cast<size_t>(y) * static_cast<size_t>(w) + static_cast<size_t>(x)) * 4u + 3u]; };
+
+    size_t clear = 0, clustered = 0, clearAdjacency = 0, partial = 0, perimeter = 0;
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            const int a = alphaAt(x, y);
+            if (a != 0 && a != 255)
+            {
+                partial++;
+                continue;
+            }
+            if (a != 0)
+            {
+                continue;
+            }
+            clear++;
+            int clearNeighbours = 0;
+            int otherNeighbours = 0;
+            // Out-of-bounds neighbours are counted as neither, so an image-edge texel is
+            // judged on the neighbours it has.  Treating the border as clear would make a
+            // full-bleed mask look clustered; treating it as solid would make one look
+            // speckled.  Both are inventions; omitting is not.
+            const int nx[4] = {x - 1, x + 1, x, x};
+            const int ny[4] = {y, y, y - 1, y + 1};
+            for (int n = 0; n < 4; n++)
+            {
+                if (nx[n] < 0 || nx[n] >= w || ny[n] < 0 || ny[n] >= h)
+                {
+                    continue;
+                }
+                if (alphaAt(nx[n], ny[n]) == 0)
+                {
+                    clearNeighbours++;
+                }
+                else
+                {
+                    otherNeighbours++;
+                }
+            }
+            clearAdjacency += static_cast<size_t>(clearNeighbours);
+            if (clearNeighbours >= 2)
+            {
+                clustered++;
+            }
+            perimeter += static_cast<size_t>(otherNeighbours);
+        }
+    }
+
+    shape.meanClearNeighbours = clear ? static_cast<double>(clearAdjacency) / static_cast<double>(clear) : 4.0;
+    shape.clusteredClearFrac = clear ? static_cast<double>(clustered) / static_cast<double>(clear) : 1.0;
+    shape.partialBandWidth = perimeter ? static_cast<double>(partial) / static_cast<double>(perimeter)
+                                       : (partial ? std::numeric_limits<double>::infinity() : 0.0);
+    shape.measured = true;
+    return shape;
+}
+
+// How often each demotion fired, reported alongside the streaming stats.  A run in which
+// these are both zero has not exercised the guard, which is the thing a null A/B most needs
+// to be able to say about itself (MAT-048's lesson: a lever that cannot fire produces a null
+// that means nothing).
+std::atomic<uint64_t> GAlphaSpeckleDemotions{0}; // Cutout -> Opaque (dithered packed alpha)
+std::atomic<uint64_t> GAlphaMaskDemotions{0};    // Blend  -> Cutout (anti-aliased mask)
+
+bool AlphaShapeTraceEnabled()
+{
+    static const bool enabled = std::getenv("WGR_ALPHA_SHAPE_TRACE") != nullptr;
+    return enabled;
+}
+
+// Applied to every freshly computed `AlphaStats`, on both scan paths, so the block scan and
+// the whole-file decode cannot disagree about routing.  Returns the shape it measured (or an
+// unmeasured one when the histogram verdict was never in question) purely so callers can log
+// it; the verdict is written straight into `stats.kind`.
+AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w, int h, const char* name)
+{
+    AlphaShape shape;
+    if (!AlphaShapeGuardEnabled())
+    {
+        return shape;
+    }
+
+    static const double neighboursMin = EnvDouble("WGR_ALPHA_NEIGHBOURS_MIN", 3.0);
+    static const double bandWidthMax = EnvDouble("WGR_ALPHA_BAND_MAX", 4.0);
+
+    const bool couldBeSpeckle = stats.kind == AlphaStats::Cutout && stats.pctClear > 0.0;
+    const bool couldBeAntialiasedMask = stats.kind == AlphaStats::Blend && stats.pctClear >= 2.0;
+    if (!couldBeSpeckle && !couldBeAntialiasedMask)
+    {
+        return shape; // glass, solid colour, and every already-Opaque texture exit here
+    }
+
+    shape = MeasureAlphaShape(rgba, w, h);
+    if (!shape.measured)
+    {
+        return shape;
+    }
+
+    const AlphaStats::Kind before = stats.kind;
+    if (couldBeSpeckle && shape.meanClearNeighbours < neighboursMin)
+    {
+        // Dispersed clear texels: packed data in the alpha lane, not coverage.  Opaque is
+        // the safe failure for the same reason ClassifyAlpha's all-clear guard says it is —
+        // a wrongly-opaque surface looks wrong, a wrongly-perforated one looks broken.
+        stats.kind = AlphaStats::Opaque;
+        GAlphaSpeckleDemotions.fetch_add(1, std::memory_order_relaxed);
+    }
+    else if (couldBeAntialiasedMask && shape.partialBandWidth <= bandWidthMax &&
+             shape.meanClearNeighbours >= neighboursMin)
+    {
+        // Counted whether or not it is applied, so a run can size this change before taking
+        // it (see `AlphaMaskDemoteEnabled`).
+        GAlphaMaskDemotions.fetch_add(1, std::memory_order_relaxed);
+        // The contiguity test is required on THIS branch too, and it is not symmetry for its
+        // own sake.  A bark colour map carries a non-coverage alpha channel (the Stratis
+        // pinus nigra bark classifies Blend) and can trip the 2%-clear floor with scattered
+        // near-zero texels.  Demoting it to Cutout would hand it to the draw path's
+        // `alphaClass == Cutout` branch (EngineWgpu.cpp:2977), which raises alphaRef to 0.5 —
+        // and a hard discard on bark removes the trunk, the exact failure ShapeDraw.cpp's
+        // TreeAdvTrunk note exists to prevent.  Requiring the clear texels to form real,
+        // contiguous holes keeps scattered packed alpha out of the mask class entirely.
+        // A thin partial rim around real holes is an anti-aliased cutout.  Cutout keeps the
+        // section in the opaque pass, where it occludes, depth-writes, casts a shadow and is
+        // eligible for the GPU-driven retained path — and MSAA alpha-to-coverage still
+        // anti-aliases the edge the author drew.
+        if (AlphaMaskDemoteEnabled())
+        {
+            stats.kind = AlphaStats::Cutout;
+        }
+    }
+    if (AlphaShapeTraceEnabled())
+    {
+        LOG_INFO(Graphics,
+                 "Wgpu alpha shape: {} {}x{} clear={:.1f}% partial={:.1f}% clearNb={:.3f} clustered={:.3f} "
+                 "bandWidth={:.2f} {} -> {}",
+                 name ? name : "<unnamed>", w, h, stats.pctClear, stats.pctPartial, shape.meanClearNeighbours,
+                 shape.clusteredClearFrac, shape.partialBandWidth, AlphaKindName(before), AlphaKindName(stats.kind));
+    }
+    return shape;
+}
+
 // Decode the top (full-resolution) mip once and classify its alpha channel — mirrors
 // TextureGL33::ScanTopMipAlphaClass. Reads the texture bytes through the VFS (works for
 // PBO-packed textures) and decodes via the shared DecodePAABuffer, which handles every
@@ -95,7 +410,9 @@ AlphaStats ScanTopMipAlphaStats(const char* name)
     {
         return {};
     }
-    return ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
+    AlphaStats stats = ClassifyAlpha(img.rgba.data(), static_cast<size_t>(img.width) * static_cast<size_t>(img.height));
+    RefineAlphaClassByShape(stats, img.rgba.data(), img.width, img.height, name);
+    return stats;
 }
 
 // The block formats that carry a multi-bit alpha channel, i.e. exactly the ones that can
@@ -133,7 +450,8 @@ bool IsBlockAlphaFormat(PacFormat fmt)
 //
 // Still the TOP mip -- the buffer is full resolution and every texel is classified. Nothing
 // here samples a smaller level; the crisp 0/255 holes a cutout needs are all present.
-bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, PacFormat fmt, AlphaStats& out)
+bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, PacFormat fmt, AlphaStats& out,
+                             const char* name)
 {
     if (!blocks || !IsBlockAlphaFormat(fmt) || w <= 0 || h <= 0)
     {
@@ -190,6 +508,7 @@ bool ClassifyAlphaFromBlocks(const uint8_t* blocks, size_t size, int w, int h, P
     }
 
     out = ClassifyAlpha(alphaOnly.data(), static_cast<size_t>(w) * static_cast<size_t>(h));
+    RefineAlphaClassByShape(out, alphaOnly.data(), w, h, name);
     return true;
 }
 
@@ -305,13 +624,15 @@ void ReportTextureStreamStats(uint64_t uploads)
     LOG_INFO(Graphics,
              "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
              "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaBlockScans={} "
-             "alphaHandoffs={} alphaMs={:.1f} totalMs={:.1f}",
+             "alphaHandoffs={} alphaSpeckleDemotions={} alphaMaskDemotions={} alphaMs={:.1f} totalMs={:.1f}",
              uploads, TextureMipOpenCount(),
              static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
              readUs / 1000.0, createUs / 1000.0, GTextureStreamStats.fallbacks.load(std::memory_order_relaxed),
              fallbackUs / 1000.0, GTextureStreamStats.alphaScans.load(std::memory_order_relaxed),
              GTextureStreamStats.alphaBlockScans.load(std::memory_order_relaxed),
-             GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed), alphaUs / 1000.0,
+             GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed),
+             GAlphaSpeckleDemotions.load(std::memory_order_relaxed),
+             GAlphaMaskDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
 }
 
@@ -429,7 +750,7 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
 
     TopMipHandoff& handoff = GTopMipHandoff;
     if (handoff.Matches(Name(), w, h, fmt) &&
-        ClassifyAlphaFromBlocks(handoff.blocks.data(), handoff.topSize, w, h, fmt, _alphaStats))
+        ClassifyAlphaFromBlocks(handoff.blocks.data(), handoff.topSize, w, h, fmt, _alphaStats, Name()))
     {
         handoff.Release();
         path = AlphaScanPath::Handoff;
@@ -449,7 +770,7 @@ bool TextureWgpu::ScanTopMipAlphaBlocks(AlphaScanPath& path)
     {
         return false;
     }
-    if (!ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, _alphaStats))
+    if (!ClassifyAlphaFromBlocks(blocks.data(), blocks.size(), w, h, fmt, _alphaStats, Name()))
     {
         return false;
     }
@@ -770,12 +1091,23 @@ uint64_t TextureWgpu::EnsureUploaded()
             // format, or a class already decided -- is not worth parking, and one that is
             // costs only a vector move, never a decode.
             const char* name = Name();
-            if (_gpuHandle && _alphaClass < 0 && !_alphaStatsScanned && _src->IsAlpha() && IsBlockAlphaFormat(dst) &&
-                name && *name)
+            // `firstLevel == 0` is load-bearing, not belt-and-braces.  Under
+            // WGR_TEXTURE_MIP_BIAS the chain STARTS lower, so `blocks` does not contain the
+            // top mip at all — and the classification needs precisely the top mip, because a
+            // smaller level blurs a cutout's crisp 0/255 holes into false partial alpha and
+            // mis-routes the section to the blend pass.  Parking a biased chain also made
+            // `offsets[1]` a heap over-read whenever the bias left a single level
+            // (`offsets` has `levelCount` entries, but the guard tested `_nMipmaps`), and the
+            // garbage size then fed a bounds check.  With the park confined to the unbiased
+            // case, `levelCount == _nMipmaps` and the index is in range by construction.
+            // A biased run simply misses the handoff and re-reads level 0 from the file,
+            // which is slower and correct.
+            if (_gpuHandle && firstLevel == 0 && _alphaClass < 0 && !_alphaStatsScanned && _src->IsAlpha() &&
+                IsBlockAlphaFormat(dst) && name && *name)
             {
                 TopMipHandoff& handoff = GTopMipHandoff;
                 // offsets[1] is where level 1 begins, i.e. exactly the size of level 0.
-                handoff.topSize = _nMipmaps > 1 ? offsets[1] : total;
+                handoff.topSize = levelCount > 1 ? offsets[1] : total;
                 handoff.blocks = std::move(blocks);
                 handoff.w = _mipmaps[0]._w;
                 handoff.h = _mipmaps[0]._h;

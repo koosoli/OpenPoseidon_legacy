@@ -1009,11 +1009,16 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     }
     if (const char* tau = std::getenv("WGR_AUTO_EXPOSURE_TAU"))
     {
-        // Adaptation TIME CONSTANT in seconds, converted per frame to the shader's per-frame
-        // ease (UpdateAutoExposureRate). `rate` as authored is per-frame, so adaptation runs
-        // more than twice as fast on a 45 fps world as on a 20 fps one — any tuning done
-        // against it is tuning against one world's framerate (RND-039). Opt-in, because
-        // switching the units silently would change the feel of an already-tuned value.
+        // An OVERRIDE of the authored `ExposureSettings::rateTau`, which is now the default
+        // source (0.4 s) because auto-exposure itself is default-on as of 2026-08-16. The
+        // time-constant form is what makes that safe to ship: `rate` as authored is
+        // per-FRAME, so adaptation runs more than twice as fast on a 45 fps world as on a
+        // 20 fps one, and a default-on feature tuned that way is tuned against whichever
+        // world it happened to be measured on (RND-039).
+        //
+        // `WGR_AUTO_EXPOSURE_TAU=0` is a real setting, not a way of spelling "unset": it
+        // selects the legacy per-frame `rate` so the two eases can be captured against each
+        // other without a rebuild. Hence a NEGATIVE unset sentinel.
         const float v = std::strtof(tau, nullptr);
         _autoExposureTau = v > 0.0f ? v : 0.0f;
     }
@@ -1391,8 +1396,10 @@ void EngineWgpu::NextFrame()
         UpdateAutoTonemap();
         UpdateAutoSky();
         UpdateSunGlareExposure();
-        // No-op unless WGR_AUTO_EXPOSURE_TAU is set; must run BEFORE PushRenderParams, which
-        // reads the derived rate.
+        // Derives this frame's adaptation ease from the time constant (ExposureSettings::rateTau,
+        // or the WGR_AUTO_EXPOSURE_TAU override). No-op only when that resolves to <= 0, which
+        // restores the authored per-frame `rate`. Must run BEFORE PushRenderParams, which reads
+        // the derived value.
         UpdateAutoExposureRate();
         // Push the consolidated look block (picks up the auto-ToD updates; renderer diffs the
         // terrain sub-blocks) and then the per-frame sky runtime (celestial + camera).
@@ -2914,6 +2921,93 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                      "so the section is on the white fallback and a reflection would blow it out",
                      rp);
     }
+    // MAT-050 -- THE MISSING DIAGNOSTIC, and the correction that goes with it.
+    //
+    // Until now there was NO untextured warning on this path at all. The retained path has had
+    // one since MAT-043 (`section draws UNTEXTURED`, in RegisterGpuModel), but a model is forced
+    // OFF the retained path by the emitter bail (`StaticEmitterRadianceTarget(...) < 1.0f`),
+    // which is exactly what every `\lamps\`, `\lights\`, `\runwaylights\` and `warninglight`
+    // material matches -- so a lamp or a floodlight mast could never produce the one diagnostic
+    // that would have named it, and the only model in a whole Stratis run to report UNTEXTURED
+    // was an 18-face training plank that happened to stay retained.
+    //
+    // The two lines that DO exist here are per-MATERIAL, not per-section: `no bindable Stage0`
+    // and `no albedo for` both dedup on the RVMAT path and fire at most once. A material whose
+    // FIRST section carries a face texture logs `faceTexture=1` and is then silent forever --
+    // including for every later section of that same material that has no face texture. That is
+    // not a small blind spot: of the 2,595 graphical sections in the loaded Stratis corpus, 430
+    // (600,873 faces, 45.6% of the world's geometry) carry no face texture at all and are
+    // resolved by the material alone. This says, per section, when that resolution came back
+    // with nothing -- and says WHY, which of "no material", "material bound nothing", "face
+    // texture named but failed to upload" it was.
+    //
+    // Deduped on (shape address, section, RVMAT), matching the WGR_MATERIAL_DEBUG_RVMAT trace's
+    // key so the two logs join. The COUNT is unconditional and reported on powers of two, for
+    // the reason the per-material lines are insufficient: first occurrences are not a
+    // denominator, and "how much of the screen is this" is the only question that decides
+    // whether it matters.
+    if (d.texture_id == 0)
+    {
+        ++_untexturedDirectDraws;
+        // Scope guard (MAT-050): `debugMaterialPath` is non-null exactly when this section
+        // names an RVMAT, which is the population whose white is a FAILURE rather than the
+        // legacy multiply identity. A materialless CWA section is left on white unless
+        // WGR_UNTEXTURED_ALBEDO=all explicitly asks otherwise.
+        const bool sectionNamesMaterial = debugMaterialPath && *debugMaterialPath;
+        const uint64_t neutral = UntexturedAlbedoHandle(sectionNamesMaterial);
+        // Pointer-derived key, no string built: this runs per untextured section per FRAME, and
+        // the pre-existing per-material logs went to pointer keys (WGR_DRAW_SECTION_ENV_CACHE)
+        // for exactly this reason. A Shape's address is stable for the frame and the (address,
+        // section) pair is what the WGR_MATERIAL_DEBUG_RVMAT=__trace__ log keys on too.
+        const uint64_t key =
+            reinterpret_cast<uintptr_t>(&sMesh) ^ (static_cast<uint64_t>(static_cast<uint32_t>(beg)) << 48);
+        static std::unordered_set<uint64_t> loggedUntexturedDirect;
+        // Capped, because a diagnostic that drowns the log it lives in is not readable. The
+        // per-section identity of the FIRST 64 is what locates the offender; past that the
+        // only useful fact is the size of the population, and the power-of-two counter below
+        // carries that at a fixed cost. (A Shape's address is stable while its model stays
+        // loaded, but it is an address, so a reload can re-key an already-reported section --
+        // one more reason not to let the count of these lines grow without bound.)
+        //
+        // The insert is UNCONDITIONAL so `distinct sections` in the counter line stays a real
+        // denominator; only the naming is capped.
+        constexpr size_t untexturedDirectLogCap = 64;
+        const bool firstForSection = loggedUntexturedDirect.insert(key).second;
+        if (firstForSection && loggedUntexturedDirect.size() <= untexturedDirectLogCap)
+        {
+            auto*       faceTexture = static_cast<TextureWgpu*>(sMesh.GetSection(beg).properties.GetTexture());
+            const char* faceName = faceTexture && faceTexture->Name() ? faceTexture->Name() : "";
+            // Four distinct causes, and they need four different fixes. Naming which one it
+            // was is the whole point: "untextured" alone sent the last investigation to the
+            // texture files, where nothing was wrong.
+            const char* why = "no face texture and the RVMAT bound no albedo";
+            if (!debugMaterialPath && !faceTexture)
+                why = "section has neither an RVMAT nor a face texture";
+            else if (!debugMaterialPath)
+                why = "no RVMAT, and the face texture did not upload";
+            else if (*faceName)
+                why = "RVMAT bound no albedo, and the named face texture did not upload";
+            else if (faceTexture)
+                why = "RVMAT bound no albedo, and the face texture has an empty name";
+            LOG_WARN(Graphics,
+                     "Wgpu material: per-draw section draws UNTEXTURED (fallback={}) shape={} section={} rvmat={} "
+                     "face={} indices={} why=\"{}\" untexturedDirectDraws={}",
+                     neutral ? "neutral" : "none", static_cast<const void*>(&sMesh), beg,
+                     debugMaterialPath ? debugMaterialPath : "<none>", *faceName ? faceName : "<none>", indexCount, why,
+                     _untexturedDirectDraws);
+        }
+        else if ((_untexturedDirectDraws & (_untexturedDirectDraws - 1)) == 0)
+        {
+            LOG_WARN(Graphics, "Wgpu material: per-draw UNTEXTURED draws so far: {} (distinct sections: {})",
+                     _untexturedDirectDraws, loggedUntexturedDirect.size());
+        }
+        // Substitute the neutral stand-in. Placed AFTER `reflectiveMaterial` above, so a
+        // fallback albedo still counts as "did not bind" for the DZ-006 reflection guard.
+        if (neutral)
+        {
+            d.texture_id = neutral;
+        }
+    }
     std::memcpy(d.world.m, &_world, sizeof(d.world.m));
     // Terrain conform: publish this instance's bilinear plane so the vertex
     // shader conforms the (undeformed) shared mesh, matching ForestPlain::Animate. d is
@@ -4079,6 +4173,188 @@ uint64_t EngineWgpu::ResolveMaterialBaseColour(const ShapeSection& section, bool
     return handle;
 }
 
+// MAT-050 -- an unresolved albedo must not be the brightest thing in the frame.
+//
+// WHAT WAS MEASURED, and why this is not a cosmetic preference. Parsing the ODOL 73 section
+// tables of the 285 models a Stratis capture actually loads gives 2,595 graphical sections:
+//
+//    face texture only          2,060 sections     682,477 faces
+//    RVMAT Stage0 only            430 sections     600,873 faces   <-- no face texture at all
+//    both                          90 sections      38,127 faces
+//    NEITHER                       15 sections          52 faces
+//
+// So 45.6% of the world's faces have NO legacy face texture and depend entirely on the
+// material resolver below. When that resolver returns 0 the section keeps texture_id 0,
+// SharedTextures::texture_slot maps 0 to bindless slot 0, and slot 0 is the 1x1 opaque WHITE
+// texel -- albedo 1.0. In a daylight frame that is brighter than anything authored (of 4,273
+// Arma 3 textures only 35 average >= 250, every one of them UI art or the sun sprite), so the
+// failure does not present as "untextured"; it presents as a light source. Two owner reports,
+// one cause: a 2 px x 18 px mast at exactly (255,255,255) blooming into a disc, and building
+// far-LODs -- which are disproportionately the Stage0-only ones -- "looking wrong".
+//
+// WHICH GENERATION THIS IS ABOUT, because the same symptom has two causes and merging them
+// would hide one of them. Everything measured above is ARMA 3 (Stratis): the material EXISTS,
+// LoadTranslatedMaterial reads it, and it still yields no bindable Stage0 -- a resolution
+// failure inside a material the engine understands. The REFORGER "white sticks" report is a
+// different statement of the same pixel: 100% of Everon's materials are `.emat`, none of them
+// opens (the section keeps the raw Enfusion path while the textures were rewritten to the
+// deployed root), and `TranslateEmat` reads DayZ's `AlbedoMap`/`NormalMap` keys while only
+// 2.2% of 10,312 real Reforger `.emat` files name any key it reads -- the real ones are
+// `BCRMap`, `NMOMap`, `MaskMap`. On Everon white is therefore the EXPECTED output of a
+// material the engine cannot read at all, and grey here would only repaint that; the fix for
+// Reforger is in the .emat path (another session owns those files), not in this function.
+// This code changes what an unresolved section LOOKS like on both, and says so in the log on
+// both; it fixes the CAUSE on neither -- it is a floor under the symptom plus the diagnostic
+// that was missing.
+//
+// The correction is applied HERE and not to slot 0 itself. Slot 0 must stay white: it is the
+// multiply identity for every draw that legitimately carries no texture and puts its colour in
+// the material (2D fills, DrawLine, procedural constants), and repainting it would move pixels
+// that are correct today. This knows something slot 0 cannot -- that the draw is a 3D object
+// section whose albedo was supposed to resolve and did not.
+//
+// 128,128,128 is not a taste call either: the Arma 3 `*_mlod_co` placeholders, the closest
+// thing the corpus has to "a surface with no detail", average 100-150. A neutral mid-grey is
+// what an untextured object is SUPPOSED to look like, and it sits ~4x below white in linear
+// light -- under the bloom knee, so the orb cannot form even where the section stays wrong.
+//
+// SCOPE, and it is what makes the knob safe to turn on at all.
+//
+// White is not always wrong. A section that carries NO authored material is the original 2001
+// case: it has no texture BY DESIGN and its colour comes from the folded TLMaterial, where the
+// white texel is the multiply identity. Repainting those grey would halve every untextured
+// surface in Cold War Assault -- the game this engine is actually for -- to fix an Arma 3 bug.
+//
+// A section that NAMES AN RVMAT is a different statement: the material was supposed to supply
+// an albedo and did not, so 1.0 is not an identity, it is a failure wearing the brightest value
+// the format allows. Only those are in scope when the knob is on. Every case in the measured
+// Stratis corpus is of that kind.
+//
+// AND THE DEFAULT IS STILL OFF, deliberately, even with that scope. The two populations are
+// separated by a heuristic ("names an RVMAT"), not by a proof, and the correction is a pixel
+// change to a shipping game whose content this session cannot measure -- CWA's own PBOs carry
+// no RVMATs, but no run has yet demonstrated that no CWA-era section reaching this engine names
+// one. A wrong grey on a legacy surface is silent, permanent and indistinguishable from art;
+// a wrong white is loud and already understood. So the WHITE ships and the fix is opt-in until
+// a capture pair says otherwise.
+//
+// What ships unconditionally is the DIAGNOSTIC below it: the per-draw UNTEXTURED warning that
+// never existed on this path, and the counters. Those change no pixel.
+//
+// WGR_UNTEXTURED_ALBEDO:
+//   unset / "0" / "off" / "white"   leave texture_id 0 -- the exact pre-MAT-050 white (DEFAULT)
+//   "1" / "on"                      128,128,128 on RVMAT-bearing sections only (the fix)
+//   "all"                           the same, and ALSO sections with no authored material
+//                                   (legacy CWA content included -- this is the one that can
+//                                   move shipped pixels, so it is never implied)
+//   "R,G,B[,A]"                     any 0-255 tuple, RVMAT scope; append ",all" for the wider
+//                                   one. "255,0,255" makes every unresolved OBJECT section
+//                                   magenta and, unlike WGR_TEXTURE_FALLBACK_DEBUG, covers
+//                                   ONLY those -- so a magenta pixel means "this section's
+//                                   albedo did not resolve", with none of the ambiguity of the
+//                                   2D fills and constant-colour draws that also share slot 0.
+namespace
+{
+struct UntexturedAlbedoConfig
+{
+    bool enabled = false;             // DEFAULT: today's behaviour, no pixel moves
+    bool includeMaterialless = false; // "all": also correct sections with no RVMAT
+    uint8_t rgba[4] = {128, 128, 128, 255};
+    std::string raw = "<unset>"; // echoed in the announcement, so the log says what was asked
+};
+
+const UntexturedAlbedoConfig& UntexturedAlbedo()
+{
+    static const UntexturedAlbedoConfig cfg = []
+    {
+        UntexturedAlbedoConfig out;
+        const char* v = std::getenv("WGR_UNTEXTURED_ALBEDO");
+        if (!v || !*v)
+            return out;
+        out.raw = v;
+        // Lowercased once and compared by value. This translation unit deliberately avoids
+        // _stricmp/strcasecmp -- it builds for Linux too and the two platforms spell that
+        // function differently (see the same note in FarTierSettings).
+        std::string lowered(v);
+        for (char& c : lowered)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (lowered == "0" || lowered == "off" || lowered == "white" || lowered == "none")
+            return out; // an explicit restatement of the default
+        out.enabled = true;
+        int channel[4] = {out.rgba[0], out.rgba[1], out.rgba[2], 255};
+        int parsed = 0;
+        for (std::size_t at = 0; at < lowered.size();)
+        {
+            const std::size_t comma = lowered.find(',', at);
+            std::string token = lowered.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+            at = (comma == std::string::npos) ? lowered.size() : comma + 1;
+            const std::size_t first = token.find_first_not_of(" \t");
+            const std::size_t last = token.find_last_not_of(" \t");
+            token = (first == std::string::npos) ? std::string() : token.substr(first, last - first + 1);
+            if (token == "all")
+            {
+                // Scanned as a TOKEN, not a substring: a substring search would have made
+                // any future value containing those three letters silently widen the scope.
+                out.includeMaterialless = true;
+                continue;
+            }
+            if (parsed >= 4 || token.empty() || token.find_first_not_of("0123456789") != std::string::npos)
+                continue; // "1", "on", anything non-numeric: a switch, not a colour
+            channel[parsed++] = int(std::clamp<long>(std::strtol(token.c_str(), nullptr, 10), 0, 255));
+        }
+        // A LONE number is a switch, not a colour: reading "1" as red would be a trap.
+        if (parsed >= 3)
+            for (int i = 0; i < 4; i++)
+                out.rgba[i] = static_cast<uint8_t>(channel[i]);
+        return out;
+    }();
+    return cfg;
+}
+} // namespace
+
+uint64_t EngineWgpu::UntexturedAlbedoHandle(bool sectionHasMaterial)
+{
+    const UntexturedAlbedoConfig& cfg = UntexturedAlbedo();
+    // ANNOUNCE ON THE FIRST UNTEXTURED SECTION, on or off. This function is only reached when
+    // a section genuinely resolved no albedo, so the line's PRESENCE is the proof that the
+    // condition occurred and its text is the proof of what was done about it. Without it a
+    // capture that looks unchanged has two readings -- "nothing was untextured" and "the knob
+    // was never set" -- and that ambiguity is exactly what made the WGR_TEXTURE_FALLBACK_DEBUG
+    // magenta A/B unreadable (zero magenta pixels, no way to tell which). Same reasoning, same
+    // remedy, as announce_fallback_texel in rust/src/textures.rs.
+    static bool announced = false;
+    if (!announced)
+    {
+        announced = true;
+        LOG_INFO(Graphics,
+                 "Wgpu material: at least one section resolved NO albedo this run; untextured-albedo "
+                 "correction is {} (WGR_UNTEXTURED_ALBEDO={}) colour=rgba({},{},{},{}) scope={}",
+                 cfg.enabled ? "ON" : "OFF -- those sections keep the 1.0 white at bindless slot 0",
+                 cfg.raw, int(cfg.rgba[0]), int(cfg.rgba[1]), int(cfg.rgba[2]), int(cfg.rgba[3]),
+                 cfg.includeMaterialless ? "every untextured section (\"all\")"
+                                         : "sections that name an RVMAT");
+    }
+    if (!cfg.enabled || !_wbank)
+        return 0;
+    // THE SCOPE GUARD. A section with no authored material is the legacy multiply-identity
+    // case and is left alone unless "all" was asked for; see the block comment above.
+    if (!sectionHasMaterial && !cfg.includeMaterialless)
+        return 0;
+    if (_untexturedAlbedoHandle)
+        return _untexturedAlbedoHandle;
+    // CreateDynamic uploads immediately and never goes through the file source, so this
+    // cannot fail the way a missing .paa can, and it is exempt from the texture LRU
+    // (TrimResidency skips IsDynamicTexture).
+    _untexturedAlbedo = _wbank->CreateDynamic(1, 1, cfg.rgba, sizeof(cfg.rgba), false);
+    if (auto* texture = static_cast<TextureWgpu*>(_untexturedAlbedo.GetRef()))
+        _untexturedAlbedoHandle = texture->GpuHandle();
+    LOG_INFO(Graphics,
+             "Wgpu material: untextured-section albedo bound as rgba({},{},{},{}) handle={} "
+             "(unset WGR_UNTEXTURED_ALBEDO to restore the 1.0 white fallback)",
+             int(cfg.rgba[0]), int(cfg.rgba[1]), int(cfg.rgba[2]), int(cfg.rgba[3]), _untexturedAlbedoHandle);
+    return _untexturedAlbedoHandle;
+}
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
@@ -4481,6 +4757,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 return v && std::strcmp(v, "0") != 0;
             }();
             bool           baseFromConstant = false;
+            // MAT-050: set when nothing resolved this section's albedo and the neutral 1x1
+            // stand-in was substituted. A substituted albedo is NOT a real one, so anything
+            // downstream that keys off "has a texture" must keep treating it as absent --
+            // notably the DZ-003 reflection, which on a fallback albedo produces the same
+            // blown-out surface the `mat.texture_id != 0` guard below was added to prevent.
+            bool           sectionUntextured = false;
             const uint64_t baseColour = ResolveMaterialBaseColour(s->GetSection(i), &baseFromConstant);
             const bool     faceHasTexture = mat.texture_id != 0;
             // Suppressed: the RVMAT offered only a constant and the face has the real image.
@@ -4551,6 +4833,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             }
             else if (mat.texture_id == 0)
             {
+                sectionUntextured = true;
                 // MAT-043: the terminal case. No RVMAT albedo AND no face texture to stand
                 // in, so this section will draw with the no-texture default -- flat light
                 // grey, near-black once lit. `fallback=none` in ResolveMaterialBaseColour's
@@ -4574,13 +4857,25 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 int   secFaces = 0, bigFaces = 0;
                 float diag = 0.0f, maxFace = 0.0f, lo[3], hi[3];
                 sectionExtent(i, secFaces, diag, maxFace, bigFaces, lo, hi);
+                // MAT-050: bind the neutral stand-in rather than leaving the section on white.
+                // Counted unconditionally -- the WARNING is deduped per (model, rvmat), so it
+                // reports first occurrences, and first occurrences are not a denominator.
+                ++_untexturedRetainedSections;
+                // Scope guard (MAT-050), the twin of DrawSectionTL's: only a section that
+                // NAMED an RVMAT is corrected by default. `sec2.surfMat` is null exactly when
+                // `rvmat` above degraded to "<none>".
+                const bool sectionNamesMaterial = !sec2.surfMat.IsNull() && rvmat && *rvmat;
+                const uint64_t neutral = UntexturedAlbedoHandle(sectionNamesMaterial);
+                if (neutral)
+                    mat.texture_id = neutral;
                 static std::unordered_set<std::string> loggedUntextured;
                 if (loggedUntextured.insert(std::string(shape->Name()) + "|" + rvmat).second)
                     LOG_WARN(Graphics,
-                             "Wgpu material: section draws UNTEXTURED (fallback=none) model={} lod={} section={} "
-                             "rvmat={} faces={} diag={} maxFace={} bigFaces={} min=({},{},{}) max=({},{},{})",
-                             shape->Name(), level, i, rvmat, secFaces, diag, maxFace, bigFaces, lo[0], lo[1], lo[2],
-                             hi[0], hi[1], hi[2]);
+                             "Wgpu material: section draws UNTEXTURED (fallback={}) model={} lod={} section={} "
+                             "rvmat={} faces={} diag={} maxFace={} bigFaces={} min=({},{},{}) max=({},{},{}) "
+                             "untexturedRetainedSections={}",
+                             neutral ? "neutral" : "none", shape->Name(), level, i, rvmat, secFaces, diag, maxFace,
+                             bigFaces, lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], _untexturedRetainedSections);
             }
             // The per-texel specular map, when the material names one. With it bound
             // the flat constant is applied in full and the map scales it per texel,
@@ -4601,7 +4896,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // wrong surface instead of a dull one. See the per-draw twin in DrawSectionTL.
             if (MaterialIsReflective(s->GetSection(i)))
             {
-                if (mat.texture_id != 0)
+                if (mat.texture_id != 0 && !sectionUntextured)
                 {
                     sec.flags |= WGR_MODEL_SECTION_REFLECTIVE;
                 }
@@ -5758,23 +6053,35 @@ void EngineWgpu::UpdateAutoTonemap()
     // The push happens in NextFrame after UpdateAutoSky (PushRenderParams).
 }
 
-// Opt-in only (WGR_AUTO_EXPOSURE_TAU>0). `ExposureSettings::rate` is authored as a PER-FRAME
-// ease and documented framerate-dependent (Engine.hpp:1767): at 0.03/frame adaptation settles in
-// ~1.5 s at 20 fps and ~0.7 s at 45 fps, so the two worlds measured this session adapt at more
-// than 2x different speeds from the same number. That makes any tuning of `rate` a property of
-// whichever world it was tuned on, which is why RND-039 flags it as a defect to fix in passing.
+// The framerate-independent adaptation ease, and as of 2026-08-16 the DEFAULT one, because
+// auto-exposure itself is now default-on (Engine.hpp, ExposureSettings::enabled).
 //
-// The exponential ease with a time constant is the standard correction: alpha = 1 - exp(-dt/tau)
-// reproduces the same settling TIME at any framerate. It is left off by default because changing
-// the units of an already-tuned value silently would alter the feel of the ImGui slider without
-// anyone asking for it; when the owner has measured a tau he likes, this is the switch to make
-// default and the per-frame form to retire.
+// `ExposureSettings::rate` is authored as a PER-FRAME ease and is framerate-dependent: at
+// 0.03/frame adaptation settles in ~1.5 s at 20 fps and ~0.7 s at 45 fps, so the two worlds
+// measured this session adapt at more than 2x different speeds from the same number. Shipping
+// a default-on feature on that ease would mean shipping a feel tuned against whichever world it
+// was measured on, and it is the one defect RND-039 flagged as disqualifying for a default.
+//
+// alpha = 1 - exp(-dt/tau) is the standard correction: the same settling TIME at any framerate.
+// The time constant comes from `ExposureSettings::rateTau` (0.4 s authored, live on the Tonemap
+// tab's "Adapt time (s)"), and WGR_AUTO_EXPOSURE_TAU overrides it -- including with 0, which
+// selects the legacy per-frame `rate` and is the A/B arm for this change.
 //
 // dt is measured here from steady_clock rather than taken from the engine because EngineWgpu has
-// no frame-delta of its own, and this path only runs when explicitly asked for.
+// no frame-delta of its own.
+float EngineWgpu::EffectiveAutoExposureTau() const
+{
+    // Read fresh every frame: `_exposure` is replaced wholesale by SetExposureSettings when the
+    // dev panel moves a slider, so caching this would make "Adapt time (s)" take effect only
+    // after a restart -- exactly the kind of silently-inert control this session is fixing
+    // elsewhere.
+    return _autoExposureTau >= 0.0f ? _autoExposureTau : _exposure.rateTau;
+}
+
 void EngineWgpu::UpdateAutoExposureRate()
 {
-    if (_autoExposureTau <= 0.0f)
+    const float tau = EffectiveAutoExposureTau();
+    if (tau <= 0.0f)
     {
         _autoExposureRate = 0.0f; // PushRenderParams falls back to the authored per-frame rate
         _autoExposureLast = {};
@@ -5794,7 +6101,7 @@ void EngineWgpu::UpdateAutoExposureRate()
     // A long hitch (level load, alt-tab) must not snap the exposure: cap the step at 0.25 s so
     // the worst case is a quarter-second of adaptation, not an instant jump to the new target.
     const float step = std::clamp(dt, 0.0f, 0.25f);
-    _autoExposureRate = std::clamp(1.0f - std::exp(-step / _autoExposureTau), 1.0e-4f, 1.0f);
+    _autoExposureRate = std::clamp(1.0f - std::exp(-step / tau), 1.0e-4f, 1.0f);
 }
 
 void EngineWgpu::UpdateSunGlareExposure()
@@ -6378,8 +6685,11 @@ void EngineWgpu::PushRenderParams()
         _exposure.key,
         _exposure.minScale,
         _exposure.maxScale,
-        // The authored per-frame ease, unless WGR_AUTO_EXPOSURE_TAU asked for a framerate-
-        // independent one (UpdateAutoExposureRate leaves this 0 when it is off).
+        // The framerate-INDEPENDENT ease derived from the time constant, which is now the
+        // normal case (ExposureSettings::rateTau defaults to 0.4 s). UpdateAutoExposureRate
+        // leaves this 0 when the effective tau is <= 0 -- i.e. only when the authored rateTau
+        // is 0 or WGR_AUTO_EXPOSURE_TAU=0 asked for the legacy per-frame ease -- and also on
+        // the first frame in tau mode, where there is no measured dt yet.
         _autoExposureRate > 0.0f ? _autoExposureRate : _exposure.rate,
         _exposure.skyWeight,
         0.0f,

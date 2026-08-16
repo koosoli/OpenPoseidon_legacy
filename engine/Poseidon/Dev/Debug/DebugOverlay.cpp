@@ -4209,16 +4209,33 @@ void DrawTonemapTab()
     auto ex = GEngine->GetExposureSettings();
     bool exChanged = false;
     exChanged |= ImGui::Checkbox("Enabled##exposure", &ex.enabled);
-    ImGui::SetItemTooltip("Off by default so it doesn't fight manual per-ToD exposure tuning.\n"
-                          "When on, exposure is scaled toward key / scene-average luminance.");
+    ImGui::SetItemTooltip("ON by default since 2026-08-16. Exposure is scaled toward\n"
+                          "key / scene-average luminance, so a bright sky no longer\n"
+                          "burns out (measured: 23.2% of pixels clipped -> 0.6%).\n\n"
+                          "If the scene visibly PUMPS as you turn the camera, narrow\n"
+                          "Min/Max scale before turning this off — 0.55..1.10 measured\n"
+                          "within 0.2% of the full 0.25..4.0 range on the test pose.");
     ImGui::BeginDisabled(!ex.enabled);
     exChanged |=
         ImGui::SliderFloat("Key (target grey)##exposure", &ex.key, 0.02f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
     exChanged |= ImGui::SliderFloat("Min scale##exposure", &ex.minScale, 0.05f, 1.0f, "%.3f");
+    ImGui::SetItemTooltip("Lower bound on the exposure multiplier. Raising this toward 1.0\n"
+                          "is the first thing to try against pumping — it bounds how dark\n"
+                          "the iris can close, which is what makes a turn visible.");
     exChanged |= ImGui::SliderFloat("Max scale##exposure", &ex.maxScale, 1.0f, 16.0f, "%.3f");
+    exChanged |= ImGui::SliderFloat("Adapt time (s)##exposure", &ex.rateTau, 0.0f, 3.0f, "%.2f");
+    ImGui::SetItemTooltip("Adaptation TIME CONSTANT in seconds: 1 - exp(-dt / tau).\n"
+                          "Framerate-independent, so the same setting adapts at the same\n"
+                          "real speed on a 20 fps world and a 45 fps one.\n"
+                          "Set to 0 to fall back to the legacy per-frame rate below.");
+    ImGui::BeginDisabled(ex.rateTau > 0.0f);
     exChanged |=
-        ImGui::SliderFloat("Adapt rate##exposure", &ex.rate, 0.005f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Per-frame ease toward the target (framerate-dependent for now).");
+        ImGui::SliderFloat("Adapt rate (legacy)##exposure", &ex.rate, 0.005f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetItemTooltip("Per-frame ease toward the target. FRAMERATE-DEPENDENT: the same\n"
+                          "value adapts twice as fast on a 45 fps world as on a 20 fps one,\n"
+                          "so anything tuned with it is tuned against one world's framerate.\n"
+                          "Only used when Adapt time is 0.");
+    ImGui::EndDisabled();
     exChanged |= ImGui::SliderFloat("Sky weight##exposure", &ex.skyWeight, 0.0f, 1.0f, "%.2f");
     ImGui::SetItemTooltip("Metering weight of the top of the frame (sky) vs the bottom (ground).\n"
                           "1.0 = uniform; lower biases exposure toward the ground so a bright\n"

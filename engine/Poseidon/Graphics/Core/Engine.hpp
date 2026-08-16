@@ -1755,14 +1755,45 @@ class Engine : public IGraphicsEngine
     // every later vtable slot and misdispatches across TUs (see git history / memory).
     struct ExposureSettings
     {
-        // Manual filmic exposure is the stable default. Auto exposure remains available
-        // in the Tonemap tab, but its 4x adaptation range can flash the whole scene
-        // when a player turns from dark terrain toward a bright sky or water glint.
-        bool enabled = false;
+        // ON by default since 2026-08-16, at the owner's explicit request, and measured
+        // before flipping. Takistan hour 8 at the worst-clipping pose on record, same
+        // binary, only this flag differing:
+        //
+        //     off   mean luminance 155.1, 23.17% of pixels >= 250
+        //     on    mean luminance 123.9,  0.59% of pixels >= 250
+        //
+        // i.e. clipping falls from a quarter of the frame to under one percent. The sky
+        // keeps its cloud structure instead of burning out, and as a side effect the
+        // long-standing "Arma 2 roads are white" complaint largely goes with it — that was
+        // never a texture bug, it was the palest large surface in an overexposed frame
+        // clipping first (see WLD-024).
+        //
+        // The previous comment here read "Manual filmic exposure is the stable default...
+        // its 4x adaptation range can flash the whole scene when a player turns from dark
+        // terrain toward a bright sky or water glint." That risk is REAL and is not
+        // disproved by a settled capture — a still frame cannot show pumping. Two things
+        // reduce it, and a third is the actual mitigation:
+        //   1. `rateTau` below makes adaptation framerate-INDEPENDENT, so it no longer runs
+        //      twice as fast on a 45 fps world as on a 20 fps one. Tuning against one
+        //      world's framerate was the deeper half of the original problem.
+        //   2. The range is still 0.25..4.0 (16:1). Narrowing it is the lever to reach for
+        //      FIRST if pumping is reported — see the Tonemap tab.
+        //   3. If it does pump in motion, turn it off here, or narrow minScale/maxScale
+        //      toward 0.55..1.10, which measured within 0.2% of the full range on the test
+        //      pose. Almost all of the benefit is available from a much narrower band.
+        bool enabled = true;
         float key = 0.18f;      // target middle-grey luminance (higher = brighter)
         float minScale = 0.25f; // clamp on the exposure multiplier
         float maxScale = 4.0f;
-        float rate = 0.03f;     // per-frame adaptation ease (0..1; framerate-dependent)
+        // Per-frame ease, kept for the legacy path and for `rateTau <= 0`. Framerate
+        // DEPENDENT, which is why it is no longer the default mechanism.
+        float rate = 0.03f;
+        // Adaptation time constant in SECONDS. When > 0 the backend uses
+        // 1 - exp(-dt / rateTau) instead of `rate`, so the same setting adapts at the same
+        // real-world speed on every world regardless of framerate. 0 restores `rate`.
+        // 0.4 s is a deliberately unhurried iris: fast enough to stop a sky white-out,
+        // slow enough that ordinary look-around does not read as the scene breathing.
+        float rateTau = 0.4f;
         // Spatial metering: relative weight given to the TOP of the frame (the sky) vs
         // the bottom (the ground), so a bright sky in view doesn't drag the average up
         // and over-darken the ground. 1.0 = uniform; lower biases metering toward the

@@ -1,6 +1,7 @@
 use slotmap::{Key, KeyData, SlotMap};
 
 use crate::ffi::WgrSampler2D;
+use crate::log::{LogSink, log_level};
 
 slotmap::new_key_type! {
     struct TextureKey;
@@ -280,24 +281,44 @@ pub struct SharedTextures {
 // That is the same trap that made `WGR_ALPHA_BLOCK_SCAN=0` a worthless A/B on a game with no BC2
 // textures: a null that could not have been anything else, read as exoneration. A diagnostic whose
 // inactivity is indistinguishable from a clean result is worse than none, so this says which it is.
-fn announce_fallback_texel(texel: [u8; 4]) {
-    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
-    ANNOUNCED.call_once(|| {
-        if texel == [0xFF, 0xFF, 0xFF, 0xFF] {
-            eprintln!("[wgr] texture fallback texel: default opaque white (slot 0)");
+//
+// AND IT MUST REACH THE LOG, not stderr. `eprintln!` here was the same as saying nothing: the
+// capture launcher deliberately never redirects stderr (redirecting kills the renderer with os
+// error 232, and capture-arms.ps1 records that as a trap), so a line written there is
+// unrecoverable. That is exactly how one magenta A/B came back with zero magenta pixels and no
+// way to tell "nothing sampled slot 0" from "the lever never fired". It now goes through
+// `LogSink` — the same C++ callback every other Rust-side gate announcement uses, appearing in
+// the game log prefixed `wgpu:` — with `eprintln!` kept for a console-attached run.
+fn announce_fallback_texel(log: &LogSink, texel: [u8; 4]) {
+    let default = texel == [0xFF, 0xFF, 0xFF, 0xFF];
+    let line = if default {
+        "wgpu texture fallback texel: default opaque white at bindless slot 0 \
+         (WGR_TEXTURE_FALLBACK_DEBUG=1 recolours it magenta)"
+            .to_string()
+    } else {
+        format!(
+            "wgpu texture fallback texel: DEBUG rgba({},{},{},{}) IS ACTIVE -- every tinted \
+             surface in this capture is sampling bindless slot 0, i.e. an UNRESOLVED texture, \
+             not shading",
+            texel[0], texel[1], texel[2], texel[3]
+        )
+    };
+    eprintln!("[wgr] {line}");
+    // WARN when the lever is on: a capture whose pixels are deliberately falsified must be
+    // impossible to mistake for a production one when the log is read back months later.
+    log.log(
+        if default {
+            log_level::INFO
         } else {
-            eprintln!(
-                "[wgr] texture fallback texel: DEBUG rgba({},{},{},{}) — every magenta/tinted \
-                 surface in this capture is an UNRESOLVED texture, not shading",
-                texel[0], texel[1], texel[2], texel[3]
-            );
-        }
-    });
+            log_level::WARN
+        },
+        &line,
+    );
 }
 
-fn fallback_texel() -> [u8; 4] {
+fn fallback_texel(log: &LogSink) -> [u8; 4] {
     let texel = fallback_texel_inner();
-    announce_fallback_texel(texel);
+    announce_fallback_texel(log, texel);
     texel
 }
 
@@ -357,6 +378,10 @@ impl SharedTextures {
         bc_supported: bool,
         object_cap: u32,
         partially_bound: bool,
+        // Only used to announce the slot-0 texel (see `announce_fallback_texel`). Taken by
+        // reference and not stored: `LogSink` holds a raw C++ pointer and is neither Send nor
+        // Sync, and this type is built once on the renderer's own thread.
+        log: &LogSink,
     ) -> Self {
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_texture_layout"),
@@ -487,7 +512,7 @@ impl SharedTextures {
             1,
             1,
             TextureFormat::Rgba8,
-            &fallback_texel(),
+            &fallback_texel(log),
         );
         let white_view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let white_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {

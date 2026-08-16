@@ -7,6 +7,8 @@
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/Graphics/Shared/SDLEventWindow.hpp>
 #include <Poseidon/Foundation/Types/LLinks.hpp>
+#include <Poseidon/Foundation/Types/Pointers.hpp>       // Ref<> (MAT-050's untextured stand-in)
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>   // Texture, complete for the Ref<> member
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 
@@ -422,14 +424,21 @@ class EngineWgpu : public EngineDummy
     // frame from NextFrame, before the render-params push.
     void UpdateAutoSky();
     void SyncWaterLookProfile();
-    // Gentle, view-dependent eye accommodation for the visible sun. Kept separate
-    // from scene-average auto-exposure, which remains disabled to prevent white-outs.
+    // Gentle, view-dependent eye accommodation for the visible sun. Kept separate from
+    // scene-average auto-exposure, which is a different measurement (frame luminance, not
+    // sun visibility) and which -- as of 2026-08-16 -- is itself enabled by default; the
+    // stale note here said it "remains disabled to prevent white-outs".
     void UpdateSunGlareExposure();
-    // Convert WGR_AUTO_EXPOSURE_TAU (seconds) into the per-frame ease the exposure shader
-    // wants, using this frame's measured wall-clock delta. No-op unless the env var is set,
-    // so the authored per-frame `rate` stays the default behaviour. See RND-039: `rate` is
-    // documented framerate-dependent, which makes any tuning specific to one world's fps.
+    // Convert the adaptation TIME CONSTANT (seconds) into the per-frame ease the exposure
+    // shader wants, using this frame's measured wall-clock delta. See RND-039: the authored
+    // `rate` is per-FRAME and therefore framerate-dependent, which makes any tuning of it
+    // specific to one world's fps -- the defect that must not ship with a default-on feature.
     void UpdateAutoExposureRate();
+    // The time constant actually in force: the WGR_AUTO_EXPOSURE_TAU override when the env
+    // var was set (including a deliberate 0, which selects the legacy per-frame `rate`),
+    // otherwise the authored `ExposureSettings::rateTau`. Read every frame, not cached, so a
+    // live change on the Tonemap tab's "Adapt time (s)" slider takes effect immediately.
+    float EffectiveAutoExposureTau() const;
 
     SDL_Window* _window = nullptr;
     WgrRenderer* _renderer = nullptr;
@@ -447,10 +456,15 @@ class EngineWgpu : public EngineDummy
     bool _tonemapAuto = true;
     Engine::TonemapSettings _tonemap;
     Engine::ExposureSettings _exposure;
-    // WGR_AUTO_EXPOSURE_TAU: adaptation time constant in seconds; 0 = off (use the authored
-    // per-frame _exposure.rate unchanged). Kept OUT of _exposure so the ImGui Tonemap tab keeps
-    // showing/owning the authored value rather than a per-frame recomputed one.
-    float _autoExposureTau = 0.0f;
+    // WGR_AUTO_EXPOSURE_TAU, an OVERRIDE of `_exposure.rateTau` and not the source of it.
+    // NEGATIVE = the env var was not set, so the authored `rateTau` decides; >= 0 = the env
+    // var was set and wins, with an explicit 0 meaning "use the legacy per-frame rate".
+    //
+    // The sentinel is negative rather than 0 precisely because 0 is a MEANINGFUL setting here:
+    // conflating "unset" with "off" would have made WGR_AUTO_EXPOSURE_TAU=0 indistinguishable
+    // from not passing it at all, and therefore useless as the A/B against a default-on
+    // feature -- which is the one comparison this variable now exists to make.
+    float _autoExposureTau = -1.0f;
     // Per-frame ease derived from _autoExposureTau; 0 = not in tau mode. PushRenderParams
     // prefers this over _exposure.rate when it is positive.
     float _autoExposureRate = 0.0f;
@@ -486,6 +500,35 @@ class EngineWgpu : public EngineDummy
     double _cloudOffsetClock = 0.0; // last sky clock value, for the dt
     bool _cloudOffsetInit = false;
     TextureBankWgpu* _wbank = nullptr;
+    // MAT-050 -- the 1x1 stand-in an OBJECT SECTION gets when nothing resolved its albedo.
+    //
+    // A section that reaches the renderer with texture_id == 0 samples bindless slot 0, and
+    // slot 0 is opaque WHITE (rust/src/textures.rs). White is albedo 1.0, which in a daylight
+    // HDR frame is brighter than every authored surface on Stratis (of 4,273 Arma 3 textures
+    // only 35 average >= 250, all UI/overlay art), so an unresolved section does not merely
+    // look wrong -- it out-shines the sun-lit world and blooms. That is the "bright orbs"
+    // report, and, on the far LODs of buildings, the "textures look wrong" one.
+    //
+    // Slot 0 itself must stay white: it is the multiply identity for every draw that has no
+    // texture BY DESIGN and carries its colour in the material (2D fills, lines, procedural
+    // constants). So the correction is applied here, at the one place that knows the draw is a
+    // 3D object section whose albedo genuinely failed to resolve. Created lazily on first need
+    // through the texture bank's dynamic path, so a session that never hits the case allocates
+    // nothing. Owned by the bank (Ref keeps it alive for the session).
+    //
+    // OFF BY DEFAULT (`WGR_UNTEXTURED_ALBEDO`, see UntexturedAlbedoHandle). Nothing about the
+    // shipped frame changes until the knob is set; what ships unconditionally is the
+    // DIAGNOSTIC -- the counters below and the per-draw UNTEXTURED warning that never existed
+    // on the direct path, which is why a lamp mast could sample slot 0 for a whole session
+    // without a single line naming it.
+    Ref<Texture> _untexturedAlbedo;
+    uint64_t _untexturedAlbedoHandle = 0;
+    // How much took that fallback, per path, so a run reports the size of the problem rather
+    // than only the first offender of each material. The direct one counts DRAWS (a section is
+    // re-submitted every frame it is visible); the retained one counts sections, since
+    // registration happens once per shape.
+    long long _untexturedDirectDraws = 0;
+    long long _untexturedRetainedSections = 0;
     SDLEventWindow _eventWindow;
     int _w = 0;
     int _h = 0;
@@ -637,6 +680,21 @@ class EngineWgpu : public EngineDummy
     // CONSTANT stage rather than a real image. The caller needs that to decide precedence
     // against the section's own face texture -- see MAT-045 at the call site.
     uint64_t ResolveMaterialBaseColour(const ShapeSection& section, bool* fromConstant = nullptr);
+    // MAT-050. The handle of the 1x1 neutral stand-in described at `_untexturedAlbedo`,
+    // creating it on first call, or 0 to leave the section on the white bindless slot 0.
+    //
+    // 0 is the DEFAULT answer: `WGR_UNTEXTURED_ALBEDO` is unset in a shipped run and the
+    // correction is off, so pixels are bit-identical to pre-MAT-050. `sectionHasMaterial`
+    // is the scope guard -- true only when the section NAMES an RVMAT that then failed to
+    // supply an albedo. A section with no authored material is the original 2001 case
+    // (colour in the folded TLMaterial, white texel as the multiply identity) and is never
+    // corrected unless `WGR_UNTEXTURED_ALBEDO=all` asks for it, so no shipped CWA pixel can
+    // move even when the knob is on.
+    //
+    // Announces its own state on the first untextured section of a run, whether on or off,
+    // so a capture with no visible change can distinguish "nothing was untextured" from
+    // "the lever never fired" -- see the announcement's twin in rust/src/textures.rs.
+    uint64_t UntexturedAlbedoHandle(bool sectionHasMaterial);
     // A section's per-texel specular map (RVMAT SpecularDetail) when its RVMAT names
     // a loadable one, or 0.
     uint64_t ResolveMaterialSpecularMap(const ShapeSection& section);
