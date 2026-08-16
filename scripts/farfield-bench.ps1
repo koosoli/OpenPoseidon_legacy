@@ -76,6 +76,19 @@ param(
     # --test-world-hour (0..23.99).  Negative means "leave the mission's own time alone".
     [double]$WorldHour = -1,
 
+    # --addon-root <dir>.  A foreign generation's world (Arma 3, DayZ) has no configs in the
+    # CWA install, so its models resolve only against the source game's Addons directory.
+    # Everon needs none because its models were exported into the game dir.  DayZ Chernarus
+    # needs --addon-root "<DayZ>\Addons".
+    [string]$AddonRoot = '',
+
+    # --mod <name>, repeatable.  A3 worlds mount through a MOD FOLDER (@a3stratis), and
+    # --addon-root REJECTS mod folders - they are not interchangeable.  Getting this wrong
+    # is silent: the world streams all its placements in, and the renderer registers a few
+    # hundred instances instead of a few hundred thousand, because every model resolved to
+    # nothing.  ALWAYS check objects.registered_instances against the census placement count.
+    [string[]]$Mod = @(),
+
     # Output root.  One sub-directory per -Label is created underneath.
     [string]$Out = '',
 
@@ -220,6 +233,14 @@ if (-not [string]::IsNullOrWhiteSpace($World)) {
     $worldPath = Resolve-InputPath -Path $World -What 'World (.wrp)'
     $worldMode = $true
 }
+$addonRootPath = ''
+if (-not [string]::IsNullOrWhiteSpace($AddonRoot)) {
+    if (-not (Test-Path -LiteralPath $AddonRoot)) { throw "Addon root not found: $AddonRoot" }
+    $addonRootPath = (Resolve-Path -LiteralPath $AddonRoot).Path
+    if (-not $worldMode) {
+        Write-Warning '-AddonRoot was given without -World; it only applies to a substituted world.'
+    }
+}
 if ($Freefly.Count -ne 0 -and $Freefly.Count -ne 5) {
     throw "-Freefly takes exactly 5 values (X Z Y azimuth elevation); got $($Freefly.Count)."
 }
@@ -328,6 +349,14 @@ try {
             if ($WorldHour -ge 0) {
                 $argumentParts += '--test-world-hour'
                 $argumentParts += [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0}', $WorldHour)
+            }
+            if (-not [string]::IsNullOrWhiteSpace($addonRootPath)) {
+                $argumentParts += '--addon-root'
+                $argumentParts += Quote-Arg $addonRootPath
+            }
+            foreach ($modName in $Mod) {
+                $argumentParts += '--mod'
+                $argumentParts += $modName
             }
         }
         if ($timedMode) {
@@ -482,6 +511,15 @@ try {
             if ($contended) { $contendedNote = '  [CONTENDED]' }
             Write-Output ("  frame {0:F3} ms | attributed {1:F3} | residual {2:F3} ({3:F1}%) | {4:F1}s wall{5}" -f `
                     $frameTotal, $attributed, $residual, $residualPercent, $elapsed, $contendedNote)
+            # Print the instance count every repeat.  A world whose models did not mount
+            # (wrong --mod / --addon-root) still streams every placement in and still
+            # produces a perfectly valid, perfectly meaningless capture; the ONLY cheap
+            # tell is that registered_instances is a few hundred instead of a few hundred
+            # thousand.  Two runs were lost to this before it was printed.
+            if (Test-JsonProperty -Object $metrics -Name 'objects') {
+                Write-Output ("  registered instances {0} | main {1} | main tris {2}" -f `
+                        $metrics.objects.registered_instances, $metrics.objects.main_instances, $metrics.objects.main_tris)
+            }
         }
         $results += $meta
     }
@@ -507,6 +545,8 @@ $manifest = [PSCustomObject][ordered]@{
     exe_written  = (Get-Item -LiteralPath $gameExe).LastWriteTime.ToString('o')
     mission      = $missionPath
     world        = $worldPath
+    addon_root   = $addonRootPath
+    mods         = @($Mod)
     freefly      = @($Freefly)
     world_hour   = $WorldHour
     backend      = $Backend
