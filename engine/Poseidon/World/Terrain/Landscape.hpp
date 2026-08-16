@@ -7,6 +7,8 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #include <array>
+#include <chrono>
+#include <list>
 #include <unordered_map>
 #include <vector>
 
@@ -614,6 +616,67 @@ class Landscape : public SerializeClass
     bool _modernObjectWindowGrowth = true;
     uint32_t _modernObjectTestUpdate = 0;
     int _modernObjectTestPhase = -1;
+
+    // ----------------------------------------------------------------------------------------
+    // (a) THE EVICTION CACHE. RND-040 measured created=15958 / released=77643 over 112 s at
+    // 30 m/s against 307 / 10895 at 5 m/s: eviction is destructive, so backtracking -- the
+    // commonest camera motion there is -- rebuilds from disk what it just threw away.
+    //
+    // The cache is keyed on the MODEL SHAPE, not on the Object, because that is where the cost
+    // is. ShapeBank holds a *weak* Link (Shape.hpp:1098-1104), so when the last Object
+    // referencing a model dies the LODShapeWithShadow dies with it and ShapeBank::New
+    // (ShapeDraw.cpp:353-362) drops the dead slot and reloads: ODOL decode, ShapeAdapter LOD
+    // conversion, OptimizeOneShape vertex-buffer creation. That is the 580 ms-per-128 the
+    // admission comment already names. An object reusing a LOADED model costs ~0.03 ms, so
+    // holding one strong Ref per recently-vacated model converts the expensive half of a
+    // re-admit into the cheap half.
+    //
+    // Bounded by DISTINCT MODEL COUNT, not by placement count or by bytes: a shape has no cheap
+    // byte size (ShapeBank's own probe reports items for exactly this reason, Shape.hpp:1111-
+    // 1116) and a world names a few hundred to a few thousand distinct models against millions
+    // of placements, so the count is the quantity that actually bounds the memory.
+    //
+    // The list is LRU-ordered, coldest at the front. The index maps shape -> its list slot so
+    // that touch, adopt and trim are all O(1); the Ref in the list is the only ownership this
+    // cache ever holds.
+    std::list<Ref<LODShapeWithShadow>> _modernObjectShapeCache;
+    std::unordered_map<LODShapeWithShadow*, std::list<Ref<LODShapeWithShadow>>::iterator>
+        _modernObjectShapeCacheIndex;
+    size_t _modernObjectShapeCacheLimit = 0; // 0 = cache off (WGR_OBJECT_STREAM_EVICT_CACHE=0)
+    uint64_t _modernObjectShapeCacheHits = 0;
+    uint64_t _modernObjectShapeCacheInserts = 0;
+    uint64_t _modernObjectShapeCacheDrops = 0;
+    bool _modernObjectShapeCacheRegistered = false;
+    // Declared LAST of the cache members so it is DESTROYED FIRST: the probe holds std::function
+    // closures over `this`, and CLDLink's destructor is what unlinks it from the global
+    // free-on-demand list. Destroying it before the containers it reads makes a pressure
+    // callback against a half-destroyed Landscape impossible.
+    Foundation::MemoryDomainProbe _modernObjectShapeCacheProbe;
+
+    // ----------------------------------------------------------------------------------------
+    // (b) PREFETCH STATE. The residency window is reactive: it early-outs until the camera has
+    // ALREADY crossed a 4-cell boundary, so every admit is on the critical path. These four
+    // fields carry a smoothed camera velocity between updates so the window centre can be biased
+    // ahead of the camera. Derived here rather than passed in because
+    // UpdateModernObjectResidency's only input is a position (TerrainWgpu.cpp:2485).
+    bool _modernObjectVelocityValid = false;
+    float _modernObjectLastCameraX = 0.0f;
+    float _modernObjectLastCameraZ = 0.0f;
+    std::chrono::steady_clock::time_point _modernObjectLastCameraTime{};
+    float _modernObjectVelocityX = 0.0f; // m/s, exponentially smoothed
+    float _modernObjectVelocityZ = 0.0f;
+    float _modernObjectLeadMetres = 0.0f; // last applied lead distance, for the progress row
+    // The radius, in cells, at which the desired set actually ran out of budget -- NOT the
+    // candidate window radius. The candidate window is grown until the budget binds, so on
+    // Everon it spans 64 cells while the desired set stops around 18 (~900 m). The prefetch lead
+    // must be capped against THIS number: capping against the candidate radius would push the
+    // window so far ahead that objects still behind the camera fall out of it.
+    uint32_t _modernObjectDesiredRadiusCells = 0;
+
+    // Eviction-cache maintenance. Definitions live beside the residency system in LandSave.cpp.
+    void RetainReleasedShape(LODShapeWithShadow* shape);
+    bool AdoptCachedShape(LODShapeWithShadow* shape);
+    size_t TrimModernObjectShapeCache(size_t keep);
     // Only the small subset of streamed objects that actually emits imported
     // marker lights needs ownership state. Scene keeps non-owning links, so
     // erasing an entry also removes its lights without a map-sized per-placement

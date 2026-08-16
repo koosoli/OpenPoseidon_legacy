@@ -33,6 +33,7 @@
 // FAR INSTANCE TIER — proxy dimensions read from a model's ModelInfo alone (no LOD body).
 #include <Poseidon/Asset/Formats/P3D/ModelProxyBounds.hpp>
 #include <cctype>
+#include <iterator> // std::prev, for the eviction cache's LRU list
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
@@ -1752,6 +1753,15 @@ bool FarProxyIsPrism(const char* path)
 }
 } // namespace
 
+// The object-streaming knobs are defined next to the residency system they govern, further down
+// this file. LoadOprwModern only reads them, at world load, to size the eviction cache and to
+// record the policy in the load log, so it needs the declarations and not the definitions.
+static size_t ObjectStreamShapeCacheLimit();
+static float ObjectStreamCeilingMs();
+static float ObjectStreamPrefetchSeconds();
+static float ObjectStreamPrefetchMinSpeed();
+static int ObjectStreamPrefetchMaxCells();
+
 // Modern OPRW worlds carry two grids: a coarse "land" grid for cell semantics,
 // materials and object lists, and a fine "terrain" grid for elevation. Preserve
 // that authored split. Landscape's height/surface queries operate in terrain
@@ -2204,6 +2214,47 @@ bool Landscape::LoadOprwModern(const char* path)
         else
             _modernObjectCreatesPerUpdate = 128;
 
+        // (a) THE EVICTION CACHE, and (b) the prefetch estimator, are per-world state: a new
+        // world's shapes have nothing to do with the previous world's, and a stale velocity
+        // would bias the first window centre of a world the camera has not moved in yet.
+        _modernObjectShapeCacheLimit = ObjectStreamShapeCacheLimit();
+        TrimModernObjectShapeCache(0);
+        _modernObjectShapeCacheHits = 0;
+        _modernObjectShapeCacheInserts = 0;
+        _modernObjectShapeCacheDrops = 0;
+        _modernObjectVelocityValid = false;
+        _modernObjectVelocityX = 0.0f;
+        _modernObjectVelocityZ = 0.0f;
+        _modernObjectLeadMetres = 0.0f;
+        _modernObjectDesiredRadiusCells = 0;
+        // Registered here rather than in the constructor because this translation unit owns the
+        // streaming system and the registry entry must exist exactly once per Landscape: the
+        // free-on-demand list is an intrusive CLList, so a second Register() of the same probe
+        // would corrupt it. The probe reports items, not bytes -- a shape has no cheap byte size
+        // -- and its Free hook empties the cache outright, which is safe by construction because
+        // the cache is a pure optimisation: losing it costs reload time and nothing else.
+        //
+        // Priority 0.25 puts it BELOW textures (0.5) and the shape bank (1.0) so the global
+        // pressure path reclaims this first, which is correct: it is the only one of the three
+        // that is redundant by design.
+        if (!_modernObjectShapeCacheRegistered)
+        {
+            _modernObjectShapeCacheRegistered = true;
+            _modernObjectShapeCacheProbe.Register(
+                "Models.StreamCache", 0.25f, {}, {}, [this] { return _modernObjectShapeCache.size(); },
+                [this](size_t) -> size_t
+                {
+                    TrimModernObjectShapeCache(0);
+                    // Deliberately reports zero bytes reclaimed. The contract is "bytes actually
+                    // freed" and a shape has no cheap byte size, so any number here would be
+                    // invented -- and an invented number that is too large makes
+                    // MemoryFreeOnDemandList::Free stop early (MemFreeReq.cpp:60) believing it
+                    // has reclaimed memory it has not. Zero errs toward freeing more elsewhere,
+                    // which is the safe direction under pressure.
+                    return static_cast<size_t>(0);
+                });
+        }
+
         int highestId = -1;
         for (size_t i = 0; i < placementLimit; ++i)
             highestId = std::max(highestId, world.objects[i].objectId);
@@ -2363,11 +2414,17 @@ bool Landscape::LoadOprwModern(const char* path)
                      modelsRead, _modernObjectModels.size(), modelsSkipped, farMs);
         }
 
+        // Report the streaming POLICY, not only its inputs. Three of these are new behaviour
+        // gated on env knobs, and a run that does not say which arm it is cannot be compared
+        // with one that does.
         LOG_INFO(World,
                  "Modern object streaming: retained {} compact placements in {} land cells; radius={} cells, "
-                 "resident budget={}, create batch={}, duplicate ids reassigned={}",
+                 "resident budget={}, create batch={}, duplicate ids reassigned={}; evict cache={} shapes, "
+                 "admit ceiling={:.1f} ms, prefetch={:.1f} s above {:.1f} m/s (max {} cells)",
                  _modernObjectPlacements.size(), _modernObjectCells.size(), _modernObjectRadius,
-                 _modernObjectBudget, _modernObjectCreatesPerUpdate, reassigned);
+                 _modernObjectBudget, _modernObjectCreatesPerUpdate, reassigned, _modernObjectShapeCacheLimit,
+                 ObjectStreamCeilingMs(), ObjectStreamPrefetchSeconds(), ObjectStreamPrefetchMinSpeed(),
+                 ObjectStreamPrefetchMaxCells());
         ProgressFinish();
         return true;
     }
@@ -2522,10 +2579,288 @@ static bool ResidencyCandidateCacheEnabled()
     return on;
 }
 
+// ============================================================================================
+// (c) THE HARD WALL-CLOCK CEILING ON ONE ADMISSION PASS.
+//
+// WGR_OBJECT_STREAM_MAX_MS. The admit FLOOR (WGR_OBJECT_STREAM_MIN_BATCH, default = the legacy
+// 128) is mandatory: admitBudgetSpent() refuses to consult the clock until the floor has been
+// attempted, so the advertised 4 ms budget is unreachable and a batch that happens to contain
+// cold models costs whatever they cost. Measured on Reforger Everon: 580 ms for the mandatory
+// 128, 145x over budget (see the note at the admitBudgetSpent site below).
+//
+// This is the ceiling that overrides the floor. It is NOT a second budget: below the floor,
+// nothing stops admission except this ceiling, so a cheap all-warm batch still admits its full
+// 128 at full speed and only an EXPENSIVE batch is cut short. That distinction is the whole
+// reason for adding a ceiling instead of simply lowering the floor:
+// WGR_OBJECT_STREAM_MIN_BATCH=1 was measured to halve the stutter but LENGTHEN the total fill
+// by 39% (63 s -> 88 s), because it throttles the cheap batches too.
+//
+// 16 ms is chosen against the measured distribution, not from taste. RND-040 measured the
+// median frame at 24-25 ms and the stall frames at 230-270 ms. A 16 ms ceiling turns a 250 ms
+// frame into roughly 41 ms (24 fps instantaneous) while leaving four times the nominal 4 ms
+// budget for admission, so it should cost far less fill time than MIN_BATCH=1 did. It cannot
+// bound the frame below `ceiling + one object`, because one object must always be attempted or
+// the fill would never terminate -- a single cold model is the residual tail and async
+// admission is the only thing that removes it.
+//
+// 0 disables the ceiling and restores exactly today's behaviour, so both arms come from one
+// binary.
+static float ObjectStreamCeilingMs()
+{
+    static const float ms = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_MAX_MS");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 16.0f;
+        return parsed >= 0.0f ? parsed : 16.0f;
+    }();
+    return ms;
+}
+
+// (a) WGR_OBJECT_STREAM_EVICT_CACHE: how many recently-vacated MODEL SHAPES to keep alive so a
+// returning camera re-admits instead of rebuilding. See the long note on the members in
+// Landscape.hpp. 0 disables the cache entirely and restores today's destructive eviction.
+//
+// WHAT THE DEFAULT OF 256 CLAIMS. It claims that on every world that uses this path -- Everon,
+// Chernarus, Stratis, Sahrani, Takistan and CWA -- keeping the geometry of up to 256 distinct
+// models resident beyond their last placement is affordable. The units matter: worlds name a
+// few hundred to a few thousand distinct models (Reforger Everon: 1,132), so 256 is an
+// overshoot of at most ~23% of Everon's ENTIRE model set, and much less on a world with more
+// models. It is bounded by model count, so a world with millions of placements does not make it
+// larger.
+//
+// The claim that has NOT been measured is the Chernarus one. Chernarus is texture-VRAM bound
+// and currently needs a mip bias to render at all, so a cache that cost texture VRAM would be
+// dangerous there specifically. Reading the code, this one should not: faces hold a raw
+// `Texture *` into the bank (Poly.hpp:29), the bank owns those entries for its own lifetime and
+// registers NO Free hook (TextureBankGL33_Core.cpp:69-74), so a texture's residency does not
+// depend on a shape holding it and letting the shape die would not have freed it. What the
+// cache retains is CPU-side geometry plus the shape's vertex buffers. That is an inference from
+// code and not a measurement; Chernarus is where it must be checked, and
+// WGR_OBJECT_STREAM_EVICT_CACHE=0 is the A/B.
+static size_t ObjectStreamShapeCacheLimit()
+{
+    static const size_t limit = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_EVICT_CACHE");
+        const long parsed = v ? std::strtol(v, nullptr, 10) : 256;
+        return static_cast<size_t>(std::clamp<long>(parsed, 0, 100000));
+    }();
+    return limit;
+}
+
+// (b) WGR_OBJECT_STREAM_PREFETCH_SECONDS: how far AHEAD of the camera, in seconds of travel, to
+// bias the residency window centre. 0 disables the lead and restores the reactive window.
+//
+// 2.0 s is the measured length of the stall train, not a guess: RND-040 binned frame cost by
+// time since the last recentre and found 118 frames holding ~250 ms for a full two seconds
+// after the log line. Leading by the same two seconds is what gives (c)'s per-frame ceiling
+// somewhere to put the work: the ceiling SPREADS a recentre over more frames, and without a
+// lead those extra frames are frames in which the objects are already needed and missing.
+// (b) and (c) are a pair; (b) alone moves the same synchronous cost earlier without shrinking
+// it, and (c) alone trades a stall for pop-in.
+static float ObjectStreamPrefetchSeconds()
+{
+    static const float seconds = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_PREFETCH_SECONDS");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 2.0f;
+        return parsed >= 0.0f ? parsed : 2.0f;
+    }();
+    return seconds;
+}
+
+// (b) WGR_OBJECT_STREAM_PREFETCH_MIN_SPEED: the speed, in m/s, below which no lead is applied at
+// all, with a linear ramp to full lead at twice that speed.
+//
+// The deadband is not timidity, it is the finding. RND-040 measured walking (5 m/s) at 46.6 fps
+// -- FASTER than its own static phase -- and only vehicle speed (30 m/s) at 4 frames per median
+// second. There is nothing to fix below ~8 m/s, and a lead that engaged there would buy nothing
+// while adding recentres every time a walking camera started or stopped. The ramp (rather than
+// a step) is what keeps a camera hovering around the threshold from oscillating the window
+// centre.
+static float ObjectStreamPrefetchMinSpeed()
+{
+    static const float speed = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_PREFETCH_MIN_SPEED");
+        const float parsed = v ? static_cast<float>(std::atof(v)) : 8.0f;
+        return parsed >= 0.0f ? parsed : 8.0f;
+    }();
+    return speed;
+}
+
+// (b) WGR_OBJECT_STREAM_PREFETCH_MAX_CELLS: absolute ceiling on the lead, in land cells. The
+// lead is ALSO capped at a fraction of the effective desired radius (see
+// PrefetchRadiusFraction), which is the cap that actually protects a small window; this one is
+// the backstop for an implausible velocity estimate.
+static int ObjectStreamPrefetchMaxCells()
+{
+    static const int cells = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_PREFETCH_MAX_CELLS");
+        const long parsed = v ? std::strtol(v, nullptr, 10) : 8;
+        return static_cast<int>(std::clamp<long>(parsed, 0, 4096));
+    }();
+    return cells;
+}
+
+// The lead may never exceed this fraction of the EFFECTIVE desired radius (the radius at which
+// the desired set ran out of object budget, not the grown candidate window). Everything the
+// window gives up at the back it gives up here, so this is the number that decides whether
+// prefetch can cause pop-in BEHIND a moving camera.
+//
+// The desired radius is world-dependent and much smaller than the candidate window: ~900 m on
+// Everon and ~550-711 m on Chernarus against a 3,200 m candidate window (see the window-growth
+// note in UpdateModernObjectResidency). A fixed lead in metres would therefore be mild on Everon
+// and severe on Chernarus, which is exactly the class of default this codebase keeps getting
+// wrong. Expressed as a fraction, 0.35 leaves at least 65% of the trailing radius intact on
+// every world -- ~585 m behind on Everon, ~360-460 m on Chernarus -- and at 30 m/s the
+// two-second lead is only 60 m, so this cap does not even bind until roughly 100 m/s (aircraft).
+static constexpr float PrefetchRadiusFraction = 0.35f;
+
+// A camera step larger than this between two updates is not motion, it is a teleport, and the
+// velocity estimator must not be poisoned by it. RND-040's own measuring driver did exactly
+// this twice -- camCommit over one waypoint interval divides by ~0 on a slow frame -- and
+// dragged residency to the map corner. Sized to be unreachable by honest motion: the worst
+// frame in that run was 1.555 s, which at 30 m/s is 47 m and at an aircraft's 100 m/s is 156 m.
+static constexpr float PrefetchTeleportMetres = 250.0f;
+// Time constant of the velocity smoother, seconds. This is what makes reversal and hard turns
+// degrade gracefully instead of snapping the window: the lead vector takes ~0.5 s to swing
+// round, during which it passes through zero (the true camera position), so the camera is never
+// left outside its own window.
+static constexpr float PrefetchSmoothingTau = 0.5f;
+// Longer than this between updates and there is no usable velocity to derive. Deliberately well
+// above the 1.555 s worst frame RND-040 measured -- the estimator is most needed precisely when
+// frames are slow, so a tight gap limit would disable prefetch during the stall it exists to
+// prevent.
+static constexpr float PrefetchMaxUpdateGapSeconds = 2.0f;
+
+// (a) WGR_OBJECT_STREAM_EVICT_CACHE_LAST_ONLY=0 caches a model on ANY release rather than only
+// on the release of its last holder. See the refcount test in RetainReleasedShape: that test is
+// a heuristic about who else holds the shape, and if some subsystem this file does not know
+// about keeps a transient Ref, the heuristic silently stops the cache filling at all. The log
+// row reports `cache=held/limit`, so a run that reads 0/256 has an answer available in one
+// restart instead of a code change.
+static bool ObjectStreamCacheLastHolderOnly()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_EVICT_CACHE_LAST_ONLY");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    return on;
+}
+
+// (a) Take ownership of a shape whose last streamed placement has just been released.
+//
+// SAFETY. The only thing this holds is a strong Ref to a LODShapeWithShadow, which is exactly
+// what a resident Object holds. It hands nothing out, it never resurrects an Object, and it
+// cannot double-free: ownership is the Ref in the list and nothing else, so dropping the entry
+// is the whole release protocol. The shape pointer returned by a later ShapeBank::New is the
+// same pointer any still-resident sibling placement would have got -- shape sharing between
+// placements of one model is the normal case, not a new one.
+//
+// MUST be called while the dying Object still holds its own reference. The refcount test below
+// depends on it, and so does the guarantee that `shape` is a live pointer at all.
+void Landscape::RetainReleasedShape(LODShapeWithShadow* shape)
+{
+    if (_modernObjectShapeCacheLimit == 0 || shape == nullptr)
+        return;
+    const auto slot = _modernObjectShapeCacheIndex.find(shape);
+    if (slot != _modernObjectShapeCacheIndex.end())
+    {
+        // Already held -- another placement of the same model was released earlier. Refresh
+        // recency; do NOT insert a second Ref, or the cache would be bounded by placements
+        // (millions) rather than by distinct models (hundreds).
+        _modernObjectShapeCache.splice(_modernObjectShapeCache.end(), _modernObjectShapeCache, slot->second);
+        return;
+    }
+    // CACHE ONLY THE MODEL THAT IS ACTUALLY ABOUT TO DIE.
+    //
+    // A recentre at 30 m/s releases roughly 3,700 objects (77,643 over 21 recentres, RND-040)
+    // but only a few hundred distinct models, and most of those models still have placements
+    // resident elsewhere in the window -- they are in no danger of being destroyed and caching
+    // them would spend every slot on models that did not need one, evicting the rare models
+    // that did. This is the whole difference between a cache that survives a recentre and one
+    // that is churned by it.
+    //
+    // The caller guarantees the dying Object still holds its Ref, so a count of exactly 1 means
+    // "this Object is the only holder and the shape dies with it" -- precisely the case worth
+    // paying memory for. The test errs toward NOT caching: any other live reference, including
+    // a transient one taken by a subsystem this file knows nothing about, reads as "someone else
+    // is keeping it alive" and the model is skipped. That is a missed optimisation, never a
+    // correctness problem, and WGR_OBJECT_STREAM_EVICT_CACHE_LAST_ONLY=0 is the A/B if the log
+    // shows the cache never filling.
+    if (ObjectStreamCacheLastHolderOnly() && shape->RefCounter() > 1)
+        return;
+    _modernObjectShapeCache.emplace_back(shape);
+    _modernObjectShapeCacheIndex.emplace(shape, std::prev(_modernObjectShapeCache.end()));
+    ++_modernObjectShapeCacheInserts;
+    TrimModernObjectShapeCache(_modernObjectShapeCacheLimit);
+}
+
+// (a) Hand a shape back to the Object that has just been admitted on it.
+//
+// The Object now owns the shape, so the cache entry is redundant and is dropped. Keeping it
+// would let the cache fill with shapes that are resident anyway, which costs nothing in memory
+// but silently stops the cache protecting anything -- the slots would all be spent on models
+// that were in no danger of being destroyed. Returns true if this admission was a hit, i.e. an
+// ODOL decode, LOD conversion and vertex-buffer build that did not happen.
+bool Landscape::AdoptCachedShape(LODShapeWithShadow* shape)
+{
+    if (shape == nullptr)
+        return false;
+    const auto slot = _modernObjectShapeCacheIndex.find(shape);
+    if (slot == _modernObjectShapeCacheIndex.end())
+        return false;
+    _modernObjectShapeCache.erase(slot->second);
+    _modernObjectShapeCacheIndex.erase(slot);
+    ++_modernObjectShapeCacheHits;
+    return true;
+}
+
+// (a) Drop the coldest entries until at most `keep` remain. Returns the number dropped.
+//
+// Dropping an entry is not a destruction: it releases one reference. If any Object is still
+// resident on that model the shape lives on exactly as before, and if none is, the shape is
+// destroyed at precisely the moment it would have been destroyed without this cache. That is
+// the argument that this cannot free something still in use -- the cache never shortens a
+// lifetime, it only ever extends one.
+size_t Landscape::TrimModernObjectShapeCache(size_t keep)
+{
+    size_t dropped = 0;
+    while (_modernObjectShapeCache.size() > keep)
+    {
+        LODShapeWithShadow* victim = _modernObjectShapeCache.front().GetRef();
+        _modernObjectShapeCacheIndex.erase(victim);
+        _modernObjectShapeCache.pop_front();
+        ++_modernObjectShapeCacheDrops;
+        ++dropped;
+    }
+    return dropped;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
+    {
+        // (a) STREAMING IS OFF, SO THE CACHE MUST NOT SURVIVE. This is reached both on a world
+        // that does not stream at all (the CWA islands) and on the frame after a world is torn
+        // down: Landscape's reset clears the placement database and sets _modernObjectStreaming
+        // false (Landscape.cpp:267-285) but knows nothing about this cache, so without this the
+        // shapes of a world that no longer exists would be held for the rest of the session --
+        // and Shape.hpp:1098-1104 warns specifically that a shape outliving its display
+        // transition is how face Texture* pointers come to dangle.
+        //
+        // The flush belongs one line above, in that reset, which is the file that owns the
+        // teardown. It is here because this session's file ownership stops at the residency
+        // system; this function runs every frame from TerrainWgpu::DrawTerrain, so the cache is
+        // released on the first frame after teardown rather than during it, and the cache is
+        // never drawn from in between.
+        if (!_modernObjectShapeCache.empty())
+            TrimModernObjectShapeCache(0);
         return;
+    }
     Vector3 effectivePosition = cameraPosition;
     // Deterministic residency-turnover smoke hook. It visits a non-overlapping
     // cell window after 180 updates and returns after 360, while the real camera
@@ -2549,6 +2884,105 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                      phase == 1 ? offsetCells : 0);
         }
     }
+    // ==========================================================================================
+    // (b) PREFETCH: LEAD THE CAMERA INSTEAD OF FOLLOWING IT.
+    //
+    // The window below is REACTIVE. It quantises the centre to 4 cells and early-outs until the
+    // camera has ALREADY crossed a boundary, so the objects on the far side of that boundary are
+    // admitted at the moment they are first needed and every admit is on the critical path.
+    // RND-040 showed the shape of the damage: spike SIZE is constant (~230-270 ms) and only
+    // FREQUENCY scales with speed -- 21 recentres in 112 s at 30 m/s against 2 in 119 s at
+    // 5 m/s -- and each recentre starts a ~2 s train of ~250 ms frames. This is the only one of
+    // the four causes that targets SPEED rather than cost.
+    //
+    // The velocity is derived here because the function's only input is a position
+    // (TerrainWgpu.cpp:2485) and this file owns the residency system; nothing upstream has to
+    // change to feed it.
+    //
+    // HOW IT DEGRADES, which is the whole design:
+    //   stationary  -- speed falls under the deadband, the lead ramps to zero and the centre is
+    //                  the camera's own cell, i.e. exactly today's behaviour. Coming to a stop
+    //                  costs at most one extra recentre as the lead unwinds, and (a) makes that
+    //                  recentre a cache hit rather than a rebuild.
+    //   reversing   -- the smoother turns the lead vector over ~0.5 s and it passes THROUGH zero
+    //                  on the way, so the window centre sweeps back across the camera rather
+    //                  than jumping past it. The camera is never outside its own window.
+    //   sharp turn  -- the estimate lags for ~0.5 s, so the lead points at the old heading and
+    //                  the centre sits off to one side by at most the lead distance. Bounded by
+    //                  the same cap as everything else; the cost is a few extra recentres during
+    //                  the turn, which is the trade (a) exists to make cheap.
+    //   teleport    -- rejected outright rather than smoothed, see PrefetchTeleportMetres.
+    const auto residencyNow = std::chrono::steady_clock::now();
+    const float rawCameraX = effectivePosition.X();
+    const float rawCameraZ = effectivePosition.Z();
+    if (!_modernObjectVelocityValid)
+    {
+        _modernObjectVelocityValid = true;
+        _modernObjectVelocityX = 0.0f;
+        _modernObjectVelocityZ = 0.0f;
+    }
+    else
+    {
+        const float dt = std::chrono::duration<float>(residencyNow - _modernObjectLastCameraTime).count();
+        const float dx = rawCameraX - _modernObjectLastCameraX;
+        const float dz = rawCameraZ - _modernObjectLastCameraZ;
+        const float step = std::sqrt(dx * dx + dz * dz);
+        if (dt <= 0.0f || dt > PrefetchMaxUpdateGapSeconds || step > PrefetchTeleportMetres)
+        {
+            // No usable interval, or a discontinuity. Drop to zero velocity rather than to a
+            // wrong one: a wrong lead is worse than no lead, because it evicts the band the
+            // camera is actually in.
+            _modernObjectVelocityX = 0.0f;
+            _modernObjectVelocityZ = 0.0f;
+        }
+        else
+        {
+            // Exponential smoothing with a time constant rather than a fixed per-frame weight,
+            // because this runs once per RENDERED frame and the frame rate is precisely what is
+            // unstable here. A fixed weight would smooth over 0.1 s at 40 fps and over 2 s at
+            // 4 fps -- least responsive exactly during the stall.
+            const float alpha = 1.0f - std::exp(-dt / PrefetchSmoothingTau);
+            _modernObjectVelocityX += (dx / dt - _modernObjectVelocityX) * alpha;
+            _modernObjectVelocityZ += (dz / dt - _modernObjectVelocityZ) * alpha;
+        }
+    }
+    _modernObjectLastCameraX = rawCameraX;
+    _modernObjectLastCameraZ = rawCameraZ;
+    _modernObjectLastCameraTime = residencyNow;
+
+    _modernObjectLeadMetres = 0.0f;
+    // The residency-turnover smoke hook above exists to make two screenshots directly
+    // comparable, and it works by TELEPORTING the effective centre on a phase change. A velocity
+    // estimator fed by teleports is meaningless, and a lead applied on top of the sweep offset
+    // would move the window the test is trying to pin. Prefetch is therefore off whenever that
+    // diagnostic is armed, so the existing smoke test measures exactly what it measured before.
+    const float prefetchSeconds = sweepCells == nullptr ? ObjectStreamPrefetchSeconds() : 0.0f;
+    if (prefetchSeconds > 0.0f)
+    {
+        const float speed = std::sqrt(_modernObjectVelocityX * _modernObjectVelocityX +
+                                      _modernObjectVelocityZ * _modernObjectVelocityZ);
+        const float minSpeed = ObjectStreamPrefetchMinSpeed();
+        // Ramp from no lead at minSpeed to full lead at twice minSpeed. See
+        // ObjectStreamPrefetchMinSpeed for why walking must be left alone.
+        const float engage =
+            minSpeed <= 0.0f ? 1.0f : std::clamp((speed - minSpeed) / minSpeed, 0.0f, 1.0f);
+        if (speed > 0.001f && engage > 0.0f)
+        {
+            // Cap against the EFFECTIVE desired radius (last update's, which is stable for a
+            // world) and not the grown candidate window. On the first update of a world the
+            // desired radius is not known yet, so fall back to the configured start radius.
+            const float radiusCells = _modernObjectDesiredRadiusCells > 0
+                                          ? static_cast<float>(_modernObjectDesiredRadiusCells)
+                                          : static_cast<float>(_modernObjectRadius);
+            const float capCells =
+                std::min(static_cast<float>(ObjectStreamPrefetchMaxCells()), radiusCells * PrefetchRadiusFraction);
+            const float lead = std::min(speed * prefetchSeconds * engage, std::max(0.0f, capCells * _landGrid));
+            effectivePosition[0] += _modernObjectVelocityX / speed * lead;
+            effectivePosition[2] += _modernObjectVelocityZ / speed * lead;
+            _modernObjectLeadMetres = lead;
+        }
+    }
+
     constexpr int QuantizeCells = 4;
     int centerX = std::clamp(static_cast<int>(std::floor(effectivePosition.X() * _invLandGrid)), 0, _landRange - 1);
     int centerZ = std::clamp(static_cast<int>(std::floor(effectivePosition.Z() * _invLandGrid)), 0, _landRange - 1);
@@ -2640,6 +3074,13 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     if (centerChanged)
     {
         std::fill(_modernObjectCellDesired.begin(), _modernObjectCellDesired.end(), 0);
+        // (b) Record where the desired set actually ran out of budget. The candidates are
+        // distance-sorted, so the last cell admitted carries the largest squared cell distance
+        // and that is the EFFECTIVE window radius -- the one the prefetch lead is capped
+        // against. It is much smaller than the candidate window (~18 cells against 64 on
+        // Everon), and nothing reported it before, which is how a lead expressed in metres would
+        // have been mild on one world and pop-in on another.
+        uint32_t desiredRadius2 = 0;
         for (const CellCandidate& cell : candidates)
         {
             const uint32_t count = static_cast<uint32_t>(_modernObjectCells[cell.index].size());
@@ -2647,7 +3088,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 break;
             _modernObjectCellDesired[cell.index] = 1;
             requested += count;
+            desiredRadius2 = std::max(desiredRadius2, cell.distance2);
         }
+        _modernObjectDesiredRadiusCells = static_cast<uint32_t>(std::sqrt(static_cast<float>(desiredRadius2)));
     }
     else
     {
@@ -2671,8 +3114,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 if (!object)
                     continue;
                 Ref<Object> keepAlive = object;
+                // (a) Take a reference to the MODEL before the Object that owns it dies at the
+                // end of this iteration. This is the whole eviction cache: `keepAlive` still
+                // holds the Object here, so the shape is guaranteed alive, and the cache's Ref
+                // is taken while it is. Nothing about the Object is retained -- it is destroyed
+                // exactly as before, on the same line, in the same frame.
+                LODShapeWithShadow* releasedShape = object->GetShape();
                 placement.resident = nullptr;
                 RemoveObject(keepAlive);
+                RetainReleasedShape(releasedShape);
                 _objectIds.erase(placement.id);
                 // Scene's light list consists of non-owning links. Dropping this
                 // object's owner entry invalidates those links and prevents marker
@@ -2696,9 +3146,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // exactly backwards. The sustainable travel speed works out at
     // `batch * fps / (2 * radius * density)`, so on a dense world at 5 fps the
     // streamer sustains ~40 m/s and any aircraft outruns it permanently. Worse, the
-    // deficit accumulates: each recentre destroys the trailing objects outright
-    // (there is no cache), so what the camera left behind must be rebuilt if it
-    // turns around.
+    // deficit accumulates: each recentre destroys the trailing objects outright, so
+    // what the camera left behind must be rebuilt if it turns around.
+    //
+    // That last sentence used to end "(there is no cache)". There is one now -- see (a) and
+    // RetainReleasedShape above -- but read it precisely: the OBJECT is still destroyed
+    // outright and still has to be recreated. What the cache saves is the MODEL behind it, and
+    // that is where the measured cost lives (a warm re-admit is ~0.03 ms against a cold model's
+    // ODOL decode, LOD conversion and vertex-buffer build). The accumulating deficit this
+    // paragraph describes is therefore reduced, not removed.
     //
     // The floor is the legacy batch, so nothing streams slower than it used to; the
     // time budget only lets a slow frame admit MORE. The hard cap bounds the worst
@@ -2727,14 +3183,34 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // makes it smoother. Which matters more is a judgement about felt experience, so it
     // wants a measurement and an owner, not a silent default change.
     const uint32_t admitFloor = ObjectStreamMinBatch(_modernObjectCreatesPerUpdate);
+    // (c) THE CEILING THAT MAKES THE FLOOR YIELD. See ObjectStreamCeilingMs for the reasoning
+    // and for why this is not simply a lower floor.
+    const float admitCeilingMs = ObjectStreamCeilingMs();
     auto admitBudgetSpent = [&]
     {
-        if (attempted < admitFloor)
-            return false; // honour the floor before consulting the clock
         if (attempted >= admitCap)
             return true;
         const auto elapsed = std::chrono::steady_clock::now() - admitStart;
-        return std::chrono::duration<float, std::milli>(elapsed).count() >= admitBudgetMs;
+        const float elapsedMs = std::chrono::duration<float, std::milli>(elapsed).count();
+        if (attempted < admitFloor)
+        {
+            // Below the floor the ordinary budget is still ignored -- that is what the floor is
+            // for, and it is why a cheap all-warm batch still admits its full 128 without ever
+            // looking at the ordinary budget. Only the hard ceiling may cut the floor short.
+            //
+            // `attempted > 0` is load-bearing, not defensive. Without it an update that entered
+            // with the ceiling already exceeded (the previous frame's cost lands on this frame's
+            // clock the moment admission is slow) would admit NOTHING, and an update that admits
+            // nothing makes no progress: `_modernObjectResidencyPending` stays set, the same work
+            // is attempted next frame, and the fill never terminates. One object per update is
+            // the guarantee that it always terminates -- and it is also the residual tail this
+            // ceiling cannot remove, because that one object may be a cold model costing tens of
+            // milliseconds. Removing THAT needs asynchronous admission.
+            return admitCeilingMs > 0.0f && attempted > 0 && elapsedMs >= admitCeilingMs;
+        }
+        if (admitCeilingMs > 0.0f && elapsedMs >= admitCeilingMs)
+            return true;
+        return elapsedMs >= admitBudgetMs;
     };
 
     for (const CellCandidate& cell : candidates)
@@ -2755,17 +3231,28 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             transform.SetDirectionUp(Vector3(placement.rows[3], placement.rows[4], placement.rows[5]));
             transform.SetDirection(Vector3(placement.rows[6], placement.rows[7], placement.rows[8]));
             transform.SetPosition(Vector3(placement.rows[9], placement.rows[10], placement.rows[11]));
+            Object* admitted = nullptr;
             try
             {
-                placement.resident = ObjectCreate(placement.id, _modernObjectModels[placement.modelIndex], transform,
-                                                  nullptr, nullptr, false, true);
+                admitted = ObjectCreate(placement.id, _modernObjectModels[placement.modelIndex], transform, nullptr,
+                                        nullptr, false, true);
             }
             catch (const std::exception&)
             {
-                placement.resident = nullptr;
+                admitted = nullptr;
             }
-            if (placement.resident)
+            placement.resident = admitted;
+            if (admitted)
+            {
                 ++created;
+                // (a) If the eviction cache was holding this model, the ObjectCreate above found
+                // it in ShapeBank instead of decoding it again, and the Object now owns it. Drop
+                // the cache's reference: the entry has done its job, and leaving it would spend
+                // a cache slot on a model that is resident and therefore in no danger. Counted,
+                // because the hit rate is the only honest measure of whether the cache is worth
+                // its memory on a given world.
+                AdoptCachedShape(admitted->GetShape());
+            }
             else
                 ++refused;
         }
@@ -2798,11 +3285,25 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     const bool progressRow =
         _modernObjectResidencyPending && (_modernObjectUpdateCount % ProgressLogEveryUpdates) == 0;
     if (centerChanged || !_modernObjectResidencyPending || progressRow)
+        // The three new fields exist so the fix can be judged from the log alone. `desired` is
+        // the effective window radius (the candidate `window` is the grown one and has always
+        // been much larger); `lead` is the prefetch bias in metres, and is 0 whenever the camera
+        // is below the deadband, so a walking run reads exactly as it did before; `cache` is
+        // held/limit, `hits` are re-admissions that skipped an ODOL decode, and `ins`/`drops`
+        // are what separates a cache that is working from one that is thrashing -- drops far
+        // above hits means the bound is too small for this world's model turnover, not that the
+        // idea is wrong. RND-040's headline number to beat is created=15958 / released=77643
+        // over 112 s at 30 m/s: if hits do not grow into that, the cache is not earning its
+        // memory on this world.
         LOG_INFO(World,
-                 "Modern object residency: centre=({}, {}) window={} cells requested={} resident={} created={} "
-                 "released={} refused={} budget={} pending={}",
-                 centerX, centerZ, _modernObjectCandidateRadius, requested, _modernResidentObjectCount, created,
-                 released, refused, _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0);
+                 "Modern object residency: centre=({}, {}) window={} cells desired={} cells lead={:.0f} m "
+                 "requested={} resident={} created={} released={} refused={} budget={} pending={} cache={}/{} "
+                 "hits={} ins={} drops={}",
+                 centerX, centerZ, _modernObjectCandidateRadius, _modernObjectDesiredRadiusCells,
+                 _modernObjectLeadMetres, requested, _modernResidentObjectCount, created, released, refused,
+                 _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0, _modernObjectShapeCache.size(),
+                 _modernObjectShapeCacheLimit, _modernObjectShapeCacheHits, _modernObjectShapeCacheInserts,
+                 _modernObjectShapeCacheDrops);
 }
 
 void Landscape::SaveOptimized(QOStream& f)
