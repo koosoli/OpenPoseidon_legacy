@@ -1783,8 +1783,25 @@ class Engine : public IGraphicsEngine
         //      pose. Almost all of the benefit is available from a much narrower band.
         bool enabled = true;
         float key = 0.18f;      // target middle-grey luminance (higher = brighter)
-        float minScale = 0.25f; // clamp on the exposure multiplier
-        float maxScale = 4.0f;
+        // ASYMMETRIC ON PURPOSE. Darkening is the feature the owner asked for ("looks into the
+        // sun, the iris adjusts and it gets a bit darker"), so minScale keeps its full 4x of
+        // headroom. BRIGHTENING is what caused a regression the moment this went default-on:
+        // at night the scene is dark, the iris opened toward the old 4.0 ceiling, and that
+        // amplified Arma 2 vegetation's AUTHORED emissive (41 OA rvmats literally contain
+        // `emmisive[]={2.6,2.3,2.0}`) until trees self-illuminated and trunks went white.
+        //
+        // Measured, Takistan hour 0, same pose, pixels at luminance >= 200:
+        //     auto-exposure off      0
+        //     maxScale 4.0        1215   <- the regression
+        //     maxScale 1.10          0   <- and mean luminance back to 1.13 vs 1.06 off
+        //
+        // Costs almost nothing in daylight: a 0.55..1.10 range measured 0.76% of pixels clipped
+        // against 0.59% for the full 0.25..4.0 range on the worst-clipping pose on record. Nearly
+        // all of the benefit is in the darkening half, which is exactly the half being kept.
+        //
+        // Raise this only with a NIGHT capture in hand. A bright-sky pose cannot show what it breaks.
+        float minScale = 0.25f;
+        float maxScale = 1.10f;
         // Per-frame ease, kept for the legacy path and for `rateTau <= 0`. Framerate
         // DEPENDENT, which is why it is no longer the default mechanism.
         float rate = 0.03f;
