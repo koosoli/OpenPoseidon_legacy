@@ -683,6 +683,24 @@ uint64_t TextureWgpu::EnsureUploaded()
     WgrRenderer* r = _bank ? _bank->Renderer() : nullptr;
     if (!r || _w <= 0 || _h <= 0)
     {
+        // The one silent way a NAMED texture becomes handle 0.
+        //
+        // Init() runs at Load() time and its return value is discarded (TextureBankWgpu::Load
+        // calls `texture->Init();` and returns the object either way), so a texture whose file
+        // is missing, whose factory refuses it, or whose header will not parse leaves _w == 0
+        // and reaches here. Returning 0 hands the caller a zero handle, which
+        // SharedTextures::texture_slot maps to bindless slot 0 -- the 1x1 WHITE texel -- and
+        // the surface draws at albedo 1.0 with no log line anywhere. The warning below the
+        // fallback path ("failed to upload texture") never fires for these, because this
+        // return is above it: measured on three Stratis runs, zero occurrences of that warning
+        // while pure-white geometry was on screen.
+        //
+        // Cannot spam: _uploadTried was set to true above, so a given texture reaches this at
+        // most once per session.
+        LOG_WARN(Graphics,
+                 "Wgpu: texture {} has no uploadable image ({}, {}x{}, mips={}) -- draws on the white fallback",
+                 Name() ? Name() : "<unnamed>", r ? "source failed to initialise" : "no renderer", _w, _h,
+                 _nMipmaps);
         return 0;
     }
 

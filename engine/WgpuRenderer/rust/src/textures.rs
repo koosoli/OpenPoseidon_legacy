@@ -254,6 +254,47 @@ pub struct SharedTextures {
     white_bind: wgpu::BindGroup,
 }
 
+// The 1x1 texel behind bindless slot 0 -- the fallback every unresolved texture samples.
+//
+// Default is opaque WHITE and nothing about that changes here. The problem with white is
+// purely diagnostic: albedo 1.0 under a sunlit frame is brighter than any real surface
+// (measured on the Stratis corpus: of 4,273 authored Arma 3 textures only 35 average
+// >= 250 on all three channels, and every one of them is a UI/map icon, a `_ca` overlay,
+// a `_dt` detail map or the sun sprite -- not one building albedo, and not one of the 298
+// `*_mlod_co` placeholders, which average ~100-150). So a pure-white surface in a daylight
+// capture cannot be an authored texture; it is this texel. But nothing SAYS so, and a
+// blown-out white object reads exactly like an over-bright light, which is how the same
+// defect has been reported twice: "bright orbs almost as bright as the sun" and "building
+// textures look wrong".
+//
+// WGR_TEXTURE_FALLBACK_RGBA=R,G,B[,A] (0-255) repaints it, and the shorthand
+// WGR_TEXTURE_FALLBACK_DEBUG=1 makes it magenta. One capture with that set separates
+// "this surface has no texture" from "this surface is genuinely bright" without a build,
+// a shader change or a guess.
+//
+// Deliberately NOT the default: the white fallback is load-bearing for anything that
+// multiplies against it (an untextured section tinted by a material colour still wants
+// 1.0), so changing it silently would alter shipped pixels.
+fn fallback_texel() -> [u8; 4] {
+    if let Ok(raw) = std::env::var("WGR_TEXTURE_FALLBACK_RGBA") {
+        let parts: Vec<u8> = raw
+            .split(',')
+            .filter_map(|p| p.trim().parse::<u8>().ok())
+            .collect();
+        if parts.len() >= 3 {
+            let alpha = parts.get(3).copied().unwrap_or(0xFF);
+            return [parts[0], parts[1], parts[2], alpha];
+        }
+    }
+    if std::env::var("WGR_TEXTURE_FALLBACK_DEBUG")
+        .map(|v| v != "0")
+        .unwrap_or(false)
+    {
+        return [0xFF, 0x00, 0xFF, 0xFF]; // magenta: never authored, unmistakable
+    }
+    [0xFF, 0xFF, 0xFF, 0xFF]
+}
+
 // Build the bindless object-texture bind group from the current slot views, padding
 // holes / the tail with the white fallback. With PARTIALLY_BOUND we bind only up to the
 // high-water slot; otherwise the whole declared array must be bound.
@@ -420,7 +461,7 @@ impl SharedTextures {
             1,
             1,
             TextureFormat::Rgba8,
-            &[0xFF, 0xFF, 0xFF, 0xFF],
+            &fallback_texel(),
         );
         let white_view = white_tex.create_view(&wgpu::TextureViewDescriptor::default());
         let white_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
