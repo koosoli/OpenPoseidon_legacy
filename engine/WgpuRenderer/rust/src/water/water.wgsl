@@ -707,11 +707,21 @@ override shore_foam_legacy: f32 = 0.0;
 // "how far out is too far" is a judgement about a picture, and settling it should not need a
 // rebuild. WGR_WATER_FOAM_BAND_OUTER retunes it live; see the band in fs_water for what the
 // number means in metres of depth.
-override foam_band_outer: f32 = 1.10;
+//
+// The deep-side fade START is derived from this (band_outer * 0.32) rather than being a second
+// literal, so ONE knob moves the whole deep edge instead of only its outermost tail. At the
+// previous 1.10 that expression reproduces the old 0.35 exactly, which is what makes it a
+// refactor of the old shape rather than a new one.
+override foam_band_outer: f32 = 0.80;
 
 // Strength of the large-scale patchiness applied to the shoreline band (0 = the previous
 // stationary field, 1 = full). WGR_WATER_FOAM_PATCH. See the patch block in fs_water.
 override foam_patch_gain: f32 = 1.0;
+
+// How far the deep edge of the shoreline band meanders in and out along the coast, as a fraction
+// of `ft`. 0 = the previous ruler-straight ribbon. WGR_WATER_FOAM_MEANDER. See the meander block
+// in fs_water for why this is a stronger anti-repetition lever than another noise octave.
+override foam_band_meander: f32 = 0.34;
 
 // Water column depth (m) at this fragment: reconstruct the seabed's camera-relative position
 // from the opaque prepass depth and take the vertical gap to the water surface. In the fragment
@@ -853,14 +863,45 @@ fn foam_noise_lod(p_world: vec2<f32>, t: f32, w_world: f32) -> f32 {
 // cells go sub-pixel: the threshold window slides UP with the footprint so a filtered streak
 // field converges to zero rather than to a flat wash — streaks are a near-field detail and a
 // distant beach should read as an even band, not as a lattice.
+//
+// A third octave was the obvious next move here and is deliberately NOT what this does. The
+// streak field is read through a threshold (the smoothstep at the end), so its look depends on the
+// VARIANCE of `combined`, not just its mean: averaging in another independent octave narrows the
+// distribution and quietly thins every streak on the coast, which then has to be paid back by
+// re-tuning the threshold by eye. A domain WARP is free of that — warping a stationary field
+// leaves its one-point statistics exactly as they were — so the extra incommensurate octaves go
+// into the warp instead, where they buy the same decorrelation at no calibration cost.
 fn shoreline_streaks(xz: vec2<f32>, tangent: vec2<f32>, shoreward: vec2<f32>,
                      t: f32, drift: f32, w_world: f32) -> f32 {
     let s = dot(xz, tangent);
     let d = dot(xz, shoreward);
     let bend = vnoise_lod(vec2<f32>(s * 0.031, d * 0.047 + t * 0.03), w_world * 0.047) - 0.5;
-    let s_warped = s + bend * 9.0;
-    let a = vnoise_lod(vec2<f32>(s_warped * 0.74 + t * 0.10, d * 0.19 - t * drift), w_world * 0.74);
-    let b = vnoise_lod(vec2<f32>(s_warped * 0.317 - t * 0.07, d * 0.083 + t * drift * 0.55) +
+    // Second bend, an octave lower and stronger. The single 0.031 bend (32 m) curves the rulings
+    // locally, but over the 100-200 m of coastline that fits on screen at once its own period is
+    // what you end up seeing; a 0.0117 (85 m) companion at ~2.4x the amplitude carries the rulings
+    // through a longer arc so no single bending period is legible. 0.031 / 0.0117 = 2.65, not a
+    // simple fraction, so the pair cannot re-align into a beat.
+    //
+    // Both new warps are skipped under shore_foam_legacy so the A/B stays a clean comparison
+    // rather than differing only in the band gains. `shore_foam_legacy` is a pipeline override, so
+    // this branch is constant-folded at pipeline creation and costs nothing at runtime.
+    var s_warped = s + bend * 9.0;
+    var d_warped = d;
+    if (shore_foam_legacy <= 0.5) {
+        let bend_long = vnoise_lod(vec2<f32>(s * 0.0117 + 41.9, d * 0.0163 - t * 0.011),
+                                   w_world * 0.0163) - 0.5;
+        s_warped = s_warped + bend_long * 22.0;
+        // Warp the SHOREWARD coordinate too. Without this every streak sits at the same offshore
+        // offset within the band, so the field is ragged alongshore but perfectly stratified
+        // across — rows of dashes at fixed distances from the waterline. A 24 m-cell perturbation
+        // of a few metres breaks the stratification, and because it is a warp it cannot change how
+        // much foam there is.
+        let d_warp = vnoise_lod(vec2<f32>(s * 0.0413 - t * 0.02, d * 0.0271 + 17.3),
+                                w_world * 0.0413) - 0.5;
+        d_warped = d + d_warp * 5.5;
+    }
+    let a = vnoise_lod(vec2<f32>(s_warped * 0.74 + t * 0.10, d_warped * 0.19 - t * drift), w_world * 0.74);
+    let b = vnoise_lod(vec2<f32>(s_warped * 0.317 - t * 0.07, d_warped * 0.083 + t * drift * 0.55) +
                        vec2<f32>(23.7, 11.3), w_world * 0.317);
     let combined = a * 0.58 + b * 0.42;
     let sharp = 1.0 - smoothstep(0.30, 0.85, w_world * 0.74);
@@ -1788,16 +1829,73 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // is clipped by the beach — the deep side already faded. Foam also fades to 0 right at the
     // edge, so the water there is transparent (soft wash over wet sand) rather than opaque white.
     let ft = eff_depth / max(wp.foam_width * 2.2, 0.4);
-    // Deep-side extent of the band. 1.95 -> 1.55 -> 1.10 over two passes, both times because the
-    // owner reported the wash reaching too far out to sea. At the default foam_width of 0.4 the
-    // divisor above is 0.88 m, so `ft` IS column depth in units of 0.88 m: the band now ends at
-    // ~0.97 m of water instead of ~1.36 m, a 29% pull-in on top of the previous 21%.
+    // Deep-side extent of the band. 1.95 -> 1.55 -> 1.10 -> 0.80 over three passes, every time
+    // because the owner reported the wash reaching too far out to sea. At the default foam_width
+    // of 0.4 the divisor above is 0.88 m, so `ft` IS column depth in units of 0.88 m.
+    //
+    // The previous pass moved only the outermost tail (the point where the fade REACHES zero) and
+    // left the fade's start pinned at 0.35, which is why cutting 1.55 -> 1.10 read as a smaller
+    // change than the number suggests: the band's bright part never moved, only its faint outer
+    // skirt got shorter. The fade start is now band_outer * 0.32, so both ends of the deep edge
+    // travel together. At the old 1.10 that expression IS 0.35, so this is a re-parametrisation of
+    // the existing shape and not a new one; the visible change is entirely the 1.10 -> 0.80 default.
+    //
+    // In metres of column depth, deep edge: full band out to 0.23 m (was 0.31 m), gone by 0.70 m
+    // (was 0.97 m). The half-brightness point, which is what the eye actually calls "the outer edge
+    // of the surf", moves from 0.63 m to 0.46 m — a 27% pull-in, and the first one that moves the
+    // bright part of the band rather than its tail. The meander below then pulls the average in
+    // further, to ~0.40 m, because it is one-sided.
+    //
     // This is the DEEP edge, which had already faded to nothing. The LAND side (the
     // smoothstep(0.0, 0.06, ft) below) carries the no-hard-line guarantee and is untouched — the
     // whole point of splitting the band into two independent ends is that this knob cannot
-    // reintroduce the bright clipped line at the beach.
-    let band_outer = select(foam_band_outer, 1.95, shore_foam_legacy > 0.5);
-    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(0.35, band_outer, ft));
+    // reintroduce the bright clipped line at the beach. Note that the meander below likewise feeds
+    // `ft_deep` to the deep term ONLY: the land term keeps the raw `ft`.
+    //
+    // `band_outer` is forced to stay above `band_fade_start`: smoothstep(e, e, x) has no defined
+    // value, and WGR_WATER_FOAM_BAND_OUTER is a live env knob someone will eventually set to 0 to
+    // see what happens. Doing it here rather than only in the Rust parse keeps the shader correct
+    // on its own terms.
+    let band_fade_start = select(foam_band_outer * 0.32, 0.35, shore_foam_legacy > 0.5);
+    let band_outer = max(select(foam_band_outer, 1.95, shore_foam_legacy > 0.5),
+        band_fade_start + 0.02);
+
+    // MEANDERING DEEP EDGE — the other half of "it still looks tiled".
+    //
+    // Every anti-repetition pass so far has worked on what FILLS the band (more octaves, warps,
+    // band limiting, then large-scale patchiness of its brightness). None of them touched the
+    // band's SHAPE, and the shape is the part that actually reads as machine-made: `ft` is a
+    // function of column depth alone, so along any stretch of coast the wash is a ribbon of
+    // exactly constant width following a depth contour. No amount of noise inside a perfectly
+    // parallel-sided ribbon stops it looking stamped, which is why "add another octave" has
+    // diminishing returns here and this does not.
+    //
+    // Real surf has a ragged outer edge: bathymetry and refraction push the break line in and out
+    // by metres over tens of metres of coast (the same process that cuts beach cusps). So perturb
+    // the depth coordinate the DEEP term sees, with two low-frequency octaves at 12.2 m and 29.3 m
+    // cells whose ratio (2.40) is not a simple fraction, and which are also incommensurate with
+    // the 21.7 m / 34.5 m patchiness pair above — two independent fields at similar scales would
+    // otherwise beat into a single visible rhythm, which is the lattice bug one octave down. All
+    // four cross-ratios are checked by the test, because picking round numbers here is exactly how
+    // that bug gets rebuilt by an edit that looks like a tidy-up.
+    //
+    // ONE-SIDED ON PURPOSE: the noise pair is mapped to [0,1] and only ever SCALES ft UP, i.e. the
+    // edge only ever pulls further IN. That keeps the meander from fighting the owner's actual
+    // request — no part of the coast ends up with foam further out than the nominal band_outer.
+    //
+    // vnoise_lod converges to 0.5 once the cells go sub-pixel, so a distant coast gets a constant
+    // 1.17 scale rather than aliasing: the scalloping fades out by itself at range, exactly like
+    // the patchiness term, and a far beach still reads as one even band.
+    var ft_deep = ft;
+    if (shore_foam_legacy <= 0.5 && ft < band_outer * 2.0) {
+        let meander_a = vnoise_lod(in.base_xz * 0.0817 + vec2<f32>(wp.time * 0.005, wp.time * 0.003),
+            foam_fp * 0.0817);
+        let meander_b = vnoise_lod(in.base_xz * 0.0341 + vec2<f32>(-wp.time * 0.003, wp.time * 0.004) +
+            vec2<f32>(88.3, 61.7), foam_fp * 0.0341);
+        let meander = clamp(meander_a * 0.6 + meander_b * 0.4, 0.0, 1.0);
+        ft_deep = ft * (1.0 + max(foam_band_meander, 0.0) * meander);
+    }
+    let foam_band = smoothstep(0.0, 0.06, ft) * (1.0 - smoothstep(band_fade_start, band_outer, ft_deep));
     // coast_flow points toward land. Sampling x + v*t moves a pattern in -v, so
     // the old wash visibly travelled offshore. x - v*t makes each band advance landward.
     var foam = 0.0;

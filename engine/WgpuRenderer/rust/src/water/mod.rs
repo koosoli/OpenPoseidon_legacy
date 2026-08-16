@@ -629,14 +629,17 @@ impl Water {
         }
         // Deep-side extent of the shoreline foam band; see `foam_band_outer` in water.wgsl for
         // what the number means. The owner reported the wash STILL reaching too far out to sea
-        // after the 1.95 -> 1.55 pull-in, so the default drops again to 1.10 (~0.97 m of column
-        // depth at the default foam_width of 0.4). It is an env override and not a literal
-        // because "how far out is too far" is a judgement about a picture, and settling it
+        // after 1.95 -> 1.55 and again after 1.55 -> 1.10, so the default drops a third time, to
+        // 0.80 (~0.70 m of column depth at the default foam_width of 0.4). The shader now also
+        // derives the fade's START from this value instead of pinning it at 0.35, which is the
+        // reason the previous cut read as smaller than its number: it shortened the faint outer
+        // skirt without moving the bright part of the band at all. It is an env override and not a
+        // literal because "how far out is too far" is a judgement about a picture, and settling it
         // should cost a relaunch rather than a rebuild.
         let foam_band_outer = std::env::var("WGR_WATER_FOAM_BAND_OUTER")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(1.10);
+            .unwrap_or(0.80);
         // Large-scale patchiness of the shoreline band, 0..1. `=0` restores the previous
         // stationary field on its own, which WGR_WATER_SHORE_FOAM_LEGACY=1 cannot do without also
         // giving back the unfiltered noise, the streak lattice and the old gains — so this is the
@@ -645,6 +648,15 @@ impl Water {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(1.0);
+        // How far the band's DEEP edge meanders in and out along the coast, as a fraction of the
+        // depth coordinate. The patchiness above varies how BRIGHT the wash is; this varies how
+        // WIDE it is, which is the half of "it still looks tiled" that no amount of extra noise
+        // inside a constant-width ribbon can fix. `=0` restores the straight-edged band on its own
+        // for an A/B that does not also give back the old gains and the unfiltered noise.
+        let foam_band_meander = std::env::var("WGR_WATER_FOAM_MEANDER")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.34);
         let vs_constants = [("skirt_k", skirt_k)];
         // `fs_constants` is shared with the whitewater pipeline below, whose shader declares only
         // `linear` — wgpu rejects a pipeline whose constant map names an override the module does
@@ -655,6 +667,7 @@ impl Water {
             ("shore_foam_legacy", shore_foam_legacy),
             ("foam_band_outer", foam_band_outer),
             ("foam_patch_gain", foam_patch_gain),
+            ("foam_band_meander", foam_band_meander),
         ];
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1548,11 +1561,27 @@ mod tests {
         assert!(shader.contains("wp.time, foam_fp * 2.7)"));
         // The lattice: two incommensurate alongshore octaves plus a warp, not one fixed 0.74.
         assert!(shader.contains("fn shoreline_streaks("));
-        assert!(shader.contains("let s_warped = s + bend * 9.0"));
-        assert!(shader.contains("let combined = a * 0.58 + b * 0.42"));
+        assert!(shader.contains("var s_warped = s + bend * 9.0"));
         assert!(
             !shader.contains("dot(in.base_xz, shoreline_tangent) * 0.74"),
             "the single-octave streak lattice must not survive"
+        );
+        // The second decorrelation pass went into the WARP, not into the octave sum. `combined` is
+        // read through a threshold, so a third averaged octave would narrow the field's variance
+        // and silently thin every streak; a domain warp leaves the one-point statistics alone.
+        // Guard that intent explicitly — "add another octave" is the reflex a later edit will have.
+        assert!(
+            shader.contains("let combined = a * 0.58 + b * 0.42;"),
+            "the streak octave sum must stay two-term: decorrelate via the warp, not the sum"
+        );
+        assert!(shader.contains("bend_long * 22.0"));
+        assert!(shader.contains("d_warped = d + d_warp * 5.5"));
+        // Both bend frequencies, and the shoreward warp, must stay off simple ratios for the same
+        // reason the patch octaves below do: a "tidy" to round numbers rebuilds the beat.
+        let bend_ratio = 0.031f32 / 0.0117f32;
+        assert!(
+            (bend_ratio - 2.0).abs() > 0.25 && (bend_ratio - 3.0).abs() > 0.25,
+            "the two bend octaves must not sit at a simple ratio, got {bend_ratio}"
         );
         // Strength is a SEPARATE lever from the band limiting, and both keep a legacy path.
         assert!(shader.contains("let base_gain = select(0.20, 0.35, shore_foam_legacy > 0.5)"));
@@ -1560,9 +1589,59 @@ mod tests {
         // The deep-side extent became an override once the owner asked for it a second time:
         // pinning it as a literal here would mean a rebuild per candidate value, and the value is
         // settled by looking at a picture. The legacy arm keeps its literal 1.95.
-        assert!(shader.contains("let band_outer = select(foam_band_outer, 1.95, shore_foam_legacy > 0.5)"));
-        assert!(shader.contains("override foam_band_outer: f32 = 1.10;"));
+        assert!(shader.contains("select(foam_band_outer, 1.95, shore_foam_legacy > 0.5)"));
+        assert!(shader.contains("override foam_band_outer: f32 = 0.80;"));
         assert!(shader.contains("override shore_foam_legacy: f32 = 0.0;"));
+        // The deep edge is ONE knob now: the fade's start is derived from band_outer instead of
+        // being pinned at 0.35. That is what makes a cut to the number move the bright part of the
+        // band and not only its faint outer skirt — the reason the previous pull-in read as
+        // smaller than it was. The legacy arm keeps the literal 0.35 / 1.95 pair.
+        assert!(shader.contains(
+            "let band_fade_start = select(foam_band_outer * 0.32, 0.35, shore_foam_legacy > 0.5)"
+        ));
+        assert!(
+            (1.10f32 * 0.32 - 0.35).abs() < 0.005,
+            "the 0.32 factor must reproduce the previous 0.35 at the previous 1.10, or this is a \
+             new band shape rather than a re-parametrisation of the old one"
+        );
+        // smoothstep(e, e, x) is undefined and WGR_WATER_FOAM_BAND_OUTER is a live env knob, so
+        // the shader has to keep the two edges apart itself.
+        assert!(shader.contains("band_fade_start + 0.02)"));
+
+        // The band's deep edge MEANDERS: the anti-repetition work so far all changed what fills
+        // the band, and a constant-width ribbon following a depth contour reads as stamped no
+        // matter what is inside it. One-sided on purpose (the noise pair only ever scales ft UP),
+        // so no stretch of coast gets foam further out than band_outer — the meander cannot undo
+        // the pull-in the owner asked for.
+        assert!(shader.contains("override foam_band_meander: f32 = 0.34;"));
+        assert!(shader.contains("let meander_a = vnoise_lod(in.base_xz * 0.0817"));
+        assert!(shader.contains("let meander_b = vnoise_lod(in.base_xz * 0.0341"));
+        assert!(shader.contains("ft_deep = ft * (1.0 + max(foam_band_meander, 0.0) * meander)"));
+        assert!(
+            shader.contains("smoothstep(band_fade_start, band_outer, ft_deep)"),
+            "the meander must feed the DEEP term only"
+        );
+        assert!(
+            shader.contains("smoothstep(0.0, 0.06, ft) *"),
+            "the LAND side must keep the raw ft: it carries the no-hard-line guarantee"
+        );
+        let meander_ratio = 0.0817f32 / 0.0341f32;
+        assert!(
+            (meander_ratio - 2.0).abs() > 0.25 && (meander_ratio - 3.0).abs() > 0.25,
+            "the two meander octaves must not sit at a simple ratio, got {meander_ratio}"
+        );
+        // ...and must not sit at a simple ratio to the PATCH octaves either. Two independent
+        // low-frequency fields at commensurate scales beat into one visible rhythm, which is the
+        // lattice bug rebuilt an octave down out of two terms that each look fine alone.
+        for meander in [0.0817f32, 0.0341] {
+            for patch in [0.0461f32, 0.0290] {
+                let r = meander / patch;
+                assert!(
+                    (r - 1.0).abs() > 0.1 && (r - 2.0).abs() > 0.1 && (r - 0.5).abs() > 0.05,
+                    "meander {meander} and patch {patch} are commensurate (ratio {r})"
+                );
+            }
+        }
 
         // Large-scale patchiness: two low-frequency octaves whose ratio is NOT a simple fraction
         // (0.0461 / 0.0290 = 1.59). Guard the ratio, not just the presence of the term — a later
@@ -1656,6 +1735,7 @@ mod tests {
             "shore_foam_legacy",
             "foam_band_outer",
             "foam_patch_gain",
+            "foam_band_meander",
         ] {
             assert!(
                 surface.contains(&name.to_string()),
@@ -1680,6 +1760,7 @@ mod tests {
             "shore_foam_legacy",
             "foam_band_outer",
             "foam_patch_gain",
+            "foam_band_meander",
         ] {
             assert!(
                 module.contains(&format!("(\"{name}\", {name}),")),
