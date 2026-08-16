@@ -563,11 +563,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var m: ShadeMaterial;
     m.emissive = material.emissive.rgb;
     if (emissive_night < 1.0 && (material_flags(material) & MATFLAG_NIGHT_EMITTER) == 0u) {
-        // Same sun-only daylight factor shading.wgsl uses for the foliage fill (CPU-published
-        // in sun_dir_world.w, so the moon cannot count as day). Fixtures
-        // (MATFLAG_NIGHT_EMITTER) skip it and keep glowing.
-        let daylight = frame.sun_dir_world.w;
-        m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
+        // At EVERY hour, not only at night. The first cut faded this in with the sun-only
+        // daylight factor, and the owner's 05:25 Takistan shots showed why that is not enough:
+        // at dawn the ramp is already up while the real light is at its weakest, so the dead
+        // trees went white and the bushes lit up exactly when they should be darkest. Legacy
+        // compensation emissive is not radiance at noon either -- it is merely invisible under
+        // full sun. Fixtures (MATFLAG_NIGHT_EMITTER) are the only exemption.
+        m.emissive = m.emissive * clamp(emissive_night, 0.0, 1.0);
     }
     m.sun_ambient = material.sun_ambient.rgb;
     m.sun_diffuse = material.sun_diffuse.rgb;

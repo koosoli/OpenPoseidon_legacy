@@ -627,8 +627,8 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // Arma 3 pine crown ships emissive 1.0 through the non-veg arm on its trunk-only LODs. Same
     // sun-only daylight factor as shading.wgsl and shader3d.wgsl (sun_dir_world.w).
     if ((sm.flags & SECTION_NIGHT_EMITTER) == 0u && emissive_night < 1.0) {
-        let daylight = frame.sun_dir_world.w;
-        m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
+        // At every hour, not only at night -- see shader3d.wgsl for the 05:25 measurement.
+        m.emissive = m.emissive * clamp(emissive_night, 0.0, 1.0);
     }
     m.sun_ambient = frame.sun_ambient.rgb * sm.ambient.rgb;
     m.sun_diffuse = frame.sun_diffuse.rgb * sm.diffuse.rgb;
