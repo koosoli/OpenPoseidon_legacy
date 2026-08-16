@@ -130,6 +130,7 @@ void VertexTable::Init(int nPos)
 void VertexTable::DoConstruct(const VertexTable& src)
 {
     _tex = src._tex;
+    _tex1 = src._tex1;
     _pos = src._pos;
     _clip = src._clip;
     _norm = src._norm;

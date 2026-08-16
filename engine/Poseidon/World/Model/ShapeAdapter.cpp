@@ -223,9 +223,19 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             }
         }
 
+        // The second UV set, when the source carried one. Multi's mask / macro / ambient-shadow
+        // stages address `tex1`; without this stream they land on the tiling UV and paint
+        // rectangles across the wall (owner report, Takistan walls_l3.rvmat, 2026-08-16).
+        bool anyUv1 = false;
+        for (int v = 0; v < vertexCount && !anyUv1; ++v)
+            anyUv1 = mesh.vertices[v].uv1.u != 0.0f || mesh.vertices[v].uv1.v != 0.0f;
+        if (anyUv1)
+            shape->_lods[i]->ResizeUV1(vertexCount);
         for (int v = 0; v < vertexCount; ++v)
         {
             const Vertex& vertex = mesh.vertices[v];
+            if (anyUv1)
+                shape->_lods[i]->SetUV1(v, vertex.uv1.u, vertex.uv1.v);
             shape->_lods[i]->SetPos(v) = ::Vector3(vertex.position.x, vertex.position.y, vertex.position.z);
             shape->_lods[i]->SetNorm(v) = ::Vector3(vertex.normal.x, vertex.normal.y, vertex.normal.z);
             shape->_lods[i]->SetTangent(v) = ::Vector3(generatedTangents[v][0], generatedTangents[v][1], generatedTangents[v][2]);

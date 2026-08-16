@@ -155,6 +155,9 @@ pub struct WgrMeshVertex {
     pub conform: u32,
     pub tangent: WgrVec3,
     pub binormal: WgrVec3,
+    // Second UV set (`tex1`), or a copy of uv when the shape has none. Read by the GPU-driven
+    // VS at @location(7) for Multi's mask/macro/AS stages, which are authored on tex1.
+    pub uv1: WgrVec2,
 }
 
 #[repr(C)]
@@ -256,6 +259,8 @@ pub const WGR_DRAW3D_REFLECTIVE: u32 = 2;
 // FIXTURE whose emissive is real radiance and must survive the night. Everything else's
 // `emmisive` is legacy brightness compensation and the shaders fade it with the sun.
 pub const WGR_MODEL_SECTION_NIGHT_EMITTER: u32 = 2;
+// WgrModelSection::flags bit 2: Multi's mask stage is authored on uvSource "tex1".
+pub const WGR_MODEL_SECTION_MASK_UV1: u32 = 4;
 pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
@@ -1351,7 +1356,7 @@ pub struct WgrFrame {
 // Layouts must match wgpu_renderer.hpp exactly (the C++ side static_asserts the same).
 const _: () = assert!(std::mem::size_of::<WgrVertex2D>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrDraw2DBatch>() == 32);
-const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 60);
+const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);

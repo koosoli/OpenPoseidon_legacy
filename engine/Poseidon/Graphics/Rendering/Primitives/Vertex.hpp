@@ -138,6 +138,12 @@ protected:
     bool _hasTangentFrame = false;
 
 	AutoArray<UVPair> _tex;
+	// Second UV set (ODOL/MLOD `tex1`), OPTIONAL: empty on every legacy shape, sized
+	// to NVertex() only by the modern loaders (ShapeAdapter). Real Virtuality's Multi
+	// materials address their blend mask, macro and ambient-shadow maps through it, so
+	// dropping it misregisters those over the whole model. Consumers must check
+	// NTex1() >= NVertex() before reading.
+	AutoArray<UVPair> _tex1;
 
 	ClipFlags _orHints, _andHints; // we can do some optimizations based on this
 
@@ -247,6 +253,11 @@ public:
 	void SetV(int i, float v) { _tex[i].v = v; }
 
 	const UVPair &UV(int i) const { return _tex[i]; }
+	int NTex1() const { return _tex1.Size(); }
+	bool HasUV1() const { return _tex1.Size() >= _pos.Size() && _pos.Size() > 0; }
+	const UVPair &UV1(int i) const { return _tex1[i]; }
+	void ResizeUV1(int n) { _tex1.Realloc(n); _tex1.Resize(n); }
+	void SetUV1(int i, float u, float v){ _tex1[i].u = u, _tex1[i].v = v; }
 	void SetUV(int i, float u, float v){ _tex[i].u = u, _tex[i].v = v; }
 
 	// vertex buffer style access

@@ -4104,12 +4104,41 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
 
     static std::unordered_set<std::string> logged;
     if (logged.insert(materialPath).second)
-        LOG_INFO(Graphics, "Wgpu material: composed {} layers for {} family={} (uv scales {:.1f} {:.1f} {:.1f} {:.1f})",
+    {
+        const auto* maskEntry = cached->second.Find(Slot::Mask);
+        LOG_INFO(Graphics,
+                 "Wgpu material: composed {} layers for {} family={} (uv scales {:.1f} {:.1f} {:.1f} {:.1f}; mask uvSource={})",
                  1 + (material.layer_texture_id[0] != 0) + (material.layer_texture_id[1] != 0) +
                      (material.layer_texture_id[2] != 0),
                  materialPath, cached->second.shaderFamily, material.layer_uv[0][0], material.layer_uv[1][0],
-                 material.layer_uv[2][0], material.layer_uv[3][0]);
+                 material.layer_uv[2][0], material.layer_uv[3][0],
+                 maskEntry && !maskEntry->uvSource.empty() ? maskEntry->uvSource.c_str() : "tex");
+    }
     return true;
+}
+
+// Does the material's Multi mask stage name uvSource "tex1"? Measured on
+// ca\structures_e\wall\wall_l\data\walls_l3.rvmat: TexGen0-3 (the four layers) are "tex",
+// TexGen4 (mask, macro, ambient shadow) is "tex1". Sampling the mask on the tiling uv painted
+// its plaster/dirt/metal regions as rectangles across the wall -- the owner's "gray stuff on
+// the wall texture" (Takistan 5418.46 6244.20 144.15 az 245 el -1), which is the same
+// mechanism on every Multi material in Arma 2/3 and DayZ.
+bool EngineWgpu::MaterialMaskUsesUv1(const ShapeSection& section)
+{
+    if (!section.surfMat)
+        return false;
+    const char* materialPath = section.surfMat->GetName().Data();
+    if (!materialPath || !*materialPath)
+        return false;
+    const auto cached = _materialBindings.find(materialPath);
+    if (cached == _materialBindings.end())
+        return false;
+    const auto* mask = cached->second.Find(Asset::Material::MaterialSlot::Mask);
+    if (!mask)
+        return false;
+    const std::string& src = mask->uvSource;
+    return src.size() == 4 && (src[0] == 't' || src[0] == 'T') && (src[1] == 'e' || src[1] == 'E') &&
+           (src[2] == 'x' || src[2] == 'X') && src[3] == '1';
 }
 
 // The albedo a section's RVMAT names, or 0 when it names none.
@@ -4968,6 +4997,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             }
             // Multi's further layers, same ordering dependency on the translation cache.
             ResolveMaterialLayers(s->GetSection(i), mat);
+            // Multi's mask lives on the second UV set in the BI corpora (TexGen uvSource
+            // "tex1"); the shader samples it with uv1 when told so.
+            if (mat.mask_texture_id != 0 && MaterialMaskUsesUv1(s->GetSection(i)))
+            {
+                sec.flags |= WGR_MODEL_SECTION_MASK_UV1;
+            }
             if (const float specScale = MaterialSpecularScale(s->GetSection(i), mat.specular_texture_id);
                 specScale < 1.0f)
             {

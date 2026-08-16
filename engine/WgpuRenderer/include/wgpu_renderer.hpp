@@ -196,6 +196,9 @@ struct WgrMeshVertex
     uint32_t conform;
     WgrVec3 tangent;
     WgrVec3 binormal;
+    /* Second UV set (`tex1`), or a copy of uv when the shape has none. Read by the
+     * GPU-driven VS at @location(7) for Multi's mask/macro/AS stages (uvSource tex1). */
+    WgrVec2 uv1;
 };
 
 // --- Draw records ------------------------------------------------------------
@@ -348,7 +351,9 @@ enum WgrModelSectionFlags : uint32_t
     WGR_MODEL_SECTION_REFLECTIVE = 1u,
     /* Recognised light fixture: emissive is real radiance and survives the night. See
      * WGR_DRAW3D_NIGHT_EMITTER. */
-    WGR_MODEL_SECTION_NIGHT_EMITTER = 2u
+    WGR_MODEL_SECTION_NIGHT_EMITTER = 2u,
+    /* Multi's mask stage is authored on uvSource "tex1": sample it with WgrMeshVertex::uv1. */
+    WGR_MODEL_SECTION_MASK_UV1 = 4u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW
@@ -1592,7 +1597,7 @@ static_assert(sizeof(WgrSlice<WgrCamera>) == 16 && alignof(WgrSlice<WgrCamera>) 
               "WgrSlice must be a { pointer, u32 } with 8-byte alignment");
 static_assert(sizeof(WgrBlend) == 4, "WgrBlend must be 4 bytes to match the Rust #[repr(u32)] enum");
 static_assert(sizeof(WgrVertex2D) == 32, "WgrVertex2D layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrMeshVertex) == 60, "WgrMeshVertex must match the engine SVertex layout");
+static_assert(sizeof(WgrMeshVertex) == 68, "WgrMeshVertex must match the engine SVertex layout");
 static_assert(sizeof(WgrDraw2DBatch) == 32, "WgrDraw2DBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDraw3D) == 272, "WgrDraw3D layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrLight) == 64, "WgrLight layout must match the Rust #[repr(C)] struct");

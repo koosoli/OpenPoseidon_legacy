@@ -10,6 +10,9 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <cstdlib>
 #include <string>
 
 using Poseidon::Asset::Material::ParseRvMaterial;
@@ -336,4 +339,44 @@ class SomethingElse
     // uvSource "tex1" names the second UV channel -- exactly what AST-011C
     // preserved. This is the join between the two tickets.
     REQUIRE(material.stages[0].uvSource == "tex1");
+}
+
+// Corpus witness: point WGR_TEST_RVMAT at a binarised (raP) rvmat and this prints what the raP
+// walker reads out of it -- every TexGen's uvSource and every stage's texGen link. Skipped
+// when the variable is unset, so it never runs in CI; it exists because the text-config path
+// and the raP path are two readers, and MAT-039's mask-on-tex1 case passed the first while the
+// game (which takes the second) reported an empty uvSource.
+TEST_CASE("RvMaterialSource: raP witness dump", "[asset][material][mat-039][.witness]")
+{
+    const char* path = std::getenv("WGR_TEST_RVMAT");
+    if (!path)
+        return;
+    std::ifstream in(path, std::ios::binary);
+    REQUIRE(in.good());
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const auto material = Poseidon::Asset::Material::ParseArmaRapMaterial(bytes, path);
+    // The stage->TexGen link is what MAT-039 depends on; binarised BI rvmats store `texGen`
+    // as text, and a reader that only takes numbers leaves every stage at -1.
+    for (const auto& st : material.stages)
+        CHECK(st.texGen >= 0);
+    WARN("pixelShader=" << material.pixelShaderId << " texGens=" << material.texGens.size()
+                        << " stages=" << material.stages.size());
+    for (const auto& tg : material.texGens)
+        WARN("TexGen" << tg.index << " uvSource='" << tg.uvSource << "' transform=" << tg.uvTransform.present);
+    for (const auto& st : material.stages)
+        WARN("Stage" << st.index << " texGen=" << st.texGen << " uvSource='" << st.uvSource << "' tex="
+                     << st.texture.raw << " transform=" << st.uvTransform.present);
+    // Raw member names + types of the first stage body, to see what the walker is looking at.
+    const auto root = Poseidon::Asset::Config::ArmaRapReader(bytes).root();
+    for (const auto& m : root)
+    {
+        if (m.type != 0 || m.name.rfind("Stage", 0) != 0)
+            continue;
+        std::string line = m.name + ":";
+        for (const auto& b : m.body)
+            line += " " + b.name + "(t" + std::to_string(int(b.type)) + "/v" + std::to_string(int(b.value.type)) + "=" +
+                    (b.value.type == 0 || b.value.type == 4 ? b.value.text : std::to_string(b.value.number)) + ")";
+        WARN(line);
+        break;
+    }
 }

@@ -580,6 +580,8 @@ void Shape::SortVertices()
     AutoArray<Vector3> oNorm = _norm;
     AutoArray<VertexIndex> oVertexToPoint = _vertexToPoint;
     AutoArray<UVPair> oTex = _tex;
+    AutoArray<UVPair> oTex1 = _tex1;
+    const bool hasTex1 = _tex1.Size() >= _vertexToPoint.Size() && _tex1.Size() > 0;
 
     // change vertices to respect a new permutation
     for (int i = 0; i < _vertexToPoint.Size(); i++)
@@ -590,6 +592,8 @@ void Shape::SortVertices()
         _pos[newIndex] = oPos[oldIndex];
         _norm[newIndex] = oNorm[oldIndex];
         _tex[newIndex] = oTex[oldIndex];
+        if (hasTex1)
+            _tex1[newIndex] = oTex1[oldIndex];
         _vertexToPoint[newIndex] = oVertexToPoint[oldIndex];
     }
 

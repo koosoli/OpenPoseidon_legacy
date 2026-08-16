@@ -118,6 +118,11 @@ const SECTION_REFLECTIVE: u32 = 1u;
 // SectionMaterial.flags bit 1 (WGR_MODEL_SECTION_NIGHT_EMITTER): a recognised light fixture,
 // whose emissive is real radiance and is exempt from the `emissive_night` fade.
 const SECTION_NIGHT_EMITTER: u32 = 2u;
+// SectionMaterial.flags bit 2 (WGR_MODEL_SECTION_MASK_UV1): the Multi mask stage's TexGen names
+// uvSource "tex1", so it is sampled with the second UV set. This is the norm in the BI corpora
+// (walls_l3.rvmat: TexGen4 tex1, every layer TexGen tex); sampling the mask with the tiling uv
+// painted its plaster/dirt/metal regions as rectangles across the wall.
+const SECTION_MASK_UV1: u32 = 4u;
 
 // Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
 // rather than reinvented, so both consumers agree with fs_sky_env's convention in sky.wgsl:
@@ -351,6 +356,9 @@ struct VsOut {
     @location(8) @interpolate(flat) model_rot0: vec3<f32>,
     @location(9) @interpolate(flat) model_rot1: vec3<f32>,
     @location(10) @interpolate(flat) model_rot2: vec3<f32>,
+    // Second UV set (`tex1`): what Multi's mask / macro / ambient-shadow stages are authored
+    // on. Equals uv when the shape carries no second set (MeshBuild copies t0 into t1).
+    @location(11) uv1: vec2<f32>,
 };
 
 // WgrInstance::flags bits: vegetation canopy — bend cutout-section normals toward a radial crown
@@ -384,6 +392,7 @@ fn vs_gpu(
     @location(1) norm: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(5) conform_sel: u32, // per-vertex conform selector (mode 2): 0 rigid / 1 keep / 2 on
+    @location(7) uv1: vec2<f32>,   // second UV set (tex1), see VsOut
 ) -> VsOut {
     let rec = records[rec_slot];
     let inst = instances[rec.instance];
@@ -517,6 +526,7 @@ fn vs_gpu(
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * vec4<f32>(world_pos, 1.0));
     out.uv = uv;
+    out.uv1 = uv1;
     out.world_pos = world_pos;
     out.normal = normal_ws;
     out.fog = fog_factor(length(world_pos));
@@ -562,7 +572,8 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw);
     if (sm.mask_slot != 0u && matdbg_flag(MATDBG_COMPOSE_MULTI)) {
-        let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], in.uv).rgb;
+        let mask_uv = select(in.uv, in.uv1, (sm.flags & SECTION_MASK_UV1) != 0u);
+        let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], mask_uv).rgb;
         var weight = 0.0;
         var blended = vec3<f32>(0.0);
         for (var i = 0u; i < 3u; i = i + 1u) {

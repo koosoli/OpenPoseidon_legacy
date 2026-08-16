@@ -20,6 +20,10 @@ struct SVertex
     // WGPU mesh. Zero means this source has no decoded tangent frame.
     Vector3P tangent;
     Vector3P binormal;
+    // Second UV set (`tex1`), or a copy of t0 when the shape carries none. Real
+    // Virtuality's Multi materials address their blend mask / macro / ambient-shadow
+    // stages through it. Appended, so every earlier offset is unchanged.
+    UVPair t1;
 };
 
 } // namespace Poseidon

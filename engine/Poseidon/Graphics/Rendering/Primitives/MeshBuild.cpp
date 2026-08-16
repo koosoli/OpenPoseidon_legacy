@@ -34,6 +34,7 @@ void BuildVertices(const Shape& src, SVertex* out)
     const int n = src.NVertex();
     const int normals = src.NNorm();
     const int texcoords = src.NTex();
+    const bool hasUv1 = src.HasUV1();
     for (int vertexIndex = 0; vertexIndex < n; ++vertexIndex)
     {
         Vector3Val pos = src.Pos(vertexIndex);
@@ -43,6 +44,7 @@ void BuildVertices(const Shape& src, SVertex* out)
         // Normals are negated (matches the D3D convention).
         out->norm = Vector3P(-norm.X(), -norm.Y(), -norm.Z());
         out->t0 = uv;
+        out->t1 = hasUv1 ? src.UV1(vertexIndex) : uv;
         // Non-conform path: the per-instance conform mode is 0, so the shader ignores
         // this. Only BuildOrigVertices (the conform path) sets a meaningful value.
         out->conform = 0;
@@ -72,6 +74,7 @@ void BuildOrigVertices(const Shape& src, SVertex* out)
         // Normals are negated (matches the D3D convention), same as BuildVertices.
         out->norm = Vector3P(-norm.X(), -norm.Y(), -norm.Z());
         out->t0 = src.UV(i);
+        out->t1 = src.HasUV1() ? src.UV1(i) : src.UV(i);
         // Per-vertex conform selector from the ORIGINAL clip (Object::Animate clears
         // ClipLandKeep as it conforms, so the current clip would be wrong): 1 = Keep
         // (SurfaceY + height above surface), 2 = On (pin to SurfaceY), 0 = rigid.

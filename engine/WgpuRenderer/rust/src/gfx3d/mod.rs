@@ -4833,6 +4833,7 @@ impl Gfx3d {
                 conform: 0,
                 tangent: glam::Vec3::ZERO,
                 binormal: glam::Vec3::ZERO,
+                uv1: glam::Vec2::ZERO,
             })
             .collect();
         let indices: Vec<u16> = (0..vert_count as u16).collect();

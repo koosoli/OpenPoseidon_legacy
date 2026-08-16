@@ -634,3 +634,38 @@ class Stage3 { texture="dz\data\grass_co.paa"; uvSource="tex"; };
     REQUIRE(ir.Slot(MaterialSlot::NormalMap).sourceStage == 2);
     REQUIRE(ir.Slot(MaterialSlot::BaseColour).sourceStage == 3);
 }
+
+// Shaped like ca\structures_e\wall\wall_l\data\walls_l3.rvmat: the four layers ride TexGen0-3
+// on `tex`, and the mask / macro / ambient-shadow stages ride TexGen4 on `tex1`. Every stage
+// names its TexGen and carries no uvSource of its own, so the channel has to come THROUGH the
+// TexGen link -- which is where it was being lost.
+static const char* kMultiWall = R"CFG(
+PixelShaderID="Multi";
+VertexShaderID="Multi";
+class TexGen0 { uvSource="tex"; class uvTransform { aside[]={1,0,0}; up[]={0,1,0}; dir[]={0,0,0}; pos[]={0,0,0}; }; };
+class TexGen1 { uvSource="tex"; class uvTransform { aside[]={1,0,0}; up[]={0,1,0}; dir[]={0,0,0}; pos[]={0,0,0}; }; };
+class TexGen2 { uvSource="tex"; class uvTransform { aside[]={1,0,0}; up[]={0,1,0}; dir[]={0,0,0}; pos[]={0,0,0}; }; };
+class TexGen3 { uvSource="tex"; class uvTransform { aside[]={1,0,0}; up[]={0,1,0}; dir[]={0,0,0}; pos[]={0,0,0}; }; };
+class TexGen4 { uvSource="tex1"; class uvTransform { aside[]={1,0,0}; up[]={0,1,0}; dir[]={0,0,0}; pos[]={0,0,0}; }; };
+class Stage0 { texture="ca\structures_e\data\plaster\wall_plaster_02_co.paa"; texGen=0; };
+class Stage1 { texture="ca\structures_e\data\loam\wall_dirt03_co.paa"; texGen=1; };
+class Stage2 { texture="ca\structures_e\data\metal\metal03_co.paa"; texGen=2; };
+class Stage3 { texture="ca\structures\data\metal\metalrust1_co.paa"; texGen=3; };
+class Stage4 { texture="ca\structures_e\wall\wall_l\data\walls_l3_mask.paa"; texGen=4; };
+class Stage9 { texture="ca\structures_e\wall\wall_l\data\walls_l3_mc.paa"; texGen=4; };
+class Stage10 { texture="ca\structures_e\wall\wall_l\data\walls_l3_ads.paa"; texGen=4; };
+)CFG";
+
+TEST_CASE("Multi schema: the mask's uvSource comes through its TexGen", "[asset][material][mat-039]")
+{
+    // The owner's "gray stuff on the wall": the mask sampled on the tiling uv paints its
+    // regions as rectangles across the wall. It has to report tex1 here or the renderer
+    // cannot know to sample it with the second UV set.
+    auto ir = translate(kMultiWall);
+    REQUIRE(ir.Slot(MaterialSlot::Mask).present);
+    CHECK(ir.Slot(MaterialSlot::Mask).uvSource == "tex1");
+    CHECK(ir.Slot(MaterialSlot::Macro).uvSource == "tex1");
+    CHECK(ir.Slot(MaterialSlot::AmbientShadow).uvSource == "tex1");
+    CHECK(ir.Slot(MaterialSlot::BaseColour).uvSource == "tex");
+    CHECK(ir.Slot(MaterialSlot::LayerColour1).uvSource == "tex");
+}

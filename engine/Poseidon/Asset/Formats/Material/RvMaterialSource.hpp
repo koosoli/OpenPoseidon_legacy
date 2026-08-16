@@ -6,6 +6,7 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -199,9 +200,25 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
     };
     const auto memberInt = [](const Config::RapMember* member, int fallback = -1) -> int
     {
-        return member && (member->value.type == 1 || member->value.type == 2)
-                   ? static_cast<int>(member->value.number)
-                   : fallback;
+        if (!member)
+            return fallback;
+        if (member->value.type == 1 || member->value.type == 2)
+            return static_cast<int>(member->value.number);
+        // Binarised BI rvmats store `texGen=4;` as the STRING "4" (measured on
+        // ca\structures_e\wall\wall_l\data\walls_l3.rvmat: every Stage's texGen is v0 text).
+        // Refusing it left every stage at -1, so no stage ever linked to its TexGen -- the
+        // per-layer UV scales and the mask's `tex1` channel were silently lost on every
+        // binarised Multi material, which is all of them in the shipped PBOs.
+        if (member->value.type == 0 || member->value.type == 4)
+        {
+            const std::string& t = member->value.text;
+            if (t.empty())
+                return fallback;
+            char* end = nullptr;
+            const long v = std::strtol(t.c_str(), &end, 10);
+            return end && *end == ' ' ? static_cast<int>(v) : fallback;
+        }
+        return fallback;
     };
     const auto readRapVec3 = [](const std::vector<Config::RapMember>& members, const char* name,
                                 std::array<float, 3>& out)

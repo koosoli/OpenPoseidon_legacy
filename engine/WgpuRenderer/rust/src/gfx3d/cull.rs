@@ -1925,10 +1925,18 @@ pub fn build_gpu_pipeline(
         ],
         immediate_size: 0,
     });
-    // pos / norm / uv / conform_sel (locations 0/1/2/5). Same 36-byte WgrMeshVertex stride as
+    // pos / norm / uv / conform_sel / uv1 (locations 0/1/2/5/7). Same WgrMeshVertex stride as
     // the per-draw path; location 5 (the conform selector at byte 32) drives mode-2 conform.
-    let vbuf_attrs =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
+    // Location 7 is the SECOND UV set (byte 60, after the authored tangent frame): Multi's
+    // mask / macro / ambient-shadow stages are authored on `tex1`, and sampling them with
+    // the tiling uv painted rectangles across every Multi wall on Takistan (walls_l3.rvmat).
+    let vbuf_attrs = [
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 12, shader_location: 1 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 24, shader_location: 2 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint32, offset: 32, shader_location: 5 },
+        wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x2, offset: 60, shader_location: 7 },
+    ];
     let vbuf_layout = wgpu::VertexBufferLayout {
         array_stride: super::BAKED_VERT_SIZE,
         step_mode: wgpu::VertexStepMode::Vertex,
