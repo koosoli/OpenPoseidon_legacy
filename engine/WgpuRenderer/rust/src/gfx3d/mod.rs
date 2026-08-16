@@ -122,6 +122,15 @@ pub(crate) fn emissive_night() -> f32 {
     env_f32("WGR_EMISSIVE_NIGHT", 0.0).clamp(0.0, 1.0)
 }
 
+// Per-mip alpha gain for cutout foliage (gbuffer.wgsl mip_alpha_boost). Owner, Arma 2: "the
+// leaves of trees only render when one comes extremely close" -- the canopy dissolves to
+// speckle past ~15 m while its shadow stays full, because a sparse leaf card's mip alpha sinks
+// under the 0.5 cutoff a few mips down. 0.5 per mip is the customary starting point;
+// WGR_CUTOUT_MIP_ALPHA=0 restores the old behaviour for an A/B.
+pub(crate) fn cutout_mip_alpha() -> f32 {
+    env_f32("WGR_CUTOUT_MIP_ALPHA", 0.5).clamp(0.0, 4.0)
+}
+
 // Restore the historical PANIC when a per-frame staging allocation is refused.
 //
 // OFF by default: a refused allocation is an out-of-memory condition, and unwinding the
@@ -3659,6 +3668,7 @@ impl Gfx3d {
             ("a2c", if a2c { 1.0 } else { 0.0 }),
             ("translucent", translucent),
             ("emissive_night", emissive_night() as f64),
+            ("cutout_mip_alpha", cutout_mip_alpha() as f64),
         ];
 
         // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
@@ -3771,7 +3781,13 @@ impl Gfx3d {
             &plain_buffers
         };
         let alpha_ref = f32::from_bits(key.alpha_ref_bits) as f64;
-        let constants = [("alpha_ref", alpha_ref), ("depth_bias", 0.0)];
+        // cutout_mip_alpha MUST match the colour pipeline's, or the prepass lays depth for
+        // texels the colour pass discards (gpu_driven.wgsl's prepass_match rationale).
+        let constants = [
+            ("alpha_ref", alpha_ref),
+            ("depth_bias", 0.0),
+            ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+        ];
         // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
         // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
         // colour pass will shade. Pure-opaque prepass (alpha_ref == 0) keeps the vec2 fs_prepass.

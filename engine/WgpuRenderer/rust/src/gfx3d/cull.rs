@@ -1971,6 +1971,7 @@ pub fn build_gpu_pipeline(
         ("a2c", if foliage_a2c { 1.0 } else { 0.0 }),
         ("prepass_match", prepass_match),
         ("emissive_night", super::emissive_night() as f64),
+        ("cutout_mip_alpha", super::cutout_mip_alpha() as f64),
     ];
     let depth_stencil = wgpu::DepthStencilState {
         format: super::DEPTH_FORMAT,

@@ -11,7 +11,7 @@
 
 #import frame::{frame, reverse_z, fog_factor, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV}
 #import shading::{shade, ShadeMaterial}
-#import gbuffer::{oct_encode, a2c_coverage}
+#import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
 // shadow_depth. Lets the GPU-driven VS conform ClipLand vegetation/fences to the ground per
 // vertex, matching the per-draw path — so these objects no longer have to stay on the CPU.
@@ -39,6 +39,10 @@ override prepass_match: f32 = 1.0;
 // see shader3d.wgsl's twin for the measurement. 0 by default: the imported corpora use the lane
 // as fixed-function brightness compensation and it made forests glow at midnight.
 override emissive_night: f32 = 0.0;
+// Per-mip alpha gain for cutout sections (WGR_CUTOUT_MIP_ALPHA, cull.rs). See
+// gbuffer.wgsl mip_alpha_boost: without it Arma 2 canopies dissolve to speckle past ~15 m
+// while their shadows stay full (owner: "leaves only render when one comes extremely close").
+override cutout_mip_alpha: f32 = 0.0;
 
 // InstanceGpu / RecordGpu / SectionMaterialGpu (cull.rs). conform0/1/2 is the terrain-conform
 // plane (WgrDraw3D::conform* parity); conform2.z = mode (0 rigid, 1 ForestPlain plane, 2
@@ -599,17 +603,24 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     }
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
     // alpha; opaque sections keep full coverage (1.0). Without A2C, the classic hard discard.
+    // Cutout alpha with the mip-coverage lift; the sampled alpha itself stays what it was
+    // for the blend/composition below. Uniform: sm.alpha_ref is per-section, uv per-fragment.
+    var cut_a = base.a;
+    if (sm.alpha_ref > 0.0) {
+        let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
+        cut_a = mip_alpha_boost(base.a, in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, dims0, cutout_mip_alpha);
+    }
     var out_a = base.a;
     if (a2c > 0.5) {
         if (sm.alpha_ref > 0.0) {
-            out_a = a2c_coverage(base.a, sm.alpha_ref);
+            out_a = a2c_coverage(cut_a, sm.alpha_ref);
             if (out_a <= 0.0) {
                 discard;
             }
         } else {
             out_a = 1.0;
         }
-    } else if (base.a < sm.alpha_ref) {
+    } else if (cut_a < sm.alpha_ref) {
         discard;
     }
     // Fold RAW material x the frame sun, reproducing GL33's UploadVSMaterialConstants
@@ -802,7 +813,12 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     let sm = section_materials[in.section];
     if (sm.alpha_ref > 0.0) {
         let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
-        if (textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a < sm.alpha_ref) {
+        // Same mip-coverage lift as fs_gpu, or the prepass keeps depth for texels the colour
+        // pass discards (and vice versa) -- the exact mismatch prepass_match exists to prevent.
+        let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
+        let a = mip_alpha_boost(textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a,
+                                base_uv, dims0, cutout_mip_alpha);
+        if (a < sm.alpha_ref) {
             discard;
         }
     }
@@ -826,7 +842,9 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     var cov = 1.0;
     if (sm.alpha_ref > 0.0) {
         let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
-        let alpha = textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a;
+        let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
+        let alpha = mip_alpha_boost(textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a,
+                                    base_uv, dims0, cutout_mip_alpha);
         cov = a2c_coverage(alpha, sm.alpha_ref);
         if (cov <= 0.0) {
             discard;

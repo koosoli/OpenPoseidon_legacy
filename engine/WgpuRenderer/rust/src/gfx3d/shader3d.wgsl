@@ -9,7 +9,7 @@
 #import skin::{skin_pos, skin_normal}
 #import lighting::lights_contrib
 #import color::srgb_to_linear
-#import gbuffer::{oct_encode, a2c_coverage}
+#import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Shared fragment shading, also used by the GPU-driven indirect path (gpu_driven.wgsl).
 #import shading::{shade, ShadeMaterial}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
@@ -222,6 +222,9 @@ override linear: f32 = 0.0;
 // WGR_AUTO_EXPOSURE=0: dead trees ~150/255, canopy ~60, terrain 0.2 -- exposure exonerated).
 // WGR_EMISSIVE_NIGHT=1 is the A/B back to the old behaviour.
 override emissive_night: f32 = 0.0;
+// Per-mip alpha gain for cutout foliage (WGR_CUTOUT_MIP_ALPHA); see gbuffer.wgsl
+// mip_alpha_boost and gpu_driven.wgsl's twin.
+override cutout_mip_alpha: f32 = 0.0;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -536,13 +539,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Cutout: A2C emits a sharpened coverage alpha (edge dithered across MSAA samples);
     // otherwise the classic hard discard. a2c is a compile-time override, so exactly one
     // path is compiled and control flow stays uniform for the derivatives above/below.
+    // Cutout alpha with the mip-coverage lift (the sampled alpha stays what it was for the
+    // shading below). alpha_ref is a pipeline constant, so this folds away on opaque draws.
+    var cut_a = base.a;
+    if (alpha_ref > 0.0) {
+        let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
+        cut_a = mip_alpha_boost(base.a, uv, dims0, cutout_mip_alpha);
+    }
     var out_a = base.a;
     if (a2c > 0.5) {
-        out_a = a2c_coverage(base.a, alpha_ref);
+        out_a = a2c_coverage(cut_a, alpha_ref);
         if (out_a <= 0.0) {
             discard;
         }
-    } else if (base.a < alpha_ref) {
+    } else if (cut_a < alpha_ref) {
         discard;
     }
     if (is_shadow > 0.5) {
@@ -668,7 +678,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
     if (alpha_ref > 0.0) {
         let packed = bitcast<u32>(materials[in.instance].emissive.w);
-        if (textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a < alpha_ref) {
+        let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
+        let a = mip_alpha_boost(textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a, in.uv, dims0,
+                                cutout_mip_alpha);
+        if (a < alpha_ref) {
             discard;
         }
     }
@@ -686,7 +699,9 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
 @fragment
 fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     let packed = bitcast<u32>(materials[in.instance].emissive.w);
-    let alpha = textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a;
+    let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
+    let alpha = mip_alpha_boost(textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a, in.uv, dims0,
+                                cutout_mip_alpha);
     let cov = a2c_coverage(alpha, alpha_ref);
     if (cov <= 0.0) {
         discard;

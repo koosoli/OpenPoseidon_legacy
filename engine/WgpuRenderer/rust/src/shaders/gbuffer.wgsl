@@ -38,3 +38,22 @@ fn oct_decode(e: vec2<f32>) -> vec3<f32> {
 fn a2c_coverage(alpha: f32, cutoff: f32) -> f32 {
     return clamp((alpha - cutoff) / max(fwidth(alpha), 1e-4) + 0.5, 0.0, 1.0);
 }
+
+// Coverage-preserving alpha for cutout foliage at distance. A leaf card's alpha is sparse,
+// so every mip's box filter drags it toward the average and, a few mips down, UNDER the
+// 0.5 cutoff everywhere: the canopy dissolves to a pixel-speckle while its shadow (a solid
+// LOD) stays full. The sharpen above cannot help -- it rescales about the cutoff, and once
+// alpha sits below it over the whole card there is no transition left to sharpen. The
+// standard answer (Castano; UE "mip alpha scale") is to lift alpha with the mip level so the
+// covered fraction at the cutoff stays roughly what mip 0 had. `k` is the per-mip gain
+// (0 = off, the previous behaviour); dims is the texture's mip-0 size in texels. Uniform
+// control flow only (derivatives).
+fn mip_alpha_boost(alpha: f32, uv: vec2<f32>, dims: vec2<f32>, k: f32) -> f32 {
+    if (k <= 0.0) {
+        return alpha;
+    }
+    let dx = dpdx(uv) * dims;
+    let dy = dpdy(uv) * dims;
+    let lod = 0.5 * log2(max(max(dot(dx, dx), dot(dy, dy)), 1e-8));
+    return clamp(alpha * (1.0 + max(lod, 0.0) * k), 0.0, 1.0);
+}
