@@ -1855,6 +1855,34 @@ pub fn gpu_group1_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
+/// `prepass_match` override for the GPU-driven prepass FS: 1 (default) = the prepass applies
+/// fs_gpu's full discard set, so it lays depth only where the colour pass will shade. 0 restores
+/// the pre-fix behaviour for an A/B.
+///
+/// Resolved ONCE (build_gpu_pipeline runs twice — main + mirrored reflection) so both pipelines
+/// are specialised identically and the log carries one line, like the other WGR_* gates.
+fn prepass_match_from_env() -> f64 {
+    static MATCH: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *MATCH.get_or_init(|| {
+        let on = std::env::var("WGR_PREPASS_MATCH")
+            .map(|v| v != "0")
+            .unwrap_or(true);
+        eprintln!(
+            "[wgr] gpu-driven prepass discard parity: {} from WGR_PREPASS_MATCH",
+            if on {
+                "on (prepass drops what fs_gpu drops)"
+            } else {
+                "off (legacy: raw-uv cutout test, no clip plane)"
+            }
+        );
+        if on {
+            1.0
+        } else {
+            0.0
+        }
+    })
+}
+
 // Build the GPU-driven draw pipelines (gpu_driven.wgsl) — the opaque COLOUR pipeline
 // (vs_gpu / fs_gpu) and the depth+normal PREPASS pipeline (vs_gpu / fs_gpu_prepass), sharing
 // one shader module + layout. Both: reversed-Z GreaterEqual depth test + WRITE, back-face
@@ -1915,9 +1943,25 @@ pub fn build_gpu_pipeline(
     // A2C, the colour shader decides coverage per-fragment (cutout -> sharpened, opaque -> 1.0);
     // `a2c` just tells it the pipeline has alpha_to_coverage enabled. Module-level override, so
     // it's valid to hand to both stages of this module.
+    // ONE constants map, handed to every stage of BOTH pipelines.
+    //
+    // This is not tidiness. `vs_gpu` is the vertex stage of the colour pipeline AND of the
+    // prepass pipeline, and the colour pass depth-tests (reversed-Z GreaterEqual) against the
+    // depth the prepass wrote — so the two must be the same program, specialised the same way,
+    // or a fragment can fail its own prepass depth and leave the pixel at the clear colour.
+    // shader3d states the same invariant for the CPU twin ("same VS + override constants ->
+    // bit-for-bit depth as fs_main", shader3d.wgsl ~655); the GPU-driven prepass was built with
+    // `PipelineCompilationOptions::default()` and therefore did not hold it.
+    //
+    // `prepass_match` = 1 makes the prepass FS apply fs_gpu's full discard set (Multi's layer-0
+    // uv transform on the cutout test, plus the waterline clip). WGR_PREPASS_MATCH=0 restores
+    // the previous behaviour for an A/B; it is read once at pipeline build, so an arm is two
+    // runs of the same binary differing in exactly one term.
+    let prepass_match = prepass_match_from_env();
     let constants = [
         ("linear", linear),
         ("a2c", if foliage_a2c { 1.0 } else { 0.0 }),
+        ("prepass_match", prepass_match),
     ];
     let depth_stencil = wgpu::DepthStencilState {
         format: super::DEPTH_FORMAT,
@@ -1974,7 +2018,11 @@ pub fn build_gpu_pipeline(
         vertex: wgpu::VertexState {
             module: &module,
             entry_point: Some("vs_gpu"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            // The SAME constants as the colour pipeline's vs_gpu — see the `constants` comment.
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
             buffers: &vbuffers,
         },
         primitive,
@@ -1993,7 +2041,10 @@ pub fn build_gpu_pipeline(
             } else {
                 "fs_gpu_prepass"
             }),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
             targets: &[Some(wgpu::ColorTargetState {
                 format: super::NORMAL_FORMAT,
                 blend: None,

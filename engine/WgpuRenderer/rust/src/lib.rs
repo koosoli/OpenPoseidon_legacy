@@ -1033,6 +1033,9 @@ impl Renderer {
             bc_supported,
             object_texture_cap,
             partially_bound_enabled,
+            // So the bindless slot-0 texel announces itself in the GAME log rather than on
+            // stderr, which this harness never captures. See announce_fallback_texel.
+            &log,
         );
         // One composer, pre-loaded with the shared shader modules, shared by the
         // 3D subsystems that #import them.

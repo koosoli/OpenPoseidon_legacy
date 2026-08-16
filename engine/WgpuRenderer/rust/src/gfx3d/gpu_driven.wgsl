@@ -24,6 +24,17 @@ override foliage_shadow_ao: f32 = 0.35;
 // opaque + cutout sections, so cutout-ness is decided per-fragment (sm.alpha_ref > 0, uniform
 // per quad): cutout emits sharpened coverage, opaque emits 1.0 (full coverage -> unchanged).
 override a2c: f32 = 0.0;
+// 1 = the depth+normal PREPASS fragment applies the colour pass' FULL discard set, so the depth
+// it lays down covers exactly the pixels fs_gpu will shade. 0 restores the pre-fix behaviour
+// (raw-uv cutout test only, no clip plane) for an A/B. Driven by WGR_PREPASS_MATCH (cull.rs).
+//
+// Why this exists: a prepass fragment that survives where the colour fragment discards writes
+// depth for a pixel nothing ever colours. Terrain, sky and every object behind it then fail the
+// reversed-Z GreaterEqual test, so the pixel keeps the scene target's CLEAR value — a hard-edged
+// black hole, not a shading error. The CPU path has this parity by construction (shader3d's
+// fs_prepass shares fs_main's `alpha_ref` override and samples the same uv); the GPU-driven twin
+// lost it when Multi's per-layer UV transform landed in fs_gpu alone (023ebd5).
+override prepass_match: f32 = 1.0;
 
 // InstanceGpu / RecordGpu / SectionMaterialGpu (cull.rs). conform0/1/2 is the terrain-conform
 // plane (WgrDraw3D::conform* parity); conform2.z = mode (0 rigid, 1 ForestPlain plane, 2
@@ -727,6 +738,31 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(out_rgb, out_a);
 }
 
+// The uv fs_gpu samples the BASE colour (and therefore the cutout alpha) at. Layer 0 carries its
+// own transform on a Multi material, so a prepass that tested the raw uv tested a different texel
+// and could keep a fragment the colour pass discards. `prepass_match` is a pipeline-override
+// constant, so this branch folds at compile time and the caller's textureSample stays in uniform
+// control flow.
+fn prepass_base_uv(uv: vec2<f32>, layer0: vec4<f32>) -> vec2<f32> {
+    if (prepass_match > 0.5) {
+        return uv * layer0.xy + layer0.zw;
+    }
+    return uv;
+}
+
+// fs_gpu's reflected-view waterline clip, so the prepass never lays depth for a fragment the
+// colour pass will clip away. Inert on a main camera (which uploads a zero plane, gfx3d/mod.rs
+// ~5048) and on the planar reflection, which has no prepass — carried for symmetry, not for a
+// measured defect.
+fn prepass_clipped(world_pos: vec3<f32>) -> bool {
+    if (prepass_match < 0.5) {
+        return false;
+    }
+    let clip_len2 = dot(frame.clip_plane.xyz, frame.clip_plane.xyz);
+    return clip_len2 > 0.0 &&
+        dot(frame.clip_plane.xyz, world_pos + frame.cam_pos.xyz) + frame.clip_plane.w < 0.0;
+}
+
 // Depth+normal PREPASS fragment: no shading — writes ONLY the view-space octahedral normal
 // into the Rg16Float G-buffer (depth is written by the fixed-function stage). Mirrors
 // shader3d's fs_prepass, but reads the per-section cutout threshold + bindless texture from
@@ -734,9 +770,13 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
 @fragment
 fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    if (prepass_clipped(in.world_pos)) {
+        discard;
+    }
     let sm = section_materials[in.section];
     if (sm.alpha_ref > 0.0) {
-        if (textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], in.uv).a < sm.alpha_ref) {
+        let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
+        if (textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a < sm.alpha_ref) {
             discard;
         }
     }
@@ -753,10 +793,14 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
 fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    if (prepass_clipped(in.world_pos)) {
+        discard;
+    }
     let sm = section_materials[in.section];
     var cov = 1.0;
     if (sm.alpha_ref > 0.0) {
-        let alpha = textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], in.uv).a;
+        let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
+        let alpha = textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a;
         cov = a2c_coverage(alpha, sm.alpha_ref);
         if (cov <= 0.0) {
             discard;

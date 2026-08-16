@@ -1939,6 +1939,18 @@ fn water_ripple_strength_from_env() -> f32 {
     strength
 }
 
+/// WGR_GTAO=0 hard-disables screen-space AO (see `Gfx3d::gtao_force_off`). Read once at renderer
+/// construction so an A/B is two runs of the same binary differing in exactly one term.
+fn gtao_force_off_from_env() -> bool {
+    let off = std::env::var("WGR_GTAO").map(|v| v == "0").unwrap_or(false);
+    if off {
+        eprintln!(
+            "[wgr] gtao: FORCED OFF by WGR_GTAO=0 (the ambient AO term stays 1.0 everywhere)"
+        );
+    }
+    off
+}
+
 fn gtao_scale_from_env() -> u32 {
     let scale = std::env::var("WGR_GTAO_SCALE")
         .ok()
@@ -2714,6 +2726,19 @@ pub struct Gfx3d {
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
     // `near` is the whole linearisation: stored reversed-Z depth d gives view z = near / d.
     cam_gtao_proj: Vec<[f32; 3]>,
+    // WGR_GTAO=0: hard-disable screen-space AO for an ablation arm. Deliberately NOT a field of
+    // GtaoSettings, for exactly the reason `gtao_scale` above is not — C++ pushes that struct
+    // every frame (Engine::AoSettings), so anything living in it is frame-0-only from the
+    // renderer's side and an env override would be silently reverted before the first capture.
+    //
+    // It exists because GTAO is the one term that can drive a lit pixel to EXACTLY (0,0,0):
+    // shading.wgsl folds it into `amb_ao`, ambient is `sky_irradiance * sun_ambient.w * amb_ao`,
+    // and gtao_ao() returns a clamped [0,1] texture read (frame.wgsl:410). Indoors, with no
+    // direct sun on a wall, ambient is the whole radiance — so AO = 0 renders the same exact
+    // black as an untouched clear. Any argument of the form "the pixel is 0, therefore nothing
+    // drew it" has to eliminate this first, and it is fed BY the depth prepass, so it also
+    // vanishes under WGR_PREPASS=0.
+    gtao_force_off: bool,
     // Single-sample depth-stencil for the post-tonemap UI phase (Some only when sample_count > 1).
     // That phase composites display-referred 2D to the 1x swapchain, so it can't share the MSAA
     // scene depth (mismatched sample counts). Cleared per use; world occlusion isn't carried into
@@ -3368,6 +3393,7 @@ impl Gfx3d {
             gtao_blur,
             gtao_settings: GtaoSettings::default(),
             gtao_scale: gtao_scale_from_env(),
+            gtao_force_off: gtao_force_off_from_env(),
             material_debug_view: 0,
             material_debug_flags: 1 << 2, // compose Multi layers, matching the C++ default
             water_anim: [0.0, water_ripple_strength_from_env(), 0.0, 0.0],
@@ -5070,7 +5096,9 @@ impl Gfx3d {
                 // weapon vanish into the world behind it; in the lit path it is a quieter wrong
                 // ambient. Neither has a valid AO value available, so they get 1.0.
                 let g = &self.gtao_settings;
-                let on = g.enabled && i == gtao_camera;
+                // The frame-UBO gate must follow the same force-off as render_gtao, or the shader
+                // would keep sampling the AO target the pass no longer refreshes.
+                let on = g.enabled && !self.gtao_force_off && i == gtao_camera;
                 let gtao = [
                     if on { 1.0f32 } else { 0.0 },
                     if on { g.debug_mode.min(2) as f32 } else { 0.0 },
@@ -6891,7 +6919,7 @@ impl Gfx3d {
         timers: &crate::gpu_timers::GpuTimers,
     ) {
         let s = self.gtao_settings;
-        if !s.enabled {
+        if !s.enabled || self.gtao_force_off {
             return;
         }
         let Some(&[proj_xx, proj_yy, near]) = self.cam_gtao_proj.get(camera) else {
