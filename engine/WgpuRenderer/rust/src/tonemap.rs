@@ -106,9 +106,16 @@ impl Tonemap {
             }
             Err(_) => (0.75, 0.0),
         };
+        // Hable linear-white point (see `linear_white` in tonemap.wgsl). WGR_TONEMAP_WHITE=<w>.
+        let linear_white = std::env::var("WGR_TONEMAP_WHITE")
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|w| *w >= 1.0)
+            .unwrap_or(11.2);
         let constants = [
             ("desat_start", desat_start.clamp(0.0, 0.99)),
             ("desat_strength", desat_strength.clamp(0.0, 1.0)),
+            ("linear_white", linear_white),
         ];
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

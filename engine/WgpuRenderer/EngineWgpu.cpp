@@ -1531,7 +1531,14 @@ void EngineWgpu::NextFrame()
                 // moonIntensity is the full-moon irradiance as a FRACTION of the sun's
                 // (default 1/400 — see Engine::SkySettings). moonAmount already carries
                 // the phase falloff and the horizon ramps.
-                const float moonRad = rad * _sky.moonIntensity * moonAmount;
+                // moonLightGain lifts the LIGHT only; the disc keeps moonIntensity (PushFrame's
+                // moonDiscScale), so the ground can catch the moon without the disc blooming.
+                static const float moonLightGainEnv = [] {
+                    const char* v = std::getenv("WGR_MOON_LIGHT_GAIN");
+                    return v ? static_cast<float>(std::atof(v)) : -1.0f;
+                }();
+                const float moonGain = moonLightGainEnv > 0.0f ? moonLightGainEnv : _sky.moonLightGain;
+                const float moonRad = rad * _sky.moonIntensity * moonGain * moonAmount;
                 // Blue bias, the Purkinje shift: it is not modelled anywhere downstream, so it
                 // has to live in the light. Stronger than LightSun::MoonLightColor's because the
                 // night tonemap key is warm and Takistan's tan ground measured (10.4, 7.8, 7.0)

@@ -45,7 +45,6 @@ const HABLE_C: f32 = 0.10;
 const HABLE_D: f32 = 0.20;
 const HABLE_E: f32 = 0.02;
 const HABLE_F: f32 = 0.30;
-const HABLE_W: f32 = 11.2;
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 
 // Highlight desaturation ("roll to white"). The Hable curve below is applied PER CHANNEL, so a
@@ -65,6 +64,15 @@ const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
 // Driven from tonemap.rs via pipeline constants (WGR_TONEMAP_DESAT).
 override desat_start: f32 = 0.75;
 override desat_strength: f32 = 0.0;
+// Linear-white point of the Hable curve: the post-exposure radiance that maps to display 1.0.
+// Above it everything CLIPS. Uncharted's 11.2 was written for scenes whose midtones sit near
+// 1-2; here a sunlit Takistan slope arrives at ~6-7 (sky-lit sun 22 x transmittance x albedo,
+// x preset exposure 3.625, x the auto-exposure floor 0.25), i.e. already at 0.9 of white -- so
+// a house wall at 2-3x the terrain's albedo has nowhere to go but flat white, which is the
+// owner's "the sun hits a wall and totally overexposes it". Raising this lengthens the
+// shoulder: midtones darken a little, highlights get a stop of room. Driven by
+// WGR_TONEMAP_WHITE (tonemap.rs) so the value is settled by a capture, not a rebuild.
+override linear_white: f32 = 11.2;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -86,7 +94,7 @@ fn hable_partial(x: vec3<f32>) -> vec3<f32> {
 }
 
 fn hable(color: vec3<f32>) -> vec3<f32> {
-    let white_scale = vec3<f32>(1.0) / hable_partial(vec3<f32>(HABLE_W));
+    let white_scale = vec3<f32>(1.0) / hable_partial(vec3<f32>(max(linear_white, 1.0)));
     return hable_partial(color) * white_scale;
 }
 

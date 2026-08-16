@@ -1732,10 +1732,14 @@ class Engine : public IGraphicsEngine
         // well as the light: they are one body, so this is one knob by necessity. The phase
         // function scales it on top, making a crescent ~30x dimmer.
         //
-        // 0.06 -> 0.09 on 2026-08-16 with the bluer light: Takistan's moon-facing slopes
-        // measured (7.4, 6.4, 7.4)/255 under a forced full moon at 45 deg, terrain in the
-        // no-moon frame 0.2. The owner asked for "not much but a little"; ~10 is a little.
-        float moonIntensity = 0.09f;
+        float moonIntensity = 0.06f;
+        // Extra gain on the moon's LIGHT only (not the disc), so the ground can catch it
+        // without the disc blooming into a lamp. At 1.0 (= moonIntensity alone) Takistan's
+        // moon-facing slopes measured (7.4, 6.4, 7.4)/255 under a forced full moon at 45 deg
+        // and the owner, flying Stratis under a 25 deg moon over dark grass, said "ground does
+        // not seem to catch light from the moon". 4.0 is the answer to that; the disc stays
+        // where it was. WGR_MOON_LIGHT_GAIN overrides it without a rebuild.
+        float moonLightGain = 4.0f;
         // Moon casts a directional light (and shadows) at night. Off = the pre-existing
         // behaviour, where night is lit by flat ambient only and the moon is scenery.
         bool moonLighting = true;
