@@ -99,8 +99,20 @@ pub struct TerrainConformParams {
     pub enabled: f32,       // 1 when a heightmap is loaded, else 0
     pub hm_width: u32,
     pub hm_height: u32,
+    // WLD-023(c) -- the CDLOD lattice the terrain RASTERISES, so a conformed decal can be
+    // placed on the surface the terrain draws instead of the one it evaluates. See
+    // conform.wgsl `surface_y_raster`. cdlod_base = ranges[0] (metres), cdlod_ratio = the
+    // per-level range multiplier, cdlod_morph = the fraction of each band spent morphing,
+    // cdlod_mode = 0 off (default, exact previous behaviour) / 1 on.
+    pub cdlod_base: f32,
+    pub cdlod_ratio: f32,
+    pub cdlod_morph: f32,
+    pub cdlod_mode: f32,
     pub _pad: [u32; 2],
 }
+
+// (baseMult, lodRatio, morphRegion, rasterConformMode) -- see conform_params().
+static CONFORM_CDLOD_ENV: std::sync::OnceLock<(f32, f32, f32, f32)> = std::sync::OnceLock::new();
 
 // Mask dimensions for a heightmap of the given size: `scale`x finer, but never
 // smaller than the heightmap and never past the dimension cap or the device limit.
@@ -1225,12 +1237,49 @@ impl Terrain {
     }
 
     pub fn conform_params(&self) -> TerrainConformParams {
+        // WLD-023(c). The CDLOD selector lives on the C++ side (TerrainWgpu::BuildQuadtree ->
+        // ComputeCdlodRanges, CdlodMorphBand in World/Terrain/TerrainCdlod.hpp) and its three
+        // inputs are process env vars, so the Rust side reads THE SAME VARIABLES rather than
+        // inventing a second control. The defaults below are copied from TerrainWgpu.cpp:219-221
+        // and must be kept in step with them; a divergence here does not fail, it silently
+        // conforms decals to a lattice the terrain does not draw.
+        //
+        // ranges[0] = leafSize * baseMult and leafSize = TerrainGridN * terrain_grid
+        // (TerrainCdlod.hpp BuildCdlodTree), with TerrainGridN == GRID_N == 32 here.
+        //
+        // Read ONCE: conform_params() runs every frame (lib.rs) and std::env::var takes a
+        // process-wide lock on Windows -- the same cost DrawSectionTL already had to cache away
+        // (EngineWgpu.cpp:2382-2385). The answer cannot change during a run.
+        let (base_mult, ratio, morph, mode) = *CONFORM_CDLOD_ENV.get_or_init(|| {
+            let f = |name: &str, fallback: f32| {
+                std::env::var(name)
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(fallback)
+            };
+            // Default OFF: turning this on changes where every road/decal vertex sits on every
+            // world, and the previous behaviour is the shipped one. WGR_CONFORM_RASTER=1 enables.
+            let on = std::env::var("WGR_CONFORM_RASTER")
+                .map(|v| !v.is_empty() && v != "0")
+                .unwrap_or(false);
+            (
+                f("WGR_TERRAIN_LOD_BASE", 4.0),
+                f("WGR_TERRAIN_LOD_RATIO", 2.0).max(1.001),
+                f("WGR_TERRAIN_MORPH", 0.50).clamp(0.05, 1.0),
+                if on { 1.0f32 } else { 0.0f32 },
+            )
+        });
         TerrainConformParams {
             origin: self.world_origin,
             terrain_grid: self.terrain_grid,
             enabled: if self.have_heightmap { 1.0 } else { 0.0 },
             hm_width: self.hm_width,
             hm_height: self.hm_height,
+            cdlod_base: GRID_N as f32 * self.terrain_grid * base_mult,
+            cdlod_ratio: ratio,
+            cdlod_morph: morph,
+            cdlod_mode: mode,
             _pad: [0, 0],
         }
     }

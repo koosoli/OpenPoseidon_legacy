@@ -111,6 +111,12 @@ fn decal_scale() -> f32 {
     env_f32("WGR_DECAL_SCALE", 1.0)
 }
 
+// Fraction of a draw's material EMISSIVE kept at full night; see the `emissive_night`
+// override in shader3d.wgsl for the measurement that motivates it. 1 = shipped behaviour.
+fn emissive_night() -> f32 {
+    env_f32("WGR_EMISSIVE_NIGHT", 1.0).clamp(0.0, 1.0)
+}
+
 // Restore the historical PANIC when a per-frame staging allocation is refused.
 //
 // OFF by default: a refused allocation is an out-of-memory condition, and unwinding the
@@ -3621,6 +3627,7 @@ impl Gfx3d {
             ("linear", linear),
             ("a2c", if a2c { 1.0 } else { 0.0 }),
             ("translucent", translucent),
+            ("emissive_night", emissive_night() as f64),
         ];
 
         // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL

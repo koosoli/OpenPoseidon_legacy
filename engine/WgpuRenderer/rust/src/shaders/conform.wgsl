@@ -4,7 +4,7 @@
 // mesh pipeline (shader3d) and the shadow depth pass (shadow_depth), so each conforms
 // ClipLand vegetation to the ground (SurfaceY) per vertex without the CPU rewriting the
 // shared mesh. The R32Float heightmap is read with textureLoad in the vertex stage
-// (non-filterable); HmParams mirrors the Rust TerrainConformParams (32 bytes). Both the
+// (non-filterable); HmParams mirrors the Rust TerrainConformParams (48 bytes). Both the
 // color and shadow passes import surface_y from HERE — the CPU gameplay conform
 // (Object::Animate → occlusion/LOS) evaluates the same SurfaceY, so a single shared
 // definition keeps the rendered geometry aligned with the gameplay occluders.
@@ -14,6 +14,11 @@ struct HmParams {
     enabled: f32,        // 1 when a heightmap is loaded
     hm_width: u32,
     hm_height: u32,
+    // WLD-023(c): the CDLOD lattice the terrain RASTERISES. See surface_y_raster.
+    cdlod_base: f32,     // ranges[0] in metres (leafSize * WGR_TERRAIN_LOD_BASE)
+    cdlod_ratio: f32,    // per-level range multiplier (WGR_TERRAIN_LOD_RATIO)
+    cdlod_morph: f32,    // fraction of each band spent morphing (WGR_TERRAIN_MORPH)
+    cdlod_mode: f32,     // 0 = evaluate the fine surface (default), 1 = the rasterised one
 };
 @group(4) @binding(0) var hm: texture_2d<f32>;
 @group(4) @binding(1) var<uniform> hm_params: HmParams;
@@ -44,6 +49,113 @@ fn surface_y(world_xz: vec2<f32>) -> f32 {
         return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
     }
     return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+}
+
+// ---------------------------------------------------------------------------
+// WLD-023(c) -- the surface the terrain RASTERISES, not the one it EVALUATES.
+//
+// `surface_y` above is the FULL-RESOLUTION height field. The terrain pass only evaluates
+// that field at its CDLOD lattice vertices and linearly interpolates between them
+// (terrain.wgsl vs_terrain: one node of world size S is tessellated into GRID_N=32 quads,
+// so its vertex spacing is S/32 = one heightmap texel x 2^level). On CONVEX ground the fine
+// field sits ABOVE the coarse chord, and a road pinned to the fine field therefore wins
+// `depth_compare: GreaterEqual` against the ridge in front of it -- with depth_write = false
+// and no depth-prepass entry, the ridge can never paint back over it. That is the road drawn
+// through the mountain. A constant world-space depth bias bounds the symptom but cannot
+// remove it, because the chord error grows with LOD while the bias does not.
+//
+// The fix is to evaluate the height field on the SAME lattice the terrain draws:
+//
+//   * level      L = ceil(log(dist / ranges[0]) / log(ratio)), floored at 0. This mirrors
+//                  SelectCdlod (TerrainCdlod.hpp): a node is emitted at the coarsest level
+//                  whose range still contains it. APPROXIMATION: the selector measures the
+//                  distance to the node's AABB, we measure it to the point. The two differ
+//                  by at most one node radius, i.e. only within one patch of a LOD boundary.
+//   * spacing    step = terrain_grid * 2^L texels. The quadtree always halves (BuildCdlodNode),
+//                  independent of cdlod_ratio, which scales the DISTANCE bands only.
+//   * morph      k = clamp((dist - morphStart) / (morphEnd - morphStart)), matching
+//                  CdlodMorphBand + terrain.wgsl:586-593.
+//
+// The lattice is anchored on heightmap texel (0,0). Real node origins are
+// rootOriginTexel + n*32*2^L and rootOriginTexel is a whole number of leaves (32 texels),
+// so for L <= 5 every lattice point lands on a texel index that is a multiple of 2^L --
+// EXACT. Above L = 5 (spacing > 32 texels, i.e. kilometres out on any real world) the
+// anchor can be off by up to 32 texels; the surface is still a chord of the right length,
+// just not the same chord.
+//
+// The morph blend mixes the two lattice interpolants rather than reproducing the per-vertex
+// snap. It is EXACT at both ends (k = 0 is the fine lattice, k = 1 is the coarse one, which
+// is what a fully-morphed patch actually draws) and monotone between them.
+const CDLOD_MAX_LEVEL: f32 = 12.0;
+
+// The two-triangle interpolant of the height field on a lattice of `step` heightmap texels,
+// anchored at texel (0,0). `step` = 1 reproduces surface_y bit-for-bit. The diagonal is the
+// ANTI-diagonal, matching both Landscape::SurfaceY and the terrain grid mesh's index order
+// (terrain/mod.rs build_grid emits [i0,i2,i1] = (x,z),(x,z+1),(x+1,z) as its first triangle).
+// (`step_texels`, not `step`: `step` is a WGSL predeclared built-in function name and
+// shadowing one is the class of mistake that costs a deploy here.)
+fn lattice_y(world_xz: vec2<f32>, step_texels: f32) -> f32 {
+    let cell = hm_params.terrain_grid * step_texels;
+    let t = (world_xz - hm_params.origin) / cell;
+    let base = floor(t);
+    let f = t - base;
+    let n = i32(step_texels);
+    let ix = i32(base.x) * n;
+    let iz = i32(base.y) * n;
+    let y00 = hm_load(ix, iz);
+    let y01 = hm_load(ix + n, iz);
+    let y10 = hm_load(ix, iz + n);
+    let y11 = hm_load(ix + n, iz + n);
+    if (f.x <= 1.0 - f.y) {
+        return y00 + (y10 - y00) * f.y + (y01 - y00) * f.x;
+    }
+    return y10 + (y01 - y11) - (y10 - y11) * f.x - (y01 - y11) * f.y;
+}
+
+// Absolute terrain height at world xz ON THE DRAWN SURFACE. `cam_pos` is the ABSOLUTE camera
+// position (both object vertex shaders work camera-relative and already reconstruct it).
+// Falls back to surface_y when the feature is off or the CDLOD description is missing, so an
+// unpopulated params buffer degrades to the previous behaviour instead of to a flat world.
+fn surface_y_raster(world_xz: vec2<f32>, cam_pos: vec3<f32>) -> f32 {
+    if (hm_params.enabled < 0.5) {
+        return 0.0;
+    }
+    if (hm_params.cdlod_mode < 0.5 || hm_params.cdlod_base <= 0.0 || hm_params.cdlod_ratio <= 1.0) {
+        return surface_y(world_xz);
+    }
+    // Distance is measured to the point ON the fine surface, the same quantity
+    // terrain.wgsl:582 uses to drive morph_k.
+    let y_fine = surface_y(world_xz);
+    let d = max(length(vec3<f32>(world_xz.x, y_fine, world_xz.y) - cam_pos), 1e-3);
+    let level = clamp(ceil(log2(d / hm_params.cdlod_base) / log2(hm_params.cdlod_ratio)),
+                      0.0, CDLOD_MAX_LEVEL);
+    if (level < 0.5) {
+        // Level 0 IS the full-resolution lattice; skip the second set of taps. This is also
+        // the arm the WGR_TERRAIN_LOD_BASE pin exercises, so it must be exactly surface_y.
+        let range0 = hm_params.cdlod_base;
+        let ms0 = range0 * (1.0 - hm_params.cdlod_morph);
+        var k0 = 0.0;
+        if (range0 > ms0) {
+            k0 = clamp((d - ms0) / (range0 - ms0), 0.0, 1.0);
+        }
+        if (k0 <= 0.0) {
+            return y_fine;
+        }
+        return mix(y_fine, lattice_y(world_xz, 2.0), k0);
+    }
+    let lod_step = exp2(level);
+    let range_end = hm_params.cdlod_base * pow(hm_params.cdlod_ratio, level);
+    let range_prev = hm_params.cdlod_base * pow(hm_params.cdlod_ratio, level - 1.0);
+    let morph_start = range_end - (range_end - range_prev) * hm_params.cdlod_morph;
+    var k = 0.0;
+    if (range_end > morph_start) {
+        k = clamp((d - morph_start) / (range_end - morph_start), 0.0, 1.0);
+    }
+    let y_lod = lattice_y(world_xz, lod_step);
+    if (k <= 0.0) {
+        return y_lod;
+    }
+    return mix(y_lod, lattice_y(world_xz, lod_step * 2.0), k);
 }
 
 // Terrain height gradient (dSy/dx, dSy/dz) at world xz — the analytic derivative of

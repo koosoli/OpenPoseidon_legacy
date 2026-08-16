@@ -275,7 +275,33 @@ pub struct SharedTextures {
 // Deliberately NOT the default: the white fallback is load-bearing for anything that
 // multiplies against it (an untextured section tinted by a material colour still wants
 // 1.0), so changing it silently would alter shipped pixels.
+// ANNOUNCE IT. A capture with zero magenta pixels has two readings — "nothing sampled slot 0"
+// and "the lever never fired" — and without a line in the log there is no way to tell them apart.
+// That is the same trap that made `WGR_ALPHA_BLOCK_SCAN=0` a worthless A/B on a game with no BC2
+// textures: a null that could not have been anything else, read as exoneration. A diagnostic whose
+// inactivity is indistinguishable from a clean result is worse than none, so this says which it is.
+fn announce_fallback_texel(texel: [u8; 4]) {
+    static ANNOUNCED: std::sync::Once = std::sync::Once::new();
+    ANNOUNCED.call_once(|| {
+        if texel == [0xFF, 0xFF, 0xFF, 0xFF] {
+            eprintln!("[wgr] texture fallback texel: default opaque white (slot 0)");
+        } else {
+            eprintln!(
+                "[wgr] texture fallback texel: DEBUG rgba({},{},{},{}) — every magenta/tinted \
+                 surface in this capture is an UNRESOLVED texture, not shading",
+                texel[0], texel[1], texel[2], texel[3]
+            );
+        }
+    });
+}
+
 fn fallback_texel() -> [u8; 4] {
+    let texel = fallback_texel_inner();
+    announce_fallback_texel(texel);
+    texel
+}
+
+fn fallback_texel_inner() -> [u8; 4] {
     if let Ok(raw) = std::env::var("WGR_TEXTURE_FALLBACK_RGBA") {
         let parts: Vec<u8> = raw
             .split(',')

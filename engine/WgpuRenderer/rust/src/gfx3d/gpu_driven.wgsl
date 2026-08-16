@@ -15,7 +15,7 @@
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
 // shadow_depth. Lets the GPU-driven VS conform ClipLand vegetation/fences to the ground per
 // vertex, matching the per-draw path — so these objects no longer have to stay on the CPU.
-#import conform::{surface_y, surface_grad}
+#import conform::{surface_y, surface_grad, surface_y_raster}
 
 // Pipeline-overridable constants (kept out of a per-draw binding), same as shader3d.
 override linear: f32 = 0.0;
@@ -389,10 +389,14 @@ fn vs_gpu(
         let sy = surface_y(world_pos_abs.xz);
         if (conform_sel == 1u) {
             // world.y_abs = SurfaceY + undeformedWorldY - bcSurfaceY; the cam.y offset cancels
-            // between the two camera-relative terms.
+            // between the two camera-relative terms. Keeps the FINE surface under
+            // WGR_CONFORM_RASTER for the reason spelled out in shader3d.wgsl's twin.
             world_pos.y = sy + world_pos.y - inst.conform0.x;
         } else if (conform_sel == 2u) {
-            world_pos.y = sy - frame.cam_pos.y;
+            // WLD-023(c) -- twin of shader3d::vs_main. The two paths must not disagree about
+            // where a conformed decal sits; a road that reached the retained set on one world
+            // and the direct path on another would otherwise z-fight differently per world.
+            world_pos.y = surface_y_raster(world_pos_abs.xz, frame.cam_pos.xyz) - frame.cam_pos.y;
         }
         // Tilt the conformed vertex's normal by the terrain slope so lighting follows the
         // ground (same shear as mode 1). Rigid verts (sel 0) keep theirs.

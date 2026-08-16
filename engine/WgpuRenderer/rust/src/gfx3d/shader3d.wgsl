@@ -14,7 +14,7 @@
 #import shading::{shade, ShadeMaterial}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad}
+#import conform::{surface_y, surface_grad, surface_y_raster}
 
 struct Object {
     world: mat4x4<f32>,
@@ -198,6 +198,25 @@ override depth_bias: f32 = 0.0;
 // shading writes linear radiance (that can exceed 1.0) into the HDR target. 0 = the
 // exact gamma-naive GL33 behaviour for the LDR-direct path.
 override linear: f32 = 0.0;
+// Fraction of a draw's MATERIAL EMISSIVE that survives at full night. 1 = the shipped
+// behaviour (emissive is absolute radiance, unaffected by time of day) and the default.
+//
+// WHY IT EXISTS (owner report 2026-08-16, Arma 2 Takistan, hour 0 vs hour 12, capture
+// .tmp-shadow/owner/road-night/): the road reads (40.6, 41.0, 44.5) at midnight while the
+// terrain one metre beside it reads (0.26, 0.22, 0.09) -- ~195x. By DAY the same road is
+// correctly DARKER than the sand (186.9 vs 233.7), so this is not albedo and not the
+// texture. Terrain and objects share one ambient expression (terrain.wgsl:852 and
+// shading.wgsl:176 are the same `sky_irradiance(n) * sun_ambient.w`), so the only term an
+// object can carry that terrain cannot is `m_emissive` -- which shade() adds as absolute
+// radiance and nothing scales by the day/night level. Note the road's night brightness still
+// falls with distance (40.6 -> 3.8), i.e. fog IS applied: it is specifically the sun/night
+// factor that is missing, which is exactly the shape of an unattenuated emissive.
+//
+// NOT fixed unilaterally, because a lit window or a lamp glass SHOULD stay lit at night and
+// this constant cannot tell one from the other. WGR_EMISSIVE_NIGHT=0 is the decisive
+// ablation: if the Takistan road goes black at midnight, emissive is the mechanism; if it
+// stays white, it is not, and the next suspect is the albedo/1x1-white path in WLD-023.
+override emissive_night: f32 = 1.0;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -286,17 +305,33 @@ fn vs_main(
         // (keep height above the surface), 2 = ClipLandOn (pin onto it), 0 = rigid.
         let abs_x = world_pos.x + frame.cam_pos.x;
         let abs_z = world_pos.z + frame.cam_pos.z;
-        let sy = surface_y(vec2<f32>(abs_x, abs_z));
+        let abs_xz = vec2<f32>(abs_x, abs_z);
+        let sy = surface_y(abs_xz);
         if (conform_sel == 1u) {
             // world.y_abs = SurfaceY + undeformedWorldY - bcSurfaceY (conform0.x); the
             // cam.y offset cancels between the two camera-relative terms.
+            //
+            // ClipLandKeep deliberately keeps the FINE surface even under WGR_CONFORM_RASTER:
+            // this vertex sits a fixed height ABOVE the ground, where a chord error of a few
+            // decimetres is invisible, and the raster surface is camera-distance dependent --
+            // a plant tracking it would visibly rise and sink as the camera walked. The
+            // coplanar depth-fight the raster surface exists to fix is a ClipLandOn problem.
             world_pos.y = sy + world_pos.y - obj.conform0.x;
         } else if (conform_sel == 2u) {
-            world_pos.y = sy - frame.cam_pos.y;
+            // WLD-023(c): pin to the surface the terrain RASTERISES, not the one it
+            // evaluates, so a road cannot sit above the coarse chord of the ridge in front
+            // of it. Returns surface_y exactly when WGR_CONFORM_RASTER is unset (default).
+            world_pos.y = surface_y_raster(abs_xz, frame.cam_pos.xyz) - frame.cam_pos.y;
         }
         // Tilt the conformed vertex's normal by the terrain slope (inverse-transpose of
         // the vertical height-field shear, same as mode 1) so lighting follows the ground
         // the CPU's InvalidateNormals would have produced. Rigid verts (sel 0) keep theirs.
+        //
+        // This stays on the FINE gradient under WGR_CONFORM_RASTER, deliberately: terrain
+        // shades from the fine field too, per-fragment and explicitly LOD/morph-independent
+        // (terrain.wgsl:112-123 — a mesh-derived normal banded the lighting into radial
+        // stripes). Matching the drawn POSITION is a depth question; matching the drawn
+        // NORMAL would reintroduce the banding that comment records.
         if (conform_sel != 0u) {
             let g = surface_grad(vec2<f32>(abs_x, abs_z));
             normal_ws = vec3<f32>(normal_ws.x - g.x * normal_ws.y, normal_ws.y,
@@ -522,6 +557,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // then calls the same shade(). srgb-decode of albedo + terms happens inside shade().
     var m: ShadeMaterial;
     m.emissive = material.emissive.rgb;
+    if (emissive_night < 1.0) {
+        // Same daylight proxy shading.wgsl:210 already uses for the foliage fill, so the two
+        // night ramps cannot drift: the atmospheric sun's peak channel, ramped over the same
+        // (0.002, 0.04) band. At 1.0 (the default) this whole branch is skipped.
+        let daylight = smoothstep(0.002, 0.04,
+            max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
+        m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
+    }
     m.sun_ambient = material.sun_ambient.rgb;
     m.sun_diffuse = material.sun_diffuse.rgb;
     m.light_diffuse = material.light_diffuse.rgb;
