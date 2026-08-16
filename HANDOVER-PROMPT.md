@@ -261,7 +261,10 @@ Still open from the owner's list: **sunlit-wall blow-out (paused at his request)
 
 ## Reforger — state after 2026-08-16 evening
 
-**Re-export RAN** (script `.tmp-shadow/run-reforger-reexport.ps1`, pass `-PoseidonTools <abs exe>` — `$PSScriptRoot` is empty under `-File`): 30 rocks + 702 structures re-exported with `--fix-orientation --fix-origin --textures`, installed over the game tree, **backup at `D:eforger-p3d-backups60816-212305`** (rollback robocopy line is in the log `%TEMP%feexport-20260816-212305\`). Closed solids read `nrm 0.00 out` as promised; clusters/cliffs and hollow houses read >0 because the centroid metric is not diagnostic for non-convex shapes — do not chase that number.
+**Re-export RAN** (script `.tmp-shadow/run-reforger-reexport.ps1`, pass `-PoseidonTools <abs exe>` — `$PSScriptRoot` is empty under `-File`): 30 rocks + 702 structures re-exported with `--fix-orientation --fix-origin --textures`, installed over the game tree, **backup at `D:
+eforger-p3d-backups60816-212305`** (rollback robocopy line is in the log `%TEMP%
+f
+eexport-20260816-212305\`). Closed solids read `nrm 0.00 out` as promised; clusters/cliffs and hollow houses read >0 because the centroid metric is not diagnostic for non-convex shapes — do not chase that number.
 - **Rocks: fixed and seen** — solid, sun-lit, `.tmp-shadow/reforger/rocks.png`.
 - **House origins: shipped, NOT verified** — no before-shot at the same pose. A/B = rollback dir vs game tree at `--test-world-freefly 4535 10760 20 50 -3`.
 - **Grass on Everon: fixed** (single catch-all layer, `65536/65536` cells) — probably too dense/tall for Everon; tune, do not re-diagnose.
@@ -289,6 +292,20 @@ the camera during a capture** — he did once — so a still taken while he is p
 # OPEN — no root cause yet, do not assume the previous guesses
 
 ## Black triangular wedges inside buildings (Arma 2, "seen in many buildings")
+
+**Owner's pose (2026-08-16): `6761.87 6022.92 303.94 az 18.4 el -1.9`, and he ranks it LAST — do the
+Reforger `.emat` reader, the card-grass flicker and the wall blow-out before this.** Two more
+hypotheses eliminated by reading (2026-08-16 evening), so do not spend on them: (a) "the prepass draws
+skinned objects with the unskinned VS" — `ensure_prepass_pipeline` has a `vs_skinned` variant keyed on
+`PrepassKey.skinned`; (b) "the colour cull picks a different LOD than the prepass cull" — both are
+built from the same `params_from_camera` inputs (`mod.rs` ~6489/6520), and with occlusion off the
+colour draw uses the prepass args verbatim, which is exactly the `WGR_GPU_OCCLUSION=0` null.
+**Stop hypothesising and measure**: the pixels are the clear colour, so at a wedge pixel read back the
+PREPASS depth and the COLOUR pass depth (or draw the colour pass with depth test ALWAYS as an arm): if
+the prepass depth is nearer than anything the colour pass draws there, dump which record wrote it
+(instance + section + LOD) — that names the mismatch in one run. The wedge shape (long triangles from
+ceiling to floor) reads as a coarse-LOD triangle, so log the LOD chosen for the house in each cull.
+
 Hard black wedges hanging down interior walls, one per roof beam. Inside them the value is exactly
 `(0,0,0)` — the scene target's clear colour — while genuinely shadowed wall 5 px away reads 27–55.
 
