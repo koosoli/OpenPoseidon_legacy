@@ -198,6 +198,56 @@ owner's single biggest performance complaint — measure it.
 
 ---
 
+# OWNER REQUESTS AND REGRESSIONS FROM THE LAST HOUR — newest, least investigated
+
+## R1. Sea level appears to have RISEN (Arma 3) — NEW REGRESSION, NOT INVESTIGATED
+Owner, testing Arma 3: "for some reason the sea level rose." Nothing in this session knowingly
+touched sea level. Candidates, in the order I would check them:
+- the water surface work (`rust/src/water/**`) — foam band and patchiness changed, but those are
+  shading terms and should not move the plane;
+- `ShapeAdapter`'s `autocenter` / `mapType` changes (shipped this session) — these move OBJECT
+  origins, so if the *shore* objects moved rather than the water, it would read as a higher sea;
+- auto-exposure making shallow water read brighter and therefore *look* wider.
+**Bisect it.** The branch has ~30 commits this session and each is self-contained; a capture at a
+coastline on two binaries settles it far faster than reading. Stratis coastline pose:
+`--test-world-freefly 2200 5400 220 45 -8 --mod a3stratis`, hour 10.
+
+## R2. Sunlit walls blow out — owner explicitly dislikes it
+"the sun when it hits a surface like a wall from a house, it can totally overexpose it... this i do
+not like." This is *local* overexposure on a lit surface, not the global sky white-out that
+auto-exposure already fixes. Auto-exposure meters the whole frame, so a single bright wall does not
+move it much. Look at the material/lighting side: specular or diffuse response on a sunlit wall,
+and whether the tonemap shoulder is doing any roll-off at all at the top end. Related and already
+known: Arma 2 vegetation ships an authored `emissive` of 2.6, and materials generally may be
+carrying values the shading model treats as absolute radiance.
+
+## R3. FEATURE — moonlight. The owner wants this.
+His words: **"i want that the moon is creating light for the game world... not much but a little, as
+long as the moon is out the game world should not be total black at night, a bluish light that casts
+shadows and water reflection would be nice."**
+
+Three parts, and they are separable — ship them in this order:
+1. **A dim bluish ambient/directional term while the moon is up**, so night is not pure black. The
+   engine already tracks the moon fully: `EngineWgpu.cpp` logs
+   `moon: dir=(...) az=... el=... | lit=... radius=... discScale=... draw=YES/NO earthshine=...`
+   every frame, and `moon: ephemeris=on sun=off lighting=on manual=off ... intensity=0.0600`
+   shows a moon *lighting* path already exists with an intensity knob. **Start by finding out what
+   that path currently contributes and why it reads as zero.** Night captures currently measure
+   terrain at (0.2, 0.2, 0.1) — essentially pure black — so either the term is off, or it is far
+   too small, or it is being multiplied out.
+2. **Moon shadows.** The cascade system is sun-driven; `SceneDraw.cpp:2318` computes
+   `sunFactor = 1 - NightEffect()` and **skips the shadow depth pass entirely once
+   `sunFactor <= 0.01`**. So at full night there are no cascades at all, by construction. Driving
+   the cascades from the moon direction when the sun is down is the change.
+3. **Water reflection of the moon.** The water already has a sun specular path
+   (`godot_water_fresnel`, `GODOT_LIGHT_ROUGHNESS`) — feed it the moon as a second, much dimmer
+   light rather than writing a new one.
+
+Do NOT make night bright. He said "not much but a little". Measure it: terrain should come off 0.2
+to something like 3-8, not to 40. Verify with a night capture and quote the number.
+
+---
+
 # OPEN — no root cause yet, do not assume the previous guesses
 
 ## Black triangular wedges inside buildings (Arma 2, "seen in many buildings")
