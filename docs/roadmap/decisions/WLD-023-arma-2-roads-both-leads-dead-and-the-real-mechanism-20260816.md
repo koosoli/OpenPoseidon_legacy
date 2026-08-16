@@ -202,3 +202,66 @@ by eye, so the test has a specific region to score.
 
 Note the frame is heavily overexposed here (mean luminance 156.7), so the roads read white — a
 second, independent confirmation of WLD-024 at a different pose and hour.
+
+---
+
+# THE ACTUAL ROOT CAUSE (2026-08-16) — roads never run the 3D shader
+
+Every road symptom is one fact: **`OnSurface` shapes are denied a vertex buffer at load time.**
+
+`ShapeDraw.cpp:503-506`: `if (level->Special() & (IsLight | OnSurface)) optimizeHW = optimizeSSE = false;`
+`RoadType::RoadType` sets `OnSurface` on every road of every generation, so `_buffer` is always
+null, `Shape::Draw`'s T&L gate fails, and the road takes the CPU `FaceArray` branch into
+`EngineWgpu::DrawSection(FaceArray&)` — which converts CPU-lit vertices to **screen space** and
+submits them to the **2D pipeline**, whose entire shader is `textureSample(...) * in.color` mixed
+toward fog. No sky irradiance, no sun term, no sRGB decode, no conform.
+
+Measured: 42 `ROAD_CPUPATH` lines, all `buffer=0 tlAble=1 spec=0x100132`.
+
+| symptom | explanation |
+|---|---|
+| white by day | gamma-space colour written into an Rgba16Float target, ~2.3× at mid-tones |
+| glowing at night | legacy CPU lighting with eye accommodation, then auto-exposed a *second* time |
+| fog still applied | `MakeScreenVertex` carries fog per-vertex; the 2D shader applies it |
+| see-through | `Object::Draw` skips `SurfaceSplit` under `GGpuTerrainConform` — **nothing conforms it** |
+| no `ROAD_TRACE` | that trace lives in `DrawSectionTL`, which roads never reach |
+| `WGR_EMISSIVE_NIGHT` no-op | that override is on `fs_main`, which roads never reach |
+
+`Shape.hpp:1125-1128` already said it in the abstract: a shape with no `_buffer` "falls to the
+software path, **which draws it unlit and with no material**."
+
+## This retracts mechanism (c) above
+
+Re-scoring the four conform arms with a road-ribbon mask (18,051 px): `WGR_CONFORM_RASTER` changed
+**0 road pixels (0.000%)** against 1.679% elsewhere. The LOD arms moved 3.17% and 12.2% but only at
+the road's *edges* — what occludes it, not where it is. The CDLOD chord mismatch is real and the
+conform fix is correct for `ClipLandOn` vegetation and non-`OnSurface` decals, but **it is not the
+road fix**.
+
+## Verified: `WGR_ROAD_CPU_SPLIT=1`, all four predictions held
+
+| | off | on |
+|---|---:|---:|
+| `ROAD_CPUPATH` | 42 | **0** |
+| `ROAD_TRACE` | 68 | **320** |
+| road at night | (41.9, 42.1, 45.7) | **(0.1, 0.1, 0.1)** |
+| terrain at night (control) | (0.2, 0.2, 0.1) | (0.2, 0.2, 0.1) |
+| road-like px, day | 59,953 | 37,203 |
+
+The road goes black at night **exactly like the terrain**. Night self-illumination: fixed.
+
+## But it is NOT shippable yet, and the default stays off
+
+The daylight capture shows the near road as a **dark scalloped, segmented ribbon** instead of a
+smooth surface: the CPU `SurfaceSplit` emits one piece per terrain triangle and they shade
+inconsistently. So the flag trades a lighting defect for a geometry-shading defect.
+
+Two known costs, both arguing against a default:
+1. The split allocates a unique `Shape` + vertex buffer **per visible placement** of a shared road
+   model — the exact cost `GGpuTerrainConform` was added to avoid. Unmeasured on frame time.
+2. The scalloping above.
+
+**The better long-term fix** is to let a road keep a vertex buffer and be conformed on the GPU like
+everything else — i.e. remove `OnSurface` from the `optimizeHW` deny at `ShapeDraw.cpp:503` and let
+the existing GPU conform handle it, now that `WGR_CONFORM_RASTER` can make that conform agree with
+the rasterised terrain. That is the combination worth trying next, and it needs no CPU split at all.
