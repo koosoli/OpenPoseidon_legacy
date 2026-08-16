@@ -227,6 +227,7 @@ class EngineWgpu : public EngineDummy
     GrassSettings GetGrassSettings() const override { return _grass; }
     void SetGrassSettings(const GrassSettings& settings) override;
     bool HasGrassPhotoClumps() const override;
+    bool HasGrassMapClutter() const override;
     int GetGrassPhotoFamilyCount() const override;
     const char* GetGrassPhotoFamilyName(int index) const override;
     int GetGrassSurfaceCount() const override;

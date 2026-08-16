@@ -6466,29 +6466,31 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.far_radius = settings.farRadius <= 0.0f ? 0.0f : std::clamp(settings.farRadius, midReach + 8.0f, 5000.0f);
     params.density_noise_scale = std::clamp(settings.densityNoiseScale, 0.002f, 0.5f);
     params.density_noise_strength = std::clamp(settings.densityNoiseStrength, 0.0f, 1.0f);
-    // The map's own plants (CfgSurfaces -> CfgSurfaceCharacters -> clutter .p3d -> per-surface
-    // atlas run, baked per cell). The pipeline is complete and its atlas is uploaded -- 25 cards
-    // over 26 layers on Takistan -- and it is NOT on by default, because the owner looked at it
-    // (2026-08-16, Takistan 6970.40 5700.31 352.57 az 20.0 el -18.3): "it looks horrible, it is
-    // flickering and in photo mode it is far too dense". Two distinct blockers, neither a
-    // placement bug:
-    //   1. DENSITY. Even at the dev panel's own 0.40 near-coverage compensation the near ring is
-    //      a solid mat with a hard band edge where it ends. The card is ~1.8 m wide against a
-    //      blade's centimetres, so coverage tuned for blades is orders of magnitude too much
-    //      plant for cards; this needs its own near/mid coverage curve, not a scalar.
-    //   2. FLICKER. Overlapping alpha-tested plates with no stable ordering. That is a rendering
-    //      problem (A2C coverage / depth / LOD cross-fade), not a coverage number, and it will
-    //      not go away by thinning.
-    // So: WGR_GRASS_MAP_CLUTTER=1 opts in, for whoever picks the tuning up. `midPhotoTuft` (dev
-    // panel, Grass tab) still forces the cards on independently. Until both blockers are closed
-    // every world keeps the procedural blade, which is also the right look for OFP worlds --
-    // they build no atlas at all.
-    static const bool mapClutterOn = [] {
-        const char* v = std::getenv("WGR_GRASS_MAP_CLUTTER");
-        return v != nullptr && std::strtol(v, nullptr, 10) != 0;
+    // WHICH grass: GrassSettings::clutterSource (Engine.hpp). Auto draws the map's own plants
+    // (CfgSurfaces -> CfgSurfaceCharacters -> clutter .p3d -> per-surface atlas, baked per
+    // cell) wherever the map built an atlas -- 25 cards over 26 layers on Takistan -- and the
+    // procedural blades everywhere else, which is every OFP world (they build no atlas). The
+    // owner asked for the map grass as the default and his own implementation selectable, and
+    // for the panel to say which is on screen; the earlier env-only enable bypassed the checkbox.
+    // Known and open on the card path (owner, Takistan 6970.40 5700.31 352.57 az 20 el -18):
+    // "flickering" (overlapping alpha-tested plates with no stable order -- a rendering
+    // problem, not a coverage number) and "far too dense" (a card is ~1.8 m wide against a
+    // blade's centimetres, so blade coverage is orders of magnitude too much plant for cards).
+    // The near-coverage compensation below is the first, untuned answer to the second.
+    // WGR_GRASS_CLUTTER_SOURCE=0|1|2 overrides the setting for an A/B without touching the panel.
+    static const int clutterSourceEnv = [] {
+        const char* v = std::getenv("WGR_GRASS_CLUTTER_SOURCE");
+        return v ? static_cast<int>(std::strtol(v, nullptr, 10)) : -1;
     }();
-    const bool mapClutter = mapClutterOn && _terrain && _terrain->GrassHasMapClutterAtlas();
-    params.use_photo_tuft = (settings.midPhotoTuft || mapClutter) ? 1.0f : 0.0f;
+    int clutterSource = clutterSourceEnv >= 0 ? clutterSourceEnv : settings.clutterSource;
+    if (settings.midPhotoTuft && clutterSourceEnv < 0)
+    {
+        clutterSource = 2; // legacy checkbox / saved setting
+    }
+    const bool haveMapAtlas = _terrain && _terrain->GrassHasMapClutterAtlas();
+    const bool mapClutter = clutterSource == 0 && haveMapAtlas;
+    const bool photoTuft = mapClutter || clutterSource == 2;
+    params.use_photo_tuft = photoTuft ? 1.0f : 0.0f;
     // Announce through the game log, on transition. A silent auto-enable is indistinguishable
     // from a broken one: the previous capture pair moved 229 pixels and could not tell whether
     // the cards looked the same or the flag never arrived.
@@ -6498,8 +6500,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         if (state != lastTuft)
         {
             lastTuft = state;
-            LOG_INFO(Graphics, "Wgpu grass tuft: use_photo_tuft={} (mapClutterAtlas={} midPhotoTuft={} env_on={})",
-                     params.use_photo_tuft, mapClutter ? 1 : 0, settings.midPhotoTuft ? 1 : 0, mapClutterOn ? 1 : 0);
+            LOG_INFO(Graphics, "Wgpu grass tuft: use_photo_tuft={} (clutterSource={} mapAtlas={} midPhotoTuft={})",
+                     params.use_photo_tuft, clutterSource, haveMapAtlas ? 1 : 0, settings.midPhotoTuft ? 1 : 0);
         }
     }
     params.blade_width_scale = std::clamp(settings.bladeWidth, 0.25f, 6.0f);
@@ -6543,7 +6545,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // Takistan, so the opt-in starts lower. Untuned: a starting point for the density work
     // named above, not a measured value.
     float nearDensity = settings.nearDensity;
-    if (mapClutter && !settings.midPhotoTuft && nearDensity == 1.0f)
+    if (photoTuft && !settings.midPhotoTuft && nearDensity == 1.0f)
     {
         nearDensity = 0.15f;
     }
@@ -6691,6 +6693,11 @@ const Helicopter* EngineWgpu::LastGrassRotor() const
 bool EngineWgpu::HasGrassPhotoClumps() const
 {
     return _renderer != nullptr && wgr_grass_have_photo_clumps(_renderer) != 0;
+}
+
+bool EngineWgpu::HasGrassMapClutter() const
+{
+    return _terrain && _terrain->GrassHasMapClutterAtlas();
 }
 
 int EngineWgpu::GetGrassPhotoFamilyCount() const

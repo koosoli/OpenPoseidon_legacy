@@ -3067,25 +3067,50 @@ void DrawGrassTab()
                             "textured blades and the mid ring its procedural ribbons. The toggle and the settings "
                             "below stay editable, and take effect the moment the assets are present.");
     }
-    if (ImGui::Checkbox("Use photographed clump cards (near + mid)", &grass.midPhotoTuft))
+    // WHICH grass is drawn. Three sources, and the label below says which one is actually on
+    // screen for THIS world -- the owner's complaint was a checkbox that read unchecked while
+    // the map's cards drew, because an automatic enable bypassed it.
     {
-        // Switching the cards on changes what one near instance COSTS, not just
-        // how it looks: a card is roughly 1.8 m wide where a procedural clump is
-        // centimetres, so the same placement density that is free for blades is
-        // ~20 layers of alpha-tested overdraw for cards. Move near coverage to a
-        // sane starting point for the mode being entered, and put it back on the
-        // way out. Only when it is still at the other mode's default, so a
-        // deliberate setting is never overwritten.
-        if (grass.midPhotoTuft && grass.nearDensity == 1.0f)
-            grass.nearDensity = 0.40f;
-        else if (!grass.midPhotoTuft && grass.nearDensity == 0.40f)
-            grass.nearDensity = 1.0f;
-        changed = true;
+        const bool mapClutter = GEngine->HasGrassMapClutter();
+        // Saved settings that predate the selector still carry midPhotoTuft.
+        if (grass.midPhotoTuft && grass.clutterSource == 0)
+        {
+            grass.clutterSource = 2;
+            grass.midPhotoTuft = false;
+            changed = true;
+        }
+        const char* sources[] = {"Auto: the map's own clutter where it has one, else procedural blades",
+                                 "Procedural blades (own implementation) everywhere",
+                                 "Photographed clump cards everywhere"};
+        int src = grass.clutterSource < 0 ? 0 : (grass.clutterSource > 2 ? 2 : grass.clutterSource);
+        if (ImGui::Combo("Grass source", &src, sources, 3))
+        {
+            // Cards cost what blades do not (~1.8 m wide, placed every 0.16 m): move near
+            // coverage to a sane point for the mode being entered, only while it still sits at
+            // the other mode's default so a deliberate setting is never overwritten.
+            const bool wasCards = grass.clutterSource == 2 || (grass.clutterSource == 0 && mapClutter);
+            const bool nowCards = src == 2 || (src == 0 && mapClutter);
+            if (nowCards && !wasCards && grass.nearDensity == 1.0f)
+                grass.nearDensity = 0.15f;
+            else if (!nowCards && wasCards && (grass.nearDensity == 0.15f || grass.nearDensity == 0.40f))
+                grass.nearDensity = 1.0f;
+            grass.clutterSource = src;
+            changed = true;
+        }
+        const bool cardsOnScreen = src == 2 || (src == 0 && mapClutter);
+        if (cardsOnScreen)
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                               mapClutter ? "ON SCREEN NOW: the map's own clutter (photo cards from its CfgSurfaces)"
+                                          : "ON SCREEN NOW: photo cards (loose primary card; this world has no clutter atlas)");
+        else
+            ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.55f, 1.0f),
+                               mapClutter ? "ON SCREEN NOW: procedural blades (this world HAS its own clutter; Auto would draw it)"
+                                          : "ON SCREEN NOW: procedural blades (this world has no clutter of its own)");
     }
-    ImGui::TextDisabled("Alpha-tested clump plates for close and mid grass. Off (default) uses stable individual "
-                        "textured blades nearby and procedural mid grass. Everything in THIS section does nothing "
-                        "unless this is on.");
-    ImGui::BeginDisabled(!grass.midPhotoTuft);
+    ImGui::TextDisabled("Photo cards are alpha-tested clump plates for close and mid grass; procedural is stable "
+                        "individual textured blades nearby and ribbons in the mid ring. Everything in THIS section "
+                        "does nothing unless cards are on screen.");
+    ImGui::BeginDisabled(!(grass.clutterSource == 2 || (grass.clutterSource == 0 && GEngine->HasGrassMapClutter())));
     changed |= ImGui::SliderFloat("Photo clump brightness", &grass.photoTuftBrightness, 0.50f, 2.50f, "%.2fx");
     ImGui::TextDisabled("1.00 = the calibrated source plate; raise it to lift dark clumps.");
     changed |= ImGui::SliderFloat("Photo clump saturation", &grass.photoSaturation, 0.0f, 2.0f, "%.2f");
@@ -3305,6 +3330,7 @@ void DrawGrassTab()
         grass.bladeArch = 1.0f;
         grass.photoTuftBrightness = 1.25f;
         grass.midPhotoTuft = false;
+        grass.clutterSource = 0;
         grass.photoTuftMix = 0.0f;
         grass.photoTuftPatchSize = 18.0f;
         grass.photoContrast = 1.35f;

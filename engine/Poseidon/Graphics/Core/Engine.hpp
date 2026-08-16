@@ -1272,6 +1272,17 @@ class Engine : public IGraphicsEngine
         // (data\trava1_pmp2.pac) is grey-teal, so if only that is present the
         // mid ring looks desaturated and this is worth turning off.
         bool midPhotoTuft = false;
+        // WHICH grass is drawn (owner request 2026-08-16: the map's own grass by default, his own
+        // implementation selectable, and the panel must SHOW which one is on screen -- the
+        // previous auto-enable bypassed the checkbox, so it read unchecked while cards drew).
+        //   0 = Auto: the map's own clutter (photo cards from the CfgSurfaces atlas) where the
+        //       map supplies one; the procedural blades everywhere else, which is every OFP world.
+        //   1 = Procedural blades always ("my own grass implementation").
+        //   2 = Photo cards always (the old midPhotoTuft; falls back to the loose primary card
+        //       where no map atlas exists).
+        // Auto is the default. midPhotoTuft is kept for saved-settings compatibility and reads
+        // as source 2 when set.
+        int clutterSource = 0;
         float densityBoost = 4.0f; // turns base spacing into a denser placement grid
         float height = 1.40f;      // authored blade height multiplier
         // The default follows the weather system that also drives smoke,
@@ -1302,6 +1313,9 @@ class Engine : public IGraphicsEngine
       /// a missing asset is always a fallback, never a failure. The Grass tab
       /// reports this rather than presenting a control that silently does nothing.
       virtual bool HasGrassPhotoClumps() const { return false; }
+      /// True while the loaded world supplied its OWN clutter (CfgSurfaces atlas), i.e. what
+      /// GrassSettings::clutterSource 0 (Auto) would draw here. False on every OFP world.
+      virtual bool HasGrassMapClutter() const { return false; }
 
       /// The photographed clump families actually discovered on disk, in atlas
       /// layer order (0 = the primary clump). Nothing about them is hardcoded:
