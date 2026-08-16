@@ -235,6 +235,20 @@ Two possibilities, and you must distinguish them:
 `WGR_AUTO_EXPOSURE=0` is the instant A/B: if the glow survives with auto-exposure off, exposure is
 exonerated entirely and the emissive term itself is the bug.
 
+**THIRD POSSIBILITY, AND CHECK IT FIRST — the shipped DEFAULT may not be what was measured.**
+The 1.10 ceiling was verified only via the env override `WGR_AUTO_EXPOSURE_MAX=1.10` (1215 glowing
+pixels -> 0). The capture that would have confirmed the new *default* in `Engine.hpp` reaches the
+running binary **never produced a file** — it failed twice on the `$PSScriptRoot` trap below. So
+"maxScale defaults to 1.10 in the shipped build" is **asserted from source, not observed**.
+
+One run settles all three possibilities at once, on the current binary, at a night pose:
+```
+arm A: (no env)                      -> if trees glow, the DEFAULT did not take
+arm B: WGR_AUTO_EXPOSURE_MAX=1.10    -> if this is clean but A is not, it is the default, not the cap
+arm C: WGR_AUTO_EXPOSURE=0           -> if this still glows, exposure is exonerated entirely
+```
+Do that before touching any code.
+
 The night verification capture for the shipped fix was **still running when the session ended** —
 `.tmp-shadow/ae-night/` may be incomplete. Re-run it; the recipe is in the capture-harness section.
 
