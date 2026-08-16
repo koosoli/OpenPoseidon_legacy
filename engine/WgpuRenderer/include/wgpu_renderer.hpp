@@ -236,7 +236,15 @@ enum WgrDraw3DFlags : uint32_t
     /* DZ-003: this draw's material declared itself reflective (its shader family is
      * CalmWater, DayZ's water), so the fragment shader adds a Fresnel-weighted reflection
      * of the sky env map. Clear for every other material, which is all of them but water. */
-    WGR_DRAW3D_REFLECTIVE = 2
+    WGR_DRAW3D_REFLECTIVE = 2,
+
+    /* This draw's material is a recognised light FIXTURE (lamp lens, runway/warning light):
+     * its emissive is source radiance and stays on at night. Every other material's
+     * `emmisive` lane is legacy fixed-function brightness compensation (Arma 2 vegetation
+     * ships 2.6, Arma 3 tree crowns 1.0) and the shader fades it out with the sun, or the
+     * whole forest self-illuminates at midnight. Same meaning as
+     * WGR_MODEL_SECTION_NIGHT_EMITTER on the retained path. */
+    WGR_DRAW3D_NIGHT_EMITTER = 4
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
@@ -337,7 +345,10 @@ enum WgrModelSectionFlags : uint32_t
 {
     /* DZ-003: this section's material declared itself reflective (shader family
      * CalmWater). Same meaning as WGR_DRAW3D_REFLECTIVE on the per-draw path. */
-    WGR_MODEL_SECTION_REFLECTIVE = 1u
+    WGR_MODEL_SECTION_REFLECTIVE = 1u,
+    /* Recognised light fixture: emissive is real radiance and survives the night. See
+     * WGR_DRAW3D_NIGHT_EMITTER. */
+    WGR_MODEL_SECTION_NIGHT_EMITTER = 2u
 };
 
 /* Per-section shading, parallel to a model's sections (one per section). The RAW

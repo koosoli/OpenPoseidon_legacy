@@ -174,6 +174,24 @@ float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
                : 1.0f;
 }
 
+// Is this material's emissive REAL light -- a fixture that should still glow at midnight? Only
+// the fixture families StaticEmitterRadianceTarget already recognises, plus lit windows. Every
+// other `emmisive` in the imported corpora is fixed-function brightness compensation (Arma 2 OA
+// vegetation ships {2.6,2.3,2.0}, the Arma 3 pine crown 1.0), and the shaders fade it with the
+// sun (shader3d.wgsl / gpu_driven.wgsl `emissive_night`); the flag this feeds is what exempts a
+// lamp from that fade. Owner-visible symptom this closes: forests self-illuminating at night on
+// Arma 2, Arma 3 and DayZ alike, surviving WGR_AUTO_EXPOSURE=0.
+bool MaterialEmitsAtNight(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    if (StaticEmitterRadianceTarget(surfMat) < 1.0f)
+        return true;
+    const char* path = surfMat->GetName().Data();
+    // Lit-window materials (Czech `okno`/`okna` in the BI corpora, `window` in DayZ/Reforger).
+    return ContainsNoCase(path, "okn") || ContainsNoCase(path, "window");
+}
+
 // Scale that lands a material's emissive at its family's target peak. Materials already at or
 // under the target are untouched -- which is every stock CWA material, all of whose CfgMaterials
 // emissive values measure {0,0,0,0}.
@@ -3178,6 +3196,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         const Color emissive = _curMaterial.emmisive;
         const float scale = StaticEmitterRadianceScale(debugSection.surfMat, emissive);
         d.mat_emissive = {emissive.R() * scale, emissive.G() * scale, emissive.B() * scale, emissive.A()};
+        // Fixtures keep their emissive through the night; everything else (vegetation
+        // included) has it faded out with the sun in the shader.
+        if (MaterialEmitsAtNight(debugSection.surfMat))
+        {
+            d.flags |= WGR_DRAW3D_NIGHT_EMITTER;
+        }
     }
     d.mat_sun_ambient = {ambient.R() * sunEn, ambient.G() * sunEn, ambient.B() * sunEn, ambient.A() * sunEn};
     d.mat_sun_diffuse = {diffuse.R() * sunEn, diffuse.G() * sunEn, diffuse.B() * sunEn, diffuse.A() * sunEn};
@@ -4894,6 +4918,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // DZ-006: and only when the albedo actually bound. mat.texture_id == 0 leaves the
             // section on the white bindless fallback, where a sky reflection produces a bright
             // wrong surface instead of a dull one. See the per-draw twin in DrawSectionTL.
+            // Fixture emissive survives the night; legacy compensation emissive does not
+            // (gpu_driven.wgsl `emissive_night`, the twin of the per-draw flag).
+            if (MaterialEmitsAtNight(s->GetSection(i).surfMat))
+            {
+                sec.flags |= WGR_MODEL_SECTION_NIGHT_EMITTER;
+            }
             if (MaterialIsReflective(s->GetSection(i)))
             {
                 if (mat.texture_id != 0 && !sectionUntextured)

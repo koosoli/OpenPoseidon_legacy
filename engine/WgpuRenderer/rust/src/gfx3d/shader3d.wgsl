@@ -54,6 +54,8 @@ const MATFLAG_INVERT_NORMAL_Y: u32 = 1u;
 // DZ-003: this draw's material declared itself reflective (WGR_DRAW3D_REFLECTIVE) --
 // DayZ's CalmWater family, and nothing else.
 const MATFLAG_REFLECTIVE: u32 = 2u;
+// WGR_DRAW3D_NIGHT_EMITTER: a recognised light fixture, exempt from the emissive_night fade.
+const MATFLAG_NIGHT_EMITTER: u32 = 4u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -212,11 +214,14 @@ override linear: f32 = 0.0;
 // falls with distance (40.6 -> 3.8), i.e. fog IS applied: it is specifically the sun/night
 // factor that is missing, which is exactly the shape of an unattenuated emissive.
 //
-// NOT fixed unilaterally, because a lit window or a lamp glass SHOULD stay lit at night and
-// this constant cannot tell one from the other. WGR_EMISSIVE_NIGHT=0 is the decisive
-// ablation: if the Takistan road goes black at midnight, emissive is the mechanism; if it
-// stays white, it is not, and the next suspect is the albedo/1x1-white path in WLD-023.
-override emissive_night: f32 = 1.0;
+// A lit window or a lamp glass SHOULD stay lit at night, and this constant cannot tell one
+// from the other -- so the CPU does: EngineWgpu's MaterialEmitsAtNight marks recognised
+// fixture families with WGR_DRAW3D_NIGHT_EMITTER (bit 2 of material.normal_map.w) and those
+// are exempt. Everything else fades with the sun. Default 0 since 2026-08-16: with 1.0 the
+// forests self-illuminated at midnight on Arma 2, Arma 3 and DayZ (Takistan hour 0 with
+// WGR_AUTO_EXPOSURE=0: dead trees ~150/255, canopy ~60, terrain 0.2 -- exposure exonerated).
+// WGR_EMISSIVE_NIGHT=1 is the A/B back to the old behaviour.
+override emissive_night: f32 = 0.0;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -557,10 +562,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // then calls the same shade(). srgb-decode of albedo + terms happens inside shade().
     var m: ShadeMaterial;
     m.emissive = material.emissive.rgb;
-    if (emissive_night < 1.0) {
+    if (emissive_night < 1.0 && (material_flags(material) & MATFLAG_NIGHT_EMITTER) == 0u) {
         // Same daylight proxy shading.wgsl:210 already uses for the foliage fill, so the two
         // night ramps cannot drift: the atmospheric sun's peak channel, ramped over the same
-        // (0.002, 0.04) band. At 1.0 (the default) this whole branch is skipped.
+        // (0.002, 0.04) band. Fixtures (MATFLAG_NIGHT_EMITTER) skip it and keep glowing.
         let daylight = smoothstep(0.002, 0.04,
             max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
         m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);

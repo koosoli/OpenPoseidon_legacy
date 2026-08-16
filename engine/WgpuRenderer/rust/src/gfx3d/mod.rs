@@ -111,10 +111,15 @@ fn decal_scale() -> f32 {
     env_f32("WGR_DECAL_SCALE", 1.0)
 }
 
-// Fraction of a draw's material EMISSIVE kept at full night; see the `emissive_night`
-// override in shader3d.wgsl for the measurement that motivates it. 1 = shipped behaviour.
-fn emissive_night() -> f32 {
-    env_f32("WGR_EMISSIVE_NIGHT", 1.0).clamp(0.0, 1.0)
+// Fraction of a NON-FIXTURE material's emissive kept at full night; see the `emissive_night`
+// override in shader3d.wgsl for the measurement that motivates it. Default 0: the imported
+// corpora use the lane as fixed-function brightness compensation (Arma 2 vegetation 2.6, Arma 3
+// tree crowns 1.0), and at 1.0 whole forests self-illuminated at midnight -- surviving
+// WGR_AUTO_EXPOSURE=0, so exposure was never the cause. Recognised fixtures are exempt via
+// WGR_DRAW3D_NIGHT_EMITTER / WGR_MODEL_SECTION_NIGHT_EMITTER. WGR_EMISSIVE_NIGHT=1 is the A/B
+// back to the old behaviour. Shared by the per-draw and the GPU-driven pipelines.
+pub(crate) fn emissive_night() -> f32 {
+    env_f32("WGR_EMISSIVE_NIGHT", 0.0).clamp(0.0, 1.0)
 }
 
 // Restore the historical PANIC when a per-frame staging allocation is refused.
@@ -5314,7 +5319,8 @@ impl Gfx3d {
                             specular: d.mat_specular,
                             // w is a small BITFIELD, not a bool: bit 0 = invert the normal
                             // map's Y (the material-debug toggle it already carried), bit 1 =
-                            // DZ-003 reflective (the material named an EnvironmentMap). Kept
+                            // DZ-003 reflective (the material named an EnvironmentMap), bit 2 =
+                            // night emitter (a fixture whose emissive survives the night). Kept
                             // in this lane because WgrDraw3D is ABI-frozen and MaterialUbo's
                             // seven vec4s are otherwise fully spoken for.
                             normal_map: [
@@ -5323,7 +5329,10 @@ impl Gfx3d {
                                 if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
                                 (u32::from(d._pad & 0x100 != 0)
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
-                                        << 1)) as f32,
+                                        << 1)
+                                    | (u32::from(
+                                        d.flags & crate::ffi::WGR_DRAW3D_NIGHT_EMITTER != 0,
+                                    ) << 2)) as f32,
                             ],
                         })
                     }));

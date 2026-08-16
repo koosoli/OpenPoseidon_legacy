@@ -252,6 +252,12 @@ pub const WGR_MODEL_SECTION_REFLECTIVE: u32 = 1;
 // WgrDraw3D::flags bit 1: the per-draw twin of WGR_MODEL_SECTION_REFLECTIVE.
 pub const WGR_DRAW3D_REFLECTIVE: u32 = 2;
 
+// WgrModelSection::flags bit 1 / WgrDraw3D::flags bit 2: the material is a recognised light
+// FIXTURE whose emissive is real radiance and must survive the night. Everything else's
+// `emmisive` is legacy brightness compensation and the shaders fade it with the sun.
+pub const WGR_MODEL_SECTION_NIGHT_EMITTER: u32 = 2;
+pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
+
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);
 // `texture_id` is a wgr_texture_create handle, resolved to a bindless slot at registration.

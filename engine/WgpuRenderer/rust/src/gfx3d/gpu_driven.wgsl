@@ -35,6 +35,10 @@ override a2c: f32 = 0.0;
 // fs_prepass shares fs_main's `alpha_ref` override and samples the same uv); the GPU-driven twin
 // lost it when Multi's per-layer UV transform landed in fs_gpu alone (023ebd5).
 override prepass_match: f32 = 1.0;
+// Fraction of a NON-FIXTURE section's emissive kept at full night (WGR_EMISSIVE_NIGHT, cull.rs);
+// see shader3d.wgsl's twin for the measurement. 0 by default: the imported corpora use the lane
+// as fixed-function brightness compensation and it made forests glow at midnight.
+override emissive_night: f32 = 0.0;
 
 // InstanceGpu / RecordGpu / SectionMaterialGpu (cull.rs). conform0/1/2 is the terrain-conform
 // plane (WgrDraw3D::conform* parity); conform2.z = mode (0 rigid, 1 ForestPlain plane, 2
@@ -111,6 +115,9 @@ struct SectionMaterial {
 // this surface is reflective. Set for DayZ's CalmWater family and nothing else -- water
 // whose authored colour is RGB (10,14,17) and whose whole appearance is the reflection.
 const SECTION_REFLECTIVE: u32 = 1u;
+// SectionMaterial.flags bit 1 (WGR_MODEL_SECTION_NIGHT_EMITTER): a recognised light fixture,
+// whose emissive is real radiance and is exempt from the `emissive_night` fade.
+const SECTION_NIGHT_EMITTER: u32 = 2u;
 
 // Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
 // rather than reinvented, so both consumers agree with fs_sky_env's convention in sky.wgsl:
@@ -609,11 +616,20 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let emissive_peak = max(sm.emissive.r, max(sm.emissive.g, sm.emissive.b));
     if (in.is_veg != 0u) {
         // Legacy vegetation emissive was a fixed-function visibility boost, not
-        // source radiance. Preserve only a small starlight residual so foliage
-        // is dark at night without collapsing to an entirely black silhouette.
+        // source radiance. Keep a small daytime residual only.
         m.emissive = sm.emissive.rgb * 0.10;
     } else {
         m.emissive = sm.emissive.rgb * min(1.0, 0.50 / max(emissive_peak, 1e-4));
+    }
+    // ...and NONE of it at night unless the section is a recognised fixture. The 0.10 residual
+    // above still read as a glowing forest at midnight against black terrain (Takistan hour 0,
+    // WGR_AUTO_EXPOSURE=0: dead trees ~150/255, canopy speckle ~60, terrain 0.2), and the
+    // Arma 3 pine crown ships emissive 1.0 through the non-veg arm on its trunk-only LODs. Same
+    // daylight proxy as shading.wgsl:210 and shader3d.wgsl so the ramps cannot drift.
+    if ((sm.flags & SECTION_NIGHT_EMITTER) == 0u && emissive_night < 1.0) {
+        let daylight = smoothstep(0.002, 0.04,
+            max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
+        m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
     }
     m.sun_ambient = frame.sun_ambient.rgb * sm.ambient.rgb;
     m.sun_diffuse = frame.sun_diffuse.rgb * sm.diffuse.rgb;
