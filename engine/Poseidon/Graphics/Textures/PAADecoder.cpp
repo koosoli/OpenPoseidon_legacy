@@ -15,7 +15,7 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
     AlphaStats s;
     if (!rgba || pixelCount == 0)
         return s;
-    size_t clear = 0, opaque = 0, partial = 0;
+    size_t clear = 0, opaque = 0, partial = 0, mid = 0;
     int aMin = 255, aMax = 0;
     unsigned long long aSum = 0;
     for (size_t i = 0; i < pixelCount; i++)
@@ -31,7 +31,11 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
         else if (a == 255)
             opaque++;
         else
+        {
             partial++;
+            if (a >= 16 && a <= 239)
+                mid++;
+        }
     }
     s.aMin = aMin;
     s.aMax = aMax;
@@ -39,6 +43,7 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
     s.pctClear = 100.0 * static_cast<double>(clear) / static_cast<double>(pixelCount);
     s.pctOpaque = 100.0 * static_cast<double>(opaque) / static_cast<double>(pixelCount);
     s.pctPartial = 100.0 * static_cast<double>(partial) / static_cast<double>(pixelCount);
+    s.pctMid = 100.0 * static_cast<double>(mid) / static_cast<double>(pixelCount);
     // Partial alpha → genuine blend (must be drawn back-to-front, no depth-write).
     // Otherwise fully-transparent holes → alpha-test cutout. Otherwise opaque.
     // Both Cutout and Opaque occlude (write depth); the holes are handled by the test.

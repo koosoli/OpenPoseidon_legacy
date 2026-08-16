@@ -95,6 +95,11 @@ struct AlphaStats
     Kind kind = Opaque;
     int aMin = 255, aMax = 255, aMean = 255;
     double pctClear = 0.0, pctOpaque = 100.0, pctPartial = 0.0; // % of texels a=0 / a=255 / 0<a<255
+    // % of texels with 16 <= a <= 239: partial alpha that is a real intermediate opacity,
+    // not the 1..15 / 240..254 fringe a filtered or dithered edge leaves around a mask.
+    // Genuine translucency (glass, smoke) is mostly here; a solid surface with a soft
+    // seam or a few decal edges is almost never here. Purely additive to the verdict.
+    double pctMid = 0.0;
 };
 
 // Classify the alpha channel of an RGBA8888 buffer (4 bytes/texel, alpha = byte 3).

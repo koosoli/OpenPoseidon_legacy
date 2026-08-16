@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -380,6 +381,166 @@ AlphaShape RefineAlphaClassByShape(AlphaStats& stats, const uint8_t* rgba, int w
     return shape;
 }
 
+// ---------------------------------------------------------------------------------------
+// Format-forced alpha: the translucent cockpit BODY (owner report, 2026-08-16).
+//
+// `TextureWgpu::Init` calls `ForceAlpha()` for every ARGB4444 / AI88 / ARGB8888 texture, so
+// `hasAlpha` is true for all of them and `GetAlphaClass` decodes and consults the histogram
+// even when the file carries no FLAG tagg — the only authored alpha signal (MAT-047). The
+// histogram then applies its >= 2%-partial rule, and a solid surface with a soft seam or a
+// couple of anti-aliased decal edges is called Blend. Blend is not a shading tweak: the
+// section leaves the opaque pass for the back-to-front pass, which sorts per OBJECT, not per
+// section, and (since MAT-048) does not write depth — so a cockpit whose panels all land
+// there composites in mesh order and the far wall shows through the near door.
+//
+// MEASURED on the retail install (2026-08-16; every ARGB4444/AI88 PAA in AddOns/*.pbo and
+// DTA/*.pbo decoded — 762 ARGB4444, 731 AI88, matching MAT-048's format census exactly).
+// Not one AI88 file carries any tagg; 31 of the ARGB4444 lack FLAG. Of those 762 no-FLAG
+// files, 641 classify Blend by histogram. The Kiowa (oh58.pbo), which is the repro:
+//
+//                        clear%  partial%  mid%(16..239)  mean   verdict wanted
+//   kiowa_inspanl        9.7      2.2       1.4           227    body  -> Cutout
+//   kiowa_insidtga      50.6      4.2       2.6           122    body  -> Cutout
+//   kiowa_expanel        9.5      5.9       4.5           221    body  -> Cutout
+//   kiowa_inspanr       10.0      7.3       5.5           215    body  -> Cutout
+//   kiowa_in_doors       0.0      0.0       0.0           255    (already Opaque)
+//   oh58_sklotest        0.0    100.0     100.0           158    glass -> Blend
+//   oh58_sklotestl       0.0    100.0      91.9            37    glass -> Blend (tinted)
+//   oh58_sklotest_c     53.3     46.7      45.8            79    glass -> Blend (pane + frame)
+//   oh58_sklotestl_c    54.7     45.3      43.4            26    glass -> Blend
+//
+// (An earlier handover quoted the body textures at "mean alpha 10-23/255"; that was wrong —
+// they are 122-255. They are not faint, they are solid with a few soft texels, which is why
+// Opaque/Cutout is the right class and blending at their real alpha merely looked opaque in
+// the original engine, whose alpha pass wrote depth.)
+//
+// The two populations do not overlap on the MID band. Corpus-wide, among no-FLAG textures
+// with no glass token in the name, the highest "solid" surfaces are the Cobra dashboards
+// (cobra_palubka_tl/tr/br/bl: 9.9-19.7% mid, 0% clear, mean 217-235) and uh60_pilot_palubka1
+// (18.3% mid, 36.2% partial); the lowest genuinely translucent surfaces are
+// ah-1_kabina_predo (34.8% mid, 51.7% partial), lldr_monitor (70.8%), uh60_cargo_dvereo
+// (91.7%), zsu_dri_pruzor2 (96.9%). 25% mid sits between them with ~5 points of margin on
+// each side, and >= 50% partial is a second, independent escape for gradients whose partial
+// texels sit near 0 or 255 (a majority-partial texture cannot be a solid body).
+//
+// Mean alpha is deliberately NOT a criterion: tinted glass has mean 26-37 (oh58_sklotestl,
+// sk_predni_sklo, sklo.paa) while the body sits at 122-255, so a mean floor would keep the
+// wrong side.
+//
+// THE RULE, applied only when the alpha was forced by the FORMAT (no FLAG tagg): demote
+//
+//   Blend -> (pctClear >= 2 ? Cutout : Opaque)
+//
+// iff ALL of
+//   pctMid     <  25   (WGR_FORMAT_ALPHA_MID_MIN)      not translucent by area
+//   pctPartial <  50   (WGR_FORMAT_ALPHA_PARTIAL_MIN)  not a majority-partial gradient
+//   pctOpaque  >= 40   (WGR_FORMAT_ALPHA_OPAQUE_MIN)   a solid body IS mostly a==255
+//   no glass token in the base name
+//
+// i.e. only a texture that is demonstrably a solid surface with fringe partials is pulled
+// back; everything ambiguous keeps the histogram's Blend, because a wrongly-opaque pane is a
+// worse failure than a wrongly-ordered body (the pre-regression engine drew these bodies
+// blended for 25 years and nobody noticed -- with per-object sorting they merely look
+// opaque-ish; an opaque windscreen is unmissable). The pctOpaque floor is what keeps
+// effects sheets out of it: the fired.* muzzle flashes (52-72% partial), mrak_war_* war
+// clouds, night_sum.* halos, kuzel_svetla light cones, lightcircle, halo, obrshadow/
+// krizshadow blob shadows and slunce (the sun sprite) all have pctOpaque well under 40 and
+// stay Blend. Demotion count on the full corpus with these values: 86 of 641 no-FLAG
+// histogram-Blend textures (63 -> Cutout, 23 -> Opaque); the list is cockpit interior
+// sheets, weapon-sight reticle housings, dashboards, 2D map/HUD icons (which never consult
+// GetAlphaClass), and mesic.01-12 -- the moon-phase sprites, disc 46.7% opaque inside a
+// 48.1% clear surround with a 5.2% partial rim, for which Cutout is arguably the authored
+// shape anyway (its soft halo is a separate texture, halo.paa, which stays Blend).
+//
+// FLAG-tagged textures are untouched: the authored bit is trusted (MAT-047), so ARGB4444
+// glass with FLAG=1 (kiowa_topsklo, apach_in_skla) never reaches this.
+//
+// Glass tokens (OFP is Czech-named): "sklo" (glass; sklotest, topsklo, kab_sklo, notasskloa..f,
+// scud_sklo*), "skla" (genitive: apach_in_skla, jeep_ciferniky_skla) — excluding "sklad"
+// (warehouse), "okno"/"okna" (window: kabina_topokno*, gunner_okna*, m60_com_okna), "glass"
+// (jepp4x4_glass*, ian_doorglass). Verified against every file name in the retail PBOs: the
+// only near-misses are "prasklina" (crack — not matched, "skli") and the "okn?" building
+// windows in O.pbo/Hous, all FLAG-tagged so out of scope. The token exists for panes whose
+// histogram is dominated by their FRAME cutout — ah-1_kabina_zadoknoc (23.2% mid, 49.7%
+// clear), scud_sklo4 (1.2% mid, 64.9% clear), uh60_gunner_oknac (16.6% mid) — which the
+// numbers alone would demote.
+//
+// WGR_COCKPIT_FORCEALPHA_LEGACY=1 disables the rule (today's behaviour) for the A/B.
+// WGR_ALPHA_SHAPE_TRACE=1 logs every demotion; the count is in the stream-stats line.
+std::atomic<uint64_t> GFormatAlphaDemotions{0}; // Blend -> Cutout/Opaque (format-forced alpha)
+
+bool CockpitForceAlphaLegacyEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_COCKPIT_FORCEALPHA_LEGACY");
+        return v && v[0] != '0';
+    }();
+    return enabled;
+}
+
+bool TextureNameLooksLikeGlass(const char* name)
+{
+    if (!name || !*name)
+    {
+        return false;
+    }
+    const char* base = name;
+    for (const char* p = name; *p; p++)
+    {
+        if (*p == '\\' || *p == '/')
+        {
+            base = p + 1;
+        }
+    }
+    std::string lower(base);
+    for (char& c : lower)
+    {
+        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    }
+    if (lower.find("sklo") != std::string::npos || lower.find("glass") != std::string::npos ||
+        lower.find("okno") != std::string::npos || lower.find("okna") != std::string::npos)
+    {
+        return true;
+    }
+    // "skla" is glass (genitive) unless it is the start of "sklad" (warehouse).
+    for (size_t at = lower.find("skla"); at != std::string::npos; at = lower.find("skla", at + 1))
+    {
+        if (lower.compare(at, 5, "sklad") != 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ApplyFormatAlphaPolicy(AlphaStats& stats, const char* name)
+{
+    if (stats.kind != AlphaStats::Blend || CockpitForceAlphaLegacyEnabled())
+    {
+        return;
+    }
+    static const double midMin = EnvDouble("WGR_FORMAT_ALPHA_MID_MIN", 25.0);
+    static const double partialMin = EnvDouble("WGR_FORMAT_ALPHA_PARTIAL_MIN", 50.0);
+    static const double opaqueMin = EnvDouble("WGR_FORMAT_ALPHA_OPAQUE_MIN", 40.0);
+    const bool glassByHistogram = stats.pctMid >= midMin || stats.pctPartial >= partialMin;
+    const bool mostlySolid = stats.pctOpaque >= opaqueMin;
+    if (glassByHistogram || !mostlySolid || TextureNameLooksLikeGlass(name))
+    {
+        return;
+    }
+    const AlphaStats::Kind before = stats.kind;
+    stats.kind = stats.pctClear >= 2.0 ? AlphaStats::Cutout : AlphaStats::Opaque;
+    GFormatAlphaDemotions.fetch_add(1, std::memory_order_relaxed);
+    if (AlphaShapeTraceEnabled())
+    {
+        LOG_INFO(Graphics,
+                 "Wgpu format-alpha: {} clear={:.1f}% partial={:.1f}% mid={:.1f}% mean={} {} -> {} (no FLAG tagg)",
+                 name ? name : "<unnamed>", stats.pctClear, stats.pctPartial, stats.pctMid, stats.aMean,
+                 AlphaKindName(before), AlphaKindName(stats.kind));
+    }
+}
+
 // Decode the top (full-resolution) mip once and classify its alpha channel — mirrors
 // TextureGL33::ScanTopMipAlphaClass. Reads the texture bytes through the VFS (works for
 // PBO-packed textures) and decodes via the shared DecodePAABuffer, which handles every
@@ -624,7 +785,8 @@ void ReportTextureStreamStats(uint64_t uploads)
     LOG_INFO(Graphics,
              "Wgpu texture stream stats: uploads={} mipOpens={} blockMB={:.1f} readMs={:.1f} "
              "createMs={:.1f} fallbacks={} fallbackMs={:.1f} alphaScans={} alphaBlockScans={} "
-             "alphaHandoffs={} alphaSpeckleDemotions={} alphaMaskDemotions={} alphaMs={:.1f} totalMs={:.1f}",
+             "alphaHandoffs={} alphaSpeckleDemotions={} alphaMaskDemotions={} formatAlphaDemotions={} "
+             "alphaMs={:.1f} totalMs={:.1f}",
              uploads, TextureMipOpenCount(),
              static_cast<double>(GTextureStreamStats.blockBytes.load(std::memory_order_relaxed)) / (1024.0 * 1024.0),
              readUs / 1000.0, createUs / 1000.0, GTextureStreamStats.fallbacks.load(std::memory_order_relaxed),
@@ -632,7 +794,8 @@ void ReportTextureStreamStats(uint64_t uploads)
              GTextureStreamStats.alphaBlockScans.load(std::memory_order_relaxed),
              GTextureStreamStats.alphaHandoffs.load(std::memory_order_relaxed),
              GAlphaSpeckleDemotions.load(std::memory_order_relaxed),
-             GAlphaMaskDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
+             GAlphaMaskDemotions.load(std::memory_order_relaxed),
+             GFormatAlphaDemotions.load(std::memory_order_relaxed), alphaUs / 1000.0,
              (readUs + createUs + fallbackUs + alphaUs) / 1000.0);
 }
 
@@ -682,6 +845,12 @@ int TextureWgpu::Init()
     format = _src->GetFormat();
     if (format == PacARGB4444 || format == PacAI88 || format == PacARGB8888)
     {
+        // Original-engine behaviour (TextureD3D::Init did the same): a multi-bit-alpha
+        // FORMAT is treated as an alpha texture whether or not the file carries a FLAG
+        // tagg. Kept, because IsAlpha() also feeds the 2D path, fonts and icons, which are
+        // AI88 with no taggs at all. But remember that the file itself said nothing, so
+        // GetAlphaClass can decline to BLEND on the format's say-so alone.
+        _alphaForcedByFormat = !_src->IsAlpha();
         _src->ForceAlpha();
     }
 
@@ -816,6 +985,12 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 if (!ScanTopMipAlphaBlocks(path))
                 {
                     _alphaStats = ScanTopMipAlphaStats(Name());
+                }
+                // Both scan paths have run the histogram and the shape guard; the last word
+                // on a FORMAT-implied alpha channel is whether the pixels look like glass.
+                if (_alphaForcedByFormat)
+                {
+                    ApplyFormatAlphaPolicy(_alphaStats, Name());
                 }
                 _alphaStatsScanned = true;
                 if (timed)

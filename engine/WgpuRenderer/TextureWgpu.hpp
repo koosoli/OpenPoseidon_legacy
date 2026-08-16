@@ -45,6 +45,11 @@ class TextureWgpu : public Texture
     // has clear alpha texels and may receive an alpha test.
     bool _alphaStatsScanned = false;
     AlphaStats _alphaStats;
+    // True when the ONLY alpha signal was the pixel format (ARGB4444 / AI88 / ARGB8888 ->
+    // Init() calls ForceAlpha) and no FLAG tagg said so. GetAlphaClass refuses to route such a
+    // texture to the blend pass unless it measures or is named as glass — see
+    // ApplyFormatAlphaPolicy in TextureWgpu.cpp (the translucent-cockpit-body fix).
+    bool _alphaForcedByFormat = false;
 
     int Init();
     void InitDynamic(int w, int h, const void* rgba, uint32_t size);
