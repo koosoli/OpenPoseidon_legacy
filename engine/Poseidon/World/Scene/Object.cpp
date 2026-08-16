@@ -26,6 +26,7 @@
 #include <Poseidon/UI/Locale/StringtableExt.hpp>
 #include <stdint.h>
 #include <stdio.h>
+#include <cstdlib> // std::getenv — WGR_ROAD_CPU_SPLIT (GpuTerrainConformWillRun)
 #include <cmath>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -434,6 +435,70 @@ void Object::Animate(int level)
             shape->InvalidateBuffer();
         }
     }
+}
+
+// WLD-025 — does the GPU terrain conform ACTUALLY run for this shape?
+//
+// `GGpuTerrainConform` is a promise that shader3d.wgsl's vertex stage will pin this draw's
+// ClipLandOn vertices to SurfaceY, so Object::Draw may skip the CPU SurfaceSplit. For a ROAD
+// that promise cannot be kept, and the chain is entirely mechanical:
+//
+//   1. ShapeDraw.cpp:503-506 — `if (level->Special() & (IsLight | OnSurface))
+//      optimizeHW = optimizeSSE = false;`. An OnSurface shape is DENIED a vertex buffer at
+//      load time, by design: 2001 expected OnSurface geometry to be re-split per terrain
+//      triangle every frame, so a static VB would be worthless.
+//   2. RoadType::RoadType (ObjectClasses.cpp:768) sets `OrSpecial(NoShadow|OnSurface|NoZWrite)`
+//      on every road model of every generation. So every road has `_buffer == nullptr`.
+//   3. Shape::Draw's T&L gate is `GetTL() && EnableHWTLState && tlAble && _buffer`
+//      (ShapeDraw.cpp:198). `_buffer` is null, so the road falls to the CPU FaceArray branch
+//      — DrawSectionTL, and with it shader3d.wgsl and the whole GPU conform, never run.
+//   4. EngineWgpu::DrawSection(FaceArray) (EngineWgpu.cpp:6764) then converts the CPU-lit
+//      TLVertices to SCREEN space (MakeScreenVertex) and submits them through AppendTriangles
+//      — the 2D pipeline. gfx2d/shader.wgsl is `textureSample(...) * in.color` mixed toward
+//      the fog colour: no sky irradiance, no sun, no sRGB decode, no HDR `linear` handling.
+//   5. And Object::Animate does nothing for an all-ClipLandOn shape (Object.cpp:373 — "will be
+//      done during SurfaceSplit"), so with the split skipped NOTHING conforms the road at all.
+//
+// MEASURED, not inferred (.tmp-shadow/night-emissive/trace.log, Takistan, WGR_ROAD_TRACE=1):
+// 36 ROAD_CPUPATH lines, every one `buffer=0 tlAble=1 spec=0x100132` (0x2 = OnSurface,
+// 0x10 = NoZWrite — RoadType's own bits). Zero road textures in the 75 ROAD_TRACE lines from
+// the T&L path. Shape.hpp:1125-1128 already records the symptom in the abstract: a shape with
+// no _buffer "falls to the software path, which draws it unlit and with no material".
+//
+// This single fact accounts for all three road reports: the road is not conformed (seen
+// through mountains), its albedo is written gamma-space into the HDR target (white by day),
+// and its colour is legacy CPU lighting with eye accommodation folded in, then auto-exposed a
+// second time (self-lit at night). It also explains why WGR_EMISSIVE_NIGHT=0 left the road
+// bit-identical while moving 0.85% of the frame: that override lives on fs_main, which the
+// road never reaches.
+//
+// WGR_ROAD_CPU_SPLIT=1 requires the promise to be keepable before it is trusted: a shape with
+// no vertex buffer takes the CPU SurfaceSplit instead, which is exactly what GL33 does. The
+// split shape is drawn with `IsOnSurface` in place of `OnSurface`, so it is no longer denied a
+// buffer, reaches DrawSectionTL, and keeps its decal offset (IsOnSurfaceRouting covers both
+// bits, RenderFlags.hpp:220).
+//
+// DEFAULT OFF, and not because the current behaviour is defensible. The split path allocates a
+// unique Shape + vertex buffer PER VISIBLE PLACEMENT of a shared road model — the cost the
+// GPU-conform shortcut was introduced to avoid — so enabling it trades a correctness fix
+// against a per-frame allocation on road-heavy worlds. That trade needs the owner's frame
+// numbers, not my assumption.
+static bool GpuTerrainConformWillRun(const Shape* sShape)
+{
+    if (!GGpuTerrainConform)
+    {
+        return false;
+    }
+    static const bool requireBuffer = []
+    {
+        const char* v = std::getenv("WGR_ROAD_CPU_SPLIT");
+        return v && v[0] != '\0' && v[0] != '0';
+    }();
+    if (!requireBuffer)
+    {
+        return true; // shipped behaviour, bit-for-bit
+    }
+    return sShape && sShape->GetVertexBuffer() != nullptr;
 }
 
 bool Object::PublishConformPlane(const Shape* sShape, ConformPlane& saved)
@@ -1048,8 +1113,13 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         // important on road-heavy modern worlds: that path allocates a unique split
         // Shape + vertex buffer per visible placement even though every placement
         // shares one source road model. GL33 keeps the established CPU split path.
+        //
+        // WLD-025: the guard is GpuTerrainConformWillRun, not GGpuTerrainConform. A road has no
+        // vertex buffer (OnSurface shapes are denied one at load time), so it never reaches the
+        // vertex shader that was supposed to conform it — see the function's comment for the
+        // measured chain. Default-off; identical to the previous condition when unset.
         if (render::Has(specT.routing, render::Routing::OnSurface) &&
-            (sShape->GetAndHints() & ClipLandMask) == ClipLandOn && !GGpuTerrainConform)
+            (sShape->GetAndHints() & ClipLandMask) == ClipLandOn && !GpuTerrainConformWillRun(sShape))
         {
             // if all point are LandOn, we can split cache
             Ref<Shape> split = GScene->GetShadowCache().Shadow(this, VUp, forceLOD, *this, true);
