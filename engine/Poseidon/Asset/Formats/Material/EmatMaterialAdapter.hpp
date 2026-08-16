@@ -6,11 +6,14 @@
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
+#include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Poseidon::Asset::Material
@@ -85,10 +88,109 @@ inline bool IsEmatPath(std::string_view path)
     return EmatMaterial::NameMatches(path.substr(path.size() - 5), ".emat");
 }
 
+// Where a converted world's `.emat` files were DEPLOYED, for a material path that
+// still names where they LIVED.
+//
+// A `.xob` part names its material by Enfusion virtual path --
+// `Assets/Vegetation/Tree/Alnus_Glutinosa/Data/t_alnus_glutinosa_2f_polyplane.emat` --
+// and every converted Everon section carried that string through unchanged. Nothing
+// under the game root is called `Assets\`, so `AutoOpen` fails and the material is
+// cached as a miss: measured on 2026-08-16 (`.tmp-shadow/reforger/owner-trees.log`),
+// 737 "no albedo ... family=" lines, one per distinct `.emat`, family EMPTY because
+// TranslateEmat never ran. What DOES exist under the game root is the converter's
+// texture tree, `reforger\everon\textures\assets\...`, and the converter now writes
+// each material it baked into that same tree, at the same relative path, lower-cased
+// (`TextureBaker::WriteEmat` in XobCommand.cpp; the naming is `VirtualNameFor`).
+//
+// So when the raw path does not open, look for it under each deploy root. This is
+// what lets the 1,132 models ALREADY on disk -- whose sections name the raw path --
+// open a material without being re-exported; models the converter writes from now on
+// name the deployed path directly and never reach this branch.
+//
+// `POSEIDON_EMAT_ROOTS` overrides the list (`;`-separated); `POSEIDON_EMAT_ROOTS=none`
+// disables the fallback, which is the A/B: with it, `family=MatPBR...` on every
+// Reforger material line; without it, `family=` (empty), as before.
+inline std::vector<std::string> ParseEmatDeployRoots(std::string_view list)
+{
+    std::vector<std::string> out;
+    if (EmatMaterial::NameMatches(list, "none"))
+        return out;
+    size_t begin = 0;
+    while (begin <= list.size())
+    {
+        const size_t end = list.find(';', begin);
+        std::string root(list.substr(begin, end == std::string_view::npos ? std::string_view::npos : end - begin));
+        while (!root.empty() && (root.back() == '\\' || root.back() == '/'))
+            root.pop_back();
+        if (!root.empty())
+            out.push_back(root);
+        if (end == std::string_view::npos)
+            break;
+        begin = end + 1;
+    }
+    return out;
+}
+
+inline std::vector<std::string>& EmatDeployRootsStorage()
+{
+    static std::vector<std::string> roots = []
+    {
+        const char* env = std::getenv("POSEIDON_EMAT_ROOTS");
+        return ParseEmatDeployRoots(env && *env ? env : "reforger\\everon\\textures");
+    }();
+    return roots;
+}
+
+inline const std::vector<std::string>& EmatDeployRoots()
+{
+    return EmatDeployRootsStorage();
+}
+
+// Replaces the root list for the rest of the process. Exists for the unit test that
+// deploys a material under a temp directory; the game never calls it.
+inline void SetEmatDeployRoots(std::vector<std::string> roots)
+{
+    EmatDeployRootsStorage() = std::move(roots);
+}
+
+// `<root>\<path lower-cased, / -> \>` -- the exact spelling `VirtualNameFor` writes,
+// so the engine and the converter cannot disagree about where a deployed file is.
+inline std::string DeployedEmatPath(const std::string& root, std::string_view rawPath)
+{
+    std::string tail(rawPath);
+    for (char& c : tail)
+    {
+        if (c == '/')
+            c = '\\';
+        else
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    while (!tail.empty() && tail.front() == '\\')
+        tail.erase(tail.begin());
+    return root + "\\" + tail;
+}
+
+// True when `path` already sits under one of the deploy roots (case-insensitive
+// prefix), so the fallback does not stack a root on top of a root.
+inline bool IsUnderEmatDeployRoot(std::string_view path)
+{
+    for (const std::string& root : EmatDeployRoots())
+    {
+        if (path.size() <= root.size())
+            continue;
+        if (!EmatMaterial::NameMatches(path.substr(0, root.size()), root))
+            continue;
+        const char next = path[root.size()];
+        if (next == '\\' || next == '/')
+            return true;
+    }
+    return false;
+}
+
 // Reads a file through the same resolver model loading uses, so an addon-bank path
 // resolves the way an RVMAT reference does. Returns false when the file is absent --
 // which is the ordinary case for every non-DayZ material and must not be an error.
-inline bool ReadEmatText(const std::string& path, std::string& out)
+inline bool ReadEmatTextExact(const std::string& path, std::string& out)
 {
     QIFStreamB file;
     file.AutoOpen(path.c_str());
@@ -100,6 +202,26 @@ inline bool ReadEmatText(const std::string& path, std::string& out)
     out.assign(static_cast<size_t>(length), '\0');
     file.read(out.data(), length);
     return !file.fail();
+}
+
+// The path exactly as named first; the deployed spelling under each root second. The
+// order matters: a path that opens as written (DayZ's `dz\water\...emat` inside a
+// bank, or a converter-written `reforger\everon\textures\...emat`) must never be
+// shadowed by a root lookup.
+inline bool ReadEmatText(const std::string& path, std::string& out)
+{
+    if (ReadEmatTextExact(path, out))
+        return true;
+    if (path.empty() || IsUnderEmatDeployRoot(path))
+        return false;
+    // Absolute paths and drive-letter paths are not virtual paths; a root would
+    // produce `root\C:\...`, which is nothing.
+    if (path[0] == '\\' || path[0] == '/' || (path.size() > 1 && path[1] == ':'))
+        return false;
+    for (const std::string& root : EmatDeployRoots())
+        if (ReadEmatTextExact(DeployedEmatPath(root, path), out))
+            return true;
+    return false;
 }
 
 inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)
@@ -248,6 +370,157 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
         out.slots.push_back(std::move(entry));
     }
 
+    return out;
+}
+
+// Whether an `.emat` describes an ALPHA-TESTED surface -- the Enfusion counterpart of
+// Real Virtuality's `TreeAdv`/`TreeAdvTrans` answer that `GpuSectionMaterialUsesLeafCards`
+// gives for an rvmat. The renderer asks this only when a texture's alpha statistics are
+// ambiguous (Blend, i.e. more than 2% partial-alpha texels): a leaf card with soft mip
+// edges reads the same as a window pane, and only the authored material can say which
+// it is.
+//
+// What answers yes, and why -- measured over the 10,312 `.emat` Reforger ships, with
+// inheritance resolved (`%TEMP%\rf\emat`, 2026-08-16):
+//
+//   MatPBRTreeCrown   468 files, 463 name an OpacityMap once the parent is folded in
+//                     (the 5 that do not ARE the parents: crown_base, plant_base, ...)
+//   Grass             clutter polyplanes; every leaf inherits its OpacityMap
+//   AlphaTest > 0     47 files, 44 with an OpacityMap: flags, nets, MatPBRBasic props
+//                     that Enfusion alpha-tests. `Particle` also spells a threshold
+//                     this way (`AlphaTest 10`), so a particle material would say yes
+//                     too -- none of them reaches a model section.
+//   OpacityMap        1,715 files. Enfusion binds it as coverage, never as a blend
+//                     weight; a material that names one is a cutout.
+//
+// What does NOT: `BCRMap` alpha. It varies in 1,112 of 1,312 baked albedos and it is
+// ROUGHNESS (measured: `WaterTank_01_MLOD_BCR` 99.8% partial alpha, `polyplane_
+// MountainGrass_01_aut_BCR` 100% partial -- no cutout is 100% partial). Reading it as
+// opacity would punch holes in every wall. The premise "Reforger foliage opacity lives
+// in BCR alpha" is false; it lives in `OpacityMap`, and the converter folds that into
+// the face texture's alpha already.
+inline bool EmatUsesLeafCards(const EmatMaterial& emat)
+{
+    if (EmatMaterial::NameMatches(emat.className, "MatPBRTreeCrown") ||
+        EmatMaterial::NameMatches(emat.className, "Grass"))
+        return true;
+    if (!emat.TextureOf("OpacityMap").empty())
+        return true;
+    float alphaTest = 0.0f;
+    return emat.FloatOf("AlphaTest", alphaTest) && alphaTest > 0.0f;
+}
+
+// True when the material class is one of Enfusion's vegetation families -- what a
+// consumer that keys on `TreeAdv*` for RV wants to key on for Reforger.
+inline bool IsEmatVegetationFamily(std::string_view family)
+{
+    return EmatMaterial::NameMatches(family, "MatPBRTreeCrown") ||
+           EmatMaterial::NameMatches(family, "MatPBRTreeTrunk") || EmatMaterial::NameMatches(family, "Grass");
+}
+
+// The material the converter DEPLOYS beside the textures it baked: `resolved` with its
+// texture keys rewritten to the files that now exist, and nothing that does not.
+//
+//   BCRMap          -> `colourPaa`, the baked albedo (`_ca` variant when the OpacityMap
+//                      was folded into its alpha). For a MatPBRMulti this is the tinted
+//                      library tile the converter chose as the object's colour, so it is
+//                      written under BCRMap -- the key TranslateEmat binds as BaseColour
+//                      -- and not under the BCR_N it came from, which would land in a
+//                      layer slot nothing samples.
+//   `normalKey`     -> `normalPaa` when one was baked, under the SAME key the source
+//                      used (NMOMap / GlobalNMOMap / NTCMap), all of which TranslateEmat
+//                      binds as NormalMap.
+//   OpacityMap      -> dropped: it is inside `colourPaa`'s alpha now -- and, so the
+//                      deployed file still SAYS it is a cutout (EmatUsesLeafCards reads
+//                      OpacityMap), `AlphaTest 1` is written in its place when
+//                      `opacityFolded` and the source had no AlphaTest of its own. That
+//                      is Enfusion's own key with Enfusion's own meaning: the alpha of
+//                      the base colour is coverage.
+//   every other texture-valued key -> dropped. A deployed material must not name a
+//                      file that is not deployed; `MaskMap` and `BCR_1..4` pointing at
+//                      `.edds` inside a `.pak` would be exactly the unresolvable
+//                      references this file exists to replace, and a MaskMap that
+//                      resolves with no layers behind it would put the section on the
+//                      layered path with three empty layers.
+//   every non-texture key -> kept verbatim (Color, SpecularMul, AlphaTest, wind, AO,
+//                      the UVTransform blocks flattened). They cost nothing and are what
+//                      a later shading pass will want to read.
+//
+// The result carries no parent: `resolved` must already be inheritance-resolved.
+inline EmatMaterial MakeDeployedEmat(const EmatMaterial& resolved, const std::string& colourPaa, bool opacityFolded,
+                                     const std::string& normalKey, const std::string& normalPaa)
+{
+    EmatMaterial out;
+    out.className = resolved.className;
+    bool droppedOpacity = false;
+    const auto textureValue = [](const std::string& path, const std::string& guid)
+    {
+        EmatValue value;
+        value.text = path;
+        // A GUID is what makes TextureOf() see a texture at all; the source's own id
+        // is kept when there is one so the deployed file still says which Enfusion
+        // asset it stands for, and a placeholder is written when there is not.
+        value.guid = guid.empty() ? "0000000000000000" : guid;
+        return value;
+    };
+    bool wroteColour = false;
+    for (const EmatProperty& property : resolved.properties)
+    {
+        bool isTexture = false;
+        std::string guid;
+        for (const EmatValue& value : property.values)
+            if (value.isTexture() && !value.text.empty())
+            {
+                isTexture = true;
+                guid = value.guid;
+                break;
+            }
+        if (!isTexture)
+        {
+            out.properties.push_back(property);
+            continue;
+        }
+        if (EmatMaterial::NameMatches(property.name, "BCRMap") && !colourPaa.empty())
+        {
+            EmatProperty colour;
+            colour.name = "BCRMap";
+            colour.values.push_back(textureValue(colourPaa, guid));
+            out.properties.push_back(std::move(colour));
+            wroteColour = true;
+            continue;
+        }
+        if (!normalKey.empty() && !normalPaa.empty() && EmatMaterial::NameMatches(property.name, normalKey))
+        {
+            EmatProperty normal;
+            normal.name = property.name;
+            normal.values.push_back(textureValue(normalPaa, guid));
+            out.properties.push_back(std::move(normal));
+            continue;
+        }
+        if (EmatMaterial::NameMatches(property.name, "OpacityMap"))
+            droppedOpacity = true;
+        // OpacityMap, MaskMap, BCR_N, NMO_N, WorldColorizeMap, ... -- not deployed.
+    }
+    if (!wroteColour && !colourPaa.empty())
+    {
+        // The source named no BCRMap (a MatPBRMulti took its colour from BCR_1): the
+        // baked file still goes under BCRMap so it binds as the base colour.
+        EmatProperty colour;
+        colour.name = "BCRMap";
+        colour.values.push_back(textureValue(colourPaa, ""));
+        out.properties.push_back(std::move(colour));
+    }
+    if (droppedOpacity && opacityFolded && !colourPaa.empty() && !out.Has("AlphaTest"))
+    {
+        EmatProperty alphaTest;
+        alphaTest.name = "AlphaTest";
+        EmatValue one;
+        one.text = "1";
+        one.number = 1.0;
+        one.isNumber = true;
+        alphaTest.values.push_back(one);
+        out.properties.push_back(std::move(alphaTest));
+    }
     return out;
 }
 

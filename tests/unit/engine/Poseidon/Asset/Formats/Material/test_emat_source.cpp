@@ -279,3 +279,81 @@ TEST_CASE("EMAT: an unresolvable or cyclic parent leaves the child untouched", "
     };
     REQUIRE_FALSE(Poseidon::Asset::Material::ResolveEmatInheritance(cyclic, loop));
 }
+
+// ---------------------------------------------------------------------------
+// The writer. The converter deploys a resolved `.emat` for the engine to read back
+// (XobCommand's TextureBaker::WriteEmat -> LoadTranslatedMaterial), and this is the
+// only place the two halves meet outside a full re-export.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("EMAT: WriteEmatText round-trips what ParseEmat read", "[asset][material][emat][arf]")
+{
+    using Poseidon::Asset::Material::WriteEmatText;
+    // Every value kind the corpus has: a 4-vector, a bare word, a texture with its
+    // GUID (trailing space verbatim from the jerrycan), a quoted key with a space, a
+    // nested block, and a number whose text must not be re-formatted.
+    const char* source = "MatPBRMulti {\n"
+                         " Color_1 0.103 0.105 0.041 1\n"
+                         " Cull none\n"
+                         " BCR_1 \"{1837E633B1A92A98}Assets/_SharedData/Metal/ST_MetalPaint_Coated_02_1m_BCR.edds\" \n"
+                         " \"Pixel stride_1\" 3\n"
+                         " UVTransform_1 MatUVTransform \"{52B49B158EA97A36}\" {\n"
+                         "  TilingU 4.9\n"
+                         "  TilingV 4\n"
+                         " }\n"
+                         " Roughness_1 1.118000000001\n"
+                         "}";
+    const EmatMaterial first = ParseEmat(source);
+    REQUIRE(first.valid());
+    const std::string written = WriteEmatText(first);
+    const EmatMaterial second = ParseEmat(written);
+    REQUIRE(second.valid());
+
+    REQUIRE(second.className == first.className);
+    REQUIRE(second.parentPath.empty());
+    REQUIRE(second.properties.size() == first.properties.size());
+    for (size_t i = 0; i < first.properties.size(); ++i)
+    {
+        const auto& a = first.properties[i];
+        const auto& b = second.properties[i];
+        REQUIRE(b.name == a.name);
+        REQUIRE(b.values.size() == a.values.size());
+        for (size_t v = 0; v < a.values.size(); ++v)
+        {
+            REQUIRE(b.values[v].text == a.values[v].text);
+            REQUIRE(b.values[v].guid == a.values[v].guid);
+            REQUIRE(b.values[v].isNumber == a.values[v].isNumber);
+            REQUIRE(b.values[v].number == a.values[v].number);
+        }
+    }
+    // The things a consumer actually asks for.
+    REQUIRE(second.TextureOf("BCR_1") == "Assets/_SharedData/Metal/ST_MetalPaint_Coated_02_1m_BCR.edds");
+    REQUIRE(second.WordOf("Cull") == "none");
+    REQUIRE(second.FloatOr("Pixel stride_1", 0.0f) == 3.0f);
+    float colour[4] = {};
+    REQUIRE(second.Vec4Of("Color_1", colour));
+    REQUIRE(colour[2] == 0.041f);
+    // The number's TEXT survives, not a re-formatted double.
+    REQUIRE(written.find("1.118000000001") != std::string::npos);
+    // A texture is written with its GUID -- that is what makes it a texture on the way back.
+    REQUIRE(written.find("\"{1837E633B1A92A98}Assets/_SharedData") != std::string::npos);
+}
+
+TEST_CASE("EMAT: WriteEmatText keeps a word that looks like a number a word", "[asset][material][emat][arf]")
+{
+    using Poseidon::Asset::Material::WriteEmatText;
+    EmatMaterial material;
+    material.className = "MatPBRBasic";
+    Poseidon::Asset::Material::EmatProperty word;
+    word.name = "Tag";
+    Poseidon::Asset::Material::EmatValue value;
+    value.text = "42"; // a quoted "42" in the source: not a number, by the parser's rule
+    word.values.push_back(value);
+    material.properties.push_back(word);
+
+    const EmatMaterial back = ParseEmat(WriteEmatText(material));
+    REQUIRE(back.valid());
+    REQUIRE(back.WordOf("Tag") == "42");
+    float asNumber = 0.0f;
+    REQUIRE_FALSE(back.FloatOf("Tag", asNumber));
+}

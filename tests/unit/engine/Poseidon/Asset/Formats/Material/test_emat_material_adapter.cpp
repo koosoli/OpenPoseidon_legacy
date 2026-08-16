@@ -9,11 +9,14 @@
 //                  family=CalmWater ( dz\water_bliss\ponds\data\enoch_pond_nohq.edds)
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using Poseidon::Asset::Material::BindsNothing;
 using Poseidon::Asset::Material::EmatSiblingOf;
@@ -361,4 +364,293 @@ TEST_CASE("EMAT adapter: a DayZ material still reads the way it did", "[asset][m
     REQUIRE(normal->texture.path.canonical().find("enoch_river_nohq.edds") != std::string::npos);
     REQUIRE(river.shaderFamily == "CalmWater");
     REQUIRE(river.Find(MaterialSlot::Environment) != nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Deploying the `.emat` -- why "none opens" on Everon, and the two halves of the fix.
+//
+// Measured 2026-08-16 (`.tmp-shadow/reforger/owner-trees.log`): 737 distinct
+// `Wgpu material: no albedo for Assets/...emat (...) family=` lines, family EMPTY --
+// so TranslateEmat never ran, because `Assets/Vegetation/...emat` names a file
+// inside a `.pak` and nothing under the game root is called `Assets\`. The converter
+// now deploys each material it baked under its texture prefix at the same relative
+// path (`MakeDeployedEmat` + `WriteEmatText`, spelled by `VirtualNameFor`), and the
+// engine looks there when the raw path fails (`EmatDeployRoots`). Either half alone
+// is a file nobody reads or a lookup that finds nothing.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+using Poseidon::Asset::Material::DeployedEmatPath;
+using Poseidon::Asset::Material::EmatMaterial;
+using Poseidon::Asset::Material::EmatUsesLeafCards;
+using Poseidon::Asset::Material::LoadTranslatedMaterial;
+using Poseidon::Asset::Material::MakeDeployedEmat;
+using Poseidon::Asset::Material::ParseEmatDeployRoots;
+using Poseidon::Asset::Material::ReadEmatFile;
+using Poseidon::Asset::Material::SetEmatDeployRoots;
+using Poseidon::Asset::Material::WriteEmatText;
+
+// Assets/Vegetation/Tree/Alnus_Glutinosa/Data/t_alnus_glutinosa_2f_polyplane.emat,
+// verbatim, minus the parent reference (crown_base only adds wetness/porosity keys).
+// This is the tree the owner reported as "big flat leaf polygons".
+const char* kAlderCrownEmat =
+    "MatPBRTreeCrown {\n"
+    " SpecularIBL 0.433 0.456 0.346 1\n"
+    " SpecularMul 0.7\n"
+    " GlobalAOPower 0.5\n"
+    " BCRMap \"{CFF8762C3EB0A8BC}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_BCR.edds\"\n"
+    " OpacityMap \"{CAC2E08429009AF9}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_A.edds\"\n"
+    " NormalPower 2.5\n"
+    " NTCMap \"{5C969BABF5CA2BB9}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_NTC.edds\"\n"
+    " WindSmoothness 1\n"
+    " EnableColorization Full\n"
+    " WorldColorizeMap \"{933013A75A6BD5E7}Assets/Vegetation/Tree/Data/vege_color_noise_02_COLOR.edds\"\n"
+    " ColorizeMapBlendMask "
+    "\"{528252C9249492FF}Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_aut_MASK.edds\"\n"
+    " SSSColor 0.471 0.471 0.471 1\n"
+    "}\n";
+
+const char* kAlderColourPaa =
+    "reforger\\everon\\textures\\assets\\vegetation\\_polyplanes\\polyplane_alnus_glutinosa_bcr_ca.paa";
+const char* kAlderNormalPaa =
+    "reforger\\everon\\textures\\assets\\vegetation\\_polyplanes\\polyplane_alnus_glutinosa_nohq.paa";
+
+struct DeployRootsScope
+{
+    std::vector<std::string> saved = Poseidon::Asset::Material::EmatDeployRoots();
+    ~DeployRootsScope() { SetEmatDeployRoots(saved); }
+};
+} // namespace
+
+TEST_CASE("EMAT deploy: the alder crown deploys as a cutout that binds its baked albedo and normal",
+          "[asset][material][emat][arf]")
+{
+    const EmatMaterial source = ParseEmat(kAlderCrownEmat);
+    REQUIRE(source.valid());
+    const EmatMaterial deployed =
+        MakeDeployedEmat(source, kAlderColourPaa, /*opacityFolded=*/true, "NTCMap", kAlderNormalPaa);
+
+    // Through the real writer and the real parser, as the game will see it.
+    const EmatMaterial back = ParseEmat(WriteEmatText(deployed));
+    REQUIRE(back.valid());
+    REQUIRE(back.className == "MatPBRTreeCrown");
+    REQUIRE(back.parentPath.empty()); // stands alone; no reference into a .pak
+
+    // Textures: exactly the two files the converter wrote, nothing it did not.
+    REQUIRE(back.TextureOf("BCRMap") == kAlderColourPaa);
+    REQUIRE(back.TextureOf("NTCMap") == kAlderNormalPaa);
+    REQUIRE_FALSE(back.Has("OpacityMap"));       // folded into the _ca alpha
+    REQUIRE_FALSE(back.Has("WorldColorizeMap")); // an .edds inside a .pak: not deployed
+    REQUIRE_FALSE(back.Has("ColorizeMapBlendMask"));
+    // ...and it says so: the folded opacity is recorded as Enfusion's own alpha-test key.
+    REQUIRE(back.FloatOr("AlphaTest", 0.0f) == 1.0f);
+    // Non-texture keys survive verbatim.
+    REQUIRE(back.FloatOr("SpecularMul", 0.0f) == 0.7f);
+    REQUIRE(back.WordOf("EnableColorization") == "Full");
+
+    // What the engine then binds.
+    const TranslatedMaterial material = TranslateEmat(back, "deployed", "");
+    REQUIRE(material.shaderFamily == "MatPBRTreeCrown");
+    const TranslatedSlot* base = material.Find(MaterialSlot::BaseColour);
+    REQUIRE(base != nullptr);
+    REQUIRE(base->texture.path.canonical().find("polyplane_alnus_glutinosa_bcr_ca.paa") != std::string::npos);
+    const TranslatedSlot* normal = material.Find(MaterialSlot::NormalMap);
+    REQUIRE(normal != nullptr);
+    REQUIRE(normal->texture.path.canonical().find("polyplane_alnus_glutinosa_nohq.paa") != std::string::npos);
+    REQUIRE(material.Find(MaterialSlot::Mask) == nullptr);
+
+    // And it is a leaf card -- the answer GpuSectionMaterialUsesLeafCards gives TreeAdv.
+    REQUIRE(EmatUsesLeafCards(back));
+}
+
+TEST_CASE("EMAT deploy: no normal baked means no normal named", "[asset][material][emat][arf]")
+{
+    // The 21:23 re-export ran without --normals: the deployed file must not name a
+    // `_nohq.paa` that does not exist. A material that names a missing file is worse
+    // than one that names nothing -- it fails to load instead of falling back.
+    const EmatMaterial deployed = MakeDeployedEmat(ParseEmat(kAlderCrownEmat), kAlderColourPaa, true, "NTCMap", "");
+    const EmatMaterial back = ParseEmat(WriteEmatText(deployed));
+    REQUIRE(back.TextureOf("BCRMap") == kAlderColourPaa);
+    REQUIRE_FALSE(back.Has("NTCMap"));
+    REQUIRE(TranslateEmat(back, "deployed", "").Find(MaterialSlot::NormalMap) == nullptr);
+}
+
+TEST_CASE("EMAT deploy: a MatPBRMulti's tinted tile becomes its BCRMap and its layers stay in the pak",
+          "[asset][material][emat][arf]")
+{
+    // The converter bakes BCR_1 rescaled to Color_1 as the object's colour. Deployed
+    // under BCR_1 it would land in LayerColour1 and nothing would sample it; under
+    // BCRMap it is the base colour. MaskMap and NMO_N are library files inside the
+    // .pak and must not be named -- a MaskMap that resolves with no layers behind it
+    // puts the section on the layered path with three empty layers.
+    const char* colour = "reforger\\everon\\textures\\assets\\_shareddata\\metal\\st_metalpaint_coated_02_1m_bcr.paa";
+    const char* normal = "reforger\\everon\\textures\\assets\\items\\fuel\\jerrycan_01\\data\\jerrycan_01_nohq.paa";
+    const EmatMaterial back =
+        ParseEmat(WriteEmatText(MakeDeployedEmat(ParseEmat(kMultiEmat), colour, false, "GlobalNMOMap", normal)));
+    REQUIRE(back.valid());
+    REQUIRE(back.TextureOf("BCRMap") == colour);
+    REQUIRE(back.TextureOf("GlobalNMOMap") == normal);
+    REQUIRE_FALSE(back.Has("MaskMap"));
+    REQUIRE_FALSE(back.Has("BCR_1"));
+    REQUIRE_FALSE(back.Has("NMO_1"));
+    REQUIRE_FALSE(back.Has("AlphaTest")); // nothing was folded; an opaque jerrycan stays opaque
+    // Non-texture layer keys stay: Color_1, Roughness_1, the UV transform block.
+    REQUIRE(back.Has("Color_1"));
+    REQUIRE(back.Has("UVTransform_2"));
+
+    const TranslatedMaterial material = TranslateEmat(back, "deployed", "");
+    REQUIRE(material.Find(MaterialSlot::BaseColour) != nullptr);
+    REQUIRE(material.Find(MaterialSlot::NormalMap) != nullptr);
+    REQUIRE(material.Find(MaterialSlot::Mask) == nullptr);
+    REQUIRE(material.Find(MaterialSlot::LayerColour1) == nullptr);
+    REQUIRE_FALSE(EmatUsesLeafCards(back));
+}
+
+TEST_CASE("EMAT deploy: what counts as a leaf card, and BCR alpha does not", "[asset][material][emat][arf]")
+{
+    // MatPBRTreeCrown, Grass, an OpacityMap, or AlphaTest > 0. NOT the class of the
+    // trunk, and NOT a MatPBRBasic that has only a BCRMap -- its alpha is roughness
+    // (measured 99.8% partial on WaterTank_01_MLOD_BCR, 100% on a grass polyplane).
+    REQUIRE(EmatUsesLeafCards(ParseEmat("MatPBRTreeCrown {\n}\n")));
+    REQUIRE(EmatUsesLeafCards(ParseEmat("Grass {\n BCRMap \"{1}a_BCR.edds\"\n}\n")));
+    REQUIRE(EmatUsesLeafCards(ParseEmat("MatPBRBasic {\n BCRMap \"{1}a_BCR.edds\"\n OpacityMap \"{2}a_A.edds\"\n}\n")));
+    REQUIRE(EmatUsesLeafCards(ParseEmat("MatPBRBasic {\n Cull none\n AlphaTest 1\n BCRMap \"{1}flag_BCR.edds\"\n}\n")));
+    REQUIRE_FALSE(EmatUsesLeafCards(ParseEmat("MatPBRBasic {\n AlphaTest 0\n BCRMap \"{1}a_BCR.edds\"\n}\n")));
+    REQUIRE_FALSE(EmatUsesLeafCards(
+        ParseEmat("MatPBRTreeTrunk {\n BCRMap \"{1}bark_BCR.edds\"\n NTCMap \"{2}bark_NMO.edds\"\n}\n")));
+    // The 1,726 `_MLOD` far-LOD materials: MatPBRBasic, BCRMap only. Opaque.
+    REQUIRE_FALSE(EmatUsesLeafCards(
+        ParseEmat("MatPBRBasic {\n MetalnessScale 0\n BCRMap \"{1}Mineflags_USSR_01_MLOD_BCR.edds\"\n}\n")));
+    REQUIRE_FALSE(EmatUsesLeafCards(ParseEmat(kBasicEmat)));
+}
+
+TEST_CASE("EMAT deploy: the deployed spelling is the converter's spelling", "[asset][material][emat][arf]")
+{
+    // `VirtualNameFor` in XobCommand.cpp: prefix + "\\" + source path lower-cased with
+    // forward slashes turned. The engine rebuilds it from the raw path; a mismatch here
+    // is a file the converter writes and the engine never finds.
+    REQUIRE(DeployedEmatPath("reforger\\everon\\textures",
+                             "Assets/Vegetation/Tree/Alnus_Glutinosa/Data/t_alnus_glutinosa_2f_polyplane.emat") ==
+            "reforger\\everon\\textures\\assets\\vegetation\\tree\\alnus_glutinosa\\data\\t_alnus_glutinosa_2f_"
+            "polyplane.emat");
+    REQUIRE(DeployedEmatPath("root", "/Assets/X.emat") == "root\\assets\\x.emat");
+
+    // The env var grammar: `;`-separated, trailing slashes dropped, `none` disables.
+    REQUIRE(ParseEmatDeployRoots("none").empty());
+    REQUIRE(ParseEmatDeployRoots("NONE").empty());
+    const auto two = ParseEmatDeployRoots("a\\b\\;c/d/");
+    REQUIRE(two.size() == 2);
+    REQUIRE(two[0] == "a\\b");
+    REQUIRE(two[1] == "c/d");
+    REQUIRE(ParseEmatDeployRoots("reforger\\everon\\textures") ==
+            std::vector<std::string>{"reforger\\everon\\textures"});
+}
+
+TEST_CASE("EMAT deploy: a raw Enfusion path opens the deployed file, and only through a root",
+          "[asset][material][emat][arf]")
+{
+    // The 1,132 models already installed name `Assets/...emat`. This is the branch that
+    // lets them open the file the converter deploys, without a re-export.
+    const auto root = std::filesystem::temp_directory_path() / "poseidon_emat_deploy_root";
+    const auto file =
+        root / "assets" / "vegetation" / "tree" / "alnus_glutinosa" / "data" / "t_alnus_glutinosa_2f_polyplane.emat";
+    std::filesystem::create_directories(file.parent_path());
+    {
+        std::ofstream out(file, std::ios::trunc);
+        REQUIRE(out);
+        out << WriteEmatText(MakeDeployedEmat(ParseEmat(kAlderCrownEmat), kAlderColourPaa, true, "NTCMap", ""));
+    }
+    const std::string raw = "Assets/Vegetation/Tree/Alnus_Glutinosa/Data/t_alnus_glutinosa_2f_polyplane.emat";
+
+    DeployRootsScope scope;
+
+    // With the fallback disabled (POSEIDON_EMAT_ROOTS=none): the raw path opens
+    // nothing, which is what every Everon material did before -- and it must THROW,
+    // so the engine caches a miss rather than an empty material that claims a family.
+    SetEmatDeployRoots({});
+    REQUIRE_THROWS(LoadTranslatedMaterial(raw));
+
+    // With the root: the same string opens the deployed file.
+    SetEmatDeployRoots({root.string()});
+    const TranslatedMaterial material = LoadTranslatedMaterial(raw);
+    REQUIRE(material.shaderFamily == "MatPBRTreeCrown");
+    const TranslatedSlot* base = material.Find(MaterialSlot::BaseColour);
+    REQUIRE(base != nullptr);
+    REQUIRE(base->texture.path.canonical().find("polyplane_alnus_glutinosa_bcr_ca.paa") != std::string::npos);
+
+    // A path already under the root is opened as written and never re-rooted.
+    REQUIRE(Poseidon::Asset::Material::IsUnderEmatDeployRoot(root.string() + "\\assets\\x.emat"));
+    REQUIRE_FALSE(Poseidon::Asset::Material::IsUnderEmatDeployRoot(raw));
+
+    // The deployed file EXISTS as text, and every RVMAT consumer (TexMaterial's
+    // constructor, ShapeDraw's alpha route, the wgpu leaf-card test) reaches
+    // ParseRvMaterialFile with the section's material path. It must refuse an `.emat`
+    // BEFORE opening it: handed to ParamFile::Parse, `MatPBRTreeCrown {` is a word
+    // followed by '{' where '=' was expected, and the config parser reports that
+    // through ErrorMessage -- a Critical-error line per material, exit(1) under
+    // --strict. REQUIRE_THROWS alone would pass either way (the parse failure also
+    // throws); the message pins WHICH throw it was.
+    REQUIRE(Poseidon::Asset::Material::IsEmatMaterialPath(file.string()));
+    REQUIRE(Poseidon::Asset::Material::IsEmatMaterialPath("A.EMAT"));
+    REQUIRE_FALSE(Poseidon::Asset::Material::IsEmatMaterialPath("a.rvmat"));
+    REQUIRE_FALSE(Poseidon::Asset::Material::IsEmatMaterialPath(".emat"));
+    REQUIRE_THROWS_WITH(Poseidon::Asset::Material::ParseRvMaterialFile(file.string()),
+                        Catch::Matchers::StartsWith("not an RVMAT"));
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("EMAT deploy: the shipped alder crown, parent and all, through the real corpus",
+          "[asset][material][emat][arf][corpus]")
+{
+    // Guarded on the local corpus (`%TEMP%\rf\emat`, the 10,312 `.emat` extracted from
+    // the Reforger paks); skipped where it is absent. The parent chain is resolved
+    // through the SAME root fallback the game uses -- `Assets/Vegetation/_Data/
+    // crown_base.emat` is a raw path too -- so this is the whole read path on real data.
+    const char* temp = std::getenv("TEMP");
+    if (!temp || !*temp)
+        return;
+    const auto corpus = std::filesystem::path(temp) / "rf" / "emat";
+    const auto alder =
+        corpus / "Assets" / "Vegetation" / "Tree" / "Alnus_Glutinosa" / "Data" / "t_alnus_glutinosa_2f_polyplane.emat";
+    if (!std::filesystem::exists(alder))
+        return;
+
+    DeployRootsScope scope;
+    SetEmatDeployRoots({corpus.string()});
+
+    EmatMaterial emat;
+    REQUIRE(ReadEmatFile(alder.string(), emat));
+    REQUIRE(emat.className == "MatPBRTreeCrown");
+    // Its own keys.
+    REQUIRE(emat.TextureOf("BCRMap") == "Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_BCR.edds");
+    REQUIRE(emat.TextureOf("OpacityMap") == "Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_A.edds");
+    REQUIRE(emat.TextureOf("NTCMap") == "Assets/Vegetation/_Polyplanes/polyplane_alnus_glutinosa_NTC.edds");
+    // A key only the parent (crown_base.emat) defines: inheritance ran through the root.
+    REQUIRE(emat.parentPath.empty());
+    REQUIRE(emat.Has("WetnessScale"));
+    REQUIRE(EmatUsesLeafCards(emat));
+
+    // And the converter's deployment of THIS file, through the real writer and the
+    // real reader: still a MatPBRTreeCrown, still a leaf card, naming exactly the two
+    // files the converter would have written and keeping the parent's keys.
+    const EmatMaterial back =
+        ParseEmat(WriteEmatText(MakeDeployedEmat(emat, kAlderColourPaa, true, "NTCMap", kAlderNormalPaa)));
+    REQUIRE(back.valid());
+    REQUIRE(back.className == "MatPBRTreeCrown");
+    REQUIRE(back.TextureOf("BCRMap") == kAlderColourPaa);
+    REQUIRE(back.TextureOf("NTCMap") == kAlderNormalPaa);
+    REQUIRE_FALSE(back.Has("OpacityMap"));
+    REQUIRE_FALSE(back.Has("WorldColorizeMap"));
+    REQUIRE(back.Has("WetnessScale"));
+    REQUIRE(back.FloatOr("AlphaTest", 0.0f) == 1.0f);
+    REQUIRE(EmatUsesLeafCards(back));
+    REQUIRE(TranslateEmat(back, "deployed", "").Find(MaterialSlot::NormalMap) != nullptr);
+
+    // The premise the handover carried -- "foliage opacity lives in BCR alpha" -- is
+    // false for this tree and for 463 of the 468 MatPBRTreeCrown files: the opacity is
+    // the OpacityMap, and the converter already folds it into the `_ca` face texture.
+    // What turned the leaves into solid planes was the 21:23 re-export overwriting the
+    // 140 cutout `.paa` files without the FLAG tagg (PAAEncoder.cpp, MAT-047).
 }

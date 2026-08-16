@@ -56,6 +56,17 @@ TexMaterial::TexMaterial(const char* name)
         // leading '#' -> name into the global material table
         entry = (Pars >> "CfgMaterials").FindEntry(name + 1);
     }
+    else if (Asset::Material::IsEmatMaterialPath(name))
+    {
+        // An Enfusion `.emat` (Reforger sections name one, and since 2026-08-16 the
+        // `xob` converter deploys it as a real text file under the texture prefix).
+        // Neither parser below can read it, and `ParamFile::Parse` on an EXISTING
+        // `.emat` reports "'{' encountered instead of '='" through ErrorMessage --
+        // a Critical-error log line per material and exit(1) under --strict. The
+        // shading it carries reaches the renderer through LoadTranslatedMaterial;
+        // this object only needs the neutral constants.
+        entry = nullptr;
+    }
     else
     {
         // RVMAT references from model sections may be retail `\0raP` files.

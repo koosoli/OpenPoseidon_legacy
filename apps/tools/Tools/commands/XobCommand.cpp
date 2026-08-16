@@ -118,8 +118,9 @@
 //     caught this is in the log of every run.
 //
 //  7. THE MODEL ORIGIN IS MOVED TO THE BOUNDING-BOX CENTRE, AND THAT IS THE SINK.
-//     A converted `.p3d` carries no named properties at all, and `autocenter` is one
-//     the engine looks for. Absent, it defaults ON in BOTH places that implement it:
+//     A converted `.p3d` carried no named properties at all (until facts 7 and 8 below
+//     started writing `autocenter` and `map`), and `autocenter` is one the engine
+//     looks for. Absent, it defaults ON in BOTH places that implement it:
 //     `Model.cpp:64-108` subtracts the bbox centre from every vertex of every LOD (and
 //     records the offset nowhere -- `ShapeAdapter.cpp:723-745` restores
 //     `_boundingCenter` only in the `sourceFormat == "ODOL"` branch), and
@@ -154,6 +155,18 @@
 //     runs the `-_boundingCenter` branch, so a shape that was already recentred is put
 //     back. Default OFF, and independent of `--fix-orientation`: they are separate
 //     defects and each deserves its own A/B.
+//
+//  8. THE MODEL HAS NO CLASS, SO THE ENGINE GUESSES ONE FROM ITS NAME. `map` is the
+//     named property Real Virtuality classifies a static object by (`ResolveMapTypeProperty`,
+//     ShapeLOD.cpp), and that class is not a map symbol only: it is the gate for wind
+//     sway and canopy shading (Object.cpp GCurrentFoliageKind, EngineWgpu
+//     WGR_INSTANCE_CANOPY_*). Absent, the engine falls back to MapHide unless the path
+//     says `vegetation` and the basename says `t_`/`b_`. The converter KNOWS the class --
+//     it is in the pak path -- so it now writes it (`MapPropertyForXob`: rock / tree /
+//     bush / house / wall / hide) on every LOD, next to `autocenter`. Default ON,
+//     `--no-map-property` for the A/B. The engine-side proof is `WGR_SWAY_GATE_DUMP=2`:
+//     one `SwayGate: kind=... property='...' model=...` line per model whose gate is
+//     non-zero, and a granite model in that list is the bug.
 //
 //  3. PREFAB INHERITANCE. A world placement names a prefab GUID, not a model. The
 //     `.et` prefab it resolves to often carries no mesh of its own:
@@ -203,6 +216,21 @@
 //     without ever erroring. And the layer maps of a `MatPBRMulti` are excluded from
 //     the normal slot on purpose: `NMO_1..4` are shared one-metre library tiles in
 //     their own tiled UV frame, not the object's own normal, which is `GlobalNMOMap`.
+//
+//     Since 2026-08-16 the material slot names the `.emat` ITSELF, deployed: `--textures`
+//     writes each baked material, parent chain folded in and its texture keys rewritten
+//     to the `.paa` files above, at `<texture prefix>\<source path lower-cased>.emat`
+//     (`TextureBaker::WriteEmat`, default on, `--no-material-emat` to disable). The
+//     engine reads an `.emat` as a material already (LoadTranslatedMaterial); it could
+//     only never OPEN one, because the path was inside a `.pak`. The engine also looks
+//     under that same prefix when a raw `Assets/...emat` path fails (`EmatDeployRoots`),
+//     so the models already installed pick the deployed file up without a re-export.
+//     The `.rvmat` route is kept for the A/B and is otherwise superseded.
+//
+//     BCR alpha, once and for all: it is ROUGHNESS. Measured 99.8% partial alpha on an
+//     opaque prop's MLOD BCR and 100% partial on a grass polyplane BCR -- no cutout is
+//     100% partial. Foliage opacity is the `OpacityMap` (463 of 468 MatPBRTreeCrown files
+//     name one once inheritance is resolved), and it is folded into the `_ca` alpha here.
 //
 // The whole-model bounding box in metres is reported for every conversion because a
 // unit-scale mistake is the failure mode that survives every structural check: the
@@ -644,7 +672,20 @@ struct TextureOptions
     //! normal has no face-texture slot to arrive through, only a material stage.
     bool normals = false;
     //! Write a real `.rvmat` per material and name THAT in the MLOD material field.
+    //! Superseded by `emats` below, which carries everything this does and the albedo
+    //! too; kept for the A/B and for a reader that wants an RVMAT-only tree.
     bool rvmats = false;
+    //! Deploy the material itself: the `.emat`, inheritance folded in and its texture
+    //! keys rewritten to the `.paa` files this converter wrote, under the texture
+    //! prefix at the source's own relative path (`Assets/X/Y.emat` ->
+    //! `<prefix>\assets\x\y.emat`), and name THAT in the MLOD material field. The
+    //! engine already reads an `.emat` as a material (LoadTranslatedMaterial); what it
+    //! could never do was OPEN one, because every section named the path inside the
+    //! `.pak`. Default ON with `--textures`: a written `.emat` the engine cannot parse
+    //! costs exactly what the unopenable one cost, and one it can parse is the whole
+    //! difference between `family=` and `family=MatPBRTreeCrown`. `--no-material-emat`
+    //! is the A/B.
+    bool emats = true;
 };
 
 //! Which two channels of a decoded normal texture carry X and Y.
@@ -800,6 +841,8 @@ struct TextureStats
     size_t materialsWithNormal = 0;         //!< materials that resolved a normal map
     size_t normalsWritten = 0;              //!< distinct normal `.paa` files on disk
     size_t rvmatsWritten = 0;               //!< distinct `.rvmat` files on disk
+    size_t ematsWritten = 0;                //!< distinct deployed `.emat` files on disk
+    size_t ematsCutout = 0;                 //!< of those, the ones that say they are alpha-tested
     std::map<std::string, size_t> packings; //!< detected NMO packing -> distinct textures
     //! Whether the BCR's alpha channel varies. Recorded, NOT bound: Enfusion is
     //! understood to pack roughness there, and an SMDI-shaped specular map could be
@@ -825,7 +868,13 @@ struct BakedMaterial
 {
     std::string colourPaa; //!< the MLOD TEXTURE field
     std::string normalPaa; //!< DXT5nm, reachable only through the rvmat below
-    std::string rvmatPath; //!< the MLOD MATERIAL field, "" when none was written
+    std::string rvmatPath; //!< a Super `.rvmat` naming the normal, "" when none was written
+    std::string ematPath;  //!< the deployed `.emat`, "" when none was written
+    //! What the MLOD MATERIAL field should say. The `.emat` when there is one -- it
+    //! names the albedo AND the normal and keeps every non-texture key -- else the
+    //! `.rvmat`, else "" so the caller keeps the source path, which at least says
+    //! which material was meant.
+    const std::string& MaterialField() const { return !ematPath.empty() ? ematPath : rvmatPath; }
 };
 
 class TextureBaker
@@ -949,11 +998,15 @@ class TextureBaker
         // `NMOMap` (2,402 files), MatPBRMulti's `GlobalNMOMap`, and `NTCMap` (334), which
         // is what the vegetation families call theirs.
         std::string nmo;
+        std::string nmoKey;
         for (const char* key : {"NMOMap", "GlobalNMOMap", "NTCMap"})
         {
             nmo = emat.TextureOf(key);
             if (!nmo.empty())
+            {
+                nmoKey = key;
                 break;
+            }
         }
         if (_options.normals && nmo.empty())
         {
@@ -981,6 +1034,12 @@ class TextureBaker
         // already reads, naming the files this converter just wrote.
         if (_options.rvmats && !baked.normalPaa.empty())
             baked.rvmatPath = WriteRvmat(ematPath, baked);
+        // The `.emat` itself, deployed. Written whenever an albedo was baked -- a
+        // material with nothing bindable in it would only be an empty file the engine
+        // opens, translates, and reports as binding nothing.
+        if (_options.emats && !baked.colourPaa.empty())
+            baked.ematPath =
+                WriteEmat(ematPath, emat, baked, _imageHasAlpha.count(LowerCopy(baked.colourPaa)) != 0, nmoKey);
         return baked;
     }
 
@@ -1145,6 +1204,44 @@ class TextureBaker
         return virtualPath;
     }
 
+    //! The material, deployed: `MakeDeployedEmat` decides what goes in it and
+    //! `WriteEmatText` spells it -- both live beside the reader that has to open it
+    //! again (EmatMaterialAdapter.hpp / EmatSource.hpp), so the converter cannot drift
+    //! from the engine. The path is `VirtualNameFor(ematPath, "", ".emat")`, i.e. the
+    //! source's own relative path under the texture prefix, lower-cased -- and that
+    //! spelling is a CONTRACT: `EmatDeployRoots()` in the engine rebuilds it from the
+    //! raw path so the 1,132 models already on disk, whose sections still name
+    //! `Assets/...emat`, open this file without a re-export.
+    std::string WriteEmat(const std::string& ematPath, const Poseidon::Asset::Material::EmatMaterial& resolved,
+                          const BakedMaterial& baked, bool opacityFolded, const std::string& normalKey)
+    {
+        const std::string virtualPath = VirtualNameFor(ematPath, "", ".emat");
+        const std::filesystem::path target = OnDiskPathFor(_outputRoot, virtualPath);
+        std::error_code ec;
+        std::filesystem::create_directories(target.parent_path(), ec);
+        const Poseidon::Asset::Material::EmatMaterial deployed = Poseidon::Asset::Material::MakeDeployedEmat(
+            resolved, baked.colourPaa, opacityFolded, normalKey, baked.normalPaa);
+        std::ofstream file(target, std::ios::trunc | std::ios::binary);
+        if (!file)
+        {
+            Unbound("cannot open the .emat for writing");
+            return {};
+        }
+        file << Poseidon::Asset::Material::WriteEmatText(deployed);
+        file.close();
+        if (!file)
+        {
+            Unbound("cannot write the .emat");
+            return {};
+        }
+        _taken.insert(virtualPath);
+        _stats.ematsWritten++;
+        if (Poseidon::Asset::Material::EmatUsesLeafCards(deployed))
+            _stats.ematsCutout++;
+        _stats.bytesWritten += static_cast<size_t>(std::filesystem::file_size(target, ec));
+        return virtualPath;
+    }
+
     std::string Write(const std::string& bcrPath, const std::string& opacityPath, const float* tint)
     {
         Poseidon::Image albedo;
@@ -1269,6 +1366,8 @@ class TextureBaker
         _taken.insert(virtualPath);
         _stats.filesWritten++;
         _stats.filesWithAlpha += hasAlpha ? 1 : 0;
+        if (hasAlpha)
+            _imageHasAlpha.insert(LowerCopy(virtualPath));
         _stats.bytesWritten += static_cast<size_t>(std::filesystem::file_size(target, ec));
         return virtualPath;
     }
@@ -1281,6 +1380,9 @@ class TextureBaker
     //! Keyed on the NMO alone, unlike `_byImage`: a normal map is folded with nothing,
     //! so two materials naming one NMO really are the same file.
     std::unordered_map<std::string, std::string> _byNormal;
+    //! Colour `.paa` virtual paths (lower-cased) whose alpha carries a folded
+    //! OpacityMap -- what the deployed `.emat` needs to know to say `AlphaTest 1`.
+    std::unordered_set<std::string> _imageHasAlpha;
     std::unordered_set<std::string> _taken;
     TextureStats _stats;
 };
@@ -1300,8 +1402,72 @@ struct ConvertOptions
     //! Fact 7: write `autocenter=0` so the engine stops moving the model's origin to
     //! its bounding-box centre. See the note at the top of the file.
     bool fixOrigin = false;
+    //! Fact 8: write a `map` named property from the source path -- `rock`, `tree`,
+    //! `bush`, `house`, `wall`, else `hide` -- so the engine's one map-type table
+    //! (ResolveMapTypeProperty, ShapeLOD.cpp) classifies a converted model the way it
+    //! classifies an authored one, instead of falling back to a name heuristic. The
+    //! table drives wind sway and canopy shading (Object.cpp GCurrentFoliageKind,
+    //! EngineWgpu WGR_INSTANCE_CANOPY_*), so a rock and a tree MUST NOT share a class.
+    //! Default ON: `--no-map-property` restores the property-less file, for the A/B.
+    bool mapProperty = true;
     TextureOptions textures;
 };
+
+//! Fact 8's table: what a converted model's `map` named property says, from where the
+//! `.xob` lives in the pak. Spelled in the words `ResolveMapTypeTable` accepts.
+//!
+//! Measured over the 1,132 models `ev_DALL.wrp` places (`%TEMP%\rf\manifestALL.txt`,
+//! 2026-08-16): 30 under `Assets/Rocks/`, 66 `Assets/Vegetation/Tree/t_*`, 18
+//! `Assets/Vegetation/Bush/b_*`, 11 other vegetation (plants `p_*`, vegetables, and the
+//! `t_stump_debris_01` / `t_trunk_debris_01` tree parts), 30 `Structures/*/houses`, ~250
+//! `Structures/Walls/*`, the rest props, signs, infrastructure and decals. The rules:
+//!
+//!   Assets/Rocks/**                                        rock
+//!   Assets/Vegetation/Tree/**/t_*   (not stump/fallen/debris/trunk)   tree
+//!   Assets/Vegetation/Bush/**       (and any b_* under Vegetation)    bush
+//!   Assets/Structures/**/Houses/**  and Structures/Houses/**          house
+//!   Assets/Structures/Walls/**                             wall
+//!   everything else                                        hide
+//!
+//! `hide` is what an ABSENT property already resolves to (ShapeLOD.cpp: the unknown
+//! case is MapHide), so nothing outside the five classes changes; it is written anyway
+//! so a reader of the file sees a decision rather than an omission. A stump, a fallen
+//! trunk or a piece of debris is `hide` and not `tree` for the reason the engine's own
+//! fallback gives: it has no crown to bend, and swaying one reads as the ground moving.
+//! Nothing here is `forest`, `small tree` or `building`: the first two would need a
+//! measurement of canopy size this converter does not make, and `building` would put
+//! a map symbol on every kerb and pole.
+std::string MapPropertyForXob(const std::string& sourcePath)
+{
+    std::string path = LowerCopy(sourcePath);
+    for (char& c : path)
+        if (c == '\\')
+            c = '/';
+    const size_t slash = path.rfind('/');
+    const std::string base = slash == std::string::npos ? path : path.substr(slash + 1);
+    const auto has = [&](const char* needle) { return path.find(needle) != std::string::npos; };
+    const auto baseHas = [&](const char* needle) { return base.find(needle) != std::string::npos; };
+
+    if (has("/rocks/"))
+        return "rock";
+    if (has("/vegetation/"))
+    {
+        const bool debris = baseHas("stump") || baseHas("fallen") || baseHas("debris") || baseHas("trunk");
+        if (base.rfind("b_", 0) == 0 || has("/vegetation/bush/"))
+            return debris ? "hide" : "bush";
+        if (base.rfind("t_", 0) == 0 && has("/vegetation/tree/"))
+            return debris ? "hide" : "tree";
+        return "hide";
+    }
+    if (has("/structures/"))
+    {
+        if (has("/houses/"))
+            return "house";
+        if (has("/structures/walls/"))
+            return "wall";
+    }
+    return "hide";
+}
 
 //! `XOB_FIX_ORIENTATION=1` turns fact 6's correction on without a command line change,
 //! so a batch script that already exists can be A/B'd from the environment.
@@ -1331,7 +1497,7 @@ struct ConvertStats
     size_t droppedUnreferenced = 0; //!< source vertices no triangle indexes
     size_t materials = 0;
     size_t partsTextured = 0;     //!< parts whose material resolved to a written `.paa`
-    size_t partsWithMaterial = 0; //!< parts naming a written `.rvmat` rather than an `.emat`
+    size_t partsWithMaterial = 0; //!< parts naming a DEPLOYED material file rather than the pak path
     size_t crossAlongNormal = 0;  //!< triangles whose edge cross agrees with the stored normals
     //! Fact 6's absolute check, over LOD0 only: does the WRITTEN normal point away from
     //! the LOD's point-cloud centroid? Meaningful per model only for a closed convex
@@ -1341,6 +1507,7 @@ struct ConvertStats
     size_t normalInward = 0;
     float bboxMin[3] = {0.0f, 0.0f, 0.0f};
     float bboxMax[3] = {0.0f, 0.0f, 0.0f};
+    std::string mapProperty; //!< fact 8: the `map` value written on every LOD, "" when none
 
     float Extent(int axis) const { return bboxMax[axis] - bboxMin[axis]; }
 };
@@ -1366,8 +1533,11 @@ float VisualLodResolution(size_t rank, float base)
     return base * static_cast<float>(rank + 1);
 }
 
+//! `sourcePath` is the `.xob`'s own path in the pak; it decides fact 8's `map` property
+//! and nothing else. Empty disables the property (a caller with no path has no class).
 bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options, TextureBaker* baker,
-                Fmt::MLOD::WriteModel& out, ConvertStats& stats, std::string& error)
+                const std::string& sourcePath, Fmt::MLOD::WriteModel& out, ConvertStats& stats,
+                std::string& error)
 {
     const XobHeader header = ReadXobHeader(bytes.data(), bytes.size());
     if (!header.valid())
@@ -1390,6 +1560,7 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
     stats.lodCount = header.lods.size();
     stats.lodIndex = FinestLodIndex(header);
     stats.threshold = header.lods[stats.lodIndex].threshold;
+    stats.mapProperty = options.mapProperty && !sourcePath.empty() ? MapPropertyForXob(sourcePath) : std::string();
     std::unordered_set<std::string> materialPaths;
     float boxMin[3] = {1e30f, 1e30f, 1e30f};
     float boxMax[3] = {-1e30f, -1e30f, -1e30f};
@@ -1426,6 +1597,11 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         // model has no geometry LOD today but may grow one.
         if (options.fixOrigin)
             writeLod.properties.push_back({"autocenter", "0"});
+        // Fact 8, on every LOD for the same reason as autocenter: `PropertyValue` reads
+        // the geometry LOD first and LOD 0 second, and which LOD is which is the
+        // engine's decision, not this file's.
+        if (!stats.mapProperty.empty())
+            writeLod.properties.push_back({"map", stats.mapProperty});
         writeLod.resolution = VisualLodResolution(rank, options.resolution);
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
         {
@@ -1488,12 +1664,13 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
             {
                 const BakedMaterial& baked = baker->For(materialSource);
                 texturePath = baked.colourPaa;
-                // Only when a file was actually written. Naming an `.rvmat` that does
-                // not exist is strictly worse than naming the `.emat`: both fail to
-                // open, but the second at least says which material it meant.
-                if (!baked.rvmatPath.empty())
+                // Only when a file was actually written. Naming a material file that
+                // does not exist is strictly worse than naming the source `.emat`:
+                // both fail to open, but the second at least says which material it
+                // meant.
+                if (!baked.MaterialField().empty())
                 {
-                    materialPath = baked.rvmatPath;
+                    materialPath = baked.MaterialField();
                     stats.partsWithMaterial++;
                 }
             }
@@ -1809,7 +1986,9 @@ ModelResult ConvertOne(const PakSet& paks, const std::string& sourcePath, const 
     }
 
     Fmt::MLOD::WriteModel model;
-    if (!ConvertXob(bytes, options, baker, model, result.stats, result.error))
+    // The stored (pak) spelling of the path is what fact 8 classifies on; the query
+    // string may be a lower-cased or slash-flipped alias of it.
+    if (!ConvertXob(bytes, options, baker, stored ? *stored : sourcePath, model, result.stats, result.error))
         return result;
 
     const std::filesystem::path target = OnDiskPathFor(outputRoot, result.virtualPath);
@@ -1853,7 +2032,9 @@ void PrintModelLine(const ModelResult& result)
         std::cout << "nrm " << std::setprecision(2)
                   << (static_cast<double>(s.normalOutward) / static_cast<double>(s.normalOutward + s.normalInward))
                   << " out  ";
-    std::cout << "originY " << std::setprecision(2) << ((s.bboxMin[1] + s.bboxMax[1]) * 0.5f) << "  "
+    std::cout << "originY " << std::setprecision(2) << ((s.bboxMin[1] + s.bboxMax[1]) * 0.5f) << "  ";
+    // Fact 8: the class the engine will read back. `map -` means no property was written.
+    std::cout << "map " << (s.mapProperty.empty() ? "-" : s.mapProperty) << "  "
               << (result.roundTrip.ok ? "round-trips" : "ROUND-TRIP: " + result.roundTrip.reason) << "\n";
 }
 
@@ -1885,10 +2066,14 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
             std::cout << "   (RG = X in red, AG = X in alpha; `none` was refused)\n";
         }
     }
+    if (stats.ematsWritten)
+        std::cout << "Materials:  " << stats.ematsWritten << " .emat deployed under the texture prefix ("
+                  << stats.ematsCutout << " alpha-tested); sections name them instead of the pak path.\n";
     if (stats.bcrAlphaVaries || stats.bcrAlphaFlat)
         std::cout << "            BCR alpha varies in " << stats.bcrAlphaVaries << " of "
                   << (stats.bcrAlphaVaries + stats.bcrAlphaFlat)
-                  << " albedos. Nothing binds it: what it holds has not been measured here.\n";
+                  << " albedos. It is ROUGHNESS, not opacity (measured 99.8-100% partial on opaque and "
+                     "cutout sources alike); opacity is the OpacityMap, folded into the _ca alpha.\n";
     if (!stats.failures.empty())
     {
         std::cout << "Materials that bound nothing:\n";
@@ -2362,9 +2547,15 @@ void XobCommand::Setup(CLI::App& app)
                         "Virtual path prefix for baked textures (default reforger\\everon\\textures)");
         cmd->add_option("--max-texture", options.textures.maxSize, "Longest baked texture edge (default 1024)");
         cmd->add_flag("--normals", options.textures.normals,
-                      "Also bake NMOMap to a DXT5nm .paa. Needs --material-rvmat to reach the renderer.");
+                      "Also bake NMOMap to a DXT5nm .paa; the deployed .emat (default) or --material-rvmat names it.");
         cmd->add_flag("--material-rvmat", options.textures.rvmats,
                       "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->add_flag("--material-emat,!--no-material-emat", options.textures.emats,
+                      "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
+                      "material slot (default ON; --no-material-emat is the A/B)");
+        cmd->add_flag("--map-property,!--no-map-property", options.mapProperty,
+                      "Fact 8: write a `map` named property (rock/tree/bush/house/wall/hide) from the source path "
+                      "(default ON; --no-map-property is the A/B)");
         cmd->callback(
             []()
             {
@@ -2401,9 +2592,15 @@ void XobCommand::Setup(CLI::App& app)
                         "Virtual path prefix for baked textures (default reforger\\everon\\textures)");
         cmd->add_option("--max-texture", options.convert.textures.maxSize, "Longest baked texture edge (default 1024)");
         cmd->add_flag("--normals", options.convert.textures.normals,
-                      "Also bake NMOMap to a DXT5nm .paa. Needs --material-rvmat to reach the renderer.");
+                      "Also bake NMOMap to a DXT5nm .paa; the deployed .emat (default) or --material-rvmat names it.");
         cmd->add_flag("--material-rvmat", options.convert.textures.rvmats,
                       "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->add_flag("--material-emat,!--no-material-emat", options.convert.textures.emats,
+                      "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
+                      "material slot (default ON; --no-material-emat is the A/B)");
+        cmd->add_flag("--map-property,!--no-map-property", options.convert.mapProperty,
+                      "Fact 8: write a `map` named property (rock/tree/bush/house/wall/hide) from the source path "
+                      "(default ON; --no-map-property is the A/B)");
         cmd->callback(
             []()
             {

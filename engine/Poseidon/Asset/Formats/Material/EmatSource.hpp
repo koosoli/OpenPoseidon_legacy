@@ -435,6 +435,70 @@ inline EmatMaterial ParseEmat(std::string_view text)
     return material;
 }
 
+//! The text of an `.emat`, in the simplest header form the parser above accepts:
+//!
+//!     ClassName {
+//!      Key value value
+//!     }
+//!
+//! This is the inverse of ParseEmat and lives beside it for the reason
+//! MakeSuperRvmatText lives beside the RVMAT reader: a format written in one place and
+//! read in another drifts silently. The `xob` converter uses it to deploy a material it
+//! has already resolved -- parent chain folded in, texture keys pointing at the `.paa`
+//! files it wrote -- as a file the engine's own `.emat` reader opens. What it writes:
+//!
+//!   numbers    the ORIGINAL token text (`0.433`, not a re-formatted double), so a
+//!              value survives a round trip byte for byte
+//!   textures   `"{GUID}path"` -- the GUID is what makes TextureOf() see a texture, so
+//!              a value that carries none is written as a plain quoted word instead
+//!   words      bare, unless the token is empty, holds a space, or would parse as a
+//!              number when read back bare -- those are quoted to keep their kind
+//!   keys       bare, or quoted when they hold a space (5 such keys exist in DayZ)
+//!
+//! Nested blocks are not reproduced: ParseEmat flattens a `Key {...}` block into further
+//! values of `Key`, and this writes those values on one line, which parses back to the
+//! same property. `parentPath` is NOT written -- the caller resolves inheritance first
+//! (ResolveEmatInheritance) so the deployed file stands alone; a deployed material that
+//! still pointed at a parent inside a `.pak` would be exactly the unresolvable reference
+//! it exists to replace.
+inline std::string WriteEmatText(const EmatMaterial& material)
+{
+    const auto quoteIfNeeded = [](const std::string& token, bool forceQuote)
+    {
+        bool needs = forceQuote || token.empty();
+        for (char c : token)
+            if (Detail::IsSpace(c) || c == '"')
+                needs = true;
+        if (!needs)
+        {
+            char* end = nullptr;
+            std::strtod(token.c_str(), &end);
+            if (end && *end == '\0')
+                needs = true; // would come back as a number
+        }
+        return needs ? "\"" + token + "\"" : token;
+    };
+
+    std::string text = material.className + " {\n";
+    for (const EmatProperty& property : material.properties)
+    {
+        text += " " + quoteIfNeeded(property.name, false);
+        for (const EmatValue& value : property.values)
+        {
+            text += " ";
+            if (value.isTexture())
+                text += "\"{" + value.guid + "}" + value.text + "\"";
+            else if (value.isNumber)
+                text += value.text;
+            else
+                text += quoteIfNeeded(value.text, false);
+        }
+        text += "\n";
+    }
+    text += "}\n";
+    return text;
+}
+
 //! Convenience: the .emat that sits beside an .rvmat. DayZ authors both, and only
 //! the .emat carries anything to shade with -- see the comment at the top.
 inline std::string EmatPathForRvmat(std::string_view rvmatPath)

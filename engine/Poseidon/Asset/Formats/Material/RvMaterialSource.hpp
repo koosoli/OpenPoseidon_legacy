@@ -10,6 +10,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Poseidon::Asset::Material
@@ -312,8 +313,30 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
 
 inline RvMaterialSource ParseRvMaterial(const ParamClass& root, std::string origin, bool embedded = false);
 
+// True when a material path names an Enfusion `.emat` -- a text format this parser
+// cannot read and MUST NOT try to. Duplicated from EmatMaterialAdapter.hpp's
+// IsEmatPath because that header includes this one.
+inline bool IsEmatMaterialPath(std::string_view path)
+{
+    if (path.size() <= 5)
+        return false;
+    return detail::EqualsNoCase(std::string(path.substr(path.size() - 5)), ".emat");
+}
+
 inline RvMaterialSource ParseRvMaterialFile(const std::string& path)
 {
+    // An `.emat` is refused BEFORE the file is opened, and the reason is not
+    // tidiness. Since the `xob` converter deploys each material as a real `.emat`
+    // under the texture prefix (2026-08-16), a section's material path can name a
+    // text file that EXISTS. Fed to `ParamFile::Parse` below, `MatPBRTreeCrown {`
+    // reads as a word followed by '{' where '=' was expected, and the config parser
+    // reports that through ErrorMessage -- a "Critical error" log line per material
+    // and, under --strict, exit(1) at the first one. Every RVMAT consumer reaches this
+    // function (TexMaterial's constructor, ShapeDraw's alpha route, the wgpu leaf-card
+    // test), so the refusal lives here rather than at each of them. Callers already
+    // catch and treat the throw as "no RVMAT", which is exactly true.
+    if (IsEmatMaterialPath(path))
+        throw std::runtime_error("not an RVMAT (Enfusion .emat; use LoadTranslatedMaterial): " + path);
     // RVMAT references are virtual game paths, often resolved from an add-on
     // bank rather than the process working directory.  QIFStreamB follows the
     // same resolver as model loading; std::ifstream would silently inspect the

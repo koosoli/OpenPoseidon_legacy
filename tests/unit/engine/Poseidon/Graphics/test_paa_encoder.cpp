@@ -5,6 +5,7 @@
 #include "test_fixtures.hpp"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <stdint.h>
 #include <algorithm>
@@ -260,6 +261,62 @@ TEST_CASE("PAAEncoder: rejects unsupported format (RGBA8888 has no PAA magic)", 
     auto img = makeGradient(16, 16);
     // RGBA8888 has paaMagic=0, not valid as PAA pixel format
     REQUIRE_FALSE(PAAEncoder::WritePAA(tmp.path, img, PixelFormat::RGBA8888));
+}
+
+// --- FLAG tagg: the alpha bit the runtime's cutout routing depends on ---
+//
+// PacPalette::Load sets _isAlpha ONLY from this tagg, TextureSourcePac::IsAlpha()
+// returns it, and ClassifyTextureAlpha's first line is `if (!hasAlpha) return
+// Opaque`. So a PAA written without it is not "a minimal PAA" -- it is a texture
+// the renderer will never alpha-test, and a cutout written that way draws its
+// transparent texels solid. These two cases pin that down at the byte level.
+
+static bool HasFlagTagg(const std::string& path)
+{
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f)
+        return false;
+    std::vector<uint8_t> head(64, 0);
+    const size_t got = std::fread(head.data(), 1, head.size(), f);
+    std::fclose(f);
+    // Straight after the 2-byte format magic: "GGAT" "GALF" size=4 flags
+    return got >= 18 && std::memcmp(head.data() + 2, "GGATGALF", 8) == 0 && head[10] == 4 && head[14] == 1;
+}
+
+static Image makeCutout(int w, int h)
+{
+    std::vector<uint8_t> rgba(static_cast<size_t>(w) * h * 4);
+    for (int i = 0; i < w * h; ++i)
+    {
+        rgba[i * 4 + 0] = 200;
+        rgba[i * 4 + 1] = 180;
+        rgba[i * 4 + 2] = 160;
+        rgba[i * 4 + 3] = (i % 2) ? 255 : 0; // hard 0/255 holes
+    }
+    return Image::FromRGBA(w, h, std::move(rgba));
+}
+
+TEST_CASE("PAAEncoder: a texture with transparent texels carries the FLAG tagg", "[Graphics][PAAEncoder]")
+{
+    TempFile tmp("cutout_flag.paa");
+    REQUIRE(PAAEncoder::WritePAA(tmp.path, makeCutout(16, 16), PixelFormat::DXT5));
+    REQUIRE(HasFlagTagg(tmp.path));
+
+    // The tagg must not disturb the rest of the container.
+    PAAInfo info;
+    REQUIRE(ReadPAAInfo(tmp.path, info));
+    REQUIRE(info.width == 16);
+    REQUIRE(info.height == 16);
+    REQUIRE(std::string(info.formatName) == "DXT5");
+    REQUIRE(DecodePAAFile(tmp.path).valid());
+}
+
+TEST_CASE("PAAEncoder: a fully opaque texture carries no FLAG tagg", "[Graphics][PAAEncoder]")
+{
+    TempFile tmp("opaque_noflag.paa");
+    REQUIRE(PAAEncoder::WritePAA(tmp.path, makeGradient(16, 16), PixelFormat::DXT1));
+    REQUIRE_FALSE(HasFlagTagg(tmp.path));
+    REQUIRE(DecodePAAFile(tmp.path).valid());
 }
 
 // --- Real fixture round-trip ---
