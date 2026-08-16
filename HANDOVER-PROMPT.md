@@ -61,6 +61,27 @@ Rules that follow from that:
 
 ---
 
+# NIGHT OF 2026-08-16/17 — what moved (read this before the older sections below)
+
+Measured on the deployed binary unless stated. Commits: 530c5bd (orphaned foam work committed),
+fb3d83b (card grass grid + A2C, roads `WGR_ROAD_GPU_VB` lever).
+
+| item | state | proof |
+|---|---|---|
+| §6 streaming stall, 30 m/s Everon traverse | **measured**: moving throughput 11.9 → **22.5 fps**, worst 1555 → 575 ms, frames >250 ms 169 → 35, wall in >100 ms frames 77% → **53%**; static unchanged 39–40 fps | `.tmp-movecam/out/everon-vehicle30-cache/` vs `everon-vehicle30/`; `python scripts/farfield-frametimes.py <log>` |
+| §4 Arma 2 roads | **section 4 below is stale** — 94e9ebb (16th, 09:33) already re-routes RoadType; verified tonight on Takistan ridge pose: default `ROAD_CPUPATH=0`, road lit/grey and occluded by the ridge; legacy arm white + through the hill. Residual: near dirt road patchy, partly under the terrain | `.tmp-shadow/road-gpu-vb/ridge-prebuild/{default,legacy}.png` |
+| card grass flicker/density | fb3d83b: cards on own 1.11 m grid + alpha-to-coverage (`WGR_GRASS_CARD_SPACING`, `WGR_GRASS_CARD_A2C`). The "A2C ordering" note below was wrong: there WAS no A2C. Capture pending in `.tmp-shadow/cards/` | commit message |
+| house origins (§2) | re-export ran 21:23; `houses.png` post-export shows the house on grade but there is no before-arm; owner to judge | `.tmp-shadow/reforger/houses.png` |
+| collision (walk through walls, all non-OFP) — **NEW owner report** | agent work in progress (P3D readers + ShapeAdapter geometry LOD/components) | — |
+| Reforger `.emat` / BCR alpha / rock `map` property | agent work in progress | — |
+| grass panel: 0.24 default coverage, photo-mix slider dead, self-shadow/contrast options; dev-panel "reset to defaults" per tab | agent work in progress | — |
+| Arma 3 trees no wind sway; Reforger rocks sway | agent work in progress (leading hypothesis: b299a1e's map-type resolver does not recognise A3 tree ODOLs) | — |
+
+Owner's remaining list from tonight, not yet started: DayZ towns missing = `--test-world-max-objects 100000` truncates placements (use 0, plus `WGR_OBJECT_STREAM_MAX_OBJECTS=200000`, `WGR_TEXTURE_MIP_BIAS=1`); Reforger buildings culled by view angle at `1222.42 6003.50 40.35 az 339 el -10.7` and still partly in the ground; Reforger near-tree LOD; the streaming residual (single cold model decoded synchronously — needs async admission).
+
+**Two agents died on the session limit at ~22:15 mid-edit; their partial diffs are saved in
+`.tmp-shadow/wip-patches/` and re-applied to the tree; fresh agents were started at 01:05.**
+
 # READY TO SHIP — diagnosed, fix known, NOT yet delivered
 
 ## 1. Reforger rocks show only their backside — HIGHEST CONFIDENCE FIX IN THIS FILE
