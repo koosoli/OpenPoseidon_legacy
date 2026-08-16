@@ -198,114 +198,69 @@ owner's single biggest performance complaint — measure it.
 
 ---
 
-# START HERE — THE LIVE REGRESSION
+# SHIPPED 2026-08-16 (afternoon) — three owner items closed, one open
 
-## R0. Self-illuminating trees at night — PARTIALLY FIXED, STILL PRESENT ON ARMA 3
+## R0. Self-illuminating trees at night — FIXED, all generations (d727de7 + 7329f43)
 
-**Do this first. It is a regression the last session caused and did not finish closing.**
+**The previous handover's verdict was wrong.** It declared the trees fixed on a "0 pixels ≥ 200"
+threshold; the same capture at any lower threshold, and the `WGR_AUTO_EXPOSURE=0` arm, still
+showed dead trees at ~150/255 and canopy at ~60 against terrain at 0.2. **Exposure was never the
+cause.** The `emmisive` lane in the imported corpora is fixed-function brightness compensation
+(Arma 2 OA vegetation `{2.6,2.3,2.0}`, the Arma 3 pine crown `1.0`) and both shading paths turned
+it into source radiance (retained: `* 0.10`; direct: peak-clamped to 1.0 = white).
 
-Cause: auto-exposure was made default-on, and its `maxScale` ceiling of 4.0 let the iris open wide
-at night, amplifying vegetation's **authored** emissive until trees glowed and trunks went white.
-Arma 2 OA ships 41 rvmats literally containing `emmisive[]={2.6,2.3,2.0}`.
+Fix: every material's emissive is multiplied by a **sun-only daylight factor** unless the CPU
+marked it a light fixture (`MaterialEmitsAtNight` in `EngineWgpu.cpp`: the `\lamps\`, `\lights\`,
+runway, warning families + `okn*`/`window`), carried as `WGR_DRAW3D_NIGHT_EMITTER` (bit 2 of the
+per-draw `normal_map.w` bitfield) and `WGR_MODEL_SECTION_NIGHT_EMITTER` (retained section flags bit
+1). `WGR_EMISSIVE_NIGHT` defaults to 0 and reaches the GPU-driven pipeline; `=1` is the A/B back.
+The daylight factor is CPU-published in `sun_dir_world.w` because the old shader proxy (peak of
+`sun_diffuse`) counted the MOON as 40% daylight and re-lit the trees under a full moon.
 
-Measured on Arma 2 Takistan, hour 0, same pose, pixels at luminance >= 200:
+Measured (scene region, pixels ≥ 100): Takistan hour 0 **3518 → 73** (the 73 are stars); Stratis
+hour 0: pale trees gone, the village's real street lamps still lit. `.tmp-shadow/nightfix*/`.
+**If the owner names a lamp or a lit window that went dark, add its path fragment to
+`MaterialEmitsAtNight` — that is the whole mechanism.**
 
-| arm | glowing px | mean luminance |
-|---|---:|---:|
-| auto-exposure off | 0 | 1.06 |
-| `maxScale 4.0` (the regression) | **1215** | 2.27 |
-| `maxScale 1.10` (shipped fix) | **0** | 1.13 |
+## R1. Sea level rose (Arma 3) — FIXED (99f05b4)
 
-`ExposureSettings::maxScale` is now **1.10** (`Engine.hpp`), asymmetric on purpose: darkening keeps
-its full 4x headroom because that is the feature the owner asked for; only brightening is capped.
+It was OFP's **tide**: `Landscape::Simulate` sets `_seaLevel = maxTide(5 m) * (sunDir.y² +
+moonDir.y²)/2`, so a summer noon puts the sea 2–3 m up. CWA's islands were built for it; Arma
+1/2/3, DayZ and Reforger have no tide and author their coasts to a sea at 0. It became visible
+when f88f0ea put the moon on a real ephemeris and moved the moon half of the term.
+`LoadOprwModern` now clears `Landscape::_tidal`; every substituted world holds the sea at 0, CWA
+is unchanged. The log prints `Sea level: tidal=... -> N m` once per kind of world.
+Evidence: `.tmp-shadow/sealevel/pier-compare.png` (Agia Marina breakwater, before/after).
 
-**BUT THE OWNER REPORTS IT IS STILL PRESENT ON ARMA 3**, after the fix was deployed (binary
-13:47 on 2026-08-16 — note an earlier build at 12:56 silently failed to deploy, so any test before
-13:47 was on the unfixed binary; confirm which he was on before assuming).
+## R3. Moonlight — SHIPPED (7329f43), owner has NOT yet judged the amount
 
-Two possibilities, and you must distinguish them:
-1. **He tested the 12:56 binary.** Re-test on 13:47+ and it is simply done.
-2. **Arma 3 has a second, independent cause.** Likely, because Arma 3 materials come through a
-   different reader than Arma 2's. Check whether Arma 3 vegetation also carries a large authored
-   `emissive`, and whether the *retained* path caps it — `gpu_driven.wgsl:601` applies
-   `emissive * min(1, 0.50/peak)` while the direct path uses `StaticEmitterRadianceScale`
-   (`EngineWgpu.cpp:2986`/`3163`). If Arma 3 trees are on one path and Arma 2 trees on the other,
-   only one of them is capped and that is the answer.
+The lighting path already existed (f88f0ea); what was missing: (1) `SceneDraw.cpp` skipped the
+cascade depth pass at full night, so **no moon shadows by construction** — gate is now
+`max(1 - NightEffect, MoonLightAmount())`; (2) colour read brown on Takistan — now `0.50/0.66/1.10`
+at `moonIntensity 0.09` (was 0.06), moon-facing slopes ≈ 10/255 vs 0.2 without moon; (3) water
+needed nothing — it already reads `sun_dir_world`/`sun_diffuse`, which ARE the moon at night, and
+the planar reflection shows the disc.
+Verified: `.tmp-shadow/moon4/` (tree shadows on/off with `WGR_SHADOW_MAPS`), `moon6/` (sea).
+Levers, no rebuild: `WGR_MOON_AZEL=az,el`, `WGR_MOON_PHASE=1`, `WGR_MOON_BRIGHT=k`, `WGR_MOON_LIGHT=0`.
+**Open:** the owner asked for "not much but a little" — he was flying a forced-moon Stratis session
+when this was written. If he wants more/less, `Engine::SkySettings::moonIntensity` and the three
+colour multipliers in `EngineWgpu.cpp` (search `Purkinje`) are the knobs.
 
-`WGR_AUTO_EXPOSURE=0` is the instant A/B: if the glow survives with auto-exposure off, exposure is
-exonerated entirely and the emissive term itself is the bug.
-
-**THIRD POSSIBILITY, AND CHECK IT FIRST — the shipped DEFAULT may not be what was measured.**
-The 1.10 ceiling was verified only via the env override `WGR_AUTO_EXPOSURE_MAX=1.10` (1215 glowing
-pixels -> 0). The capture that would have confirmed the new *default* in `Engine.hpp` reaches the
-running binary **never produced a file** — it failed twice on the `$PSScriptRoot` trap below. So
-"maxScale defaults to 1.10 in the shipped build" is **asserted from source, not observed**.
-
-One run settles all three possibilities at once, on the current binary, at a night pose:
-```
-arm A: (no env)                      -> if trees glow, the DEFAULT did not take
-arm B: WGR_AUTO_EXPOSURE_MAX=1.10    -> if this is clean but A is not, it is the default, not the cap
-arm C: WGR_AUTO_EXPOSURE=0           -> if this still glows, exposure is exonerated entirely
-```
-Do that before touching any code.
-
-The night verification capture for the shipped fix was **still running when the session ended** —
-`.tmp-shadow/ae-night/` may be incomplete. Re-run it; the recipe is in the capture-harness section.
-
-**Harness trap that cost two runs:** a wrapper script invoked via `powershell -File` can get an
-EMPTY `$PSScriptRoot`, so `& "$PSScriptRoot\capture-arms.ps1"` silently resolves to `\capture-arms.ps1`
-and the whole run produces nothing, with no error and no output directory. Call `capture-arms.ps1`
-directly with explicit paths, or `cd` to `.tmp-shadow` first.
-
----
-
-# OWNER REQUESTS AND REGRESSIONS FROM THE LAST HOUR — newest, least investigated
-
-## R1. Sea level appears to have RISEN (Arma 3) — NEW REGRESSION, NOT INVESTIGATED
-Owner, testing Arma 3: "for some reason the sea level rose." Nothing in this session knowingly
-touched sea level. Candidates, in the order I would check them:
-- the water surface work (`rust/src/water/**`) — foam band and patchiness changed, but those are
-  shading terms and should not move the plane;
-- `ShapeAdapter`'s `autocenter` / `mapType` changes (shipped this session) — these move OBJECT
-  origins, so if the *shore* objects moved rather than the water, it would read as a higher sea;
-- auto-exposure making shallow water read brighter and therefore *look* wider.
-**Bisect it.** The branch has ~30 commits this session and each is self-contained; a capture at a
-coastline on two binaries settles it far faster than reading. Stratis coastline pose:
-`--test-world-freefly 2200 5400 220 45 -8 --mod a3stratis`, hour 10.
-
-## R2. Sunlit walls blow out — owner explicitly dislikes it
+## R2. Sunlit walls blow out — OPEN, owner explicitly dislikes it
 "the sun when it hits a surface like a wall from a house, it can totally overexpose it... this i do
 not like." This is *local* overexposure on a lit surface, not the global sky white-out that
-auto-exposure already fixes. Auto-exposure meters the whole frame, so a single bright wall does not
-move it much. Look at the material/lighting side: specular or diffuse response on a sunlit wall,
-and whether the tonemap shoulder is doing any roll-off at all at the top end. Related and already
-known: Arma 2 vegetation ships an authored `emissive` of 2.6, and materials generally may be
-carrying values the shading model treats as absolute radiance.
+auto-exposure already fixes. Auto-exposure meters the whole frame (log-average), so a single bright
+wall does not move it much. Look at the material/lighting side: specular or diffuse response on a
+sunlit wall, and whether the tonemap shoulder is doing any roll-off at all at the top end. Same
+family as R0: materials may carry values the shading model treats as absolute radiance
+(`forcedDiffuse` on A3 materials is folded into `sun_ambient` on the direct path).
 
-## R3. FEATURE — moonlight. The owner wants this.
-His words: **"i want that the moon is creating light for the game world... not much but a little, as
-long as the moon is out the game world should not be total black at night, a bluish light that casts
-shadows and water reflection would be nice."**
-
-Three parts, and they are separable — ship them in this order:
-1. **A dim bluish ambient/directional term while the moon is up**, so night is not pure black. The
-   engine already tracks the moon fully: `EngineWgpu.cpp` logs
-   `moon: dir=(...) az=... el=... | lit=... radius=... discScale=... draw=YES/NO earthshine=...`
-   every frame, and `moon: ephemeris=on sun=off lighting=on manual=off ... intensity=0.0600`
-   shows a moon *lighting* path already exists with an intensity knob. **Start by finding out what
-   that path currently contributes and why it reads as zero.** Night captures currently measure
-   terrain at (0.2, 0.2, 0.1) — essentially pure black — so either the term is off, or it is far
-   too small, or it is being multiplied out.
-2. **Moon shadows.** The cascade system is sun-driven; `SceneDraw.cpp:2318` computes
-   `sunFactor = 1 - NightEffect()` and **skips the shadow depth pass entirely once
-   `sunFactor <= 0.01`**. So at full night there are no cascades at all, by construction. Driving
-   the cascades from the moon direction when the sun is down is the change.
-3. **Water reflection of the moon.** The water already has a sun specular path
-   (`godot_water_fresnel`, `GODOT_LIGHT_ROUGHNESS`) — feed it the moon as a second, much dimmer
-   light rather than writing a new one.
-
-Do NOT make night bright. He said "not much but a little". Measure it: terrain should come off 0.2
-to something like 3-8, not to 40. Verify with a night capture and quote the number.
+## Harness trap that cost two runs
+A wrapper script invoked via `powershell -File` can get an EMPTY `$PSScriptRoot`, so
+`& "$PSScriptRoot\capture-arms.ps1"` silently resolves to `\capture-arms.ps1` and the whole run
+produces nothing. Call `capture-arms.ps1` with an explicit absolute path (the `run-*.ps1` scripts
+in `.tmp-shadow/` written this afternoon do). Also: **when the owner is at the machine he may move
+the camera during a capture** — he did once — so a still taken while he is present is not a pose.
 
 ---
 
@@ -322,7 +277,7 @@ vs 27.40% base). Ambient occlusion: `WGR_GTAO=0` gave 27.90% against a predicted
 Repro: `--test-world-freefly 6907.68 6017.04 313.98 187.2 -1.7 --test-world-hour 8`, hour 8,
 score exact-black inside x 200-1400 / y 105-790.
 
-## Orbs / "light posts look like white sticks" (Arma 3 AND Reforger)
+## Orbs / "light posts look like white sticks" — OWNER CONFIRMS FIXED ON ARMA 3 (2026-08-16); Reforger unverified
 A ~16 m mast rendering at pure white, bloom turning the bar into a disc. **The slot-0 untextured
 fallback is REFUTED**: with `WGR_UNTEXTURED_ALBEDO=255,0,255` and even `...,all`, zero magenta
 pixels appeared while all 34 pure-white pixels survived — and the log proved the lever fired
@@ -449,3 +404,7 @@ Implemented but unmeasured: streaming cache/prefetch/ceiling, prepass-colour par
 Diagnosed but unshipped: everything in READY TO SHIP above.
 
 **The gap between those three lists is the whole job.** Close it.
+
+Added 2026-08-16 afternoon (see the SHIPPED section): night emissive fade for all generations,
+no-tide on foreign worlds, moon shadows/colour/level, and the sun-only daylight factor. Owner
+confirmed the white orbs are gone on Arma 3.
