@@ -1189,6 +1189,19 @@ bool ShadowGateTraceEnabled()
     return on;
 }
 
+// WGR_SHADOW_FORCE_NO_CPU_CASTERS=1 — diagnostic; see the gate in NextFrame for why it exists.
+// It empties the CPU caster list to force the exact condition the fix targets, because no natural
+// exterior pose produced it. Diagnostic only: it discards real casters.
+bool ShadowForceNoCpuCastersEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_FORCE_NO_CPU_CASTERS");
+        return v && v[0] != '0';
+    }();
+    return on;
+}
+
 } // namespace
 
 void EngineWgpu::InitDraw(bool clear, PackedColor color)
@@ -1524,9 +1537,37 @@ void EngineWgpu::NextFrame()
         //
         // WGR_SHADOW_LEGACY_GATE=1 restores the old gate (and the old `_smCamPos` handling with it).
         const bool gpuDrivenShadowCasters = _gpuDriven && !_gpuInstances.empty();
+        // GRASS is a third independent caster set, and the Rust side already knew that: its own
+        // gate is `casters.is_empty() && !gpu_shadows && !grass.casts_shadows()` (gfx3d/mod.rs:4404).
+        // Mirroring only the gpu_shadows term left a frame with no CPU casters and an empty
+        // retained set still losing grass shadows, purely because C++ declined to send the frame
+        // that Rust was ready to render. Same defect as the main one, one set over.
+        const bool grassShadowCasters = _grass.castShadows && !_grassBatches.empty();
+        // WGR_SHADOW_FORCE_NO_CPU_CASTERS=1 — a DIAGNOSTIC that empties the CPU caster list right
+        // before the gate reads it.
+        //
+        // It exists because the natural experiment could not be run. The claim behind this whole
+        // fix is "a view whose visible set is entirely retained submits zero CPU casters, and that
+        // silently disables every cascade". Four A/B arms on Takistan and Everon measured
+        // cpuCasters at 7 and 5 — never 0 — so an ordinary exterior always keeps a handful of
+        // non-retained objects alive and the old gate stayed open. The bug never reproduced, which
+        // left the fix unverified rather than confirmed (see SHD-001).
+        //
+        // Hunting for a pose that empties the list naturally (an interior) is expensive and
+        // uncertain. Forcing the CONSEQUENCE is cheap and tests the actual claim: with the list
+        // emptied, the legacy gate must lose every shadow in the frame and the fixed gate must
+        // keep them via draw_gpu_driven_shadow. That is a direct test of the mechanism rather than
+        // a search for a view that exhibits it.
+        //
+        // Diagnostic only: it throws away real casters, so anything not retained stops casting.
+        // Never a default, and never a performance arm.
+        if (ShadowForceNoCpuCastersEnabled())
+        {
+            _shadowCasters.clear();
+        }
         const bool shadowActive =
-            _smCascadesValid &&
-            (!_shadowCasters.empty() || (!ShadowLegacyGateEnabled() && gpuDrivenShadowCasters));
+            _smCascadesValid && (!_shadowCasters.empty() ||
+                                 (!ShadowLegacyGateEnabled() && (gpuDrivenShadowCasters || grassShadowCasters)));
 
         // WGR_SHADOW_GATE_TRACE=1 — the one measurement that decides whether the gate above was
         // ever the owner's bug. Everything in the comment block is static reading; nobody has
@@ -1551,10 +1592,11 @@ void EngineWgpu::NextFrame()
             {
                 lastTraced = state;
                 LOG_INFO(Graphics,
-                         "Wgpu shadow gate: active={} cpuCasters={} gpuInstances={} cascadesValid={} "
-                         "gpuDriven={} legacy={}",
-                         shadowActive, _shadowCasters.size(), _gpuInstances.size(), _smCascadesValid,
-                         _gpuDriven, ShadowLegacyGateEnabled());
+                         "Wgpu shadow gate: active={} cpuCasters={} gpuInstances={} grassBatches={} "
+                         "cascadesValid={} gpuDriven={} legacy={} forcedNoCpu={}",
+                         shadowActive, _shadowCasters.size(), _gpuInstances.size(), _grassBatches.size(),
+                         _smCascadesValid, _gpuDriven, ShadowLegacyGateEnabled(),
+                         ShadowForceNoCpuCastersEnabled());
             }
         }
         // Sun-faded darkness (GL33 parity): full daylight uses tuning.darkness,
