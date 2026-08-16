@@ -6466,19 +6466,28 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.far_radius = settings.farRadius <= 0.0f ? 0.0f : std::clamp(settings.farRadius, midReach + 8.0f, 5000.0f);
     params.density_noise_scale = std::clamp(settings.densityNoiseScale, 0.002f, 0.5f);
     params.density_noise_strength = std::clamp(settings.densityNoiseStrength, 0.0f, 1.0f);
-    // The map's own plants, drawn by default where the map HAS them. The clutter pipeline
-    // (CfgSurfaces -> CfgSurfaceCharacters -> clutter .p3d -> per-surface atlas run, baked
-    // per cell) was complete and its 25-card atlas was uploaded, but `midPhotoTuft` defaulted
-    // off, so every world still drew the procedural CWA meadow blade: Takistan grew emerald
-    // lawn over its own desert brush. That default is right for OFP worlds -- they have no
-    // clutter atlas and the loose blades ARE their look -- so the gate is the atlas, not the
-    // world. `midPhotoTuft` still forces the cards on where no map atlas exists.
-    // WGR_GRASS_MAP_CLUTTER=0 restores the previous behaviour for an A/B.
-    static const bool mapClutterOff = [] {
+    // The map's own plants (CfgSurfaces -> CfgSurfaceCharacters -> clutter .p3d -> per-surface
+    // atlas run, baked per cell). The pipeline is complete and its atlas is uploaded -- 25 cards
+    // over 26 layers on Takistan -- and it is NOT on by default, because the owner looked at it
+    // (2026-08-16, Takistan 6970.40 5700.31 352.57 az 20.0 el -18.3): "it looks horrible, it is
+    // flickering and in photo mode it is far too dense". Two distinct blockers, neither a
+    // placement bug:
+    //   1. DENSITY. Even at the dev panel's own 0.40 near-coverage compensation the near ring is
+    //      a solid mat with a hard band edge where it ends. The card is ~1.8 m wide against a
+    //      blade's centimetres, so coverage tuned for blades is orders of magnitude too much
+    //      plant for cards; this needs its own near/mid coverage curve, not a scalar.
+    //   2. FLICKER. Overlapping alpha-tested plates with no stable ordering. That is a rendering
+    //      problem (A2C coverage / depth / LOD cross-fade), not a coverage number, and it will
+    //      not go away by thinning.
+    // So: WGR_GRASS_MAP_CLUTTER=1 opts in, for whoever picks the tuning up. `midPhotoTuft` (dev
+    // panel, Grass tab) still forces the cards on independently. Until both blockers are closed
+    // every world keeps the procedural blade, which is also the right look for OFP worlds --
+    // they build no atlas at all.
+    static const bool mapClutterOn = [] {
         const char* v = std::getenv("WGR_GRASS_MAP_CLUTTER");
-        return v != nullptr && std::strtol(v, nullptr, 10) == 0;
+        return v != nullptr && std::strtol(v, nullptr, 10) != 0;
     }();
-    const bool mapClutter = !mapClutterOff && _terrain && _terrain->GrassHasMapClutterAtlas();
+    const bool mapClutter = mapClutterOn && _terrain && _terrain->GrassHasMapClutterAtlas();
     params.use_photo_tuft = (settings.midPhotoTuft || mapClutter) ? 1.0f : 0.0f;
     // Announce through the game log, on transition. A silent auto-enable is indistinguishable
     // from a broken one: the previous capture pair moved 229 pixels and could not tell whether
@@ -6489,8 +6498,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         if (state != lastTuft)
         {
             lastTuft = state;
-            LOG_INFO(Graphics, "Wgpu grass tuft: use_photo_tuft={} (mapClutterAtlas={} midPhotoTuft={} env_off={}) near_density push",
-                     params.use_photo_tuft, mapClutter ? 1 : 0, settings.midPhotoTuft ? 1 : 0, mapClutterOff ? 1 : 0);
+            LOG_INFO(Graphics, "Wgpu grass tuft: use_photo_tuft={} (mapClutterAtlas={} midPhotoTuft={} env_on={})",
+                     params.use_photo_tuft, mapClutter ? 1 : 0, settings.midPhotoTuft ? 1 : 0, mapClutterOn ? 1 : 0);
         }
     }
     params.blade_width_scale = std::clamp(settings.bladeWidth, 0.25f, 6.0f);
@@ -6530,10 +6539,13 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // above has to do the same or it would ship a silent framerate cliff. Applied to the
     // PUSHED value only, and only while the setting is still at its default, so an explicit
     // choice in the Grass panel is never overwritten.
+    // 0.40 is the dev panel's own figure for cards, and it was still "far too dense" on
+    // Takistan, so the opt-in starts lower. Untuned: a starting point for the density work
+    // named above, not a measured value.
     float nearDensity = settings.nearDensity;
     if (mapClutter && !settings.midPhotoTuft && nearDensity == 1.0f)
     {
-        nearDensity = 0.40f;
+        nearDensity = 0.15f;
     }
     params.near_density = std::clamp(nearDensity, 0.0f, 1.0f);
     params.mid_density = std::clamp(settings.midDensity, 0.0f, 1.0f);
