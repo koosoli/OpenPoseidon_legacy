@@ -1822,6 +1822,12 @@ bool Landscape::LoadOprwModern(const char* path)
     ProgressReset();
     ProgressStart(LocalizeString(IDS_LOAD_WORLD));
     Init();
+    // No tide on a foreign world. OFP's sea rides `maxTide * tide` (LandscapeShared.hpp: 5 m
+    // amplitude, driven by the sun AND moon elevation) and its islands were built around that.
+    // Arma 1/2/3 and DayZ have no tide -- their coasts, harbours and piers are authored to a
+    // sea at exactly 0 -- so here the tide put the ocean up to several metres over them, and it
+    // MOVED when the moon went onto a real ephemeris (f88f0ea): "the sea level rose" on Stratis.
+    _tidal = false;
 
     const float landGrid = terrainGrid * ratio;
     Dim(land, land, terrain, terrain, landGrid);

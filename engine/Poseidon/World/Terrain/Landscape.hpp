@@ -555,6 +555,9 @@ class Landscape : public SerializeClass
     float _seaLevel;     // sea level with tide
     float _seaLevelWave; // sea level with wave effects
     float _seaWaveSpeed;
+    // OFP's sun+moon tide (maxTide 5 m). Cleared by LoadOprwModern: later-generation worlds
+    // have no tide and are authored to a sea at 0. See Simulate().
+    bool _tidal = true;
 
     mutable int _lastFindObjectX, _lastFindObjectZ; // usally query for ids on same square
     int _objectId;

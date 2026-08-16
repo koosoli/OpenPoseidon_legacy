@@ -775,8 +775,17 @@ void Landscape::Simulate(float deltaT)
     Vector3 sunTide = sunDir[1] * sunDir;
     Vector3 moonTide = moonDir[1] * moonDir;
     float tide = (sunTide.Y() + moonTide.Y()) * 0.5;
-    // consider moon
-    _seaLevel = maxTide * tide;
+    // consider moon. Foreign (OPRW) worlds have no tide: their sea is authored at 0 and this
+    // term put it metres over their harbours -- and moved it when the moon changed (see
+    // LoadOprwModern). Log once so a "sea level rose" report can be answered from the log.
+    _seaLevel = _tidal ? maxTide * tide : 0.0f;
+    static int loggedTidal = -1; // re-log when the world flips between tidal and not
+    if (loggedTidal != int(_tidal))
+    {
+        loggedTidal = int(_tidal);
+        LOG_INFO(World, "Sea level: tidal={} tide={:.3f} (sun {:.3f} moon {:.3f}) -> {:.2f} m", _tidal, tide,
+                 sunTide.Y(), moonTide.Y(), _seaLevel);
+    }
     // simulate waves
     float wave = sin(2 * H_PI * Glob.time.toFloat() * _seaWaveSpeed);
     // float waveSize=(GRandGen.RandomValue()*0.5+0.5)
