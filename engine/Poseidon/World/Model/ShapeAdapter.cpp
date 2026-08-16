@@ -757,7 +757,23 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->SetRemarks(model.remarksFlags);
         shape->_andHints = static_cast<int>(model.andHints);
         shape->_orHints = static_cast<int>(model.orHints);
-        shape->_mapType = static_cast<MapType>(model.mapType);
+        // WLD/VEG-SWAY -- resolve the map type from the model's OWN `map` named property, the
+        // same string LODShape::Load resolves, through the one shared table
+        // (ResolveMapTypeProperty, Shape.hpp). `model.mapType` is NOT usable here: it is written
+        // only by the ODOL-7 prologue reader (P3DStructures.hpp readModel); convertOdolStatic --
+        // the converter behind EVERY modern revision, 40 / 48 / 49 / 50 / 52 / 54 / 73 -- never
+        // assigns it, so it arrived as its default 0, and MapType's zeroth enumerator is MapTree.
+        // Every Arma 1, Arma 2, Arma 3, DayZ and Reforger model was therefore loading as a TREE.
+        // That is the gate for wind sway and for canopy leaf normals, which is why building walls
+        // bent in the wind: the sway amplitude scales with a vertex's model-space height, so a
+        // wall's base stays planted while its top swings, exactly like grass.
+        //
+        // The assignment itself sits further down, immediately after the LOD indices, because
+        // LODShape::PropertyValue consults the GEOMETRY LOD before LOD 0 and `_geometry` is not
+        // set until then. Nothing between here and there reads _mapType.
+        //
+        // WGR_ODOL_MAPTYPE=0 restores the previous behaviour (the unset byte, i.e. MapTree for
+        // everything) so the two can be captured back to back from one binary.
         memcpy(&shape->_invInertia, model.invInertia, sizeof(model.invInertia));
 
         // LODShape::SerializeBin lines 541-558
@@ -785,6 +801,23 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_geometryViewGunner = model.geometryViewGunnerIdx;
         shape->_geometryViewCommander = model.geometryViewCommanderIdx;
         shape->_geometryViewCargo = model.geometryViewCargoIdx;
+
+        {
+            static const bool legacy = []
+            {
+                const char* v = std::getenv("WGR_ODOL_MAPTYPE");
+                return v && strcmp(v, "0") == 0;
+            }();
+            if (legacy)
+            {
+                shape->_mapType = static_cast<MapType>(model.mapType);
+            }
+            else
+            {
+                shape->_mapType = ResolveMapTypeProperty(shape->PropertyValue("map"),
+                                                         model.sourcePath.c_str());
+            }
+        }
         shape->_landContact = model.landContactIdx;
         shape->_roadway = model.roadwayIdx;
         shape->_paths = model.pathsIdx;

@@ -114,6 +114,209 @@ static const char* LevelName(LODShape* shape, Shape* level)
     return "Error";
 }
 
+// See Shape.hpp for why this is a free function rather than part of LODShape::Load.
+//
+// WLD/VEG-SWAY: it exists because the two loaders disagreed. The legacy MLOD / ODOL-7 path
+// resolved the `map` string here; ShapeAdapter (every imported generation: ODOL 40/48/49/50/52/54
+// and 73) instead copied `Model::mapType`, a field only the ODOL-7 prologue reader ever writes
+// (P3DStructures.hpp readModel). convertOdolStatic never assigns it, so it stayed at its default
+// 0 -- and MapType's zeroth enumerator is MapTree. Every Arma 1/2/3, DayZ and Reforger model
+// therefore loaded as a TREE, which is the gate for wind sway (Object.cpp GCurrentFoliageKind ->
+// WgrDraw3D::mat_sun_ambient.w -> shader3d.wgsl veg_sway_offset; EngineWgpu WGR_INSTANCE_CANOPY_TREE
+// -> gpu_driven.wgsl) and for canopy leaf normals. A masonry wall bending in the wind is exactly
+// what that produces: the sway amplitude scales with the vertex's model-space height, so a wall's
+// base stays planted and its top swings.
+static MapType ResolveMapTypeTable(const char* value, const char* modelName, bool* recognised)
+{
+    const auto accept = [&](MapType type)
+    {
+        if (recognised)
+        {
+            *recognised = true;
+        }
+        return type;
+    };
+    if (recognised)
+    {
+        *recognised = false;
+    }
+    if (!value)
+    {
+        value = "";
+    }
+    if (!*value)
+    {
+        // VEG-SWAY / ARF -- Enfusion (Arma Reforger) vegetation converted from .xob carries
+        // NO named properties at all, so `map` is absent and every spruce, hazel and willow
+        // lands on MapHide. MEASURED, not assumed: of the 94 vegetation .p3d deployed from
+        // Reforger's Everon, 90 contain no `map` token anywhere in the file.
+        //
+        // MapHide is not merely a map-symbol choice. The renderer keys its whole vegetation
+        // treatment off MapType -- canopy/spherical leaf normals (EngineWgpu.cpp
+        // BuildGpuInstance, INST_CANOPY_*), the per-draw foliage kind (Object.cpp
+        // GCurrentFoliageKind) and now wind sway. On MapHide an imported tree is shaded and
+        // animated as though it were masonry.
+        //
+        // The fallback is deliberately narrow so it cannot reach OFP/Arma content, which
+        // always authors `map` explicitly: it requires BOTH an Enfusion "vegetation"
+        // directory segment in the path AND that generation's `t_` / `b_` basename prefix
+        // (t_picea_abies_3s, b_corylus_avellana_1). A rock or a fence cannot match. MEASURED
+        // across the four local corpora: of 10,908 Arma 1 / Arma 2 / Arma 3 / DayZ models, ZERO
+        // carry a "vegetation" path segment, so this cannot fire on any of them.
+        // Precedent for name-keyed classification is already in-tree: IsGrassSurfaceName
+        // (TerrainWgpu.cpp) picks grass surfaces out of authored terrain material names.
+        if (const char* path = modelName; path && *path)
+        {
+            // Local, because there is no shared case-insensitive substring helper reachable
+            // from this translation unit (the two in-tree ContainsNoCase are private statics
+            // in DisplayUI and Landscape).
+            auto containsNoCase = [](const char* hay, const char* needle) -> bool
+            {
+                const size_t n = std::strlen(needle);
+                if (n == 0)
+                    return true;
+                for (const char* p = hay; *p; ++p)
+                {
+                    size_t i = 0;
+                    while (i < n && p[i] &&
+                           std::tolower(static_cast<unsigned char>(p[i])) ==
+                               std::tolower(static_cast<unsigned char>(needle[i])))
+                    {
+                        ++i;
+                    }
+                    if (i == n)
+                        return true;
+                }
+                return false;
+            };
+            if (containsNoCase(path, "vegetation"))
+            {
+                char base[256];
+                GetFilename(base, path);
+                const bool isTreeName = (base[0] == 't' || base[0] == 'T') && base[1] == '_';
+                const bool isBushName = (base[0] == 'b' || base[0] == 'B') && base[1] == '_';
+                // A stump is not a canopy: it has no crown to bend and no leaves to flutter,
+                // and swaying one would read as the ground moving.
+                const bool isStump = containsNoCase(base, "stump") || containsNoCase(base, "fallen");
+                if (isTreeName && !isStump)
+                {
+                    return accept(MapTree);
+                }
+                if (isBushName && !isStump)
+                {
+                    return accept(MapBush);
+                }
+            }
+        }
+        return MapHide;
+    }
+    if (stricmp(value, "TREE") == 0)
+        return accept(MapTree);
+    // Both spellings of small tree. MEASURED across the four local corpora: the spaceless
+    // `smalltree` is authored by Arma 2 Operation Arrowhead (plants_e.pbo: t_AmygdalusC2s_EP1,
+    // t_PopulusF2s_EP1, t_PrunusS2s_EP1) and by one Arma 3 model; Arma 2 base, Arma 1 and DayZ
+    // author only "SMALL TREE". Without the second spelling those trees fell through to the
+    // unknown case -- MapHide -- and were classified as masonry.
+    if (stricmp(value, "SMALL TREE") == 0 || stricmp(value, "SMALLTREE") == 0)
+        return accept(MapSmallTree);
+    if (stricmp(value, "BUSH") == 0)
+        return accept(MapBush);
+    if (stricmp(value, "BUILDING") == 0)
+        return accept(MapBuilding);
+    if (stricmp(value, "HOUSE") == 0)
+        return accept(MapHouse);
+    if (stricmp(value, "FOREST BORDER") == 0)
+        return accept(MapForestBorder);
+    if (stricmp(value, "FOREST TRIANGLE") == 0)
+        return accept(MapForestTriangle);
+    if (stricmp(value, "FOREST SQUARE") == 0)
+        return accept(MapForestSquare);
+    if (stricmp(value, "CHURCH") == 0)
+        return accept(MapChurch);
+    if (stricmp(value, "CHAPEL") == 0)
+        return accept(MapChapel);
+    if (stricmp(value, "CROSS") == 0)
+        return accept(MapCross);
+    if (stricmp(value, "ROCK") == 0)
+        return accept(MapRock);
+    if (stricmp(value, "BUNKER") == 0)
+        return accept(MapBunker);
+    if (stricmp(value, "FORTRESS") == 0)
+        return accept(MapFortress);
+    if (stricmp(value, "FOUNTAIN") == 0)
+        return accept(MapFountain);
+    if (stricmp(value, "VIEW-TOWER") == 0 || stricmp(value, "VIEWTOWER") == 0)
+        return accept(MapViewTower);
+    if (stricmp(value, "LIGHTHOUSE") == 0)
+        return accept(MapLighthouse);
+    if (stricmp(value, "QUAY") == 0)
+        return accept(MapQuay);
+    if (stricmp(value, "FUELSTATION") == 0)
+        return accept(MapFuelstation);
+    if (stricmp(value, "HOSPITAL") == 0)
+        return accept(MapHospital);
+    if (stricmp(value, "FENCE") == 0)
+        return accept(MapFence);
+    if (stricmp(value, "WALL") == 0)
+        return accept(MapWall);
+    if (stricmp(value, "HIDE") == 0)
+        return accept(MapHide);
+    if (stricmp(value, "BUSSTOP") == 0)
+        return accept(MapBusStop);
+    // Everything else -- and the corpora carry plenty: `main road`, `track`, `railway`,
+    // `power lines`, `transmitter`, `watertower`, `ruin`, `stack`, `tsign`, `powerwind`,
+    // `shipwreck` -- is a map SYMBOL this engine does not draw. MapHide is the right
+    // fallback and, importantly, is not vegetation.
+    return MapHide;
+}
+
+// VEG-SWAY GATE TRACE (WGR_SWAY_GATE_DUMP). The wgpu wind sway is a pure function of the MapType
+// resolved above and of NOTHING else, on both object paths:
+//   direct   -- Object.cpp GCurrentFoliageKind = tree ? 2 : bush ? 1 : 0, written verbatim into
+//               WgrDraw3D::mat_sun_ambient.w (EngineWgpu.cpp, an unconditional overwrite) and read
+//               as shader3d.wgsl `foliage_kind`;
+//   retained -- EngineWgpu.cpp WGR_INSTANCE_CANOPY_{BUSH,TREE,FOREST}, read as gpu_driven.wgsl
+//               `canopy`.
+// The gate cannot be seen in a screenshot -- it moves geometry, and a still frame cannot show
+// motion -- but it CAN be seen here, once per model at load, before anything renders. `kind` is
+// the number the direct-path shader compares against 0.5; `canopy` is the retained-path bit mask.
+// Non-zero on a wall is the bug.
+//   WGR_SWAY_GATE_DUMP=1  every model      =2  only models whose gate is non-zero
+static void LogSwayGate(MapType mapType, const char* property, const char* modelName)
+{
+    static const int dump = []
+    {
+        const char* v = std::getenv("WGR_SWAY_GATE_DUMP");
+        return v ? atoi(v) : 0;
+    }();
+    if (dump <= 0)
+    {
+        return;
+    }
+    const bool isTree = mapType == MapTree || mapType == MapSmallTree || mapType == MapForestBorder ||
+                        mapType == MapForestTriangle || mapType == MapForestSquare;
+    const bool isBush = mapType == MapBush;
+    const float kind = isTree ? 2.0f : (isBush ? 1.0f : 0.0f);
+    const unsigned canopy = isBush                                              ? 1u
+                            : (mapType == MapTree || mapType == MapSmallTree)   ? 2u
+                            : (mapType == MapForestBorder || mapType == MapForestTriangle ||
+                               mapType == MapForestSquare)
+                                                                                ? 4u
+                                                                                : 0u;
+    if (dump < 2 || kind > 0.0f)
+    {
+        LOG_INFO(Graphics, "SwayGate: kind={} canopy=0x{:x} mapType={} property='{}' model={}", kind, canopy,
+                 int(mapType), property ? property : "", modelName ? modelName : "");
+    }
+}
+
+MapType ResolveMapTypeProperty(const char* value, const char* modelName, bool* recognised)
+{
+    const MapType mapType = ResolveMapTypeTable(value, modelName, recognised);
+    LogSwayGate(mapType, value, modelName);
+    return mapType;
+}
+
 void LODShape::CalculateHints()
 {
     _andHints = ~0;
@@ -984,171 +1187,11 @@ void LODShape::Load(QIStream& f, bool reversed)
     // map type
     {
         const char* mapType = PropertyValue("map");
-        if (!*mapType)
-        {
-            // LOG_DEBUG(Graphics, "{}: No map type {}",(const char *)(const char *)_name,mapType);
-            _mapType = MapHide;
-            // VEG-SWAY / ARF -- Enfusion (Arma Reforger) vegetation converted from .xob carries
-            // NO named properties at all, so `map` is absent and every spruce, hazel and willow
-            // lands on MapHide. MEASURED, not assumed: of the 94 vegetation .p3d deployed from
-            // Reforger's Everon, 90 contain no `map` token anywhere in the file.
-            //
-            // MapHide is not merely a map-symbol choice. The renderer keys its whole vegetation
-            // treatment off MapType -- canopy/spherical leaf normals (EngineWgpu.cpp
-            // BuildGpuInstance, INST_CANOPY_*), the per-draw foliage kind (Object.cpp
-            // GCurrentFoliageKind) and now wind sway. On MapHide an imported tree is shaded and
-            // animated as though it were masonry.
-            //
-            // The fallback is deliberately narrow so it cannot reach OFP/Arma content, which
-            // always authors `map` explicitly: it requires BOTH an Enfusion "vegetation"
-            // directory segment in the path AND that generation's `t_` / `b_` basename prefix
-            // (t_picea_abies_3s, b_corylus_avellana_1). A rock or a fence cannot match.
-            // Precedent for name-keyed classification is already in-tree: IsGrassSurfaceName
-            // (TerrainWgpu.cpp) picks grass surfaces out of authored terrain material names.
-            if (const char* path = _name; path && *path)
-            {
-                // Local, because there is no shared case-insensitive substring helper reachable
-                // from this translation unit (the two in-tree ContainsNoCase are private statics
-                // in DisplayUI and Landscape).
-                auto containsNoCase = [](const char* hay, const char* needle) -> bool
-                {
-                    const size_t n = std::strlen(needle);
-                    if (n == 0)
-                        return true;
-                    for (const char* p = hay; *p; ++p)
-                    {
-                        size_t i = 0;
-                        while (i < n && p[i] &&
-                               std::tolower(static_cast<unsigned char>(p[i])) ==
-                                   std::tolower(static_cast<unsigned char>(needle[i])))
-                        {
-                            ++i;
-                        }
-                        if (i == n)
-                            return true;
-                    }
-                    return false;
-                };
-                if (containsNoCase(path, "vegetation"))
-                {
-                    char base[256];
-                    GetFilename(base, path);
-                    const bool isTreeName = (base[0] == 't' || base[0] == 'T') && base[1] == '_';
-                    const bool isBushName = (base[0] == 'b' || base[0] == 'B') && base[1] == '_';
-                    // A stump is not a canopy: it has no crown to bend and no leaves to flutter,
-                    // and swaying one would read as the ground moving.
-                    const bool isStump = containsNoCase(base, "stump") || containsNoCase(base, "fallen");
-                    if (isTreeName && !isStump)
-                    {
-                        _mapType = MapTree;
-                    }
-                    else if (isBushName && !isStump)
-                    {
-                        _mapType = MapBush;
-                    }
-                }
-            }
-        }
-        else if (stricmp(mapType, "TREE") == 0)
-        {
-            _mapType = MapTree;
-        }
-        else if (stricmp(mapType, "SMALL TREE") == 0)
-        {
-            _mapType = MapSmallTree;
-        }
-        else if (stricmp(mapType, "BUSH") == 0)
-        {
-            _mapType = MapBush;
-        }
-        else if (stricmp(mapType, "BUILDING") == 0)
-        {
-            _mapType = MapBuilding;
-        }
-        else if (stricmp(mapType, "HOUSE") == 0)
-        {
-            _mapType = MapHouse;
-        }
-        else if (stricmp(mapType, "FOREST BORDER") == 0)
-        {
-            _mapType = MapForestBorder;
-        }
-        else if (stricmp(mapType, "FOREST TRIANGLE") == 0)
-        {
-            _mapType = MapForestTriangle;
-        }
-        else if (stricmp(mapType, "FOREST SQUARE") == 0)
-        {
-            _mapType = MapForestSquare;
-        }
-        else if (stricmp(mapType, "CHURCH") == 0)
-        {
-            _mapType = MapChurch;
-        }
-        else if (stricmp(mapType, "CHAPEL") == 0)
-        {
-            _mapType = MapChapel;
-        }
-        else if (stricmp(mapType, "CROSS") == 0)
-        {
-            _mapType = MapCross;
-        }
-        else if (stricmp(mapType, "ROCK") == 0)
-        {
-            _mapType = MapRock;
-        }
-        else if (stricmp(mapType, "BUNKER") == 0)
-        {
-            _mapType = MapBunker;
-        }
-        else if (stricmp(mapType, "FORTRESS") == 0)
-        {
-            _mapType = MapFortress;
-        }
-        else if (stricmp(mapType, "FOUNTAIN") == 0)
-        {
-            _mapType = MapFountain;
-        }
-        else if (stricmp(mapType, "VIEW-TOWER") == 0)
-        {
-            _mapType = MapViewTower;
-        }
-        else if (stricmp(mapType, "LIGHTHOUSE") == 0)
-        {
-            _mapType = MapLighthouse;
-        }
-        else if (stricmp(mapType, "QUAY") == 0)
-        {
-            _mapType = MapQuay;
-        }
-        else if (stricmp(mapType, "FUELSTATION") == 0)
-        {
-            _mapType = MapFuelstation;
-        }
-        else if (stricmp(mapType, "HOSPITAL") == 0)
-        {
-            _mapType = MapHospital;
-        }
-        else if (stricmp(mapType, "FENCE") == 0)
-        {
-            _mapType = MapFence;
-        }
-        else if (stricmp(mapType, "WALL") == 0)
-        {
-            _mapType = MapWall;
-        }
-        else if (stricmp(mapType, "HIDE") == 0)
-        {
-            _mapType = MapHide;
-        }
-        else if (stricmp(mapType, "BUSSTOP") == 0)
-        {
-            _mapType = MapBusStop;
-        }
-        else
+        bool recognised = false;
+        _mapType = ResolveMapTypeProperty(mapType, _name, &recognised);
+        if (*mapType && !recognised)
         {
             RptF("%s: Unknown map type %s", (const char*)_name, mapType);
-            _mapType = MapHide;
         }
     }
     // move (0,0,0) to the geometry center

@@ -643,6 +643,19 @@ class ConvexComponent: public NamedSelection,public RefCount
 
 DECL_ENUM(MapType)
 
+/// Resolve a model's `map` named property to its MapType.
+///
+/// ONE table, because there are two loaders. The legacy MLOD / ODOL-7 path resolves this string
+/// itself (LODShape::Load); every imported generation arrives through ShapeAdapter, which used to
+/// take the byte the ODOL-7 prologue carries -- a field the modern revision readers never fill.
+/// Both now call this.
+///
+/// `modelName` is the model's virtual path, used only by the Enfusion vegetation fallback for
+/// models that carry no `map` at all; pass the empty string if unknown. `recognised` (optional)
+/// reports whether the value was in the table, so only the caller that wants the diagnostic emits
+/// one.
+MapType ResolveMapTypeProperty(const char *value, const char *modelName, bool *recognised = nullptr);
+
 class ConvexComponents: public RefCount,public RefArray<ConvexComponent>
 {
 	mutable bool _valid;
