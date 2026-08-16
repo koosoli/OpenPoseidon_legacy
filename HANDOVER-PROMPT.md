@@ -259,6 +259,15 @@ colour multipliers in `EngineWgpu.cpp` (search `Purkinje`) are the knobs.
 
 Still open from the owner's list: **sunlit-wall blow-out (paused at his request)**, **card-grass flicker**, and the READY-TO-SHIP Reforger items — the re-export script is written and dry-run clean at `.tmp-shadow/run-reforger-reexport.ps1` (rebuild target `PoseidonTools`, exe is stale), it has just not been run. Item 6 traverse: `.tmp-movecam/run-vehicle30-cache.ps1` is the corrected wrapper (the `-Start` array trap), baseline pre-cache was 11.9 fps / 77% wall in >100 ms frames.
 
+## Reforger — state after 2026-08-16 evening
+
+**Re-export RAN** (script `.tmp-shadow/run-reforger-reexport.ps1`, pass `-PoseidonTools <abs exe>` — `$PSScriptRoot` is empty under `-File`): 30 rocks + 702 structures re-exported with `--fix-orientation --fix-origin --textures`, installed over the game tree, **backup at `D:eforger-p3d-backups60816-212305`** (rollback robocopy line is in the log `%TEMP%feexport-20260816-212305\`). Closed solids read `nrm 0.00 out` as promised; clusters/cliffs and hollow houses read >0 because the centroid metric is not diagnostic for non-convex shapes — do not chase that number.
+- **Rocks: fixed and seen** — solid, sun-lit, `.tmp-shadow/reforger/rocks.png`.
+- **House origins: shipped, NOT verified** — no before-shot at the same pose. A/B = rollback dir vs game tree at `--test-world-freefly 4535 10760 20 50 -3`.
+- **Grass on Everon: fixed** (single catch-all layer, `65536/65536` cells) — probably too dense/tall for Everon; tune, do not re-diagnose.
+- **Owner's building at 4875.35 6954.80 181.51 az 282 el -15 (roof, no walls)**: NOT the sink — the walls are prefab children the export never produced (`13449 placements skipped: prefab resolves to no converted model`, and 845 MatPBRMulti bound one library tile). Exporter coverage work.
+- **Owner's near trees at 5157.37 6968.01 185.53 az 250 el -12 (big flat leaf polygons)**: the model's finest LOD is what it is (alder `2f`: 1215→6 faces over 5 LODs); the leaves are solid planes because Reforger foliage OPACITY lives in the `.emat` (`MaskMap` / BCR alpha — "BCR alpha varies in 1112 of 1312 albedos. Nothing binds it") and `TranslateEmat` reads DayZ keys. The 140 cutout masks the exporter did write are the exception. **This is the `.emat` reader project the previous handover named; it is the whole of Reforger vegetation.**
+
 ## R2. Sunlit walls blow out — OPEN, owner explicitly dislikes it
 "the sun when it hits a surface like a wall from a house, it can totally overexpose it... this i do
 not like." This is *local* overexposure on a lit surface, not the global sky white-out that
