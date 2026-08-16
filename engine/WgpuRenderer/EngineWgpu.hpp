@@ -13,6 +13,7 @@
 #include <wgpu_renderer.hpp>
 
 #include <array>
+#include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -424,6 +425,11 @@ class EngineWgpu : public EngineDummy
     // Gentle, view-dependent eye accommodation for the visible sun. Kept separate
     // from scene-average auto-exposure, which remains disabled to prevent white-outs.
     void UpdateSunGlareExposure();
+    // Convert WGR_AUTO_EXPOSURE_TAU (seconds) into the per-frame ease the exposure shader
+    // wants, using this frame's measured wall-clock delta. No-op unless the env var is set,
+    // so the authored per-frame `rate` stays the default behaviour. See RND-039: `rate` is
+    // documented framerate-dependent, which makes any tuning specific to one world's fps.
+    void UpdateAutoExposureRate();
 
     SDL_Window* _window = nullptr;
     WgrRenderer* _renderer = nullptr;
@@ -441,6 +447,15 @@ class EngineWgpu : public EngineDummy
     bool _tonemapAuto = true;
     Engine::TonemapSettings _tonemap;
     Engine::ExposureSettings _exposure;
+    // WGR_AUTO_EXPOSURE_TAU: adaptation time constant in seconds; 0 = off (use the authored
+    // per-frame _exposure.rate unchanged). Kept OUT of _exposure so the ImGui Tonemap tab keeps
+    // showing/owning the authored value rather than a per-frame recomputed one.
+    float _autoExposureTau = 0.0f;
+    // Per-frame ease derived from _autoExposureTau; 0 = not in tau mode. PushRenderParams
+    // prefers this over _exposure.rate when it is positive.
+    float _autoExposureRate = 0.0f;
+    // Wall-clock stamp of the previous UpdateAutoExposureRate call (tau mode only).
+    std::chrono::steady_clock::time_point _autoExposureLast{};
     // Small multiplier applied only while the sun is centred in the player's view.
     // The authored time-of-day tonemap exposure remains unchanged in dev controls.
     float _sunGlareExposure = 1.0f;

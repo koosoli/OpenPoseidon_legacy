@@ -921,6 +921,102 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _tonemap.encode = std::strtol(en, nullptr, 10) != 0;
         _tonemapAuto = false;
     }
+    // BLOOM A/B levers. Unlike the grade fields above these do NOT switch the per-ToD auto
+    // mode off, because bloom is deliberately carried across the auto overwrite
+    // (UpdateAutoTonemap, :5651-5658) — so setting one here holds for the whole run while the
+    // time-of-day grade keeps interpolating normally. Unset changes nothing.
+    //
+    // They exist for the "white orb" report: a compact blown-out disc with a wide soft halo has
+    // three possible authors and ONE capture separates them. `WGR_BLOOM_INTENSITY=0` drops the
+    // pyramid out of the resolve (tonemap.wgsl:118, `color += bloom * bloom_intensity`) without
+    // touching the scene the pyramid was built from, so:
+    //   * halo gone, a small hard-edged bright patch left -> a SURFACE/GEOMETRY blow-out. The
+    //     residual is the emitter's true screen size, which names the object (a 5 m prop and a
+    //     0.3 m lamp lens are not confusable once bloom is off).
+    //   * the orb disappears entirely -> a modest source that only bloom makes conspicuous;
+    //     the fix is threshold/knee, not the source.
+    //   * the orb is unchanged -> it is drawn AFTER the resolve (a 2D / flare sprite), which no
+    //     HDR-side lever can reach at all.
+    // The default 1.0 threshold is scene-referred, and sunlit ground already sits near
+    // sunIntensity(22) x transmittance, so almost every lit surface clears it; raising
+    // WGR_BLOOM_THRESHOLD is how you ask "is this source actually brighter than the terrain?".
+    if (const char* bi = std::getenv("WGR_BLOOM_INTENSITY"))
+    {
+        _tonemap.bloomIntensity = std::max(0.0f, std::strtof(bi, nullptr));
+    }
+    if (const char* bt = std::getenv("WGR_BLOOM_THRESHOLD"))
+    {
+        _tonemap.bloomThreshold = std::max(0.0f, std::strtof(bt, nullptr));
+    }
+    if (const char* bk = std::getenv("WGR_BLOOM_KNEE"))
+    {
+        _tonemap.bloomKnee = std::max(1.0e-4f, std::strtof(bk, nullptr));
+    }
+    // AUTO-EXPOSURE (eye adaptation) levers. The chain is complete and has been since the HDR
+    // pass landed — luminance pyramid -> fs_adapt -> exposure scale (exposure.wgsl /
+    // exposure.rs). It is `enabled = false` by DELIBERATE default (Engine.hpp:1758-1762: its 4x
+    // range "can flash the whole scene when a player turns from dark terrain toward a bright sky
+    // or water glint" — someone tried it and backed it out), and until now the ONLY way to switch
+    // it on was the ImGui Tonemap tab, i.e. a human at the keyboard. That made it impossible to
+    // A/B from a capture harness at all. See RND-039.
+    //
+    // These levers deliberately change NO default: an unset variable leaves ExposureSettings
+    // exactly as constructed. They exist so the pumping the original author feared can be
+    // MEASURED rather than argued about.
+    //
+    // WGR_EXPOSURE (read above) is a DIFFERENT knob and the two are routinely confused: it is a
+    // manual pre-curve multiplier that also drops the per-ToD auto grade. Auto-exposure is a
+    // multiplicative scale ON TOP of whatever exposure the tonemap ends up with, so the two
+    // compose (manual base x adaptive scale) rather than override each other.
+    if (const char* ae = std::getenv("WGR_AUTO_EXPOSURE"))
+    {
+        _exposure.enabled = std::strtol(ae, nullptr, 10) != 0;
+    }
+    if (const char* k = std::getenv("WGR_AUTO_EXPOSURE_KEY"))
+    {
+        const float v = std::strtof(k, nullptr);
+        if (v > 0.0f)
+            _exposure.key = v;
+    }
+    if (const char* mn = std::getenv("WGR_AUTO_EXPOSURE_MIN"))
+    {
+        const float v = std::strtof(mn, nullptr);
+        if (v > 0.0f)
+            _exposure.minScale = v;
+    }
+    if (const char* mx = std::getenv("WGR_AUTO_EXPOSURE_MAX"))
+    {
+        const float v = std::strtof(mx, nullptr);
+        if (v > 0.0f)
+            _exposure.maxScale = v;
+    }
+    if (const char* r = std::getenv("WGR_AUTO_EXPOSURE_RATE"))
+    {
+        // Per-FRAME ease, as the field is documented. Clamped into (0,1]: 0 would freeze
+        // adaptation at its initial scale and read as "auto-exposure does nothing".
+        _exposure.rate = std::clamp(std::strtof(r, nullptr), 1.0e-4f, 1.0f);
+    }
+    if (const char* sw = std::getenv("WGR_AUTO_EXPOSURE_SKYWEIGHT"))
+    {
+        // 1.0 = uniform metering. The 0.3 default DOWN-weights the top of the frame so a bright
+        // sky cannot over-darken the ground (exposure.wgsl meter_weight) — which is exactly why
+        // "look at the sun and the iris closes" does not happen today. Raise this to test that,
+        // and expect it to also darken on a plain look-up at empty sky: uv.y is a screen-space
+        // proxy for the sun, not the sun. RND-039 §"What would actually satisfy it".
+        const float v = std::strtof(sw, nullptr);
+        if (v >= 0.0f)
+            _exposure.skyWeight = v;
+    }
+    if (const char* tau = std::getenv("WGR_AUTO_EXPOSURE_TAU"))
+    {
+        // Adaptation TIME CONSTANT in seconds, converted per frame to the shader's per-frame
+        // ease (UpdateAutoExposureRate). `rate` as authored is per-frame, so adaptation runs
+        // more than twice as fast on a 45 fps world as on a 20 fps one — any tuning done
+        // against it is tuning against one world's framerate (RND-039). Opt-in, because
+        // switching the units silently would change the feel of an already-tuned value.
+        const float v = std::strtof(tau, nullptr);
+        _autoExposureTau = v > 0.0f ? v : 0.0f;
+    }
     PushRenderParams();
     PushSkyRuntime();
     // Once at startup so the WGR_MATERIAL_* env overrides read above reach the
@@ -1295,6 +1391,9 @@ void EngineWgpu::NextFrame()
         UpdateAutoTonemap();
         UpdateAutoSky();
         UpdateSunGlareExposure();
+        // No-op unless WGR_AUTO_EXPOSURE_TAU is set; must run BEFORE PushRenderParams, which
+        // reads the derived rate.
+        UpdateAutoExposureRate();
         // Push the consolidated look block (picks up the auto-ToD updates; renderer diffs the
         // terrain sub-blocks) and then the per-frame sky runtime (celestial + camera).
         PushRenderParams();
@@ -5659,6 +5758,45 @@ void EngineWgpu::UpdateAutoTonemap()
     // The push happens in NextFrame after UpdateAutoSky (PushRenderParams).
 }
 
+// Opt-in only (WGR_AUTO_EXPOSURE_TAU>0). `ExposureSettings::rate` is authored as a PER-FRAME
+// ease and documented framerate-dependent (Engine.hpp:1767): at 0.03/frame adaptation settles in
+// ~1.5 s at 20 fps and ~0.7 s at 45 fps, so the two worlds measured this session adapt at more
+// than 2x different speeds from the same number. That makes any tuning of `rate` a property of
+// whichever world it was tuned on, which is why RND-039 flags it as a defect to fix in passing.
+//
+// The exponential ease with a time constant is the standard correction: alpha = 1 - exp(-dt/tau)
+// reproduces the same settling TIME at any framerate. It is left off by default because changing
+// the units of an already-tuned value silently would alter the feel of the ImGui slider without
+// anyone asking for it; when the owner has measured a tau he likes, this is the switch to make
+// default and the per-frame form to retire.
+//
+// dt is measured here from steady_clock rather than taken from the engine because EngineWgpu has
+// no frame-delta of its own, and this path only runs when explicitly asked for.
+void EngineWgpu::UpdateAutoExposureRate()
+{
+    if (_autoExposureTau <= 0.0f)
+    {
+        _autoExposureRate = 0.0f; // PushRenderParams falls back to the authored per-frame rate
+        _autoExposureLast = {};
+        return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (_autoExposureLast.time_since_epoch().count() == 0)
+    {
+        // First frame in tau mode: no delta yet. Use the authored rate for one frame rather
+        // than inventing a dt (a guessed first dt shows up as a visible one-frame step).
+        _autoExposureLast = now;
+        _autoExposureRate = 0.0f;
+        return;
+    }
+    const float dt = std::chrono::duration<float>(now - _autoExposureLast).count();
+    _autoExposureLast = now;
+    // A long hitch (level load, alt-tab) must not snap the exposure: cap the step at 0.25 s so
+    // the worst case is a quarter-second of adaptation, not an instant jump to the new target.
+    const float step = std::clamp(dt, 0.0f, 0.25f);
+    _autoExposureRate = std::clamp(1.0f - std::exp(-step / _autoExposureTau), 1.0e-4f, 1.0f);
+}
+
 void EngineWgpu::UpdateSunGlareExposure()
 {
     if (!_renderer || !_hdrEnabled || !GScene || !GScene->GetCamera() || !GScene->MainLight())
@@ -6240,7 +6378,9 @@ void EngineWgpu::PushRenderParams()
         _exposure.key,
         _exposure.minScale,
         _exposure.maxScale,
-        _exposure.rate,
+        // The authored per-frame ease, unless WGR_AUTO_EXPOSURE_TAU asked for a framerate-
+        // independent one (UpdateAutoExposureRate leaves this 0 when it is off).
+        _autoExposureRate > 0.0f ? _autoExposureRate : _exposure.rate,
         _exposure.skyWeight,
         0.0f,
         0.0f,
