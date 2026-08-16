@@ -43,6 +43,10 @@ using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/AlphaSortOrder.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
+// MAT-048: `render::GBlendSectionDepthReadOnly`, set around the object-blend branch in
+// DrawObjectsAndShadowsPass2.  Previously reached only transitively (via RenderFlags.hpp for
+// `render::IsOnSurfaceSpec`); named explicitly now that this TU writes into the header's state.
+#include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
 #include <Poseidon/Graphics/Shadow/ShadowMath.hpp>
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
@@ -2233,6 +2237,21 @@ static int CmpSurfaceObj(const SortObjectItem* p1, const SortObjectItem* p2)
     return Poseidon::SurfaceDraw::CompareSurfaceDraw(k1, k2);
 }
 
+// MAT-048 escape hatch.  The safe behaviour (blend sections draw depth-test-only) is the
+// default per house rules; `WGR_COCKPIT_BLEND_LEGACY=1` restores the pre-MAT-048 state exactly —
+// depth-write left ON for the object-blend branch below — so an A/B of the cockpit-glass fix
+// needs one binary and one env var rather than two builds.  Read once: this is queried inside the
+// per-object alpha loop, and a `getenv` per drawn vehicle per frame is not free.
+static bool CockpitBlendLegacy()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_COCKPIT_BLEND_LEGACY");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+
 void Scene::DrawObjectsAndShadowsPass2()
 {
     // must be sorted by distance
@@ -2416,11 +2435,44 @@ void Scene::DrawObjectsAndShadowsPass2()
             // opaque object that owns translucent (blend) sections — e.g. a vehicle's
             // glass. Its opaque+cutout sections drew in pass 1; revisit it here, in
             // back-to-front order, drawing only the blend sections so they blend over
-            // the already-drawn scene behind them (depth-write stays on — original parity).
+            // the already-drawn scene behind them.
+            //
+            // MAT-048: depth-TEST on, depth-WRITE off for the duration of this draw. The
+            // previous code left the write on and called it "original parity"; it is not
+            // parity with anything, and it is what makes a cockpit lose panes. This loop's
+            // back-to-front order is per-OBJECT, but a cockpit is ONE object whose glass
+            // spans the whole view depth, and Shape::Draw walks that object's sections in
+            // mesh index order with no intra-object sort (ShapeDraw.cpp:217). So the pane
+            // with the lower section index wrote depth first and the pane BEHIND it was
+            // then rejected by the depth test outright — seven OH-58 canopy panes, and
+            // from the pilot seat looking across the cockpit you saw one of every two.
+            // Stable per model, because section index does not change. Full reasoning and
+            // the accepted dust-ordering cost are at
+            // Graphics/Rendering/BuildRenderPassDescriptor.hpp (`GBlendSectionDepthReadOnly`).
+            //
+            // Set per object and cleared per object, not hoisted out of the loop: the
+            // passNum==2 whole-alpha branch above shares this loop and must keep its own
+            // depth behaviour, and so must the surface-overlay BlendOnly pass at the top of
+            // this function.
+            //
+            // FlushQueues before clearing is for GL33, not wgpu. wgpu's DrawSectionTL builds
+            // the descriptor synchronously (EngineWgpu.cpp:2078), but GL33 defers it to
+            // ApplyPassState at queue-flush time (EngineGL33_Queue.cpp:255) — a queue opened
+            // during this draw and flushed after the flag was cleared would silently get the
+            // old state. FlushQueues is a no-op on backends that do not queue
+            // (Graphics/Core/Engine.hpp:494 defines it as an empty default), so this costs
+            // wgpu nothing.
+            const bool blendDepthReadOnly = !CockpitBlendLegacy();
+            render::GBlendSectionDepthReadOnly = blendDepthReadOnly;
             GSectionFilter = SectionClassFilter::BlendOnly;
             GPass1Stats.p2AlphaDrawn.fetch_add(1, std::memory_order_relaxed);
             DrawSortObject(oi);
+            if (blendDepthReadOnly)
+            {
+                GEngine->FlushQueues();
+            }
             GSectionFilter = SectionClassFilter::All;
+            render::GBlendSectionDepthReadOnly = false;
 #if DO_STAT
             Alpha.Count(shape->Name());
 #endif

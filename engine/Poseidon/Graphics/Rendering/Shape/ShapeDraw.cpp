@@ -74,6 +74,17 @@ bool EnableHWTLState = true;
 // edge at distance, and dark patches that move because interpenetrating cards sort
 // order-dependently.
 //
+// MAT-048 footnote on "with no depth write". When this comment was written it described a
+// system that did not exist: the pass it names (Scene::DrawObjectsAndShadowsPass2, the
+// `GSectionFilter = BlendOnly` branch in World/Scene/SceneDraw.cpp) left depth-write ON and
+// said so in its own comment, calling it "original parity". Two comments in two files
+// described opposite behaviour and one of them had to be wrong; it was the SceneDraw one, in
+// the sense that the behaviour it documented was the defect. That pass now really does draw
+// depth-test-only, so this paragraph is accurate as written -- see
+// `GBlendSectionDepthReadOnly` in Graphics/Rendering/BuildRenderPassDescriptor.hpp for why,
+// and note that `WGR_COCKPIT_BLEND_LEGACY=1` puts the depth-write back, which would make this
+// sentence wrong again for that run.
+//
 // CWA content is spared by accident of format: ClassifyTextureAlpha short-circuits 1-bit
 // alpha straight to Cutout, so the engine has never been asked about an anti-aliased
 // cutout before.

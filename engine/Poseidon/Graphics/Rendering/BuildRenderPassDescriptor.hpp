@@ -36,8 +36,69 @@ struct BuildContext
     PassKindHint passKindHint = PassKindHint::None;
 };
 
-// Pure, header-implemented to keep the seam visible.  Inline so callers
-// can specialize for their context inputs at compile time when possible.
+// MAT-048 — the back-to-front blend pass must not write depth.
+//
+// `Scene::DrawObjectsAndShadowsPass2` (World/Scene/SceneDraw.cpp:2406-2436) revisits an
+// otherwise-opaque object a second time with `GSectionFilter = BlendOnly` to draw only its
+// translucent sections — a vehicle's glass — over the already-drawn scene behind them.  Until
+// MAT-048 those draws kept `DepthMode::Normal`, i.e. depth-write ON, and the code said that was
+// "original parity".  It is not parity with anything; it is a bug, and it has a very specific
+// signature.
+//
+// Back-to-front is a per-OBJECT algorithm.  The radix sort at SceneDraw.cpp:2364 orders the
+// object list by `SortObject::zCoord`, and `Shape::Draw`
+// (Graphics/Rendering/Shape/ShapeDraw.cpp:217) then walks that object's sections in MESH INDEX
+// order — there is no intra-object sort, and there never has been.  For most objects that is
+// harmless, because their blend sections do not overlap each other in screen space.  A cockpit is
+// the counterexample: it is ONE object whose glass spans the whole view depth.  An OH-58 canopy is
+// seven separate panes (six `oh58_sklotest*` plus `kiowa_topsklo`), so from the pilot seat, looking
+// ACROSS the cockpit rather than straight ahead, two of them are in line of sight.
+//
+// With depth-write on, the failure is not a wrong blend — it is a missing pane.  Whichever pane
+// holds the lower mesh index draws first and writes depth; the pane behind it then fails the depth
+// test (`GreaterEqual` under wgpu's reversed-Z; `LEQUAL` on GL33 — the same rejection either way)
+// and is discarded ENTIRELY.  You look through two panes and see one.  Both backends build state
+// through this one function, so both have always had it.  And because the winner is fixed by
+// section index, the artefact is stable per model rather than flickering — which is why it reads
+// as "that pane is missing" rather than "the glass sorts badly".
+//
+// Depth-TEST stays on: the glass must still be occluded by the fuselage in front of it and by
+// terrain.  Only the WRITE goes.  Once it is off no pane can erase another, all seven composite,
+// and the residual error is confined to the COLOUR of the overlap rather than its presence.  For
+// CWA glass that residual is small — `apach_in_skla.paa` measures TAGG AVGC alpha 46/255 (~18%,
+// MAT-048's raw-byte check) — so two panes composited in the wrong order differ by a slight tint,
+// not by a hole.  That is the reason this change deliberately does NOT also add an intra-object
+// back-to-front section sort: the sort would buy a subtle tint correction at the cost of breaking
+// Shape::Draw's adjacent-section merge (ShapeDraw.cpp:255-260 batches by texture + spec + material
+// and requires `i == secEnd`, so reordering sections shatters every batch), and a per-section
+// centroid order is ill-defined for interpenetrating panes anyway.  Order stops mattering for
+// VISIBILITY the moment the write is off; it only ever mattered because of the write.
+//
+// Scoped, never global.  The flag is set only around the object-blend branch and cleared
+// immediately after, so:
+//   - the depth-write rule ~20 lines above is untouched — `IsAlpha` deliberately does NOT disable
+//     depth-write, and poles / fences / signs still occlude, because those sections classify
+//     Cutout or Opaque and draw in pass 1 with the filter off;
+//   - the surface-overlay BlendOnly pass (roads / decals, SceneDraw.cpp:2296) is left alone on
+//     purpose and stays bit-identical;
+//   - `passNum == 2` whole-alpha objects and cloudlets sharing the same loop are untouched.
+//
+// One accepted cost, written down here so it is not rediscovered as a fresh bug:
+// World/Scene/AlphaSortOrder.hpp sorts a blend-owning object by its FAR extent
+// (`centreZ + radius`) precisely BECAUSE those sections used to write depth — dust that
+// interpenetrates the object was then depth-clipped by the glass.  With the write off, dust drawn
+// after the object composites over its glass unconditionally.  Dust is short-lived and already
+// semi-transparent; a permanently missing canopy pane is not.  `WGR_COCKPIT_BLEND_LEGACY=1`
+// restores the old depth-writing behaviour in the same binary, so that trade is one env var and
+// no rebuild away from being re-examined.
+inline bool GBlendSectionDepthReadOnly = false;
+
+// Header-implemented to keep the seam visible.  Inline so callers can specialize for their
+// context inputs at compile time when possible.  A function of (spec, ctx) alone, with the ONE
+// documented exception of `GBlendSectionDepthReadOnly` above — which is deliberately not a
+// `BuildContext` field, because both wgpu call sites (EngineWgpu.cpp:2078, :2702) and GL33's
+// (EngineGL33_Queue.cpp:255) default-construct their context and adding a field there would have
+// changed nothing without editing backend files this pass is not allowed to touch.
 inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, const BuildContext& ctx = {})
 {
     const Routing routing = spec.routing;
@@ -81,6 +142,15 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
     else
     {
         d.depth = DepthMode::Normal;
+    }
+
+    // MAT-048: the back-to-front blend pass demotes its draws to depth-test-only for the
+    // duration of that pass (see `GBlendSectionDepthReadOnly` above for the full reasoning).
+    // Applied AFTER the branch, and only to `Normal`, so the Shadow / NoZBuf / NoZWrite cases
+    // keep their own already-non-writing modes verbatim and nothing above this line changes.
+    if (GBlendSectionDepthReadOnly && d.depth == DepthMode::Normal)
+    {
+        d.depth = DepthMode::ReadOnly;
     }
 
     // Lighting (sun gate).
