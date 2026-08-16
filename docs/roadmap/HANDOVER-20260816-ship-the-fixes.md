@@ -198,6 +198,53 @@ owner's single biggest performance complaint — measure it.
 
 ---
 
+# START HERE — THE LIVE REGRESSION
+
+## R0. Self-illuminating trees at night — PARTIALLY FIXED, STILL PRESENT ON ARMA 3
+
+**Do this first. It is a regression the last session caused and did not finish closing.**
+
+Cause: auto-exposure was made default-on, and its `maxScale` ceiling of 4.0 let the iris open wide
+at night, amplifying vegetation's **authored** emissive until trees glowed and trunks went white.
+Arma 2 OA ships 41 rvmats literally containing `emmisive[]={2.6,2.3,2.0}`.
+
+Measured on Arma 2 Takistan, hour 0, same pose, pixels at luminance >= 200:
+
+| arm | glowing px | mean luminance |
+|---|---:|---:|
+| auto-exposure off | 0 | 1.06 |
+| `maxScale 4.0` (the regression) | **1215** | 2.27 |
+| `maxScale 1.10` (shipped fix) | **0** | 1.13 |
+
+`ExposureSettings::maxScale` is now **1.10** (`Engine.hpp`), asymmetric on purpose: darkening keeps
+its full 4x headroom because that is the feature the owner asked for; only brightening is capped.
+
+**BUT THE OWNER REPORTS IT IS STILL PRESENT ON ARMA 3**, after the fix was deployed (binary
+13:47 on 2026-08-16 — note an earlier build at 12:56 silently failed to deploy, so any test before
+13:47 was on the unfixed binary; confirm which he was on before assuming).
+
+Two possibilities, and you must distinguish them:
+1. **He tested the 12:56 binary.** Re-test on 13:47+ and it is simply done.
+2. **Arma 3 has a second, independent cause.** Likely, because Arma 3 materials come through a
+   different reader than Arma 2's. Check whether Arma 3 vegetation also carries a large authored
+   `emissive`, and whether the *retained* path caps it — `gpu_driven.wgsl:601` applies
+   `emissive * min(1, 0.50/peak)` while the direct path uses `StaticEmitterRadianceScale`
+   (`EngineWgpu.cpp:2986`/`3163`). If Arma 3 trees are on one path and Arma 2 trees on the other,
+   only one of them is capped and that is the answer.
+
+`WGR_AUTO_EXPOSURE=0` is the instant A/B: if the glow survives with auto-exposure off, exposure is
+exonerated entirely and the emissive term itself is the bug.
+
+The night verification capture for the shipped fix was **still running when the session ended** —
+`.tmp-shadow/ae-night/` may be incomplete. Re-run it; the recipe is in the capture-harness section.
+
+**Harness trap that cost two runs:** a wrapper script invoked via `powershell -File` can get an
+EMPTY `$PSScriptRoot`, so `& "$PSScriptRoot\capture-arms.ps1"` silently resolves to `\capture-arms.ps1`
+and the whole run produces nothing, with no error and no output directory. Call `capture-arms.ps1`
+directly with explicit paths, or `cd` to `.tmp-shadow` first.
+
+---
+
 # OWNER REQUESTS AND REGRESSIONS FROM THE LAST HOUR — newest, least investigated
 
 ## R1. Sea level appears to have RISEN (Arma 3) — NEW REGRESSION, NOT INVESTIGATED
