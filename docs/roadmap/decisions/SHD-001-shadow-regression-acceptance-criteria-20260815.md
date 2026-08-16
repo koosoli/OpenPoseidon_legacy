@@ -208,3 +208,37 @@ it remains the right tool if hypothesis 1 is pursued.
   pass on Arma 2 does not license a claim about Reforger or Arma 3. Per the house rule that a
   default is a claim about every world, at least one more world should be checked before this is
   called fixed everywhere.
+
+---
+
+# UNRELATED FINDING FROM THE SAME POSE (2026-08-16): the black wedges are MISSING DRAWS
+
+The owner's "strange triangles inside many buildings" are **not shadows and not geometry**. Inside
+the wedges the value is exactly `(0,0,0)` — the scene target's clear colour (`rust/src/lib.rs:3321`)
+— while genuinely shadowed wall 5 px away reads 27..55. Nothing ever wrote those pixels.
+
+CSM cannot produce them: on the sky-lit path a cascade only removes **direct sun**, ambient
+survives, so a fully shadowed pixel floors at ambient; and that interior wall faces away from the
+sun so its direct term is ~0 anyway. `interior_sky_ao` floors at 0.32.
+
+Four arms at `6907.68 6017.04 313.98 187.2 -1.7`, hour 8, counting exact-black inside the content
+rect:
+
+| arm | exact-black | verdict |
+|---|---:|---|
+| base | **27.40%** | reproduces |
+| `WGR_PREPASS=0` | **0.07%** | **gone** |
+| `WGR_GPU_OCCLUSION=0` | 28.22% | unchanged — not the Hi-Z cull |
+| `WGR_GPU_DRIVEN=0` | **0.21%** | **gone** |
+
+**The depth prepass lays down depth for GPU-driven (retained) objects that the colour pass then
+never draws.** Those pixels reject sky, terrain and everything behind them, so the clear survives.
+It is the retained path itself, not the occlusion cull — `WGR_GPU_OCCLUSION=0` changes nothing
+while both `WGR_PREPASS=0` and `WGR_GPU_DRIVEN=0` remove it entirely.
+
+Next step is to find what the colour pass drops that the prepass drew — the two culls are not
+symmetric (`gfx3d/mod.rs:2723-2727`, `:3378-3380`).
+
+Also from the same sweep: the tree speckling in `alt317_0.png` is a **different** defect — those
+pixels measure (89,99,79)/(56,59,60), i.e. leaf colour, never 0. Cutout-foliage alpha coverage on
+bare winter leaf cards. Its own ticket.
