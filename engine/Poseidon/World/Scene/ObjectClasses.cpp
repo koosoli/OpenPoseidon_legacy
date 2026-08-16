@@ -12,6 +12,7 @@
 #include <Poseidon/Core/Global.hpp>
 #include <string.h>
 #include <cmath>
+#include <cstdlib> // std::getenv - WGR_ROAD_LEGACY_SURFACE (RoadConformsOnGpu)
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
@@ -749,6 +750,66 @@ void ForestPlain::Deanimate(int level)
 
 RoadType::RoadType() = default;
 
+// WLD-026 — under a backend that conforms terrain on the GPU, a road must be flagged
+// `IsOnSurface`, NOT `OnSurface`. The two names look interchangeable and are not:
+// ModelFlags.hpp:183 states the contract exactly — "IsOnSurface = confirmed on surface
+// (OnSurface = should be placed on surface)". `OnSurface` is a REQUEST for conforming that
+// has not happened yet; `IsOnSurface` says the geometry already sits on the ground and only
+// needs the decal routing (polygon offset, no z-write, drawn in the on-surface pass).
+// `render::IsOnSurfaceRouting` (RenderFlags.hpp:220) accepts either, so every routing,
+// blending and bias decision downstream is unchanged. What changes is one thing:
+//
+//   ShapeDraw.cpp:503 — `if (level->Special() & (IsLight | OnSurface)) optimizeHW = false;`
+//
+// An `OnSurface` shape is DENIED a vertex buffer at load time. That was right in 2001, when
+// OnSurface geometry was re-split against the terrain every frame and a static buffer would
+// have been worthless. It is wrong here, and the consequences cascade:
+//
+//   1. No `_buffer` fails Shape::Draw's T&L gate (`GetTL() && EnableHWTLState && tlAble &&
+//      _buffer`, ShapeDraw.cpp:198), so no road ever reaches DrawSectionTL.
+//   2. It lands in FaceArray::Draw instead, which re-splits it per terrain triangle EVERY
+//      FRAME (ClipShape.cpp:235-242, still unconditional on `spec & OnSurface`) and hands
+//      CPU-lit screen-space vertices to EngineWgpu::DrawSection -> AppendTriangles: the 2D
+//      pipeline. gfx2d/shader.wgsl is `textureSample * in.color` mixed toward fog — no sun,
+//      no sky irradiance, no sRGB decode, no HDR handling.
+//   3. So none of the road work done in gfx3d/shader3d.wgsl is reachable by a road: not the
+//      mode-2 per-vertex ClipLand conform (which is what `GGpuTerrainConform` promises and
+//      what Object::Draw skips the CPU split for), not the ndc^2 decal bias, not the
+//      emissive_night override. Each was written for roads and none of them runs on one.
+//
+// That accounts for all three reported symptoms from one cause: untextured/white by day
+// (gamma-space CPU colour written straight into a linear HDR target, with slot-0 white for
+// any texture that fails to resolve), self-lit at night (the same colour carries no sun
+// term), and — the see-through-mountains one — a depth value produced by a DIFFERENT
+// projection from the one the rest of the scene uses. EngineWgpu::PushSceneCamera overrides
+// the depth row to an infinite-far reversed-Z form (`_33=1, _43=-cNear`) while the CPU T&L
+// path keeps `Camera::Projection()`'s finite `q = ccFar/(ccFar-cNear)` form; the gap is then
+// papered over with a constant software z-bias (`GetZCoefs`, 16x GL33's). A constant offset
+// in reversed-Z depth is a distance-QUADRATIC error in world space: measured at cNear=0.079,
+// fog 3000 m, the road is depth-tested as though it stood at 608 m when it is at 1000 m, and
+// at 874 m when it is at 2000 m. Anything in between cannot occlude it.
+//
+// Setting `IsOnSurface` takes roads off that path entirely and onto the normal 3D one, where
+// the GPU conform pins each ClipLandOn vertex to the terrain in the vertex shader.
+//
+// SCOPE. Returns false whenever `GGpuTerrainConform` is false, so GL33 — and wgpu with
+// `WGR_GPU_CONFORM=0` — keep the established CPU-split behaviour bit for bit. The escape
+// hatch is `WGR_ROAD_LEGACY_SURFACE=1`, which restores the old flags exactly; the fixed
+// behaviour is the default, matching WGR_SHADOW_LEGACY_GATE's convention.
+static bool RoadConformsOnGpu()
+{
+    if (!GGpuTerrainConform)
+    {
+        return false;
+    }
+    static const bool legacy = []
+    {
+        const char* v = std::getenv("WGR_ROAD_LEGACY_SURFACE");
+        return v && v[0] != '\0' && v[0] != '0';
+    }();
+    return !legacy;
+}
+
 RoadType::RoadType(const char* name)
 {
     _shape = Shapes.New(name, false, true);
@@ -757,7 +818,23 @@ RoadType::RoadType(const char* name)
     if (geom && geom->NFaces() > 0)
     {
         // some shapes (bridges) should not be land-following
-        LOG_DEBUG(Graphics, "Road with geometry {}", name);
+        //
+        // WLD-026: this bail-out gives the model NOTHING — no OnSurface/IsOnSurface, no
+        // NoZWrite, no SetCanBeOccluded(false), and not the ClipLand normalisation below.
+        // It was suspected of being the reason DayZ rail tracks band, on the theory that
+        // collidable rail ballast would be classed a road and then silently skipped. The
+        // census says otherwise and the theory is dead: of 90 DayZ rail models, ZERO carry
+        // the `road` property class, so a rail never reaches RoadType at all (it would also
+        // bail here, since 90/90 do have a non-empty Geometry LOD). Rails are ordinary
+        // alpha-cutout objects; whatever bands them is not on this path.
+        //
+        // The bail-out is nonetheless a live set worth being able to see: 12 DayZ models,
+        // 4 Arma 1 models and 3 Arma 2 models ARE `class=road` with a non-empty Geometry LOD
+        // and land here, keeping only whatever flags their P3D set. (Operation Arrowhead's
+        // roads_e.pbo has none — 198/198 of its road-classed models take the else branch.)
+        // Logged at INFO with the geometry face count so that set can be enumerated from a
+        // normal boot log instead of guessed at.
+        LOG_INFO(Graphics, "Road with geometry: {} ({} geometry faces), no road flags applied", name, geom->NFaces());
     }
     else
     {
@@ -765,7 +842,16 @@ RoadType::RoadType(const char* name)
         {
             LOG_DEBUG(Graphics, "Missing OnSurface {}", name);
         }
-        _shape->OrSpecial(NoShadow | OnSurface | NoZWrite);
+        const bool gpuConform = RoadConformsOnGpu();
+        _shape->OrSpecial(NoShadow | NoZWrite | (gpuConform ? IsOnSurface : OnSurface));
+        if (gpuConform)
+        {
+            // OR-ing IsOnSurface is not enough. Road P3Ds normally set OnSurface themselves —
+            // that is precisely what the LOG_DEBUG above tests for, and it fires rarely — so
+            // the model's own bit has to be cleared or the shape is still denied its vertex
+            // buffer and nothing above changes.
+            _shape->AndSpecial(~OnSurface);
+        }
         // no occlusions on roads
         _shape->SetCanBeOccluded(false);
         for_each_alpha for (int level = 0; level < _shape->NLevels(); level++)
@@ -780,21 +866,93 @@ RoadType::RoadType(const char* name)
                 // REPLACE the land nibble; do not OR into it. Object::Draw forks roads on
                 // `(andHints & ClipLandMask) == ClipLandOn` being EXACT: one vertex still
                 // carrying ClipLandKeep/Under/Above turns that AND into 0x900 and sends the
-                // whole model down the other branch. The two branches then light the road
-                // through code that reads Shape::Norm() with OPPOSITE sign conventions --
-                // the GPU path negates it (MeshBuild.cpp:44), the CPU per-vertex path does
-                // not (TransLight.cpp:548) -- so one of them lights a flat road with an
-                // inverted normal, takes the `cosFi <= 0` branch and falls to packedAmbient:
-                // sun-independent, forever. That is the alternating light/dark "piano key"
-                // pattern on Arma 2 roads. Measured: the dark pieces read 88/100/101 at
-                // 08:00/12:00/16:00 while the light ones track the sun.
+                // whole model down the other branch, and the two branches read Shape::Norm()
+                // with OPPOSITE sign conventions -- the GPU path negates it (MeshBuild.cpp:44),
+                // the CPU per-vertex path does not (TransLight.cpp:548).
                 //
-                // Arma 2 road parts mix land bits, which is why this is A2-specific. OFP
-                // parts are already pure ClipLandOn, for which this is bit-identical to the
-                // previous OR.
+                // CORRECTION, WLD-026, from a census of 916 road models across four
+                // generations (A1 roads.pbo rev 40; A2 Roads2.pbo rev 48; OA roads_e.pbo rev
+                // 49 -- the exact Takistan corpus; OA roads_pmc rev 50; DayZ structures_rail
+                // and structures_roads rev 54):
+                //
+                //   * NO model in ANY corpus mixes land bits. Every non-empty LOD stores its
+                //     clip array as a condensed fill -- ONE clip word repeated across every
+                //     vertex -- so a mixed nibble is not representable in the shipped data.
+                //     The only values that occur anywhere are 0x3f (ClipAll), 0x13f
+                //     (ClipAll|ClipLandOn) and 0x83f (ClipAll|ClipLandKeep, one model).
+                //   * For roads_e.pbo specifically, 196/210 models are ALREADY pure
+                //     ClipLandOn before the engine touches them, and the AND-of-hints is
+                //     already exactly ClipLandOn on 198/210.
+                //
+                // So the older comment here -- "Arma 2 road parts mix land bits, which is why
+                // this is A2-specific" -- is FALSE, and this rewrite is a measured no-op on
+                // every road model that ships. It is kept as a cheap invariant (it costs one
+                // pass over ~10 vertices per model and guarantees the exact-match fork above
+                // for hand-made or converted content), not because it fixes anything, and it
+                // is NOT the cause of the alternating light/dark "piano key" pattern. That
+                // pattern was traced elsewhere -- see WLD-021 and the RoadConformsOnGpu
+                // comment above.
                 shape->SetClip(i, (shape->Clip(i) & ~ClipLandMask) | ClipLandOn);
             }
             shape->CalculateHints();
+            if (gpuConform)
+            {
+                // Snapshot the undeformed geometry AFTER the clip normalisation above.
+                // `MeshBuild::BuildOrigVertices` derives the per-vertex conform selector from
+                // `OrigClip`, not `Clip`, and it is the only builder that writes a non-zero
+                // selector — so without this the road uploads with conform_sel = 0 on every
+                // vertex, the vertex shader's mode-2 branch does nothing, and the road draws
+                // rigid at its authored height instead of pinned to the ground. Nothing else
+                // saves it for a road: Object::Animate returns immediately on an all-ClipLandOn
+                // shape ("will be done during SurfaceSplit", Object.cpp:374) without reaching
+                // the SaveOriginalPos in the branch below it. The retained path already does
+                // exactly this at its own registration site (EngineWgpu.cpp:4297) for the same
+                // reason. Idempotent.
+                shape->SaveOriginalPos();
+            }
+        }
+        if (gpuConform)
+        {
+            // The conformed vertex data has to reach the GPU, and for a STATIC buffer it never
+            // would. VertexBufferWgpu::Update early-outs on `!bufferDirty && (!isDynamic ||
+            // haveUploadHash)`, and a road never dirties its buffer (its CPU deform is the one
+            // Object::Animate skips), so a VBStatic road would keep the conform_sel = 0 bytes
+            // that EngineWgpu::CreateVertexBuffer writes at creation — when no conform plane is
+            // active and BuildVertices is therefore the only builder it can use. Marking the
+            // shape animatable makes ShapeDraw.cpp:533 choose VBDynamic, whose FIRST Update runs
+            // (haveUploadHash is false) inside BeginMeshTL with the object's conform plane
+            // published, takes the BuildOrigVertices arm, and uploads the selector. From the
+            // second frame on the early-out applies again, so this costs exactly one upload of a
+            // ~10-vertex mesh per road MODEL, not per placement.
+            //
+            // Contained: `GetAllowAnimation` is read in exactly two places, both in
+            // ShapeDraw.cpp — the buffer type above, and `optimizeSSE`, which additionally
+            // requires >= 16 vertices and only selects a CPU quad path this road no longer
+            // takes. Object::IsAnimated does not consult it.
+            _shape->AllowAnimation(true);
+            // Rebuild the buffers, because whatever exists was built under the wrong flags.
+            //
+            // During world load ShapeBank has not run its bulk OptimizeAll yet
+            // (`_bulkOptimizeDone` false), so ShapeBank::New skipped per-shape optimization and
+            // no level has a buffer: the release below is a no-op, this builds them once, and
+            // the bulk pass — which runs after every RoadType is constructed — releases and
+            // rebuilds them once more. Bounded and cheap: road segment models are tiny (a
+            // typical Takistan piece is 10 vertices / 8 faces) over ~122 models on that world.
+            //
+            // A road loaded AFTER the bulk pass is the trap WLD-021 recorded: ShapeBank::New
+            // calls OptimizeOneShape immediately, i.e. BEFORE this constructor runs, so its
+            // buffer was decided by the P3D's own flags — absent if the model set OnSurface
+            // itself, and VBStatic (no conform selector, ever) if it did not. Releasing first
+            // makes both cases converge, and satisfies Shape::ConvertToVBuffer's
+            // `DoAssert(!_buffer)`.
+            for (int level = 0; level < _shape->NLevels(); level++)
+            {
+                if (Shape* shape = _shape->Level(level))
+                {
+                    shape->ReleaseVBuffer();
+                }
+            }
+            Shapes.OptimizeOneShape(_shape);
         }
     }
 }
