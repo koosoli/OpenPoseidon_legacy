@@ -138,6 +138,67 @@ world file in the time available. Two workable routes:
 
 Route 2 is the better next step. It tests the mechanism rather than hunting for a pose.
 
+---
+
+# FINAL VERDICT (2026-08-16, after an INTERIOR pose was obtained)
+
+**The cascade gate was not the owner's shadow bug. The fix is defensive hardening, not a repair.**
+
+The owner supplied a coordinate for an unrelated complaint ("strange triangles") which turned out to
+be **inside a building** — the interior view that could not be constructed from the freefly harness
+all night, and the exact case the fix was built for. Re-run as a two-arm A/B there:
+
+| pose | arm | cpuCasters | gpuInstances | active | mean luminance |
+|---|---|---:|---:|---|---:|
+| Takistan interior 6907.68 / 6017.04 / alt 313.98 | fixed | **8** | 19 | true | 12.58 |
+| same | legacy | **8** | 19 | true | 12.45 |
+
+Identical. 4.4% of pixels differ at all, and `dark%` (72.8 vs 72.9) and `bright%` (0.24 vs 0.24) are
+the same to two decimals — TAA and animation jitter, not shadowing.
+
+**So `cpuCasters` was never 0 across every pose tried:** Takistan exterior (7), Everon exterior (5),
+and now a Takistan *interior* (8). The premise in commit `bc59281` — "a view whose visible set is
+entirely retained submits zero CPU casters; an interior does that" — is **false in practice**. Even
+indoors, enough objects fail retention (proxies, non-GPU-owned sections, the player model itself)
+to keep the list populated and the old gate open.
+
+The interior capture also shows **correct shadowing**: the room is dark, the walls occlude, and
+there is a sun patch on the floor through the window — the reference behaviour from the owner's
+screenshot, on both arms.
+
+## What the fix is now worth
+
+It is not worthless, and it should stay:
+
+- The defect it removes is **real**: `shadowActive` gates `cameras[i].shadow`, so an empty CPU
+  caster list genuinely would disable every cascade including the GPU-driven ones that render fine.
+  Rust has been ready for that case since the multi-view slice; C++ simply never sent the frame.
+- It is **measurably inert** where the old gate was already open — three poses, two worlds, no
+  pixel difference beyond jitter. That is the safe outcome.
+- It removes a latent knife-edge that a future increase in retention coverage would have walked
+  straight into. Retention has been growing all session.
+
+But it must **not** be reported as fixing the owner's regression. It does not, and the owner's own
+follow-up ("might be that it is already fixed, so not seeing the same problem currently") suggests
+his symptom is either intermittent or was addressed by something else.
+
+## What is still unexplained
+
+The owner's before/after screenshots showed sunlight on an interior floor **ignoring the walls**.
+Nothing measured this session reproduces that. Possibilities not yet excluded, in order:
+
+1. **Intermittent.** A transient state during streaming — note every run shows
+   `cascadesValid=false` while `gpuInstances` climbs, and the world spends 100+ seconds there.
+   A player moving through a fill-in could sit in a no-cascade state for seconds at a time. **This
+   is the strongest remaining hypothesis and it is testable with the moving-camera harness.**
+2. A different code path entirely (the projected accumulator, or a per-material lighting term).
+3. Already fixed by another change this session — the decal bias, the foam work and the gate all
+   landed together.
+
+`WGR_SHADOW_FORCE_NO_CPU_CASTERS=1` was added to test the *consequence* directly rather than hunt
+for a pose. Given `cpuCasters` is never 0 naturally, that test is now academic for this bug — but
+it remains the right tool if hypothesis 1 is pursued.
+
 ## Not yet established
 
 - Nobody has observed `_shadowCasters.size()` in a failing frame. Every claim in `bc59281` about
