@@ -1095,8 +1095,9 @@ pub struct WgrGrassParams {
     /// being able to trim at runtime.
     pub photo_alpha_cutoff: f32,
     /// Force every photographed clump to one atlas layer: -1 = normal selection,
-    /// 0 = the primary clump, 1..8 = one local family. The direct way to find
-    /// which source plate is responsible for a flicker.
+    /// 0..31 = that atlas layer (0 = the primary clump / first map clutter class,
+    /// 1..8 the local families on a loose-card world, up to 31 map classes). The
+    /// direct way to find which source plate is responsible for a flicker.
     pub photo_force_layer: f32,
     /// Saturation of the photographed cards about their own luma. Separate from
     /// the field-wide `saturation` so the plates can be matched to the
@@ -1118,12 +1119,38 @@ pub struct WgrGrassParams {
     pub near_density: f32,
     pub mid_density: f32,
     pub far_density: f32,
-    pub _pad_density: f32,
+    /// Photo-card coverage: the fraction of clutter-grid cells (card_spacing,
+    /// 1.11 m by default) that grow a card, 0..1. With `card_coverage_auto` set
+    /// it applies only where the map's geography bake did NOT answer (OFP
+    /// worlds, unmasked cells); authored cells keep the map's own density.
+    /// 0.24 is the owner's fallback for worlds whose clutter density is unknown.
+    pub card_coverage: f32,
     /// Albedo tints, applied after the existing colour work and before lighting.
     /// `tint_procedural` covers procedural blades, ribbons and the far proxy;
     /// `tint_photo` covers the photographed cards. White = untinted.
     pub tint_procedural: [f32; 4],
     pub tint_photo: [f32; 4],
+    /// 1 = authored cells use the map's own clutter density and `card_coverage`
+    /// is the fallback elsewhere; 0 = `card_coverage` multiplies everywhere, on
+    /// top of the bake's relative thinning.
+    pub card_coverage_auto: f32,
+    /// PROCEDURAL BLADES ONLY (near blades and the mid ribbons; cards and the far
+    /// proxy ignore these). Defaults reproduce the pre-existing look exactly.
+    /// Blade-on-blade self shadow: height-based occlusion inside a tuft plus a
+    /// sample of the cascade the grass itself writes. 0 = off (the old look).
+    pub blade_self_shadow: f32,
+    /// Contrast about the procedural palette's mid-tone. 1.0 = untouched.
+    pub blade_contrast: f32,
+    /// Per-patch hue drift (warm straw <-> cool blue-green) on top of the
+    /// existing luminance-only colour variation. 0 = none (the old look).
+    pub blade_hue_variation: f32,
+    /// Root-to-tip darkening. 0.70 = the long-standing `mix(0.30, 1.0, t*t)`.
+    pub blade_root_shade: f32,
+    /// Photo card SIZE multiplier, 1.0 = the stock card (0.5-2.3 m tall, wider
+    /// than tall). Arma's own clutter plants are ~0.3-0.9 m, so the stock card is
+    /// two to three times the plant it stands for; this is the lever for that.
+    pub card_scale: f32,
+    pub _pad_look: [f32; 2],
     /// Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     /// Renderer-derived from the uploaded atlas; ignored on input.
     pub photo_layer_bounds: [f32; 36],
@@ -1397,8 +1424,9 @@ const _: () = assert!(std::mem::size_of::<WgrGrassTrack>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrGrassDownwash>() == 16);
 // 1840 bytes; the photo-card look block, the placement block, the layer-mix
 // block and eight per-layer weights complete five further vec4s
-// (GrassParams.photo / .place / .photo_mix / .layer_weights[2]).
-const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4736);
+// (GrassParams.photo / .place / .photo_mix / .layer_weights[2]). 4736 + 32 for
+// the card-coverage / procedural-look pair (GrassParams.card_look / .blade_look).
+const _: () = assert!(std::mem::size_of::<WgrGrassParams>() == 4768);
 const _: () = assert!(std::mem::size_of::<WgrWaterParams>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrWaterNode>() == 40);
 const _: () = assert!(std::mem::size_of::<WgrWaterBatch>() == 16);

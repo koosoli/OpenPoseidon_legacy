@@ -986,7 +986,8 @@ struct WgrGrassParams
      * plates come from JPEG opacity maps whose noisy edges are a flicker source. */
     float photo_alpha_cutoff;
     /* Force every photographed clump onto one atlas layer: -1 = normal selection,
-     * 0 = the primary clump, 1..8 = one local family. */
+     * 0..31 = that atlas layer (0 = the primary clump / first map clutter class,
+     * 1..8 the local families on a loose-card world, up to 31 map classes). */
     float photo_force_layer;
     /* Saturation of the photographed cards about their own luma. Separate from
      * the field-wide `saturation` so the plates can be matched to the procedural
@@ -1008,12 +1009,28 @@ struct WgrGrassParams
     float near_density;
     float mid_density;
     float far_density;
-    float _pad_density;
+    /* Photo-card coverage: fraction of clutter-grid cells (1.11 m by default,
+     * WGR_GRASS_CARD_SPACING) that grow a card, 0..1. With card_coverage_auto it
+     * is only the fallback where the map's geography bake did not answer (every
+     * OFP world); authored cells keep the map's own clutter density. */
+    float card_coverage;
     /* Albedo tints applied after the existing colour work and before lighting.
      * `tint_procedural` covers procedural blades, ribbons and the far proxy;
      * `tint_photo` covers the photographed cards. White = untinted. */
     float tint_procedural[4];
     float tint_photo[4];
+    /* 1 = authored cells keep the map's own density, card_coverage elsewhere;
+     * 0 = card_coverage multiplies everywhere on top of the bake's thinning. */
+    float card_coverage_auto;
+    /* PROCEDURAL BLADES ONLY (near blades + mid ribbons). Defaults = the old look:
+     * self shadow 0, contrast 1, hue variation 0, root shade 0.70. */
+    float blade_self_shadow;
+    float blade_contrast;
+    float blade_hue_variation;
+    float blade_root_shade;
+    /* Photo card size multiplier; 1.0 = the stock card. */
+    float card_scale;
+    float _pad_look[2];
     /* Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
      * Renderer-derived from the uploaded atlas; ignored on input. */
     float photo_layer_bounds[36];
@@ -1631,7 +1648,7 @@ static_assert(sizeof(WgrTerrainBatch) == 16, "WgrTerrainBatch layout must match 
 static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
-  static_assert(sizeof(WgrGrassParams) == 4736, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
+  static_assert(sizeof(WgrGrassParams) == 4768, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 272, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterBatch) == 16, "WgrWaterBatch layout must match the Rust #[repr(C)] struct");

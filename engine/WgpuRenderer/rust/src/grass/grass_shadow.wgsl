@@ -29,6 +29,10 @@ struct GrassParams {
     lod_density: vec4<f32>,
     tint_procedural: vec4<f32>,
     tint_photo: vec4<f32>,
+    // .x card coverage, .y auto -- placement only. Then the procedural-blade
+    // look block (colour pass only). Both must stay: same uniform buffer.
+    card_look: vec4<f32>,
+    blade_look: vec4<f32>,
     layer_bounds: array<vec4<f32>, 32>,
     layer_means: array<vec4<f32>, 32>,
 };
@@ -111,6 +115,11 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
     let forced = grass.photo_mix.x;
     if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
     if (run.y > 0u) {
+        // Mirrors grass.wgsl: patches outside the variety mix keep the run's
+        // first class (single variety), so the shadow matches the colour card.
+        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+            return min(run.x, 31u);
+        }
         let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
@@ -281,8 +290,10 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let family = u32(seed * 4.0);
     let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
+    // Mirrors photo_card_scale() in grass.wgsl (card_look.z, 0 = stock).
+    let card_scale = select(clamp(grass.card_look.z, 0.25, 2.0), 1.0, grass.card_look.z <= 0.0);
     let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
-        lod_height_scale(inst_packed.z);
+        lod_height_scale(inst_packed.z) * card_scale;
     let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
     let crush_dir = unpack2x16snorm(inst_packed.x);
     let crush_data = unpack2x16unorm(inst_packed.y);

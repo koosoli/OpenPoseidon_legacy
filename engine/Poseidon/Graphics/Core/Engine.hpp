@@ -1217,10 +1217,52 @@ class Engine : public IGraphicsEngine
         // JPEG opacity maps, whose compression noise around thin stems is a real
         // flicker source; raising this trims those partial texels away.
         float photoAlphaCutoff = 0.5f;
-        // Force one atlas layer: -1 = normal selection, 0 = the primary clump,
-        // 1..8 = a single local family. Purely a diagnostic -- it is how you find
-        // which source plate is responsible for a flicker.
+        // Force one atlas layer: -1 = normal selection, 0..31 = that atlas layer
+        // (0 = the primary clump / first map clutter class, 1..8 the local
+        // families on a loose-card world, up to 31 map clutter classes). Purely
+        // a diagnostic -- it is how you find which plate is responsible for a
+        // flicker.
         int photoForceLayer = -1;
+        // PHOTO CARD COVERAGE: the fraction of clutter-grid cells (1.11 m,
+        // WGR_GRASS_CARD_SPACING) that grow a card. Mean card spacing is
+        // grid / sqrt(coverage): 0.24 is one card every ~2.3 m, ~0.19 per m^2.
+        // With photoCoverageAuto the map's own clutter density is used wherever
+        // the geography bake answered (Arma worlds with a CfgSurfaces atlas), and
+        // this value is only the fallback where it did not (every OFP world with
+        // cards forced on, unmasked cells). Auto off: this multiplies everywhere,
+        // on top of the bake, so 1.0 = the map's own density. 0.24 is the owner's
+        // fallback for worlds whose clutter density is unknown.
+        float photoCoverage = 0.24f;
+        bool photoCoverageAuto = true;
+        // Photo card SIZE, 1.0 = the stock card. The stock card is 0.5-2.3 m tall
+        // and wider than tall; Arma's own clutter plants are ~0.3-0.9 m, so at the
+        // map's own density the stock card is two to three plants' worth of plate
+        // over every clutter cell -- most of what reads as a solid mat. Kept at 1.0
+        // until measured in a run; ~0.5 is the Arma-sized guess.
+        float photoCardScale = 1.0f;
+        // PROCEDURAL BLADE LOOK (near blades + mid ribbons; cards and the far
+        // proxy ignore these). Every default reproduces the pre-existing look, so
+        // nothing changes until a slider is moved.
+        // Blade-on-blade self shadow: root occlusion inside a tuft plus a sample
+        // of the cascade the near grass itself writes (needs castShadows for the
+        // cascade half). 0 = off.
+        float bladeSelfShadow = 0.0f;
+        // Contrast about the palette's own mid-tone. 1.0 = untouched.
+        float bladeContrast = 1.0f;
+        // Per-patch hue drift (warm straw <-> cool blue-green) on top of the
+        // luminance-only colourVariation. 0 = none.
+        float bladeHueVariation = 0.0f;
+        // Root-to-tip darkening. 0.70 = the long-standing mix(0.30, 1.0, t*t).
+        float bladeRootShade = 0.70f;
+        // CATCH-ALL WORLDS: a world whose terrain arrives as ONE material (a
+        // converted Enfusion world such as Reforger's Everon) has no per-surface
+        // clutter classification, so the whole map is grass and the stock
+        // density/height read as a knee-high uniform meadow everywhere. On such a
+        // world (GetGrassSurfaceCount() == 1) these two scale the master coverage
+        // and the blade height; both are 1.0-neutral elsewhere. Owner's number for
+        // an unknown clutter density is 0.24. WGR_GRASS_CATCHALL=0 disables.
+        float catchAllCoverage = 0.24f;
+        float catchAllHeight = 0.55f;
         // Saturation of the photographed cards about their own luma, separate
         // from the field-wide `saturation` so the plates can be matched to the
         // procedural grass rather than moved with it. 0.62 was the constant this

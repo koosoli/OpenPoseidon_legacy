@@ -3293,8 +3293,20 @@ bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat)
     bool cutout = false;
     try
     {
-        const std::string& family = Asset::Material::ParseRvMaterialFile(key).pixelShaderId;
-        cutout = family == "TreeAdv" || family == "TreeAdvTrans";
+        if (Asset::Material::IsEmatPath(key))
+        {
+            // Reforger: the section names an `.emat`, which ParseRvMaterialFile cannot
+            // read (it throws, and every Everon section landed in the catch below with
+            // `cutout=false`). Its own class answers the same question TreeAdv answers
+            // for RV -- see EmatUsesLeafCards for what counts and the measurement.
+            Asset::Material::EmatMaterial emat;
+            cutout = Asset::Material::ReadEmatFile(key, emat) && Asset::Material::EmatUsesLeafCards(emat);
+        }
+        else
+        {
+            const std::string& family = Asset::Material::ParseRvMaterialFile(key).pixelShaderId;
+            cutout = family == "TreeAdv" || family == "TreeAdvTrans";
+        }
     }
     catch (...)
     {
@@ -6451,7 +6463,34 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     }
 
     WgrGrassParams params{};
-    params.density = std::clamp(settings.density, 0.0f, 1.0f);
+    // CATCH-ALL WORLD: one terrain material means no per-surface clutter classification at all
+    // (TerrainWgpu::UploadGeography enables the single layer as a catch-all, 65536/65536 cells on
+    // Reforger's Everon), so the stock density and height read as a knee-high meadow over the
+    // whole map. Scale both by the conservative catch-all defaults; 1.0-neutral on every world
+    // with a real classification. WGR_GRASS_CATCHALL=0 disables the reduction for an A/B.
+    // Announced on transition: grep the game log for "Wgpu grass catch-all".
+    static const bool catchAllEnv = [] {
+        const char* v = std::getenv("WGR_GRASS_CATCHALL");
+        return v == nullptr || *v != '0';
+    }();
+    const int surfaceCount = _terrain ? _terrain->GrassSurfaceCount() : 0;
+    const bool catchAllWorld = catchAllEnv && surfaceCount == 1;
+    const float catchAllCoverage = catchAllWorld ? std::clamp(settings.catchAllCoverage, 0.02f, 1.0f) : 1.0f;
+    const float catchAllHeight = catchAllWorld ? std::clamp(settings.catchAllHeight, 0.10f, 1.0f) : 1.0f;
+    {
+        static int lastCatchAll = -1;
+        const int state = catchAllWorld ? 1 : 0;
+        if (state != lastCatchAll)
+        {
+            lastCatchAll = state;
+            LOG_INFO(Graphics,
+                     "Wgpu grass catch-all: {} ({} terrain material(s), WGR_GRASS_CATCHALL={}); coverage x{:.2f}, "
+                     "blade height x{:.2f}",
+                     catchAllWorld ? "ACTIVE -- single-material world, reduced defaults" : "off",
+                     surfaceCount, catchAllEnv ? 1 : 0, catchAllCoverage, catchAllHeight);
+        }
+    }
+    params.density = std::clamp(settings.density, 0.0f, 1.0f) * catchAllCoverage;
     const float densityBoost = std::clamp(settings.densityBoost, 1.0f, 64.0f);
     const float requestedNearRadius = std::clamp(settings.radius, 8.0f, 200.0f);
     // Spacing is the density control and NOTHING else. It used to be floored at
@@ -6464,7 +6503,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.spacing = std::clamp(settings.spacing / std::sqrt(densityBoost), 0.02f, 0.75f);
     params.near_radius = requestedNearRadius;
     params.enabled = settings.enabled ? 1.0f : 0.0f;
-    params.blade_height = std::clamp(settings.height, 0.10f, 3.00f);
+    params.blade_height = std::clamp(settings.height * catchAllHeight, 0.10f, 3.00f);
     params.wind_strength = std::clamp(settings.windStrength, 0.0f, 3.0f);
     params.wind_direction = settings.windDirection;
     // Match the simulation's actual weather vector (the same one used by
@@ -6562,8 +6601,10 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.photo_saturation = std::clamp(settings.photoSaturation, 0.0f, 2.0f);
     params.track_lifetime = trackLifetime;
     params.imprint_depth = std::clamp(settings.imprintDepth, 0.0f, 0.95f);
+    // 0..31: the map clutter atlas has 32 layers, and finding the one plate that flickers means
+    // being able to force any of them, not just the nine loose-card slots.
     params.photo_force_layer =
-        settings.photoForceLayer < 0 ? -1.0f : static_cast<float>(std::min(settings.photoForceLayer, 8));
+        settings.photoForceLayer < 0 ? -1.0f : static_cast<float>(std::min(settings.photoForceLayer, 31));
     for (size_t i = 0; i < std::size(params.photo_layer_weights); ++i)
     {
         params.photo_layer_weights[i] = std::clamp(settings.photoLayerWeights[i], 0.0f, 1.0f);
@@ -6583,6 +6624,16 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     }
     params.tint_procedural[3] = 1.0f;
     params.tint_photo[3] = 1.0f;
+    // Photo-card coverage (fraction of 1.11 m clutter cells that grow a card) and whether the
+    // map's own authored density wins where the bake answered. Cards only; blades ignore it.
+    params.card_coverage = std::clamp(settings.photoCoverage, 0.01f, 1.0f);
+    params.card_coverage_auto = settings.photoCoverageAuto ? 1.0f : 0.0f;
+    params.card_scale = std::clamp(settings.photoCardScale, 0.25f, 2.0f);
+    // Procedural blade look; defaults are the pre-existing shading (see GrassSettings).
+    params.blade_self_shadow = std::clamp(settings.bladeSelfShadow, 0.0f, 1.0f);
+    params.blade_contrast = std::clamp(settings.bladeContrast, 0.25f, 3.0f);
+    params.blade_hue_variation = std::clamp(settings.bladeHueVariation, 0.0f, 1.0f);
+    params.blade_root_shade = std::clamp(settings.bladeRootShade, 0.0f, 0.95f);
     params.weed_percent = std::clamp(settings.weedPercent, 0.0f, 1.0f);
     params.flower_percent = std::clamp(settings.flowerPercent, 0.0f, 1.0f - params.weed_percent);
     // Everon/Eden's legacy geography marks normal terrain as excluded. The
@@ -6707,6 +6758,36 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     }
     std::copy(_grassTracks.begin(), _grassTracks.end(), params.tracks);
     wgr_grass_set_params(_renderer, &params);
+    // PLACEMENT WITNESS. A capture pair that "looks the same" cannot tell an inert lever from a
+    // field the placement pass rejected outright (this pose sits on a hard-object cell, the
+    // world's geography excludes it, ...). The compacted counters say which: log them when the
+    // field first appears, whenever it empties or refills, and while it is empty every ~10 s.
+    // The renderer's own card-state line ("Wgpu grass cards: drawn=...") arrives through the same
+    // log from grass/mod.rs via lib.rs, so a run carries both halves of the proof.
+    {
+        static int lastPlaced = -1;      // -1 unknown, 0 empty, 1 placing
+        static float sinceReport = 0.0f;
+        GrassStatsOut stats;
+        if (params.enabled > 0.5f && GLandscape != nullptr && _terrain && GetGrassStats(stats))
+        {
+            const unsigned placed = stats.nearInstances + stats.midInstances + stats.farInstances;
+            const int state = placed > 0 ? 1 : 0;
+            sinceReport += dt;
+            const bool emptyReminder = state == 0 && sinceReport >= 10.0f;
+            if (state != lastPlaced || emptyReminder)
+            {
+                lastPlaced = state;
+                sinceReport = 0.0f;
+                LOG_INFO(Graphics,
+                         "Wgpu grass placement: near {}/{} mid {}/{} far {}/{} instances/candidates{}",
+                         stats.nearInstances, stats.nearCandidates, stats.midInstances, stats.midCandidates,
+                         stats.farInstances, stats.farCandidates,
+                         placed == 0 ? " -- NOTHING PLACED at this camera (geography exclusions, surface "
+                                       "selection, sea level or slope rejected every candidate; not a look setting)"
+                                     : "");
+            }
+        }
+    }
 }
 
 const Helicopter* EngineWgpu::LastGrassRotor() const
@@ -6943,17 +7024,67 @@ void EngineWgpu::PushRenderParams()
             return std::max(parsed, 0.0f);
         }();
         swayAmp *= envScale;
+        // Calm-wind FLOOR on the live-wind response. The response is speed / swayWindReference
+        // (6 m/s); WindModel's clear-sky mean is calmSpeed = 1.5 m/s, so on any overcast-0
+        // world the amplitude collapses to 0.25 x 0.35 m = 9 cm of tip travel at the 12 m
+        // reference height -- one or two pixels at a normal viewing distance. That is why the
+        // canopy reads as "no wind animation" on a clear day (owner report, Stratis pines) while
+        // the SAME shader term is plainly visible on a tall model under an overcast front. The
+        // gate (MapType -> kind / INST_CANOPY_*) was measured correct for Arma 3: every
+        // plants_f tree authors `map=tree` and every b_ bush `map=bush`, in the geometry LOD
+        // PropertyValue consults first.
+        //
+        // The floor is a fraction of the reference response, so at 0.5 a calm day still
+        // stirs the canopy at half the reference amplitude, and a stiffening wind takes over
+        // above 3 m/s exactly as before. Real trees are never perfectly still; a hard zero at
+        // calm was a modelling choice, not a measurement. WGR_TREE_SWAY_CALM_FLOOR=0 restores
+        // the pure-linear response for an A/B; values are clamped to [0, 2.5].
+        static const float calmFloor = []() -> float {
+            const char* v = std::getenv("WGR_TREE_SWAY_CALM_FLOOR");
+            if (v == nullptr || *v == '\0')
+                return 0.5f;
+            char* end = nullptr;
+            const float parsed = std::strtof(v, &end);
+            if (end == v)
+                return 0.5f;
+            LOG_INFO(Graphics, "VEG-SWAY: WGR_TREE_SWAY_CALM_FLOOR={} — calm-wind response floor {:.3f}", v,
+                     parsed);
+            return std::clamp(parsed, 0.0f, 2.5f);
+        }();
+        float windResponse = 1.0f;
+        float windSpeed = -1.0f; // -1 = live wind not consulted (authored steady breeze)
         if (_foliage.swayUseLiveWind && GWind.IsActive())
         {
             const WindSample& wind = GWind.Sample();
             const float reference = std::max(_foliage.swayWindReference, 0.1f);
-            swayAmp *= std::clamp(wind.speed / reference, 0.0f, 2.5f);
+            windResponse = std::clamp(std::max(wind.speed / reference, calmFloor), 0.0f, 2.5f);
+            windSpeed = wind.speed;
+            swayAmp *= windResponse;
             if (wind.speed > 0.001f)
             {
                 swayDirX = std::cos(wind.directionRad);
                 swayDirZ = std::sin(wind.directionRad);
             }
             swayGust = std::clamp(wind.gustFraction, -1.0f, 1.0f);
+        }
+        // WGR_SWAY_TRACE=1: log the RESOLVED amplitude the shaders will read, once a second.
+        // Sway is motion, so a still capture cannot show whether the term is live; this line
+        // can. amp is metres of tip travel at 12 m (frame.foliaged.x); amp == 0 means both
+        // vertex shaders branch the whole term out regardless of any model's gate.
+        static const bool swayTrace = std::getenv("WGR_SWAY_TRACE") != nullptr;
+        if (swayTrace)
+        {
+            static float lastLog = -1e9f;
+            const float now = Glob.time.toFloat();
+            if (now - lastLog >= 1.0f || now < lastLog)
+            {
+                lastLog = now;
+                LOG_INFO(Graphics,
+                         "VEG-SWAY: amp={:.4f} strength={:.3f} env={:.3f} windSpeed={:.2f} response={:.3f} "
+                         "floor={:.3f} gust={:.3f} dir=({:.2f},{:.2f}) liveWind={} windActive={}",
+                         swayAmp, _foliage.swayStrength, envScale, windSpeed, windResponse, calmFloor, swayGust,
+                         swayDirX, swayDirZ, _foliage.swayUseLiveWind ? 1 : 0, GWind.IsActive() ? 1 : 0);
+            }
         }
     }
     // The SAME clock the water surface and the cloud deck run on (Glob.time), and frozen by the

@@ -4318,11 +4318,22 @@ impl Renderer {
     fn grass_set_tuft(&mut self, width: u32, height: u32, rgba: &[u8]) {
         self.grass
             .set_tuft(&self.device, &self.queue, width, height, rgba);
+        self.drain_grass_log();
     }
 
     fn grass_set_tufts(&mut self, width: u32, height: u32, layers: u32, rgba: &[u8]) {
         self.grass
             .set_tufts(&self.device, &self.queue, width, height, layers, rgba);
+        self.drain_grass_log();
+    }
+
+    // The grass module has no LogSink of its own; it queues lines and they are
+    // forwarded here so the GAME log carries them (stderr is discarded by the
+    // launcher, which is how the card-spacing lever went unannounced).
+    fn drain_grass_log(&mut self) {
+        for line in self.grass.drain_log() {
+            self.log.log(log_level::INFO, &line);
+        }
     }
 
     fn grass_have_photo_clumps(&self) -> bool {
@@ -4352,6 +4363,7 @@ impl Renderer {
             params.enabled = 0.0;
         }
         self.grass.set_params(&self.queue, params);
+        self.drain_grass_log();
     }
 
     fn terrain_set_jitter_map(&mut self, width: u32, height: u32, offsets: &[i8]) {

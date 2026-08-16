@@ -87,6 +87,17 @@ struct GrassParams {
     // blades, ribbons and the far proxy; `tint_photo` covers photographed cards.
     tint_procedural: vec4<f32>,
     tint_photo: vec4<f32>,
+    // PHOTO CARD COVERAGE (see card_coverage_for).
+    //   .x = fraction of clutter-grid cells that grow a card, 0..1
+    //   .y = auto: 1 = authored cells keep the map's own density and .x is only
+    //        the fallback where the bake did not answer; 0 = .x applies everywhere
+    //   .z = card size multiplier (1 = the stock card; see photo_card_scale), .w spare
+    card_look: vec4<f32>,
+    // PROCEDURAL BLADES ONLY (near blades + mid ribbons; cards and the far proxy
+    // ignore this). Defaults reproduce the pre-existing look exactly.
+    //   .x = blade-on-blade self shadow (0 = off), .y = contrast (1 = untouched)
+    //   .z = per-patch hue variation (0 = none), .w = root darkening (0.70 = stock)
+    blade_look: vec4<f32>,
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
     // alpha test, so rasterising it was pure overdraw on a fill-bound path.
@@ -392,11 +403,26 @@ fn instance_layer_run(packed_w: u32) -> vec2<u32> {
     return vec2<u32>((packed_w >> 3u) & 31u, (packed_w >> 8u) & 7u);
 }
 
+// The "Photo grass mix" slider (renderer.z): the fraction of world-space patches
+// that draw from the FULL variety. 0 = ONE variety everywhere -- the surface's
+// first clutter class on a map-clutter world, the primary clump on a loose-card
+// world -- which is the owner's "a single variety stopped the flicker" setting,
+// now reachable on both paths. Before this it was only consulted on the legacy
+// global-mix path, so on every map that declares its own clutter runs (Takistan,
+// Stratis) the slider did nothing at all.
+fn photo_variety_mix() -> f32 {
+    return clamp(grass.renderer.z, 0.0, 1.0);
+}
+
 fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
     let forced = grass.photo_mix.x;
     if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
     // A surface whose clutter the map actually declares picks from its own run.
     if (run.y > 0u) {
+        // Patches outside the mix keep the run's first class: single variety.
+        if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= photo_variety_mix()) {
+            return min(run.x, 31u);
+        }
         let pick = u32(hash11(patch_cell + vec2<f32>(43.0, 11.0)) * f32(run.y));
         return min(run.x + min(pick, run.y - 1u), 31u);
     }
@@ -408,7 +434,7 @@ fn pick_photo_layer_run(patch_cell: vec2<f32>, run: vec2<u32>) -> u32 {
 fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
     let forced = grass.photo_mix.x;
     if (forced > -0.5) { return min(u32(forced + 0.5), 31u); }
-    if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= clamp(grass.renderer.z, 0.0, 1.0)) {
+    if (hash11(patch_cell + vec2<f32>(19.0, 71.0)) >= photo_variety_mix()) {
         return 0u;
     }
     var total = 0.0;
@@ -448,6 +474,45 @@ fn authored_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
     let cover = geo_clutter_coverage(geo);
     if (cover >= 0.999) { return false; }
     return hash_cell01(cell_id, 0x51a3f7c9u) >= cover;
+}
+
+// PHOTO CARD coverage for this cell, 0..1: the fraction of clutter-grid cells
+// (card_placement_spacing, 1.11 m) that grow a card. Blades ignore this.
+//
+// One card = one clutter object, so on a cell the map's own bake answered
+// (GEO_AUTHORED) the map's density is `authored_thinned` alone: a card per
+// clutter cell, thinned by the surface's authored probability -- which is what
+// Arma does with clutterGrid x probability. Where the bake did NOT answer (every
+// OFP world with cards forced on, any unmasked Arma cell) there is no authored
+// number, and card_look.x (0.24 by default) stands in. With auto off, card_look.x
+// multiplies everywhere, on top of the bake's own thinning, so 1.0 is the map's
+// density and 0.24 is a quarter of it.
+//
+// Coverage <-> spacing: mean card spacing = card grid / sqrt(coverage), so 0.24
+// on the 1.11 m grid is one card every ~2.3 m, ~0.19 cards per m^2.
+// Photo card size. The stock card is 0.5-2.3 m tall and wider than tall
+// (vs_grass_mid_tuft: 0.34-0.78 x blade_height 1.4 x 1.7 x family 0.62-1.24),
+// against Arma clutter plants of ~0.3-0.9 m -- two to three times the plant it
+// stands for, which at the map's own density is most of what reads as a solid
+// mat. 1.0 keeps the stock size so nothing changes until the slider moves; the
+// shadow shader applies the same factor.
+fn photo_card_scale() -> f32 {
+    let s = grass.card_look.z;
+    return select(clamp(s, 0.25, 2.0), 1.0, s <= 0.0);
+}
+
+fn card_coverage_for(geo: u32) -> f32 {
+    let manual = clamp(grass.card_look.x, 0.0, 1.0);
+    let authored = (geo & GEO_AUTHORED) != 0u;
+    return select(manual, 1.0, authored && grass.card_look.y > 0.5);
+}
+
+// Stable card thinning, salted apart from both the density seed and the
+// authored-coverage seed so the three thin the field independently.
+fn card_thinned(cell_id: vec2<i32>, geo: u32) -> bool {
+    let cover = card_coverage_for(geo);
+    if (cover >= 0.999) { return false; }
+    return hash_cell01(cell_id, 0x2e7d9b41u) >= cover;
 }
 
 // Coverage multiplier from a world-space noise map, so density is patchy rather
@@ -799,6 +864,8 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
+    // Cards only: the card coverage (map's own where authored, else card_look.x).
+    if (cards_on_near() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35) { return; }
     let normal = sample_normal(world_xz);
@@ -866,6 +933,8 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((geo & 0x80000000u) == 0u || (geo & GEO_EXCLUDE_HARD) != 0u) { return; }
     if (grass.debug_flags.x < 0.5 && (geo & GEO_EXCLUDE_SOFT) != 0u) { return; }
     if (authored_thinned(cell_id, geo)) { return; }
+    // Cards only: the card coverage (map's own where authored, else card_look.x).
+    if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }
     let y = sample_height(world_xz);
     if (y <= terrain.sea_level + 0.35 || sample_normal(world_xz).y < 0.70) { return; }
     let rel = vec3<f32>(world_xz.x, y, world_xz.y) - frame.cam_pos.xyz;
@@ -1163,7 +1232,7 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let family_height = select(select(select(0.78, 1.00, family == 1u), 1.24, family == 2u), 0.62, family == 3u);
     let family_width = select(select(select(0.72, 1.00, family == 1u), 1.20, family == 2u), 1.38, family == 3u);
     let height = mix(0.34, 0.78, height_seed) * grass.blade_height * 1.7 * family_height *
-        lod_height_scale(inst_packed.z);
+        lod_height_scale(inst_packed.z) * photo_card_scale();
     let half_width = height * mix(0.55, 0.85, hash11(inst.xz + 23.0)) * family_width;
 
     let crush_dir = unpack2x16snorm(inst_packed.x);
@@ -1260,11 +1329,47 @@ fn fs_grass(in: VsOut) -> @location(0) vec4<f32> {
     return grass_shade(in);
 }
 
+// PROCEDURAL BLADE look controls (grass.blade_look), near blades and mid ribbons.
+// Every default is the value that reproduces the pre-existing shading exactly,
+// so the field only changes when a slider is moved:
+//   .x self shadow 0   .y contrast 1.0   .z hue variation 0   .w root shade 0.70
+fn blade_root_shade() -> f32 { return clamp(grass.blade_look.w, 0.0, 0.95); }
+fn blade_contrast() -> f32 { return clamp(grass.blade_look.y, 0.25, 3.0); }
+fn blade_hue_variation() -> f32 { return clamp(grass.blade_look.z, 0.0, 1.0); }
+fn blade_self_shadow() -> f32 { return clamp(grass.blade_look.x, 0.0, 1.0); }
+
+// Blade-on-blade shadowing, the cheap way: (a) occlusion toward the root of the
+// tuft -- the lower a point on a blade, the more of its neighbours stand between
+// it and the sky and the sun -- and (b) the cascade the near grass itself writes
+// (draw_shadow submits the near ring), sampled at the blade like tuft_csm_shadow
+// does for cards. Contact range only, for the same reason as the cards: past the
+// first cascades a shadow texel is larger than a tuft and the sample degenerates
+// into a flat darkening of the distance. Returns (sun occlusion 0..1, ambient AO
+// multiplier 0..1); both are identity at strength 0.
+fn blade_self_shadow_terms(world_rel: vec3<f32>, normal: vec3<f32>, height_t: f32) -> vec2<f32> {
+    let strength = blade_self_shadow();
+    // Root occlusion: at full strength the base sees ~40% of the light a tip does.
+    let tuft_ao = mix(1.0 - 0.60 * strength, 1.0, smoothstep(0.0, 0.70, height_t));
+    // Derivatives outside the branch: they must come from uniform control flow.
+    let dwx = dpdx(world_rel);
+    let dwy = dpdy(world_rel);
+    var cast_shadow = 0.0;
+    if (strength > 0.001) {
+        let range_fade = 1.0 - smoothstep(30.0, 60.0, length(world_rel));
+        cast_shadow = shadow_strength(world_rel, normal, 1.0, dwx, dwy) * strength * range_fade;
+    }
+    // The tuft occlusion also dims the sun a little (blades in the middle of a
+    // clump are shaded by the ones in front), at half the ambient weight.
+    let sun_occlusion = max(cast_shadow, (1.0 - tuft_ao) * 0.5);
+    return vec2<f32>(sun_occlusion, tuft_ao);
+}
+
 fn grass_shade(in: VsOut) -> vec4<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
     let base = vec3<f32>(0.055, 0.16, 0.025);
     let tip = vec3<f32>(0.32, 0.43, 0.10);
-    let root = mix(0.30, 1.0, in.height_t * in.height_t);
+    // 0.70 root shade = the long-standing mix(0.30, 1.0, t*t).
+    let root = mix(1.0 - blade_root_shade(), 1.0, in.height_t * in.height_t);
     let field_tint = clump_noise(world.xz, 0.16, 0x5e3a91c7u);
     let blade_tint = mix(in.seed, field_tint, 0.55);
     let variation = mix(1.0, mix(0.78, 1.20, blade_tint), grass.debug_flags.z);
@@ -1293,8 +1398,19 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.
     let texture_amount = in.blade_uv.w * clamp(grass.shape_mix.w, 0.0, 1.0);
+    let graded = grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
+    // Per-patch hue drift on top of the luminance-only colour variation above:
+    // warm straw one way, cool blue-green the other, on a ~11 m field of its own
+    // so it lines up with neither the dry patches nor the density. 0 = none.
+    let hue_field = clump_noise(world.xz, 0.09, 0x7a1c3e5du);
+    let hue_tint = mix(vec3<f32>(1.10, 1.00, 0.78), vec3<f32>(0.88, 1.00, 1.12), hue_field);
+    let hued = graded * mix(vec3<f32>(1.0), hue_tint, blade_hue_variation());
+    // Contrast about the palette's own mid-tone (the root/tip pair at half height
+    // and mean root shade), so 1.0 is exactly the untouched palette. Applied
+    // before the tint, so the tint still does what it did.
+    let pivot = mix(base, tip, 0.5) * 0.65;
     let albedo = grass.tint_procedural.rgb *
-        grass_saturation(dry_patch(mix(procedural, textured, texture_amount), world.xz, in.height_t));
+        max((hued - pivot) * blade_contrast() + pivot, vec3<f32>(0.0));
     // Bend card normals toward an upright rounded-blade normal. This avoids
     // the flat dark-side look of a raw ribbon while preserving its silhouette.
     let n = normalize(mix(normalize(in.normal), vec3<f32>(0.0, 1.0, 0.0), 0.24));
@@ -1303,8 +1419,12 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     let wrap = max((dot(n, light_dir) + 0.35) / 1.35, 0.0);
     let terrain_shadow = terrain_sun_shadow(world.xz, world.y);
     let cloud_lit = cloud_sun_shadow(world.xz);
-    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) * (1.0 - terrain_shadow) * cloud_lit;
-    let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
+    // Blade-on-blade: (sun occlusion, ambient AO). Identity at strength 0.
+    let self_shadow = blade_self_shadow_terms(in.world_rel, n, in.height_t);
+    let direct = frame.sun_diffuse.rgb * mix(ndl, wrap, 0.35) *
+        (1.0 - max(terrain_shadow, self_shadow.x)) * cloud_lit;
+    let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz) *
+        self_shadow.y;
     let view_dir = normalize(-in.world_rel);
     let transmission = species_transmission(u32(in.blade_uv.z));
     let transmission_amount = pow(max(dot(view_dir, -light_dir), 0.0), 1.5) * (1.0 - ndl) *

@@ -175,10 +175,32 @@ struct GrassParams {
     card_spacing: f32,
     tint_procedural: [f32; 4],
     tint_photo: [f32; 4],
+    // Photo-card coverage block; mirrors `card_look` in grass.wgsl.
+    //   .x = card coverage 0..1 (fraction of clutter cells that grow a card)
+    //   .y = auto: 1 = authored cells keep the map's own density and .x is only
+    //        the fallback for unanswered cells; 0 = .x multiplies everywhere
+    //   .z = card size multiplier (1 = stock), .w spare
+    card_coverage: f32,
+    card_coverage_auto: f32,
+    card_scale: f32,
+    _card_look_pad: f32,
+    // Procedural-blade look block; mirrors `blade_look` in grass.wgsl. Near
+    // blades and mid ribbons only. Defaults are the pre-existing look.
+    //   .x = blade self shadow, .y = contrast, .z = hue variation, .w = root shade
+    blade_self_shadow: f32,
+    blade_contrast: f32,
+    blade_hue_variation: f32,
+    blade_root_shade: f32,
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
 }
+
+/// Owner's fallback for photo-card coverage where the map's own clutter density
+/// is unknown (every OFP world, and any Arma cell the mask bake left unanswered).
+/// A card then grows in roughly one clutter cell in four; on the 1.11 m grid that
+/// is ~0.19 cards/m^2, or one card every ~2.3 m on average.
+pub const CARD_COVERAGE_DEFAULT: f32 = 0.24;
 
 /// Mirrors `GrassInstance` in grass.wgsl and grass_shadow.wgsl (32 B). `packed`
 /// carries what the compute placement pass resolves once per blade -- currently
@@ -329,6 +351,26 @@ pub struct Grass {
     // the pipelines themselves are fixed at construction.
     #[allow(dead_code)]
     card_a2c: bool,
+    // Lines for the GAME log, drained by lib.rs (which owns the LogSink) after
+    // every set_params / set_tufts. eprintln! goes to a stderr the launcher
+    // discards, so a lever announced only there cannot be proven from a run.
+    pending_log: Vec<String>,
+    // The last card state announced, so set_params (called every frame) only
+    // writes a line when something actually changes.
+    announced_cards: Option<CardStateKey>,
+}
+
+/// What the card-state log line keys on. Any change re-announces.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct CardStateKey {
+    have_tuft: bool,
+    opt_in: bool,
+    cards_mid: bool,
+    cards_near: bool,
+    near_grid_dim: u32,
+    mid_grid_dim: u32,
+    coverage_centi: u32,
+    coverage_auto: bool,
 }
 
 impl Grass {
@@ -390,13 +432,15 @@ impl Grass {
             && std::env::var("WGR_GRASS_CARD_A2C")
                 .map(|v| v != "0")
                 .unwrap_or(true);
-        // Same channel water uses for its env-driven A/B notices; the game log
-        // gets the tuft state line from EngineWgpu::SetGrassSettings.
-        eprintln!(
-            "[wgr] grass cards: spacing {card_spacing:.2} m (WGR_GRASS_CARD_SPACING), a2c={} \
-             (WGR_GRASS_CARD_A2C, msaa {sample_count}x)",
+        // Announced through the GAME log (pending_log, drained by lib.rs on the
+        // first set_params): the stderr copy below is discarded by the launcher,
+        // and a lever that only announces there cannot be proven from a run.
+        let cards_line = format!(
+            "Wgpu grass cards: spacing {card_spacing:.2} m (WGR_GRASS_CARD_SPACING), a2c={} \
+             (WGR_GRASS_CARD_A2C, msaa {sample_count}x), coverage default {CARD_COVERAGE_DEFAULT:.2}",
             card_a2c as u8
         );
+        eprintln!("[wgr] {cards_line}");
         let params = GrassParams {
             density,
             // Dense 0.25 m grid; the 512x512 placement buffer supports this
@@ -478,6 +522,14 @@ impl Grass {
             card_spacing,
             tint_procedural: [1.0, 1.0, 1.0, 1.0],
             tint_photo: [1.0, 1.0, 1.0, 1.0],
+            card_coverage: CARD_COVERAGE_DEFAULT,
+            card_coverage_auto: 1.0,
+            card_scale: 1.0,
+            _card_look_pad: 0.0,
+            blade_self_shadow: 0.0,
+            blade_contrast: 1.0,
+            blade_hue_variation: 0.0,
+            blade_root_shade: 0.70,
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
         };
@@ -1152,6 +1204,8 @@ impl Grass {
             last_params: params,
             card_spacing,
             card_a2c,
+            pending_log: vec![cards_line],
+            announced_cards: None,
         }
     }
 
@@ -1160,6 +1214,53 @@ impl Grass {
     #[allow(dead_code)]
     pub fn card_a2c(&self) -> bool {
         self.card_a2c
+    }
+
+    /// Lines queued for the game log since the last drain. lib.rs calls this after
+    /// set_params / set_tufts and forwards each through the LogSink.
+    pub fn drain_log(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_log)
+    }
+
+    /// The card state as the shader will see it this frame; re-announced only on
+    /// change. `drawn` is what the draw() pipeline choice keys on, `near_grid` /
+    /// `mid_grid` are the dispatch sizes -- on the 1.11 m card grid a 41 m near
+    /// ring is an 80-cell grid, on the 0.16 m blade grid it is 520, so the line
+    /// says on its own whether the card spacing engaged.
+    fn announce_cards(&mut self, key: CardStateKey) {
+        if self.announced_cards == Some(key) {
+            return;
+        }
+        self.announced_cards = Some(key);
+        let near_spacing = if key.cards_near {
+            self.card_spacing
+        } else {
+            near_placement_spacing(
+                self.last_params.spacing,
+                self.last_params.clump_renderer != 0.0,
+                false,
+                self.card_spacing,
+            )
+        };
+        let mid_spacing = mid_placement_spacing(key.cards_mid, self.card_spacing);
+        self.pending_log.push(format!(
+            "Wgpu grass cards: drawn={} (atlas resident={}, opt-in={}), near ring {} at {:.2} m \
+             ({}x{} grid), mid ring {} at {:.2} m ({}x{} grid), a2c={}, card coverage {:.2} auto={}",
+            key.cards_mid as u8,
+            key.have_tuft as u8,
+            key.opt_in as u8,
+            if key.cards_near { "cards" } else { "blades" },
+            near_spacing,
+            key.near_grid_dim,
+            key.near_grid_dim,
+            if key.cards_mid { "cards" } else { "ribbons" },
+            mid_spacing,
+            key.mid_grid_dim,
+            key.mid_grid_dim,
+            self.card_a2c as u8,
+            key.coverage_centi as f32 / 100.0,
+            key.coverage_auto as u8,
+        ));
     }
 
     /// Photo-card placement spacing in metres (CARD_SPACING_DEFAULT or the env override).
@@ -1208,6 +1309,37 @@ impl Grass {
         }
         self.last_params.photo_layer_bounds = self.tuft_bounds;
         self.last_params.photo_layer_means = self.tuft_means;
+        // Which slices can flicker under the alpha test, answered at upload so
+        // nobody has to step through "Force one family" to find out by eye. A
+        // plate with a high partial-alpha fraction (JPEG opacity map) or any
+        // speckle fraction (one-texel stem fragments) is a flicker source; a
+        // hard-authored cutout reads ~0 on both.
+        let report = blade_atlas::tuft_alpha_edge_report(width, height, layers, rgba);
+        let mut worst: Vec<(usize, &blade_atlas::TuftAlphaEdgeReport)> = report
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.covered > 0)
+            .collect();
+        worst.sort_by(|a, b| {
+            (b.1.speckle_fraction + b.1.partial_fraction * 0.25)
+                .partial_cmp(&(a.1.speckle_fraction + a.1.partial_fraction * 0.25))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let listed: Vec<String> = worst
+            .iter()
+            .map(|(layer, r)| {
+                format!(
+                    "L{layer} partial {:.2} speckle {:.3} edge {:.2}",
+                    r.partial_fraction, r.speckle_fraction, r.edge_fraction
+                )
+            })
+            .collect();
+        self.pending_log.push(format!(
+            "Wgpu grass atlas alpha edges ({layers} layers {width}x{height}, worst first; partial = \
+             fraction of covered texels with intermediate alpha, speckle = isolated texels above \
+             the cutoff, edge = texels on the cutoff boundary): [{}]",
+            listed.join(", ")
+        ));
         // Uploads normally arrive after the game has pushed GrassSettings. Keep
         // that opt-in live immediately instead of requiring a UI slider nudge.
         //
@@ -1486,8 +1618,11 @@ impl Grass {
             mid_grid_dim: mid_grid_dim as f32,
             lod_blend: params.lod_blend.clamp(0.0, 40.0),
             photo_alpha_cutoff: params.photo_alpha_cutoff.clamp(0.05, 0.95),
-            // Anything outside 0..8 means "no override"; the shader tests < -0.5.
-            photo_force_layer: if (0.0..=8.0).contains(&params.photo_force_layer) {
+            // Anything outside 0..31 means "no override"; the shader tests < -0.5.
+            // 31, not 8: the map clutter atlas has 32 layers (TUFT_LAYERS), and
+            // finding the one plate that flickers means being able to force any of
+            // them, not just the nine loose-card slots.
+            photo_force_layer: if (0.0..=31.0).contains(&params.photo_force_layer) {
                 params.photo_force_layer.round()
             } else {
                 -1.0
@@ -1502,6 +1637,35 @@ impl Grass {
             card_spacing: self.card_spacing,
             tint_procedural: clamp_tint(params.tint_procedural),
             tint_photo: clamp_tint(params.tint_photo),
+            // A zeroed struct (a caller that predates the field) must not delete
+            // the cards: non-finite or non-positive falls back to the default.
+            card_coverage: if params.card_coverage.is_finite() && params.card_coverage > 0.0 {
+                params.card_coverage.clamp(0.01, 1.0)
+            } else {
+                CARD_COVERAGE_DEFAULT
+            },
+            card_coverage_auto: if params.card_coverage_auto != 0.0 {
+                1.0
+            } else {
+                0.0
+            },
+            // 0 (a zeroed / older caller) reads as the stock size, not as no card.
+            card_scale: if params.card_scale > 0.0 {
+                params.card_scale.clamp(0.25, 2.0)
+            } else {
+                1.0
+            },
+            _card_look_pad: 0.0,
+            blade_self_shadow: params.blade_self_shadow.clamp(0.0, 1.0),
+            // 0 contrast would collapse the palette to its pivot; a zeroed struct
+            // (old caller) reads as "untouched" instead.
+            blade_contrast: if params.blade_contrast > 0.0 {
+                params.blade_contrast.clamp(0.25, 3.0)
+            } else {
+                1.0
+            },
+            blade_hue_variation: params.blade_hue_variation.clamp(0.0, 1.0),
+            blade_root_shade: params.blade_root_shade.clamp(0.0, 0.95),
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,
@@ -1518,6 +1682,16 @@ impl Grass {
         // uniform's use_photo_tuft was derived from the same pair above.
         self.tuft_enabled = cards_mid;
         queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&params));
+        self.announce_cards(CardStateKey {
+            have_tuft: self.have_tuft,
+            opt_in: self.last_raw_params.use_photo_tuft != 0.0,
+            cards_mid,
+            cards_near,
+            near_grid_dim,
+            mid_grid_dim,
+            coverage_centi: (params.card_coverage * 100.0).round() as u32,
+            coverage_auto: params.card_coverage_auto != 0.0,
+        });
     }
 
     /// Pixels per radian of the current view: `(viewport_height / 2) * proj[1][1]`.
@@ -2219,6 +2393,158 @@ mod tests {
             assert!(!grass.tuft_enabled);
             assert_eq!(grass.near_grid_dim, blade_grid);
         }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    // The announcement path: the card state reaches the GAME log (via lib.rs
+    // draining pending_log), and only on change -- a per-frame set_params must
+    // not write a line per frame.
+    #[test]
+    fn card_state_is_announced_through_the_pending_log_on_change_only() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let camera_layout = crate::gfx3d::camera_layout_for_tests(&device);
+        let shadow_layout = shadow_pass_layout(&device);
+        let mut composer = crate::shaders::build_composer();
+        let mut grass = Grass::new(
+            &device,
+            &queue,
+            &camera_layout,
+            &shadow_layout,
+            crate::HDR_FORMAT,
+            4,
+            &mut composer,
+        );
+        // Construction queues the config line (spacing / a2c / coverage default).
+        let boot = grass.drain_log();
+        assert_eq!(boot.len(), 1, "{boot:?}");
+        assert!(boot[0].starts_with("Wgpu grass cards: spacing 1.11 m"));
+        assert!(boot[0].contains("coverage default 0.24"));
+        // First push: cards requested, no atlas -> drawn=0, blade grid.
+        grass.set_params(&queue, params(0.05, 41.0, 1.0));
+        let first = grass.drain_log();
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert!(
+            first[0].contains("drawn=0 (atlas resident=0, opt-in=1)"),
+            "{}",
+            first[0]
+        );
+        assert!(
+            first[0].contains("near ring blades at 0.16 m (520x520 grid)"),
+            "{}",
+            first[0]
+        );
+        assert!(
+            first[0].contains("card coverage 0.24 auto=0"),
+            "{}",
+            first[0]
+        );
+        // Same params again: silence.
+        grass.set_params(&queue, params(0.05, 41.0, 1.0));
+        assert!(grass.drain_log().is_empty());
+        // Atlas arrives: re-announced with cards drawn on the card grid, plus the
+        // per-layer alpha-edge report.
+        let rgba = vec![255u8; 4 * 4 * 4];
+        grass.set_tufts(&device, &queue, 4, 4, 1, &rgba);
+        let after = grass.drain_log();
+        assert!(
+            after
+                .iter()
+                .any(|l| l.contains("drawn=1 (atlas resident=1, opt-in=1)")
+                    && l.contains("near ring cards at 1.11 m (80x80 grid)")
+                    && l.contains("mid ring cards at 1.11 m")),
+            "{after:?}"
+        );
+        assert!(
+            after
+                .iter()
+                .any(|l| l.starts_with("Wgpu grass atlas alpha edges (1 layers 4x4")),
+            "{after:?}"
+        );
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+
+    // Owner: photo cards "far too dense"; default coverage 0.24 where the map's
+    // density is unknown, the map's own where it is; the "photo grass mix"
+    // slider must reach BOTH selection paths (it only reached the loose-card
+    // one, which is why it "does not work anymore" on Takistan); and the
+    // procedural look controls must be identity at their defaults.
+    #[test]
+    fn card_coverage_mix_and_blade_look_are_wired_in_both_shaders() {
+        // Coverage: applied to cards in both placement passes, keyed on the
+        // authored bit, with the manual value as the fallback.
+        assert_eq!(SHADER.matches("card_thinned(cell_id, geo)").count(), 2);
+        assert!(SHADER.contains("if (cards_on_near() && card_thinned(cell_id, geo)) { return; }"));
+        assert!(SHADER.contains("if (cards_on_mid() && card_thinned(cell_id, geo)) { return; }"));
+        assert!(
+            SHADER.contains("return select(manual, 1.0, authored && grass.card_look.y > 0.5);")
+        );
+        assert_eq!(CARD_COVERAGE_DEFAULT, 0.24);
+        // Mix: the per-surface run path consults it too, colour AND shadow.
+        for (name, src) in [("grass.wgsl", SHADER), ("grass_shadow.wgsl", SHADOW)] {
+            let start = src.find("fn pick_photo_layer_run(").unwrap();
+            let end = src[start..].find("fn pick_photo_layer(").unwrap() + start;
+            let body = &src[start..end];
+            assert!(
+                body.contains("return min(run.x, 31u);"),
+                "{name}: single-variety branch missing"
+            );
+            assert!(
+                body.contains("hash11(patch_cell + vec2<f32>(19.0, 71.0))"),
+                "{name}"
+            );
+        }
+        // Force layer reaches every atlas layer, not just the nine loose slots.
+        assert!(
+            include_str!("mod.rs").contains("(0.0..=31.0).contains(&params.photo_force_layer)")
+        );
+        // Blade look: defaults are the pre-existing shading.
+        assert!(
+            SHADER.contains(
+                "let root = mix(1.0 - blade_root_shade(), 1.0, in.height_t * in.height_t);"
+            )
+        );
+        assert!(SHADER.contains("fn blade_self_shadow_terms("));
+        let mut p: WgrGrassParams = bytemuck::Zeroable::zeroed();
+        p.blade_root_shade = 0.70;
+        // A zeroed caller (or a saved struct that predates the fields) must read
+        // as untouched, not as "contrast 0 / coverage 0".
+        assert_eq!(p.card_coverage, 0.0);
+        assert_eq!(p.blade_contrast, 0.0);
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let camera_layout = crate::gfx3d::camera_layout_for_tests(&device);
+        let shadow_layout = shadow_pass_layout(&device);
+        let mut composer = crate::shaders::build_composer();
+        let mut grass = Grass::new(
+            &device,
+            &queue,
+            &camera_layout,
+            &shadow_layout,
+            crate::HDR_FORMAT,
+            1,
+            &mut composer,
+        );
+        let mut raw = params(0.05, 41.0, 0.0);
+        raw.blade_root_shade = 0.70;
+        grass.set_params(&queue, raw);
+        assert_eq!(grass.last_params.card_coverage, CARD_COVERAGE_DEFAULT);
+        assert_eq!(grass.last_params.blade_contrast, 1.0);
+        assert_eq!(grass.last_params.blade_self_shadow, 0.0);
+        assert_eq!(grass.last_params.blade_hue_variation, 0.0);
+        assert_eq!(grass.last_params.blade_root_shade, 0.70);
+        // Explicit values pass through, clamped.
+        raw.card_coverage = 0.5;
+        raw.card_coverage_auto = 1.0;
+        raw.blade_contrast = 9.0;
+        raw.blade_self_shadow = 0.7;
+        grass.set_params(&queue, raw);
+        assert_eq!(grass.last_params.card_coverage, 0.5);
+        assert_eq!(grass.last_params.card_coverage_auto, 1.0);
+        assert_eq!(grass.last_params.blade_contrast, 3.0);
+        assert_eq!(grass.last_params.blade_self_shadow, 0.7);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 }

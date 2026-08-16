@@ -477,6 +477,103 @@ pub fn tuft_bounds(width: u32, height: u32, layers: u32, rgba: &[u8]) -> [[f32; 
     out
 }
 
+/// Per-layer alpha-edge health of a photo atlas: the numbers that say whether a
+/// slice can flicker under the alpha test BEFORE anyone has to step through the
+/// "Force one family" combo to find it by eye.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TuftAlphaEdgeReport {
+    /// Texels with any coverage at all (alpha >= TRIM_ALPHA).
+    pub covered: u32,
+    /// Fraction of covered texels whose alpha is PARTIAL (between TRIM_ALPHA and
+    /// 248). A hard-authored cutout is ~0; a JPEG-derived opacity map is high,
+    /// and every partial texel near the 0.5 cutoff is one the mip chain and the
+    /// wind can push across it from one frame to the next.
+    pub partial_fraction: f32,
+    /// Fraction of texels ABOVE the cutoff whose four neighbours are all below
+    /// it: isolated speckles. Each is a stem fragment one texel wide, which no
+    /// minification keeps stable -- the direct predictor of "this variety
+    /// flickers, that one does not".
+    pub speckle_fraction: f32,
+    /// Fraction of covered texels lying on a cutoff edge (above with a neighbour
+    /// below, or the reverse). Higher = more silhouette per unit of plant, i.e.
+    /// thinner stems and more edge to shimmer.
+    pub edge_fraction: f32,
+}
+
+/// Which slices have bad alpha edges. Runs once per atlas upload, so it walks
+/// every texel; the cost is a few ms on a 32 x 512^2 atlas.
+pub fn tuft_alpha_edge_report(
+    width: u32,
+    height: u32,
+    layers: u32,
+    rgba: &[u8],
+) -> Vec<TuftAlphaEdgeReport> {
+    const CUTOFF: u8 = 128;
+    let mut out = Vec::new();
+    if width == 0 || height == 0 {
+        return out;
+    }
+    let (w, h) = (width as usize, height as usize);
+    let layer_bytes = w * h * 4;
+    let alpha_at = |data: &[u8], x: usize, y: usize| -> u8 { data[(y * w + x) * 4 + 3] };
+    for layer in 0..(layers as usize).min(TUFT_LAYERS) {
+        let Some(data) = rgba.get(layer * layer_bytes..(layer + 1) * layer_bytes) else {
+            break;
+        };
+        let (mut covered, mut partial, mut above, mut speckle, mut edge) =
+            (0u32, 0u32, 0u32, 0u32, 0u32);
+        for y in 0..h {
+            for x in 0..w {
+                let a = alpha_at(data, x, y);
+                if a < TRIM_ALPHA {
+                    continue;
+                }
+                covered += 1;
+                if a < 248 {
+                    partial += 1;
+                }
+                let over = a >= CUTOFF;
+                // Four-neighbourhood against the cutoff; the border counts as
+                // "below", which is what the sampler's clamp-to-edge sees.
+                let n = [
+                    if x > 0 { alpha_at(data, x - 1, y) } else { 0 },
+                    if x + 1 < w {
+                        alpha_at(data, x + 1, y)
+                    } else {
+                        0
+                    },
+                    if y > 0 { alpha_at(data, x, y - 1) } else { 0 },
+                    if y + 1 < h {
+                        alpha_at(data, x, y + 1)
+                    } else {
+                        0
+                    },
+                ];
+                let neighbours_over = n.iter().filter(|&&v| v >= CUTOFF).count();
+                if over {
+                    above += 1;
+                    if neighbours_over == 0 {
+                        speckle += 1;
+                    }
+                    if neighbours_over < 4 {
+                        edge += 1;
+                    }
+                } else if neighbours_over > 0 {
+                    edge += 1;
+                }
+            }
+        }
+        let frac = |n: u32, d: u32| if d == 0 { 0.0 } else { n as f32 / d as f32 };
+        out.push(TuftAlphaEdgeReport {
+            covered,
+            partial_fraction: frac(partial, covered),
+            speckle_fraction: frac(speckle, above),
+            edge_fraction: frac(edge, covered),
+        });
+    }
+    out
+}
+
 /// A 1x1 opaque stand-in so the bind group is always complete before the game
 /// has loaded a tuft (or if the PAA is missing). The shader keys off a params
 /// flag, not this texture's contents.
@@ -833,6 +930,56 @@ mod tests {
             (after - base).abs() < 0.15,
             "coverage drifted {base} -> {after}"
         );
+    }
+
+    // The per-slice flicker predictor: a hard-authored cutout reads ~0 partial
+    // and 0 speckle; a JPEG-style noisy opacity map with one-texel stem
+    // fragments reads high on both. This is what the "which variety flickers"
+    // log line ranks by, so the two must separate cleanly.
+    #[test]
+    fn alpha_edge_report_separates_hard_cutouts_from_speckled_opacity_maps() {
+        let (w, h) = (16u32, 16u32);
+        // Layer 0: a solid 8x8 opaque block, hard alpha. Layer 1: the same block
+        // with soft (partial) alpha throughout, plus isolated one-texel speckles
+        // in the transparent margin.
+        let mut rgba = vec![0u8; (w * h * 4 * 2) as usize];
+        let layer_bytes = (w * h * 4) as usize;
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let inside = (4..12).contains(&x) && (4..12).contains(&y);
+                if inside {
+                    rgba[i + 3] = 255;
+                    rgba[layer_bytes + i + 3] = 160; // partial but above the cutoff
+                }
+            }
+        }
+        for (x, y) in [(1u32, 1u32), (14, 1), (1, 14), (14, 14)] {
+            rgba[layer_bytes + ((y * w + x) * 4) as usize + 3] = 200; // speckles
+        }
+        let report = tuft_alpha_edge_report(w, h, 2, &rgba);
+        assert_eq!(report.len(), 2);
+        let hard = report[0];
+        let soft = report[1];
+        assert_eq!(hard.covered, 64);
+        assert_eq!(hard.partial_fraction, 0.0);
+        assert_eq!(hard.speckle_fraction, 0.0);
+        // 8x8 block: the 28 perimeter texels are edges.
+        assert!(
+            (hard.edge_fraction - 28.0 / 64.0).abs() < 1e-6,
+            "{}",
+            hard.edge_fraction
+        );
+        assert_eq!(soft.covered, 68);
+        assert!(soft.partial_fraction > 0.99, "{}", soft.partial_fraction);
+        assert!(
+            (soft.speckle_fraction - 4.0 / 68.0).abs() < 1e-6,
+            "{}",
+            soft.speckle_fraction
+        );
+        // Fully transparent input: no coverage, no division by zero.
+        let empty = tuft_alpha_edge_report(w, h, 1, &vec![0u8; layer_bytes]);
+        assert_eq!(empty[0], TuftAlphaEdgeReport::default());
     }
 
     // A flower layer must actually be brighter near the tip than a grass layer,

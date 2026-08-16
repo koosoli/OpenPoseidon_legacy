@@ -2751,6 +2751,28 @@ void DrawAspectTab()
     }
 }
 
+// "Reset to defaults" for any settings struct that has a default-constructed instance to copy
+// from -- which is every settings tab. Owner request (2026-08-17): the buttons that existed sat at
+// the bottom of tabs long enough to need scrolling (Amb. Occlusion, Interior Sky) or were missing
+// (Material Debug, Culling, auto exposure), and were named differently on every tab. This one goes
+// at the TOP of each tab under the same label. The struct's own initialisers are the source of
+// truth, so a new field is covered the moment it exists. Returns true when pressed; the caller's
+// existing `changed` path pushes the struct.
+template <typename T>
+bool ResetToDefaultsButton(T& settings, const char* label = "Reset to defaults",
+                           const char* note = "(every control on this tab back to the engine's built-in defaults)")
+{
+    const bool pressed = ImGui::Button(label);
+    if (pressed)
+        settings = T{};
+    if (note != nullptr && *note != 0)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", note);
+    }
+    return pressed;
+}
+
 void DrawGrassTab()
 {
     if (!GEngine)
@@ -2805,6 +2827,7 @@ void DrawGrassTab()
     Engine::GrassSettings grass = GEngine->GetGrassSettings();
     bool changed = false;
 
+    changed |= ResetToDefaultsButton(grass);
     if (ImGui::Button("Copy grass settings"))
     {
         char copy[4096];
@@ -2824,7 +2847,9 @@ void DrawGrassTab()
                  "nearDensity=%.3f; midDensity=%.3f; farDensity=%.3f\n"
                  "tintProcedural=%.2f/%.2f/%.2f; tintPhoto=%.2f/%.2f/%.2f\n"
                  "photoLayerWeights=%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f/%.2f\n"
-                 "liveWind=%d; windStrength=%.3f; windDirection=%.3f",
+                 "liveWind=%d; windStrength=%.3f; windDirection=%.3f\n"
+                 "photoCoverage=%.2f (auto=%d); bladeSelfShadow=%.2f; bladeContrast=%.2f; bladeHueVariation=%.2f; "
+                 "bladeRootShade=%.2f; catchAllCoverage=%.2f; catchAllHeight=%.2f; photoCardScale=%.2f",
                  grass.enabled, grass.midPhotoTuft, grass.clumpRenderer, grass.castShadows, grass.applyFog,
                  grass.ignoreGeographyExclusions, grass.density, grass.densityBoost, grass.spacing, grass.radius,
                  grass.midRadius, grass.farRadius, grass.densityNoiseScale, grass.densityNoiseStrength, grass.height,
@@ -2839,7 +2864,9 @@ void DrawGrassTab()
                  grass.tintPhoto[2], grass.photoLayerWeights[0], grass.photoLayerWeights[1], grass.photoLayerWeights[2],
                  grass.photoLayerWeights[3], grass.photoLayerWeights[4], grass.photoLayerWeights[5],
                  grass.photoLayerWeights[6], grass.photoLayerWeights[7], grass.useLiveWind, grass.windStrength,
-                 grass.windDirection);
+                 grass.windDirection, grass.photoCoverage, grass.photoCoverageAuto ? 1 : 0, grass.bladeSelfShadow,
+                 grass.bladeContrast, grass.bladeHueVariation, grass.bladeRootShade, grass.catchAllCoverage,
+                 grass.catchAllHeight, grass.photoCardScale);
         ImGui::SetClipboardText(copy);
     }
     ImGui::SameLine();
@@ -2961,10 +2988,10 @@ void DrawGrassTab()
     ImGui::TextDisabled("Retained fraction of procedural candidate blades, applied to every LOD. 1.00 uses every "
                         "candidate.");
     changed |= ImGui::SliderFloat("Coverage: near", &grass.nearDensity, 0.02f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Multiplies the master coverage for the near ring only. This is the most effective "
-                        "performance control on the photographed-card path: a card is roughly 1.8 m wide and they "
-                        "are placed every 0.16 m, so the near ring rasterises on the order of twenty overlapping "
-                        "card layers per square metre of ground. Most of them are hidden.");
+    ImGui::TextDisabled("Multiplies the master coverage for the near ring only. Procedural blades: the near clump "
+                        "count. Photo cards: a plain multiplier on top of the card coverage below (cards place on "
+                        "their own 1.11 m clutter grid now, not the 0.16 m blade grid, so this is no longer the "
+                        "overdraw lever it was).");
     changed |= ImGui::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 1.0f, "%.2f");
     changed |= ImGui::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
     ImGui::TextDisabled("0.95 was the mid ring's former built-in coverage, so these defaults change nothing on "
@@ -3050,6 +3077,25 @@ void DrawGrassTab()
                         "surface even when photo layers are installed -- the quickest way to tell whether a look "
                         "problem is the texture or the geometry. No effect when no photo atlas is loaded.");
 
+    ImGui::Separator();
+    ImGui::TextUnformatted("Blade shading (procedural blades and mid ribbons only -- cards ignore these)");
+    ImGui::TextDisabled("Every default here is the look before these existed; nothing moves until a slider does.");
+    changed |= ImGui::SliderFloat("Blade self shadow", &grass.bladeSelfShadow, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Blade-on-blade shadowing, the cheap way: occlusion toward the root of a tuft (the base of "
+                        "a blade sees ~40%% of the sky a tip does at full strength) plus a sample of the cascade "
+                        "the near grass itself writes, so a clump in front shades the one behind. The cascade half "
+                        "needs 'Cast close grass shadows' on and fades out past 30-60 m, where a shadow texel is "
+                        "bigger than a tuft. 0 = off (the old look).");
+    changed |= ImGui::SliderFloat("Blade contrast", &grass.bladeContrast, 0.25f, 3.0f, "%.2f");
+    ImGui::TextDisabled("Contrast about the palette's own mid-tone, before the tint and the lighting. 1.00 = the "
+                        "untouched palette; higher separates dark roots from bright tips, lower flattens the field.");
+    changed |= ImGui::SliderFloat("Blade hue variation", &grass.bladeHueVariation, 0.0f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Per-patch hue drift (~11 m field of its own): warm straw one way, cool blue-green the "
+                        "other, on top of the luminance-only 'Colour variation' below. 0 = none.");
+    changed |= ImGui::SliderFloat("Blade root shade", &grass.bladeRootShade, 0.0f, 0.95f, "%.2f");
+    ImGui::TextDisabled("How much darker a blade is at its root than at its tip. 0.70 is the long-standing value; "
+                        "0 = a flat blade.");
+
     // ------------------------------------------------------------------------
     // Everything below the header up to the next separator applies ONLY while
     // photographed clump cards are on. They were previously mixed in with the
@@ -3085,14 +3131,13 @@ void DrawGrassTab()
         int src = grass.clutterSource < 0 ? 0 : (grass.clutterSource > 2 ? 2 : grass.clutterSource);
         if (ImGui::Combo("Grass source", &src, sources, 3))
         {
-            // Cards cost what blades do not (~1.8 m wide, placed every 0.16 m): move near
-            // coverage to a sane point for the mode being entered, only while it still sits at
-            // the other mode's default so a deliberate setting is never overwritten.
+            // No near-coverage hack on the switch any more: cards place on their own 1.11 m
+            // clutter grid (fb3d83b) and have their own coverage control below, so a 0.15 near
+            // coverage would now put the near ring at 0.15 against the mid ring's 0.95. A stale
+            // 0.15 left by the old hack is lifted back to the default on the way through.
             const bool wasCards = grass.clutterSource == 2 || (grass.clutterSource == 0 && mapClutter);
             const bool nowCards = src == 2 || (src == 0 && mapClutter);
-            if (nowCards && !wasCards && grass.nearDensity == 1.0f)
-                grass.nearDensity = 0.15f;
-            else if (!nowCards && wasCards && (grass.nearDensity == 0.15f || grass.nearDensity == 0.40f))
+            if (wasCards != nowCards && (grass.nearDensity == 0.15f || grass.nearDensity == 0.40f))
                 grass.nearDensity = 1.0f;
             grass.clutterSource = src;
             changed = true;
@@ -3141,11 +3186,44 @@ void DrawGrassTab()
                         "those partial texels away. The shadow pass uses the same value.");
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Photo card coverage (density of the card path)");
+    changed |= ImGui::Checkbox("Auto: the map's own clutter density where the map declares one",
+                               &grass.photoCoverageAuto);
+    changed |= ImGui::SliderFloat("Photo card coverage", &grass.photoCoverage, 0.01f, 1.0f, "%.2f");
+    {
+        // Mirrors card_coverage_for / card_placement_spacing in grass.wgsl: cards place on a
+        // 1.11 m clutter grid (WGR_GRASS_CARD_SPACING) and this is the fraction of those cells
+        // that grow one, so mean spacing = grid / sqrt(coverage) and density = coverage / grid^2.
+        const float grid = 1.11f;
+        const float c = std::clamp(grass.photoCoverage, 0.01f, 1.0f);
+        ImGui::TextDisabled("Coverage <-> spacing: cards sit on the map's 1.11 m clutter grid; %.2f means a card in "
+                            "one cell in %.1f, i.e. one card every %.2f m on average, %.2f cards per square metre "
+                            "(1.00 = every cell, the map's own maximum).",
+                            c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
+    }
+    changed |= ImGui::SliderFloat("Photo card size", &grass.photoCardScale, 0.25f, 2.0f, "%.2fx");
+    ImGui::TextDisabled("Size of each card. 1.00 = the stock card, 0.5-2.3 m tall and wider than tall; Arma's own "
+                        "clutter plants are ~0.3-0.9 m, so at the map's own density the stock card is two to three "
+                        "plants' worth of plate over every clutter cell -- try ~0.5 if the field still reads as a "
+                        "solid mat at the map's density. Shadows follow.");
+    ImGui::TextDisabled("Auto ON: wherever the map's geography bake answered (Arma worlds with a CfgSurfaces "
+                        "atlas: Takistan, Stratis...) the map's OWN clutter density is used -- one card per "
+                        "clutter cell thinned by the surface's authored probability, which is what Arma draws -- "
+                        "and this slider is only the fallback where nothing is known (every OFP world with cards "
+                        "forced on). Auto OFF: the slider multiplies everywhere, on top of the map's thinning, so "
+                        "1.00 is the map's density and 0.24 is a quarter of it. 0.24 is the owner's default for "
+                        "an unknown clutter density.");
+
+    ImGui::Separator();
     ImGui::TextUnformatted("Photographed family mix");
     changed |= ImGui::SliderFloat("Photo grass mix", &grass.photoTuftMix, 0.0f, 1.0f, "%.0f%%");
     changed |= ImGui::SliderFloat("Photo grass patch size (m)", &grass.photoTuftPatchSize, 4.0f, 80.0f, "%.0f");
-    ImGui::TextDisabled("0%% keeps the primary A3 clump everywhere. Above that, each world-space patch draws a "
-                        "family from the weights below.");
+    ImGui::TextDisabled("Fraction of world-space patches that draw from the FULL variety. 0%% = ONE variety "
+                        "everywhere: on a map-clutter world each surface's first clutter class, on a loose-card "
+                        "world the primary clump -- the 'single variety' setting that stopped the flicker. 100%% = "
+                        "every patch picks freely (a map surface's own classes, or the weighted families below). "
+                        "It used to be consulted only on the loose-card path, so on Takistan and Stratis it did "
+                        "nothing; both paths honour it now, shadows included.");
     // Isolating one plate is the fastest way to identify a flickering source, so
     // the override comes before the weights rather than being buried under them.
     {
@@ -3182,6 +3260,19 @@ void DrawGrassTab()
         ImGui::TextDisabled("Draws every photographed clump from a single atlas layer, ignoring the mix and the "
                             "weights. Step through the families to find which plate flickers, then zero its "
                             "weight below to remove just that one.");
+        // The map clutter atlas has up to 32 layers behind ONE named family ("map clutter (per
+        // surface)"), so the combo cannot reach them; this slider can. -1 = off. The game log's
+        // "Wgpu grass atlas alpha edges" line (worst plates first) says which layer to try.
+        int forcedLayer = std::clamp(grass.photoForceLayer, -1, 31);
+        if (ImGui::SliderInt("Force atlas layer (-1 = off, 0..31)", &forcedLayer, -1, 31))
+        {
+            grass.photoForceLayer = forcedLayer;
+            changed = true;
+        }
+        ImGui::TextDisabled("Same override by atlas layer number, for map-clutter worlds whose classes are not "
+                            "listed above (Takistan: 26 layers). Which layer flickers is measured at upload: grep "
+                            "the game log for 'Wgpu grass atlas alpha edges' -- plates are listed worst first by "
+                            "speckle (isolated one-texel stem fragments) and partial-alpha fraction.");
         // Weights cover layers 1..8; layer 0 is reached through the mix slider.
         for (int i = 1; i < familyCount; ++i)
         {
@@ -3297,7 +3388,32 @@ void DrawGrassTab()
     ImGui::TextDisabled("Wind: travelling direction field plus local gusts; roots stay pinned.");
 
     ImGui::Separator();
-    if (ImGui::Button("Reset ultra dense"))
+    ImGui::TextUnformatted("Catch-all worlds (one terrain material, no clutter classification)");
+    {
+        // Mirrors EngineWgpu::SetGrassSettings: a world whose terrain is ONE material (a converted
+        // Enfusion world such as Reforger's Everon) has no per-surface clutter answer, so the whole
+        // map is grass and the stock density/height read as a knee-high meadow everywhere. These
+        // scale coverage and height there only. Proof in the game log: "Wgpu grass catch-all".
+        const int materials = GEngine->GetGrassSurfaceCount();
+        if (materials == 1)
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                               "ACTIVE on this world: 1 terrain material -> coverage x%.2f, blade height x%.2f "
+                               "(WGR_GRASS_CATCHALL=0 disables)",
+                               grass.catchAllCoverage, grass.catchAllHeight);
+        else
+            ImGui::TextDisabled("Not active here: this world has %d terrain materials, so its own surface "
+                                "classification decides where grass grows. The two values below are 1.0-neutral.",
+                                materials);
+    }
+    changed |= ImGui::SliderFloat("Catch-all coverage", &grass.catchAllCoverage, 0.02f, 1.0f, "%.2f");
+    ImGui::TextDisabled("Multiplies the master coverage on a catch-all world. 0.24 is the owner's default for an "
+                        "unknown clutter density; 1.00 = the stock field.");
+    changed |= ImGui::SliderFloat("Catch-all blade height", &grass.catchAllHeight, 0.10f, 1.0f, "%.2fx");
+    ImGui::TextDisabled("Multiplies 'Blade height' on a catch-all world. 0.55 turns the waist-high uniform meadow "
+                        "into ankle-to-shin grass; 1.00 = the stock height.");
+
+    ImGui::Separator();
+    if (ImGui::Button("Reset to defaults##grassBottom"))
     {
         grass = Engine::GrassSettings{};
         changed = true;
@@ -3497,6 +3613,7 @@ void DrawFoliageTab()
 
     Engine::FoliageSettings f = GEngine->GetFoliageSettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(f);
 
     changed |= ImGui::SliderFloat("Transmission", &f.transScale, 0.0f, 2.0f, "%.2f");
     ImGui::TextDisabled("  DICE fast-SSS: light through the leaf, lifting the dark/backlit side (0 = off)");
@@ -3568,6 +3685,7 @@ void DrawShadowsTab()
 
     Engine::ShadowMapTuning t = GEngine->GetShadowMapTuning();
     bool changed = false;
+    changed |= ResetToDefaultsButton(t);
 
     ImGui::TextDisabled("Depth-buffer shadow maps (durable fix).");
     ImGui::TextDisabled("OFF = legacy projected shadows. ON = light-space shadow map (no flicker).");
@@ -3708,6 +3826,7 @@ void DrawAmbientOcclusionTab()
     }
     Engine::AoSettings ao = GEngine->GetAoSettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(ao);
 
     ImGui::TextDisabled("Short-range AO from the depth+normal prepass: local folds, corners,");
     ImGui::TextDisabled("and the contact between objects and the ground. Ambient term only.");
@@ -3835,6 +3954,7 @@ void DrawInteriorSkyTab()
     }
     Engine::InteriorSkySettings is = GEngine->GetInteriorSkySettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(is);
 
     ImGui::TextDisabled("Tells the renderer it is INDOORS: a top-down depth map of the object");
     ImGui::TextDisabled("scene. Geometry above a surface removes its SKY AMBIENT, toward a floor.");
@@ -4055,6 +4175,7 @@ void DrawMaterialDebugTab()
 
     Engine::MaterialDebugSettings settings = GEngine->GetMaterialDebugSettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(settings);
     int view = static_cast<int>(settings.view);
     changed |= ImGui::Combo("Rendering mode", &view, "Full Material\0Base Color Only\0Visualize Normal Map\0");
     settings.view = static_cast<Engine::MaterialDebugSettings::View>(view);
@@ -4234,6 +4355,7 @@ void DrawTonemapTab()
     ImGui::TextUnformatted("Auto exposure (eye adaptation)");
     auto ex = GEngine->GetExposureSettings();
     bool exChanged = false;
+    exChanged |= ResetToDefaultsButton(ex, "Reset auto exposure to defaults", "");
     exChanged |= ImGui::Checkbox("Enabled##exposure", &ex.enabled);
     ImGui::SetItemTooltip("ON by default since 2026-08-16. Exposure is scaled toward\n"
                           "key / scene-average luminance, so a bright sky no longer\n"
@@ -4307,6 +4429,7 @@ void DrawSkyTab()
 
     auto s = GEngine->GetSkySettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(s);
 
     changed |= ImGui::Checkbox("Enabled", &s.enabled);
     ImGui::SetItemTooltip("Off = skip the sky pass and restore the legacy skydome");
@@ -4757,6 +4880,7 @@ void DrawCullingTab()
 
     auto s = GEngine->GetCullDebugSettings();
     bool changed = false;
+    changed |= ResetToDefaultsButton(s);
 
     changed |= ImGui::Checkbox("Draw cull spheres", &s.drawSpheres);
     ImGui::SetItemTooltip("Green wireframe of each retained instance's frustum-cull sphere "
@@ -4956,6 +5080,7 @@ void DrawWaterTab()
     auto s = GEngine->GetWaterSettings();
     SetRifleWaterImpactSprayEnabled(s.rifleImpactSpray);
     bool changed = false;
+    changed |= ResetToDefaultsButton(s);
 
     changed |= ImGui::Checkbox("Enabled", &s.enabled);
     ImGui::SetItemTooltip("Off = draw no water surface (the seabed shows through), for A/B");
