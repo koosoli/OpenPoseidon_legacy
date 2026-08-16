@@ -6466,7 +6466,33 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.far_radius = settings.farRadius <= 0.0f ? 0.0f : std::clamp(settings.farRadius, midReach + 8.0f, 5000.0f);
     params.density_noise_scale = std::clamp(settings.densityNoiseScale, 0.002f, 0.5f);
     params.density_noise_strength = std::clamp(settings.densityNoiseStrength, 0.0f, 1.0f);
-    params.use_photo_tuft = settings.midPhotoTuft ? 1.0f : 0.0f;
+    // The map's own plants, drawn by default where the map HAS them. The clutter pipeline
+    // (CfgSurfaces -> CfgSurfaceCharacters -> clutter .p3d -> per-surface atlas run, baked
+    // per cell) was complete and its 25-card atlas was uploaded, but `midPhotoTuft` defaulted
+    // off, so every world still drew the procedural CWA meadow blade: Takistan grew emerald
+    // lawn over its own desert brush. That default is right for OFP worlds -- they have no
+    // clutter atlas and the loose blades ARE their look -- so the gate is the atlas, not the
+    // world. `midPhotoTuft` still forces the cards on where no map atlas exists.
+    // WGR_GRASS_MAP_CLUTTER=0 restores the previous behaviour for an A/B.
+    static const bool mapClutterOff = [] {
+        const char* v = std::getenv("WGR_GRASS_MAP_CLUTTER");
+        return v != nullptr && std::strtol(v, nullptr, 10) == 0;
+    }();
+    const bool mapClutter = !mapClutterOff && _terrain && _terrain->GrassHasMapClutterAtlas();
+    params.use_photo_tuft = (settings.midPhotoTuft || mapClutter) ? 1.0f : 0.0f;
+    // Announce through the game log, on transition. A silent auto-enable is indistinguishable
+    // from a broken one: the previous capture pair moved 229 pixels and could not tell whether
+    // the cards looked the same or the flag never arrived.
+    {
+        static int lastTuft = -1;
+        const int state = (params.use_photo_tuft > 0.5f ? 1 : 0) | (mapClutter ? 2 : 0);
+        if (state != lastTuft)
+        {
+            lastTuft = state;
+            LOG_INFO(Graphics, "Wgpu grass tuft: use_photo_tuft={} (mapClutterAtlas={} midPhotoTuft={} env_off={}) near_density push",
+                     params.use_photo_tuft, mapClutter ? 1 : 0, settings.midPhotoTuft ? 1 : 0, mapClutterOff ? 1 : 0);
+        }
+    }
     params.blade_width_scale = std::clamp(settings.bladeWidth, 0.25f, 6.0f);
     params.saturation = std::clamp(settings.saturation, 0.0f, 2.0f);
     params.dry_patches = std::clamp(settings.dryPatches, 0.0f, 1.0f);
@@ -6498,7 +6524,18 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         params.photo_layer_weights[i] = std::clamp(settings.photoLayerWeights[i], 0.0f, 1.0f);
     }
     params.lod_blend = std::clamp(settings.lodBlend, 0.0f, 40.0f);
-    params.near_density = std::clamp(settings.nearDensity, 0.0f, 1.0f);
+    // Cards cost what blades do not: ~1.8 m wide against centimetres, placed every 0.16 m,
+    // so the same near coverage is ~20 layers of alpha-tested overdraw. The dev-panel toggle
+    // already moves near coverage to 0.40 when it turns the cards on; the automatic enable
+    // above has to do the same or it would ship a silent framerate cliff. Applied to the
+    // PUSHED value only, and only while the setting is still at its default, so an explicit
+    // choice in the Grass panel is never overwritten.
+    float nearDensity = settings.nearDensity;
+    if (mapClutter && !settings.midPhotoTuft && nearDensity == 1.0f)
+    {
+        nearDensity = 0.40f;
+    }
+    params.near_density = std::clamp(nearDensity, 0.0f, 1.0f);
     params.mid_density = std::clamp(settings.midDensity, 0.0f, 1.0f);
     params.far_density = std::clamp(settings.farDensity, 0.0f, 1.0f);
     for (int i = 0; i < 3; ++i)

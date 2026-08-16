@@ -48,6 +48,12 @@ class TerrainWgpu : public ITerrainRenderer
     // terrain as excluded. Keep this map-specific compatibility decision next
     // to the uploaded terrain data, not in UI state.
     bool GrassNeedsCompatibilityOverride() const { return _grassNeedsCompatibilityOverride; }
+    // True once this world's OWN clutter (CfgSurfaces -> CfgSurfaceCharacters -> clutter
+    // models) built a multi-layer atlas. Layer 0 is the loose primary card the builder
+    // always reserves, so >1 means the map actually contributed plants. False on every
+    // OFP world and on any world whose clutter did not resolve -- both keep the
+    // procedural blades. Read by EngineWgpu to auto-enable the photo-tuft path.
+    bool GrassHasMapClutterAtlas() const { return !_clutterAtlas.empty() && _clutterAtlasLayers > 1; }
     // Photographed clump families actually found on disk, in atlas-layer order
     // (index 0 = the primary clump). Discovered, never hardcoded, so dropping a
     // grass pack into assets/grass/more_grass is all it takes to get one.
