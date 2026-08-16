@@ -246,6 +246,19 @@ Levers, no rebuild: `WGR_MOON_AZEL=az,el`, `WGR_MOON_PHASE=1`, `WGR_MOON_BRIGHT=
 when this was written. If he wants more/less, `Engine::SkySettings::moonIntensity` and the three
 colour multipliers in `EngineWgpu.cpp` (search `Purkinje`) are the knobs.
 
+## Also shipped 2026-08-16 evening (all verified with captures, all pushed to `safety`)
+
+| commit | what | proof |
+|---|---|---|
+| d01a55e | moon light gain 4x, separated from the disc (`moonLightGain`, `WGR_MOON_LIGHT_GAIN`); tonemap `linear_white` lever (`WGR_TONEMAP_WHITE`) | owner: "i liked what you just had with gain 4" |
+| 97d5024 | cockpit body opaque again: format-forced alpha demoted by histogram SHAPE, glass-named textures exempt (`WGR_COCKPIT_FORCEALPHA_LEGACY=1`) — **visual confirmation still inconclusive**, `.tmp-cockpit/out/kiowa-{fix,legacy}` | corpus census in the commit; the handover's "mean alpha 10-23" was PARTIAL %, not mean |
+| df3a778 | legacy emissive is not radiance at ANY hour (dawn re-lit the trees) | `.tmp-shadow/dawn/{fixed,legacy}.png` |
+| 19f4d11 | grass source selector: `GrassSettings::clutterSource` 0 Auto (map's own clutter where the map built an atlas) / 1 procedural / 2 cards; panel shows "ON SCREEN NOW"; `WGR_GRASS_CLUTTER_SOURCE`. Owner still calls the card path "flickering" (open: A2C ordering, not coverage) | `.tmp-shadow/dawn/grass-compare.png` |
+| bf21c92 | **grey rectangles on Multi walls** (owner: A2/A3/DayZ): mask is on `tex1` — second UV set now flows loader→VertexTable→SVertex/WgrMeshVertex (60→68 B, `uv1` @location(7))→`WGR_MODEL_SECTION_MASK_UV1`; AND binarised rvmats store `texGen` as a STRING so no stage ever linked its TexGen (layer scales were all 1.0 too). Witness test `WGR_TEST_RVMAT=<raP file>` | `.tmp-shadow/greywall3/compare.png`; log now `mask uvSource=tex1`, `uv scales 1.0 2.0 1.5 1.0` |
+| 7a21c8f | **tree leaves only near**: cutout mip alpha lifted per LOD (`mip_alpha_boost`, k=0.5, `WGR_CUTOUT_MIP_ALPHA`), applied in fs + all prepass twins | `.tmp-shadow/leaves2/compare.png` |
+
+Still open from the owner's list: **sunlit-wall blow-out (paused at his request)**, **card-grass flicker**, and the READY-TO-SHIP Reforger items — the re-export script is written and dry-run clean at `.tmp-shadow/run-reforger-reexport.ps1` (rebuild target `PoseidonTools`, exe is stale), it has just not been run. Item 6 traverse: `.tmp-movecam/run-vehicle30-cache.ps1` is the corrected wrapper (the `-Start` array trap), baseline pre-cache was 11.9 fps / 77% wall in >100 ms frames.
+
 ## R2. Sunlit walls blow out — OPEN, owner explicitly dislikes it
 "the sun when it hits a surface like a wall from a house, it can totally overexpose it... this i do
 not like." This is *local* overexposure on a lit surface, not the global sky white-out that
