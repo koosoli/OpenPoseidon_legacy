@@ -1731,7 +1731,11 @@ class Engine : public IGraphicsEngine
         // two backends were a factor of ~40 apart for the same scene. Drives the disc as
         // well as the light: they are one body, so this is one knob by necessity. The phase
         // function scales it on top, making a crescent ~30x dimmer.
-        float moonIntensity = 0.06f;
+        //
+        // 0.06 -> 0.09 on 2026-08-16 with the bluer light: Takistan's moon-facing slopes
+        // measured (7.4, 6.4, 7.4)/255 under a forced full moon at 45 deg, terrain in the
+        // no-moon frame 0.2. The owner asked for "not much but a little"; ~10 is a little.
+        float moonIntensity = 0.09f;
         // Moon casts a directional light (and shadows) at night. Off = the pre-existing
         // behaviour, where night is lit by flat ambient only and the moon is scenery.
         bool moonLighting = true;

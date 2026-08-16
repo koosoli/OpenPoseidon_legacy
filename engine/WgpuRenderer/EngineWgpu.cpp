@@ -1480,6 +1480,12 @@ void EngineWgpu::NextFrame()
         float sunLin[3] = {sunDiffuse.R(), sunDiffuse.G(), sunDiffuse.B()};
         float ambLin[3] = {sunAmbient.R(), sunAmbient.G(), sunAmbient.B()};
         float skyLit = 0.0f;
+        // "Is the SUN up" for the shaders, 0 at night .. 1 by day, published in sun_dir_world.w.
+        // The shaders used to derive it from the peak of sun_diffuse, which the moon term below
+        // is ADDED to -- so a full moon read as ~40% daylight and switched the legacy-emissive
+        // fade and the foliage night floor back toward their daytime values. Computed from the
+        // sun alone here, before the moon joins.
+        float daylight = 1.0f - (GScene && GScene->MainLight() ? GScene->MainLight()->NightEffect() : 0.0f);
         if (_hdrEnabled && _sky.enabled && _sky.skyLighting && GScene && GScene->MainLight())
         {
             const float camAlt = GScene->GetCamera() ? static_cast<float>(GScene->GetCamera()->Position().Y()) : 0.0f;
@@ -1488,6 +1494,13 @@ void EngineWgpu::NextFrame()
             sunLin[0] = tr.X() * rad;
             sunLin[1] = tr.Y() * rad;
             sunLin[2] = tr.Z() * rad;
+            {
+                // The same (0.002, 0.04) ramp on the atmospheric sun the shaders had, so the
+                // day/dusk look is unchanged; only the moon no longer counts.
+                const float peak = std::max({sunLin[0], sunLin[1], sunLin[2]});
+                const float t = std::clamp((peak - 0.002f) / (0.04f - 0.002f), 0.0f, 1.0f);
+                daylight = t * t * (3.0f - 2.0f * t);
+            }
             // Non-physical ambient fill (no GI yet, and none coming for a long while): the
             // engine's ToD-varying ambient used directly (gamma space, NOT sRGB-decoded — the
             // decode crushes midtones to ~6% of the sun and blackens interiors/shadowed faces),
@@ -1519,11 +1532,14 @@ void EngineWgpu::NextFrame()
                 // (default 1/400 — see Engine::SkySettings). moonAmount already carries
                 // the phase falloff and the horizon ramps.
                 const float moonRad = rad * _sky.moonIntensity * moonAmount;
-                // Slight blue bias, matching LightSun::MoonLightColor: the Purkinje shift
-                // is not modelled anywhere downstream, so it has to live in the light.
-                sunLin[0] += moonTr.X() * moonRad * 0.73f;
-                sunLin[1] += moonTr.Y() * moonRad * 0.80f;
-                sunLin[2] += moonTr.Z() * moonRad * 1.00f;
+                // Blue bias, the Purkinje shift: it is not modelled anywhere downstream, so it
+                // has to live in the light. Stronger than LightSun::MoonLightColor's because the
+                // night tonemap key is warm and Takistan's tan ground measured (10.4, 7.8, 7.0)
+                // under the previous 0.73/0.80/1.00 -- brown, not the "bluish light" the owner
+                // asked for.
+                sunLin[0] += moonTr.X() * moonRad * 0.50f;
+                sunLin[1] += moonTr.Y() * moonRad * 0.66f;
+                sunLin[2] += moonTr.Z() * moonRad * 1.10f;
             }
         }
 
@@ -1770,7 +1786,8 @@ void EngineWgpu::NextFrame()
             // sky-lit path .w carries the skyAmbient knob, scaling the DIRECTIONAL SH sky-irradiance
             // ambient the lit-mesh/terrain shaders now use in place of the flat rgb.
             cameras[i].sun_ambient = {ambLin[0], ambLin[1], ambLin[2], skyLit > 0.5f ? _sky.skyAmbient : 0.0f};
-            cameras[i].sun_dir_world = {sunDir.X(), sunDir.Y(), sunDir.Z(), 0.0f};
+            // .w = the sun-only daylight factor (see `daylight` above).
+            cameras[i].sun_dir_world = {sunDir.X(), sunDir.Y(), sunDir.Z(), daylight};
             if (shadowActive)
             {
                 WgrCameraShadow& sb = cameras[i].shadow;

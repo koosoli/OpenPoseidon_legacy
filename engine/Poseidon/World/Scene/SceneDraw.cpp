@@ -2336,8 +2336,16 @@ void Scene::DrawObjectsAndShadowsPass2()
             // because the darkness factor is 0).
             float sunFactor = 1.0f - _mainLight->NightEffect();
             sunFactor = floatMax(0.0f, floatMin(1.0f, sunFactor));
-            GEngine->SetShadowMapSunFactor(sunFactor);
-            if (sunFactor > 0.01f)
+            // ...unless the MOON is lighting the scene. LightSun swings ShadowDirection() onto
+            // the moon while MoonLightAmount() > 0 (phase and horizon ramps folded in), and the
+            // wgpu sky-lit path adds the moon's radiance to the directional term -- so the same
+            // cascades, from the same direction, are moon shadows for free. Skipping the pass
+            // here was the one thing that kept a full moon from casting anything (owner request
+            // 2026-08-16: "a bluish light that casts shadows").
+            const float moonFactor = floatMax(0.0f, floatMin(1.0f, _mainLight->MoonLightAmount()));
+            const float shadowFactor = floatMax(sunFactor, moonFactor);
+            GEngine->SetShadowMapSunFactor(shadowFactor);
+            if (shadowFactor > 0.01f)
             {
                 RenderShadowMapDepthPass(nDraw);
             }

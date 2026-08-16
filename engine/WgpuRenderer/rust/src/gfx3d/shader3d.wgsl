@@ -563,11 +563,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     var m: ShadeMaterial;
     m.emissive = material.emissive.rgb;
     if (emissive_night < 1.0 && (material_flags(material) & MATFLAG_NIGHT_EMITTER) == 0u) {
-        // Same daylight proxy shading.wgsl:210 already uses for the foliage fill, so the two
-        // night ramps cannot drift: the atmospheric sun's peak channel, ramped over the same
-        // (0.002, 0.04) band. Fixtures (MATFLAG_NIGHT_EMITTER) skip it and keep glowing.
-        let daylight = smoothstep(0.002, 0.04,
-            max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
+        // Same sun-only daylight factor shading.wgsl uses for the foliage fill (CPU-published
+        // in sun_dir_world.w, so the moon cannot count as day). Fixtures
+        // (MATFLAG_NIGHT_EMITTER) skip it and keep glowing.
+        let daylight = frame.sun_dir_world.w;
         m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
     }
     m.sun_ambient = material.sun_ambient.rgb;

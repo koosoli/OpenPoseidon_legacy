@@ -625,10 +625,9 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // above still read as a glowing forest at midnight against black terrain (Takistan hour 0,
     // WGR_AUTO_EXPOSURE=0: dead trees ~150/255, canopy speckle ~60, terrain 0.2), and the
     // Arma 3 pine crown ships emissive 1.0 through the non-veg arm on its trunk-only LODs. Same
-    // daylight proxy as shading.wgsl:210 and shader3d.wgsl so the ramps cannot drift.
+    // sun-only daylight factor as shading.wgsl and shader3d.wgsl (sun_dir_world.w).
     if ((sm.flags & SECTION_NIGHT_EMITTER) == 0u && emissive_night < 1.0) {
-        let daylight = smoothstep(0.002, 0.04,
-            max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
+        let daylight = frame.sun_dir_world.w;
         m.emissive = m.emissive * mix(clamp(emissive_night, 0.0, 1.0), 1.0, daylight);
     }
     m.sun_ambient = frame.sun_ambient.rgb * sm.ambient.rgb;

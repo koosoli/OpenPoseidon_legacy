@@ -206,8 +206,10 @@ fn shade(
             // Ambient boost — a NEAR-FIELD evening-out of lit foliage; fades to the base ambient with
             // distance so far billboards aren't over-lit.
             // Daylight-only foliage fill: the daytime tuning must not survive
-            // after the atmospheric sun has gone down.
-            let daylight = smoothstep(0.002, 0.04, max(frame.sun_diffuse.r, max(frame.sun_diffuse.g, frame.sun_diffuse.b)));
+            // after the atmospheric sun has gone down. SUN-only, published by the CPU in
+            // sun_dir_world.w -- sun_diffuse carries the moon too, and a full moon must not
+            // read as 40% daylight here.
+            let daylight = frame.sun_dir_world.w;
             ambient *= 1.0 + (kb.x - 1.0) * fade * daylight;
             // The sky irradiance is tuned for daylight readability. Leaving its full
             // strength on a leaf/card at night makes entire forests appear self-lit,

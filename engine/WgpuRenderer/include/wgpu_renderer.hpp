@@ -711,7 +711,9 @@ struct WgrCamera
      * direction (downward by day, upward while the sun is below the horizon —
      * which is what keeps night terrain ambient-only). Same convention as
      * GL33's sunDir constant; shaders dot the normal with its negation. Valid
-     * every frame, unlike the shadow block's sun_dir. */
+     * every frame, unlike the shadow block's sun_dir.
+     * w = SUN-ONLY daylight factor, 0 at night .. 1 by day (the moon is not in it,
+     * unlike sun_diffuse): what the shaders key night-only behaviour on. */
     WgrVec4 sun_dir_world;
 };
 
