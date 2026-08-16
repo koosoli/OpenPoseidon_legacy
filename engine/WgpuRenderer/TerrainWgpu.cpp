@@ -1727,11 +1727,20 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         // shader, and the Grass tab can still narrow the selection.
         const bool noneSelected = std::none_of(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(),
                                                [](bool enabled) { return enabled; });
-        if (noneSelected && resolvedLayers == 0 && layerCount > 0)
+        // ...and ALSO when the whole world is ONE terrain material. A converted Enfusion world
+        // (Reforger's Everon) arrives as a single catch-all layer, which the catalogue happily
+        // "recognises" as not-grass, so the guard above did not fire and the map grew nothing
+        // at all (owner: "there is also no grass"; log: `0 of 1 layers grass-capable ... 1
+        // layers the surface catalogue recognised`, `0 / 65536 surface cells`). One material
+        // cannot say where the grass is; geography (water/road/forest/buildings) and slope in
+        // the shader are the only per-cell signal left, and they still apply.
+        const bool singleCatchAll = layerCount == 1;
+        if (noneSelected && (resolvedLayers == 0 || singleCatchAll) && layerCount > 0)
         {
             std::fill(_grassSurfaceEnabled.begin(), _grassSurfaceEnabled.end(), true);
             LOG_INFO(Graphics,
-                     "Wgpu grass: no surface class and no named grass on this world; enabling all {} terrain layers",
+                     "Wgpu grass: {} on this world; enabling all {} terrain layers",
+                     singleCatchAll ? "a single catch-all terrain material" : "no surface class and no named grass",
                      layerCount);
         }
         LOG_INFO(Graphics,
