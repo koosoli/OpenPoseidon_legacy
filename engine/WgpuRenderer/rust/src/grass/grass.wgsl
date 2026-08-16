@@ -1,5 +1,5 @@
 #import frame::{frame, reverse_z, apply_fog, sky_irradiance, terrain_sun_shadow, sky_vis_ao, cloud_sun_shadow}
-#import gbuffer::oct_encode
+#import gbuffer::{oct_encode, a2c_coverage}
 #import shadow::shadow_strength
 
 struct TerrainParams {
@@ -81,6 +81,7 @@ struct GrassParams {
     // Relative selection weights for atlas layers 1..8, four per vec4.
     layer_weights: array<vec4<f32>, 2>,
     //   .x/.y/.z = near / mid / far coverage multipliers on top of `density`
+    //   .w = photo-card placement spacing in metres (see card_placement_spacing)
     lod_density: vec4<f32>,
     // Albedo tints applied before lighting. `tint_procedural` covers procedural
     // blades, ribbons and the far proxy; `tint_photo` covers photographed cards.
@@ -141,6 +142,47 @@ const MAX_FAR_INSTANCES: u32 = 147456u;
 const MID_PLACEMENT_SPACING: f32 = 0.82;
 const MAX_MID_INSTANCES: u32 = 1048576u;
 const LAYERS: u32 = 8u;
+
+// Which rings draw PHOTO CARDS this frame. species_mix.w is only set once the
+// atlas is actually resident (grass/mod.rs gates it on have_tuft), so a world
+// with no plates keeps the blade spacing below rather than a sparse ribbon field.
+// The near ring swaps to cards only under the clump renderer (renderer.x), which
+// is the same condition draw() uses to pick near_tuft_* over the blade pipeline.
+fn cards_on_mid() -> bool { return grass.species_mix.w > 0.5; }
+fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5; }
+
+// Placement spacing for photo cards, in metres, shared by BOTH rings when they
+// draw cards. This is the density control for the card path and it is
+// deliberately not the blade spacing: a card is ~1.5 m across against a blade's
+// centimetres, so placing cards on the 0.16 m blade grid stacked ~90 plates
+// over every point of ground -- a solid mat, ~20 layers of alpha-tested
+// overdraw, and every one of those edges shimmering in the wind. That is the
+// "horrible, flickering, far too dense" report on the map-clutter path.
+//
+// One card = one clutter object, so the natural unit is the map's own clutter
+// grid: Arma's world configs place clutter on `clutterGrid` (1.11 m on the A2/A3
+// worlds this path exists for) and thin it by the surface character's
+// probability -- which the geography bake already applies (authored_thinned).
+// The default in grass/mod.rs is that 1.11 m; WGR_GRASS_CARD_SPACING overrides.
+//
+// Using ONE spacing for near and mid means the two rings are the same field: the
+// near ring exists only to draw its own pipeline (shadow, prepass split), so its
+// join with the mid ring must be a change of nothing, not of density.
+fn card_placement_spacing() -> f32 {
+    return clamp(grass.lod_density.w, 0.16, 4.0);
+}
+
+// Must mirror `near_placement_spacing` in grass/mod.rs: the shader decides where
+// candidates land, the renderer decides how many cells exist.
+fn near_placement_spacing() -> f32 {
+    let blade = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
+    return select(blade, card_placement_spacing(), cards_on_near());
+}
+
+// Must mirror `mid_placement_spacing` in grass/mod.rs.
+fn mid_placement_spacing() -> f32 {
+    return select(MID_PLACEMENT_SPACING, card_placement_spacing(), cards_on_mid());
+}
 
 // Geography bits, mirroring GeographyInfo in engine/Poseidon/AI/Path/AITypes.hpp:
 //   0-1 waterDepth, 2 full, 3 forestInner, 4 forestOuter, 5 road, 6 track,
@@ -712,7 +754,9 @@ fn cs_place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // from the radius kept the accepted count constant, so the slider only ever
     // thinned the field -- and made the disc around the player sparser than the
     // fixed-spacing mid ring beyond it.
-    let near_spacing = grass.spacing * select(1.72, 3.20, grass.renderer.x > 0.5);
+    //
+    // Photo cards do NOT use the blade spacing at all -- see card_placement_spacing.
+    let near_spacing = near_placement_spacing();
     let half = f32(grid_dim) * 0.5;
     let snap = floor(frame.cam_pos.xz / near_spacing) * near_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
@@ -787,7 +831,8 @@ fn cs_place_mid(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (mid_end <= grass.near_radius) { return; }
     // Radius controls coverage only: this spacing is fixed and the grid is sized
     // from the radius instead, so mid density is unchanged all the way to 400 m.
-    let mid_spacing = MID_PLACEMENT_SPACING;
+    // Photo cards place on the card grid instead (card_placement_spacing).
+    let mid_spacing = mid_placement_spacing();
     let half = f32(mid_grid_dim) * 0.5;
     let snap = floor(frame.cam_pos.xz / mid_spacing) * mid_spacing;
     let cell = vec2<f32>(f32(gid.x) - half, f32(gid.y) - half);
@@ -1386,13 +1431,40 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
     return normalize(up + tangent * (-du * k) + facing * (dv * k * 0.6));
 }
 
-@fragment
-fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
-    // Thin photographed stems otherwise flip alpha coverage between adjacent
-    // mip levels as the camera moves. A modest positive bias makes the card
-    // settle before it reaches sub-pixel size without softening close clumps.
-    let tex = textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75);
-    if (tex.a < tuft_alpha_cutoff()) { discard; }
+// The ONE texture fetch every card entry point makes. Thin photographed stems
+// otherwise flip alpha coverage between adjacent mip levels as the camera moves;
+// a modest positive bias makes the card settle before it reaches sub-pixel size
+// without softening close clumps. Colour, prepass and A2C twins all go through
+// here so they sample the same mip of the same texel and agree on the alpha.
+fn tuft_sample(in: VsOut) -> vec4<f32> {
+    return textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75);
+}
+
+// Alpha-to-coverage for the cards under MSAA (grass/mod.rs builds the *_a2c
+// pipelines with alpha_to_coverage_enabled when the scene is multisampled).
+//
+// This is what the "flickering" on the card path actually was. A card's alpha
+// test used to be one hard `discard` at the pixel centre; the cards sway in the
+// wind every frame (sample_wind_field runs on terrain.time), so a stem edge a
+// pixel wide crossing a pixel centre pops that whole pixel on and off from one
+// frame to the next -- and with several plates stacked over every point of the
+// field, every pixel had several such edges. Nothing else on this path varies at
+// a fixed camera: placement is a hash of the integer world cell, the atomic
+// compaction only permutes instance ORDER, and depth resolves order.
+//
+// A2C gives an edge four coverage levels instead of one, so a moving edge
+// slides through 25% steps rather than snapping, and the sharpen (the same
+// Wyman/McGuire rescale the object foliage uses, gbuffer::a2c_coverage) keeps
+// the transition ~1 px wide so JPEG alpha noise near the cutoff dithers instead
+// of popping. The colour pass and the prepass twin MUST emit the same coverage
+// or the prepass writes depth to samples the colour pass never shades: both call
+// this from uniform control flow, before any discard, on the same sample.
+fn tuft_coverage(tex_a: f32) -> f32 {
+    return a2c_coverage(tex_a, tuft_alpha_cutoff());
+}
+
+// Shading shared by the discard and A2C colour entries. `tex` is tuft_sample(in).
+fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     let world = in.world_rel + frame.cam_pos.xyz;
     // The photo already carries base-to-tip shading, so only the field-scale
     // tint and gust highlight are applied on top -- re-adding the procedural
@@ -1465,14 +1537,45 @@ fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
     let ambient = sky_irradiance(normalize(mix(n, vec3<f32>(0.0, 1.0, 0.0), 0.45))) * sky_vis_ao(world.xz);
     let lit = albedo * (ambient + direct);
     let fogged = apply_fog(lit, in.world_rel);
-    return vec4<f32>(select(lit, fogged, grass.render_flags.y >= 0.5), 1.0);
+    return select(lit, fogged, grass.render_flags.y >= 0.5);
+}
+
+// Hard-cutout card colour: the 1x (no MSAA) path, and the WGR_GRASS_CARD_A2C=0 A/B.
+@fragment
+fn fs_grass_mid_tuft(in: VsOut) -> @location(0) vec4<f32> {
+    let tex = tuft_sample(in);
+    if (tex.a < tuft_alpha_cutoff()) { discard; }
+    return vec4<f32>(tuft_shade(in, tex), 1.0);
+}
+
+// A2C card colour: .a is the sharpened coverage the pipeline dithers across the
+// MSAA samples. Coverage is computed BEFORE the discard (fwidth needs uniform
+// control flow) and the discard only skips shading of fully uncovered fragments.
+@fragment
+fn fs_grass_mid_tuft_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    let tex = tuft_sample(in);
+    let cov = tuft_coverage(tex.a);
+    if (cov <= 0.0) { discard; }
+    return vec4<f32>(tuft_shade(in, tex), cov);
 }
 
 @fragment
 fn fs_grass_mid_tuft_prepass(in: VsOut) -> @location(0) vec2<f32> {
-    if (textureSampleBias(tuft_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), 0.75).a < tuft_alpha_cutoff()) { discard; }
+    if (tuft_sample(in).a < tuft_alpha_cutoff()) { discard; }
     let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
     return oct_encode(normalize(normal_view));
+}
+
+// A2C prepass twin: the same coverage as fs_grass_mid_tuft_a2c in .a, so the
+// prepass writes depth to exactly the samples the colour pass will shade. The
+// Rg16Float normal attachment drops .b/.a on write; .a still drives coverage.
+@fragment
+fn fs_grass_mid_tuft_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    let cov = tuft_coverage(tuft_sample(in).a);
+    if (cov <= 0.0) { discard; }
+    let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    let oct = oct_encode(normalize(normal_view));
+    return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }
 
 @fragment

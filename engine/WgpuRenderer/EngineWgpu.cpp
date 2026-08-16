@@ -6507,11 +6507,10 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // procedural blades everywhere else, which is every OFP world (they build no atlas). The
     // owner asked for the map grass as the default and his own implementation selectable, and
     // for the panel to say which is on screen; the earlier env-only enable bypassed the checkbox.
-    // Known and open on the card path (owner, Takistan 6970.40 5700.31 352.57 az 20 el -18):
-    // "flickering" (overlapping alpha-tested plates with no stable order -- a rendering
-    // problem, not a coverage number) and "far too dense" (a card is ~1.8 m wide against a
-    // blade's centimetres, so blade coverage is orders of magnitude too much plant for cards).
-    // The near-coverage compensation below is the first, untuned answer to the second.
+    // Owner report on the card path (Takistan 6970.40 5700.31 352.57 az 20 el -18):
+    // "flickering, far too dense". Both are the renderer's: cards now place on their own grid
+    // (card_placement_spacing in grass.wgsl) instead of the 0.16 m blade grid, and their alpha
+    // test runs alpha-to-coverage under MSAA (WGR_GRASS_CARD_A2C) instead of a hard discard.
     // WGR_GRASS_CLUTTER_SOURCE=0|1|2 overrides the setting for an A/B without touching the panel.
     static const int clutterSourceEnv = [] {
         const char* v = std::getenv("WGR_GRASS_CLUTTER_SOURCE");
@@ -6570,21 +6569,11 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         params.photo_layer_weights[i] = std::clamp(settings.photoLayerWeights[i], 0.0f, 1.0f);
     }
     params.lod_blend = std::clamp(settings.lodBlend, 0.0f, 40.0f);
-    // Cards cost what blades do not: ~1.8 m wide against centimetres, placed every 0.16 m,
-    // so the same near coverage is ~20 layers of alpha-tested overdraw. The dev-panel toggle
-    // already moves near coverage to 0.40 when it turns the cards on; the automatic enable
-    // above has to do the same or it would ship a silent framerate cliff. Applied to the
-    // PUSHED value only, and only while the setting is still at its default, so an explicit
-    // choice in the Grass panel is never overwritten.
-    // 0.40 is the dev panel's own figure for cards, and it was still "far too dense" on
-    // Takistan, so the opt-in starts lower. Untuned: a starting point for the density work
-    // named above, not a measured value.
-    float nearDensity = settings.nearDensity;
-    if (photoTuft && !settings.midPhotoTuft && nearDensity == 1.0f)
-    {
-        nearDensity = 0.15f;
-    }
-    params.near_density = std::clamp(nearDensity, 0.0f, 1.0f);
+    // Card density is no longer a coverage hack here: the renderer places cards on their own
+    // grid (card_placement_spacing in grass.wgsl, WGR_GRASS_CARD_SPACING) shared by the near
+    // and mid rings, so nearDensity is a plain multiplier again. The former "0.15 when cards
+    // auto-enable" override would now put the near ring at 0.15 against the mid ring's 0.95.
+    params.near_density = std::clamp(settings.nearDensity, 0.0f, 1.0f);
     params.mid_density = std::clamp(settings.midDensity, 0.0f, 1.0f);
     params.far_density = std::clamp(settings.farDensity, 0.0f, 1.0f);
     for (int i = 0; i < 3; ++i)

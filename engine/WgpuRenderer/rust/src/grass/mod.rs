@@ -46,6 +46,57 @@ const MAX_MID_INSTANCES: u32 = 1_048_576;
 // Outer bound on the mid ring, mirroring MID_RING_MAX in grass.wgsl and
 // GrassSettings::midRadius' slider maximum.
 const MID_RING_MAX: f32 = 1000.0;
+// MID_PLACEMENT_SPACING in grass.wgsl: the procedural mid ring's fixed spacing.
+const MID_PLACEMENT_SPACING: f32 = 0.82;
+// Photo-card placement spacing (both rings, when they draw cards; see
+// card_placement_spacing in grass.wgsl). One card stands for one clutter object,
+// so the unit is the map's own clutter grid: Arma's world configs place clutter
+// on `clutterGrid`, 1.11 m on the A2/A3 worlds whose atlases this path draws,
+// and thin it by the surface character's probability, which the geography bake
+// already applies. The blade grid this replaced (0.16 m) put ~90 plates over
+// every point of ground -- the "far too dense" report, and most of the flicker
+// with it, since every one of those plate edges shimmered in the wind.
+// WGR_GRASS_CARD_SPACING overrides for an A/B; clamped to CARD_SPACING_RANGE,
+// whose floor is the old blade grid so the "before" density is reproducible in
+// one binary (0.16 also puts the MID ring on that grid, which the 2440-cell cap
+// then limits to a ~195 m square -- fine for a density A/B, not a setting).
+const CARD_SPACING_DEFAULT: f32 = 1.11;
+const CARD_SPACING_RANGE: (f32, f32) = (0.16, 4.0);
+
+/// Near-ring candidate spacing. Must mirror `near_placement_spacing` in
+/// grass.wgsl: the shader decides where candidates land, this decides how many
+/// cells the dispatch has -- disagree and the ring is either a square smaller
+/// than its radius or pays for cells it never fills.
+fn near_placement_spacing(
+    spacing: f32,
+    clump_renderer: bool,
+    cards: bool,
+    card_spacing: f32,
+) -> f32 {
+    if cards {
+        card_spacing
+    } else {
+        spacing * if clump_renderer { 3.20 } else { 1.72 }
+    }
+}
+
+/// Mid-ring candidate spacing. Must mirror `mid_placement_spacing` in grass.wgsl.
+fn mid_placement_spacing(cards: bool, card_spacing: f32) -> f32 {
+    if cards {
+        card_spacing
+    } else {
+        MID_PLACEMENT_SPACING
+    }
+}
+
+fn card_spacing_from_env() -> f32 {
+    std::env::var("WGR_GRASS_CARD_SPACING")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .unwrap_or(CARD_SPACING_DEFAULT)
+        .clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1)
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -119,7 +170,9 @@ struct GrassParams {
     near_density: f32,
     mid_density: f32,
     far_density: f32,
-    _pad_density: f32,
+    // Photo-card placement spacing in metres (lod_density.w). Renderer-owned:
+    // CARD_SPACING_DEFAULT or WGR_GRASS_CARD_SPACING, never from the caller.
+    card_spacing: f32,
     tint_procedural: [f32; 4],
     tint_photo: [f32; 4],
     // Renderer-derived from the uploaded atlas, never from the caller.
@@ -219,6 +272,8 @@ pub struct Grass {
     // The photo-tuft path needs its own pipelines: entry points are immutable
     // pipeline state, so rebinding a newly uploaded tuft alone must never leave
     // the mid ring drawing the procedural shader (GRS-E regression guard).
+    // Under MSAA these six are built with alpha_to_coverage and the *_a2c
+    // fragment entries (see `card_a2c`); at 1x they are the hard-cutout entries.
     mid_tuft_prepass_pipeline: wgpu::RenderPipeline,
     mid_tuft_color_pipeline: wgpu::RenderPipeline,
     mid_tuft_color_no_write_pipeline: wgpu::RenderPipeline,
@@ -267,6 +322,13 @@ pub struct Grass {
     // Last pushed params, so set_tuft can re-publish them with the tuft flag set
     // without waiting for the Grass tab to touch a slider.
     last_params: GrassParams,
+    // Photo-card placement spacing in metres; see CARD_SPACING_DEFAULT.
+    card_spacing: f32,
+    // The card pipelines were built with alpha-to-coverage (MSAA scene and
+    // WGR_GRASS_CARD_A2C != 0). Recorded for the log line and the stats panel;
+    // the pipelines themselves are fixed at construction.
+    #[allow(dead_code)]
+    card_a2c: bool,
 }
 
 impl Grass {
@@ -320,6 +382,21 @@ impl Grass {
             .and_then(|v| v.parse::<f32>().ok())
             .unwrap_or(50.0)
             .clamp(8.0, 60.0);
+        let card_spacing = card_spacing_from_env();
+        // Alpha-to-coverage for the photo cards: needs MSAA (wgpu rejects it at
+        // 1x), default-on there like the object foliage's WGR_FOLIAGE_A2C;
+        // WGR_GRASS_CARD_A2C=0 is the A/B back to the hard cutout.
+        let card_a2c = sample_count > 1
+            && std::env::var("WGR_GRASS_CARD_A2C")
+                .map(|v| v != "0")
+                .unwrap_or(true);
+        // Same channel water uses for its env-driven A/B notices; the game log
+        // gets the tuft state line from EngineWgpu::SetGrassSettings.
+        eprintln!(
+            "[wgr] grass cards: spacing {card_spacing:.2} m (WGR_GRASS_CARD_SPACING), a2c={} \
+             (WGR_GRASS_CARD_A2C, msaa {sample_count}x)",
+            card_a2c as u8
+        );
         let params = GrassParams {
             density,
             // Dense 0.25 m grid; the 512x512 placement buffer supports this
@@ -398,7 +475,7 @@ impl Grass {
             near_density: 1.0,
             mid_density: 0.95,
             far_density: 1.0,
-            _pad_density: 0.0,
+            card_spacing,
             tint_procedural: [1.0, 1.0, 1.0, 1.0],
             tint_photo: [1.0, 1.0, 1.0, 1.0],
             photo_layer_bounds: default_layer_bounds(),
@@ -728,11 +805,16 @@ impl Grass {
             compilation_options: Default::default(),
             cache: None,
         });
-        let make_pipeline = |label: &str,
-                             vertex_entry: &str,
-                             entry: &str,
-                             target: wgpu::TextureFormat,
-                             depth_write: bool| {
+        // `a2c`: alpha-to-coverage for the photo-card pipelines. Only ever true
+        // under MSAA (wgpu validation rejects it at 1x), and only for entries
+        // that write a vec4 whose .a is the coverage (fs_grass_mid_tuft_a2c and
+        // its prepass twin). Everything else passes false.
+        let make_pipeline_a2c = |label: &str,
+                                 vertex_entry: &str,
+                                 entry: &str,
+                                 target: wgpu::TextureFormat,
+                                 depth_write: bool,
+                                 a2c: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
                 layout: Some(&layout),
@@ -756,6 +838,7 @@ impl Grass {
                 }),
                 multisample: wgpu::MultisampleState {
                     count: sample_count,
+                    alpha_to_coverage_enabled: a2c,
                     ..Default::default()
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -771,6 +854,20 @@ impl Grass {
                 multiview_mask: None,
                 cache: None,
             })
+        };
+        let make_pipeline = |label: &str,
+                             vertex_entry: &str,
+                             entry: &str,
+                             target: wgpu::TextureFormat,
+                             depth_write: bool| {
+            make_pipeline_a2c(label, vertex_entry, entry, target, depth_write, false)
+        };
+        // The card entries: A2C twins under MSAA, hard cutout otherwise. Chosen
+        // once here so both rings' six pipelines cannot disagree.
+        let (tuft_fs, tuft_prepass_fs) = if card_a2c {
+            ("fs_grass_mid_tuft_a2c", "fs_grass_mid_tuft_prepass_a2c")
+        } else {
+            ("fs_grass_mid_tuft", "fs_grass_mid_tuft_prepass")
         };
         let color_pipeline = make_pipeline(
             "wgr_grass_color",
@@ -828,47 +925,53 @@ impl Grass {
             surface_format,
             false,
         );
-        let mid_tuft_prepass_pipeline = make_pipeline(
+        let mid_tuft_prepass_pipeline = make_pipeline_a2c(
             "wgr_grass_mid_tuft_prepass",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft_prepass",
+            tuft_prepass_fs,
             NORMAL_FORMAT,
             true,
+            card_a2c,
         );
-        let mid_tuft_color_pipeline = make_pipeline(
+        let mid_tuft_color_pipeline = make_pipeline_a2c(
             "wgr_grass_mid_tuft_color",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
+            tuft_fs,
             surface_format,
             true,
+            card_a2c,
         );
-        let mid_tuft_color_no_write_pipeline = make_pipeline(
+        let mid_tuft_color_no_write_pipeline = make_pipeline_a2c(
             "wgr_grass_mid_tuft_color_no_write",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
+            tuft_fs,
             surface_format,
             false,
+            card_a2c,
         );
-        let near_tuft_prepass_pipeline = make_pipeline(
+        let near_tuft_prepass_pipeline = make_pipeline_a2c(
             "wgr_grass_near_tuft_prepass",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft_prepass",
+            tuft_prepass_fs,
             NORMAL_FORMAT,
             true,
+            card_a2c,
         );
-        let near_tuft_color_pipeline = make_pipeline(
+        let near_tuft_color_pipeline = make_pipeline_a2c(
             "wgr_grass_near_tuft_color",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
+            tuft_fs,
             surface_format,
             true,
+            card_a2c,
         );
-        let near_tuft_color_no_write_pipeline = make_pipeline(
+        let near_tuft_color_no_write_pipeline = make_pipeline_a2c(
             "wgr_grass_near_tuft_color_no_write",
             "vs_grass_mid_tuft",
-            "fs_grass_mid_tuft",
+            tuft_fs,
             surface_format,
             false,
+            card_a2c,
         );
         let far_color_pipeline = make_pipeline(
             "wgr_grass_far_color",
@@ -1047,7 +1150,22 @@ impl Grass {
             tuft_bounds: default_layer_bounds(),
             tuft_means: default_layer_means(),
             last_params: params,
+            card_spacing,
+            card_a2c,
         }
+    }
+
+    /// Whether the card pipelines run alpha-to-coverage (MSAA scene, not opted out).
+    /// Not yet surfaced through the C ABI; the tests and the Grass tab are the readers.
+    #[allow(dead_code)]
+    pub fn card_a2c(&self) -> bool {
+        self.card_a2c
+    }
+
+    /// Photo-card placement spacing in metres (CARD_SPACING_DEFAULT or the env override).
+    #[allow(dead_code)]
+    pub fn card_spacing(&self) -> f32 {
+        self.card_spacing
     }
 
     /// GRS-E — receive the game's decoded grass-tuft PAA. Rebuilds the three data
@@ -1090,10 +1208,22 @@ impl Grass {
         }
         self.last_params.photo_layer_bounds = self.tuft_bounds;
         self.last_params.photo_layer_means = self.tuft_means;
-        queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
         // Uploads normally arrive after the game has pushed GrassSettings. Keep
         // that opt-in live immediately instead of requiring a UI slider nudge.
-        self.tuft_enabled = self.last_params.use_photo_tuft != 0.0;
+        //
+        // Re-derive from the raw params rather than patching the flag: the
+        // uniform's use_photo_tuft is gated on have_tuft (so the shader's card
+        // spacing only engages once plates exist), and the candidate grids are
+        // sized from that spacing -- both come out of set_params. Before the game
+        // has pushed anything there is nothing to derive from; publish the
+        // bounds/means and let the first push do the rest.
+        if self.last_raw_params.near_radius > 0.0 {
+            let raw = self.last_raw_params;
+            self.set_params(queue, raw);
+        } else {
+            queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&self.last_params));
+            self.tuft_enabled = self.last_params.use_photo_tuft != 0.0;
+        }
         let rebuild = |instances: &wgpu::Buffer, count: &wgpu::Buffer| {
             make_data_bind(
                 device,
@@ -1231,13 +1361,17 @@ impl Grass {
                 near_radius
             }
         };
-        // Must mirror cs_place's `near_spacing`.
-        let near_spacing = spacing
-            * if params.clump_renderer != 0.0 {
-                3.20
-            } else {
-                1.72
-            };
+        // Photo cards need the texture AND the opt-in. Resolved here, once, and
+        // written into the uniform as `use_photo_tuft`, so the shader's card
+        // spacing (card_placement_spacing) can only engage when cards will
+        // actually be drawn -- otherwise a world with no plates would place its
+        // procedural ribbons on the sparse card grid.
+        let clump_renderer = params.clump_renderer != 0.0;
+        let cards_mid = self.have_tuft && params.use_photo_tuft != 0.0;
+        let cards_near = cards_mid && clump_renderer;
+        // Must mirror cs_place's `near_spacing` (near_placement_spacing in grass.wgsl).
+        let near_spacing =
+            near_placement_spacing(spacing, clump_renderer, cards_near, self.card_spacing);
         // The grid has to span the whole disc, so its edge is the diameter. Round
         // up to the workgroup size and cap.
         let want = (2.0 * near_radius / near_spacing).ceil().max(0.0) as u32;
@@ -1278,8 +1412,10 @@ impl Grass {
             mid_natural
         }
         .clamp(near_radius + 10.0, MID_RING_MAX);
-        // MID_PLACEMENT_SPACING in grass.wgsl.
-        let want_mid = (2.0 * mid_end / 0.82).ceil().max(0.0) as u32;
+        // mid_placement_spacing in grass.wgsl: the fixed ribbon spacing, or the
+        // card grid when the mid ring draws cards.
+        let mid_spacing = mid_placement_spacing(cards_mid, self.card_spacing);
+        let want_mid = (2.0 * mid_end / mid_spacing).ceil().max(0.0) as u32;
         let mid_grid_dim = want_mid
             .div_ceil(8)
             .saturating_mul(8)
@@ -1319,7 +1455,7 @@ impl Grass {
                 .flower_percent
                 .clamp(0.0, 1.0 - params.weed_percent.clamp(0.0, 1.0)),
             blade_width_scale: params.blade_width_scale.clamp(0.25, 6.0),
-            use_photo_tuft: params.use_photo_tuft,
+            use_photo_tuft: if cards_mid { 1.0 } else { 0.0 },
             saturation: params.saturation.clamp(0.0, 2.0),
             dry_patches: params.dry_patches.clamp(0.0, 1.0),
             dry_patch_scale: params.dry_patch_scale.clamp(0.002, 0.3),
@@ -1363,7 +1499,7 @@ impl Grass {
             near_density: params.near_density.clamp(0.0, 1.0),
             mid_density: params.mid_density.clamp(0.0, 1.0),
             far_density: params.far_density.clamp(0.0, 1.0),
-            _pad_density: 0.0,
+            card_spacing: self.card_spacing,
             tint_procedural: clamp_tint(params.tint_procedural),
             tint_photo: clamp_tint(params.tint_photo),
             // Always the renderer's own measurement of the loaded atlas.
@@ -1378,8 +1514,9 @@ impl Grass {
         // A zero far radius means the outer ring is off: skip its whole dispatch
         // rather than running 147k candidate threads that all reject.
         self.far_enabled = params.far_radius > 1.0;
-        // The photo cards need BOTH the texture and the dev-tool opt-in.
-        self.tuft_enabled = self.have_tuft && params.use_photo_tuft != 0.0;
+        // The photo cards need BOTH the texture and the dev-tool opt-in; the
+        // uniform's use_photo_tuft was derived from the same pair above.
+        self.tuft_enabled = cards_mid;
         queue.write_buffer(&self.grass_params, 0, bytemuck::bytes_of(&params));
     }
 
@@ -1857,4 +1994,231 @@ fn make_data_bind(
             },
         ],
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SHADER: &str = include_str!("grass.wgsl");
+    const SHADOW: &str = include_str!("grass_shadow.wgsl");
+
+    // The card flicker fix is alpha-to-coverage, and A2C is only correct if the
+    // prepass and the colour pass emit the SAME coverage from the SAME sample:
+    // otherwise the prepass writes depth to samples the colour pass never shades.
+    #[test]
+    fn card_a2c_entries_share_one_sample_and_one_coverage_function() {
+        assert!(SHADER.contains("#import gbuffer::{oct_encode, a2c_coverage}"));
+        assert!(SHADER.contains("fn tuft_coverage(tex_a: f32) -> f32 {"));
+        assert!(SHADER.contains("return a2c_coverage(tex_a, tuft_alpha_cutoff());"));
+        for entry in ["fs_grass_mid_tuft_a2c", "fs_grass_mid_tuft_prepass_a2c"] {
+            let start = SHADER
+                .find(&format!("fn {entry}("))
+                .unwrap_or_else(|| panic!("{entry} missing"));
+            let body = &SHADER[start..start + 400];
+            assert!(
+                body.contains("tuft_coverage("),
+                "{entry} must use tuft_coverage"
+            );
+            assert!(
+                body.contains("tuft_sample(in)"),
+                "{entry} must sample via tuft_sample"
+            );
+            // Coverage before discard: fwidth needs uniform control flow.
+            let cov = body.find("tuft_coverage(").unwrap();
+            let disc = body.find("discard").unwrap();
+            assert!(cov < disc, "{entry} computes coverage after its discard");
+        }
+        // The hard-cutout entries stay for 1x and the WGR_GRASS_CARD_A2C=0 A/B.
+        assert!(SHADER.contains("fn fs_grass_mid_tuft(in: VsOut)"));
+        assert!(SHADER.contains("fn fs_grass_mid_tuft_prepass(in: VsOut)"));
+        // Every card entry samples through tuft_sample: exactly two raw fetches of
+        // tuft_tex remain (tuft_sample itself and tuft_luma's contour taps).
+        assert_eq!(SHADER.matches("textureSampleBias(tuft_tex").count(), 2);
+        // The shadow twin keeps the same cutoff, so the A2C 50% edge and the
+        // shadow silhouette sit on the same texel.
+        assert!(SHADOW.contains("clamp(grass.place.w, 0.05, 0.95)"));
+        assert!(SHADER.contains("return clamp(grass.place.w, 0.05, 0.95);"));
+    }
+
+    // Density: photo cards place on their own grid, in BOTH rings, and the
+    // renderer's grid sizing mirrors the shader's spacing choice.
+    #[test]
+    fn card_placement_spacing_mirrors_the_shader() {
+        assert!(SHADER.contains("const MID_PLACEMENT_SPACING: f32 = 0.82;"));
+        assert_eq!(MID_PLACEMENT_SPACING, 0.82);
+        assert!(SHADER.contains(&format!(
+            "return clamp(grass.lod_density.w, {:.2}, {:.1});",
+            CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1
+        )));
+        // The two compute entries take their spacing from the shared helpers,
+        // and the blade formula appears exactly once (inside the helper).
+        assert!(SHADER.contains("let near_spacing = near_placement_spacing();"));
+        assert!(SHADER.contains("let mid_spacing = mid_placement_spacing();"));
+        assert_eq!(
+            SHADER.matches("grass.spacing * select(1.72, 3.20").count(),
+            1
+        );
+        // Rust side.
+        let blade = near_placement_spacing(0.05, true, false, CARD_SPACING_DEFAULT);
+        assert!((blade - 0.16).abs() < 1e-6);
+        assert_eq!(
+            near_placement_spacing(0.05, false, false, 1.11),
+            0.05 * 1.72
+        );
+        assert_eq!(near_placement_spacing(0.05, true, true, 1.11), 1.11);
+        assert_eq!(mid_placement_spacing(false, 1.11), MID_PLACEMENT_SPACING);
+        assert_eq!(mid_placement_spacing(true, 1.11), 1.11);
+        // Card mode: near and mid are one field -- same spacing, no join.
+        assert_eq!(
+            near_placement_spacing(0.05, true, true, CARD_SPACING_DEFAULT),
+            mid_placement_spacing(true, CARD_SPACING_DEFAULT)
+        );
+    }
+
+    // "Far too dense": the plates stacked over any one point of ground. A card
+    // spans ~1.5 m; on the 0.16 m blade grid that is ~90 candidates under it,
+    // on the clutter grid it is a handful. The default must be in the range the
+    // map's own clutter uses, and the shrink must be an order of magnitude.
+    #[test]
+    fn card_grid_is_an_order_of_magnitude_sparser_than_the_blade_grid() {
+        assert_eq!(CARD_SPACING_DEFAULT, 1.11);
+        assert!(
+            CARD_SPACING_DEFAULT >= CARD_SPACING_RANGE.0
+                && CARD_SPACING_DEFAULT <= CARD_SPACING_RANGE.1
+        );
+        let blade = near_placement_spacing(0.05, true, false, CARD_SPACING_DEFAULT);
+        let card = near_placement_spacing(0.05, true, true, CARD_SPACING_DEFAULT);
+        let card_area = std::f32::consts::PI * 0.75f32 * 0.75;
+        let plates_before = card_area / (blade * blade);
+        let plates_after = card_area / (card * card);
+        assert!(plates_before > 60.0, "{plates_before}");
+        assert!(plates_after < 2.5, "{plates_after}");
+        assert!(plates_before / plates_after > 40.0);
+    }
+
+    // The uniform's use_photo_tuft is what the shader's spacing keys on, so it
+    // must never say "cards" without a texture to draw them with.
+    #[test]
+    fn card_spacing_only_engages_with_a_resident_atlas() {
+        assert!(SHADER.contains("fn cards_on_mid() -> bool { return grass.species_mix.w > 0.5; }"));
+        assert!(SHADER.contains(
+            "fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5; }"
+        ));
+        let src = include_str!("mod.rs");
+        assert!(src.contains("let cards_mid = self.have_tuft && params.use_photo_tuft != 0.0;"));
+        assert!(src.contains("use_photo_tuft: if cards_mid { 1.0 } else { 0.0 },"));
+    }
+
+    fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        // The instance buffers are storage read_write in the VERTEX stage, as in production.
+        if !adapter
+            .features()
+            .contains(wgpu::Features::VERTEX_WRITABLE_STORAGE)
+        {
+            return None;
+        }
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::VERTEX_WRITABLE_STORAGE,
+            ..Default::default()
+        }))
+        .ok()
+    }
+
+    fn shadow_pass_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        // Shape of gfx3d's shadow-pass DynUbo layout: one dynamic-offset uniform, vertex only.
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_grass_test_shadow_pass_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        })
+    }
+
+    fn params(spacing: f32, near_radius: f32, use_photo_tuft: f32) -> WgrGrassParams {
+        let mut p: WgrGrassParams = bytemuck::Zeroable::zeroed();
+        p.density = 1.0;
+        p.spacing = spacing;
+        p.near_radius = near_radius;
+        p.enabled = 1.0;
+        p.blade_height = 1.4;
+        p.mid_radius = 210.0;
+        p.blade_width_scale = 0.35;
+        p.clump_renderer = 1.0;
+        p.use_photo_tuft = use_photo_tuft;
+        p.near_density = 1.0;
+        p.mid_density = 0.95;
+        p.far_density = 1.0;
+        p.lod_blend = 30.0;
+        p.photo_alpha_cutoff = 0.5;
+        p.photo_force_layer = -1.0;
+        p
+    }
+
+    // Builds every grass pipeline on a real device at 4x (alpha-to-coverage
+    // card pipelines) and at 1x (hard cutout), which is where an A2C pipeline
+    // over an Rg16Float prepass target or a vec4-vs-vec2 entry mismatch would
+    // be rejected. Then drives the card spacing through its real gate: the
+    // uniform says "cards" only once an atlas is resident, and the near grid
+    // shrinks to the card spacing when it does.
+    #[test]
+    fn card_pipelines_build_at_4x_and_1x_and_card_spacing_waits_for_the_atlas() {
+        let Some((device, queue)) = headless() else {
+            return;
+        };
+        let camera_layout = crate::gfx3d::camera_layout_for_tests(&device);
+        let shadow_layout = shadow_pass_layout(&device);
+        for sample_count in [4u32, 1u32] {
+            let mut composer = crate::shaders::build_composer();
+            let mut grass = Grass::new(
+                &device,
+                &queue,
+                &camera_layout,
+                &shadow_layout,
+                crate::HDR_FORMAT,
+                sample_count,
+                &mut composer,
+            );
+            assert_eq!(grass.card_a2c(), sample_count > 1);
+            // Cards requested, no atlas yet: blade spacing, uniform says no cards.
+            grass.set_params(&queue, params(0.05, 41.0, 1.0));
+            assert!(!grass.tuft_enabled);
+            assert_eq!(grass.last_params.use_photo_tuft, 0.0);
+            let blade_grid = grass.near_grid_dim;
+            // 2 * 41 / 0.16 = 512.5 -> 520
+            assert_eq!(blade_grid, 520);
+            // A tiny atlas arrives: cards engage and the grid re-derives itself.
+            let rgba = vec![255u8; 4 * 4 * 4];
+            grass.set_tufts(&device, &queue, 4, 4, 1, &rgba);
+            assert!(grass.tuft_enabled);
+            assert_eq!(grass.last_params.use_photo_tuft, 1.0);
+            let card = grass.card_spacing();
+            let want = ((2.0 * 41.0 / card).ceil() as u32).div_ceil(8) * 8;
+            assert_eq!(grass.near_grid_dim, want.max(NEAR_GRID_MIN));
+            assert!(grass.near_grid_dim < blade_grid / 4);
+            // Mid grid follows the same spacing in card mode.
+            let want_mid = ((2.0 * 210.0 / card).ceil() as u32).div_ceil(8) * 8;
+            assert_eq!(grass.mid_grid_dim, want_mid.max(MID_GRID_MIN));
+            // Turning cards off restores the blade grid exactly.
+            grass.set_params(&queue, params(0.05, 41.0, 0.0));
+            assert!(!grass.tuft_enabled);
+            assert_eq!(grass.near_grid_dim, blade_grid);
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
 }

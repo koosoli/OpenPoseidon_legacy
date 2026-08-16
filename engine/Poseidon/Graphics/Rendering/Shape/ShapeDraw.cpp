@@ -185,6 +185,95 @@ bool GCurrentIsVegetation = false;
 float GCurrentFoliageKind = 0.0f;
 bool GGpuTerrainConform = false;
 
+// WGR_ROAD_GPU_VB -- let an OnSurface level keep a vertex buffer when the backend conforms
+// terrain on the GPU.
+//
+// LODShape::OptimizeRendering (below) denies a vertex buffer to any level whose Special()
+// carries OnSurface. Every loader sets that bit from the geometry itself -- ShapeSetup.cpp:723
+// and ShapeAdapter.cpp:465/720 OR it in as soon as ONE vertex is ClipLandOn -- so on every
+// generation of content "OnSurface" means "has land-pinned vertices", which is roads first
+// and foremost. In 2001 the deny was right: an OnSurface shape was re-split against the
+// terrain on the CPU every frame (FaceArray::SurfaceSplit, ClipShape.cpp:241), so a static
+// buffer had nothing to hold. Under a backend that conforms in the vertex shader it is the
+// single structural reason a road never reaches DrawSectionTL: with `_buffer` null the T&L
+// gate in Shape::Draw fails and the shape falls to FaceArray::Draw -> EngineWgpu::DrawSection
+// (screen-space, 2D pipeline: no sun, no sRGB decode, no HDR, a different depth projection).
+// Measured on Takistan (WGR_ROAD_TRACE=1): 42 ROAD_CPUPATH lines, every one `buffer=0
+// tlAble=1`, and zero road textures in the T&L trace.
+//
+// RoadType (World/Scene/ObjectClasses.cpp, WLD-026) already sidesteps the deny for shapes
+// it constructs, by swapping OnSurface for IsOnSurface before the buffer is built. This
+// lever is the general form and the belt to that brace: it grants the buffer to any
+// OnSurface level -- road models that bail out of RoadType because they carry a Geometry
+// LOD, models that mix a few ClipLandOn vertices into ordinary geometry, and RoadType roads
+// themselves whenever WGR_ROAD_LEGACY_SURFACE restores their OnSurface bit -- so that the
+// draw path, not a per-class flag, decides how a land-pinned vertex is treated.
+//
+// Granting the buffer alone is NOT sufficient, and the two other halves live here too:
+//   * the buffer must be VBDynamic. EngineWgpu::CreateVertexBuffer fills a new buffer with
+//     BuildVertices (conform selector 0 on every vertex) and a static buffer is never
+//     re-uploaded; only a dynamic buffer's FIRST VertexBufferWgpu::Update -- which runs in
+//     BeginMeshTL, inside Object::Draw with the object's mode-2 conform plane published --
+//     takes the BuildOrigVertices arm and uploads the per-vertex ClipLand selector the
+//     vertex shader pins to SurfaceY. After that upload the early-out applies again, so this
+//     is one upload of a ~10-vertex mesh per road MODEL, not per placement.
+//   * OrigPos/OrigClip must be valid before that upload. BuildOrigVertices reads OrigClip,
+//     and Object::Animate returns without SaveOriginalPos on an all-ClipLandOn shape ("will
+//     be done during SurfaceSplit", Object.cpp:374). Saved in Shape::Draw, immediately
+//     before BeginMeshTL, the first time a surface shape is drawn under an active conform
+//     plane -- NOT at optimize time. The order matters: a road loaded after the bulk pass
+//     is optimized by ShapeBank::New BEFORE RoadType's constructor normalises its clip
+//     array (ObjectClasses.cpp:895), and SaveOriginalPos is a one-shot (no-op once valid),
+//     so a snapshot taken at optimize time would freeze the pre-normalisation OrigClip and
+//     RoadType's own SaveOriginalPos could no longer correct it. At first draw the shape is
+//     undeformed (Animate skips the CPU deform while the plane is active) and every
+//     load-time rewrite has already happened. Idempotent.
+//
+// Scope: only when GGpuTerrainConform is true (wgpu with WGR_GPU_CONFORM on). GL33 keeps
+// the deny bit for bit: it has no GPU conform, its OnSurface geometry is conformed by the
+// CPU split, and a buffer there would draw the road rigid at its authored height.
+// WGR_ROAD_GPU_VB=0 restores the deny on wgpu as well.
+static bool RoadGpuVertexBufferLeverEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_ROAD_GPU_VB");
+        return !(v && v[0] != '\0' && std::strcmp(v, "0") == 0);
+    }();
+    return enabled;
+}
+
+static bool OnSurfaceLevelKeepsVertexBuffer()
+{
+    return GGpuTerrainConform && RoadGpuVertexBufferLeverEnabled();
+}
+
+// Announced from ShapeBank::OptimizeAll (every world load) rather than lazily from the first
+// OnSurface level, so the log states the lever's setting even on a world where nothing
+// exercises it -- a run whose only evidence is the absence of a line proves nothing.
+static void LogRoadGpuVertexBufferLever()
+{
+    const char* v = std::getenv("WGR_ROAD_GPU_VB");
+    LOG_INFO(Graphics,
+             "ROAD_GPU_VB lever: {} (WGR_ROAD_GPU_VB={}, GPU terrain conform={}); OnSurface levels {} a vertex "
+             "buffer",
+             OnSurfaceLevelKeepsVertexBuffer() ? "ON" : "OFF", v ? v : "<unset>", GGpuTerrainConform ? 1 : 0,
+             OnSurfaceLevelKeepsVertexBuffer() ? "keep" : "are denied (2001 behaviour)");
+}
+
+// WGR_ROAD_TRACE, read once. Shape::Draw runs per object per frame; the previous per-call
+// std::getenv walked the process environment block under the CRT lock on every OnSurface
+// draw that fell to the CPU path.
+static bool RoadTraceRequested()
+{
+    static const bool on = []
+    {
+        const char* rt = std::getenv("WGR_ROAD_TRACE");
+        return rt && std::strcmp(rt, "0") != 0;
+    }();
+    return on;
+}
+
 void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags clip, int spec,
                  const Matrix4& transform, const Matrix4& invTransform)
 {
@@ -200,6 +289,40 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
     {
         if (BeginFaces() < EndFaces() && NSections() > 0)
         {
+            // ROAD_GPUPATH -- the positive twin of ROAD_CPUPATH below. A surface shape
+            // (road / decal) whose draw entered the hardware T&L branch: it has a vertex
+            // buffer and will reach DrawSectionTL, i.e. shader3d.wgsl and the mode-2 GPU
+            // conform, IF the conform plane is active here. `conform` is that plane's mode
+            // (2 = per-vertex ClipLand pin to SurfaceY, 0 = no plane published, so the
+            // shape draws rigid at its authored height). The first such draw in a process
+            // is logged unconditionally so a default run can prove roads took this path
+            // at all; every further shape is logged once under WGR_ROAD_TRACE=1, so the
+            // ROAD_GPUPATH and ROAD_CPUPATH counts of one run partition the surface set.
+            if ((spec & (OnSurface | IsOnSurface)) != 0)
+            {
+                // The conform selector is baked from OrigClip by BuildOrigVertices in the
+                // buffer's first Update (BeginMeshTL, below). Under an active plane this
+                // shape is undeformed, so snapshot it now if nobody has yet (RoadType does
+                // it for the shapes it constructs; the WGR_ROAD_GPU_VB lever relies on this
+                // for everything else -- see its comment block for why not at optimize
+                // time). No-op once valid.
+                if (GCurrentConformPlane.active && OnSurfaceLevelKeepsVertexBuffer())
+                {
+                    SaveOriginalPos();
+                }
+                static bool loggedFirstGpuSurface = false;
+                static std::unordered_set<const void*> loggedGpuShapes;
+                const bool trace = RoadTraceRequested();
+                if (!loggedFirstGpuSurface || (trace && loggedGpuShapes.insert(static_cast<const void*>(this)).second))
+                {
+                    LOG_INFO(Graphics,
+                             "ROAD_GPUPATH shape={} nv={} buffer=1 tlAble=1 spec=0x{:x} conform={} origPos={} first={}",
+                             static_cast<const void*>(this), NVertex(), unsigned(spec),
+                             GCurrentConformPlane.active ? GCurrentConformPlane.mode : 0, OriginalPosValid() ? 1 : 0,
+                             loggedFirstGpuSurface ? 0 : 1);
+                    loggedFirstGpuSurface = true;
+                }
+            }
             GEngine->PrepareMeshTL(lights, transform, render::SplitLegacy(spec));
             if (spec & (OnSurface | IsOnSurface))
             {
@@ -307,8 +430,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
         // CreateVertexBuffer returning null -- is the ONLY structural place the two backends
         // can diverge for a road. A road that never appears in the DrawSectionTL trace but does
         // appear here is that divergence, and the absence is itself the answer.
-        if (const char* rt = std::getenv("WGR_ROAD_TRACE");
-            rt && std::strcmp(rt, "0") != 0 && (spec & (OnSurface | IsOnSurface)) != 0)
+        if (RoadTraceRequested() && (spec & (OnSurface | IsOnSurface)) != 0)
         {
             static std::unordered_set<const void*> loggedCpuShapes;
             if (loggedCpuShapes.insert(static_cast<const void*>(this)).second)
@@ -477,6 +599,9 @@ void LODShape::OptimizeRendering()
         Shape* level = shape->Level(l);
         bool optimizeHW = false;
         bool optimizeSSE = false;
+        // Set when the WGR_ROAD_GPU_VB lever (see RoadGpuVertexBufferLeverEnabled) is what
+        // keeps this level's buffer: it then has to be dynamic and carry saved OrigPos.
+        bool onSurfaceKept = false;
         if (ENGINE_CONFIG.enableHWTL)
         {
             optimizeHW = level->NVertex() > 0 && level->NFaces() > 0;
@@ -500,9 +625,22 @@ void LODShape::OptimizeRendering()
                 case ClipLightLine:
                     optimizeHW = optimizeSSE = false;
             }
-            if (level->Special() & (IsLight | OnSurface))
+            if (level->Special() & IsLight)
             {
                 optimizeHW = optimizeSSE = false;
+            }
+            if (level->Special() & OnSurface)
+            {
+                // The SSE quad path is a CPU transform path and never wanted here.
+                optimizeSSE = false;
+                if (optimizeHW && OnSurfaceLevelKeepsVertexBuffer())
+                {
+                    onSurfaceKept = true;
+                }
+                else
+                {
+                    optimizeHW = false;
+                }
             }
         }
         // no optimize on geometry levels
@@ -534,6 +672,23 @@ void LODShape::OptimizeRendering()
             if (shape->GetPropertyDammage() == tentString)
             {
                 type = VBDynamic;
+            }
+            if (onSurfaceKept)
+            {
+                // Dynamic so the first Update (inside a conform-plane draw) uploads the
+                // per-vertex ClipLand selector; Shape::Draw saves OrigPos right before that
+                // Update. Both reasons are in the lever's comment block above.
+                type = VBDynamic;
+                // Once per (shape, level) per optimize pass: the proof that the lever changed
+                // an outcome. A level that reaches here already free of OnSurface (RoadType's
+                // IsOnSurface swap) is not logged, so a default Takistan run lists only the
+                // shapes THIS lever rescued; the ROAD_GPUPATH line in Shape::Draw covers both.
+                LOG_INFO(Graphics,
+                         "ROAD_GPU_VB granted: {} lod={} level={} nv={} faces={} spec=0x{:x} hints(and=0x{:x} "
+                         "or=0x{:x}) allClipLandOn={} -> VBDynamic",
+                         shape->Name(), l, static_cast<const void*>(level), level->NVertex(), level->NFaces(),
+                         unsigned(level->Special()), unsigned(level->GetAndHints()), unsigned(level->GetOrHints()),
+                         (level->GetAndHints() & ClipLandMask) == ClipLandOn ? 1 : 0);
             }
             level->ConvertToVBuffer(type);
         }
@@ -572,6 +727,7 @@ void ShapeBank::OptimizeAll()
         ReleaseAllVBuffers();
         LOG_DEBUG(Graphics, "ShapeBank::OptimizeAll");
     }
+    LogRoadGpuVertexBufferLever();
     ForEach([](LODShapeWithShadow& shape) { shape.OptimizeRendering(); });
     // From here on, a newly loaded shape has to build its own buffers (ShapeBank::New).
     _bulkOptimizeDone = true;
