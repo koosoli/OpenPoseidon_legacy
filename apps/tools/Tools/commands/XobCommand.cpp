@@ -3,6 +3,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -66,6 +68,93 @@
 //     rests on a packed-normal sign no render has confirmed, not because anything
 //     measured here is uncertain.
 //
+//     THAT PREMISE IS NOW MEASURED, AND IT IS WRONG IN AN ABSOLUTE SENSE. See fact 6.
+//
+//  6. ORIENTATION IS INVERTED, BOTH HALVES OF IT. Everything fact 2 says is a
+//     RELATIVE measurement -- the cross of an edge pair against the model's own
+//     stored normal. Relative agreement is preserved by inverting BOTH, so it cannot
+//     detect an inversion of both, and that is exactly what the corpus has.
+//
+//     The absolute test the programme never ran: does a stored normal point AWAY from
+//     the model's centroid? On a convex closed solid the answer is unambiguous.
+//     Measured on the written tree (`reforger/everon/models`), LOD0, mean of the three
+//     corner normals against the face centroid minus the point-cloud centroid:
+//
+//       graniteboulder_01.p3d   5,156 faces   5,156 outward   0 inward
+//       graniteboulder_02.p3d   3,732 faces   3,732 outward   0 inward
+//       granitebeachstone_01    3,874 faces   3,874 outward   0 inward
+//       granitebeachstone_02    3,526 faces   3,526 outward   0 inward
+//       granitebeachstone_03    2,298 faces   2,298 outward   0 inward
+//
+//     `.xob` normals are OUTWARD. This engine's are INWARD, and three independent
+//     places say so: `MeshBuild.cpp:43-44` negates the Shape normal on the way to the
+//     GPU and `gfx3d/shader3d.wgsl:226` declares that result "world space, outward";
+//     `MLODLoader.hpp:384` and `ShapeAdapter.cpp:230` copy an MLOD normal verbatim, so
+//     the on-disk sign IS the Shape sign; and `Odol73.hpp:1004` decodes ODOL with a
+//     deliberate NEGATIVE scale whose comment says dropping it "would flip every normal
+//     in the model". `UnpackXobDirection` (XobModel.hpp:115-117) uses a POSITIVE one.
+//
+//     So both halves are inverted, and they are inverted TOGETHER, which is why every
+//     relative check still closes:
+//       * the GPU normal ends up pointing INTO the surface, so `ndotl` collapses to 0
+//         on every sunlit face and lifts on faces turned away from the sun. Exteriors
+//         go flat/ambient, interiors light up.
+//       * the on-disk cross points outward, `MLODLoader.hpp:384`'s swap makes the IR
+//         cross point INWARD -- the reverse of the native convention -- so with
+//         `cull_mode: Back` the FRONT faces are culled and a rock shows only the inside
+//         of its far shell.
+//
+//     `--fix-orientation` (env `XOB_FIX_ORIENTATION=1`) applies BOTH corrections at
+//     once: it negates the written normal and swaps corners 0/1. Applying either alone
+//     trades one wrong for the other, which is why it is one flag and not two, and why
+//     `--flip-winding` on its own is NOT the fix.
+//
+//     Default OFF. The evidence above is strong but the "Shape normals are inward"
+//     anchor is an inference from three code sites, not from a render, and turning it
+//     on rewrites every model in the tree. Re-export the rocks alone and A/B them.
+//
+//     The measurement itself is no longer optional: every conversion now reports
+//     `Orientation:` with the outward/inward split, so the number that would have
+//     caught this is in the log of every run.
+//
+//  7. THE MODEL ORIGIN IS MOVED TO THE BOUNDING-BOX CENTRE, AND THAT IS THE SINK.
+//     A converted `.p3d` carries no named properties at all, and `autocenter` is one
+//     the engine looks for. Absent, it defaults ON in BOTH places that implement it:
+//     `Model.cpp:64-108` subtracts the bbox centre from every vertex of every LOD (and
+//     records the offset nowhere -- `ShapeAdapter.cpp:723-745` restores
+//     `_boundingCenter` only in the `sourceFormat == "ODOL"` branch), and
+//     `ShapeLOD.cpp:413-441` does the same again from `_autoCenter`, which
+//     `ShapeLOD.cpp:1198-1202` clears only when the property says so.
+//
+//     The placement is not compensated for it. `LandSave.cpp` passes
+//     `preserveAuthoredElevation = true` for OPRW25, so `Landscape.cpp:2650-2662` --
+//     the one place that puts the AUTHORED origin (`PositionModelToWorld(-BoundingCenter())`)
+//     on the surface -- does not run. So the world transform positions the recentred
+//     vertex space, and the model drops by its own bbox-centre Y.
+//
+//     Measured on the written tree, LOD0 point table, Y only:
+//
+//       shophouse_e_2i01t.p3d   min -5.454  max +15.115  centre +4.831
+//       house_prefab_2i02t.p3d  min -4.167  max +11.591  centre +3.712
+//       farmhouse_e_1l01.p3d    min -4.504  max +11.254  centre +3.375
+//       garage_e_01.p3d         min -1.207  max  +3.343  centre +1.068
+//       doghouse_01.p3d         min -0.000  max  +0.939  centre +0.470
+//       glass_greenhouse_01_*   min -0.220  max  +0.220  centre +0.000
+//       birdhouse_01.p3d        min -0.215  max  +0.226  centre +0.005
+//
+//     The negative minima are foundation skirts, which is what an origin at ground
+//     level looks like -- and the measured placements agree: over 304,035 sampled
+//     `ev_DALL.wrp` objects the median of (object Y - terrain Y) is -0.004 m. The
+//     authored Y already puts the ORIGIN on the ground, so recentring buries a house
+//     by 3-5 m and leaves a birdhouse alone. That is "lots of buildings are partly in
+//     the ground", including which ones.
+//
+//     `--fix-origin` (env `XOB_FIX_ORIGIN=1`) writes `autocenter=0` on every LOD.
+//     Both implementations honour it, and `ShapeLOD.cpp:1203`'s second `CalculateMinMax`
+//     runs the `-_boundingCenter` branch, so a shape that was already recentred is put
+//     back. Default OFF, and independent of `--fix-orientation`: they are separate
+//     defects and each deserves its own A/B.
+//
 //  3. PREFAB INHERITANCE. A world placement names a prefab GUID, not a model. The
 //     `.et` prefab it resolves to often carries no mesh of its own:
 //     Prefabs/Rocks/Granite/Granite_BeachCluster_02_Fucus.et -- the single most
@@ -94,6 +183,26 @@
 //     `ClassifyAlpha` needs to answer Cutout (partial alpha under 2%) rather than
 //     Blend. DXT1 is used when the material names no `OpacityMap`, because a DXT1
 //     PAA reports `IsAlpha() == false` and short-circuits to Opaque.
+//
+//  5. WHY THE FACE TEXTURE IS NOT ENOUGH. A face texture is ONE image, and it is the
+//     only thing `--textures` alone can deliver. Everything else a surface has --
+//     first of all its normal map -- reaches the renderer through a MATERIAL, and the
+//     material every section named was that same unreadable `.emat`. So Everon
+//     rendered with zero normal maps and zero specular maps on every object in the
+//     world; what looked textured was albedo and nothing else.
+//
+//     `--normals --material-rvmat` closes that: the `NMOMap` is decoded, repacked into
+//     the DXT5nm convention the renderer samples (`vec2(sample.a, sample.g)`), written
+//     as a `.paa`, and named in a small Super `.rvmat` written beside it -- which is
+//     what the section then names instead of the `.emat`. The engine change that would
+//     otherwise be needed is none: `Super` Stage1 is already the measured normal slot.
+//
+//     Two things that look like details and are not. The source packing is DETECTED,
+//     not assumed -- the corpus contains both BC5-style (X in red) and DXT5nm-style
+//     (X in alpha) normals, and binding one as the other lights every surface wrongly
+//     without ever erroring. And the layer maps of a `MatPBRMulti` are excluded from
+//     the normal slot on purpose: `NMO_1..4` are shared one-metre library tiles in
+//     their own tiled UV frame, not the object's own normal, which is `GlobalNMOMap`.
 //
 // The whole-model bounding box in metres is reported for every conversion because a
 // unit-scale mistake is the failure mode that survives every structural check: the
@@ -531,7 +640,112 @@ struct TextureOptions
     //! models name around sixty of them. 4096 also runs into the writer's truncated
     //! mip chain (measured on DXT3), so staying well under it is not only a budget.
     int maxSize = 1024;
+    //! Bake `NMOMap` into a DXT5nm `.paa`. Needs `rvmats` to reach the renderer: a
+    //! normal has no face-texture slot to arrive through, only a material stage.
+    bool normals = false;
+    //! Write a real `.rvmat` per material and name THAT in the MLOD material field.
+    bool rvmats = false;
 };
+
+//! Which two channels of a decoded normal texture carry X and Y.
+//!
+//! An `.emat` NMO is not in this engine's convention and the two live conventions
+//! disagree about WHERE, not just how:
+//!
+//!   BC5/"RG"      X in R, Y in G, B and A carry the other payload (NMO's O)
+//!   DXT5nm/"AG"   X in A, Y in G, R and B unused -- what Real Virtuality authors,
+//!                 and what `gpu_driven.wgsl:646` samples: `vec2(sample.a, sample.g)`
+//!
+//! Binding one as the other yields a normal map that is wrong per-texel but never
+//! errors -- lighting simply goes strange -- which is exactly the failure this
+//! programme keeps measuring its way out of. So detect rather than assume: a tangent
+//! space normal satisfies x^2+y^2 <= 1 for every texel, and a channel pair that is not
+//! a normal pair violates it constantly. The one thing the inequality cannot tell
+//! apart is X-then-Y from Y-then-X, since it is symmetric; that is settled by the
+//! container's own convention (BC5 is X,Y in R,G; DXT5nm is X in A) and reported per
+//! model so a wrong call is visible rather than silent.
+enum class NormalPacking
+{
+    None,
+    RG, //!< X in R, Y in G
+    AG, //!< X in A, Y in G
+};
+
+inline const char* ToString(NormalPacking packing)
+{
+    switch (packing)
+    {
+        case NormalPacking::RG:
+            return "RG";
+        case NormalPacking::AG:
+            return "AG";
+        default:
+            return "none";
+    }
+}
+
+//! Fraction of sampled texels for which the pair satisfies x^2+y^2 <= 1, and whether
+//! both channels vary at all. A constant channel passes the inequality by accident
+//! (R=0 gives x=-1, and x^2+y^2 <= 1 then forces y=0) so "varies" is not optional.
+struct PackingScore
+{
+    double obeys = 0.0;
+    bool varies = false;
+};
+
+inline PackingScore ScorePacking(const std::vector<uint8_t>& rgba, int xChannel, int yChannel)
+{
+    const size_t texels = rgba.size() / 4;
+    if (texels == 0)
+        return {};
+    // Every texel up to a cap: a normal map's violating region can be a small patch,
+    // and a stride that skips it reports a clean 1.0.
+    const size_t stride = texels > 262144 ? texels / 262144 : 1;
+    size_t tested = 0;
+    size_t obeying = 0;
+    uint8_t xMin = 255, xMax = 0, yMin = 255, yMax = 0;
+    for (size_t t = 0; t < texels; t += stride)
+    {
+        const uint8_t xb = rgba[t * 4 + static_cast<size_t>(xChannel)];
+        const uint8_t yb = rgba[t * 4 + static_cast<size_t>(yChannel)];
+        // Both channels exactly zero is not a normal, it is the absence of one -- the
+        // cut-away region of a leaf card, where nothing was ever authored. Decoded it
+        // reads (-1,-1), which violates the test by construction, so counting those
+        // texels rejects every alpha-cutout vegetation texture in the corpus for having
+        // a background. They are excluded from the denominator, not from the file.
+        if (xb == 0 && yb == 0)
+            continue;
+        xMin = std::min(xMin, xb);
+        xMax = std::max(xMax, xb);
+        yMin = std::min(yMin, yb);
+        yMax = std::max(yMax, yb);
+        const double x = xb / 127.5 - 1.0;
+        const double y = yb / 127.5 - 1.0;
+        // 1.02 rather than 1.0: the source is block-compressed, so a texel authored
+        // exactly on the unit circle decodes a quantisation step outside it.
+        if (x * x + y * y <= 1.02)
+            ++obeying;
+        ++tested;
+    }
+    PackingScore score;
+    if (tested == 0)
+        return score;
+    score.obeys = static_cast<double>(obeying) / static_cast<double>(tested);
+    score.varies = (xMax - xMin) > 8 && (yMax - yMin) > 8;
+    return score;
+}
+
+//! The packing a decoded NMO uses, or None when no candidate pair behaves like one.
+inline NormalPacking DetectNormalPacking(const std::vector<uint8_t>& rgba)
+{
+    const PackingScore rg = ScorePacking(rgba, 0, 1);
+    const PackingScore ag = ScorePacking(rgba, 3, 1);
+    const NormalPacking best = (ag.varies && ag.obeys > rg.obeys) ? NormalPacking::AG : NormalPacking::RG;
+    const PackingScore& score = best == NormalPacking::AG ? ag : rg;
+    if (!score.varies || score.obeys < 0.90)
+        return NormalPacking::None;
+    return best;
+}
 
 //! Decode a `.edds` out of the paks into straight RGBA8.
 bool LoadEdds(const PakSet& paks, const std::string& path, Poseidon::Image& out)
@@ -580,8 +794,20 @@ struct TextureStats
     size_t materialsBound = 0; //!< of those, the ones that produced a `.paa`
     size_t filesWritten = 0;   //!< distinct `.paa` files on disk
     size_t filesWithAlpha = 0; //!< of those, the ones carrying a cutout mask
-    size_t baseLayerOnly = 0;  //!< MatPBRMulti materials approximated by their BCR_1
+    size_t baseLayerOnly = 0;  //!< MatPBRMulti materials approximated by a shared tile
+    size_t layerTinted = 0;    //!< of those, the ones whose tile was rescaled to Color_N
     size_t bytesWritten = 0;
+    size_t materialsWithNormal = 0;         //!< materials that resolved a normal map
+    size_t normalsWritten = 0;              //!< distinct normal `.paa` files on disk
+    size_t rvmatsWritten = 0;               //!< distinct `.rvmat` files on disk
+    std::map<std::string, size_t> packings; //!< detected NMO packing -> distinct textures
+    //! Whether the BCR's alpha channel varies. Recorded, NOT bound: Enfusion is
+    //! understood to pack roughness there, and an SMDI-shaped specular map could be
+    //! synthesised from it -- but this programme does not bind a channel it has not
+    //! measured, and nothing here has measured that one. The count is the denominator
+    //! whoever measures it will need.
+    size_t bcrAlphaVaries = 0;
+    size_t bcrAlphaFlat = 0;
     std::map<std::string, size_t> failures; //!< reason -> distinct materials
 };
 
@@ -593,6 +819,15 @@ struct TextureStats
 //! the parse and the image cache stops the decode-and-encode. Keying the image cache
 //! on the BCR ALONE would be wrong -- two materials may share an albedo and differ in
 //! their opacity mask -- so the key is the pair.
+//! What one `.emat` became: the face texture, and the material file that carries
+//! everything a face texture has no slot for.
+struct BakedMaterial
+{
+    std::string colourPaa; //!< the MLOD TEXTURE field
+    std::string normalPaa; //!< DXT5nm, reachable only through the rvmat below
+    std::string rvmatPath; //!< the MLOD MATERIAL field, "" when none was written
+};
+
 class TextureBaker
 {
   public:
@@ -603,17 +838,18 @@ class TextureBaker
 
     const TextureStats& Stats() const { return _stats; }
 
-    //! The virtual `.paa` path a section using `ematPath` should name, or "" when the
-    //! material resolves no albedo this engine can bind.
-    const std::string& TextureFor(const std::string& ematPath)
+    //! What a section naming `ematPath` should write into its face. Both fields may be
+    //! empty: a material this engine can bind nothing of is not an error, it is a
+    //! section that keeps drawing the way it did before.
+    const BakedMaterial& For(const std::string& ematPath)
     {
         const std::string key = LowerCopy(ematPath);
         const auto found = _byMaterial.find(key);
         if (found != _byMaterial.end())
             return found->second;
         _stats.materialsSeen++;
-        std::string result = Bake(ematPath);
-        if (!result.empty())
+        BakedMaterial result = Bake(ematPath);
+        if (!result.colourPaa.empty())
             _stats.materialsBound++;
         return _byMaterial.emplace(key, std::move(result)).first->second;
     }
@@ -621,7 +857,7 @@ class TextureBaker
   private:
     void Unbound(const char* reason) { _stats.failures[reason]++; }
 
-    std::string Bake(const std::string& ematPath)
+    BakedMaterial Bake(const std::string& ematPath)
     {
         std::vector<uint8_t> blob;
         if (!_paks.Read(ematPath, blob))
@@ -648,24 +884,40 @@ class TextureBaker
                                                               return true;
                                                           });
 
-        // `MatPBRMulti` is the one common class with no single albedo: it blends up to
-        // four layers through a `MaskMap`, and each layer names its own `BCR_N`. Two of
-        // the corpus's top 50 models are that class -- GraniteCliff_01 (9,445
+        // `MatPBRMulti` is the one common class with no albedo of its own, and what it
+        // has instead is easy to mistake for one. It names `BCR_1..4`, but those are
+        // SHARED LIBRARY TILES -- `Assets/_SharedData/Metal/ST_MetalPaint_Coated_02_1m_BCR`,
+        // one square metre of generic painted metal that hundreds of unrelated objects
+        // also name -- blended through a `MaskMap` and, crucially, TINTED by a per-layer
+        // `Color_N`. The jerrycan is not olive because its texture is olive; it is olive
+        // because `Color_1` is 0.103 0.105 0.041 over a grey tile.
+        //
+        // Two of the corpus's top 50 models are that class -- GraniteCliff_01 (9,445
         // placements) and the Picea stump (8,275) -- so refusing them costs more than
-        // approximating them. `BCR_1` is the base layer: it is the only one with no
-        // `Enabled_N` switch, so it is the layer that is always painted. Binding it is
-        // an approximation of the blend and is counted separately for that reason.
+        // approximating them, and the tile alone is a poor approximation: it draws every
+        // such object in the shared tile's colour instead of its own.
+        //
+        // So the tile is RESCALED to have `Color_N` as its mean, keeping its detail and
+        // taking its colour from the material. That is a choice between two readings of
+        // `Color_N` and it is the safe one: read as an absolute base colour it is exact,
+        // and read as a multiplier it is off by a constant, whereas multiplying directly
+        // would render a 0.3-mean tile at 0.03 -- near black -- if the first reading is
+        // the true one. Counted separately either way.
         std::string bcr = emat.TextureOf("BCRMap");
+        float tint[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        bool tinted = false;
         if (bcr.empty())
         {
-            for (const char* layer : {"BCR_1", "BCR_2", "BCR_3", "BCR_4"})
+            for (int layer = 1; layer <= 4 && bcr.empty(); ++layer)
             {
-                bcr = emat.TextureOf(layer);
-                if (!bcr.empty())
-                {
-                    _stats.baseLayerOnly++;
-                    break;
-                }
+                const std::string key = "BCR_" + std::to_string(layer);
+                bcr = emat.TextureOf(key);
+                if (bcr.empty())
+                    continue;
+                _stats.baseLayerOnly++;
+                tinted = emat.Vec4Of("Color_" + std::to_string(layer), tint);
+                if (tinted)
+                    _stats.layerTinted++;
             }
         }
         if (bcr.empty())
@@ -675,47 +927,225 @@ class TextureBaker
         }
         const std::string opacity = emat.TextureOf("OpacityMap");
 
-        const std::string imageKey = LowerCopy(bcr) + "|" + LowerCopy(opacity);
+        BakedMaterial baked;
+        std::string imageKey = LowerCopy(bcr) + "|" + LowerCopy(opacity);
+        if (tinted)
+        {
+            // Two materials sharing a tile but tinting it differently are two files.
+            char suffix[64];
+            std::snprintf(suffix, sizeof(suffix), "|%.4f,%.4f,%.4f", tint[0], tint[1], tint[2]);
+            imageKey += suffix;
+        }
         const auto cached = _byImage.find(imageKey);
         if (cached != _byImage.end())
-            return cached->second;
+            baked.colourPaa = cached->second;
+        else
+            baked.colourPaa = _byImage.emplace(imageKey, Write(bcr, opacity, tinted ? tint : nullptr)).first->second;
 
-        std::string written = Write(bcr, opacity);
-        _byImage.emplace(imageKey, written);
-        return written;
+        // The normal, and note which keys are NOT in this list. `NMO_1..4` are the same
+        // shared one-metre tiles as `BCR_1..4`, in their own tiled UV frame -- bound as
+        // the object's normal map they would light every surface wrongly, which is worse
+        // than the nothing they replace. Only maps in the object's own UV layout qualify:
+        // `NMOMap` (2,402 files), MatPBRMulti's `GlobalNMOMap`, and `NTCMap` (334), which
+        // is what the vegetation families call theirs.
+        std::string nmo;
+        for (const char* key : {"NMOMap", "GlobalNMOMap", "NTCMap"})
+        {
+            nmo = emat.TextureOf(key);
+            if (!nmo.empty())
+                break;
+        }
+        if (_options.normals && nmo.empty())
+        {
+            // Counted, because it is the ceiling on how much of a world can ever get a
+            // normal map. A `MatPBRMulti` that names only `NMO_1..4` lands here on
+            // purpose: those are tiling library maps in their own UV frame, and the
+            // reason for refusing them is at the top of this function.
+            Unbound("material names no NMOMap, GlobalNMOMap or NTCMap");
+        }
+        if (_options.normals && !nmo.empty())
+        {
+            const std::string normalKey = LowerCopy(nmo);
+            const auto seen = _byNormal.find(normalKey);
+            baked.normalPaa =
+                seen != _byNormal.end() ? seen->second : _byNormal.emplace(normalKey, WriteNormal(nmo)).first->second;
+            if (!baked.normalPaa.empty())
+                _stats.materialsWithNormal++;
+        }
+
+        // The material file, and the reason it has to exist at all: a face texture is
+        // one image. Every other map a surface has -- the normal above, the specular a
+        // later pass may add -- reaches the renderer only through a MATERIAL, and the
+        // material this section names today is an `.emat` sitting inside a `.pak` that
+        // is not deployed with the game. So write one here, in the format the engine
+        // already reads, naming the files this converter just wrote.
+        if (_options.rvmats && !baked.normalPaa.empty())
+            baked.rvmatPath = WriteRvmat(ematPath, baked);
+        return baked;
     }
 
     //! `assets/vegetation/_polyplanes/polyplane_picea_abies_bcr.paa` under the prefix;
     //! `_ca` appended when an opacity mask was folded in, which is Real Virtuality's
     //! own notation for "colour plus alpha" and keeps the two variants of a shared
     //! albedo apart.
-    std::string VirtualNameFor(const std::string& bcrPath, bool alpha) const
+    std::string VirtualNameFor(const std::string& sourcePath, const char* suffix, const char* extension) const
     {
-        std::string stem = LowerCopy(bcrPath);
+        std::string stem = LowerCopy(sourcePath);
         const size_t dot = stem.rfind('.');
         if (dot != std::string::npos)
             stem = stem.substr(0, dot);
         for (char& c : stem)
             if (c == '/')
                 c = '\\';
-        if (alpha)
-            stem += "_ca";
+        if (suffix && *suffix)
+            stem += suffix;
         std::string head = LowerCopy(_options.prefix);
         for (char& c : head)
             if (c == '/')
                 c = '\\';
         while (!head.empty() && head.back() == '\\')
             head.pop_back();
-        std::string candidate = (head.empty() ? stem : head + "\\" + stem) + ".paa";
+        const std::string base = head.empty() ? stem : head + "\\" + stem;
+        std::string candidate = base + extension;
         // Two distinct (albedo, opacity) pairs can still land on one name when the
         // same albedo is masked two different ways. Rare, but a collision here means
         // one material silently wears another's cutout.
-        for (int suffix = 2; _taken.count(candidate) != 0; ++suffix)
-            candidate = (head.empty() ? stem : head + "\\" + stem) + "_" + std::to_string(suffix) + ".paa";
+        for (int n = 2; _taken.count(candidate) != 0; ++n)
+            candidate = base + "_" + std::to_string(n) + extension;
         return candidate;
     }
 
-    std::string Write(const std::string& bcrPath, const std::string& opacityPath)
+    //! Decode an NMO, repack it into the convention the renderer samples, and write it.
+    //!
+    //! `gpu_driven.wgsl:646` reads `vec2(sample.a, sample.g)`, so X must land in ALPHA
+    //! and Y in GREEN whatever the source did -- and DXT5 is the format that survives
+    //! that, because its alpha block is stored and interpolated separately from the
+    //! colour block. A DXT1 normal map has no alpha at all and would arrive with X
+    //! constant 1.
+    std::string WriteNormal(const std::string& nmoPath)
+    {
+        Poseidon::Image source;
+        if (!LoadEdds(_paks, nmoPath, source))
+        {
+            Unbound("NMOMap .edds does not decode");
+            return {};
+        }
+        int width = source.width();
+        int height = source.height();
+        std::vector<uint8_t> pixels = source.data();
+        pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+
+        const NormalPacking packing = DetectNormalPacking(pixels);
+        _stats.packings[ToString(packing)]++;
+        if (packing == NormalPacking::None)
+        {
+            // Not a refusal to be quiet about: whatever this texture is, binding it as
+            // a normal map would light every surface using it wrongly, and a wrong
+            // normal map is harder to notice than a missing one. Name it and show the
+            // numbers, once per distinct texture -- a refusal with no evidence is the
+            // kind that gets "fixed" by lowering the threshold.
+            const PackingScore rg = ScorePacking(pixels, 0, 1);
+            const PackingScore ag = ScorePacking(pixels, 3, 1);
+            std::cerr << "  no normal packing: " << nmoPath << "  RG obeys " << std::fixed << std::setprecision(3)
+                      << rg.obeys << (rg.varies ? "" : " (flat)") << "  AG obeys " << ag.obeys
+                      << (ag.varies ? "" : " (flat)") << "\n";
+            Unbound("NMOMap has no channel pair that behaves like a normal");
+            return {};
+        }
+        const int xChannel = packing == NormalPacking::AG ? 3 : 0;
+
+        // Repack in place, back to front is unnecessary -- X and Y are read out of the
+        // source before either is overwritten.
+        for (size_t t = 0; t * 4 + 3 < pixels.size(); ++t)
+        {
+            const uint8_t x = pixels[t * 4 + static_cast<size_t>(xChannel)];
+            const uint8_t y = pixels[t * 4 + 1];
+            pixels[t * 4 + 0] = 0;   // measured dead on every RV NOHQ; MaterialChannels.hpp
+            pixels[t * 4 + 1] = y;   // Y
+            pixels[t * 4 + 2] = 255; // Z is reconstructed, never sampled
+            pixels[t * 4 + 3] = x;   // X
+        }
+
+        // Halving a normal map averages X and Y, which shortens the vector rather than
+        // rotating it -- the same softening a mip chain applies, and the reason a
+        // normal map may be box-filtered at all.
+        while ((width > _options.maxSize || height > _options.maxSize) && width % 2 == 0 && height % 2 == 0 &&
+               width > 4 && height > 4)
+            HalveRGBA(pixels, width, height);
+
+        const std::string virtualPath = VirtualNameFor(NormalStem(nmoPath), "_nohq", ".paa");
+        const std::filesystem::path target = OnDiskPathFor(_outputRoot, virtualPath);
+        std::error_code ec;
+        std::filesystem::create_directories(target.parent_path(), ec);
+        if (!Poseidon::PAAEncoder::WritePAA(target.string(),
+                                            Poseidon::Image::FromRGBA(width, height, std::move(pixels)),
+                                            Poseidon::PixelFormat::DXT5))
+        {
+            Unbound("WritePAA refused the normal map");
+            return {};
+        }
+        Poseidon::PAAInfo info;
+        const Poseidon::DecodedImage back = Poseidon::DecodePAAFile(target.string());
+        if (!ReadPAAInfo(target.string(), info) || !back.valid() || back.width != width || back.height != height)
+        {
+            std::filesystem::remove(target, ec);
+            Unbound("normal .paa does not read back");
+            return {};
+        }
+        _taken.insert(virtualPath);
+        _stats.normalsWritten++;
+        _stats.bytesWritten += static_cast<size_t>(std::filesystem::file_size(target, ec));
+        return virtualPath;
+    }
+
+    //! `..._nmo.edds` -> `..._nmo`, so the written file is `..._nohq.paa` and not
+    //! `..._nmo_nohq.paa`. The suffix carries meaning here: `_nohq` is what the engine's
+    //! own sibling-enhancement lookup and every RV convention expect a normal to be
+    //! called, and a name that claims two conventions at once belongs to neither.
+    static std::string NormalStem(const std::string& nmoPath)
+    {
+        std::string stem = nmoPath;
+        const size_t dot = stem.rfind('.');
+        if (dot != std::string::npos)
+            stem = stem.substr(0, dot);
+        for (const char* tail : {"_nmo", "_ntc", "_nm"})
+        {
+            const size_t length = std::strlen(tail);
+            if (stem.size() > length && LowerCopy(stem.substr(stem.size() - length)) == tail)
+                return stem.substr(0, stem.size() - length);
+        }
+        return stem;
+    }
+
+    //! A text RVMAT naming what this converter wrote. The text itself is
+    //! `MakeSuperRvmatText`, which lives beside the reader that has to parse it back --
+    //! see the note there for why the format is not spelled out at this end.
+    std::string WriteRvmat(const std::string& ematPath, const BakedMaterial& baked)
+    {
+        const std::string virtualPath = VirtualNameFor(ematPath, "", ".rvmat");
+        const std::filesystem::path target = OnDiskPathFor(_outputRoot, virtualPath);
+        std::error_code ec;
+        std::filesystem::create_directories(target.parent_path(), ec);
+        std::ofstream file(target, std::ios::trunc);
+        if (!file)
+        {
+            Unbound("cannot open the .rvmat for writing");
+            return {};
+        }
+        file << Poseidon::Asset::Material::MakeSuperRvmatText(ematPath, baked.normalPaa);
+        file.close();
+        if (!file)
+        {
+            Unbound("cannot write the .rvmat");
+            return {};
+        }
+        _taken.insert(virtualPath);
+        _stats.rvmatsWritten++;
+        _stats.bytesWritten += static_cast<size_t>(std::filesystem::file_size(target, ec));
+        return virtualPath;
+    }
+
+    std::string Write(const std::string& bcrPath, const std::string& opacityPath, const float* tint)
     {
         Poseidon::Image albedo;
         if (!LoadEdds(_paks, bcrPath, albedo))
@@ -727,6 +1157,41 @@ class TextureBaker
         int height = albedo.height();
         std::vector<uint8_t> pixels = albedo.data();
         pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+
+        // Rescale the shared tile to the layer's own colour -- see the note at the call
+        // site. Per channel, so a grey tile can become olive; a channel whose mean is
+        // zero is left alone rather than multiplied by infinity.
+        if (tint)
+        {
+            const size_t texels = pixels.size() / 4;
+            for (int c = 0; c < 3; ++c)
+            {
+                double sum = 0.0;
+                for (size_t t = 0; t < texels; ++t)
+                    sum += pixels[t * 4 + static_cast<size_t>(c)];
+                const double mean = sum / (255.0 * static_cast<double>(texels));
+                if (!(mean > 1e-3))
+                    continue;
+                const double gain = tint[c] / mean;
+                for (size_t t = 0; t < texels; ++t)
+                    pixels[t * 4 + static_cast<size_t>(c)] = static_cast<uint8_t>(
+                        std::clamp(pixels[t * 4 + static_cast<size_t>(c)] * gain + 0.5, 0.0, 255.0));
+            }
+        }
+
+        // Does the BCR's alpha carry anything? Counted BEFORE it is overwritten below,
+        // because that is the only moment it exists. Enfusion is understood to pack
+        // roughness there -- if so, this is where a specular map would come from, and
+        // this count is the denominator that decides whether it is worth deriving.
+        {
+            uint8_t low = 255, high = 0;
+            for (size_t at = 3; at < pixels.size(); at += 4)
+            {
+                low = std::min(low, pixels[at]);
+                high = std::max(high, pixels[at]);
+            }
+            ((high - low) > 8 ? _stats.bcrAlphaVaries : _stats.bcrAlphaFlat)++;
+        }
 
         // The opacity map is a separate single-channel image and may be authored at a
         // different resolution than the albedo. BC4 decodes into R with G and B left
@@ -778,7 +1243,7 @@ class TextureBaker
                 pixels[at] = pixels[at] >= 128 ? 255 : 0;
         }
 
-        const std::string virtualPath = VirtualNameFor(bcrPath, hasAlpha);
+        const std::string virtualPath = VirtualNameFor(bcrPath, hasAlpha ? "_ca" : "", ".paa");
         const std::filesystem::path target = OnDiskPathFor(_outputRoot, virtualPath);
         std::error_code ec;
         std::filesystem::create_directories(target.parent_path(), ec);
@@ -811,8 +1276,11 @@ class TextureBaker
     const PakSet& _paks;
     std::string _outputRoot;
     TextureOptions _options;
-    std::unordered_map<std::string, std::string> _byMaterial;
+    std::unordered_map<std::string, BakedMaterial> _byMaterial;
     std::unordered_map<std::string, std::string> _byImage;
+    //! Keyed on the NMO alone, unlike `_byImage`: a normal map is folded with nothing,
+    //! so two materials naming one NMO really are the same file.
+    std::unordered_map<std::string, std::string> _byNormal;
     std::unordered_set<std::string> _taken;
     TextureStats _stats;
 };
@@ -826,9 +1294,29 @@ struct ConvertOptions
     float resolution = 1.0f;  //!< runtime detail value at which the first coarser LOD becomes active
     bool secondUv = false;    //!< emit both #UVSet# blocks when a part declares two sets
     bool flipWinding = false; //!< see the winding note at the top of this file
-    bool materialAsRvmat = false;
+    //! Fact 6: negate the written normal AND swap corners 0/1, together. Half of this
+    //! is worse than none of it -- see the note at the top of the file.
+    bool fixOrientation = false;
+    //! Fact 7: write `autocenter=0` so the engine stops moving the model's origin to
+    //! its bounding-box centre. See the note at the top of the file.
+    bool fixOrigin = false;
     TextureOptions textures;
 };
+
+//! `XOB_FIX_ORIENTATION=1` turns fact 6's correction on without a command line change,
+//! so a batch script that already exists can be A/B'd from the environment.
+inline bool OrientationFixFromEnv()
+{
+    const char* value = std::getenv("XOB_FIX_ORIENTATION");
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
+//! `XOB_FIX_ORIGIN=1`, likewise, for fact 7.
+inline bool OriginFixFromEnv()
+{
+    const char* value = std::getenv("XOB_FIX_ORIGIN");
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
 
 struct ConvertStats
 {
@@ -842,8 +1330,15 @@ struct ConvertStats
     size_t triangles = 0;
     size_t droppedUnreferenced = 0; //!< source vertices no triangle indexes
     size_t materials = 0;
-    size_t partsTextured = 0;    //!< parts whose material resolved to a written `.paa`
-    size_t crossAlongNormal = 0; //!< triangles whose edge cross agrees with the stored normals
+    size_t partsTextured = 0;     //!< parts whose material resolved to a written `.paa`
+    size_t partsWithMaterial = 0; //!< parts naming a written `.rvmat` rather than an `.emat`
+    size_t crossAlongNormal = 0;  //!< triangles whose edge cross agrees with the stored normals
+    //! Fact 6's absolute check, over LOD0 only: does the WRITTEN normal point away from
+    //! the LOD's point-cloud centroid? Meaningful per model only for a closed convex
+    //! solid (a boulder); over a corpus the aggregate is still the number that moves
+    //! when the sign is wrong, because no corpus is majority-concave.
+    size_t normalOutward = 0;
+    size_t normalInward = 0;
     float bboxMin[3] = {0.0f, 0.0f, 0.0f};
     float bboxMax[3] = {0.0f, 0.0f, 0.0f};
 
@@ -926,6 +1421,11 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         }
 
         Fmt::MLOD::WriteLod writeLod;
+        // Fact 7. On every LOD, not just LOD0: `Model.cpp:67` reads lodLevels[0] but
+        // `LODShape::PropertyValue` consults the GEOMETRY LOD first, and a converted
+        // model has no geometry LOD today but may grow one.
+        if (options.fixOrigin)
+            writeLod.properties.push_back({"autocenter", "0"});
         writeLod.resolution = VisualLodResolution(rank, options.resolution);
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
         {
@@ -962,7 +1462,12 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
                 point.position = {part.positions[v].x, part.positions[v].y, part.positions[v].z};
                 point.flags = 0;
                 writeLod.points.push_back(point);
-                writeLod.normals.push_back({part.normals[v].x, part.normals[v].y, part.normals[v].z});
+                // Fact 6: `.xob` normals are outward, this engine's are inward. The
+                // reader stays faithful to the file; the convention change belongs here,
+                // in the converter, and is paired with the winding swap below.
+                const float sign = options.fixOrientation ? -1.0f : 1.0f;
+                writeLod.normals.push_back(
+                    {sign * part.normals[v].x, sign * part.normals[v].y, sign * part.normals[v].z});
 
                 for (int axis = 0; axis < 3; ++axis)
                 {
@@ -978,14 +1483,22 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
             if (part.materialIndex < header.materials.size())
                 materialSource = header.materials[part.materialIndex].path;
             std::string texturePath;
+            std::string materialPath = materialSource;
             if (baker && !materialSource.empty())
-                texturePath = baker->TextureFor(materialSource);
+            {
+                const BakedMaterial& baked = baker->For(materialSource);
+                texturePath = baked.colourPaa;
+                // Only when a file was actually written. Naming an `.rvmat` that does
+                // not exist is strictly worse than naming the `.emat`: both fail to
+                // open, but the second at least says which material it meant.
+                if (!baked.rvmatPath.empty())
+                {
+                    materialPath = baked.rvmatPath;
+                    stats.partsWithMaterial++;
+                }
+            }
             if (!texturePath.empty())
                 stats.partsTextured++;
-
-            std::string materialPath = materialSource;
-            if (options.materialAsRvmat && EndsWith(LowerCopy(materialPath), ".emat"))
-                materialPath = materialPath.substr(0, materialPath.size() - 5) + ".rvmat";
             if (!materialPath.empty())
                 materialPaths.insert(materialPath);
 
@@ -995,7 +1508,10 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
             for (size_t t = 0; t + 2 < part.indices.size(); t += 3)
             {
                 uint16_t corner[3] = {part.indices[t], part.indices[t + 1], part.indices[t + 2]};
-                if (options.flipWinding)
+                // Two independent reasons to swap, so XOR: asking for both is asking for
+                // the original order back, and silently applying one twice would be the
+                // kind of cancellation this file exists to make impossible.
+                if (options.flipWinding != options.fixOrientation)
                     std::swap(corner[0], corner[1]);
 
                 {
@@ -1043,6 +1559,54 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         {
             error = "LOD " + std::to_string(lodIndex) + " has no geometry";
             return false;
+        }
+
+        // Fact 6's absolute orientation check. LOD0 only: it is the level that is drawn
+        // near the camera, it is the only one whose geometry is dense enough for the
+        // centroid to be a fair reference, and running it on every rung would say the
+        // same thing five times. Faces whose centroid coincides with the model's are
+        // skipped rather than counted as either sign.
+        if (rank == 0 && writeLod.points.size() >= 4)
+        {
+            float cx = 0.0f, cy = 0.0f, cz = 0.0f;
+            for (const Fmt::MLOD::WritePoint& point : writeLod.points)
+            {
+                cx += point.position.x;
+                cy += point.position.y;
+                cz += point.position.z;
+            }
+            const float invN = 1.0f / static_cast<float>(writeLod.points.size());
+            cx *= invN;
+            cy *= invN;
+            cz *= invN;
+            for (const Fmt::MLOD::WriteFace& face : writeLod.faces)
+            {
+                float nx = 0.0f, ny = 0.0f, nz = 0.0f;
+                float fx = 0.0f, fy = 0.0f, fz = 0.0f;
+                for (int c = 0; c < face.vertexCount; ++c)
+                {
+                    // -1 is the sanctioned "no normal" and would index out of range.
+                    if (face.vertices[c].normal < 0)
+                        continue;
+                    const auto& normal = writeLod.normals[static_cast<size_t>(face.vertices[c].normal)];
+                    nx += normal.x;
+                    ny += normal.y;
+                    nz += normal.z;
+                    const auto& position = writeLod.points[static_cast<size_t>(face.vertices[c].point)].position;
+                    fx += position.x;
+                    fy += position.y;
+                    fz += position.z;
+                }
+                const float invC = 1.0f / static_cast<float>(face.vertexCount);
+                fx = fx * invC - cx;
+                fy = fy * invC - cy;
+                fz = fz * invC - cz;
+                const float dot = nx * fx + ny * fy + nz * fz;
+                if (dot > 0.0f)
+                    stats.normalOutward++;
+                else if (dot < 0.0f)
+                    stats.normalInward++;
+            }
         }
 
         writeLod.secondUVChannel = options.secondUv && anySecondSet;
@@ -1278,9 +1842,18 @@ void PrintModelLine(const ModelResult& result)
               << s.lodsWritten << "/" << s.lodCount;
     if (s.lodsDropped)
         std::cout << " (" << s.lodsDropped << " refused)";
-    std::cout << " finest " << s.lodIndex << " thr " << std::fixed << std::setprecision(3) << s.threshold
-              << "  bbox " << std::setprecision(2) << s.Extent(0) << " x " << s.Extent(1) << " x " << s.Extent(2)
-              << " m  tex " << s.partsTextured << "/" << s.parts << "  "
+    std::cout << " finest " << s.lodIndex << " thr " << std::fixed << std::setprecision(3) << s.threshold << "  bbox "
+              << std::setprecision(2) << s.Extent(0) << " x " << s.Extent(1) << " x " << s.Extent(2) << " m  tex "
+              << s.partsTextured << "/" << s.parts << "  ";
+    // Facts 6 and 7, per model, because both are per-model properties and both are
+    // invisible in every other number on this line. On a closed convex solid (a
+    // boulder) `nrm` is 1.00 or 0.00 and nothing in between; `originY` is the metres
+    // the model sinks if it is autocentred.
+    if (s.normalOutward + s.normalInward)
+        std::cout << "nrm " << std::setprecision(2)
+                  << (static_cast<double>(s.normalOutward) / static_cast<double>(s.normalOutward + s.normalInward))
+                  << " out  ";
+    std::cout << "originY " << std::setprecision(2) << ((s.bboxMin[1] + s.bboxMax[1]) * 0.5f) << "  "
               << (result.roundTrip.ok ? "round-trips" : "ROUND-TRIP: " + result.roundTrip.reason) << "\n";
 }
 
@@ -1297,7 +1870,25 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
               << " written parts name a texture; the rest will draw UNTEXTURED.\n";
     if (stats.baseLayerOnly)
         std::cout << "            " << stats.baseLayerOnly
-                  << " MatPBRMulti materials bound their BCR_1 base layer only (the mask blend is not reproduced).\n";
+                  << " MatPBRMulti materials bound one shared library tile instead of a blend, " << stats.layerTinted
+                  << " of them rescaled to the layer's Color_N.\n";
+    if (stats.normalsWritten || stats.rvmatsWritten)
+    {
+        std::cout << "Normals:    " << stats.materialsWithNormal << " / " << stats.materialsSeen
+                  << " materials resolved a normal map; " << stats.normalsWritten << " DXT5nm .paa and "
+                  << stats.rvmatsWritten << " .rvmat written.\n";
+        if (!stats.packings.empty())
+        {
+            std::cout << "            source packing:";
+            for (const auto& [name, count] : stats.packings)
+                std::cout << "  " << name << " " << count;
+            std::cout << "   (RG = X in red, AG = X in alpha; `none` was refused)\n";
+        }
+    }
+    if (stats.bcrAlphaVaries || stats.bcrAlphaFlat)
+        std::cout << "            BCR alpha varies in " << stats.bcrAlphaVaries << " of "
+                  << (stats.bcrAlphaVaries + stats.bcrAlphaFlat)
+                  << " albedos. Nothing binds it: what it holds has not been measured here.\n";
     if (!stats.failures.empty())
     {
         std::cout << "Materials that bound nothing:\n";
@@ -1634,6 +2225,24 @@ int Export(const ExportOptions& options)
                   << ").\n";
     }
 
+    // The absolute companion to the relative line above. A corpus that reads mostly
+    // OUTWARD is inverted for this engine (fact 6); mostly INWARD is what native
+    // content gives. The two lines together cannot both be satisfied by an inversion
+    // of both halves, which is the failure the winding line alone could not see.
+    size_t outward = 0, inward = 0;
+    for (const ModelResult& result : results)
+    {
+        outward += result.stats.normalOutward;
+        inward += result.stats.normalInward;
+    }
+    if (outward + inward)
+    {
+        std::cout << "Orientation: LOD0 faces whose written normal points AWAY from the model centroid: " << outward
+                  << " outward / " << inward << " inward (" << std::setprecision(4)
+                  << (static_cast<double>(outward) / static_cast<double>(outward + inward))
+                  << " outward). This engine wants INWARD -- see fact 6 and --fix-orientation.\n";
+    }
+
     // --- the manifest -----------------------------------------------------
     std::error_code ec;
     const auto manifestParent = std::filesystem::path(options.manifest).parent_path();
@@ -1742,13 +2351,27 @@ void XobCommand::Setup(CLI::App& app)
                         "Visual LOD resolution step (default 1.0 writes 1/2/3/...)");
         cmd->add_flag("--second-uv", options.secondUv, "Emit both #UVSet# blocks when a part declares two UV sets");
         cmd->add_flag("--flip-winding", options.flipWinding, "Reverse triangle winding (see the winding note)");
-        cmd->add_flag("--material-rvmat", options.materialAsRvmat, "Name materials .rvmat instead of .emat");
+        cmd->add_flag("--fix-orientation", options.fixOrientation,
+                      "Fact 6: negate normals AND reverse winding together (env XOB_FIX_ORIENTATION=1)");
+        cmd->add_flag("--fix-origin", options.fixOrigin,
+                      "Fact 7: write autocenter=0 so the origin is not moved to the bbox centre "
+                      "(env XOB_FIX_ORIGIN=1)");
         cmd->add_flag("--textures", options.textures.enabled,
                       "Bake each material's BCRMap (+OpacityMap) to .paa and name it in the face texture slot");
         cmd->add_option("--texture-prefix", options.textures.prefix,
                         "Virtual path prefix for baked textures (default reforger\\everon\\textures)");
         cmd->add_option("--max-texture", options.textures.maxSize, "Longest baked texture edge (default 1024)");
-        cmd->callback([]() { std::exit(Convert(root, filter, output, prefix, limit, options)); });
+        cmd->add_flag("--normals", options.textures.normals,
+                      "Also bake NMOMap to a DXT5nm .paa. Needs --material-rvmat to reach the renderer.");
+        cmd->add_flag("--material-rvmat", options.textures.rvmats,
+                      "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->callback(
+            []()
+            {
+                options.fixOrientation = options.fixOrientation || OrientationFixFromEnv();
+                options.fixOrigin = options.fixOrigin || OriginFixFromEnv();
+                std::exit(Convert(root, filter, output, prefix, limit, options));
+            });
     }
     {
         static ExportOptions options;
@@ -1767,13 +2390,27 @@ void XobCommand::Setup(CLI::App& app)
                         "Visual LOD resolution step (default 1.0 writes 1/2/3/...)");
         cmd->add_flag("--second-uv", options.convert.secondUv, "Emit both #UVSet# blocks");
         cmd->add_flag("--flip-winding", options.convert.flipWinding, "Reverse triangle winding");
-        cmd->add_flag("--material-rvmat", options.convert.materialAsRvmat, "Name materials .rvmat instead of .emat");
+        cmd->add_flag("--fix-orientation", options.convert.fixOrientation,
+                      "Fact 6: negate normals AND reverse winding together (env XOB_FIX_ORIENTATION=1)");
+        cmd->add_flag("--fix-origin", options.convert.fixOrigin,
+                      "Fact 7: write autocenter=0 so the origin is not moved to the bbox centre "
+                      "(env XOB_FIX_ORIGIN=1)");
         cmd->add_flag("--textures", options.convert.textures.enabled,
                       "Bake each material's BCRMap (+OpacityMap) to .paa and name it in the face texture slot");
         cmd->add_option("--texture-prefix", options.convert.textures.prefix,
                         "Virtual path prefix for baked textures (default reforger\\everon\\textures)");
         cmd->add_option("--max-texture", options.convert.textures.maxSize, "Longest baked texture edge (default 1024)");
-        cmd->callback([]() { std::exit(Export(options)); });
+        cmd->add_flag("--normals", options.convert.textures.normals,
+                      "Also bake NMOMap to a DXT5nm .paa. Needs --material-rvmat to reach the renderer.");
+        cmd->add_flag("--material-rvmat", options.convert.textures.rvmats,
+                      "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->callback(
+            []()
+            {
+                options.convert.fixOrientation = options.convert.fixOrientation || OrientationFixFromEnv();
+                options.convert.fixOrigin = options.convert.fixOrigin || OriginFixFromEnv();
+                std::exit(Export(options));
+            });
     }
 }
 

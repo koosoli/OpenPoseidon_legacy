@@ -10,6 +10,7 @@
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Textures/EddsReader.hpp>
 #include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>
 #include <Poseidon/Graphics/Textures/PAAEncoder.hpp>
 #include <Poseidon/Graphics/Textures/PixelFormat.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -1189,6 +1190,35 @@ inline bool LoadEdds(const PakSet& paks, const std::string& path, Poseidon::Imag
     // fail here rather than run off the end of the buffer.
     return out.valid() &&
            out.data().size() >= static_cast<size_t>(out.width()) * static_cast<size_t>(out.height()) * 4;
+}
+
+//! Write a `.paa` and prove it reads back at the size it was written.
+//!
+//! `WritePAA` accepts formats and sizes the PAA READER cannot read, and a texture that
+//! fails to load is silent all the way to a white draw -- there is no error anywhere,
+//! only a ground that looks wrong. The mask is the live case: a 4096 DXT3 comes back
+//! with a truncated mip chain, which is the whole reason `--mask-size` is documented
+//! as capped at 2048. Before this, raising it past the cap wrote an unreadable mask
+//! and said nothing; now it names the file and the size that failed.
+inline bool WriteVerifiedPAA(const std::string& path, int width, int height, std::vector<uint8_t> rgba,
+                             Poseidon::PixelFormat format, std::string& error)
+{
+    if (!Poseidon::PAAEncoder::WritePAA(path, Poseidon::Image::FromRGBA(width, height, std::move(rgba)), format))
+    {
+        error = "WritePAA refused " + path;
+        return false;
+    }
+    Poseidon::PAAInfo info;
+    const Poseidon::DecodedImage back = Poseidon::DecodePAAFile(path);
+    if (!ReadPAAInfo(path, info) || !back.valid() || back.width != width || back.height != height)
+    {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        error = path + " does not read back at " + std::to_string(width) + "x" + std::to_string(height) +
+                " -- the writer accepted a size the reader cannot load";
+        return false;
+    }
+    return true;
 }
 
 //! Everything the RVMAT set needs, resolved per MATS entry.

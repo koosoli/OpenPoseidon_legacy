@@ -7,7 +7,10 @@
 #include <Poseidon/IO/Streams/QBStream.hpp>
 
 #include <cstdio>
+#include <initializer_list>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Poseidon::Asset::Material
@@ -65,10 +68,27 @@ inline std::string EmatSiblingOf(const std::string& rvmatPath)
     return EmatPathForRvmat(rvmatPath);
 }
 
-// Reads an `.emat` through the same resolver model loading uses, so an addon-bank path
+// True when a material path names an `.emat` outright rather than an `.rvmat`.
+//
+// This is the whole of defect 2 in the Reforger report. Every material path on Everon
+// ends in `.emat` -- the converter carried the Enfusion virtual path through unchanged
+// -- and the sibling lookup below compares `EmatPathForRvmat(p)` against `p`, which for
+// such a path is the SAME STRING. The old guard read that equality as "there is no
+// sibling" and returned false, so the one branch that can read an `.emat` was never
+// entered for the 1,189 materials that are nothing but `.emat`s.
+inline bool IsEmatPath(std::string_view path)
+{
+    // Strictly greater: a name that is nothing but the extension has no stem, and
+    // treating it as a material would send an empty path to the resolver.
+    if (path.size() <= 5)
+        return false;
+    return EmatMaterial::NameMatches(path.substr(path.size() - 5), ".emat");
+}
+
+// Reads a file through the same resolver model loading uses, so an addon-bank path
 // resolves the way an RVMAT reference does. Returns false when the file is absent --
 // which is the ordinary case for every non-DayZ material and must not be an error.
-inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)
+inline bool ReadEmatText(const std::string& path, std::string& out)
 {
     QIFStreamB file;
     file.AutoOpen(path.c_str());
@@ -77,20 +97,37 @@ inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)
     const int length = file.rest();
     if (length <= 0)
         return false;
-    std::string text(static_cast<size_t>(length), '\0');
-    file.read(text.data(), length);
-    if (file.fail())
+    out.assign(static_cast<size_t>(length), '\0');
+    file.read(out.data(), length);
+    return !file.fail();
+}
+
+inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)
+{
+    std::string text;
+    if (!ReadEmatText(path, text))
         return false;
     out = ParseEmat(text);
-    return out.valid();
+    if (!out.valid())
+        return false;
+    // 1,891 of Reforger's 10,311 materials (18.3%) take their maps only from a parent.
+    // Read without one, the child keeps its own overrides and silently loses everything
+    // else -- so resolve here, at the one place that knows how to open a file, rather
+    // than leaving each caller to remember. A parent that cannot be found leaves the
+    // child as it was: still valid, just unresolved.
+    ResolveEmatInheritance(out,
+                           [](const std::string& parent, std::string& text) { return ReadEmatText(parent, text); });
+    return true;
 }
 
 // Fills a slot from a named `.emat` texture key, if the key names one.
-inline void AddEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat, const char* key, MaterialSlot slot)
+inline bool AddEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat, const char* key, MaterialSlot slot)
 {
     const std::string path = emat.TextureOf(key);
     if (path.empty())
-        return;
+        return false;
+    if (material.Find(slot))
+        return false; // first key wins; the caller lists them in preference order
     TranslatedSlot entry;
     entry.slot = slot;
     entry.present = true;
@@ -100,6 +137,18 @@ inline void AddEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat, 
     entry.texture = RvTextureRef::Parse(path);
     entry.channels = ChannelsForSlot(slot);
     material.slots.push_back(std::move(entry));
+    return true;
+}
+
+// The first of `keys` the material names, bound into `slot`. Returns the key that won,
+// or nullptr when the material names none of them.
+inline const char* AddFirstEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat,
+                                    std::initializer_list<const char*> keys, MaterialSlot slot)
+{
+    for (const char* key : keys)
+        if (AddEmatSlot(material, emat, key, slot))
+            return key;
+    return nullptr;
 }
 
 // Translates an `.emat` into the engine's material form. `family` is carried through from
@@ -108,13 +157,64 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
 {
     TranslatedMaterial out;
     out.origin = origin;
-    out.shaderFamily = family;
+    // An `.emat` reached through an `.rvmat` stub keeps the stub's claim; an `.emat`
+    // loaded as itself has no rvmat to claim anything, and its class name is the only
+    // family it has. Reporting the class beats reporting nothing: every Reforger
+    // material logged `family=` (empty) before this, which reads as "unrecognised
+    // shader" when the file in fact says `MatPBRBasic`.
+    out.shaderFamily = family.empty() ? emat.className : family;
     // The material is now described by something real, so a consumer may trust the slots.
     out.schemaKnown = true;
 
-    AddEmatSlot(out, emat, "AlbedoMap", MaterialSlot::BaseColour);
-    AddEmatSlot(out, emat, "NormalMap", MaterialSlot::NormalMap);
+    // Enfusion's texture keys, MEASURED over the 10,312 `.emat` files Arma Reforger
+    // ships. 9,481 of them name at least one texture; only 223 (2.2%) name any of the
+    // three DayZ keys this function used to read, which is why every Reforger material
+    // bound nothing at all. Counts, most-used first:
+    //
+    //   BCRMap        4,773   the object's own base colour
+    //   MaskMap       4,044   MatPBRMulti's layer blend control
+    //   BCR_1         3,905   a per-layer TILING DETAIL colour -- see below
+    //   NMO_1         3,768   a per-layer TILING DETAIL normal  -- see below
+    //   NMOMap        2,402   the object's own normal
+    //   GlobalMCRMap  2,041   see the note below -- deliberately NOT bound
+    //   OpacityMap    1,709
+    //   NTCMap          334   the vegetation families' normal, under a second name
+    //   AlbedoMap / NormalMap / EnvironmentMap    DayZ's spelling, kept
+    //
+    // The trap is `MatPBRMulti`, 4,191 files and the commonest class in the corpus. It
+    // looks like it names four albedos and four normals; it does not. Read one:
+    //
+    //   MaskMap        Assets/Items/Fuel/Jerrycan_01/Data/JerryCan_01_GLOBAL_MASK.edds
+    //   GlobalNMOMap   Assets/Items/Fuel/Jerrycan_01/Data/JerryCan_01_NMO.edds
+    //   BCR_1          Assets/_SharedData/Metal/ST_MetalPaint_Coated_02_1m_BCR.edds
+    //   UVTransform_1  TilingU 4  TilingV 4
+    //
+    // `BCR_1` and `NMO_1` are SHARED LIBRARY TILES -- a one-metre square of painted
+    // metal, used by hundreds of unrelated objects, tiled four times over by their own
+    // transform. Only `MaskMap` and `GlobalNMOMap` are in the object's own UV layout.
+    // So `NMO_1` must NOT reach NormalMap: bound there it is a one-metre tile stretched
+    // across a whole jerrycan in the wrong UV frame, which is not a worse normal map
+    // than none, it is a normal map that lights every surface wrongly. The layer maps
+    // land in the Layer* slots, where the scale that makes them meaningful is recorded
+    // beside them and nothing samples them until a shader exists that can blend them.
+    AddFirstEmatSlot(out, emat, {"BCRMap", "AlbedoMap"}, MaterialSlot::BaseColour);
+    AddFirstEmatSlot(out, emat, {"NMOMap", "GlobalNMOMap", "NTCMap", "NormalMap"}, MaterialSlot::NormalMap);
+    AddEmatSlot(out, emat, "MaskMap", MaterialSlot::Mask);
+    AddEmatSlot(out, emat, "BCR_1", MaterialSlot::LayerColour1);
+    AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour2);
+    AddEmatSlot(out, emat, "BCR_3", MaterialSlot::LayerColour3);
+    AddEmatSlot(out, emat, "NMO_1", MaterialSlot::LayerNormal1);
+    AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal2);
+    AddEmatSlot(out, emat, "NMO_3", MaterialSlot::LayerNormal3);
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
+
+    // `GlobalMCRMap` (2,041 files) is NOT bound, and the omission is the point. The
+    // slots this engine has are the ones whose channel layout was measured -- see
+    // MaterialChannels.hpp, where every entry names the sample it came from. What an
+    // Enfusion MCR map holds per channel has not been measured here, and the nearest
+    // free slot (Macro) already means something else: Super's Stage3 macro COLOUR.
+    // Binding a data map there would make a future consumer sample it as colour. The
+    // key stays in the `EmatMaterial`, where whoever measures it can reach it.
 
     // `Color` is the surface's tint and, in its fourth component, its opacity -- pond
     // water is 0.37, Sakhal's ice is 1.0. Diffuse is where the rest of the pipeline
@@ -199,8 +299,9 @@ inline bool AugmentFromEmatSibling(const std::string& rvmatPath, TranslatedMater
 {
     if (!BindsNothing(material))
         return false;
-    const std::string ematPath = EmatSiblingOf(rvmatPath);
-    if (ematPath == rvmatPath)
+    // A path that IS an `.emat` is its own material file, not a stub with a sibling.
+    const std::string ematPath = IsEmatPath(rvmatPath) ? rvmatPath : EmatSiblingOf(rvmatPath);
+    if (ematPath.empty())
         return false;
     EmatMaterial emat;
     if (!ReadEmatFile(ematPath, emat))
@@ -226,9 +327,63 @@ inline bool AugmentFromEmatSibling(const std::string& rvmatPath, TranslatedMater
 // separate lines repeated at each call site before, and a fourth line repeated three
 // times is how one backend quietly ends up not doing it.
 //
+// The text of a minimal Super RVMAT binding one normal map.
+//
+// This lives here, beside the reader, and not in the converter that calls it, for one
+// reason: a format emitted in one place and parsed in another drifts, and the drift is
+// silent -- the material still loads, it just stops binding what it meant to. Written
+// here it is covered by a test that hands the output straight back to
+// `LoadTranslatedMaterial`.
+//
+// Super, because its stage table is the most thoroughly measured one this engine has
+// (ShaderSchema.hpp, over 2,853 materials) and Stage1 is its normal map.
+//
+// Stage0 is deliberately absent. The albedo arrives through the MLOD face texture, and
+// `ClassifyGpuSection` takes a section's cutout decision from the face texture and from
+// nothing else -- so moving the colour into the material would quietly turn every
+// alpha-tested leaf card back into an opaque rectangle. This file adds a normal and
+// changes nothing else.
+inline std::string MakeSuperRvmatText(const std::string& origin, const std::string& normalTexture)
+{
+    std::string text;
+    if (!origin.empty())
+        text += "// Generated by `poseidon xob` from " + origin + "\n";
+    text += "ambient[]={1,1,1,1};\n"
+            "diffuse[]={1,1,1,1};\n"
+            "forcedDiffuse[]={0,0,0,0};\n"
+            // Spelled the way the format spells it. `emissive` is read by nothing.
+            "emmisive[]={0,0,0,0};\n"
+            "specular[]={0,0,0,0};\n"
+            "specularPower=0;\n"
+            "PixelShaderID=\"Super\";\n"
+            "VertexShaderID=\"Super\";\n"
+            "class Stage1\n"
+            "{\n"
+            " texture=\"" +
+            normalTexture +
+            "\";\n"
+            " uvSource=\"tex\";\n"
+            "};\n";
+    return text;
+}
+
 // Throws whatever `ParseRvMaterialFile` throws; callers already cache the miss.
+//
+// Defect 1 of the Reforger report is answered at the top: a path ending in `.emat` is
+// not an RVMAT and must never be handed to `ParseRvMaterialFile`. That call opens the
+// file, fails, and throws "failed to open RVMAT" -- which is what happened for every
+// single material on Everon, all 1,189 of them, and is why they all logged an empty
+// shader family. `.emat` is a complete material description in its own right, so read
+// it as one.
 inline TranslatedMaterial LoadTranslatedMaterial(const std::string& rvmatPath)
 {
+    if (IsEmatPath(rvmatPath))
+    {
+        EmatMaterial emat;
+        if (!ReadEmatFile(rvmatPath, emat))
+            throw std::runtime_error("failed to open EMAT: " + rvmatPath);
+        return TranslateEmat(emat, rvmatPath, std::string());
+    }
     const RvMaterialSource source = ParseRvMaterialFile(rvmatPath);
     TranslatedMaterial translated = TranslateSemantics(source, TranslateMaterial(source));
     AugmentFromEmatSibling(rvmatPath, translated);
