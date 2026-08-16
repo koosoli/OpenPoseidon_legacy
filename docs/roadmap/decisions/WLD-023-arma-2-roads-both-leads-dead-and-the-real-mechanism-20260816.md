@@ -136,3 +136,69 @@ white while the rest of the frame darkens, it is slot-0/bindless and the trace t
   `--vertices` shows correct UVs — a tool reporting bug that will mislead the next reader.
 - `ShapeDraw.cpp:70-71` says the blend pass has "no depth write"; `SceneDraw.cpp:2419` keeps it on
   for "original parity". One of those comments describes a system that does not exist.
+
+---
+
+# RUN RESULTS (2026-08-16) — night glow is NOT emissive; poke-through inconclusive at this pose
+
+## Night self-illumination: hypothesis refuted by its own ablation
+
+`WGR_EMISSIVE_NIGHT=0` (added specifically to test it) **fired and changed nothing on the road**:
+
+| | trace arm (emissive 1.0) | noemissive arm |
+|---|---|---|
+| road (1000,650) | (41.9, 42.1, 45.7) | **(41.9, 42.1, 45.7)** |
+| terrain (600,700) | (0.2, 0.2, 0.1) | (0.2, 0.2, 0.1) |
+
+The lever demonstrably worked frame-wide — 12,269 pixels (0.852%) changed, mean luminance
+1.1177 → 1.0280 — so emissive really was removed and the road really is unaffected. **Emissive is
+not the mechanism for road night-glow.** Next suspect is a *missing* term rather than an extra one:
+the decal/surface path appears not to multiply by `frame.sun_ambient.w`, which fits the evidence
+that fog IS applied (41.9 → 12.6 with distance) while the night factor is not.
+
+## But vegetation emissive is real, and large
+
+Distribution of `emi=` over the whole `WGR_ROAD_TRACE` capture:
+
+| count | value | materials |
+|---:|---|---|
+| 49 | (2.600, 2.300, 2.000) | `ca\plants_e\tree\...` |
+| 12 | (2.000, 2.000, 2.000) | `ca\plants_e\bush\...` |
+| 5 | (1.500, 1.600, 1.000) | — |
+| 3 | (1.000, 1.000, 1.000) | — |
+| 6 | (0.000, 0.000, 0.000) | weapons, flags |
+
+Emissive of 2.6 added as absolute radiance with no time-of-day scaling explains the glowing trunks
+observed at night. **A 2.6 emissive on a pine canopy is more likely a misread material field than
+an authored glow** — these are OFP-lineage lanes, so check whether an Arma 2 field (forcedDiffuse,
+or a specular/ambient lane) is being read into the emissive slot by the section reader.
+
+**Also learned:** `WGR_ROAD_TRACE` matched **no road material at all** at this pose — every entry
+was a weapon, flag, tree or bush. The trace cannot currently observe an Arma 2 road, which is worth
+fixing before relying on it again.
+
+## Poke-through: four arms, inconclusive
+
+Takistan 7778.77 / 5661.41 / alt 521.81, az 106.7 el −19.6, hour 8. Counting "road-like" pixels
+(bright, desaturated) present in one arm and not the other:
+
+| arm | only in base | only in arm | net |
+|---|---:|---:|---:|
+| `WGR_TERRAIN_LOD_BASE=1000` (leaves everywhere) | 1393 | 1144 | −249 |
+| `WGR_CONFORM_RASTER=1` (the fix) | 654 | 659 | +5 |
+| `WGR_TERRAIN_LOD_BASE=0.25` (coarser) | 3822 | 5230 | **+1408** |
+
+The first two are near-symmetric — the road *shifting* under a different tessellation, not
+poke-through being removed. Only the deliberately-worse arm moves directionally, and it moves the
+predicted way (coarser terrain → more road visible). That is weak supporting evidence for the
+mechanism and **not** a confirmation of the fix.
+
+**This pose does not show the artefact strongly enough to measure.** The owner has since clarified
+that the see-through is partial — "the mountain in front is not perfectly masking the road, but it
+is not that it is see-through everywhere" — which is consistent with the mechanism and also
+explains why a whole-frame pixel count cannot resolve it. The next attempt needs a pose where a
+road segment is *known* to sit behind a ridge, ideally identified from the world data rather than
+by eye, so the test has a specific region to score.
+
+Note the frame is heavily overexposed here (mean luminance 156.7), so the roads read white — a
+second, independent confirmation of WLD-024 at a different pose and hour.
