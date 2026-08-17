@@ -80,6 +80,8 @@ bool DoEditorChildControllerUiAction(ControlsContainer* display, Poseidon::Contr
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>
+#include <cstdio>
+#include <cstring>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -734,7 +736,79 @@ void World::SimulateCloudlets(float deltaT)
         if (wanted != 0 && !spawned && CameraOn() != nullptr && Glob.time.toFloat() > 2.0f)
         {
             spawned = true;
-            const Vector3 position = CameraOn()->Position() + CameraOn()->Direction() * 10.0f;
+            Vector3 position = CameraOn()->Position() + CameraOn()->Direction() * 10.0f;
+            // POSEIDON_TEST_SMOKE_AT="x y z" pins the emitter to a world position,
+            // so a scripted run can put a plume INSIDE a specific building — the
+            // only way to test wall/ceiling behaviour without a hand on the panel.
+            if (const char* at = std::getenv("POSEIDON_TEST_SMOKE_AT"))
+            {
+                float x = 0.0f, y = 0.0f, z = 0.0f;
+                if (std::sscanf(at, "%f %f %f", &x, &y, &z) == 3)
+                {
+                    position = Vector3(x, y, z);
+                }
+            }
+            LOG_INFO(World, "POSEIDON_TEST_SMOKE spawn at {:.1f},{:.1f},{:.1f}", position.X(), position.Y(),
+                     position.Z());
+            // POSEIDON_TEST_SMOKE_HOUSE=1: find the nearest ENTERABLE building on
+            // the map (a shape with a Roadway LOD is one you can walk inside) and
+            // put the emitter inside it, 1 m off its floor. This is the only way
+            // to test wall / ceiling / indoor-shelter behaviour from a script
+            // without knowing the map's coordinates in advance; the log line
+            // below tells you where it went so the camera can be aimed there on
+            // the next run.
+            const char* houseEnv = std::getenv("POSEIDON_TEST_SMOKE_HOUSE");
+            const bool wantHouse = houseEnv != nullptr && houseEnv[0] != ' ' && houseEnv[0] != '0';
+            if (wantHouse && GLandscape != nullptr)
+            {
+                const Object* best = nullptr;
+                float bestD2 = 1e30f;
+                for (int z = 0; z < LandRange; ++z)
+                {
+                    for (int x = 0; x < LandRange; ++x)
+                    {
+                        const ObjectList& list = GLandscape->GetObjects(z, x);
+                        for (int i = 0; i < list.Size(); ++i)
+                        {
+                            const Object* obj = list[i];
+                            if (obj == nullptr || obj->GetShape() == nullptr)
+                            {
+                                continue;
+                            }
+                            const LODShape* shape = obj->GetShape();
+                            if (shape->FindRoadwayLevel() < 0 || shape->FindFireGeometryLevel() < 0)
+                            {
+                                continue;
+                            }
+                            if (obj->GetRadius() < 4.0f)
+                            {
+                                continue;
+                            }
+                            const float d2 = (obj->Position() - position).SquareSizeXZ();
+                            if (d2 < bestD2)
+                            {
+                                bestD2 = d2;
+                                best = obj;
+                            }
+                        }
+                    }
+                }
+                if (best != nullptr)
+                {
+                    // Inside the footprint, low. The centre of a house model is
+                    // usually inside it; 1 m above its floor keeps the emitter
+                    // out of the ground plane.
+                    position = best->Position();
+                    position[1] = GLandscape->RoadSurfaceY(position.X(), position.Z()) + 0.5f;
+                    LOG_INFO(World, "POSEIDON_TEST_SMOKE_HOUSE: nearest enterable building '{}' at {:.1f},{:.1f},{:.1f} r={:.1f} ({:.0f} m away)",
+                             (const char*)best->GetShape()->Name(), best->Position().X(), best->Position().Y(),
+                             best->Position().Z(), best->GetRadius(), std::sqrt(bestD2));
+                }
+                else
+                {
+                    LOG_WARN(World, "POSEIDON_TEST_SMOKE_HOUSE: no enterable building found on this map");
+                }
+            }
             if (wanted == 2)
             {
                 GSmokeSystem.SpawnLegacy(position, 1.0f, 1.5f, -1.0f);

@@ -50,6 +50,15 @@ class ISmokeWorldQuery
     /// frame for every particle, unlike SweepSphere.
     virtual float GroundHeight(float x, float z) const = 0;
 
+    /// The surface a thing standing here would stand ON: the topmost of the
+    /// terrain and any building floor / roadway over it. This is what an
+    /// emitter placed inside a house must sit on. GroundHeight put a plume
+    /// spawned in a house UNDER its floor slab — in the crawl space between the
+    /// terrain and the roadway LOD — where every particle rose 20 cm, hit the
+    /// underside of the floor, was pushed back down, and leaked out the sides.
+    /// Costs a roadway lookup; fine for spawn and for a per-particle clamp.
+    virtual float FloorHeight(float x, float z) const = 0;
+
     /// Is there geometry directly overhead within `probeHeight` metres? This is
     /// the "am I indoors" test, and it is deliberately that crude: a roof is
     /// what stops the wind, and asking whether a point is inside a closed

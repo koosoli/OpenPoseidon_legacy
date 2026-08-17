@@ -20,20 +20,22 @@ class NullSmokeWorldQuery final : public ISmokeWorldQuery
   public:
     SmokeSurfaceHit SweepSphere(Vector3Par, Vector3Par, float) const override { return SmokeSurfaceHit{}; }
     float GroundHeight(float, float) const override { return 0.0f; }
+    float FloorHeight(float, float) const override { return 0.0f; }
     bool IsSheltered(Vector3Par, float) const override { return false; }
 };
 
 class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
 {
   public:
-    SmokeSurfaceHit SweepSphere(Vector3Par from, Vector3Par to, float radius) const override
+    /// One zero-width ray through the world, returning the deepest hit converted
+    /// to world space with a real outward normal. Factored out because
+    /// SweepSphere below fires several of these: Object::Intersect(beg, end,
+    /// radius, ...) IGNORES ITS RADIUS ARGUMENT — the bounding checks test the
+    /// line's distance and the clip loop clips the segment; `radius` is never
+    /// read. So the "sphere sweep" the interface promises has to be built here
+    /// from rays, or a puff's centre has to cross a wall before anything hits.
+    bool CastRay(Vector3Par from, Vector3Par to, SmokeSurfaceHit& out) const
     {
-        SmokeSurfaceHit result;
-        if (GLandscape == nullptr)
-        {
-            return result;
-        }
-
         ++GSweepCount;
 
         CollisionBuffer buffer;
@@ -46,21 +48,23 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         // ObjIntersectFire, not ObjIntersectView: fire geometry is the solid
         // shell of a building. View geometry includes glass and foliage, which
         // smoke should drift through.
-        GLandscape->ObjectCollision(buffer, nullptr, nullptr, from, to, radius, ObjIntersectFire);
+        GLandscape->ObjectCollision(buffer, nullptr, nullptr, from, to, 0.0f, ObjIntersectFire);
 
         if (buffer.Size() <= 0)
         {
-            return result;
+            return false;
         }
 
-        // Deepest penetration wins. The buffer is not sorted along the sweep, and
-        // taking the first entry gives whichever object the grid walk happened to
-        // reach first — which produced particles that slid along a wall and then
-        // popped through a pillar standing in front of it.
+        // Nearest entry along the ray wins. `under` on this path is the
+        // parametric t of the ENTRY point (see ObjectIntersect.cpp: "ret.under =
+        // t" where t = bt), so the smallest value is the surface the ray
+        // reached first — which is the one a particle should stop at. Taking
+        // the largest, as an earlier revision did, picked the FARTHEST wall on
+        // a ray that crossed a room, and reflected the particle off it.
         int best = 0;
         for (int i = 1; i < buffer.Size(); ++i)
         {
-            if (buffer[i].under > buffer[best].under)
+            if (buffer[i].under < buffer[best].under)
             {
                 best = i;
             }
@@ -69,26 +73,16 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         const CollisionInfo& info = buffer[best];
         if (info.object == nullptr)
         {
-            return result;
+            return false;
         }
 
-        // EVERYTHING IN CollisionInfo IS IN THE HIT OBJECT'S MODEL SPACE. Using
-        // `pos` and the normal directly as world-space values puts the contact
-        // wherever the building happens to sit relative to the map origin and
-        // rotates the normal by the building's heading — which looks like smoke
-        // reacting to walls that are not there. Convert, as SoldierOldSim and
-        // the vehicle collision code do.
-        result.hit = true;
-        result.position = info.object->PositionModelToWorld(info.pos);
+        // EVERYTHING IN CollisionInfo IS IN THE HIT OBJECT'S MODEL SPACE.
+        out.hit = true;
+        out.position = info.object->PositionModelToWorld(info.pos);
 
         // `surfaceNormal`, not `dirOut`: on this sweep path dirOut is the
-        // penetration chord (the engine says so in a comment) and points ALONG
-        // the travel direction, so reflecting off it does nothing at all.
+        // penetration chord and points ALONG the travel direction.
         Vector3 normal = info.object->DirectionModelToWorld(info.surfaceNormal);
-
-        // Zero when the segment lay entirely inside a component and clipped
-        // against no plane. Pushing back the way we came is not a real normal
-        // but it never leaves a particle stuck inside a wall.
         const float length = normal.Size();
         if (length > 1e-4f)
         {
@@ -100,23 +94,97 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
             const float backLength = back.Size();
             normal = backLength > 1e-4f ? back / backLength : Vector3(0.0f, 1.0f, 0.0f);
         }
-
-        // The plane normal that clipped the segment faces INTO the solid (the
-        // convex component's planes have positive distance inside). The caller
-        // wants the outward normal to push along, so flip it if it disagrees
-        // with the direction we came from.
+        // Convex-component planes face INTO the solid; the caller wants outward.
         if (normal.DotProduct(from - to) < 0.0f)
         {
             normal = -normal;
         }
+        out.normal = normal;
+        return true;
+    }
 
-        result.normal = normal;
+    SmokeSurfaceHit SweepSphere(Vector3Par from, Vector3Par to, float radius) const override
+    {
+        SmokeSurfaceHit result;
+        if (GLandscape == nullptr)
+        {
+            return result;
+        }
+
+        // Centre ray first: it is the cheapest and, for a particle heading
+        // straight at a wall, the one that hits.
+        SmokeSurfaceHit best;
+        bool haveBest = CastRay(from, to, best);
+
+        // Then a ring of rays offset by `radius` around the axis of travel, plus
+        // one straight up and one straight down. The ring catches a wall the
+        // particle is grazing; up/down catch a ceiling or floor when the sweep
+        // is nearly horizontal, which is exactly the case where a ring around
+        // the axis has no vertical member. Seven rays per sweep is the price of
+        // an interface that promised a sphere; SmokeVolume rations sweeps per
+        // particle so the total stays bounded.
+        Vector3 axis = to - from;
+        const float axisLength = axis.Size();
+        if (radius > 1e-3f)
+        {
+            Vector3 dir = axisLength > 1e-4f ? axis / axisLength : Vector3(0.0f, 1.0f, 0.0f);
+            // Two perpendiculars to the travel direction.
+            Vector3 up(0.0f, 1.0f, 0.0f);
+            if (std::fabs(dir.DotProduct(up)) > 0.9f)
+            {
+                up = Vector3(1.0f, 0.0f, 0.0f);
+            }
+            Vector3 side = dir.CrossProduct(up);
+            side = side / std::max(side.Size(), 1e-6f);
+            Vector3 lift = side.CrossProduct(dir);
+            lift = lift / std::max(lift.Size(), 1e-6f);
+
+            const Vector3 offsets[6] = {
+                side * radius,  side * -radius, lift * radius,
+                lift * -radius, Vector3(0.0f, radius, 0.0f), Vector3(0.0f, -radius, 0.0f),
+            };
+            for (const Vector3& offset : offsets)
+            {
+                SmokeSurfaceHit hit;
+                if (!CastRay(from + offset, to + offset, hit))
+                {
+                    continue;
+                }
+                // Prefer the contact whose surface is nearest the sweep START:
+                // that is the wall the particle reaches first. Measured as the
+                // hit point's distance from `from` along the travel axis.
+                const float d = (hit.position - from).DotProduct(axisLength > 1e-4f ? axis / axisLength : axis);
+                const float bd = haveBest ? (best.position - from).DotProduct(axisLength > 1e-4f ? axis / axisLength : axis)
+                                          : 1e9f;
+                if (!haveBest || d < bd)
+                {
+                    // Report the contact at the sphere CENTRE line, not at the
+                    // offset ray, so the caller's plane sits where the sphere
+                    // touches, not where the ring ray touched.
+                    hit.position -= offset;
+                    best = hit;
+                    haveBest = true;
+                }
+            }
+        }
+
+        if (haveBest)
+        {
+            result = best;
+        }
         return result;
     }
 
     float GroundHeight(float x, float z) const override
     {
         return GLandscape != nullptr ? GLandscape->SurfaceY(x, z) : 0.0f;
+    }
+
+    float FloorHeight(float x, float z) const override
+    {
+        // "find topmost surface on given x,z coordinates" — terrain OR a
+        // roadway LOD (building floor, bridge deck) above it.
+        return GLandscape != nullptr ? GLandscape->RoadSurfaceY(x, z) : 0.0f;
     }
 
     bool IsSheltered(Vector3Par pos, float probeHeight) const override

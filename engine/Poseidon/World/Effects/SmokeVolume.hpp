@@ -163,7 +163,15 @@ class SmokeVolume : public Entity
     void Animate(int level) override {}
     void Deanimate(int level) override {}
 
-    float CloudletClippingCoef() const override { return 10.0f; }
+    /// NOT the legacy 10. Scene::CloudletForDrawing drops the whole object when
+    /// its centre is closer than Near() * this coefficient. For a legacy
+    /// cloudlet that is one puff, so it only culls a puff you are standing in.
+    /// For a volume it is the ENTIRE PLUME: stand inside the smoke, or beside it
+    /// with its centroid a little behind you, and every particle vanishes at
+    /// once — which is exactly the "not visible from every angle indoors"
+    /// symptom. A coefficient below 1 lets the centre pass the near plane; each
+    /// particle still does its own per-billboard near test in Draw().
+    float CloudletClippingCoef() const override { return 0.0f; }
     SimulationImportance WorstImportance() const override;
     SimulationImportance BestImportance() const override;
 
@@ -202,6 +210,9 @@ class SmokeVolume : public Entity
     /// Rate limit for the draw diagnostics. Without it a plume logs once per
     /// particle per frame and the log becomes the performance problem.
     Foundation::Time _nextDiagTime;
+    long long _diagSweeps = 0; ///< sweeps since the last diag line
+    long long _diagHits = 0;   ///< of which hit geometry
+    int _diagHitLog = 0;       ///< first-N hit dump, once per volume
 
     unsigned _rand = 0x1234567u;
     float RandUnit();      ///< [0, 1)

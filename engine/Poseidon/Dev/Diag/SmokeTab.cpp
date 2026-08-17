@@ -26,6 +26,8 @@
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Effects/SmokeSystem.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
@@ -82,17 +84,24 @@ float Average(const float (&values)[kHistory])
 /// Where a spawn goes: `GSpawnDistance` metres in front of the camera, dropped
 /// to the ground. Ground-level is what you want almost always — a plume born in
 /// mid-air tells you nothing about collision or pooling.
+///
+/// The SCENE camera, not GWorld->CameraOn(). CameraOn() is the entity the view
+/// is attached to; in a free-fly / Zeus flight that is the player left standing
+/// wherever they were, while the picture on screen comes from a CameraVehicle
+/// the panel owns privately. Spawning off CameraOn() put the plume at the
+/// player's feet, out of frame, which read as "spawn does nothing in freefly".
+/// GScene->GetCamera() is what is actually being rendered, in every mode.
 bool SpawnPosition(Vector3& out)
 {
-    if (GWorld == nullptr || GWorld->CameraOn() == nullptr)
+    if (GWorld == nullptr || GScene == nullptr || GScene->GetCamera() == nullptr)
     {
         return false;
     }
 
-    const Object* camera = GWorld->CameraOn();
-    const Vector3 forward = camera->Direction();
-    Vector3 position = camera->Position() + forward * GSpawnDistance;
-    position[1] = GSmokeWorldQuery().GroundHeight(position.X(), position.Z()) + 0.2f;
+    const Camera& camera = *GScene->GetCamera();
+    const Vector3 forward = camera.Direction();
+    Vector3 position = camera.Position() + forward * GSpawnDistance;
+    position[1] = GSmokeWorldQuery().FloorHeight(position.X(), position.Z()) + 0.2f;
     out = position;
     return true;
 }
@@ -101,7 +110,7 @@ void DrawSpawnSection()
 {
     ImGui::SeparatorText("Spawn");
 
-    const bool haveWorld = GWorld != nullptr && GWorld->CameraOn() != nullptr;
+    const bool haveWorld = GWorld != nullptr && GScene != nullptr && GScene->GetCamera() != nullptr;
     if (!haveWorld)
     {
         ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "No world / no camera - nothing can be spawned.");
@@ -465,7 +474,7 @@ void DrawBenchmarkSection()
                 const float x = static_cast<float>(i % side - side / 2) * 12.0f;
                 const float z = static_cast<float>(i / side - side / 2) * 12.0f;
                 Vector3 position = centre + Vector3(x, 0.0f, z);
-                position[1] = GSmokeWorldQuery().GroundHeight(position.X(), position.Z()) + 0.2f;
+                position[1] = GSmokeWorldQuery().FloorHeight(position.X(), position.Z()) + 0.2f;
 
                 if (stressLegacy)
                 {

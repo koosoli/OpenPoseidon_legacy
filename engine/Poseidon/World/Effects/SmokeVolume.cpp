@@ -228,7 +228,9 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     // Always, and cheaply: a heightmap lookup, not a geometry query. Smoke
     // sinking into a hillside is the most visible failure of the legacy system
     // and it does not deserve a sphere sweep to fix.
-    const float ground = query.GroundHeight(particle.position.X(), particle.position.Z());
+    // FloorHeight, not GroundHeight: inside a house the surface smoke pools on
+    // is the floor slab, and the terrain under it may be a metre lower.
+    const float ground = query.FloorHeight(particle.position.X(), particle.position.Z());
     const float floorY = ground + 0.05f;
     if (particle.position.Y() < floorY)
     {
@@ -286,11 +288,21 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     // wall from being tunnelled through between sweeps.
     const Vector3 lookahead = particle.position + particle.velocity * _params.sweepInterval;
     const SmokeSurfaceHit hit = query.SweepSphere(previousPosition, lookahead, sphereRadius);
+    ++_diagSweeps;
 
     if (!hit.hit)
     {
         particle.planeValid = false;
         return;
+    }
+    ++_diagHits;
+    if (_diagHitLog < 12)
+    {
+        ++_diagHitLog;
+        LOG_INFO(World, "  hit: p=({:.1f},{:.1f},{:.1f}) v=({:.1f},{:.1f},{:.1f}) n=({:.2f},{:.2f},{:.2f}) at y={:.2f}",
+                 particle.position.X(), particle.position.Y(), particle.position.Z(), particle.velocity.X(),
+                 particle.velocity.Y(), particle.velocity.Z(), hit.normal.X(), hit.normal.Y(), hit.normal.Z(),
+                 hit.position.Y());
     }
 
     // Cache the contact as a half-space and place the particle just outside it.
@@ -342,7 +354,14 @@ void SmokeVolume::UpdateBounds()
     }
 
     SetPosition(centre);
-    SetOrientScaleOnly(std::sqrt(radius2) + _params.endRadius);
+
+    // GetRadius() is BoundingSphere() * Scale(), so the scale must be divided
+    // by the shape's own sphere or the culling radius is off by that factor.
+    // cl_basic's sphere is not 1.0; using the metres directly under-reported
+    // the bound and let the frustum test drop a plume whose edge was on screen.
+    const float shapeSphere = _shape != nullptr ? std::max(_shape->BoundingSphere(), 1e-3f) : 1.0f;
+    const float radiusMetres = std::sqrt(radius2) + _params.endRadius;
+    SetOrientScaleOnly(radiusMetres / shapeSphere);
 }
 
 void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
@@ -554,11 +573,27 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             continue;
         }
 
-        // Same projection Object::DrawDecal performs; see Object.cpp.
+        // Same projection Object::DrawDecal performs for x/y; see Object.cpp.
         const float invW = 1.0f / posp[2];
         posp[0] = project(0, 2) + project(0, 0) * posp[0] * invW;
         posp[1] = project(1, 2) + project(1, 1) * posp[1] * invW;
-        const float nearPos = floatMax(posp[2] - size, nearest);
+
+        // DEPTH IS THE PARTICLE'S TRUE CENTRE, NOT SIZE-BIASED.
+        //
+        // Object::DrawDecal writes the billboard's depth at (z - size): the puff
+        // is pulled toward the camera by its own radius so a big soft blob is
+        // not knifed by the ground it is sitting on. Sensible for one puff of
+        // dust in the open. Fatal for a plume in a room: a 5 m puff at the BACK
+        // wall of an 8 m house reads as 5 m nearer than it is, which puts it in
+        // FRONT of the front wall, and the whole plume draws over the building
+        // from outside. That was the "smoke goes through walls" everyone saw --
+        // it was never in the room's geometry, only in the depth test.
+        //
+        // A small pull (a fraction of a metre) is still worth having so a puff
+        // resting on the floor is not half-clipped by it; capped so it can never
+        // exceed the particle's own contact plane distance.
+        const float depthPull = std::min(size * 0.10f, 0.35f);
+        const float nearPos = floatMax(posp[2] - depthPull, nearest);
         const float invNearPos = 1.0f / nearPos;
         posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
 
@@ -594,9 +629,21 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     if (verbose && Glob.time > _nextDiagTime)
     {
         _nextDiagTime = Glob.time + 1.0f;
-        LOG_INFO(World, "SmokeVolume: particles={} decals={} centre={:.1f},{:.1f},{:.1f} radius={:.2f} emitting={}",
+        int sheltered = 0;
+        for (const SmokeParticle& p : _particles)
+        {
+            if (p.exposure < 0.5f)
+            {
+                ++sheltered;
+            }
+        }
+        LOG_INFO(World,
+                 "SmokeVolume: particles={} decals={} centre={:.1f},{:.1f},{:.1f} radius={:.2f} emitting={} "
+                 "sweeps={} hits={} sheltered={}",
                  _particles.size(), issued, Position().X(), Position().Y(), Position().Z(), GetRadius(),
-                 _emitting ? 1 : 0);
+                 _emitting ? 1 : 0, _diagSweeps, _diagHits, sheltered);
+        _diagSweeps = 0;
+        _diagHits = 0;
     }
 
     _lastDrawUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();

@@ -1050,7 +1050,13 @@ void Scene::CloudletForDrawing(Object* obj)
     // perform more distant clipping than normal
     // in case of real 3d object peform normal clipping
     float nearest = _camera->Near() * obj->CloudletClippingCoef();
-    if (cPos.Z() < nearest)
+    // Test the SPHERE against the near plane, not the centre. For a legacy
+    // cloudlet (one puff) the two are the same test. For a volume that owns many
+    // particles the centre can sit behind the camera while half the plume is in
+    // front of it — you are standing in the smoke — and culling on the centre
+    // dropped every particle at once. A coefficient of 0 plus the radius term
+    // lets such an object through; each billboard still does its own near test.
+    if (cPos.Z() + radius < nearest)
     {
         return;
     }
