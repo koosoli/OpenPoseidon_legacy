@@ -162,6 +162,9 @@ OLink<CameraVehicle> s_zeusCamera;
 // scope above -- declaring them in here would name new symbols inside this namespace instead.
 bool s_zeusPrevCinemaBorder = true;
 std::string s_zeusStatus;
+// "Go to coordinates": whatever the owner pasted, verbatim. Sized for a full readout
+// line with room to spare; the parser below ignores everything that is not a number.
+char s_zeusGotoBuf[256] = {};
 int s_zeusSide = 0;
 int s_zeusSpawnKind = 0;
 int s_zeusPreset = 0;
@@ -301,6 +304,136 @@ void DisableZeusCamera()
 // character physically valid: standing on the terrain/road rather than at the
 // camera's arbitrary altitude.  This is deliberately a separate action from
 // spawning so it cannot accidentally replace or duplicate the player.
+// Pull the numbers out of whatever was pasted, ignoring everything else.
+//
+// The point is that the panel's OWN readout can be pasted straight back in. That line is
+//     freefly [2721.96, 944.30, 99.33]  az 306.9  el -5.4  (active)
+// so brackets, commas, the word `freefly`, the `az`/`el` labels and a trailing `(active)`
+// all have to be skipped -- and a bare `2721.96 944.30 99.33` has to work too, because
+// that is what a log line and the --test-world-freefly flag look like.
+//
+// ORDER IS X, Z, ALTITUDE. That is what the readout prints and what
+// --test-world-freefly takes, and it is NOT the (x, altitude, z) order the engine uses
+// internally -- copying a pose from an engine-internal log put a camera at 6099 m
+// photographing clouds once already. This function is the one place that conversion
+// happens, so the two orders cannot be confused anywhere else.
+//
+// A leading minus is part of its number (elevations are negative); anything else
+// non-numeric just ends the current number.
+struct ZeusGotoPose
+{
+    float x = 0.0f;
+    float z = 0.0f;
+    float altitude = 0.0f;
+    float azimuth = 0.0f;
+    float elevation = 0.0f;
+    int count = 0; // how many numbers were found, so the caller knows what is authored
+};
+
+ZeusGotoPose ParseZeusGoto(const char* text)
+{
+    ZeusGotoPose pose;
+    if (!text)
+        return pose;
+
+    float values[5] = {};
+    int found = 0;
+    const char* p = text;
+    while (*p && found < 5)
+    {
+        const bool numeric = (*p >= '0' && *p <= '9') || *p == '.' ||
+                             ((*p == '-' || *p == '+') && p[1] && ((p[1] >= '0' && p[1] <= '9') || p[1] == '.'));
+        if (!numeric)
+        {
+            ++p;
+            continue;
+        }
+        char* end = nullptr;
+        const float v = std::strtof(p, &end);
+        if (end == p) // strtof refused it after all; do not spin on the same byte
+        {
+            ++p;
+            continue;
+        }
+        values[found++] = v;
+        p = end;
+    }
+
+    pose.count = found;
+    if (found >= 1)
+        pose.x = values[0];
+    if (found >= 2)
+        pose.z = values[1];
+    if (found >= 3)
+        pose.altitude = values[2];
+    if (found >= 4)
+        pose.azimuth = values[3];
+    if (found >= 5)
+        pose.elevation = values[4];
+    return pose;
+}
+
+// Move the free-fly camera to a pasted pose, enabling free-fly first if it is not already
+// running, so one paste + one click is the whole interaction.
+//
+// Altitude is taken as ABSOLUTE when it was authored, matching the readout and
+// --test-world-freefly. Two numbers alone mean "this spot, sensible height": the terrain
+// there plus an eye offset, because a paste of just X/Z otherwise buries the camera.
+void GoToZeusCoordinates()
+{
+    const ZeusGotoPose pose = ParseZeusGoto(s_zeusGotoBuf);
+    if (pose.count < 2)
+    {
+        s_zeusStatus = "Paste at least X and Z -- e.g. `2721.96 944.30 99.33 306.9 -5.4`, or the freefly readout.";
+        return;
+    }
+    if (!ZeusWorldAvailable())
+    {
+        s_zeusStatus = "Go to coordinates requires a loaded world.";
+        return;
+    }
+    if (!s_zeusCamera)
+    {
+        EnableZeusCamera();
+        if (!s_zeusCamera)
+            return; // EnableZeusCamera already explained why
+    }
+
+    const float groundY = GLandscape ? GLandscape->RoadSurfaceYAboveWater(pose.x, pose.z) : 0.0f;
+    const float altitude = pose.count >= 3 ? pose.altitude : groundY + 1.8f;
+
+    Vector3 position(pose.x, altitude, pose.z);
+    s_zeusCamera->SetPosition(position);
+    // The camera aims at a target point, not at its own orientation: ResetTargets()
+    // re-derives that point from the CURRENT position and direction (CameraHold.cpp,
+    // `Position() + Direction() * 1e5`). Teleporting without it leaves the camera locked
+    // on the aim point it had before the jump, so the view is rotated toward wherever you
+    // came from and mouse-look starts from that wrong basis -- which is exactly the
+    // "wrongly orientated / panning not right" this had on its first outing. Both the
+    // engine's own mouse-look and EnableZeusCamera call it after re-orienting; so does
+    // this now, once, after the final position AND direction are set.
+
+    // Azimuth is compass-style: 0 = +Z (north), increasing clockwise, which is what the
+    // readout prints. Elevation is degrees above the horizon, so a negative value looks
+    // down. Only applied when both were authored; a two- or three-number paste keeps the
+    // heading you were already flying, which is what you want when nudging a position.
+    if (pose.count >= 5)
+    {
+        const float az = pose.azimuth * (H_PI / 180.0f);
+        const float el = pose.elevation * (H_PI / 180.0f);
+        const float cosEl = std::cos(el);
+        Vector3 direction(std::sin(az) * cosEl, std::sin(el), std::cos(az) * cosEl);
+        direction.Normalize();
+        s_zeusCamera->SetDirectionAndUp(direction, VUp);
+    }
+    s_zeusCamera->ResetTargets();
+
+    char status[192];
+    std::snprintf(status, sizeof(status), "Moved free-fly to %.2f, %.2f, %.2f%s (terrain %.1f m).", pose.x, pose.z,
+                  altitude, pose.count >= 5 ? " with heading" : "", groundY);
+    s_zeusStatus = status;
+}
+
 void BeamPlayerToZeusCamera()
 {
     if (!s_zeusCamera || !GWorld || !GLandscape)
@@ -1078,6 +1211,41 @@ void DrawZeusTab()
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("WASD moves, Q/Z changes altitude, and the mouse looks around.\nKeypad +/- changes zoom.");
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Go to coordinates");
+    ImGui::Separator();
+    ImGui::BeginDisabled(!worldAvailable);
+    ImGui::SetNextItemWidth(-1.0f);
+    // Enter in the box is the same as pressing the button: pasting a pose and hitting
+    // return is the whole gesture this exists for.
+    const bool submitted = ImGui::InputTextWithHint("##zeusgoto", "paste a pose, e.g. 2721.96 944.30 99.33 306.9 -5.4",
+                                                    s_zeusGotoBuf, sizeof(s_zeusGotoBuf),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SetItemTooltip("X Z ALTITUDE [azimuth elevation] -- the same order this panel's freefly readout prints,\n"
+                          "so you can paste that line back in verbatim, brackets and labels and all.\n"
+                          "Two numbers = X and Z at head height on the terrain.");
+    if (ImGui::Button("Go") || submitted)
+        Defer([] { GoToZeusCoordinates(); });
+    ImGui::SameLine();
+    if (ImGui::Button("Copy current pose"))
+    {
+        if (s_zeusCamera)
+        {
+            const Vector3 p = s_zeusCamera->Position();
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "%.2f %.2f %.2f", p[0], p[2], p[1]);
+            ImGui::SetClipboardText(buf);
+            std::snprintf(s_zeusGotoBuf, sizeof(s_zeusGotoBuf), "%s", buf);
+            s_zeusStatus = "Current position copied to the clipboard (X Z altitude).";
+        }
+        else
+        {
+            s_zeusStatus = "No free-fly camera active to copy a pose from.";
+        }
+    }
+    ImGui::SetItemTooltip("Puts the current free-fly position on the clipboard in the order this box expects.");
+    ImGui::EndDisabled();
 
     ImGui::Spacing();
     ImGui::TextUnformatted("Spawn at camera aim");
