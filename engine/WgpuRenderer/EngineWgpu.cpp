@@ -31,7 +31,8 @@
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp> // rotor wash for grass
 #include <Poseidon/World/Scene/ObjectClasses.hpp>              // ForestPlain (mode-1 conform exclusion)
 #include <Poseidon/World/Terrain/Landscape.hpp>                // GLandscape->SurfaceY (GPU-driven conform bcSurfaceY)
-#include <Poseidon/World/Weather/WindModel.hpp>                // the one wind authority (grass sway, cloud drift)
+#include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Effects/SmokeSystem.hpp>                // the one wind authority (grass sway, cloud drift)
 #include <Poseidon/Graphics/Shared/PNGWriter.hpp>
 #include <Poseidon/Graphics/Shared/ScreenshotWriter.hpp>
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
@@ -7225,6 +7226,22 @@ void EngineWgpu::PushRenderParams()
     // the look struct's size is part of the ABI handshake, and this is one float.
     if (_renderer != nullptr)
     {
+        // Smoke -> ground shadow: this frame's particles into the cloud shadow map.
+        // Published here because this runs once per frame right before the sky
+        // pass consumes the map. Empty is a valid publish (clears the shadow).
+        {
+            static std::vector<SmokeSystem::ShadowBlob> blobs;
+            static std::vector<WgrSmokeShadowBlob> packed;
+            GSmokeSystem.CollectShadowBlobs(blobs, 512);
+            packed.resize(blobs.size());
+            for (std::size_t i = 0; i < blobs.size(); ++i)
+            {
+                packed[i].pos_radius = {blobs[i].x, blobs[i].y, blobs[i].z, blobs[i].radius};
+                packed[i].density = {blobs[i].density, blobs[i].heightAboveGround, 0.0f, 0.0f};
+            }
+            wgr_set_smoke_shadow(_renderer, packed.empty() ? nullptr : packed.data(), U32(packed.size()),
+                                 GSmokeSystem.GroundShadowStrength());
+        }
         wgr_set_cloud_shadow_strength(_renderer, std::clamp(_sky.cloudShadowStrength, 0.0f, 1.0f));
         wgr_set_star_intensity(_renderer, std::clamp(_sky.starIntensity, 0.0f, 4.0f));
         wgr_set_lens_flare(_renderer, std::clamp(_sky.lensFlare, 0.0f, 4.0f));

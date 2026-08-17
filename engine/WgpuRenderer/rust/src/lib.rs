@@ -1434,6 +1434,10 @@ impl Renderer {
         self.sky.set_cloud_shadow_strength(strength);
     }
 
+    fn set_smoke_shadow(&mut self, blobs: &[sky::SmokeShadowBlob], strength: f32) {
+        self.sky.set_smoke_shadow(blobs, strength);
+    }
+
     // Material Debug (dev panel, Materials tab) for the retained GPU-driven path.
     // `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
     fn set_material_debug(&mut self, view: u32, flags: u32) {

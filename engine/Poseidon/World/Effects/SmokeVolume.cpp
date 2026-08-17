@@ -284,6 +284,7 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     // FloorHeight, not GroundHeight: inside a house the surface smoke pools on
     // is the floor slab, and the terrain under it may be a metre lower.
     const float ground = query.FloorHeight(particle.position.X(), particle.position.Z());
+    particle.groundY = ground;
     const float floorY = ground + 0.05f;
     if (particle.position.Y() < floorY)
     {

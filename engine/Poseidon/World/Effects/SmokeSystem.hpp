@@ -105,9 +105,27 @@ class SmokeSystem
     /// total.
     void BeginFrame();
 
+    /// One particle for the renderer's ground-shadow pass. Kept renderer-
+    /// agnostic here (plain floats); EngineWgpu copies it into its own struct.
+    struct ShadowBlob
+    {
+        float x, y, z, radius;
+        float density, heightAboveGround;
+    };
+
+    /// Gather this frame's shadow-casting particles from every live volume, densest
+    /// first, capped at `maxBlobs`. `strength` is the global multiplier the panel
+    /// exposes. Cost is a walk over the live particles; called once per frame by
+    /// the renderer, not by the panel.
+    void CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs) const;
+
+    float GroundShadowStrength() const { return _groundShadowStrength; }
+    void SetGroundShadowStrength(float strength) { _groundShadowStrength = strength; }
+
   private:
     std::vector<Entry> _entries;
     int _nextId = 1;
+    float _groundShadowStrength = 1.5f;
 };
 
 SmokeSystem& GSmokeSystemInstance();

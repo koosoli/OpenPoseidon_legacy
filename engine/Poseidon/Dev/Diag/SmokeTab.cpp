@@ -422,6 +422,18 @@ void DrawTuningSection()
     }
     ImGui::SliderInt("Self-shadow reach", &GParams.selfShadowSteps, 0, 10);
     ImGui::SliderFloat("Sky ambient", &GParams.skyAmbient, 0.0f, 1.5f, "%.2f");
+    ImGui::SliderFloat("Ground shadow (this plume)", &GParams.groundShadow, 0.0f, 2.0f, "%.2f");
+    {
+        float g = GSmokeSystem.GroundShadowStrength();
+        if (ImGui::SliderFloat("Ground shadow (global)", &g, 0.0f, 3.0f, "%.2f"))
+        {
+            GSmokeSystem.SetGroundShadowStrength(g);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Smoke particles are splatted into the sun shadow map the terrain and objects already sample, so everything lit under a plume darkens. Texel is ~8 m: a soft ground shadow for a plume, not a crisp one for a puff.");
+        }
+    }
     ImGui::SliderFloat("Fade in", &GParams.fadeIn, 0.0f, 0.9f, "%.2f");
     ImGui::SliderFloat("Fade out", &GParams.fadeOut, 0.0f, 0.9f, "%.2f");
 

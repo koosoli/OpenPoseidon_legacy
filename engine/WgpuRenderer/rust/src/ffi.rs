@@ -3084,6 +3084,46 @@ pub unsafe extern "C" fn wgr_set_cloud_shadow_strength(renderer: *mut WgrRendere
     renderer.set_cloud_shadow_strength(strength);
 }
 
+/// One smoke particle for the ground-shadow pass. Layout matches
+/// `sky::SmokeShadowBlob` and the C `WgrSmokeShadowBlob` exactly (32 bytes).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WgrSmokeShadowBlob {
+    /// xyz world position, w radius (m)
+    pub pos_radius: [f32; 4],
+    /// x optical density, y height above ground (m), zw unused
+    pub density: [f32; 4],
+}
+
+/// Publish this frame's smoke particles to the ground-shadow pass. `blobs` may be null with
+/// `count` 0 to clear. Capped at `sky::SMOKE_SHADOW_MAX_BLOBS`; the caller is expected to
+/// pre-select the densest / nearest particles if it has more.
+///
+/// # Safety
+/// `blobs` must point at `count` valid `WgrSmokeShadowBlob`s, or be null with `count == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_smoke_shadow(
+    renderer: *mut WgrRenderer,
+    blobs: *const WgrSmokeShadowBlob,
+    count: u32,
+    strength: f32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    let slice: &[WgrSmokeShadowBlob] = if blobs.is_null() || count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(blobs, count as usize) }
+    };
+    // Same layout; reinterpret rather than copy.
+    let as_sky: &[crate::sky::SmokeShadowBlob] = unsafe {
+        std::slice::from_raw_parts(slice.as_ptr() as *const crate::sky::SmokeShadowBlob, slice.len())
+    };
+    renderer.set_smoke_shadow(as_sky, strength);
+}
+
 /// Second cloud layer (high cirrus at ~7 km): 0 = off, 1 = flat sheet, 2 = thin-shell volumetric
 /// march. Its own entry point for the same reason as `wgr_set_cloud_shadow_strength` above —
 /// WgrSkyLook's size is part of the ABI handshake, and this is one enum. Values above 2 clamp.

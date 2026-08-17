@@ -3,6 +3,7 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #include <vector>
+#include <algorithm>
 #include <unordered_map>
 
 namespace Poseidon
@@ -70,6 +71,9 @@ struct SmokeParams
     /// Weight of the cool sky term on the plume's top. Smoke in sun is white on
     /// top and blue-grey in shadow; this is the blue-grey.
     float skyAmbient = 0.55f;
+    /// How strongly this plume shadows the GROUND (and everything lit under
+    /// it) via the renderer's shadow map. 1 = its opacity; 0 = casts none.
+    float groundShadow = 1.0f;
 
     // -- motion -----------------------------------------------------------
     /// Upward acceleration while the smoke is still hotter than the air, m/s^2.
@@ -176,6 +180,7 @@ struct SmokeParticle
     bool planeValid = false;
     float sizeJitter = 1.0f;
     float alphaJitter = 1.0f;
+    float groundY = 0.0f; ///< floor height under the particle, from the last clamp
 };
 
 class SmokeVolume : public Entity
@@ -209,6 +214,42 @@ class SmokeVolume : public Entity
 
     std::size_t ParticleCount() const { return _particles.size(); }
     std::size_t FlameCount() const { return _flames.size(); }
+
+    /// Append this volume's particles as ground-shadow blobs. Density is the
+    /// particle's current opacity (fade included) times the plume's shadow
+    /// weight; height above ground is what the shadow pass slides along the
+    /// sun ray. Forward-declared struct to keep the renderer type out of here.
+    template <typename Blob>
+    void AppendShadowBlobs(std::vector<Blob>& out) const
+    {
+        for (const SmokeParticle& p : _particles)
+        {
+            const float lf = std::clamp(p.age / std::max(p.lifetime, 1e-3f), 0.0f, 1.0f);
+            float fade = 1.0f;
+            if (lf < _params.fadeIn && _params.fadeIn > 0.0f)
+            {
+                fade = lf / _params.fadeIn;
+            }
+            else if (lf > 1.0f - _params.fadeOut && _params.fadeOut > 0.0f)
+            {
+                fade = (1.0f - lf) / _params.fadeOut;
+            }
+            const float density = _params.opacity * p.alphaJitter * fade * _params.groundShadow;
+            if (density <= 0.01f)
+            {
+                continue;
+            }
+            const float radius = (_params.startRadius + (_params.endRadius - _params.startRadius) * lf) * p.sizeJitter;
+            Blob b{};
+            b.x = p.position.X();
+            b.y = p.position.Y();
+            b.z = p.position.Z();
+            b.radius = radius;
+            b.density = density;
+            b.heightAboveGround = std::max(p.position.Y() - p.groundY, 0.0f);
+            out.push_back(b);
+        }
+    }
 
     /// Microseconds spent in the last Simulate / Draw. Read by the dev panel's
     /// benchmark section; costs one clock read per call.

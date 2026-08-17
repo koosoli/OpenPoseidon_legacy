@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace Poseidon
 {
@@ -274,9 +275,47 @@ void SmokeSystem::BeginFrame()
     ResetSmokeSweepCount();
 }
 
+void SmokeSystem::CollectShadowBlobs(std::vector<ShadowBlob>& out, std::size_t maxBlobs) const
+{
+    out.clear();
+    if (_groundShadowStrength <= 0.0f)
+    {
+        return;
+    }
+    for (const Entry& entry : _entries)
+    {
+        Entity* entity = entry.entity;
+        const SmokeVolume* volume = entity != nullptr ? dynamic_cast<const SmokeVolume*>(entity) : nullptr;
+        if (volume == nullptr)
+        {
+            continue;
+        }
+        volume->AppendShadowBlobs(out);
+    }
+    if (out.size() > maxBlobs)
+    {
+        // Keep the densest: partial sort so the cheap cap does not drop the
+        // core of a plume in favour of its faint rim.
+        std::nth_element(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(maxBlobs), out.end(),
+                         [](const ShadowBlob& a, const ShadowBlob& b) { return a.density > b.density; });
+        out.resize(maxBlobs);
+    }
+}
+
 SmokeSystem& GSmokeSystemInstance()
 {
     static SmokeSystem instance;
+    // POSEIDON_SMOKE_GROUND_SHADOW=<f> overrides the global strength from a
+    // script, so an A/B capture can be taken without the panel.
+    static const bool seeded = []
+    {
+        if (const char* v = std::getenv("POSEIDON_SMOKE_GROUND_SHADOW"))
+        {
+            instance.SetGroundShadowStrength(static_cast<float>(std::atof(v)));
+        }
+        return true;
+    }();
+    (void)seeded;
     return instance;
 }
 

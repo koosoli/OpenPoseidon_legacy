@@ -635,6 +635,29 @@ fn lut_key(sky: &WgrSky) -> LutKey {
 /// march work to resolve detail the phenomenon does not have. 4 km covers the view distance that
 /// matters without the map's edge becoming visible as a lighting seam.
 const CLOUD_SHADOW_DIM: u32 = 512;
+
+/// Fixed capacity of the smoke -> ground-shadow blob buffer. The froxel bind group is built
+/// once, so the buffer is fixed-size and rewritten per frame; the C++ side caps to this.
+pub const SMOKE_SHADOW_MAX_BLOBS: usize = 512;
+
+/// One smoke particle as the ground-shadow pass sees it. Matches sky.wgsl `SmokeBlob`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SmokeShadowBlob {
+    /// xyz world position, w radius (m)
+    pub pos_radius: [f32; 4],
+    /// x optical density, y height above ground (m), zw unused
+    pub density: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
+struct SmokeShadowHeader {
+    count: u32,
+    strength: f32,
+    _pad0: f32,
+    _pad1: f32,
+}
 const CLOUD_SHADOW_SPAN: f32 = 4096.0;
 
 /// Initial second-cloud-layer (cirrus) mode: 0 = off, 1 = flat sheet, 2 = thin-shell volumetric.
@@ -776,6 +799,10 @@ pub struct Sky {
     cloud_shadow_tex: wgpu::Texture,
     cloud_shadow_view: wgpu::TextureView,
     cloud_shadow_pipeline: wgpu::ComputePipeline,
+    smoke_shadow_header_buf: wgpu::Buffer,
+    smoke_shadow_blob_buf: wgpu::Buffer,
+    smoke_shadow_blobs: Vec<SmokeShadowBlob>,
+    smoke_shadow_strength: f32,
     cloud_shadow_strength: f32,
     cloud_shadow_map_params: [f32; 4],
     star_intensity: f32,
@@ -1330,6 +1357,27 @@ impl Sky {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // Smoke -> ground shadow: header + blob array, read by cs_cloud_shadow.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         // Group(1): the terrain sun-shadow mask (texture + sampler) + its world->UV mapping
@@ -1452,10 +1500,30 @@ impl Sky {
                 cache: None,
             })
         };
+        let smoke_shadow_header_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_smoke_shadow_header"),
+            size: std::mem::size_of::<SmokeShadowHeader>() as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let smoke_shadow_blob_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_smoke_shadow_blobs"),
+            size: (std::mem::size_of::<SmokeShadowBlob>() * SMOKE_SHADOW_MAX_BLOBS) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let froxel_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wgr_sky_froxel_bind"),
             layout: &froxel_layout,
             entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: smoke_shadow_header_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: smoke_shadow_blob_buf.as_entire_binding(),
+                },
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: uniform_buf.as_entire_binding(),
@@ -1677,6 +1745,10 @@ impl Sky {
             cloud_shadow_tex,
             cloud_shadow_view,
             cloud_shadow_pipeline,
+            smoke_shadow_header_buf,
+            smoke_shadow_blob_buf,
+            smoke_shadow_blobs: Vec::with_capacity(SMOKE_SHADOW_MAX_BLOBS),
+            smoke_shadow_strength: 1.0,
             // Default ON at a moderate strength: clouds that do not shade the ground are the
             // thing a player notices, and the pass is one 512x512 dispatch.
             cloud_shadow_strength: 0.85,
@@ -1765,6 +1837,16 @@ impl Sky {
         self.cloud_shadow_strength = strength.clamp(0.0, 1.0);
     }
 
+    /// Replace this frame's smoke ground-shadow blobs. Called from the FFI once per frame
+    /// with whatever the smoke system chose to publish (already capped to
+    /// SMOKE_SHADOW_MAX_BLOBS by the caller; truncated here regardless).
+    pub fn set_smoke_shadow(&mut self, blobs: &[SmokeShadowBlob], strength: f32) {
+        self.smoke_shadow_blobs.clear();
+        self.smoke_shadow_blobs
+            .extend_from_slice(&blobs[..blobs.len().min(SMOKE_SHADOW_MAX_BLOBS)]);
+        self.smoke_shadow_strength = strength.max(0.0);
+    }
+
     /// Second cloud layer (high cirrus): 0 = off, 1 = flat sheet, 2 = thin-shell volumetric march.
     pub fn set_cirrus_mode(&mut self, mode: u32) {
         self.cirrus_mode = (mode.min(2)) as f32;
@@ -1795,6 +1877,25 @@ impl Sky {
         shadow_map: &crate::terrain::TerrainShadowMap,
         csm: &crate::ffi::WgrCameraShadow,
     ) {
+        // Smoke ground-shadow blobs for cs_cloud_shadow. Written every frame, even when
+        // empty (count = 0), so a plume that has just died stops shadowing at once.
+        {
+            let header = SmokeShadowHeader {
+                count: self.smoke_shadow_blobs.len() as u32,
+                strength: self.smoke_shadow_strength,
+                _pad0: 0.0,
+                _pad1: 0.0,
+            };
+            queue.write_buffer(&self.smoke_shadow_header_buf, 0, bytemuck::bytes_of(&header));
+            if !self.smoke_shadow_blobs.is_empty() {
+                queue.write_buffer(
+                    &self.smoke_shadow_blob_buf,
+                    0,
+                    bytemuck::cast_slice(&self.smoke_shadow_blobs),
+                );
+            }
+        }
+
         let key = lut_key(sky);
         if self.last_lut != Some(key) {
             self.last_lut = Some(key);

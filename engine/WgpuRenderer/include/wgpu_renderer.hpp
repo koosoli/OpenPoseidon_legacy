@@ -882,6 +882,13 @@ struct WgrAbiCheck
 
 /* A transient rotor-wash field. Unlike tracks this is rebuilt from the live
  * helicopter list each frame, so grass springs upright as the aircraft leaves. */
+/* One smoke particle for the ground-shadow pass. Matches Rust sky::SmokeShadowBlob (32 bytes). */
+struct WgrSmokeShadowBlob
+{
+    WgrVec4 pos_radius; /* xyz world position, w radius (m) */
+    WgrVec4 density;    /* x optical density, y height above ground (m), zw unused */
+};
+
 struct WgrGrassDownwash
 {
     float x;
@@ -1654,6 +1661,7 @@ static_assert(sizeof(WgrTerrainBatch) == 16, "WgrTerrainBatch layout must match 
 static_assert(sizeof(WgrGrassBatch) == 16, "WgrGrassBatch layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassTrack) == 16, "WgrGrassTrack layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGrassDownwash) == 16, "WgrGrassDownwash layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrSmokeShadowBlob) == 32, "WgrSmokeShadowBlob layout must match the Rust #[repr(C)] struct");
   static_assert(sizeof(WgrGrassParams) == 4768, "WgrGrassParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterParams) == 272, "WgrWaterParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrWaterNode) == 40, "WgrWaterNode layout must match the Rust #[repr(C)] struct");
@@ -2005,6 +2013,10 @@ extern "C"
     WGR_API void wgr_set_star_intensity(WgrRenderer* renderer, float intensity);
 
     WGR_API void wgr_set_cloud_shadow_strength(WgrRenderer* renderer, float strength);
+    /* Smoke -> ground shadow: this frame's particles, splatted into the cloud shadow map so
+     * every lit surface darkens under a plume. blobs may be null with count 0 to clear. */
+    WGR_API void wgr_set_smoke_shadow(WgrRenderer* renderer, const WgrSmokeShadowBlob* blobs, uint32_t count,
+                                      float strength);
 
     /* Second cloud layer (the high cirrus sheet at ~7 km): 0 = off, 1 = flat sheet (one
        ray/sheet intersection), 2 = thin-shell volumetric march. Values above 2 clamp.

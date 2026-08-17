@@ -59,6 +59,53 @@ struct Sky {
 // CLD-020 output: sun transmittance through the cloud deck, one texel per world square.
 @group(0) @binding(7) var cloud_shadow_out: texture_storage_2d<rgba8unorm, write>;
 
+// Smoke -> ground shadow. Each blob is one smoke particle; cs_cloud_shadow
+// projects it to the ground ALONG THE SUN RAY and darkens the texel it lands
+// on. Riding the cloud map means every lit surface -- terrain, buildings,
+// vehicles -- picks up smoke shadow through the sample it already does, with
+// no per-shader change. Texel is ~8 m, so this is a soft ground shadow for a
+// plume, not a crisp one for a puff.
+struct SmokeBlob {
+    pos_radius: vec4<f32>, // xyz world position, w radius (m)
+    density: vec4<f32>,    // x optical density; y = height above ground (m)
+};
+struct SmokeShadowHeader {
+    count: u32,
+    strength: f32,
+    _pad0: f32,
+    _pad1: f32,
+};
+@group(0) @binding(8) var<storage, read> smoke_header: SmokeShadowHeader;
+@group(0) @binding(9) var<storage, read> smoke_blobs: array<SmokeBlob>;
+
+// Transmittance through the smoke above ground texel `world_xz`, along `sun`
+// (the direction light TRAVELS, i.e. pointing down). 1 = clear.
+fn smoke_ground_shadow(world_xz: vec2<f32>, sun: vec3<f32>, texel: f32) -> f32 {
+    let count = smoke_header.count;
+    if (count == 0u || smoke_header.strength <= 0.0 || sun.y >= -0.02) {
+        return 1.0;
+    }
+    var tau = 0.0;
+    for (var i = 0u; i < count; i = i + 1u) {
+        let b = smoke_blobs[i];
+        let p = b.pos_radius.xyz;
+        let r = b.pos_radius.w;
+        // Slide the particle down the sun ray by its height above ground.
+        let h = max(b.density.y, 0.0);
+        let t = h / max(-sun.y, 1e-3);
+        let foot = p.xz + sun.xz * t;
+        let d = length(world_xz - foot);
+        // Soft disc, widened to at least most of a texel so a small puff still
+        // lands rather than falling between samples.
+        let rr = max(r, texel * 0.6);
+        if (d < rr) {
+            let w = 0.5 + 0.5 * cos(3.14159265 * d / rr);
+            tau = tau + b.density.x * w;
+        }
+    }
+    return exp(-tau * smoke_header.strength);
+}
+
 const PI: f32 = 3.14159265359;
 const TRANSMITTANCE_STEPS: f32 = 40.0;
 const MS_SQRT_SAMPLES: i32 = 8;        // 8x8 = 64 sphere directions
@@ -1544,9 +1591,15 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) {
         return;
     }
-    // Fully lit is the safe default: a disabled or degenerate pass must not darken the world.
+    // Fully lit is the safe default: a disabled or degenerate pass must not darken the world --
+    // except for smoke, which is not the cloud deck and shadows the ground whether or not the
+    // cloud shadow feature is on.
     if (sky.cloud_shadow.w <= 0.0 || sky.cloud0.x <= 0.001) {
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, 0.0, 0.0, 1.0));
+        let span0 = 1.0 / max(sky.cloud_shadow.z, 1e-6);
+        let texel0 = span0 / f32(dims.x);
+        let world_xz0 = sky.cloud_shadow.xy + (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * texel0;
+        let smoke0 = smoke_ground_shadow(world_xz0, -normalize(sky.sun_dir.xyz), texel0);
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke0, 0.0, 0.0, 1.0));
         return;
     }
     let span = 1.0 / max(sky.cloud_shadow.z, 1e-6);
@@ -1554,10 +1607,15 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
     let world_xz = sky.cloud_shadow.xy + (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * texel;
 
     let sun = normalize(sky.sun_dir.xyz);
+    // Smoke shadow is independent of the cloud deck: computed once here and
+    // folded into EVERY store below, including the early "fully lit" returns,
+    // so a plume shadows the ground on a clear day. sky.sun_dir points TOWARD
+    // the sun; the light travels the other way.
+    let smoke = smoke_ground_shadow(world_xz, -sun, texel);
     // Below the horizon there is no sun to occlude. Returning lit here also stops the march from
     // running against a ray that never reaches the deck.
     if (sun.y <= 0.02) {
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, 0.0, 0.0, 1.0));
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke, 0.0, 0.0, 1.0));
         return;
     }
 
@@ -1571,7 +1629,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let interval = cloud_interval(ground, sun);
     if (interval.y <= interval.x) {
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, 0.0, 0.0, 1.0));
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke, 0.0, 0.0, 1.0));
         return;
     }
 
@@ -1588,7 +1646,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Strength lerps toward fully lit rather than scaling the transmittance, so turning it down
     // lightens the shadows instead of shifting what counts as cloud.
     let shadow = mix(1.0, clamp(transmittance, 0.0, 1.0), clamp(sky.cloud_shadow.w, 0.0, 1.0));
-    textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(shadow, 0.0, 0.0, 1.0));
+    textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(shadow * smoke, 0.0, 0.0, 1.0));
 }
 
 @compute @workgroup_size(8, 8, 1)
