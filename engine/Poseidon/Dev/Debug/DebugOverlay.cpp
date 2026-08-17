@@ -43,6 +43,8 @@
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
+#include <Poseidon/Dev/Diag/WeatherTab.hpp>
+#include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/UI/Controls/UIControls.hpp>
@@ -5888,6 +5890,17 @@ void DrawMainWindow()
         if (ImGui::BeginTabItem("Ballistics"))
         {
             Poseidon::Dev::DrawBallisticsTab();
+            ImGui::EndTabItem();
+        }
+        // Same arrangement: bodies in WeatherTab.cpp / SmokeTab.cpp.
+        if (ImGui::BeginTabItem("Weather"))
+        {
+            Poseidon::Dev::DrawWeatherTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Smoke"))
+        {
+            Poseidon::Dev::DrawSmokeTab();
             ImGui::EndTabItem();
         }
         ImGuiTabItemFlags memoryFlags = 0;

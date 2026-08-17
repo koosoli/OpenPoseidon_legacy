@@ -79,6 +79,7 @@ bool DoEditorChildControllerUiAction(ControlsContainer* display, Poseidon::Contr
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Effects/SmokeSystem.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -711,6 +712,52 @@ void World::SimulateFastVehicles(float deltaT, VehicleSimulation simul)
 void World::SimulateCloudlets(float deltaT)
 {
     SimulationImportance prec = SimulateVisibleFar;
+
+    // POSEIDON_TEST_SMOKE=1 drops one new-system plume in front of the camera a
+    // couple of seconds into the mission. The dev panel is the normal way in,
+    // but the panel cannot be driven from a script or a headless run, so there
+    // was no way to reproduce "the smoke does nothing" without a human at the
+    // keyboard. Same env-var convention as POSEIDON_WIND_BALLISTICS.
+    {
+        // 1 = new system, 2 = legacy source (so the legacy path can be verified
+        // without the panel too — it was silently spawning an explosion).
+        static const int wanted = []
+        {
+            const char* value = std::getenv("POSEIDON_TEST_SMOKE");
+            if (value == nullptr || value[0] == '\0' || value[0] == '0')
+            {
+                return 0;
+            }
+            return value[0] == '2' ? 2 : 1;
+        }();
+        static bool spawned = false;
+        if (wanted != 0 && !spawned && CameraOn() != nullptr && Glob.time.toFloat() > 2.0f)
+        {
+            spawned = true;
+            const Vector3 position = CameraOn()->Position() + CameraOn()->Direction() * 10.0f;
+            if (wanted == 2)
+            {
+                GSmokeSystem.SpawnLegacy(position, 1.0f, 1.5f, -1.0f);
+            }
+            else
+            {
+                GSmokeSystem.Spawn(position, SmokeParams{}, -1.0f);
+            }
+        }
+        if (wanted == 2 && spawned)
+        {
+            // Legacy cloudlets are independent entities, so the only visible
+            // sign that the source is emitting is the world's cloudlet count
+            // climbing. Flat at 1 means the source is alive but producing
+            // nothing.
+            static Foundation::Time nextLog;
+            if (Glob.time > nextLog)
+            {
+                nextLog = Glob.time + 1.0f;
+                LOG_INFO(World, "Legacy smoke probe: world cloudlets={}", NCloudlets());
+            }
+        }
+    }
 
     for (int i = 0; i < _cloudlets.Size();)
     {

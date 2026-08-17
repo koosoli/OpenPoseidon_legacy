@@ -36,6 +36,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
 #include <Poseidon/Game/TitEffects.hpp>
@@ -1302,6 +1303,12 @@ void World::SimulateLandscape(float deltaT)
     // overcast still, and the wind then holds its mean while still breathing,
     // which is what the dev panel wants when scrubbing time of day.
     GWind.Update(Glob.NetTime().toInt(), _actualOvercast);
+
+    // Local airflow rides on top of the prevailing wind and must be rebuilt
+    // after it, from the same frame's world state. Ranked by distance from the
+    // camera: a rotor wake nobody can see moves nothing anybody can see, and the
+    // emitter list is deliberately small.
+    GAirflow.Update(CameraOn() ? CameraOn()->Position() : VZero);
 }
 
 void World::SetWeather(float overcast, float fog, float time)

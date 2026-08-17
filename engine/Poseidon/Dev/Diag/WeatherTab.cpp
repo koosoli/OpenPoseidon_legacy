@@ -1,0 +1,387 @@
+// The dev-panel "Weather" tab — an instrument for the one wind authority
+// (World/Weather/WindModel).
+//
+// The reason this exists: WindModel is a CLOSED FORM in mission time. That is
+// exactly the property that makes it deterministic and replication-free, and it
+// is also what makes it untestable by hand — you cannot ask the shipping model
+// for "9 m/s due east" and watch what answers, because the model's whole job is
+// to decide that for itself. The override this tab drives is the escape hatch:
+// local, unreplicated, not serialized, and off unless a developer turns it on.
+//
+// Everything above the override is a pure readout. Nothing in this file caches
+// wind state; the sample is re-read every frame from the authority, so what the
+// tab shows is what the grass, the sea and the smoke are being handed.
+
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Foundation/platform.hpp>
+
+// The PCH pulls in Logging.hpp, which #defines DebugLog() as a macro and
+// collides with the ImGui::DebugLog() method. Same dance as DebugOverlay.cpp.
+#ifdef DebugLog
+#undef DebugLog
+#endif
+
+#include <imgui.h>
+
+#include <Poseidon/Dev/Diag/WeatherTab.hpp>
+#include <Poseidon/Core/Global.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Weather/WindModel.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+namespace Poseidon::Dev
+{
+
+namespace
+{
+
+constexpr float kPi = 3.14159265358979f;
+
+/// Compass bearing (degrees, 0 = north/+Z, 90 = east/+X, clockwise) from the
+/// model's `directionRad` (atan2(z, x), the heading the air travels TOWARD).
+/// Both describe the same vector; the model's form is convenient for trig and
+/// the compass form is the one a human can check against the in-game map.
+float BearingFromRad(float directionRad)
+{
+    float bearing = 90.0f - directionRad * (180.0f / kPi);
+    while (bearing < 0.0f)
+    {
+        bearing += 360.0f;
+    }
+    while (bearing >= 360.0f)
+    {
+        bearing -= 360.0f;
+    }
+    return bearing;
+}
+
+float RadFromBearing(float bearingDegrees)
+{
+    return (90.0f - bearingDegrees) * (kPi / 180.0f);
+}
+
+/// The nearest of the sixteen compass points. Purely so the readout says "WSW"
+/// next to the number — reading a bearing off a heading you are flying is much
+/// easier than reading it off three digits.
+const char* CompassPoint(float bearingDegrees)
+{
+    static const char* kPoints[] = {"N",  "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                                    "S",  "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+    const int index = static_cast<int>(std::floor(bearingDegrees / 22.5f + 0.5f)) & 15;
+    return kPoints[index];
+}
+
+/// Beaufort description of a speed in m/s. The point is not meteorological
+/// precision — it is that "12 m/s" means nothing to most people and "strong
+/// breeze, whitecaps everywhere" tells you whether the sea outside is right.
+const char* BeaufortLabel(float speedMs)
+{
+    if (speedMs < 0.3f)
+        return "calm";
+    if (speedMs < 1.6f)
+        return "light air";
+    if (speedMs < 3.4f)
+        return "light breeze";
+    if (speedMs < 5.5f)
+        return "gentle breeze";
+    if (speedMs < 8.0f)
+        return "moderate breeze";
+    if (speedMs < 10.8f)
+        return "fresh breeze";
+    if (speedMs < 13.9f)
+        return "strong breeze";
+    if (speedMs < 17.2f)
+        return "near gale";
+    if (speedMs < 20.8f)
+        return "gale";
+    if (speedMs < 24.5f)
+        return "strong gale";
+    return "storm";
+}
+
+/// A compass rose with an arrow along the *instantaneous* heading and a faint
+/// second arrow along the mean. Seeing the two separate is the quickest read on
+/// whether the gust term is doing anything, which is otherwise a number that
+/// wobbles in the third decimal.
+void DrawCompass(const WindSample& sample)
+{
+    const float diameter = 108.0f;
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 centre(origin.x + diameter * 0.5f, origin.y + diameter * 0.5f);
+    const float radius = diameter * 0.5f - 10.0f;
+
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    const ImU32 ring = IM_COL32(140, 140, 150, 180);
+    const ImU32 faint = IM_COL32(120, 160, 220, 130);
+    const ImU32 strong = IM_COL32(120, 200, 255, 255);
+    const ImU32 label = IM_COL32(190, 190, 195, 220);
+
+    draw->AddCircle(centre, radius, ring, 48, 1.5f);
+    for (int i = 0; i < 4; ++i)
+    {
+        const float angle = static_cast<float>(i) * (kPi * 0.5f);
+        // Screen Y grows downward, so a north bearing must point to -Y.
+        const ImVec2 outer(centre.x + std::sin(angle) * radius, centre.y - std::cos(angle) * radius);
+        const ImVec2 inner(centre.x + std::sin(angle) * (radius - 5.0f), centre.y - std::cos(angle) * (radius - 5.0f));
+        draw->AddLine(inner, outer, ring, 1.0f);
+    }
+    draw->AddText(ImVec2(centre.x - 4.0f, centre.y - radius - 14.0f), label, "N");
+
+    // Arrow helper: from the centre outward along a compass bearing.
+    const auto arrow = [&](float bearingDegrees, float length, ImU32 colour, float thickness) {
+        const float a = bearingDegrees * (kPi / 180.0f);
+        const ImVec2 tip(centre.x + std::sin(a) * length, centre.y - std::cos(a) * length);
+        draw->AddLine(centre, tip, colour, thickness);
+        // Two short barbs, 150 degrees either side of the shaft.
+        const float barb = 8.0f;
+        for (int side = -1; side <= 1; side += 2)
+        {
+            const float b = a + static_cast<float>(side) * (150.0f * kPi / 180.0f);
+            draw->AddLine(tip, ImVec2(tip.x + std::sin(b) * barb, tip.y - std::cos(b) * barb), colour, thickness);
+        }
+    };
+
+    // Scale the shaft with speed so the picture also reads as a magnitude, but
+    // never let it vanish at 0 m/s or overrun the ring in a storm.
+    const float meanBearing = BearingFromRad(sample.meanDirectionRad);
+    const float bearing = BearingFromRad(sample.directionRad);
+    const float scale = std::clamp(sample.speed / 20.0f, 0.15f, 1.0f);
+
+    arrow(meanBearing, radius * 0.75f, faint, 1.5f);
+    arrow(bearing, radius * scale, strong, 2.5f);
+
+    ImGui::Dummy(ImVec2(diameter, diameter));
+}
+
+void DrawReadout()
+{
+    ImGui::SeparatorText("Live wind");
+
+    if (!GWind.IsActive())
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Wind authority inactive");
+        ImGui::TextDisabled("WindModel::Update has not run. No world is loaded, or this");
+        ImGui::TextDisabled("Landscape is being driven outside a World - in which case");
+        ImGui::TextDisabled("Landscape::GetWind falls back to the legacy random walk.");
+        return;
+    }
+
+    const WindSample& sample = GWind.Sample();
+    const float bearing = BearingFromRad(sample.directionRad);
+    const float meanBearing = BearingFromRad(sample.meanDirectionRad);
+
+    ImGui::BeginGroup();
+    DrawCompass(sample);
+    ImGui::EndGroup();
+    ImGui::SameLine();
+
+    ImGui::BeginGroup();
+    ImGui::Text("Speed      %6.2f m/s  (%s)", sample.speed, BeaufortLabel(sample.speed));
+    ImGui::Text("Mean       %6.2f m/s", sample.meanSpeed);
+    ImGui::Text("Gust       %+6.0f %%", sample.gustFraction * 100.0f);
+    ImGui::Spacing();
+    ImGui::Text("Toward     %6.1f deg  %-3s", bearing, CompassPoint(bearing));
+    ImGui::Text("Mean tow.  %6.1f deg  %-3s", meanBearing, CompassPoint(meanBearing));
+    ImGui::TextDisabled("velocity  (%+.2f, %+.2f) m/s in world X/Z", sample.velocityX, sample.velocityZ);
+    ImGui::EndGroup();
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Overcast %.2f   -   the mean speed and the gust envelope both", GWind.Overcast());
+    ImGui::TextDisabled("scale with it, which is what makes a front feel like one.");
+}
+
+void DrawOverrideSection()
+{
+    ImGui::SeparatorText("Override");
+
+    WindOverride current = GWind.Override();
+    bool changed = false;
+
+    bool enabled = current.enabled;
+    if (ImGui::Checkbox("Override the wind authority", &enabled))
+    {
+        current.enabled = enabled;
+        changed = true;
+
+        // Turning it ON seeds from whatever the mission wind is doing right now,
+        // so the first frame after the click looks identical. Without this the
+        // world snaps to the default 6 m/s due east and you cannot tell your
+        // change apart from the discontinuity.
+        if (enabled && GWind.IsActive())
+        {
+            const WindSample& sample = GWind.Sample();
+            current.speed = sample.meanSpeed;
+            current.directionRad = sample.meanDirectionRad;
+        }
+    }
+
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("LOCAL AND UNREPLICATED. Not serialized, not sent to the server.\n"
+                          "In a network game this machine will disagree with everyone\n"
+                          "else about the wind. Fine for looking at smoke; never leave\n"
+                          "it on for anything that matters.");
+    }
+
+    ImGui::BeginDisabled(!current.enabled);
+
+    float speed = current.speed;
+    if (ImGui::SliderFloat("Speed (m/s)", &speed, 0.0f, 30.0f, "%.1f"))
+    {
+        current.speed = speed;
+        changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", BeaufortLabel(speed));
+
+    float bearing = BearingFromRad(current.directionRad);
+    if (ImGui::SliderFloat("Toward (deg)", &bearing, 0.0f, 360.0f, "%.0f"))
+    {
+        current.directionRad = RadFromBearing(bearing);
+        changed = true;
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", CompassPoint(bearing));
+
+    float gustiness = current.gustiness;
+    if (ImGui::SliderFloat("Gustiness", &gustiness, 0.0f, 1.0f, "%.2f"))
+    {
+        current.gustiness = gustiness;
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("0 keeps the field dead steady, which is what you want when\n"
+                          "comparing two smoke systems: a gust that lands differently\n"
+                          "in the two runs is not a difference between the systems.");
+    }
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Presets");
+    struct Preset
+    {
+        const char* name;
+        float speed;
+        float gustiness;
+    };
+    static const Preset kPresets[] = {
+        {"Calm", 0.5f, 0.0f}, {"Breeze", 5.0f, 0.2f}, {"Windy", 12.0f, 0.4f}, {"Gale", 20.0f, 0.7f}};
+    for (const Preset& preset : kPresets)
+    {
+        if (ImGui::Button(preset.name))
+        {
+            current.speed = preset.speed;
+            current.gustiness = preset.gustiness;
+            changed = true;
+        }
+        ImGui::SameLine();
+    }
+    ImGui::NewLine();
+
+    ImGui::EndDisabled();
+
+    if (changed)
+    {
+        GWind.SetOverride(current);
+    }
+}
+
+void DrawConsumerSection()
+{
+    ImGui::SeparatorText("Consumers");
+
+    ImGui::TextDisabled("Everything below reads the sample above. Nothing invents its");
+    ImGui::TextDisabled("own air; that was the point of centralising the model.");
+    ImGui::Spacing();
+
+    ImGui::BulletText("Grass sway        renderer, live");
+    ImGui::BulletText("Cloud deck drift  renderer, live");
+    ImGui::BulletText("Ocean spectrum    renderer, live (driven by MEAN, not gust)");
+    ImGui::BulletText("Buoyancy predict  simulation, live");
+
+    bool ballistics = WindModel::BallisticsEnabled();
+    if (ImGui::Checkbox("Ballistics (bullet drift)", &ballistics))
+    {
+        WindModel::SetBallisticsEnabled(ballistics);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("OFF BY DEFAULT AND DELIBERATELY SO. Classic OFP missions were\n"
+                          "authored and tested windless; a 9 m/s crosswind changes how a\n"
+                          "sniper mission plays. With this off ShotShell::Simulate computes\n"
+                          "the byte-identical expression it always did.\n"
+                          "Also settable with POSEIDON_WIND_BALLISTICS=1.");
+    }
+    if (ballistics)
+    {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.2f, 1.0f), "gameplay-affecting");
+    }
+}
+
+void DrawWeatherStateSection()
+{
+    ImGui::SeparatorText("Weather state");
+
+    if (GWorld == nullptr)
+    {
+        ImGui::TextDisabled("No world loaded.");
+        return;
+    }
+
+    bool frozen = GWorld->IsWeatherFrozen();
+    if (ImGui::Checkbox("Freeze forecast", &frozen))
+    {
+        GWorld->SetFreezeWeather(frozen);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Holds the overcast/fog transition where it is, so scrubbing the\n"
+                          "time of day does not roll new weather underneath your test.");
+    }
+
+    // Sliders seeded from the live values every frame: this is a command, not a
+    // bound control. SetWeather drives a transition rather than assigning, so
+    // holding a slider mid-drag would fight the simulation if it were bound.
+    static float wantedOvercast = -1.0f;
+    static float wantedFog = -1.0f;
+    if (wantedOvercast < 0.0f)
+    {
+        wantedOvercast = GWorld->GetOvercast();
+        wantedFog = GWorld->GetFog();
+    }
+
+    ImGui::SliderFloat("Overcast", &wantedOvercast, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Fog", &wantedFog, 0.0f, 1.0f, "%.2f");
+
+    float transition = 0.0f;
+    ImGui::SetNextItemWidth(120.0f);
+    ImGui::InputFloat("Transition (s)", &transition, 0.0f, 0.0f, "%.0f");
+    ImGui::SameLine();
+    if (ImGui::Button("Apply"))
+    {
+        GWorld->SetWeather(wantedOvercast, wantedFog, std::max(transition, 0.0f));
+    }
+
+    ImGui::TextDisabled("Actual: overcast %.2f, fog %.2f", GWorld->GetOvercast(), GWorld->GetFog());
+    ImGui::TextDisabled("Overcast also drives the wind: mean speed and gust envelope");
+    ImGui::TextDisabled("both scale with it unless the override above is on.");
+}
+
+} // namespace
+
+void DrawWeatherTab()
+{
+    DrawReadout();
+    ImGui::Spacing();
+    DrawOverrideSection();
+    ImGui::Spacing();
+    DrawConsumerSection();
+    ImGui::Spacing();
+    DrawWeatherStateSection();
+}
+
+} // namespace Poseidon::Dev
