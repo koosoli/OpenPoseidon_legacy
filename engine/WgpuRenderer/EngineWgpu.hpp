@@ -140,6 +140,11 @@ class EngineWgpu : public EngineDummy
     void EndMesh(TLVertexTable& mesh) override;
     void PrepareTriangle(const MipInfo& mip, int specFlags) override;
     void DrawSection(const FaceArray& face, Offset beg, Offset end) override;
+    // Screen-space billboard (every cloudlet, plus light halos / flares). Same
+    // empty-EngineDummy-body story as DrawLine below: until this override existed,
+    // all smoke, dust, exhaust and muzzle clouds drew nothing under wgpu.
+    void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color, const MipInfo& mip,
+                   int specFlags) override;
     // World-space line / point primitives, fed by the same software-T&L mesh as
     // DrawSection above (Object::DrawLines / Object::DrawPoints). Without these the
     // base EngineDummy body is empty, so every world diagnostic line -- ballistics

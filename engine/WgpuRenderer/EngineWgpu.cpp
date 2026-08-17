@@ -7607,6 +7607,111 @@ void EngineWgpu::DrawSection(const FaceArray& face, Offset beg, Offset end)
     AppendTriangles(_swTexture, _swBlend, _swSampler, _swDepth, tris);
 }
 
+// Screen-space billboard: the primitive every cloudlet is drawn with. Object::DrawDecal
+// projects the puff to a screen position + rhw + half-extents and calls this; the same
+// call carries the SceneDraw volume-light and flare sprites. Never went through
+// DrawSection, so with the inherited EngineDummy body -- which is empty -- ALL smoke,
+// dust, exhaust, muzzle clouds, water spray and light halos drew nothing under wgpu.
+// The simulation was fine and the submission counts looked healthy; the quad simply
+// never reached a pipeline. Same class of bug as DrawLine below.
+//
+// Mirrors EngineGL33::DrawDecal (EngineGL33_DrawShared.cpp): clip the quad to the
+// viewport (adjusting UVs so the texture does not stretch), carry z + rhw through so
+// the 2D shader depth-tests it against the world in reversed-Z, and derive the fog
+// factor from IsAlphaFog exactly as GL33 packs it into TLVertex.specular. Depth is
+// TESTED and not written -- smoke is occluded by a wall and never occludes anything.
+void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
+                           const MipInfo& mip, int specFlags)
+{
+    if (!mip.IsOK() || sizeX <= 0.0f || sizeY <= 0.0f)
+    {
+        return;
+    }
+
+    const float w = static_cast<float>(_w);
+    const float h = static_cast<float>(_h);
+
+    float xBeg = screen.X() - sizeX;
+    float xEnd = screen.X() + sizeX;
+    float yBeg = screen.Y() - sizeY;
+    float yEnd = screen.Y() + sizeY;
+    float uBeg = 0.0f, uEnd = 1.0f;
+    float vBeg = 0.0f, vEnd = 1.0f;
+
+    // Clip to the viewport, sliding the UVs by the clipped fraction so a puff half off
+    // the left edge shows its right half at the correct scale rather than being
+    // squashed into what remains. GL33 does exactly this.
+    if (xBeg < 0.0f)
+    {
+        uBeg = -xBeg / (2.0f * sizeX);
+        xBeg = 0.0f;
+    }
+    if (xEnd > w)
+    {
+        uEnd = 1.0f - (xEnd - w) / (2.0f * sizeX);
+        xEnd = w;
+    }
+    if (yBeg < 0.0f)
+    {
+        vBeg = -yBeg / (2.0f * sizeY);
+        yBeg = 0.0f;
+    }
+    if (yEnd > h)
+    {
+        vEnd = 1.0f - (yEnd - h) / (2.0f * sizeY);
+        yEnd = h;
+    }
+    if (xBeg >= xEnd || yBeg >= yEnd)
+    {
+        return;
+    }
+
+    // Colour / fog split, as GL33 packs it into TLVertex (colour + specular alpha):
+    //   IsAlphaFog: the caller has ALREADY folded fog into the alpha (see
+    //     Object::DrawDecal, "colorI.SetA((1 - fog) * colorI.A())"), so pass the colour
+    //     through and apply no fog blend at all -- fog = 1 keeps the colour.
+    //   otherwise: the caller put (1 - visibility) in the alpha channel; the colour is
+    //     drawn opaque and the alpha channel is the fog factor toward the fog colour.
+    // Object::DrawDecal always sets IsAlphaFog for cloudlets, so the first branch is
+    // the one smoke takes; the second exists so light halos match GL33.
+    TLVertex proto;
+    if (specFlags & IsAlphaFog)
+    {
+        proto.color = color;
+        proto.specular = PackedColor(0xff000000u);
+    }
+    else
+    {
+        proto.specular = PackedColor(0xff000000u - (color & 0xff000000u));
+        proto.color = PackedColor(color | 0xff000000u);
+    }
+    proto.rhw = rhw;
+    proto.pos[2] = screen.Z();
+
+    auto corner = [&](float x, float y, float u, float v)
+    {
+        TLVertex tl = proto;
+        tl.pos[0] = x;
+        tl.pos[1] = y;
+        tl.t0.u = u;
+        tl.t0.v = v;
+        return MakeScreenVertex(tl);
+    };
+
+    const WgrVertex2D v0 = corner(xBeg, yBeg, uBeg, vBeg);
+    const WgrVertex2D v1 = corner(xEnd, yBeg, uEnd, vBeg);
+    const WgrVertex2D v2 = corner(xEnd, yEnd, uEnd, vEnd);
+    const WgrVertex2D v3 = corner(xBeg, yEnd, uBeg, vEnd);
+    const WgrVertex2D quad[6] = {v0, v1, v2, v0, v2, v3};
+
+    // Not DepthForSpec(specFlags): the cloudlet specials carry NoZWrite, which
+    // DepthForSpec would honour, but a decal is a screen-space sprite standing in for
+    // a volume -- it must be TESTED against the world (so a wall in front hides it)
+    // and must never WRITE (so it does not punch a hole in whatever is drawn behind
+    // it later in the alpha pass). That is a fixed policy, not a per-spec choice.
+    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), WGR_DEPTH_TEST, quad);
+}
+
 // 3D line primitive: Object::DrawLines projects the shape, then submits every edge
 // through here (Object.cpp, GEngine->DrawLine). It never goes through DrawSection, so
 // with the inherited EngineDummy body -- which is empty -- the whole world-space
