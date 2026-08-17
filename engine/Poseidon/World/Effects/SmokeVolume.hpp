@@ -119,6 +119,14 @@ struct SmokeParams
     /// Vertical stretch of a flame sprite at full rise speed. 0 = round puffs
     /// (the first pass, which read as cotton wool); ~1.6 = tongues.
     float fireStretch = 1.6f;
+    /// The fire lights its surroundings: a point light at the flame centroid,
+    /// warm, driven by the same flicker as the flames so the ground and walls
+    /// around it breathe with the fire. 0 disables it. Point lights in this
+    /// renderer do not cast shadow maps, so "flickering shadows" is what a
+    /// flickering light DOES to a scene -- near surfaces pulse, far ones do
+    /// not, and anything between fire and wall reads dark against it.
+    float fireLightIntensity = 1.0f;
+    float fireLightRadius = 18.0f; ///< reach, m (attenuation start)
 
     // -- budget -----------------------------------------------------------
     int maxParticles = 400;
@@ -240,6 +248,11 @@ class SmokeVolume : public Entity
     std::vector<SmokeParticle> _flames;
     Ref<LODShapeWithShadow> _fireShape;
     float _fireAccumulator = 0.0f;
+    /// The fire's point light. Created on the first tick with fire on, freed
+    /// when the flames are gone; scene-owned once added.
+    Ref<LightPoint> _fireLight;
+    float _fireLightPhase = 0.0f;
+    void UpdateFireLight(float deltaT);
     std::vector<int> _drawOrder;
 
     Vector3 _emitterPosition{VZero};

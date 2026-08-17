@@ -7,6 +7,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -77,7 +78,18 @@ SmokeVolume::SmokeVolume(LODShapeWithShadow* shape, LODShapeWithShadow* fireShap
     _drawOrder.reserve(_particles.capacity());
 }
 
-SmokeVolume::~SmokeVolume() = default;
+SmokeVolume::~SmokeVolume()
+{
+    // Ref<> drops our hold; the scene's light list holds the other. Zero the
+    // colour first so a light the scene has not yet pruned goes dark at once
+    // rather than lingering at last-frame brightness for a frame.
+    if (!_fireLight.IsNull())
+    {
+        _fireLight->SetDiffuse(HBlack);
+        _fireLight->SetAmbient(HBlack);
+        _fireLight.Free();
+    }
+}
 
 SimulationImportance SmokeVolume::WorstImportance() const
 {
@@ -563,6 +575,69 @@ void SmokeVolume::DrawFire(int level)
     }
 }
 
+void SmokeVolume::UpdateFireLight(float deltaT)
+{
+    const bool wantLight = _params.fire && _params.fireLightIntensity > 0.0f && !_flames.empty();
+
+    if (!wantLight)
+    {
+        if (!_fireLight.IsNull())
+        {
+            _fireLight->SetDiffuse(HBlack);
+            _fireLight->SetAmbient(HBlack);
+            _fireLight.Free();
+        }
+        return;
+    }
+
+    if (_fireLight.IsNull())
+    {
+        if (GScene == nullptr)
+        {
+            return;
+        }
+        // Same construction the legacy explosion uses (Smokes.cpp): black at
+        // birth, coloured per frame below. Scene owns it once added.
+        _fireLight = new LightPoint(HBlack, HBlack);
+        GScene->AddLight(_fireLight);
+    }
+
+    // Light sits at the flame centroid, a little above it: the brightest part
+    // of a fire is the top of the flame column, not the fuel.
+    Vector3 centre(VZero);
+    for (const SmokeParticle& flame : _flames)
+    {
+        centre += flame.position;
+    }
+    centre /= static_cast<float>(_flames.size());
+    centre[1] += 0.4f;
+
+    // Flicker: the same two slow sines the flames breathe on, plus a faster
+    // sputter, so light and flame pulse together. Kept well away from 0 -- a
+    // fire's light never goes out between flickers, it only dips.
+    _fireLightPhase += deltaT;
+    const float t = _fireLightPhase;
+    const float body = 0.85f + 0.15f * std::sin(t * 9.7f) * std::sin(t * 3.1f + 1.3f);
+    const float sputter = 0.92f + 0.08f * std::sin(t * 27.0f + 0.7f) * std::sin(t * 13.0f);
+    const float flicker = std::clamp(body * sputter, 0.6f, 1.0f);
+
+    // Scale with how much fire there is: more flames, more light, saturating
+    // so a raging preset does not become a searchlight.
+    const float fill = std::min(static_cast<float>(_flames.size()) / 40.0f, 1.0f);
+    const float intensity = _params.fireLightIntensity * flicker * (0.4f + 0.6f * fill);
+
+    // Warm: fire light is orange, and the ambient term is a dimmer, redder
+    // version so the shadowed sides of nearby things pick up a glow rather
+    // than staying cold.
+    const Color diffuse(1.00f * intensity, 0.62f * intensity, 0.22f * intensity, 1.0f);
+    const Color ambient(0.30f * intensity, 0.12f * intensity, 0.04f * intensity, 1.0f);
+
+    _fireLight->SetPosition(centre);
+    _fireLight->SetDiffuse(diffuse);
+    _fireLight->SetAmbient(ambient);
+    _fireLight->SetBrightness(_params.fireLightRadius / 50.0f);
+}
+
 void SmokeVolume::UpdateBounds()
 {
     if (_particles.empty())
@@ -614,6 +689,7 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
         Emit(deltaT);
         EmitFire(deltaT);
         SimulateFire(deltaT);
+        UpdateFireLight(deltaT);
 
         std::size_t write = 0;
         for (std::size_t read = 0; read < _particles.size(); ++read)

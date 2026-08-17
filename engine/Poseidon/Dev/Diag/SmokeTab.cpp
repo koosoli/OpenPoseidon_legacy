@@ -348,6 +348,14 @@ void DrawTuningSection()
                           "1 = heavy oil fire, 0.2 = clean hot burn with wisps.");
     }
     ImGui::SliderFloat("Flame stretch", &GParams.fireStretch, 0.0f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Fire light intensity", &GParams.fireLightIntensity, 0.0f, 4.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("A warm point light at the flame centroid, flickering with the fire.\n"
+                          "Point lights here cast no shadow maps, so 'flickering shadows' is\n"
+                          "what the light does to nearby surfaces. Best judged at night.");
+    }
+    ImGui::SliderFloat("Fire light radius (m)", &GParams.fireLightRadius, 2.0f, 60.0f, "%.0f");
     ImGui::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
 
     ImGui::SeparatorText("Collision and shelter");
