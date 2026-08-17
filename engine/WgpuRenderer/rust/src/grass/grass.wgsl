@@ -98,6 +98,11 @@ struct GrassParams {
     //   .x = blade-on-blade self shadow (0 = off), .y = contrast (1 = untouched)
     //   .z = per-patch hue variation (0 = none), .w = root darkening (0.70 = stock)
     blade_look: vec4<f32>,
+    // PHOTO CARDS ONLY; renderer-owned (CardTone in grass/mod.rs).
+    //   .x = per-layer tone target luma (0 = off), .y = tone gain cap
+    //        (see card_tone_gain), .z = wind flutter the cards take, 0..1
+    //        (see vs_grass_mid_tuft), .w spare
+    card_tone: vec4<f32>,
     // Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     // The card quad is trimmed to it: the margin outside can never survive the
     // alpha test, so rasterising it was pure overdraw on a fill-bound path.
@@ -1246,8 +1251,19 @@ fn vs_grass_mid_tuft(@builtin(vertex_index) vertex_index: u32, @builtin(instance
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (card_depth * 1.35 * crush);
 
     let wind = sample_wind_field(inst.xz, vh, seed);
+    // A card sways on the GUST field only, plus card_tone.z of the turbulence.
+    // The turbulence term is blade-TIP flutter -- a 0.105 /m noise scrolled at
+    // ~97 m/s (gust_scroll * 2.1) is a ~10 Hz signal of +-3..6 cm at the tip.
+    // On a 5 cm blade tip that reads as flutter; on a rigid 1-2 m plate it is
+    // the whole plant vibrating at 10 Hz (~1 px at 50 m, ~8 px at 5 m) under a
+    // 1 px alpha transition, which is temporal aliasing by construction and
+    // reads as flicker at a fixed camera. The gust field (45 m features at
+    // 30-45 m/s, ~1 Hz) is the smooth wind that remains. Mirrored in
+    // vs_grass_tuft_shadow so the shadow sways with the card. Renderer default 0;
+    // WGR_GRASS_CARD_FLUTTER=1 is the exact old motion for an A/B.
+    let card_flutter = clamp(grass.card_tone.z, 0.0, 1.0);
     let wind_bend = vec3<f32>(wind.direction.x, 0.0, wind.direction.y) * grass.wind_strength *
-        (0.030 + 0.18 * wind.gust + wind.turbulence);
+        (0.030 + 0.18 * wind.gust + wind.turbulence * card_flutter);
     let flutter_dir = rotor_flutter_direction(inst.xz, seed);
     let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     // The whole card leans; roots stay pinned. Quadratic in height, as the
@@ -1452,8 +1468,11 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
     // chain as the cards when they are in use, and the procedural blade palette
     // when they are not, so the join is a change of detail, not of material.
     let photo_far = grass.species_mix.w > 0.5;
-    let mean_a3 = grass.layer_means[0].rgb * vec3<f32>(0.74, 1.22, 0.56) *
-        clamp(grass.renderer.y, 0.5, 2.5);
+    // Same chain as tuft_shade, tone lift included, or the proxy would sit at
+    // the plates' RAW tone under lifted cards -- the material change this ring
+    // exists to avoid.
+    let mean_a3 = grass.layer_means[0].rgb * PHOTO_TONE_CORRECTION *
+        clamp(grass.renderer.y, 0.5, 2.5) * card_tone_gain(0u);
     let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
     let photo_base = mix(vec3<f32>(mean_luma), mean_a3, clamp(grass.photo_mix.y, 0.0, 2.0));
     // The procedural blades run root-to-tip base..tip; a ground proxy stands for
@@ -1492,6 +1511,42 @@ fn fs_grass_far(in: VsOut) -> @location(0) vec4<f32> {
 // flickers, and trimming those partial texels is the direct remedy.
 fn tuft_alpha_cutoff() -> f32 {
     return clamp(grass.place.w, 0.05, 0.95);
+}
+
+// The A2/A3 tone correction every photographed plate goes through before the
+// user's brightness: A3's clutter albedo is authored warmer/duller than CWA's
+// meadow palette. ONE definition, so the card, its contrast pivot and the far
+// proxy that stands in for it cannot drift apart.
+const PHOTO_TONE_CORRECTION: vec3<f32> = vec3<f32>(0.74, 1.22, 0.56);
+
+// PHOTO CARD TONE LIFT (card_tone.x = target luma, .y = gain cap; renderer-owned,
+// see CardTone in grass/mod.rs). Per LAYER, from the plate mean the renderer
+// measures at upload (layer_means), never below 1 and never above the cap.
+//
+// This stands in for the clutter MATERIAL, which the card path never reads. An
+// Arma clutter plate is authored to be multiplied by its rvmat's lighting gains
+// -- Takistan's c_plants / c_grass_desert rvmats are ambient 10, forcedDiffuse
+// 2.5, diffuse 0 -- so the texels themselves are dark: the seven Takistan
+// plates decode (Bohemia's ImageToPAA) to opaque linear luma means of 0.054 to
+// 0.243, against 0.63 for the A3 stock plate this whole chain was tuned on.
+// Drawn raw, under a sun that puts the terrain at ~0.44 linear, a TK card is a
+// flat dark silhouette in BOTH rings. Lifting each plate's mean to the target
+// puts every atlas where the tuning was done; a plate already at or above it is
+// untouched, so an A3 atlas renders exactly as before.
+//
+// Not premultiplied alpha, measured: the plates' transparent texels carry
+// colour and their partial-alpha texels are as bright as the opaque ones, so
+// dividing by alpha would be wrong. Not the contrast pivot: layer_means are
+// linear and per layer. The exact per-class gains want the C++ atlas builder to
+// read each class's rvmat and pass a per-layer gain over the ABI; this is the
+// data-driven stand-in until then. 0 target = off (the raw look, for A/B).
+fn card_tone_gain(layer: u32) -> f32 {
+    // Not `target`: a WGSL reserved word, and composition fails on it.
+    let tone_target = grass.card_tone.x;
+    if (tone_target <= 0.001) { return 1.0; }
+    let plate_mean = grass.layer_means[min(layer, 31u)].rgb * PHOTO_TONE_CORRECTION;
+    let plate_luma = dot(plate_mean, vec3<f32>(0.2126, 0.7152, 0.0722));
+    return clamp(tone_target / max(plate_luma, 0.005), 1.0, max(grass.card_tone.y, 1.0));
 }
 
 // Near clumps already render into the cascade shadow map. Sample that same map
@@ -1548,7 +1603,18 @@ fn tuft_contour_normal(uv: vec2<f32>, layer: i32, card_normal: vec3<f32>) -> vec
     // Texture v runs downward, so a positive dv means brighter BELOW.
     let dv = tuft_luma(uv + vec2<f32>(0.0, texel), layer) - tuft_luma(uv - vec2<f32>(0.0, texel), layer);
     let k = strength * 3.2;
-    return normalize(up + tangent * (-du * k) + facing * (dv * k * 0.6));
+    let tilt = tangent * (-du * k) + facing * (dv * k * 0.6);
+    // Bound the tilt. `du` is an alpha-weighted luma difference, so at a stem
+    // edge it is the whole stem luma: on a bright plate that is k * 0.5 = 3 at
+    // the default strength, a normal 71 degrees off vertical whose sun term
+    // swings from full to nothing across ONE texel. Every frame the wind moves
+    // the taps a fraction of a texel, so that swing is per-pixel lighting
+    // noise -- sparkle. Capping the tangent length at 1.2 (~50 degrees) keeps the
+    // relief on every plate and removes only the flip; plates whose gradients
+    // never reach it (the dark A2 sets, du ~0.05-0.1) are untouched.
+    let tilt_len = length(tilt);
+    let bounded = tilt * (min(tilt_len, 1.2) / max(tilt_len, 1e-5));
+    return normalize(up + bounded);
 }
 
 // The ONE texture fetch every card entry point makes. Thin photographed stems
@@ -1605,7 +1671,10 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // meadow while retaining red/blue stem variation; the former 1.85 green
     // multiplier made bright patches unnaturally saturated.
     let photo_brightness = clamp(grass.renderer.y, 0.5, 2.5);
-    let a3_albedo = tex.rgb * vec3<f32>(0.74, 1.22, 0.56) * photo_brightness;
+    // The per-layer material stand-in (card_tone_gain) multiplies BOTH the
+    // sample and its contrast pivot below, so contrast stays brightness-neutral.
+    let tone_gain = card_tone_gain(u32(in.blade_uv.z));
+    let a3_albedo = tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
     // The source plates have strong chlorophyll green. Keep their natural
     // stem variation but pull this card-only correction toward luma before
     // the user's global grass saturation is applied.
@@ -1626,7 +1695,7 @@ fn tuft_shade(in: VsOut, tex: vec4<f32>) -> vec3<f32> {
     // the near-field cancellation between bright stems and dark gaps disappears.
     let contrast = clamp(grass.photo.x, 0.5, 2.5);
     let mean_a3 = grass.layer_means[min(u32(in.blade_uv.z), 31u)].rgb *
-        vec3<f32>(0.74, 1.22, 0.56) * photo_brightness;
+        PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;
     let mean_luma = dot(mean_a3, vec3<f32>(0.2126, 0.7152, 0.0722));
     let plate_pivot = mix(vec3<f32>(mean_luma), mean_a3, photo_sat);
     let shaped = max((photo_natural - plate_pivot) * contrast + plate_pivot, vec3<f32>(0.0));

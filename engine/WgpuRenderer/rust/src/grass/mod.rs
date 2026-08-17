@@ -98,6 +98,74 @@ fn card_spacing_from_env() -> f32 {
         .clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1)
 }
 
+/// PHOTO CARD TONE (uniform `card_tone` in grass.wgsl; renderer-owned, never
+/// from the caller).
+///
+/// `.x` target: the corrected mean luma every plate is lifted TO, `.y` the gain
+/// cap. This stands in for the clutter MATERIAL, which the card path never
+/// reads: Arma's clutter rvmats carry large lighting gains -- Takistan's
+/// c_plants.rvmat / c_grass_desert.rvmat are ambient 10, forcedDiffuse 2.5,
+/// diffuse 0; its bunch rvmats ambient 2.3, forcedDiffuse 0.65 -- and the
+/// plates are authored dark to be multiplied by them. Decoded with Bohemia's own
+/// ImageToPAA, the seven Takistan plates have opaque linear luma means of
+/// 0.054 (c_grassgreen_grouphard = TK_BrushHard), 0.056 (weed2), 0.076
+/// (thistle), 0.107 (plants_white), 0.139 (grassgreen), 0.159 (bunch) and 0.243
+/// (grassdry), against 0.63 for the A3 stock plate the tone chain was tuned on.
+/// Under the same sun the terrain renders at ~0.44 linear, so an unlifted TK
+/// card is a flat dark silhouette -- in BOTH rings; the "near ring is fine"
+/// reading was Takistan's object bushes at 5-15 m, not cards.
+///
+/// The gain is per LAYER, from the plate mean the renderer already measures
+/// (`layer_means`), never below 1 (no plate is darkened, so an A3 atlas whose
+/// plates sit at or above the target is untouched) and capped at `.y`. The
+/// exact per-class material gains would need the C++ atlas builder to read
+/// each clutter class's rvmat and pass a per-layer gain across the ABI; until
+/// then this is the data-driven stand-in. WGR_GRASS_CARD_TONE=<target> (0 =
+/// off, i.e. the old look), WGR_GRASS_CARD_TONE_MAX=<cap>.
+///
+/// `.z` card flutter: how much of the wind field's TURBULENCE term the cards
+/// take (0..1). The turbulence is blade-tip flutter: a 0.105 /m noise scrolled
+/// at ~97 m/s (gust_scroll * 2.1) is a ~10 Hz signal, +-3..6 cm at the tip.
+/// On a 5 cm blade tip that is flutter; on a rigid 1-2 m plate it is the whole
+/// plant vibrating at 10 Hz -- ~1 px at 50 m, ~8 px at 5 m -- under a 1 px
+/// alpha transition, which is temporal aliasing by construction: exactly the
+/// "flickering a lot" a fixed camera sees with nothing else changing. Cards
+/// default to the gust-only sway (0); WGR_GRASS_CARD_FLUTTER=1 is the A/B back.
+const CARD_TONE_TARGET_DEFAULT: f32 = 0.63;
+const CARD_TONE_GAIN_MAX_DEFAULT: f32 = 8.0;
+const CARD_FLUTTER_DEFAULT: f32 = 0.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CardTone {
+    target: f32,
+    gain_max: f32,
+    flutter: f32,
+}
+
+impl CardTone {
+    fn from_env() -> Self {
+        Self::from_env_values(
+            std::env::var("WGR_GRASS_CARD_TONE").ok().as_deref(),
+            std::env::var("WGR_GRASS_CARD_TONE_MAX").ok().as_deref(),
+            std::env::var("WGR_GRASS_CARD_FLUTTER").ok().as_deref(),
+        )
+    }
+
+    fn from_env_values(target: Option<&str>, gain_max: Option<&str>, flutter: Option<&str>) -> Self {
+        let parse = |v: Option<&str>, default: f32| {
+            v.and_then(|s| s.trim().parse::<f32>().ok())
+                .filter(|f| f.is_finite())
+                .unwrap_or(default)
+        };
+        Self {
+            // 0 switches the lift off; anything else is a luma target.
+            target: parse(target, CARD_TONE_TARGET_DEFAULT).clamp(0.0, 2.0),
+            gain_max: parse(gain_max, CARD_TONE_GAIN_MAX_DEFAULT).clamp(1.0, 16.0),
+            flutter: parse(flutter, CARD_FLUTTER_DEFAULT).clamp(0.0, 1.0),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct GrassParams {
@@ -191,6 +259,14 @@ struct GrassParams {
     blade_contrast: f32,
     blade_hue_variation: f32,
     blade_root_shade: f32,
+    // Photo-card tone block; mirrors `card_tone` in grass.wgsl and
+    // grass_shadow.wgsl. Renderer-owned (see CardTone), never from the caller.
+    //   .x = per-layer tone target luma (0 = off), .y = tone gain cap,
+    //   .z = card wind flutter 0..1, .w spare
+    card_tone_target: f32,
+    card_tone_gain_max: f32,
+    card_flutter: f32,
+    _card_tone_pad: f32,
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
@@ -351,6 +427,8 @@ pub struct Grass {
     // the pipelines themselves are fixed at construction.
     #[allow(dead_code)]
     card_a2c: bool,
+    // Photo-card tone lift and wind flutter; see CardTone.
+    card_tone: CardTone,
     // Lines for the GAME log, drained by lib.rs (which owns the LogSink) after
     // every set_params / set_tufts. eprintln! goes to a stderr the launcher
     // discards, so a lever announced only there cannot be proven from a run.
@@ -432,13 +510,15 @@ impl Grass {
             && std::env::var("WGR_GRASS_CARD_A2C")
                 .map(|v| v != "0")
                 .unwrap_or(true);
+        let card_tone = CardTone::from_env();
         // Announced through the GAME log (pending_log, drained by lib.rs on the
         // first set_params): the stderr copy below is discarded by the launcher,
         // and a lever that only announces there cannot be proven from a run.
         let cards_line = format!(
             "Wgpu grass cards: spacing {card_spacing:.2} m (WGR_GRASS_CARD_SPACING), a2c={} \
-             (WGR_GRASS_CARD_A2C, msaa {sample_count}x), coverage default {CARD_COVERAGE_DEFAULT:.2}",
-            card_a2c as u8
+             (WGR_GRASS_CARD_A2C, msaa {sample_count}x), coverage default {CARD_COVERAGE_DEFAULT:.2}, \
+             tone target {:.2} cap x{:.1} (WGR_GRASS_CARD_TONE/_MAX), flutter {:.2} (WGR_GRASS_CARD_FLUTTER)",
+            card_a2c as u8, card_tone.target, card_tone.gain_max, card_tone.flutter
         );
         eprintln!("[wgr] {cards_line}");
         let params = GrassParams {
@@ -530,6 +610,10 @@ impl Grass {
             blade_contrast: 1.0,
             blade_hue_variation: 0.0,
             blade_root_shade: 0.70,
+            card_tone_target: card_tone.target,
+            card_tone_gain_max: card_tone.gain_max,
+            card_flutter: card_tone.flutter,
+            _card_tone_pad: 0.0,
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
         };
@@ -1204,6 +1288,7 @@ impl Grass {
             last_params: params,
             card_spacing,
             card_a2c,
+            card_tone,
             pending_log: vec![cards_line],
             announced_cards: None,
         }
@@ -1666,6 +1751,11 @@ impl Grass {
             },
             blade_hue_variation: params.blade_hue_variation.clamp(0.0, 1.0),
             blade_root_shade: params.blade_root_shade.clamp(0.0, 0.95),
+            // Renderer-owned, like card_spacing: the caller has no say.
+            card_tone_target: self.card_tone.target,
+            card_tone_gain_max: self.card_tone.gain_max,
+            card_flutter: self.card_tone.flutter,
+            _card_tone_pad: 0.0,
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,
@@ -2282,6 +2372,87 @@ mod tests {
         let src = include_str!("mod.rs");
         assert!(src.contains("let cards_mid = self.have_tuft && params.use_photo_tuft != 0.0;"));
         assert!(src.contains("use_photo_tuft: if cards_mid { 1.0 } else { 0.0 },"));
+    }
+
+    // Dark cards: the A2/OA plates are authored dark for their rvmat gains, so
+    // the card path lifts each layer to the target from the mean it measured,
+    // never darkens, and applies the same lift to the sample, its contrast pivot
+    // and the far proxy. Off is the raw look.
+    #[test]
+    fn card_tone_lift_is_per_layer_and_reaches_sample_pivot_and_far_proxy() {
+        assert!(SHADER.contains("card_tone: vec4<f32>,"));
+        assert!(SHADOW.contains("card_tone: vec4<f32>,"));
+        assert!(SHADER.contains("fn card_tone_gain(layer: u32) -> f32 {"));
+        assert!(SHADER.contains("if (tone_target <= 0.001) { return 1.0; }"));
+        assert!(SHADER.contains(
+            "return clamp(tone_target / max(plate_luma, 0.005), 1.0, max(grass.card_tone.y, 1.0));"
+        ));
+        // Applied to the sample AND its pivot in tuft_shade, and to layer 0 in
+        // fs_grass_far. The correction vector is one constant everywhere.
+        assert!(SHADER.contains("let tone_gain = card_tone_gain(u32(in.blade_uv.z));"));
+        assert!(SHADER.contains("tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;"));
+        assert_eq!(
+            SHADER.matches("PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;").count(),
+            2,
+            "sample and pivot"
+        );
+        assert!(SHADER.contains("clamp(grass.renderer.y, 0.5, 2.5) * card_tone_gain(0u);"));
+        assert_eq!(SHADER.matches("vec3<f32>(0.74, 1.22, 0.56)").count(), 1);
+        // `target` is a WGSL reserved word; the shader must not have grown one.
+        assert!(!SHADER.contains("let target ="));
+        // Rust defaults and env parsing.
+        let d = CardTone::from_env_values(None, None, None);
+        assert_eq!(d.target, CARD_TONE_TARGET_DEFAULT);
+        assert_eq!(d.gain_max, CARD_TONE_GAIN_MAX_DEFAULT);
+        assert_eq!(d.flutter, CARD_FLUTTER_DEFAULT);
+        assert_eq!(CARD_FLUTTER_DEFAULT, 0.0);
+        let off = CardTone::from_env_values(Some("0"), Some("99"), Some("1"));
+        assert_eq!(off.target, 0.0);
+        assert_eq!(off.gain_max, 16.0);
+        assert_eq!(off.flutter, 1.0);
+        let junk = CardTone::from_env_values(Some("nan"), Some("x"), Some("-3"));
+        assert_eq!(junk.target, CARD_TONE_TARGET_DEFAULT);
+        assert_eq!(junk.gain_max, CARD_TONE_GAIN_MAX_DEFAULT);
+        assert_eq!(junk.flutter, 0.0);
+        // What the default does to the measured Takistan plates: the gain the
+        // shader will compute for c_grassgreen_grouphard (TK_BrushHard, corrected
+        // luma 0.054) hits the cap; c_grassdry (0.243) is lifted ~2.6x; the A3
+        // stock plate (0.63) is untouched.
+        let gain = |luma: f32| (d.target / luma.max(0.005)).clamp(1.0, d.gain_max);
+        assert_eq!(gain(0.054), d.gain_max);
+        assert!((gain(0.243) - 2.59).abs() < 0.02);
+        assert_eq!(gain(0.63), 1.0);
+        assert_eq!(gain(0.9), 1.0);
+    }
+
+    // Flicker: cards take the gust sway and only card_tone.z of the blade-tip
+    // turbulence, in the colour vertex shader AND the shadow twin, from the same
+    // uniform slot -- or the shadow would jitter under a still card.
+    #[test]
+    fn card_flutter_is_one_uniform_read_by_both_card_vertex_shaders() {
+        for (name, src, entry, turb) in [
+            ("grass.wgsl", SHADER, "fn vs_grass_mid_tuft(", "wind.turbulence * card_flutter"),
+            ("grass_shadow.wgsl", SHADOW, "fn vs_grass_tuft_shadow(", "wind.w * card_flutter"),
+        ] {
+            let start = src.find(entry).unwrap_or_else(|| panic!("{name}: {entry}"));
+            let body = &src[start..];
+            let end = body.find("\n@").unwrap_or(body.len());
+            let body = &body[..end];
+            assert!(
+                body.contains("let card_flutter = clamp(grass.card_tone.z, 0.0, 1.0);"),
+                "{name}: card_flutter must come from card_tone.z"
+            );
+            assert!(body.contains(turb), "{name}: turbulence must be scaled by card_flutter");
+            // The gust term is untouched: 0.030 + 0.18 * gust, as before.
+            assert!(body.contains("(0.030 + 0.18 * wind."), "{name}");
+        }
+        // The blade shaders keep their flutter: only the two card entries scale it.
+        assert_eq!(SHADER.matches("* card_flutter").count(), 1);
+        assert_eq!(SHADOW.matches("* card_flutter").count(), 1);
+        assert!(SHADER.contains("(0.035 + 0.21 * wind.gust + wind.turbulence)"));
+        assert!(SHADER.contains("(0.030 + 0.18 * wind.gust + wind.turbulence);"));
+        // Contour tilt is bounded (per-pixel sun flip = sparkle under motion).
+        assert!(SHADER.contains("let bounded = tilt * (min(tilt_len, 1.2) / max(tilt_len, 1e-5));"));
     }
 
     fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {

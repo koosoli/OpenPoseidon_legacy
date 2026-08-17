@@ -33,6 +33,9 @@ struct GrassParams {
     // look block (colour pass only). Both must stay: same uniform buffer.
     card_look: vec4<f32>,
     blade_look: vec4<f32>,
+    // .z = card wind flutter, read by vs_grass_tuft_shadow so the shadow sways
+    // exactly as the colour card does. Mirrors grass.wgsl.
+    card_tone: vec4<f32>,
     layer_bounds: array<vec4<f32>, 32>,
     layer_means: array<vec4<f32>, 32>,
 };
@@ -309,8 +312,12 @@ fn vs_grass_tuft_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(insta
     let crushed_height = height * (1.0 - card_depth * crush);
     let crush_bend = vec3<f32>(crush_dir.x, 0.0, crush_dir.y) * height * (card_depth * 1.35 * crush);
     let wind = sample_wind_field(inst.xz, vh, seed);
+    // Mirrors vs_grass_mid_tuft: gust sway plus card_tone.z of the turbulence
+    // (renderer default 0). The shadow must lean exactly as the card it belongs
+    // to, or grass-on-grass shadowing samples a card that is not there.
+    let card_flutter = clamp(grass.card_tone.z, 0.0, 1.0);
     let wind_bend = vec3<f32>(wind.x, 0.0, wind.y) * grass.wind_strength *
-        (0.030 + 0.18 * wind.z + wind.w);
+        (0.030 + 0.18 * wind.z + wind.w * card_flutter);
     let flutter_dir = rotor_flutter_direction(inst.xz, seed);
     let crush_flutter = vec3<f32>(flutter_dir.x, 0.0, flutter_dir.y) * height * (0.95 * rotor_wash);
     let lean = (wind_bend * (1.0 - card_depth * crush) + crush_bend + crush_flutter) * (vh * vh);
