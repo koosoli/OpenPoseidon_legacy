@@ -1226,14 +1226,28 @@ class Engine : public IGraphicsEngine
         // PHOTO CARD COVERAGE: the fraction of clutter-grid cells (1.11 m,
         // WGR_GRASS_CARD_SPACING) that grow a card. Mean card spacing is
         // grid / sqrt(coverage): 0.24 is one card every ~2.3 m, ~0.19 per m^2.
-        // With photoCoverageAuto the map's own clutter density is used wherever
-        // the geography bake answered (Arma worlds with a CfgSurfaces atlas), and
-        // this value is only the fallback where it did not (every OFP world with
-        // cards forced on, unmasked cells). Auto off: this multiplies everywhere,
-        // on top of the bake, so 1.0 = the map's own density. 0.24 is the owner's
-        // fallback for worlds whose clutter density is unknown.
+        // The map's bake decides WHERE cards may grow (mask x surface probability);
+        // this decides HOW MANY of those cells actually grow one, on every world.
+        // It is not a distrust of the bake: one of our cards is two to three of
+        // Arma's clutter plants in plate area (see photoCardScale), so a card per
+        // authored clutter cell is two to three times the plant the map asked for.
+        //
+        // MEASURED (Takistan 6970.40 5700.31 352.57 az 20 el -18, consecutive
+        // frames 900/901, fraction of grass pixels changing by more than 48/255 --
+        // the popping signature, as distinct from smooth sway):
+        //     scene with no grass                 0.01%   (the floor: nothing else moves)
+        //     procedural blades                   0.83%
+        //     cards at the map's own density      3.68%
+        //     cards at coverage 0.25 (2.2 m)      1.66%
+        //     cards with alpha-to-coverage off   10.16%   (A2C is carrying this)
+        // Density is the flicker: every overlapping alpha edge is another chance
+        // for a pixel to pop. 0.24 more than halves it AND is what the owner asked
+        // for ("far too dense ... settle for something like 0.24 coverage").
+        //
+        // photoCoverageAuto restores the previous behaviour -- the map's own
+        // density, untouched, wherever the bake answered -- for the A/B.
         float photoCoverage = 0.24f;
-        bool photoCoverageAuto = true;
+        bool photoCoverageAuto = false;
         // Photo card SIZE, 1.0 = the stock card. The stock card is 0.5-2.3 m tall
         // and wider than tall; Arma's own clutter plants are ~0.3-0.9 m, so at the
         // map's own density the stock card is two to three plants' worth of plate

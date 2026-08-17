@@ -907,6 +907,16 @@ class LODShape: public RefCountWithLinks
 	// destructor
 	~LODShape() override;
 
+	// One process-wide listener told, from ~LODShape, that a shape is dying (address only:
+	// the derived part is already gone, so the pointer is a KEY, never dereferenced). Exists so
+	// a renderer may keep GPU-side registrations keyed by shape alive past the last live Object
+	// (EngineWgpu's parked models, which is what makes the streamer's evict cache save the
+	// GPU registration and not only the LODShape) without ever holding a dangling key.
+	// Set once at renderer construction, cleared at its destruction. Not a virtual on the
+	// engine interface because that vtable is slot-locked (Engine.hpp).
+	using DestroyListener = void (*)(const LODShape* shape, void* userData);
+	static void SetDestroyListener(DestroyListener listener, void* userData);
+
 	// construct by loading from stream
 	LODShape( QIStream &f, bool reversed );
 	// construct by loading from file

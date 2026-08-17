@@ -94,6 +94,15 @@ class ObjectStreamPreparer
         size_t queued = 0;       // current queue depth
         size_t ready = 0;        // current Ready-and-not-taken count
         uint32_t workers = 0;
+        // Texture prepare (stage 2, WGR_OBJECT_STREAM_TEXTURE_PREPARE): after a successful
+        // parse the same worker reads the model's block-compressed loose PAAs into the
+        // PreparedTextureStore so the main thread's upload skips the file read + LZO. All
+        // still on the worker, all outside any lock.
+        uint64_t texPrepared = 0;   // chains stored
+        uint64_t texPreparedBytes = 0;
+        uint64_t texSkipped = 0;    // ShouldPrepare said no (already uploaded/stored/full)
+        uint64_t texUnreadable = 0; // named by the IR but not a readable loose DXT PAA
+        double texMs = 0.0;         // wall time in ReadPAABlockChain + Put
     };
 
     // WGR_OBJECT_STREAM_ASYNC. Read once.

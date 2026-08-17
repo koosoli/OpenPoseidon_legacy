@@ -1911,8 +1911,26 @@ void LODShape::operator=(const LODShape& src)
     DoDestruct();
     DoConstruct(src, true);
 }
+namespace
+{
+// See LODShape::SetDestroyListener. Plain statics: set once before any streamed shape can
+// die, cleared in the renderer's destructor; the listener itself is what has to be cheap.
+LODShape::DestroyListener GShapeDestroyListener = nullptr;
+void* GShapeDestroyListenerData = nullptr;
+} // namespace
+
+void LODShape::SetDestroyListener(DestroyListener listener, void* userData)
+{
+    GShapeDestroyListener = listener;
+    GShapeDestroyListenerData = userData;
+}
+
 LODShape::~LODShape()
 {
+    if (GShapeDestroyListener)
+    {
+        GShapeDestroyListener(this, GShapeDestroyListenerData);
+    }
     DoDestruct();
 }
 

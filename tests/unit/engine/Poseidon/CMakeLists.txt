@@ -234,6 +234,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/P3D/test_model_proxy_bounds.cpp
     Asset/Addon/test_virtual_path.cpp
     Graphics/Textures/test_paa_taggs.cpp
+    Graphics/Textures/test_prepared_textures.cpp
     Graphics/Textures/test_edds_reader.cpp
     Graphics/Textures/test_dds_texture_source.cpp
     Graphics/Textures/test_block_compression.cpp

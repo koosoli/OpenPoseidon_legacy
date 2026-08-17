@@ -778,4 +778,197 @@ DecodedImage DecodePAAFileMip(const std::string& path, int mipLevel)
     return img;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Raw block chain (worker-safe). The container walk mirrors ReadPAAInfo above -- magic, TAGG
+// list, palette, then per level {u16 w (bit 15 = LZO), u16 h, u24 size, payload} until a 0x0
+// terminator -- but keeps the payload instead of skipping it, and touches nothing outside the
+// bytes it was given. Kept independent of QIStream/PacLevelMem on purpose: those are the
+// main-thread reader (Pactext.cpp) and carry statics and a Fail() path this must not share.
+// ---------------------------------------------------------------------------------------------
+namespace
+{
+class ByteCursor
+{
+  public:
+    ByteCursor(const uint8_t* data, size_t size) : _data(data), _size(size) {}
+    bool need(size_t n) const { return _pos + n <= _size; }
+    bool u16(uint16_t& v)
+    {
+        if (!need(2))
+            return false;
+        v = static_cast<uint16_t>(_data[_pos] | (_data[_pos + 1] << 8));
+        _pos += 2;
+        return true;
+    }
+    bool u24(uint32_t& v)
+    {
+        if (!need(3))
+            return false;
+        v = static_cast<uint32_t>(_data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16));
+        _pos += 3;
+        return true;
+    }
+    bool u32(uint32_t& v)
+    {
+        if (!need(4))
+            return false;
+        v = static_cast<uint32_t>(_data[_pos] | (_data[_pos + 1] << 8) | (_data[_pos + 2] << 16) |
+                                  (static_cast<uint32_t>(_data[_pos + 3]) << 24));
+        _pos += 4;
+        return true;
+    }
+    bool skip(size_t n)
+    {
+        if (!need(n))
+            return false;
+        _pos += n;
+        return true;
+    }
+    const uint8_t* here() const { return _data + _pos; }
+    size_t pos() const { return _pos; }
+    void seek(size_t p) { _pos = p; }
+
+  private:
+    const uint8_t* _data;
+    size_t _size;
+    size_t _pos = 0;
+};
+
+bool IsDxtMagic(uint16_t magic)
+{
+    return magic >= 0xFF01 && magic <= 0xFF05;
+}
+} // namespace
+
+bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, std::string* errorOut)
+{
+    out = PAABlockChain{};
+    auto fail = [&](const char* why)
+    {
+        if (errorOut)
+            *errorOut = why;
+        out = PAABlockChain{};
+        return false;
+    };
+    if (!data || size < 2)
+        return fail("empty buffer");
+    ByteCursor in(static_cast<const uint8_t*>(data), size);
+    uint16_t magic = 0;
+    if (!in.u16(magic))
+        return fail("no magic");
+    if (!IsDxtMagic(magic))
+        return fail("not a DXT PAA");
+    out.magic = magic;
+    const size_t blockBytes = magic == 0xFF01 ? 8 : 16;
+
+    // TAGG list. Reversed marker and reversed name, size, payload; resume from the declared
+    // size regardless of what the payload was.
+    for (;;)
+    {
+        const size_t mark = in.pos();
+        uint32_t m = 0;
+        if (!in.u32(m) || m != 0x54414747u)
+        {
+            in.seek(mark);
+            break;
+        }
+        uint32_t sz = 0;
+        if (!in.skip(4) || !in.u32(sz) || !in.skip(sz))
+            return fail("truncated TAGG");
+    }
+    uint16_t palette = 0;
+    if (!in.u16(palette))
+        return fail("no palette count");
+    if (palette > 0 && !in.skip(static_cast<size_t>(palette) * 3))
+        return fail("truncated palette");
+
+    for (;;)
+    {
+        uint16_t w = 0, h = 0;
+        if (!in.u16(w) || !in.u16(h))
+            break; // ran off the end without a terminator: keep what was read
+        if (w == 0 && h == 0)
+            break;
+        const bool lzo = (w & 0x8000) != 0;
+        int rw = w & 0x7FFF, rh = h;
+        if (rw == 1234 && rh == 8765)
+        {
+            uint16_t w2 = 0, h2 = 0;
+            if (!in.u16(w2) || !in.u16(h2))
+                return fail("truncated LZW header");
+            rw = w2;
+            rh = h2;
+        }
+        uint32_t stored = 0;
+        if (!in.u24(stored))
+            return fail("truncated level size");
+        if (rw < 1 || rh < 1 || rw > 8192 || rh > 8192)
+            return fail("level dimensions out of range");
+        if (!in.need(stored))
+            return fail("level payload past end of file");
+        const size_t expected = static_cast<size_t>((rw + 3) / 4) * static_cast<size_t>((rh + 3) / 4) * blockBytes;
+        PAABlockLevel level;
+        level.width = rw;
+        level.height = rh;
+        level.offset = out.blocks.size();
+        level.size = expected;
+        out.blocks.resize(level.offset + expected);
+        if (lzo)
+        {
+            out.hadLzoLevels = true;
+            const size_t got = Foundation::Lzo1x::Decompress(in.here(), stored, out.blocks.data() + level.offset,
+                                                             expected);
+            if (got != expected)
+                return fail("LZO level did not inflate to its block size");
+        }
+        else
+        {
+            if (stored < expected)
+                return fail("stored level smaller than its block size");
+            std::memcpy(out.blocks.data() + level.offset, in.here(), expected);
+        }
+        in.skip(stored);
+        if (out.levels.empty())
+        {
+            out.width = rw;
+            out.height = rh;
+        }
+        out.levels.push_back(level);
+    }
+    if (!out.valid())
+        return fail("no levels");
+    return true;
+}
+
+bool ReadPAABlockChain(const std::string& path, PAABlockChain& out, std::string* errorOut)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.good())
+    {
+        if (errorOut)
+            *errorOut = "cannot open file";
+        out = PAABlockChain{};
+        return false;
+    }
+    const std::streamoff fileSize = file.tellg();
+    if (fileSize <= 0)
+    {
+        if (errorOut)
+            *errorOut = "empty file";
+        out = PAABlockChain{};
+        return false;
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(fileSize));
+    file.seekg(0, std::ios::beg);
+    file.read(reinterpret_cast<char*>(bytes.data()), fileSize);
+    if (!file.good() && !file.eof())
+    {
+        if (errorOut)
+            *errorOut = "read error";
+        out = PAABlockChain{};
+        return false;
+    }
+    return ReadPAABlockChainBuffer(bytes.data(), bytes.size(), out, errorOut);
+}
+
 } // namespace Poseidon

@@ -711,6 +711,27 @@ class Landscape : public SerializeClass
     double _modernObjectColdAdaptMs = 0.0;    // ShapeAdapter, all cold
     double _modernObjectColdOptimizeMs = 0.0; // vertex buffers, all cold
     double _modernObjectColdCreateMs = 0.0;   // ObjectCreate beyond ShapeBank (NewObject/AddObject/GPU)
+    // The split of `create` (ObjectAdmitProfile, cumulative over cold models): where inside
+    // ObjectCreate the milliseconds went. `Register` = RegisterGpuModel whole; `Section` = its
+    // per-section loop (materials + textures), of which the four texture figures; `MeshBuild` /
+    // `MeshCreate` / `ModelFfi` its geometry halves and the register FFI; `Proxies` =
+    // EmitGpuProxies whole. `TexPrepared`/`TexUploads` count uploads served from the worker
+    // store vs all real uploads; `ParkHits` counts registrations skipped whole (WGR_GPU_MODEL_PARK).
+    double _modernObjectColdSceneMs = 0.0;
+    double _modernObjectColdRegisterMs = 0.0;
+    double _modernObjectColdProxiesMs = 0.0;
+    double _modernObjectColdMeshBuildMs = 0.0;
+    double _modernObjectColdMeshCreateMs = 0.0;
+    double _modernObjectColdSectionMs = 0.0;
+    double _modernObjectColdModelFfiMs = 0.0;
+    double _modernObjectColdTexReadMs = 0.0;
+    double _modernObjectColdTexCreateMs = 0.0;
+    double _modernObjectColdTexFallbackMs = 0.0;
+    double _modernObjectColdAlphaMs = 0.0;
+    uint64_t _modernObjectColdTexUploads = 0;
+    uint64_t _modernObjectColdTexPrepared = 0;
+    uint64_t _modernObjectColdParkHits = 0;
+    uint64_t _modernObjectColdParkStale = 0;
     // Ensure the preparer knows this world's model table; no-op if already current.
     void EnsureModernObjectPreparer();
     // Walk the desired set once per recentre and enqueue every distinct cold model in

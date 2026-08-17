@@ -5,6 +5,8 @@
 
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Threads/PoThread.hpp>
+#include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
 #include <Poseidon/World/Model/Model.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 
@@ -98,7 +100,9 @@ struct ObjectStreamPreparer::Impl
     bool stop = false;
     // Bumped by Reset. A worker that finishes a parse started under an older generation
     // discards its result: the slot it would write belongs to a different world now.
-    uint64_t generation = 0;
+    // Atomic because the texture-prepare loop polls it OUTSIDE the mutex (to stop reading
+    // files for a world that is gone); every WRITE still happens under the mutex.
+    std::atomic<uint64_t> generation{0};
 
     size_t count = 0;
     std::vector<std::string> paths;
@@ -144,7 +148,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         --stats.queued;
         if (index >= count)
             continue;
-        const uint64_t gen = generation;
+        const uint64_t gen = generation.load(std::memory_order_relaxed);
         const std::string path = paths[index];
         Set(index, State::Parsing);
         lock.unlock();
@@ -175,10 +179,90 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         }
         const double ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+
+        // ---- unlocked: the texture prepare (stage 2) ------------------------------------
+        // The IR names its face textures (Model::Material::texturePath / embeddedStages);
+        // read the block-compressed loose PAAs among them NOW, on this thread, so the main
+        // thread's EnsureUploaded inside RegisterGpuModel takes ready blocks instead of a
+        // file open + LZO per texture. Everything used here is pure (ReadPAABlockChain:
+        // ifstream + LZO; PreparedTextureStore: its own mutex): no texture bank, no file
+        // server, no GPU. Textures the store refuses (already uploaded, already stored,
+        // over budget) are skipped; textures that are not loose DXT PAAs simply fail to
+        // read here and take the old path on the main thread -- counted, never fatal.
+        // Materials resolved at registration time (.rvmat/.emat maps) are not in the IR and
+        // are NOT prepared; the admit split's texture timers measure what that costs.
+        uint64_t texPrepared = 0, texPreparedBytes = 0, texSkipped = 0, texUnreadable = 0;
+        double texMs = 0.0;
+        if (model && render::PreparedTextureStore::Enabled())
+        {
+            const auto texStart = std::chrono::steady_clock::now();
+            render::PreparedTextureStore& store = render::PreparedTextureStore::Instance();
+            std::vector<std::string> names;
+            auto noteName = [&](const std::string& raw)
+            {
+                if (raw.empty())
+                    return;
+                // Same extension gate as the main thread's block path (BcFormatFor): only
+                // .paa/.pac can carry a DXT chain this reader understands.
+                const size_t dot = raw.find_last_of('.');
+                if (dot == std::string::npos)
+                    return;
+                std::string ext = raw.substr(dot);
+                for (char& c : ext)
+                    if (c >= 'A' && c <= 'Z')
+                        c = static_cast<char>(c - 'A' + 'a');
+                if (ext != ".paa" && ext != ".pac")
+                    return;
+                std::string key = render::PreparedTextureStore::Key(raw);
+                if (std::find(names.begin(), names.end(), key) == names.end())
+                    names.push_back(std::move(key));
+            };
+            for (const Model::LODLevel& level : model->lodLevels)
+            {
+                for (const Model::Material& material : level.mesh.materials)
+                {
+                    noteName(material.texturePath);
+                    for (const Model::MaterialStage& stage : material.embeddedStages)
+                        noteName(stage.texturePath);
+                }
+            }
+            for (const std::string& key : names)
+            {
+                if (gen != generation.load(std::memory_order_relaxed)) // Reset ran: dead world, stop reading
+                    break;
+                if (!store.ShouldPrepare(key))
+                {
+                    ++texSkipped;
+                    continue;
+                }
+                PAABlockChain chain;
+                if (!ReadPAABlockChain(key, chain))
+                {
+                    ++texUnreadable; // not loose, not DXT, or malformed: main thread's problem
+                    continue;
+                }
+                const size_t bytes = chain.blocks.size();
+                if (store.Put(key, std::move(chain)))
+                {
+                    ++texPrepared;
+                    texPreparedBytes += bytes;
+                }
+                else
+                {
+                    ++texSkipped; // raced with another worker or the budget: fine
+                }
+            }
+            texMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - texStart).count();
+        }
         // ---------------------------------------------------------------------------------
 
         lock.lock();
-        if (gen != generation)
+        stats.texPrepared += texPrepared;
+        stats.texPreparedBytes += texPreparedBytes;
+        stats.texSkipped += texSkipped;
+        stats.texUnreadable += texUnreadable;
+        stats.texMs += texMs;
+        if (gen != generation.load(std::memory_order_relaxed))
         {
             // Reset ran while we were parsing: the slot is another world's now.
             ++stats.dropped;

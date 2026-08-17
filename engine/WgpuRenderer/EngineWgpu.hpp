@@ -16,6 +16,7 @@
 
 #include <array>
 #include <chrono> // steady_clock, for the opt-in auto-exposure time constant (WGR_AUTO_EXPOSURE_TAU)
+#include <list>   // parked GPU model LRU
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -623,6 +624,21 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<const LODShapeWithShadow*, uint32_t> _gpuModelRefs;
     void RetainGpuModel(const LODShapeWithShadow* shape);
     void ReleaseGpuModel(const LODShapeWithShadow* shape);
+    // PARKED registrations (WGR_GPU_MODEL_PARK, EngineWgpu.cpp). When the last instance of a
+    // shape leaves, its meshes/materials are kept -- not destroyed -- in a bounded LRU keyed by
+    // the shape, as long as the shape itself is alive (the streamer's evict cache holds it). A
+    // re-admission then finds the model in _gpuModels and skips the whole rebuild. The texture
+    // handles baked into the model's materials are recorded so an unpark can prove they are
+    // still the live ones (a TrimResidency eviction in between changes them); if not, the
+    // parked entry is destroyed and the model rebuilt. Shape death (LODShape::SetDestroyListener
+    // -> OnShapeDestroyed) destroys the entry, so a key can never dangle.
+    std::unordered_map<const LODShapeWithShadow*, std::vector<uint64_t>> _gpuModelTextureHandles;
+    std::list<const LODShapeWithShadow*> _gpuModelParked; // front = oldest
+    std::unordered_map<const LODShapeWithShadow*, std::list<const LODShapeWithShadow*>::iterator> _gpuModelParkedIndex;
+    void DestroyGpuModel(const LODShapeWithShadow* shape); // meshes + every shape-keyed map entry
+    uint32_t DestroyGpuModelMeshes(const LODShapeWithShadow* shape); // just the pool meshes
+    void UnparkGpuModel(const LODShapeWithShadow* shape);  // no-op if not parked
+    void OnShapeDestroyed(const LODShape* shape);
     // Register `shape` (all graphical LODs + per-section geometry/material) if not already,
     // returning its model id or WGR_INVALID_MODEL if it is ineligible for the GPU path.
     uint32_t RegisterGpuModel(LODShapeWithShadow* shape);

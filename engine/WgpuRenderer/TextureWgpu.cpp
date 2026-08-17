@@ -4,7 +4,9 @@
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // per-admission split timers
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -64,6 +66,28 @@ int BcFormatFor(PacFormat fmt)
             return WGR_TEXTURE_BC3;
         default:
             return -1;
+    }
+}
+
+// The PAA magic of a block-compressed file, as the worker-side chain reader reports it, back
+// to the PacFormat the bank's header parse produced for the same file (PacFormatFromDesc's
+// DXT arm). Only the DXT magics: a prepared chain is DXT by construction.
+PacFormat PacFormatFromMagic(uint16_t magic)
+{
+    switch (magic)
+    {
+        case 0xFF01:
+            return PacDXT1;
+        case 0xFF02:
+            return PacDXT2;
+        case 0xFF03:
+            return PacDXT3;
+        case 0xFF04:
+            return PacDXT4;
+        case 0xFF05:
+            return PacDXT5;
+        default:
+            return PacFormatN;
     }
 }
 
@@ -980,11 +1004,18 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 // takes the old path, unchanged: no format loses its answer, and the answer
                 // it gets is the same one.
                 const bool timed = TextureStreamStatsEnabled();
-                const uint64_t began = timed ? NowUs() : 0;
+                render::ObjectAdmitProfile& admit = render::GObjectAdmitProfile;
+                const bool profiled = admit.active;
+                const uint64_t began = (timed || profiled) ? NowUs() : 0;
                 AlphaScanPath path = AlphaScanPath::FullDecode;
                 if (!ScanTopMipAlphaBlocks(path))
                 {
                     _alphaStats = ScanTopMipAlphaStats(Name());
+                }
+                if (profiled)
+                {
+                    ++admit.alphaScans;
+                    admit.alphaScanMs += (NowUs() - began) / 1000.0;
                 }
                 // Both scan paths have run the histogram and the shape guard; the last word
                 // on a FORMAT-implied alpha channel is whether the pixels look like glass.
@@ -1028,6 +1059,10 @@ void TextureWgpu::EvictGpu()
     }
     _gpuHandle = 0;
     _uploadTried = false;
+    if (render::PreparedTextureStore::Enabled())
+    {
+        render::PreparedTextureStore::Instance().MarkEvicted(render::PreparedTextureStore::Key(Name()));
+    }
 }
 
 bool TextureWgpu::HasAlphaHoles()
@@ -1201,6 +1236,16 @@ uint64_t TextureWgpu::EnsureUploaded()
     }
 
     const bool timed = TextureStreamStatsEnabled();
+    // The per-admission split (ObjectAdmitProfile): active only while LandSave's admit loop
+    // has a scope open around one ObjectCreate. One bool load on the resident fast path above
+    // is not paid at all -- this is below the early return -- and here it costs a clock pair
+    // per REAL upload, which is a file read away from mattering.
+    render::ObjectAdmitProfile& admit = render::GObjectAdmitProfile;
+    const bool profiled = admit.active;
+    if (profiled)
+    {
+        ++admit.textureUploads;
+    }
     const PacFormat dst = _nMipmaps > 0 ? _mipmaps[0].DstFormat() : PacFormatN;
     const int bcFormat = BcFormatFor(dst);
     if (bcFormat >= 0 && _src)
@@ -1230,22 +1275,98 @@ uint64_t TextureWgpu::EnsureUploaded()
         }
         // Destinations are resolved only once the buffer is at its final size — a pointer
         // taken before the allocation would not survive it.
-        std::vector<uint8_t> blocks(total);
-        std::vector<MipmapRead> reads(static_cast<size_t>(levelCount));
-        for (int i = 0; i < levelCount; i++)
+        std::vector<uint8_t> blocks;
+        const uint64_t readBegan = (timed || profiled) ? NowUs() : 0;
+        // TEXTURE STREAMING: a worker may already have read and inflated this chain
+        // (ObjectStreamPreparer -> ReadPAABlockChain -> PreparedTextureStore) while the model
+        // it belongs to was being parsed. Take it if so -- but trust nothing about it that
+        // this side can check: the source format, the level count, and every level's
+        // dimensions and byte size must agree with the header the bank parsed through the
+        // file server at Load(). A chain that fails any of those is dropped and the file is
+        // read exactly as before; the miss is counted so a silent fallback cannot masquerade
+        // as a working prefetch. `blocks` ends up in the same layout either way: the levels
+        // firstLevel.. tightly packed at `offsets`, so the alpha handoff below is unchanged.
+        bool ok = false;
+        bool fromPrepared = false;
+        if (render::PreparedTextureStore::Enabled())
         {
-            reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
+            PAABlockChain prepared;
+            const std::string key = render::PreparedTextureStore::Key(Name());
+            if (render::PreparedTextureStore::Instance().Take(key, prepared))
+            {
+                const PacFormat preparedFormat = PacFormatFromMagic(prepared.magic);
+                bool matches = preparedFormat == dst &&
+                               prepared.levels.size() >= static_cast<size_t>(firstLevel + levelCount);
+                for (int i = 0; matches && i < levelCount; i++)
+                {
+                    const PAABlockLevel& level = prepared.levels[static_cast<size_t>(firstLevel + i)];
+                    const PacLevelMem& mip = _mipmaps[firstLevel + i];
+                    const size_t want = static_cast<size_t>(render::mipmap::ComputeLayout(dst, mip._w, mip._h).dataSize);
+                    matches = level.width == mip._w && level.height == mip._h && level.size == want &&
+                              level.offset + level.size <= prepared.blocks.size() && offsets[i] + want <= total;
+                }
+                if (matches)
+                {
+                    if (firstLevel == 0 && prepared.levels[0].offset == 0)
+                    {
+                        // The common case: identical layout from byte 0. Steal the buffer and
+                        // cut the tail levels the bank's header stopped short of (MIN_MIP_SIZE
+                        // in TextureSourcePac::Init), so wgr_texture_create sees exactly
+                        // `total` bytes for `levelCount` levels.
+                        blocks = std::move(prepared.blocks);
+                        blocks.resize(total);
+                    }
+                    else
+                    {
+                        blocks.resize(total);
+                        for (int i = 0; i < levelCount; i++)
+                        {
+                            const PAABlockLevel& level = prepared.levels[static_cast<size_t>(firstLevel + i)];
+                            std::memcpy(blocks.data() + offsets[i], prepared.blocks.data() + level.offset, level.size);
+                        }
+                    }
+                    ok = true;
+                    fromPrepared = true;
+                }
+                else
+                {
+                    static std::atomic<uint32_t> loggedMismatch{0};
+                    if (loggedMismatch.fetch_add(1, std::memory_order_relaxed) < 8)
+                    {
+                        LOG_WARN(Graphics,
+                                 "Wgpu texture prepare: prepared chain for {} did not match its header (prepared "
+                                 "magic=0x{:x} {}x{} levels={} vs bank format={} {}x{} levels={} first={}) -- "
+                                 "reading the file instead",
+                                 Name(), prepared.magic, prepared.width, prepared.height, prepared.levels.size(),
+                                 int(dst), _w, _h, levelCount, firstLevel);
+                    }
+                }
+            }
         }
-        const uint64_t readBegan = timed ? NowUs() : 0;
-        const bool ok = _src->GetMipmapChain(reads.data(), levelCount);
+        if (!fromPrepared)
+        {
+            blocks.assign(total, 0);
+            std::vector<MipmapRead> reads(static_cast<size_t>(levelCount));
+            for (int i = 0; i < levelCount; i++)
+            {
+                reads[i] = MipmapRead{blocks.data() + offsets[i], &_mipmaps[firstLevel + i], firstLevel + i};
+            }
+            ok = _src->GetMipmapChain(reads.data(), levelCount);
+        }
         if (timed)
         {
             GTextureStreamStats.readUs.fetch_add(NowUs() - readBegan, std::memory_order_relaxed);
             GTextureStreamStats.blockBytes.fetch_add(total, std::memory_order_relaxed);
         }
+        if (profiled)
+        {
+            admit.textureReadMs += (NowUs() - readBegan) / 1000.0;
+            if (fromPrepared)
+                ++admit.texturePrepared;
+        }
         if (ok && !blocks.empty())
         {
-            const uint64_t createBegan = timed ? NowUs() : 0;
+            const uint64_t createBegan = (timed || profiled) ? NowUs() : 0;
             // Dimensions follow the level actually uploaded, not the file's level 0 —
             // handing wgpu the full-resolution size with a biased chain describes a
             // texture whose level 0 is missing, which is a validation error, not a
@@ -1259,6 +1380,10 @@ uint64_t TextureWgpu::EnsureUploaded()
             if (timed)
             {
                 GTextureStreamStats.createUs.fetch_add(NowUs() - createBegan, std::memory_order_relaxed);
+            }
+            if (profiled)
+            {
+                admit.textureCreateMs += (NowUs() - createBegan) / 1000.0;
             }
             // Both call sites classify this texture on the line after they upload it. Park
             // the level they will need so that call reads no file. The condition is exactly
@@ -1296,7 +1421,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     // to RGBA8 via the shared PAA decoder
     if (!_gpuHandle)
     {
-        const uint64_t began = timed ? NowUs() : 0;
+        const uint64_t began = (timed || profiled) ? NowUs() : 0;
         QIFStreamB stream;
         stream.AutoOpen(Name());
         const IFileBuffer* fb = stream.GetBuffer();
@@ -1317,6 +1442,10 @@ uint64_t TextureWgpu::EnsureUploaded()
             GTextureStreamStats.fallbacks.fetch_add(1, std::memory_order_relaxed);
             GTextureStreamStats.fallbackUs.fetch_add(NowUs() - began, std::memory_order_relaxed);
         }
+        if (profiled)
+        {
+            admit.textureFallbackMs += (NowUs() - began) / 1000.0;
+        }
     }
 
     if (!_gpuHandle)
@@ -1326,6 +1455,13 @@ uint64_t TextureWgpu::EnsureUploaded()
     if (timed)
     {
         ReportTextureStreamStats(GTextureStreamStats.uploads.fetch_add(1, std::memory_order_relaxed) + 1);
+    }
+    // Success or failure, this name has had its one upload attempt: a worker must not spend
+    // a file read preparing it, and any chain already prepared for it is dead weight. (Reset
+    // by EvictGpu, which is the one way this texture can want bytes again.)
+    if (render::PreparedTextureStore::Enabled())
+    {
+        render::PreparedTextureStore::Instance().MarkUploaded(render::PreparedTextureStore::Key(Name()));
     }
     return _gpuHandle;
 }

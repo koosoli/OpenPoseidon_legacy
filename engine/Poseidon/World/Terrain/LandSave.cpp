@@ -37,6 +37,8 @@
 #include <algorithm>
 #include <memory>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // ShapeBank::Find / NewFromModel (async admission)
+#include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
+#include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
@@ -2888,9 +2890,15 @@ void Landscape::EnsureModernObjectPreparer()
     for (const RStringB& model : _modernObjectModels)
         paths.emplace_back(model.GetLength() > 0 ? (const char*)model : "");
     _modernObjectPreparer->Reset(paths.data(), paths.size());
-    LOG_INFO(World, "Object stream prepare: {} workers armed for {} models (queue<={} ready<={})",
+    // The prepared-texture store belongs to the same lifetime: chains for a previous world's
+    // textures are never wanted by this one.
+    render::PreparedTextureStore::Instance().Clear();
+    LOG_INFO(World,
+             "Object stream prepare: {} workers armed for {} models (queue<={} ready<={}) "
+             "texture prepare={} (budget={} MB ttl={:.0f} s)",
              ObjectStreamPreparer::WorkerCount(), paths.size(), ObjectStreamPreparer::QueueLimit(),
-             ObjectStreamPreparer::ReadyLimit());
+             ObjectStreamPreparer::ReadyLimit(), render::PreparedTextureStore::Enabled() ? "on" : "off",
+             render::PreparedTextureStore::ByteBudget() / (1024 * 1024), render::PreparedTextureStore::TtlSeconds());
 }
 
 // (d) Give the workers lead time. Called once per recentre, after the desired set is known:
@@ -3424,6 +3432,17 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             Object* admitted = nullptr;
             ShapeBank::LoadTiming timing;
             double shapeMs = 0.0;
+            // Open the per-admission split scope for a COLD model only: `create` was 26 ms
+            // median / 208 ms worst against a warm admit's 0.03 ms, so the warm path must not
+            // pay even the clock reads. Everything under ObjectCreate that self-reports
+            // (SceneObjectCreated, RegisterGpuModel, TextureWgpu::EnsureUploaded) accumulates
+            // into the buckets while this is active.
+            render::ObjectAdmitProfile& admitProfile = render::GObjectAdmitProfile;
+            if (cold)
+            {
+                admitProfile.Reset();
+                admitProfile.active = true;
+            }
             const auto createStart = std::chrono::steady_clock::now();
             try
             {
@@ -3455,6 +3474,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - createStart).count();
             if (cold)
             {
+                admitProfile.active = false;
                 const double createMs = std::max(0.0, totalMs - shapeMs);
                 coldMs += totalMs;
                 if (timing.preparsed)
@@ -3466,14 +3486,51 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 _modernObjectColdAdaptMs += timing.adaptMs;
                 _modernObjectColdOptimizeMs += timing.optimizeMs;
                 _modernObjectColdCreateMs += createMs;
+                _modernObjectColdSceneMs += admitProfile.sceneMs;
+                _modernObjectColdRegisterMs += admitProfile.registerMs;
+                _modernObjectColdProxiesMs += admitProfile.proxiesMs;
+                _modernObjectColdMeshBuildMs += admitProfile.meshBuildMs;
+                _modernObjectColdMeshCreateMs += admitProfile.meshCreateMs;
+                _modernObjectColdSectionMs += admitProfile.sectionMs;
+                _modernObjectColdModelFfiMs += admitProfile.modelRegisterMs;
+                _modernObjectColdTexReadMs += admitProfile.textureReadMs;
+                _modernObjectColdTexCreateMs += admitProfile.textureCreateMs;
+                _modernObjectColdTexFallbackMs += admitProfile.textureFallbackMs;
+                _modernObjectColdAlphaMs += admitProfile.alphaScanMs;
+                _modernObjectColdTexUploads += admitProfile.textureUploads;
+                _modernObjectColdTexPrepared += admitProfile.texturePrepared;
+                _modernObjectColdParkHits += admitProfile.parkHits;
+                _modernObjectColdParkStale += admitProfile.parkStale;
                 // One row per cold model. This is the split timer the whole change is judged
                 // by: if `parse` is small next to `adapt`+`opt`+`create`, moving the parse off
                 // the thread cannot have removed the stall, and the row says so per model.
+                //
+                // The `[...]` clause is the further split of `create`, measured inside the
+                // engine (ObjectAdmitProfile): reg = RegisterGpuModel whole; mesh = vertex/
+                // index/section building + wgr_mesh_create; sect = the per-section loop MINUS
+                // its texture time (material resolution, classification); tex = texture time
+                // (read+LZO / wgr_texture_create / whole-file fallback / alpha scans), with
+                // up/prep = real uploads / of which worker-prepared; ffi = wgr_model_register;
+                // prox = EmitGpuProxies; other = ObjectCreate outside SceneObjectCreated
+                // (NewObject, AddObject insert, marker lights, transform repair). park=hit
+                // means the registration was reused whole (WGR_GPU_MODEL_PARK).
+                const double texMs = admitProfile.textureReadMs + admitProfile.textureCreateMs +
+                                     admitProfile.textureFallbackMs + admitProfile.alphaScanMs;
+                const double meshMs = admitProfile.meshBuildMs + admitProfile.meshCreateMs;
+                const double sectOnlyMs = std::max(0.0, admitProfile.sectionMs - texMs);
+                const double otherMs = std::max(0.0, createMs - admitProfile.sceneMs);
                 LOG_INFO(World,
                          "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
+                         "[reg={:.1f} mesh={:.1f} sect={:.1f} tex={:.1f} (read={:.1f} create={:.1f} fb={:.1f} "
+                         "alpha={:.1f} up={} prep={}) ffi={:.1f} prox={:.1f} other={:.1f} park={}] "
                          "total={:.1f} ms{}",
                          (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
-                         timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, totalMs,
+                         timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, admitProfile.registerMs,
+                         meshMs, sectOnlyMs, texMs, admitProfile.textureReadMs, admitProfile.textureCreateMs,
+                         admitProfile.textureFallbackMs, admitProfile.alphaScanMs, admitProfile.textureUploads,
+                         admitProfile.texturePrepared, admitProfile.modelRegisterMs, admitProfile.proxiesMs,
+                         otherMs,
+                         admitProfile.parkHits ? "hit" : (admitProfile.parkStale ? "stale" : "miss"), totalMs,
                          timing.canonical ? "" : " (legacy loader)");
             }
             else
@@ -3552,6 +3609,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         ObjectStreamPreparer::Stats prep;
         if (asyncOn)
             prep = _modernObjectPreparer->SnapshotStats();
+        // Cumulative store view for the texture-prepare row below; cheap (one mutex hop) and
+        // only taken when a row is due anyway.
+        const render::PreparedTextureStore::Stats texStore =
+            render::PreparedTextureStore::Instance().SnapshotStats();
         LOG_INFO(World,
                  "Modern object residency: centre=({}, {}) window={} cells desired={} cells lead={:.0f} m "
                  "requested={} resident={} created={} released={} refused={} budget={} pending={} cache={}/{} "
@@ -3568,6 +3629,31 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                  prep.workerMs, prep.workerMaxMs, _modernObjectColdParseMs, _modernObjectColdAdaptMs,
                  _modernObjectColdOptimizeMs, _modernObjectColdCreateMs, _modernObjectColdModels,
                  _modernObjectAsyncInstalled, _modernObjectAsyncWaited, _modernObjectSyncCold);
+        // The `create` split and the texture-prepare pipeline, cumulative, as their own row so
+        // the main row's format (which scripts already parse) is untouched. `createsplit` sums
+        // to ~create above: reg (RegisterGpuModel) + other (NewObject/AddObject/lights); reg
+        // further divides into mesh/sect/tex/ffi (tex = read/create/fallback/alpha). texprep is
+        // the worker pipeline: prepared chains (count/MB/worker-ms), consumed = uploads served
+        // from the store vs all real uploads during cold admission, skipped/unreadable are the
+        // worker's refusals, store = entries/MB currently held (expired = TTL drops). park is
+        // the whole-registration reuse (WGR_GPU_MODEL_PARK): hits skipped a rebuild outright,
+        // stale found moved textures and rebuilt.
+        LOG_INFO(World,
+                 "Modern object create split: scene={:.0f}ms [reg={:.0f} mesh={:.0f}+{:.0f} sect={:.0f} "
+                 "tex read/create/fb/alpha={:.0f}/{:.0f}/{:.0f}/{:.0f} ffi={:.0f} prox={:.0f}] "
+                 "texprep worker={}chains/{:.1f}MB/{:.0f}ms consumed={}/{} skipped={} unreadable={} "
+                 "store={}entries/{:.1f}MB expired={} park hit={} stale={}",
+                 _modernObjectColdSceneMs, _modernObjectColdRegisterMs, _modernObjectColdMeshBuildMs,
+                 _modernObjectColdMeshCreateMs,
+                 std::max(0.0, _modernObjectColdSectionMs - _modernObjectColdTexReadMs -
+                                   _modernObjectColdTexCreateMs - _modernObjectColdTexFallbackMs -
+                                   _modernObjectColdAlphaMs),
+                 _modernObjectColdTexReadMs, _modernObjectColdTexCreateMs, _modernObjectColdTexFallbackMs,
+                 _modernObjectColdAlphaMs, _modernObjectColdModelFfiMs, _modernObjectColdProxiesMs,
+                 prep.texPrepared, prep.texPreparedBytes / (1024.0 * 1024.0), prep.texMs,
+                 _modernObjectColdTexPrepared, _modernObjectColdTexUploads, prep.texSkipped, prep.texUnreadable,
+                 texStore.entries, texStore.bytes / (1024.0 * 1024.0), texStore.expired,
+                 _modernObjectColdParkHits, _modernObjectColdParkStale);
     }
 }
 

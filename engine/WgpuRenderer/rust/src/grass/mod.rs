@@ -603,7 +603,13 @@ impl Grass {
             tint_procedural: [1.0, 1.0, 1.0, 1.0],
             tint_photo: [1.0, 1.0, 1.0, 1.0],
             card_coverage: CARD_COVERAGE_DEFAULT,
-            card_coverage_auto: 1.0,
+            // Coverage applies on every world, authored or not: one card is two to
+            // three of Arma's clutter plants in plate area, and the measured
+            // popping rate on Takistan falls 3.68% -> 1.66% between the map's own
+            // density and 0.25. The C++ side owns the default (GrassSettings::
+            // photoCoverageAuto, now false); 1.0 here is only the value a renderer
+            // built without the game would start from.
+            card_coverage_auto: 0.0,
             card_scale: 1.0,
             _card_look_pad: 0.0,
             blade_self_shadow: 0.0,

@@ -23,6 +23,7 @@
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // streamed-admission split timers
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
 #include <Poseidon/World/Scene/Object.hpp>                     // Object accessors (GPU-driven retained scene)
@@ -54,6 +55,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator> // std::prev (parked-model LRU)
 #include <map>
 #include <memory>
 #include <limits>
@@ -1048,10 +1050,18 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
     Dev::DebugOverlay::InitForEngine(_window);
     _eventWindow.Attach(_window, _w, _h);
+
+    // The parked-model LRU (WGR_GPU_MODEL_PARK) keys registrations by shape past the last live
+    // Object. That is only safe if a dying shape tells us: without this, a shape the streamer's
+    // evict cache dropped would leave its address in the maps and a later shape allocated at
+    // the same address would "unpark" a stranger's meshes.
+    LODShape::SetDestroyListener(
+        [](const LODShape* shape, void* self) { static_cast<EngineWgpu*>(self)->OnShapeDestroyed(shape); }, this);
 }
 
 EngineWgpu::~EngineWgpu()
 {
+    LODShape::SetDestroyListener(nullptr, nullptr);
     // While the engine (and its renderer) is still alive so the overlay's
     // textures release cleanly; a later fallback engine can then re-init.
     Dev::DebugOverlay::Shutdown();
@@ -4444,11 +4454,93 @@ uint64_t EngineWgpu::UntexturedAlbedoHandle(bool sectionHasMaterial)
     return _untexturedAlbedoHandle;
 }
 
+namespace
+{
+// WGR_GPU_MODEL_PARK: how many released-but-alive shapes keep their GPU registration (meshes,
+// baked materials, model id) instead of being torn down on the last instance's removal.
+// Default 256, matching the streamer's evict cache (WGR_OBJECT_STREAM_EVICT_CACHE), which is
+// what keeps the SHAPE alive: a shape the cache drops dies, and its parked entry dies with it
+// (OnShapeDestroyed), so the park can never outgrow what the cache holds. 0 = old behaviour
+// (destroy on last release; every re-admission rebuilds). The measured motivation: on the
+// 30 m/s Everon traverse the evict cache scored hits=274 (RND-040), and each of those hits
+// still paid a full RegisterGpuModel -- BuildVertices, wgr_mesh_create, section
+// classification -- because ReleaseGpuModel had erased the registration the cache's LODShape
+// was keeping warm.
+size_t GpuModelParkLimit()
+{
+    static const size_t n = []
+    {
+        const char* v = std::getenv("WGR_GPU_MODEL_PARK");
+        const long parsed = v ? std::strtol(v, nullptr, 10) : 256;
+        return static_cast<size_t>(std::clamp<long>(parsed, 0, 100000));
+    }();
+    return n;
+}
+
+// Timing helper for the admission split. Zero cost unless a scope is open.
+struct AdmitTimer
+{
+    double* bucket;
+    std::chrono::steady_clock::time_point start;
+    explicit AdmitTimer(double* target)
+        : bucket(render::GObjectAdmitProfile.active ? target : nullptr),
+          start(bucket ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{})
+    {
+    }
+    ~AdmitTimer()
+    {
+        if (bucket)
+            *bucket += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    }
+};
+} // namespace
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
     {
-        return found->second; // already scanned (WGR_INVALID_MODEL if it was ineligible)
+        // Already registered -- live, or PARKED. A parked entry is valid only while the
+        // texture handles baked into its materials are the ones the textures still hold; a
+        // TrimResidency eviction and re-upload in between hands out a new slot the baked
+        // material never learns (see the residency note above EnsureUploaded), so prove it
+        // before reusing. Stale -> destroy and fall through to a fresh registration.
+        if (const auto parked = _gpuModelParkedIndex.find(shape); parked != _gpuModelParkedIndex.end())
+        {
+            bool handlesLive = true;
+            if (const auto handles = _gpuModelTextureHandles.find(shape); handles != _gpuModelTextureHandles.end())
+            {
+                const auto textures = _gpuModelTextures.find(shape);
+                const size_t n = handles->second.size();
+                if (textures == _gpuModelTextures.end() || textures->second.size() != n)
+                    handlesLive = false;
+                for (size_t i = 0; handlesLive && i < n; i++)
+                {
+                    TextureWgpu* texture = textures->second[i];
+                    if (!texture || texture->GpuHandle() != handles->second[i])
+                        handlesLive = false;
+                }
+            }
+            if (handlesLive)
+            {
+                UnparkGpuModel(shape);
+                if (render::GObjectAdmitProfile.active)
+                    ++render::GObjectAdmitProfile.parkHits;
+                if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+                    LOG_INFO(Graphics, "Wgpu model residency unpark: model={} parked={}", shape->Name(),
+                             _gpuModelParked.size());
+                return found->second;
+            }
+            if (render::GObjectAdmitProfile.active)
+                ++render::GObjectAdmitProfile.parkStale;
+            if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+                LOG_INFO(Graphics, "Wgpu model residency unpark STALE: model={} -- textures moved, rebuilding",
+                         shape->Name());
+            DestroyGpuModel(shape); // erases every map entry; registration proceeds below
+        }
+        else
+        {
+            return found->second; // already scanned (WGR_INVALID_MODEL if it was ineligible)
+        }
     }
 
     std::vector<TextureWgpu*> modelTextures;
@@ -4674,20 +4766,23 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             continue;
         }
         std::vector<SVertex> verts(static_cast<size_t>(nv));
-        // Conform (ClipLand mode-2) shapes: bake the per-vertex conform selector from OrigClip
-        // AND upload the UNDEFORMED original geometry, exactly like the per-draw conform path
-        // (BuildOrigVertices). Plain BuildVertices hardcodes conform=0, so mode-2 instances
-        // never conform (they float rigid). OriginalPosValid guards shapes without orig data.
-        if (levelConform && s->OriginalPosValid())
-        {
-            render::mesh::BuildOrigVertices(*s, verts.data());
-        }
-        else
-        {
-            render::mesh::BuildVertices(*s, verts.data());
-        }
         std::vector<VertexIndex> indices(static_cast<size_t>(ni));
-        render::mesh::BuildIndices(*s, indices.data());
+        {
+            AdmitTimer buildTimer(&render::GObjectAdmitProfile.meshBuildMs);
+            // Conform (ClipLand mode-2) shapes: bake the per-vertex conform selector from OrigClip
+            // AND upload the UNDEFORMED original geometry, exactly like the per-draw conform path
+            // (BuildOrigVertices). Plain BuildVertices hardcodes conform=0, so mode-2 instances
+            // never conform (they float rigid). OriginalPosValid guards shapes without orig data.
+            if (levelConform && s->OriginalPosValid())
+            {
+                render::mesh::BuildOrigVertices(*s, verts.data());
+            }
+            else
+            {
+                render::mesh::BuildVertices(*s, verts.data());
+            }
+            render::mesh::BuildIndices(*s, indices.data());
+        }
         // §9 Approach A: for forests, flood-fill this LOD into per-tree components and bake each
         // vertex's crown-centre index into its conform word (forests are mode 0/1 conform, which
         // never read the ClipLand per-vertex selector, so the word is free). vs_gpu reads it to get
@@ -4728,9 +4823,12 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             LOG_INFO(Graphics, "GpuModel lod name={} lod={} res={} vertices={} indices={} sections={} radius={}",
                      shape->Name(), level, shape->Resolution(level), nv, ni, s->NSections(), shape->BoundingSphere());
         }
-        const uint64_t mesh =
-            wgr_mesh_create(_renderer, AsMeshVerts(verts),
-                            WgrSlice<uint16_t>{reinterpret_cast<const uint16_t*>(indices.data()), U32(ni)});
+        uint64_t mesh = 0;
+        {
+            AdmitTimer createTimer(&render::GObjectAdmitProfile.meshCreateMs);
+            mesh = wgr_mesh_create(_renderer, AsMeshVerts(verts),
+                                   WgrSlice<uint16_t>{reinterpret_cast<const uint16_t*>(indices.data()), U32(ni)});
+        }
         if (!mesh)
         {
             eligible = false;
@@ -4738,11 +4836,20 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         }
         _gpuMeshes.insert(mesh);
         modelMeshes.push_back(mesh);
+        if (render::GObjectAdmitProfile.active)
+            ++render::GObjectAdmitProfile.meshes;
         AutoArray<render::mesh::MeshSection> secs;
-        render::mesh::BuildSections(*s, secs);
+        {
+            AdmitTimer buildTimer(&render::GObjectAdmitProfile.meshBuildMs);
+            render::mesh::BuildSections(*s, secs);
+        }
 
         const uint32_t base = U32(sections.size());
         uint32_t count = 0;
+        // The section loop: classification (which uploads the face texture and classifies its
+        // alpha), material resolution (.rvmat/.emat reads on first sight, their maps' uploads),
+        // and the flags. Inclusive of the texture buckets TextureWgpu fills; LandSave subtracts.
+        AdmitTimer sectionTimer(&render::GObjectAdmitProfile.sectionMs);
         for (int i = 0; i < s->NSections(); i++)
         {
             // Hidden sections (e.g. texture-nulled proxy markers) are skipped by the CPU path
@@ -5025,6 +5132,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             sections.push_back(sec);
             materials.push_back(mat);
             count++;
+            if (render::GObjectAdmitProfile.active)
+                ++render::GObjectAdmitProfile.sections;
         }
         // Only register a LOD that actually has owned geometry (levelHasOwned guaranteed >=1
         // candidate, but it may have been degenerate). Empty owned LODs are CPU-drawn instead.
@@ -5037,6 +5146,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     uint32_t model = WGR_INVALID_MODEL;
     if (eligible && !lods.empty() && !sections.empty())
     {
+        AdmitTimer ffiTimer(&render::GObjectAdmitProfile.modelRegisterMs);
         model =
             wgr_model_register(_renderer, shape->BoundingSphere(), WgrSlice<WgrModelLod>{lods.data(), U32(lods.size())},
                                WgrSlice<WgrModelSection>{sections.data(), U32(sections.size())},
@@ -5058,6 +5168,14 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     }
     if (model != WGR_INVALID_MODEL)
     {
+        // The handles baked into `materials` are the ones these textures hold RIGHT NOW (every
+        // EnsureUploaded above ran on this thread, before this line). Recorded so a later
+        // unpark can prove nothing moved.
+        std::vector<uint64_t> handles;
+        handles.reserve(modelTextures.size());
+        for (const TextureWgpu* texture : modelTextures)
+            handles.push_back(texture ? texture->GpuHandle() : 0);
+        _gpuModelTextureHandles[shape] = std::move(handles);
         _gpuModelMeshes[shape] = std::move(modelMeshes);
         _gpuModelTextures[shape] = std::move(modelTextures);
     }
@@ -5167,21 +5285,36 @@ void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
                 }
             }
         }
-        _gpuModelTextures.erase(found);
+        // (Not erased here any more: the texture list stays with the registration, parked or
+        // destroyed below.)
     }
 
-    uint32_t releasedMeshes = 0;
-    if (const auto found = _gpuModelMeshes.find(shape); found != _gpuModelMeshes.end())
+    // PARK, do not destroy (WGR_GPU_MODEL_PARK). The registration -- pool meshes, baked
+    // materials, model id -- stays keyed by the shape; if this shape is re-admitted while it
+    // is still alive (the streamer's evict cache is what keeps it so), RegisterGpuModel finds it
+    // and the whole rebuild is skipped. Bounded: the oldest parked entry is destroyed when the
+    // limit is reached; a shape's death destroys its own (OnShapeDestroyed). With the old
+    // eviction opt-in above (which destroys the textures' GPU copies) parking is pointless --
+    // the unpark would find every handle stale -- so it destroys as before.
+    const size_t parkLimit = GpuModelParkLimit();
+    if (parkLimit > 0 && !EvictTexturesOnModelRelease() && _gpuModels.count(shape) != 0)
     {
-        for (uint64_t mesh : found->second)
+        while (_gpuModelParked.size() >= parkLimit)
         {
-            wgr_mesh_destroy(_renderer, mesh);
-            _gpuMeshes.erase(mesh);
-            ++releasedMeshes;
+            const LODShapeWithShadow* victim = _gpuModelParked.front();
+            DestroyGpuModel(victim); // pops it from the park too
         }
-        _gpuModelMeshes.erase(found);
+        _gpuModelParked.push_back(shape);
+        _gpuModelParkedIndex[shape] = std::prev(_gpuModelParked.end());
+        if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+            LOG_INFO(Graphics, "Wgpu model residency park: model={} parked={}/{}", shape->Name(),
+                     _gpuModelParked.size(), parkLimit);
+        return;
     }
 
+    const uint32_t releasedMeshes = DestroyGpuModelMeshes(shape);
+    _gpuModelTextures.erase(shape);
+    _gpuModelTextureHandles.erase(shape);
     _gpuModels.erase(shape);
     _gpuModelCoverage.erase(shape);
     _gpuModelComplement.erase(shape);
@@ -5189,6 +5322,74 @@ void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
     if (std::getenv("WGR_MODEL_RESIDENCY_TRACE") && (releasedMeshes || evictedTextures))
         LOG_INFO(Graphics, "Wgpu model residency release: model={} meshes={} textures={}", shape->Name(),
                  releasedMeshes, evictedTextures);
+}
+
+uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
+{
+    uint32_t releasedMeshes = 0;
+    if (const auto found = _gpuModelMeshes.find(shape); found != _gpuModelMeshes.end())
+    {
+        for (uint64_t mesh : found->second)
+        {
+            if (_renderer)
+                wgr_mesh_destroy(_renderer, mesh);
+            _gpuMeshes.erase(mesh);
+            ++releasedMeshes;
+        }
+        _gpuModelMeshes.erase(found);
+    }
+    return releasedMeshes;
+}
+
+void EngineWgpu::UnparkGpuModel(const LODShapeWithShadow* shape)
+{
+    const auto it = _gpuModelParkedIndex.find(shape);
+    if (it == _gpuModelParkedIndex.end())
+        return;
+    _gpuModelParked.erase(it->second);
+    _gpuModelParkedIndex.erase(it);
+}
+
+// Tear down everything registered for `shape`, parked or not. Never dereferences the shape:
+// OnShapeDestroyed calls this from ~LODShape with a dying pointer that is a key and nothing
+// else. Textures are unpinned only if this shape still holds a retain count (a parked entry
+// has none).
+void EngineWgpu::DestroyGpuModel(const LODShapeWithShadow* shape)
+{
+    UnparkGpuModel(shape);
+    if (const auto refs = _gpuModelRefs.find(shape); refs != _gpuModelRefs.end())
+    {
+        if (refs->second > 0)
+            if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
+                for (TextureWgpu* texture : found->second)
+                    if (texture)
+                        texture->UnpinResident();
+        _gpuModelRefs.erase(refs);
+    }
+    DestroyGpuModelMeshes(shape);
+    _gpuModelTextures.erase(shape);
+    _gpuModelTextureHandles.erase(shape);
+    _gpuModels.erase(shape);
+    _gpuModelCoverage.erase(shape);
+    _gpuModelComplement.erase(shape);
+    _gpuConformShapes.erase(shape);
+}
+
+void EngineWgpu::OnShapeDestroyed(const LODShape* shape)
+{
+    // LODShapeWithShadow derives from LODShape by single inheritance, so the base subobject IS
+    // the object's address and the maps' keys compare equal to it. The static_cast here is a
+    // pointer-value cast on an object that is mid-destruction and is not dereferenced.
+    const auto* key = static_cast<const LODShapeWithShadow*>(shape);
+    if (_gpuModels.count(key) == 0)
+        return; // the common case: a shape this renderer never registered
+    if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+    {
+        const auto refs = _gpuModelRefs.find(key);
+        LOG_INFO(Graphics, "Wgpu model residency shape died: parked={} live-refs={}",
+                 _gpuModelParkedIndex.count(key) ? 1 : 0, refs != _gpuModelRefs.end() ? refs->second : 0u);
+    }
+    DestroyGpuModel(key);
 }
 
 // §12d: register the parent's eligible interior furniture proxies as GPU child instances. A
@@ -5246,6 +5447,8 @@ bool EngineWgpu::EmitGpuProxies(Object* parent, LODShapeWithShadow* shape)
         const WgrInstance inst = BuildGpuProxyInstance(world, pmodel);
         const uint32_t slot = wgr_instance_add(_renderer, &inst);
         RetainGpuModel(pshape);
+        if (render::GObjectAdmitProfile.active)
+            ++render::GObjectAdmitProfile.proxyModels;
         set.children.push_back(GpuProxyChild{i, slot, pmodel, pshape});
     }
     if (!set.children.empty())
@@ -5308,7 +5511,12 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
             }
         }
     }
-    const uint32_t model = RegisterGpuModel(shape);
+    AdmitTimer sceneTimer(&render::GObjectAdmitProfile.sceneMs);
+    uint32_t model = WGR_INVALID_MODEL;
+    {
+        AdmitTimer registerTimer(&render::GObjectAdmitProfile.registerMs);
+        model = RegisterGpuModel(shape);
+    }
     if (model == WGR_INVALID_MODEL)
     {
         return; // ineligible shape -> object drawn by the CPU path
@@ -5327,6 +5535,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     // the GPU as child instances (only Partial objects have proxies; Full ones never do).
     if (cov == GpuDrawCoverage::Partial)
     {
+        AdmitTimer proxiesTimer(&render::GObjectAdmitProfile.proxiesMs);
         const bool allProxiesGpu = EmitGpuProxies(obj, shape);
         // §12d-full: if the ONLY reason this was Partial is proxies (no CPU complement) and every
         // proxy moved to the GPU, the whole object is now GPU-drawn -> Full, so DrawSortObject

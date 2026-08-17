@@ -71,6 +71,41 @@ struct PAAInfo
 // Read metadata without decoding pixel data
 bool ReadPAAInfo(const std::string& path, PAAInfo& info);
 
+// A block-compressed PAA's whole mip chain, as the GPU wants it: raw DXT blocks per level,
+// largest first, tightly packed in one buffer. This is the worker-thread half of texture
+// streaming (ObjectStreamPreparer): it is PURE -- std::ifstream, std::vector and
+// Foundation::Lzo1x only; no file server, no texture bank, no logging, no statics -- so it may
+// run on any thread. The main thread's TextureWgpu::EnsureUploaded consumes it in place of its
+// own file read + LZO, then does the upload itself (see Graphics/Textures/PreparedTextures.hpp).
+//
+// DXT1/2/3/4/5 only. Every other PAA format (ARGB4444, AI88, palette PAC...) returns false and
+// the caller takes the ordinary path; those go through the RGBA8 whole-file decode on the main
+// thread and are not what a Reforger/Arma-3 world streams.
+struct PAABlockLevel
+{
+    int width = 0;
+    int height = 0;
+    size_t offset = 0; // into PAABlockChain::blocks
+    size_t size = 0;   // bytes of raw blocks at that offset
+};
+
+struct PAABlockChain
+{
+    uint16_t magic = 0;   // 0xFF01 DXT1 ... 0xFF05 DXT5
+    int width = 0;        // level 0
+    int height = 0;
+    bool hadLzoLevels = false;
+    std::vector<PAABlockLevel> levels; // [0] is the largest
+    std::vector<uint8_t> blocks;       // all levels, contiguous, in `levels` order
+    bool valid() const { return width > 0 && height > 0 && !levels.empty() && !blocks.empty(); }
+};
+
+// Returns false (and leaves `out` invalid) on: unopenable file, non-DXT format, malformed
+// header/chain, an LZO level that did not inflate to its dimensions' block size, or a level
+// whose stored size disagrees with its dimensions. `errorOut` (optional) names which.
+bool ReadPAABlockChain(const std::string& path, PAABlockChain& out, std::string* errorOut = nullptr);
+bool ReadPAABlockChainBuffer(const void* data, size_t size, PAABlockChain& out, std::string* errorOut = nullptr);
+
 // Decode PAA/PAC file to RGBA8888 pixel buffer
 DecodedImage DecodePAAFile(const std::string& path);
 
