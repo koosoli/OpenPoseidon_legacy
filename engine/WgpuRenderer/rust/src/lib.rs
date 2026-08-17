@@ -1079,6 +1079,18 @@ impl Renderer {
             sample_count,
             multi_draw_count
         );
+        // Directional-ambient normal mapping (WGR_AMBIENT_NORMAL_MAPPED). Announced through the
+        // GAME log rather than stderr, and UNCONDITIONALLY rather than only when it differs from
+        // the default: the whole value of the line is that a captured dawn screenshot can be
+        // matched to which arm produced it.
+        log.log(
+            log_level::INFO,
+            &crate::gfx3d::ambient_normal_mapped_log_line(),
+        );
+        // Normal-map relief under ambient light (WGR_NORMAL_CAVITY / WGR_SKY_SPECULAR). Same
+        // reasoning, same destination: the two terms that answer "the normals do not read at
+        // dawn", announced where a captured run can prove which arm produced it.
+        log.log(log_level::INFO, &crate::gfx3d::normal_relief_log_line());
         if gpu_driven_enabled {
             log.log(
                 log_level::INFO,

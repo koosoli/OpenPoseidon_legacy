@@ -7,7 +7,7 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -861,9 +861,25 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // absent from that MAP (a hillside is not a roof), but it must still RECEIVE the term: the
     // floor of a shed, a barrack or an archway is terrain, and leaving it at full sky ambient
     // while the walls around it darkened would look worse than not having the feature.
+    //
+    // The authored surfaces' own normal map joins them as a FOURTH occluder, at a scale none of
+    // the three can resolve (their smallest feature is a depth-buffer pixel; a crevice in a
+    // normal map has no depth at all). Same term, same derivation and the same never-brightens /
+    // exactly-1-on-a-flat-map guarantees as the object path — frame::normal_map_cavity — because
+    // the dawn ground is flat for exactly the reason a dawn wall is: with the sun's N.L gone,
+    // nothing left in the frame was a function of the per-pixel normal at better than ~2 m.
+    // `geometric_n` is the heightfield's central difference and `n` the surface-normal-mapped
+    // result, which is precisely the (macro, micro) pair the term is defined on; at an unauthored
+    // or fully faded-out cell they are the same vector and this is exactly 1.0.
+    //
+    // Terrain gets NO sky specular, and that is a judgement rather than an omission: the term is
+    // scaled by the material's gloss and terrain has no material at all, so ground would take the
+    // bare 4% dielectric reallocation — an invisible result for a per-pixel reflect() plus a
+    // second SH evaluation on the single most fill-heavy surface in the frame.
     sun_ambient *= sky_vis_ao(in.world_xz)
         * gtao_ao(in.clip.xy)
-        * interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n);
+        * interior_sky_ao(in.world_pos + frame.cam_pos.xyz, n)
+        * normal_map_cavity(geometric_n, n);
     // CLD-020: cloud transmittance dims the DIRECT term only, leaving sky ambient intact, so
     // ground under a cloud settles toward ambient rather than toward black.
     let sun_raw = sun_diffuse * cos_fi * (1.0 - shadow) * cloud_sun_shadow(in.world_xz) + sun_ambient;

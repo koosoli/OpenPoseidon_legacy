@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal}
+#import frame::{frame, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -34,6 +34,28 @@ struct ShadeMaterial {
     spec_mask: f32,
 };
 
+// Rotate `v` by the rotation that carries unit vector `src_n` onto unit vector `dst_n`.
+//
+// Rodrigues' formula, with cos/sin read straight off dot()/length(cross()) of the two inputs --
+// no trig call, ~12 ALU. Returns `v` untouched when the two are (anti)parallel: there the
+// rotation is either the identity or undefined about an arbitrary axis, and inventing an axis is
+// how a "subtle" shading term acquires a seam.
+//
+// Used to carry a normal map's ANGULAR DEVIATION (geometric normal -> shading normal) over onto a
+// direction that was computed without it. That is a rotation and not a blend on purpose: a blend
+// would dilute the direction it is applied to, and the whole point here is to leave that direction
+// exactly where it was on a flat surface.
+fn rotate_between(src_n: vec3<f32>, dst_n: vec3<f32>, v: vec3<f32>) -> vec3<f32> {
+    let axis = cross(src_n, dst_n);
+    let s = length(axis);
+    if (s < 1e-5) {
+        return v;
+    }
+    let k = axis / s;
+    let c = dot(src_n, dst_n);
+    return v * c + cross(k, v) * s + k * (dot(k, v) * (1.0 - c));
+}
+
 // world_pos is camera-relative; dwx/dwy = dpdx/dpdy(world_pos), computed in the entry point
 // under uniform control flow (before any discard). `linear` selects the HDR path,
 // `is_cutout` the alpha-tested-foliage canopy-AO branch, `foliage_shadow_ao` its constant.
@@ -41,6 +63,16 @@ fn shade(
     albedo_in: vec3<f32>,
     mat: ShadeMaterial,
     normal: vec3<f32>,
+    // The INTERPOLATED VERTEX normal of this fragment, before any normal map -- i.e. the basis
+    // the tangent-space normal was resolved against in the caller. Only the directional sky
+    // ambient reads it, to recover "how far did the normal map turn this pixel", which is
+    // otherwise unrecoverable inside shade() (it receives only the already-mapped result).
+    //
+    // Deliberately the vertex normal and NOT cross(dwx, dwy): the derivative cross is the FACE
+    // normal, so using it as the reference would inject the mesh's faceting into the ambient on
+    // every curved surface -- a new artifact introduced by a fix for flatness.
+    // May be zero/degenerate (decal sections authored with no normals); the reader checks.
+    geo_normal: vec3<f32>,
     world_pos: vec3<f32>,
     fog: f32,
     dwx: vec3<f32>,
@@ -151,6 +183,24 @@ fn shade(
     // Each returns 1 when its own feature is off.
     let amb_ao = sky_vis_ao(world_abs.xz) * gtao_ao(frag_coord)
         * interior_sky_ao(world_abs, nrm) * clamp(baked_sky_vis, 0.0, 1.0);
+    // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
+    // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
+    // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
+    // of them can resolve is a screen pixel of DEPTH, and a crevice in a normal map has no depth
+    // at all. So a bump's dark side was lit exactly like its bright side under ambient, which is
+    // most of what "the normals do not work at dawn" is. Derivation, the never-brightens and the
+    // exactly-1-on-a-flat-map guarantees: frame::normal_map_cavity.
+    //
+    // It joins the other three by MULTIPLYING for the same reason they multiply each other: it
+    // occludes independently and at a disjoint scale. It stays out of `amb_ao` itself because
+    // amb_ao is also the term the legacy path applies to its flat ambient, and keeping the two
+    // separate is what lets the foliage exemption below be one condition instead of two.
+    //
+    // Foliage is exempt. A leaf card's normal is AUTHORED (a spherical fake, not relief), and
+    // the two-sided flip 30 lines above may have replaced `nrm` with its own negation — against
+    // which the vertex normal is a 180-degree reference, so a cavity term would read every
+    // back-facing card as a maximally deep crevice and black out half of every tree.
+    let cavity = select(normal_map_cavity(geo_normal, nrm), 1.0, is_foliage);
     var sun: vec3<f32>;
     if (sky_lit) {
         // Sky-based lighting: frame-global atmosphere sun + DIRECTIONAL sky-irradiance ambient
@@ -166,14 +216,95 @@ fn shade(
         // steer then bends that toward the direction the SKY reaches this point from — the
         // window or doorway. Indoors GTAO has nothing useful to say (the room is bigger than its
         // radius and the roof is off-screen), so the interior term is what carries the result.
-        var amb_n = interior_sky_ambient_normal(world_abs, gtao_bent_normal_world(frag_coord, nrm));
+        var amb_steer = interior_sky_ambient_normal(world_abs, gtao_bent_normal_world(frag_coord, nrm));
         // The baked steer, when this model has a volume. frame.skyvisb.z is the shared
         // "directional" knob: 0 leaves the ambient purely scaled (the safe default), 1 samples
         // the sky fully along the direction it enters from.
         if (dot(baked_sky_dir, baked_sky_dir) > 1e-6 && frame.skyvisb.z > 0.0) {
-            amb_n = normalize(mix(amb_n, baked_sky_dir, frame.skyvisb.z));
+            amb_steer = normalize(mix(amb_steer, baked_sky_dir, frame.skyvisb.z));
         }
-        var ambient = sky_irradiance(amb_n) * frame.sun_ambient.w * amb_ao;
+        var amb_n = amb_steer;
+        // LIT: put the NORMAL MAP back into the ambient direction.
+        //
+        // Everything above resolves a direction that contains NO per-pixel detail at all. The
+        // GTAO bent normal comes out of the DEPTH buffer at roughly a 2 m march radius, and when
+        // it is on it REPLACES the shading normal outright; the interior term then steers that
+        // further toward the window. So on any surface where ambient dominates the frame -- dawn,
+        // dusk, overcast, shadow, interiors -- the sky term was a direction-per-2-metres, and the
+        // normal map contributed to the picture only through the sun's N.L. Measured on Stratis
+        // (stone wall, freefly 3094.20 2138.07 170.45): at hour 10 toggling the normal map moves
+        // 42.6% of the wall's pixels (mean |d| 11.18 at wall mean level 65); at hour 6 it moves
+        // 6.5% (mean |d| 2.85 at level 39). Relief per unit brightness falls 2.4x exactly when
+        // the sun stops carrying it. That is the "the normals do not really work" report.
+        //
+        // (a) sky_irradiance is an SH-9 projection and therefore ALREADY low-frequency in the
+        //     direction argument -- it cannot resolve a bump. That is not an argument against
+        //     doing this. A dawn sky is strongly directional (bright horizon band, dark zenith,
+        //     warm one way and cold the other), so even a smooth L2 field has a large gradient
+        //     across the ~30-60 degrees a normal map turns a pixel through, and it is that
+        //     gradient, sampled per pixel, that makes brick read as brick instead of as a wash.
+        //     The SH-9 bandwidth caps the CONTRAST of the relief; it does not remove it.
+        //
+        // (b) This must NOT double-count occlusion. Nothing here touches magnitude: `amb_ao`
+        //     (sky-vis x GTAO x interior x baked) is applied on the line below, unchanged, and
+        //     stays the only place ambient is attenuated. This term changes only WHICH direction
+        //     the SH is evaluated in.
+        //
+        // (c) Which is also why the steer is applied as a ROTATION rather than a blend. The
+        //     bent/interior direction is a ~2 m-scale visibility hint, not a surface orientation,
+        //     so it must bend the mapped normal, not replace it -- but mixing the two would pull
+        //     the result back toward `nrm` and quietly undo LIT-020's "the room is lit through
+        //     its window". Carrying the map's own deviation (geo_normal -> nrm) onto the steer
+        //     keeps BOTH at full strength, and on a flat surface the rotation is the identity, so
+        //     amb_n is bit-identical to what shipped. That is the guarantee that mean ambient
+        //     LEVEL is unchanged and this is a directionality change only -- no new blow-out on a
+        //     sunlit wall, no extra light in an interior. Over a bumpy surface the perturbations
+        //     are zero-mean about the vertex normal, so the mean only moves at second order.
+        //
+        // No cap on the deviation angle: a steep normal can turn the sample below the horizon,
+        // where sky_irradiance's max(e, 0) simply returns less light -- which is the right answer
+        // for a crevice, and cannot brighten anything.
+        //
+        // frame.gtao.w is the weight (WGR_AMBIENT_NORMAL_MAPPED, default 1). 0 restores today's
+        // look exactly by skipping the branch.
+        //
+        // (c, foliage) The foliage branch deliberately does NOT get this. A leaf card's normal is
+        // authored, not relief, and the two-sided flip 30 lines above already replaced `nrm` with
+        // its negation -- against which the vertex normal is a 180 degree reference and the
+        // rotation axis is arbitrary. Canopy shading is carried by the SSS/wrap terms below, not
+        // by per-pixel ambient relief. Glass (is_translucent) DOES take the treatment: it is a
+        // real surface with a real normal map, and its ambient is damped to 0.2 immediately
+        // below, so a more directional sky wash there is 20% of a term that was already tuned
+        // low rather than a new source of blow-out.
+        let amb_map_w = clamp(frame.gtao.w, 0.0, 1.0);
+        let geo_len = length(geo_normal);
+        if (amb_map_w > 0.0 && !is_foliage && geo_len > 1e-4 && n_len >= 1e-4) {
+            let n_geo_amb = geo_normal / geo_len;
+            // Same hemisphere only. A back-facing double-sided draw (or a broken tangent frame)
+            // can leave the mapped normal opposite the vertex normal, and rotating by ~180
+            // degrees about an arbitrary axis would fling the sample somewhere unrelated.
+            if (dot(n_geo_amb, nrm) > 0.1) {
+                let mapped_steer = rotate_between(n_geo_amb, nrm, amb_steer);
+                amb_n = normalize(mix(amb_steer, mapped_steer, amb_map_w));
+            }
+        }
+        // SKY SPECULAR, as a REALLOCATION of the ambient rather than an addition to it — the
+        // second per-pixel mechanism, and the one that carries GRAZING surfaces and anything with
+        // authored gloss (wet-ish stone, paint, glass, metal trim) where the cavity term is
+        // weakest. See frame::sky_specular_split for the derivation; the two facts that matter
+        // here are that the split conserves energy by construction (diffuse is scaled by exactly
+        // the weight the specular took, so a sunlit wall cannot gain a single level of brightness
+        // from it) and that it is roughness-aware, so it does not paint a Fresnel rim on every
+        // silhouette in the scene.
+        //
+        // It rides INSIDE the same amb_ao * cavity multiply as the diffuse sky, not beside it: it
+        // is the same sky arriving at the same point, so anything that occludes one occludes the
+        // other. Letting it out of the occlusion is how crevices acquire glints.
+        let view_dir_sky = normalize(-world_pos);
+        let sky_spec = sky_specular_split(
+            nrm, view_dir_sky, spec_power_to_gloss(mat.spec_power), mat.spec_mask);
+        var ambient =
+            (sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;
         // Glass canopies: keep only a fraction of the sky wash so they read as glazing, not a lit
         // diffuse dome (the direct sun sheen + any glint still sit on top).
         if (is_translucent) {
@@ -237,7 +368,11 @@ fn shade(
             sun = m_emissive + ambient + frame.sun_diffuse.rgb * ndotl * sun_vis;
         }
     } else {
-        sun = m_emissive + m_sun_ambient * amb_ao + m_sun_diffuse * ndotl * sun_vis;
+        // The legacy (non-sky) path takes the cavity too — its ambient is a FLAT constant, so it
+        // is the flattest ambient in the renderer and the one with the most to gain. It gets no
+        // sky specular: there is no atmosphere on this path to reflect, and sky_irradiance would
+        // be reading an SH set the legacy sun never wrote.
+        sun = m_emissive + m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis;
     }
     let local = lights_contrib(world_pos, nrm, m_light_diffuse, m_light_ambient, linear);
     let raw = sun + local;

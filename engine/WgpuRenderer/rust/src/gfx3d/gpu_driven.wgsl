@@ -831,7 +831,11 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         return vec4<f32>(normal_ts_dbg * 0.5 + vec3<f32>(0.5), out_a);
     }
     let rgb = shade(
-        base.rgb, m, shading_normal, in.world_pos, in.fog, dwx, dwy, linear,
+        // `geometric_normal` rides along beside the shading normal so the directional sky
+        // ambient can recover how far the normal map turned this pixel; see shade()'s
+        // `geo_normal` parameter. Kept in step with shader3d.wgsl's call by construction --
+        // the two paths must not disagree about how a normal-mapped surface takes sky light.
+        base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // Per-model baked sky visibility (LIT-020 Stage 2), 1 when the model has no volume.
         baked_sky_visibility(in.model_id, in.model_pos),
         baked_sky_direction(in.model_id, in.model_pos,

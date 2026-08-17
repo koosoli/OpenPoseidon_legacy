@@ -644,7 +644,10 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             frame.wateranim.y);
     }
     let rgb = shade(
-        base.rgb, m, shading_normal, in.world_pos, in.fog, dwx, dwy, linear,
+        // `geometric_normal` rides along beside the shading normal so the directional sky
+        // ambient can recover how far the normal map turned this pixel; see shade()'s
+        // `geo_normal` parameter.
+        base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // The per-draw path has no retained model id, so no baked volume applies.
         1.0, vec3<f32>(0.0), foliage_shadow_ao,
         veg_cutout, translucent > 0.5, veg_cutout, in.clip.xy,

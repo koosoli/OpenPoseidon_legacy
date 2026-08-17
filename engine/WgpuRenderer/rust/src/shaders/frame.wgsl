@@ -70,7 +70,13 @@ struct Frame {
     //   x = 1 when the GTAO pass ran this frame and its buffer may be read (0 = off)
     //   y = 1 for the raw AO debug view
     //   z = 1 to steer sky irradiance by the bent normal (Stage 2 directional ambient)
-    //   w = unused
+    //   w = how much of the NORMAL MAP's angular deviation the directional sky ambient keeps,
+    //       [0,1] (WGR_AMBIENT_NORMAL_MAPPED, default 1; 0 = the pre-fix look exactly).
+    //       Shares this lane with the bent-normal gate because it modifies the same lookup --
+    //       x/y/z say how the ambient DIRECTION is steered by occlusion, w says whether the
+    //       per-pixel surface detail survives that steer. Unlike x/y/z it is NOT gated on the
+    //       GTAO camera: it is a property of the surface, not of a screen-space buffer.
+    //       Read by shading::shade; see the block there for why it is a rotation, not a blend.
     gtao: vec4<f32>,
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), appended after gtao.
     //   skyvis_vp[i]  = ABSOLUTE world -> sky-map layer i's ortho clip space (w = 1, ortho)
@@ -108,6 +114,16 @@ struct Frame {
     // `wateranim` and not `water_anim0`/`water2`: naga_oil forbids composable identifiers
     // ending in a digit (see `ctlb` above).
     wateranim: vec4<f32>,
+    // Normal-map RELIEF UNDER AMBIENT LIGHT — the two terms that make a normal map read when
+    // the sun is not carrying it. Appended after wateranim; it is now the LAST lane.
+    //   x = cavity exponent   (WGR_NORMAL_CAVITY,  default 2, 0 = off/bit-identical)
+    //   y = sky-specular gain (WGR_SKY_SPECULAR,   default 1, 0 = off/bit-identical)
+    //   z, w = unused
+    // Its own lane rather than the spare halves of `matdbg`: those are DEBUG switches the dev
+    // panel owns and resets, and a lighting term parked in one would be turned off by a UI
+    // action that has nothing to do with it. Read by frame::normal_map_cavity /
+    // frame::sky_specular_split, called from shading::shade and terrain's fs_terrain.
+    relief: vec4<f32>,
 };
 
 // ---------------------------------------------------------------------------
@@ -295,6 +311,141 @@ fn sky_irradiance(n: vec3<f32>) -> vec3<f32> {
         + 2.0 * c1 * (l2m2 * x * y + l21 * x * z + l2m1 * y * z)
         + 2.0 * c2 * (l11 * x + l1m1 * y + l10 * z);
     return max(e, vec3<f32>(0.0)) * (1.0 / 3.14159265359);
+}
+
+// ---------------------------------------------------------------------------
+// Normal-map relief under AMBIENT light.
+//
+// THE PROBLEM, measured. Arma 3 Stratis stone wall, freefly 3094.20 2138.07 170.45 169.9 -6.3,
+// fraction of wall pixels that WGR_MATERIAL_DISABLE_NORMAL moves by more than 8/255:
+//   hour 10 (direct sun)      42.6%   mean |d| 11.18   at wall mean level 65
+//   hour  6 (ambient)          6.5%   mean |d|  2.85   at wall mean level 39
+// Steering the SH-9 sky-irradiance lookup along the mapped normal (the `gtao.w` term, see
+// shading::shade) lifted the dawn figure to 10.3% and no further, which is the expected ceiling:
+// an order-2 spherical-harmonic field is low-frequency BY CONSTRUCTION, so rotating its argument
+// can change the average tone of a bumpy surface but cannot resolve a bump. Relief needs a term
+// whose output is high-frequency in the normal, and there are exactly two honest candidates that
+// do not invent light: micro-OCCLUSION (a crevice sees less sky) and Fresnel-weighted sky
+// SPECULAR (the reflectance itself varies per pixel). Both live here rather than in shading.wgsl
+// because the terrain shader is not allowed to import shading (its pipeline layout has no lights
+// binding) and the ground has the same dawn flatness.
+// ---------------------------------------------------------------------------
+
+// Micro-occlusion of the AMBIENT term, derived from how far the normal map turned this pixel.
+//
+// DERIVATION, not a tuned curve. Treat the mapped normal as a microfacet sitting on the macro
+// surface. The macro surface is an occluding half-space at that facet, and the cosine-weighted
+// fraction of the facet's own hemisphere lying above a plane whose normal makes an angle t with
+// it is exactly (1 + cos t)/2 -- the standard half-space ambient-occlusion result. cos t is
+// dot(geometric, mapped), which for a tangent-space map is just its z. So the physical term is
+// `0.5 + 0.5 * c`, needing no new texture fetch, no derivative and no authored data.
+//
+// The exponent `k` (WGR_NORMAL_CAVITY) generalises it because the half-space value is a LOWER
+// BOUND on the occlusion: it counts one occluder, and a real micro-surface has neighbours on
+// every side, so k = 1 is the provable floor and the shipped default of 2 is the honest estimate
+// of a surface that occludes itself from more than one direction. k = 0 returns exactly 1.0 and
+// the whole term vanishes -- a flat normal map (c == 1) is also exactly 1.0 at every k, so an
+// unmapped surface is bit-identical either way. That double guarantee is the point: this may
+// never brighten anything and may never touch a surface that has no relief to reveal.
+//
+// It multiplies the AMBIENT only. On direct sun it would double-count N.L (which already answers
+// "how much sun does this facet catch") and produce the classic over-darkened normal map. It is
+// also safe against double-darkening an authored occlusion map, because the wgpu material path
+// binds none: SectionMaterial carries colour / normal / SMDI / Multi-layer slots and no ambient-
+// shadow (`_as`) slot at all -- Engine::MaterialDebugSettings names an AmbientShadow view but
+// nothing implements it. The one occlusion this cannot see is AO baked into a `_co` albedo by the
+// artist, which is a constant of the texture and would be double-counted by ANY runtime AO term
+// (GTAO and sky-vis included); it is not new exposure introduced here.
+//
+// `geo_n` may be zero (decal sections authored without normals) and `n` is assumed unit.
+fn normal_map_cavity(geo_n: vec3<f32>, n: vec3<f32>) -> f32 {
+    let k = frame.relief.x;
+    if (k <= 0.0) {
+        return 1.0;
+    }
+    let g2 = dot(geo_n, geo_n);
+    if (g2 < 1e-8) {
+        return 1.0;
+    }
+    // SATURATED at the far hemisphere, not guarded out of it. The ambient STEER refuses to act
+    // when the mapped normal falls behind the geometric one (it would rotate by ~180 degrees
+    // about an arbitrary axis), and copying that "no information, change nothing" stance here
+    // was the first draft — but this term is a scalar, so bailing to 1.0 puts a hard step from
+    // 0.5^k straight back to full brightness at exactly 90 degrees, i.e. a bright rim around the
+    // steepest part of every crevice. Clamping instead makes the term continuous and monotone
+    // everywhere and lands on the physically right value: a facet at or past the horizon sees
+    // exactly half the hemisphere, which is what 0.5^k says.
+    //
+    // Unreachable in practice on an authored surface either way — decode_nohq reconstructs z as
+    // a non-negative sqrt and terrain floors it at 1e-3, so a real normal map cannot produce a
+    // negative cosine. It is the world-space water-ripple normal and broken tangent frames this
+    // has to stay well-behaved for.
+    let c = max(dot(geo_n * inverseSqrt(g2), n), 0.0);
+    return pow(0.5 + 0.5 * c, k);
+}
+
+// Dielectric normal-incidence reflectance. 0.04 is the standard value for the non-metals this
+// corpus is made of (stone, plaster, painted metal, wood); it is NOT the 0.02 of env_fresnel,
+// which is specifically air/water for the DayZ CalmWater surfaces.
+const SKY_SPEC_F0: f32 = 0.04;
+
+// Grazing-angle SKY SPECULAR, returned as a REALLOCATION of the ambient rather than an addition.
+//   .rgb = the specular radiance, already weighted by its Fresnel term
+//   .a   = the weight the DIFFUSE sky term must be scaled by, i.e. 1 - that Fresnel term
+// so the caller writes `sky_irradiance(diffuse_n) * split.a + split.rgb` and the total ambient
+// energy is unchanged to the accuracy of "the two lobes see a similar sky". That construction is
+// deliberate and is the answer to the standing complaint that sunlit walls blow out: this term
+// CANNOT add energy, only move it between two lookups, so a bright surface stays exactly as
+// bright and only its per-pixel VARIATION changes. At gain 0 it returns (0,0,0,1) and the caller
+// is bit-identical to the pre-existing line.
+//
+// The relief comes from two places at once, and both are per-pixel: the Schlick term is a fifth
+// power of (1 - N.V), so a bump that tips a facet toward grazing gains reflectance sharply; and
+// the lookup direction is the MIRROR direction, which swings by twice the normal's deviation, so
+// it walks much further across the sky's gradient than the diffuse normal does. That is why this
+// resolves detail the SH steer alone cannot, even though it reads the same SH-9 field.
+//
+// ROUGHNESS-AWARE, via Lazarov's `max(gloss, F0)` ceiling on the grazing term: a rough surface
+// does not become a mirror at grazing incidence, and letting Schlick run to 1.0 paints a bright
+// Fresnel rim on every silhouette in the scene. `gloss` is derived from the material's Blinn
+// exponent by the caller; a material with no authored specular has gloss 0, so it keeps a flat
+// 4% reallocation and this term is (correctly) invisible on it.
+//
+// `mask` is the per-texel specular level (SMDI green, 1 when the material binds no map) — a real
+// per-pixel signal already fetched, so it costs nothing to respect and it keeps the term off the
+// parts of a surface the artist marked as non-reflective.
+//
+// SH-9 is used rather than the `sky_env` equirect map on purpose: an order-2 field is a good
+// approximation of a WIDE specular lobe (the rough surfaces this term is for) and it is bound to
+// every 3D pipeline, whereas sky_env is a group(1) binding that only the two object pipelines
+// have and that is a 1x1 dummy until Sky lends the real view. A sharp lobe for genuinely glossy
+// materials would need that map and is not attempted here.
+//
+// `view_dir` is the surface -> eye direction (camera-relative space puts the camera at 0, so it
+// is normalize(-world_pos)); `n` is the MAPPED shading normal and must be unit.
+fn sky_specular_split(n: vec3<f32>, view_dir: vec3<f32>, gloss: f32, mask: f32) -> vec4<f32> {
+    let gain = frame.relief.y;
+    if (gain <= 0.0) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let ndotv = clamp(dot(n, view_dir), 0.0, 1.0);
+    let f_grazing = max(clamp(gloss, 0.0, 1.0), SKY_SPEC_F0);
+    let c = 1.0 - ndotv;
+    let c2 = c * c;
+    let f = clamp(
+        (SKY_SPEC_F0 + (f_grazing - SKY_SPEC_F0) * (c2 * c2 * c)) * clamp(mask, 0.0, 1.0) * gain,
+        0.0,
+        1.0);
+    let mirror = reflect(-view_dir, n);
+    return vec4<f32>(sky_irradiance(mirror) * f, 1.0 - f);
+}
+
+// Blinn-Phong exponent -> gloss (1 - roughness), for sky_specular_split's grazing ceiling.
+// Roughness from the exponent by the usual correspondence alpha = sqrt(2 / (p + 2)): p = 0 gives
+// roughness 1 / gloss 0 (a material with no authored specular gets no sky specular beyond F0),
+// p = 8 gives gloss 0.55, p = 64 gives 0.83.
+fn spec_power_to_gloss(spec_power: f32) -> f32 {
+    return clamp(1.0 - sqrt(2.0 / (max(spec_power, 0.0) + 2.0)), 0.0, 1.0);
 }
 
 // Aerial-perspective fog for a camera-relative fragment position. The froxel volume

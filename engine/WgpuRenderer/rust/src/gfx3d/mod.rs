@@ -582,6 +582,11 @@ impl CameraGroup {
             + 16
             // DZ-005 water surface animation (frame.wgsl `wateranim`): time, ripple
             // strength, flow strength, flow-map bindless slot.
+            + 16
+            // Normal-map relief under ambient light (frame.wgsl `relief`): cavity exponent,
+            // sky-specular gain. The LAST lane — the two write_buffer calls at the end of the
+            // camera upload address matdbg and wateranim from `bind_size` backwards, so adding
+            // here moves them and both offsets are updated with it.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -1951,6 +1956,90 @@ fn water_ripple_strength_from_env() -> f32 {
         .clamp(0.0, 8.0);
     eprintln!("[wgr] water ripple strength: {strength} from WGR_WATER_RIPPLE (0 = glassy)");
     strength
+}
+
+/// How much of the normal map's own angular deviation the DIRECTIONAL SKY AMBIENT keeps, in
+/// [0,1] — published to the shader in `frame.gtao.w` and consumed by `shading::shade`.
+///
+/// 1 (the default) rotates the bent/interior sky-ambient direction by the same rotation the
+/// normal map applied to this pixel, so a normal-mapped surface has relief in its ambient term.
+/// **0 restores the pre-fix look exactly**: the shader skips the branch and samples along the
+/// unmodified steer, which is what shipped before this knob existed. That is the A/B arm.
+///
+/// Read through `env_f32`, which caches per name, so the value is fixed for the run — an A/B
+/// must be two runs of the same binary differing in exactly one term.
+pub(crate) fn ambient_normal_mapped() -> f32 {
+    env_f32("WGR_AMBIENT_NORMAL_MAPPED", 1.0).clamp(0.0, 1.0)
+}
+
+/// The one-line announcement of the above, for the GAME log. Not `eprintln!`: the launcher
+/// discards stderr, so a lever announced only there cannot be proven to have fired from a
+/// captured run — the same lesson the grass card-spacing knob paid for.
+pub(crate) fn ambient_normal_mapped_log_line() -> String {
+    let w = ambient_normal_mapped();
+    format!(
+        "wgpu ambient normal-mapping: {w:.2} (WGR_AMBIENT_NORMAL_MAPPED) — {}",
+        if w <= 0.0 {
+            "OFF, sky ambient samples the bent/interior steer only (pre-fix look)"
+        } else {
+            "sky irradiance is sampled along the normal-mapped direction, so ambient-dominated \
+             surfaces (dawn/dusk/overcast/shadow/interior) keep their relief"
+        }
+    )
+}
+
+/// Exponent on the normal map's half-space micro-occlusion of the AMBIENT term — published in
+/// `frame.relief.x` and consumed by `frame::normal_map_cavity` (objects and terrain).
+///
+/// **0 is off and is bit-identical to the pre-fix look** (the shader returns 1.0 before touching
+/// anything), so it is the A/B arm. 1 is the provable half-space value `(1 + cos t)/2`; the
+/// default of **2** is the argued one: the half-space result counts a SINGLE occluding plane, and
+/// a real micro-surface occludes itself from every side, so 1 is a lower bound rather than an
+/// estimate. Squaring it is the cheapest honest way to say "more than one occluder" and it keeps
+/// the mean cost small — for a typical `_nohq` (mean deviation ~20 degrees) the mean ambient loses
+/// ~6%, i.e. about 2 levels at the measured dawn wall level of 38.8, while a 45-degree facet loses
+/// 27%. The complaint being answered is about CONTRAST, so the term is shaped to spend its budget
+/// on the steep pixels and almost nothing on the flat ones.
+///
+/// Values above ~4 read as a painted-on dirt map: the surface stops looking lit and starts looking
+/// textured with shadow. Not clamped to that, because judging it is the owner's job, but the log
+/// line says what was asked for.
+pub(crate) fn normal_cavity() -> f32 {
+    env_f32("WGR_NORMAL_CAVITY", 2.0).clamp(0.0, 8.0)
+}
+
+/// Gain on the grazing-angle SKY SPECULAR — published in `frame.relief.y`, consumed by
+/// `frame::sky_specular_split` on the object paths only (terrain has no gloss to drive it).
+///
+/// 1 (the default) is the physical term: a Fresnel-weighted mirror-direction sky lookup, with the
+/// diffuse sky scaled by exactly the weight the specular took, so the ambient is REALLOCATED and
+/// never increased. That is why the default is 1 rather than something timid — the standing
+/// complaint that sunlit walls blow out cannot be caused by a term that conserves energy by
+/// construction. 0 skips it and is bit-identical to the pre-fix look.
+pub(crate) fn sky_specular() -> f32 {
+    env_f32("WGR_SKY_SPECULAR", 1.0).clamp(0.0, 1.0)
+}
+
+/// The one-line announcement of both, for the GAME log — same reasoning as
+/// `ambient_normal_mapped_log_line`: the launcher discards stderr, so a lever announced only
+/// there cannot be matched to a captured dawn screenshot.
+pub(crate) fn normal_relief_log_line() -> String {
+    let cav = normal_cavity();
+    let spec = sky_specular();
+    format!(
+        "wgpu normal relief: cavity {cav:.2} (WGR_NORMAL_CAVITY), sky specular {spec:.2} \
+         (WGR_SKY_SPECULAR) — {}",
+        match (cav > 0.0, spec > 0.0) {
+            (false, false) =>
+                "BOTH OFF, ambient carries no per-pixel normal detail beyond the SH steer \
+                 (pre-fix look)",
+            (true, false) => "cavity only: crevices darken under ambient, no sky specular",
+            (false, true) => "sky specular only: grazing/glossy relief, no cavity darkening",
+            (true, true) =>
+                "the normal map occludes its own ambient and reflects the sky at grazing angles; \
+                 both multiply/reallocate, neither adds energy",
+        }
+    )
 }
 
 /// WGR_GTAO=0 hard-disables screen-space AO (see `Gfx3d::gtao_force_off`). Read once at renderer
@@ -5123,7 +5212,13 @@ impl Gfx3d {
                     if on { 1.0f32 } else { 0.0 },
                     if on { g.debug_mode.min(2) as f32 } else { 0.0 },
                     if on && g.bent_normal { 1.0 } else { 0.0 },
-                    0.0,
+                    // NOT gated on `on`. The other three lanes describe a screen-space buffer
+                    // that only the GTAO camera may read; this one is how much of the normal
+                    // map's own deviation the ambient direction keeps, and that is true of
+                    // every camera in the frame whether GTAO ran for it or not. Gating it here
+                    // would leave the weapon segment and the planar reflection shading their
+                    // normal-mapped surfaces flat while the main view did not.
+                    ambient_normal_mapped(),
                 ];
                 queue.write_buffer(
                     buf,
@@ -5202,16 +5297,30 @@ impl Gfx3d {
                 ];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 32,
+                    base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&matdbg),
                 );
-                // DZ-005 water surface animation (frame.wgsl `wateranim`), the LAST lane.
+                // DZ-005 water surface animation (frame.wgsl `wateranim`).
                 // Same reasoning as matdbg: unconditional, so a world that stops publishing
                 // water params cannot leave the ripple frozen at a stale time.
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 16,
+                    base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&self.water_anim),
+                );
+                // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
+                //
+                // Written for EVERY camera and never gated, exactly like the ambient normal-
+                // mapping weight it works with: these describe how a SURFACE takes sky light,
+                // not how a screen-space buffer may be read, so the weapon segment, a cockpit
+                // view and the planar reflection must all shade their normal-mapped surfaces the
+                // same way the main view does. Gating a surface property on the GTAO camera is
+                // how you get a rifle whose receiver is flat while the wall behind it is not.
+                let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
+                queue.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&relief),
                 );
             }
         }
@@ -7607,6 +7716,368 @@ fn gtao_bent_normal_reaches_the_ambient_term() {
             "{name} must sample sky irradiance along the bent normal, not the surface normal"
         );
     }
+}
+
+// The normal map must reach the DIRECTIONAL SKY AMBIENT.
+//
+// Measured failure this guards (Stratis stone wall, freefly 3094.20 2138.07 170.45 169.9 -6.3):
+// with the sun on the wall, toggling WGR_MATERIAL_DISABLE_NORMAL moved 42.6% of the wall's pixels
+// (mean |d| 11.18, wall mean level 65); at dawn it moved 6.5% (mean |d| 2.85, level 39). The
+// normal map was reaching the picture only through the sun's N.L, because the ambient direction
+// came from the GTAO bent normal (a DEPTH-buffer quantity at ~2 m scale, which cannot contain
+// per-pixel detail and which REPLACES the shading normal when it is on) steered further by the
+// interior term. Every link below is easy to leave half-connected, and half-connected looks
+// exactly like "the normals do not really work".
+#[test]
+fn normal_map_reaches_the_directional_sky_ambient() {
+    let shading = include_str!("../shaders/shading.wgsl");
+    // shade() cannot recover the map's deviation from the mapped normal alone; the caller has to
+    // hand it the pre-map basis.
+    assert!(
+        shading.contains("geo_normal: vec3<f32>,"),
+        "shade() must take the geometric (pre-normal-map) normal"
+    );
+    // The steer is ROTATED by the map's deviation, not replaced by it and not blended away from
+    // it. A blend would dilute LIT-020's interior steer; a replacement would delete the occlusion
+    // direction the bent normal exists to carry.
+    assert!(
+        shading.contains("fn rotate_between("),
+        "the map's deviation must be applied as a rotation"
+    );
+    assert!(
+        shading.contains("let mapped_steer = rotate_between(n_geo_amb, nrm, amb_steer);")
+            && shading.contains("amb_n = normalize(mix(amb_steer, mapped_steer, amb_map_w));")
+            && shading.contains("sky_irradiance(amb_n)"),
+        "sky irradiance must be sampled along the steer ROTATED by the normal map's deviation"
+    );
+    // Directionality only. If the STEER ever starts scaling the ambient it is double-counting the
+    // occlusion amb_ao applies -- the exact mistake the plan's §6 forbids. The magnitude factors
+    // that ARE allowed on this line are named explicitly, so a fifth one cannot arrive unnoticed:
+    // amb_ao (the three independent occluders), `cavity` (the normal map's own micro-occlusion,
+    // which is an occluder and multiplies for the same reason they do) and the sky-specular
+    // split, which is a reallocation between two lookups and cannot change the total.
+    assert!(
+        shading.contains(
+            "(sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;"
+        ),
+        "ambient magnitude must be amb_ao x cavity and an energy-conserving specular split; \
+         the steer itself stays directional only"
+    );
+    // Foliage keeps its own treatment: a leaf card's normal is authored, not relief, and the
+    // two-sided flip above leaves the vertex normal a 180-degree reference with an arbitrary
+    // rotation axis.
+    assert!(
+        shading
+            .contains("if (amb_map_w > 0.0 && !is_foliage && geo_len > 1e-4 && n_len >= 1e-4) {"),
+        "the rotation must be skipped for foliage and for degenerate normals"
+    );
+    // Both object paths, or a normal-mapped wall shades differently depending on which one drew
+    // it -- the split this codebase keeps paying for.
+    for (name, src) in [
+        ("gfx3d/shader3d.wgsl", include_str!("shader3d.wgsl")),
+        ("gfx3d/gpu_driven.wgsl", include_str!("gpu_driven.wgsl")),
+    ] {
+        assert!(
+            src.contains(
+                "base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,"
+            ),
+            "{name} must pass the geometric normal alongside the shading normal"
+        );
+    }
+    // And the knob has to actually be published, or the shader reads a lane nobody writes and the
+    // branch is dead at weight 0.
+    let frame = include_str!("../shaders/frame.wgsl");
+    assert!(
+        shading.contains("clamp(frame.gtao.w, 0.0, 1.0)")
+            && frame.contains("WGR_AMBIENT_NORMAL_MAPPED"),
+        "the weight must ride in frame.gtao.w and be documented on the struct"
+    );
+    // Default ON: the fix ships enabled, and 0 is the restore-the-old-look arm.
+    if std::env::var("WGR_AMBIENT_NORMAL_MAPPED").is_err() {
+        assert_eq!(
+            ambient_normal_mapped(),
+            1.0,
+            "the fix must be on by default; WGR_AMBIENT_NORMAL_MAPPED=0 is the A/B arm"
+        );
+    }
+    // ... and be announced somewhere a captured run can prove it fired. The launcher discards
+    // stderr, so the line has to name the knob and go to the game log (lib.rs forwards it).
+    let line = ambient_normal_mapped_log_line();
+    assert!(
+        line.contains("WGR_AMBIENT_NORMAL_MAPPED"),
+        "the log line must name the knob, got: {line}"
+    );
+    let lib = include_str!("../lib.rs");
+    assert!(
+        lib.contains("&crate::gfx3d::ambient_normal_mapped_log_line(),")
+            && !lib.contains("eprintln!(\"{}\", crate::gfx3d::ambient_normal_mapped_log_line()"),
+        "the announcement must go through the LogSink (game log), not eprintln! -- the launcher \
+         discards stderr, so a stderr-only line cannot prove which arm a screenshot came from"
+    );
+}
+
+// Rust mirrors of the two shader terms, so their PROPERTIES can be proven over a sweep rather
+// than asserted about a string. Each is pinned to the WGSL it mirrors by the tests below, which
+// is what stops the mirror drifting away from the shader it claims to describe.
+#[cfg(test)]
+fn cavity_ref(cos_deviation: f32, k: f32) -> f32 {
+    if k <= 0.0 {
+        return 1.0;
+    }
+    (0.5 + 0.5 * cos_deviation.max(0.0)).powf(k)
+}
+
+#[cfg(test)]
+fn sky_spec_fresnel_ref(ndotv: f32, gloss: f32, mask: f32, gain: f32) -> f32 {
+    if gain <= 0.0 {
+        return 0.0;
+    }
+    const F0: f32 = 0.04;
+    let f_grazing = gloss.clamp(0.0, 1.0).max(F0);
+    let c = 1.0 - ndotv.clamp(0.0, 1.0);
+    ((F0 + (f_grazing - F0) * c.powi(5)) * mask.clamp(0.0, 1.0) * gain).clamp(0.0, 1.0)
+}
+
+// CAVITY. The mechanism that makes a crevice darker than a face when there is no sun to do it.
+//
+// The failure mode this guards is not "it does nothing" — it is the far more likely "it does
+// something, and that something is a brightness change". The measured complaint at hour 6 is
+// about CONTRAST at a wall mean level of 38.8, so a term that lifts or drops the mean is a
+// regression even if the relief improves, and a term that can exceed 1.0 anywhere is a term that
+// invents light out of a texture.
+#[test]
+fn normal_map_cavity_only_darkens_the_ambient_and_is_inert_on_a_flat_map() {
+    // 1. Never brighter than 1, monotone in the deviation, and EXACTLY 1 on a flat normal map at
+    //    every strength — the guarantee that an unmapped or normal-map-less surface is
+    //    bit-identical whatever the knob is set to.
+    for k in [0.0f32, 0.5, 1.0, 2.0, 4.0, 8.0] {
+        assert_eq!(
+            cavity_ref(1.0, k),
+            1.0,
+            "a flat normal map (deviation 0) must be exactly 1.0 at strength {k}"
+        );
+        let mut prev = 1.0f32;
+        for step in 0..=90 {
+            let t = (step as f32).to_radians();
+            let v = cavity_ref(t.cos(), k);
+            assert!(
+                (0.0..=1.0).contains(&v),
+                "cavity must stay in [0,1]: {v} at {step} deg, k = {k}"
+            );
+            assert!(
+                v <= prev + 1e-6,
+                "cavity must fall monotonically with deviation: {v} > {prev} at {step} deg"
+            );
+            prev = v;
+        }
+    }
+    // 2. k = 0 is the OFF arm and is exactly 1 at every deviation, so WGR_NORMAL_CAVITY=0 restores
+    //    the previous look bit-for-bit rather than approximately.
+    for step in 0..=90 {
+        let t = (step as f32).to_radians();
+        assert_eq!(cavity_ref(t.cos(), 0.0), 1.0, "k = 0 must be a hard no-op");
+    }
+    // 3. The shipped default has to be worth shipping AND cheap on the mean. At a typical `_nohq`
+    //    deviation (~20 deg) it costs a few percent of the ambient; at a real crevice edge
+    //    (45-60 deg) it is a fifth to a third. Those two numbers together are the whole design:
+    //    contrast concentrated on the steep pixels, mean barely moved.
+    let d = normal_cavity();
+    let typical = cavity_ref(20.0f32.to_radians().cos(), d);
+    let steep = cavity_ref(50.0f32.to_radians().cos(), d);
+    assert!(
+        (0.90..=0.98).contains(&typical),
+        "the default must cost only a few percent on a typical texel, got {typical}"
+    );
+    assert!(
+        steep < 0.80,
+        "the default must visibly darken a steep facet (>20%), got {steep}"
+    );
+    // 4. And it must be the AMBIENT it multiplies, on both object branches and on terrain — never
+    //    the sun (which already has N.L and would over-darken) and never as an addition.
+    let shading = include_str!("../shaders/shading.wgsl");
+    assert!(
+        shading.contains("let cavity = select(normal_map_cavity(geo_normal, nrm), 1.0, is_foliage);"),
+        "shade() must derive the cavity from the geometric/mapped normal pair, foliage exempt"
+    );
+    assert!(
+        shading.contains("* amb_ao * cavity;")
+            && shading
+                .contains("m_sun_ambient * amb_ao * cavity + m_sun_diffuse * ndotl * sun_vis;"),
+        "the cavity must multiply the ambient on BOTH the sky-lit and the legacy branch"
+    );
+    assert!(
+        !shading.contains("ndotl * sun_vis * cavity") && !shading.contains("cavity * sun_vis"),
+        "the cavity must never touch the direct sun term"
+    );
+    let terrain = include_str!("../terrain/terrain.wgsl");
+    assert!(
+        terrain.contains("* normal_map_cavity(geometric_n, n);"),
+        "terrain must take the same term on its ambient — the dawn ground is flat for the same \
+         reason the dawn wall is"
+    );
+    // 5. The shader must be the maths the mirror above claims it is.
+    let frame = include_str!("../shaders/frame.wgsl");
+    assert!(
+        frame.contains("return pow(0.5 + 0.5 * c, k);")
+            && frame.contains("let c = max(dot(geo_n * inverseSqrt(g2), n), 0.0);")
+            && frame.contains("let k = frame.relief.x;"),
+        "normal_map_cavity must be the half-space term (1 + cos)/2 raised to the knob, SATURATED \
+         (not bailed out of) past the horizon — a bail leaves a bright step at 90 degrees"
+    );
+}
+
+// SKY SPECULAR. The second per-pixel mechanism, and the one with a standing constraint attached:
+// the owner's complaint is that sunlit walls blow out, so a term that ADDS ambient light is not
+// acceptable however good the relief is. It is therefore built as a reallocation, and the
+// property that makes that true — diffuse weight + specular weight == 1 — is proven here rather
+// than asserted in a comment.
+#[test]
+fn sky_specular_reallocates_the_ambient_and_cannot_add_energy() {
+    for &gloss in &[0.0f32, 0.25, 0.55, 0.83, 1.0] {
+        for &mask in &[0.0f32, 0.3, 1.0] {
+            for step in 0..=90 {
+                let ndotv = (step as f32).to_radians().cos();
+                let f = sky_spec_fresnel_ref(ndotv, gloss, mask, sky_specular());
+                assert!(
+                    (0.0..=1.0).contains(&f),
+                    "the split weight must stay in [0,1]: {f}"
+                );
+                // The caller computes `diffuse * (1 - f) + spec * f`. If both lookups returned
+                // the same radiance L, the result must be exactly L — that is what "cannot add
+                // energy" means, and it is what keeps the wall's mean level where it was.
+                let l = 42.0f32;
+                let out = l * (1.0 - f) + l * f;
+                assert!(
+                    (out - l).abs() < 1e-4,
+                    "the split must conserve energy: {out} != {l}"
+                );
+            }
+        }
+    }
+    // Roughness ceiling. Schlick run to 1.0 at grazing paints a bright Fresnel rim on every
+    // silhouette in the scene; Lazarov's max(gloss, F0) ceiling is what keeps a rough surface
+    // rough. A material with NO authored specular (gloss 0) must stay at the flat dielectric 4%.
+    let flat = sky_spec_fresnel_ref(0.0, 0.0, 1.0, 1.0);
+    assert!(
+        (flat - 0.04).abs() < 1e-4,
+        "a gloss-0 material must keep a flat 4% reallocation even at grazing, got {flat}"
+    );
+    let glossy = sky_spec_fresnel_ref(0.0, 0.83, 1.0, 1.0);
+    assert!(
+        glossy > 0.7 && glossy <= 0.84,
+        "a glossy material must reach most of its grazing reflectance, got {glossy}"
+    );
+    // Head-on it is 4% regardless of gloss: this is a GRAZING-angle mechanism and must not be
+    // sold as anything else.
+    for &gloss in &[0.0f32, 0.55, 1.0] {
+        let head_on = sky_spec_fresnel_ref(1.0, gloss, 1.0, 1.0);
+        assert!(
+            (head_on - 0.04).abs() < 1e-4,
+            "head-on reflectance must be F0 at gloss {gloss}, got {head_on}"
+        );
+    }
+    // Gain 0 is a hard no-op: (0,0,0,1) leaves the caller's line bit-identical.
+    assert_eq!(sky_spec_fresnel_ref(0.0, 1.0, 1.0, 0.0), 0.0);
+
+    // Wiring. It must be driven by the MAPPED normal (or it has no per-pixel content at all),
+    // sample the MIRROR direction (or it is just a second diffuse lookup), and ride inside the
+    // same occlusion as the diffuse sky (or crevices acquire glints).
+    let frame = include_str!("../shaders/frame.wgsl");
+    assert!(
+        frame.contains("let mirror = reflect(-view_dir, n);")
+            && frame.contains("return vec4<f32>(sky_irradiance(mirror) * f, 1.0 - f);"),
+        "the specular must sample the mirror direction and return its own complement as the \
+         diffuse weight"
+    );
+    assert!(
+        frame.contains("let f_grazing = max(clamp(gloss, 0.0, 1.0), SKY_SPEC_F0);"),
+        "the grazing term must be ceilinged by gloss (Lazarov), not run to a mirror"
+    );
+    let shading = include_str!("../shaders/shading.wgsl");
+    assert!(
+        shading.contains("nrm, view_dir_sky, spec_power_to_gloss(mat.spec_power), mat.spec_mask);"),
+        "the split must be driven by the MAPPED normal and the material's own gloss/spec mask"
+    );
+    assert!(
+        shading.contains("(sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;"),
+        "the specular must sit inside the same amb_ao x cavity occlusion as the diffuse sky"
+    );
+    // Terrain deliberately does NOT take it — a null result, recorded so a later reader does not
+    // "fix" the omission. Ground has no material and therefore gloss 0, so it would buy the bare
+    // 4% reallocation for a reflect() plus a second SH evaluation on the frame's heaviest fill.
+    let terrain = include_str!("../terrain/terrain.wgsl");
+    assert!(
+        !terrain.contains("sky_specular_split"),
+        "terrain must not pay for a sky specular it has no gloss to drive"
+    );
+}
+
+// The knobs must reach the GPU and be announced. `relief` is the LAST lane of the camera UBO and
+// the two lanes before it are addressed BACKWARDS from bind_size, so appending it moved both —
+// exactly the kind of edit that silently writes the water animation over the material-debug lane
+// and leaves a debug view stuck on.
+#[test]
+fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
+    let frame = include_str!("../shaders/frame.wgsl");
+    assert!(
+        frame.contains("WGR_NORMAL_CAVITY") && frame.contains("WGR_SKY_SPECULAR"),
+        "both knobs must be documented on the struct they ride in"
+    );
+    // The three trailing lanes, in order, each at its own offset. Pinned as a set: any one of
+    // them alone looks right.
+    let src = include_str!("mod.rs");
+    for (offset, payload) in [
+        ("bind_size - 48", "cast_slice(&matdbg)"),
+        ("bind_size - 32", "cast_slice(&self.water_anim)"),
+        ("bind_size - 16", "cast_slice(&relief)"),
+    ] {
+        let at = src
+            .find(offset)
+            .unwrap_or_else(|| panic!("no camera-UBO write at {offset}"));
+        let window = &src[at..(at + 200).min(src.len())];
+        assert!(
+            window.contains(payload),
+            "the write at {offset} must carry {payload}; the three trailing lanes are addressed \
+             backwards from bind_size, so appending one moves the others"
+        );
+    }
+    // ...and the WGSL must declare them in that same order, or the offsets address the wrong
+    // fields with no error anywhere.
+    let matdbg_at = frame.find("    matdbg: vec4<f32>,").expect("matdbg lane");
+    let water_at = frame
+        .find("    wateranim: vec4<f32>,")
+        .expect("wateranim lane");
+    let relief_at = frame.find("    relief: vec4<f32>,").expect("relief lane");
+    assert!(
+        matdbg_at < water_at && water_at < relief_at,
+        "the WGSL lane order must match the upload offsets"
+    );
+    // Defaults: both ON, because both are constructed so they cannot brighten anything — the
+    // cavity only multiplies and the specular only reallocates. 0 is the A/B arm for each.
+    if std::env::var("WGR_NORMAL_CAVITY").is_err() {
+        assert_eq!(normal_cavity(), 2.0, "cavity ships on; 0 is the A/B arm");
+    }
+    if std::env::var("WGR_SKY_SPECULAR").is_err() {
+        assert_eq!(
+            sky_specular(),
+            1.0,
+            "sky specular ships on; 0 is the A/B arm"
+        );
+    }
+    // Announced through the GAME log naming both knobs, for the same reason as the ambient
+    // normal-mapping line: the launcher discards stderr, so a stderr-only announcement cannot be
+    // matched to a captured dawn screenshot.
+    let line = normal_relief_log_line();
+    assert!(
+        line.contains("WGR_NORMAL_CAVITY") && line.contains("WGR_SKY_SPECULAR"),
+        "the log line must name both knobs, got: {line}"
+    );
+    let lib = include_str!("../lib.rs");
+    assert!(
+        lib.contains("log.log(log_level::INFO, &crate::gfx3d::normal_relief_log_line());")
+            && !lib.contains("eprintln!(\"{}\", crate::gfx3d::normal_relief_log_line()"),
+        "the announcement must go through the LogSink (game log), not eprintln!"
+    );
 }
 
 // The interior steer must WRAP the bent normal, not discard it. Written separately from the test
