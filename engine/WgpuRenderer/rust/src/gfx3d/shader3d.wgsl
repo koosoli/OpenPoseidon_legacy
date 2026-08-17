@@ -1,5 +1,6 @@
 // Unlit textured 3D, plain (vs_main) and GPU-skinned (vs_skinned) variants
-// sharing fs_main. The two group(1) declarations coexist because each entry
+// sharing fs_main (and, for OnSurface road/decal pipelines on the plain path, its
+// frag_depth-writing twin fs_surface). The two group(1) declarations coexist because each entry
 // point statically uses only one (binding collisions are validated per entry
 // point): the plain pipeline binds `object`, the skinned pipeline binds the
 // bone `palette` (from the skin module). Shadowing is the shared cascade kernel.
@@ -14,7 +15,7 @@
 #import shading::{shade, ShadeMaterial}
 // Group(4) terrain heightmap + surface_y, shared with the shadow depth pass.
 // surface_grad tilts conformed veg normals to follow the ground slope (color pass only).
-#import conform::{surface_y, surface_grad, surface_y_raster}
+#import conform::{surface_y, surface_grad, surface_y_raster, hm_params}
 
 struct Object {
     world: mat4x4<f32>,
@@ -225,6 +226,10 @@ override emissive_night: f32 = 0.0;
 // Per-mip alpha gain for cutout foliage (WGR_CUTOUT_MIP_ALPHA); see gbuffer.wgsl
 // mip_alpha_boost and gpu_driven.wgsl's twin.
 override cutout_mip_alpha: f32 = 0.0;
+// WGR_ROAD_PIXEL_CONFORM / WGR_ROAD_PIXEL_LIFT -- metres an OnSurface (road/decal) fragment is
+// pulled TOWARD THE CAMERA along its view ray after fs_surface has re-seated its depth on the
+// terrain (see surface_pixel_depth). Only fs_surface reads it; fs_main never writes depth.
+override pixel_lift: f32 = 0.02;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -239,13 +244,18 @@ struct VsOut {
     // separate from the normal so fs_main can retain its safe derivative fallback.
     @location(5) tangent: vec3<f32>,
     @location(6) binormal: vec3<f32>,
+    // 1 where the vertex was PINNED to the terrain (mode 2, conform_sel 2 -- roads and other
+    // ClipLandOn geometry), 0 elsewhere. Interpolated, so fs_surface can weight its per-pixel
+    // depth re-seat across a triangle that mixes pinned and rigid vertices. Skinned draws
+    // and every rigid vertex carry 0, which makes fs_surface a no-op for them.
+    @location(7) conform_w: f32,
 };
 
 // world_pos is camera-relative (the world matrix / palette is offset by the
 // camera position on the C++ side), so its length is the camera distance.
 fn finish_vertex(
     world_pos: vec4<f32>, normal_ws: vec3<f32>, tangent_ws: vec3<f32>, binormal_ws: vec3<f32>,
-    uv: vec2<f32>, instance: u32,
+    uv: vec2<f32>, instance: u32, conform_w: f32,
 ) -> VsOut {
     var out: VsOut;
     out.clip = reverse_z(frame.proj * frame.view * world_pos);
@@ -279,6 +289,7 @@ fn finish_vertex(
     out.binormal = binormal_ws;
     out.fog = fog_factor(length(world_pos.xyz));
     out.instance = instance;
+    out.conform_w = conform_w;
     return out;
 }
 
@@ -307,6 +318,9 @@ fn vs_main(
     // world xz (+ frame.cam_pos) and written back camera-relative. conform2.z = mode:
     // 1 = ForestPlain bilinear plane, 2 = per-vertex ClipLand vegetation (heightmap).
     let mode = obj.conform2.z;
+    // 1 for a vertex pinned onto the terrain (see VsOut.conform_w). Vertex-only knowledge;
+    // fs_surface uses it to decide where its per-pixel depth re-seat applies.
+    var conform_w = 0.0;
     if (mode > 1.5) {
         // Mode 2: individual ClipLand vegetation, conformed per vertex to SurfaceY,
         // matching Object::Animate (Object.cpp:395-423). conform_sel: 1 = ClipLandKeep
@@ -330,6 +344,7 @@ fn vs_main(
             // evaluates, so a road cannot sit above the coarse chord of the ridge in front
             // of it. Returns surface_y exactly when WGR_CONFORM_RASTER is unset (default).
             world_pos.y = surface_y_raster(abs_xz, frame.cam_pos.xyz) - frame.cam_pos.y;
+            conform_w = 1.0;
         }
         // Tilt the conformed vertex's normal by the terrain slope (inverse-transpose of
         // the vertical height-field shear, same as mode 1) so lighting follows the ground
@@ -402,7 +417,7 @@ fn vs_main(
             normal_ws = normalize(mix(normal_ws, normalize(radial), clamp(bend, 0.0, 1.0)));
         }
     }
-    return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance);
+    return finish_vertex(world_pos, normal_ws, rot * tangent, rot * binormal, uv, instance, conform_w);
 }
 
 // Linear-blend skinning (see the skin module). Vertices with no skin weight
@@ -422,11 +437,103 @@ fn vs_skinned(
     // uploads -OrigNorm), skin_normal rotates it into world space, and we light
     // with it as-is to match GL33 — no extra negation.
     let normal_ws = skin_normal(norm, bones, weights);
-    return finish_vertex(world_pos, normal_ws, vec3<f32>(0.0), vec3<f32>(0.0), uv, instance);
+    return finish_vertex(world_pos, normal_ws, vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0);
 }
 
+// The colour-pass fragment. Depth is fixed-function (no frag_depth), so early-Z stays on for
+// every ordinary draw; the OnSurface variant below (fs_surface) shares this body and adds
+// only a depth output.
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return shade_fragment(in);
+}
+
+// OnSurface (roads, footprint decals) colour output plus an explicit depth. Only pipelines
+// built for Offset::Decal on the plain (non-skinned) path use this entry point: writing
+// frag_depth turns early-Z off, which is acceptable for the handful of road/decal draws a
+// frame and not for everything else.
+struct SurfaceOut {
+    @location(0) color: vec4<f32>,
+    @builtin(frag_depth) depth: f32,
+};
+
+@fragment
+fn fs_surface(in: VsOut) -> SurfaceOut {
+    var out: SurfaceOut;
+    out.color = shade_fragment(in);
+    out.depth = surface_pixel_depth(in);
+    return out;
+}
+
+// WGR_ROAD_PIXEL_CONFORM -- per-PIXEL terrain conform of an OnSurface draw's DEPTH.
+//
+// The vertex conform (vs_main, conform_sel 2) pins each road VERTEX to the terrain, but
+// between two road vertices the road is a flat chord while the terrain is not: wherever the
+// ground bulges up between them the terrain wins `GreaterEqual` and pokes through the ribbon
+// as terrain-triangle-shaped patches (owner, Arma 2 Takistan, .tmp-shadow/a2clip). A
+// vertex-side fix cannot reach a between-vertex error (WGR_CONFORM_RASTER moved 0.76% of the
+// pixels), and the CPU road split along terrain triangles the old engine used
+// (WGR_ROAD_CPU_SPLIT) was rejected as too expensive. So the depth is re-seated per fragment:
+//
+//   1. Take the fragment's view ray (camera-relative world_pos; the camera is at the origin).
+//   2. Walk that ray onto the SAME height source the vertex conform reads (surface_y_raster,
+//      i.e. surface_y unless WGR_CONFORM_RASTER=1) -- a short fixed-point iteration, because
+//      the terrain height at the road-plane hit is not yet the terrain hit along the ray. At a
+//      grazing 10 degrees a 0.2 m height gap is a 1.1 m slide along the ray, so lifting the
+//      point vertically would leave the terrain fragment nearer and STILL winning. Three
+//      steps converge to sub-cm on any slope the iteration is stable on (|slope| < 1/tan(el)),
+//      and the lift below covers the residual.
+//   3. Pull the seated point `pixel_lift` (+ 0.5 mm/m of distance) toward the camera ALONG
+//      THE RAY -- always nearer under reversed-Z regardless of whether the camera looks down
+//      onto or up at the road, unlike a vertical lift -- and re-apply the vertex path's
+//      ndc-squared decal bias so WGR_DECAL_SCALE still means what it meant.
+//
+// The COLOUR position, shading and uv are untouched; only the depth this fragment is tested
+// with moves. The rigid parts of a partly-pinned draw keep their fixed-function depth
+// (conform_w = 0), and so does everything drawn before a heightmap exists.
+const PIXEL_CONFORM_STEPS: i32 = 3;
+// Below this |dir.y| the ray is too flat to solve for its terrain hit (a 1 m height gap is
+// a 20 m slide); the point is seated vertically instead, which the lift then covers.
+const PIXEL_CONFORM_MIN_DIR_Y: f32 = 0.05;
+const PIXEL_CONFORM_LIFT_PER_M: f32 = 0.0005;
+
+fn surface_pixel_depth(in: VsOut) -> f32 {
+    let w = clamp(in.conform_w, 0.0, 1.0);
+    let dist = length(in.world_pos);
+    if (w <= 0.0 || hm_params.enabled < 0.5 || dist <= 1e-3) {
+        return in.clip.z;
+    }
+    let cam = frame.cam_pos.xyz;
+    let dir = in.world_pos / dist;
+    var p = in.world_pos;
+    var i = 0;
+    loop {
+        if (i >= PIXEL_CONFORM_STEPS) { break; }
+        // Camera-relative terrain height under the current point.
+        let hy = surface_y_raster(p.xz + cam.xz, cam) - cam.y;
+        if (abs(dir.y) > PIXEL_CONFORM_MIN_DIR_Y) {
+            // Slide along the ray to where it reaches that height. Clamped so a step onto a
+            // steep facing slope cannot throw the point far past the road it belongs to.
+            let t = clamp(hy / dir.y, 0.5 * dist, 1.5 * dist);
+            p = dir * t;
+        } else {
+            p = vec3<f32>(p.x, hy, p.z);
+        }
+        i = i + 1;
+    }
+    let seated_dist = length(p);
+    let lift = pixel_lift + PIXEL_CONFORM_LIFT_PER_M * seated_dist;
+    let pulled = p * max(seated_dist - lift, 1e-3) / max(seated_dist, 1e-3);
+    let clip = reverse_z(frame.proj * frame.view * vec4<f32>(pulled, 1.0));
+    if (clip.w <= 1e-6) {
+        return in.clip.z;
+    }
+    var ndc = clip.z / clip.w;
+    ndc = ndc + depth_bias * ndc * ndc;
+    return mix(in.clip.z, clamp(ndc, 0.0, 1.0), w);
+}
+
+fn shade_fragment(in: VsOut) -> vec4<f32> {
     // Derivatives must run in uniform control flow — before the discard.
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);

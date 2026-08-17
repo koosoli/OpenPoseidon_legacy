@@ -111,6 +111,45 @@ fn decal_scale() -> f32 {
     env_f32("WGR_DECAL_SCALE", 1.0)
 }
 
+// WGR_ROAD_PIXEL_CONFORM (default ON; 0 = the vertex-only conform): OnSurface draws on the
+// plain per-draw path use `fs_surface`, which re-seats every FRAGMENT's depth on the terrain
+// height field the vertex conform reads (shader3d.wgsl surface_pixel_depth). Owner, Arma 2
+// Takistan (.tmp-shadow/a2clip): between two road vertices the road is a flat chord and the
+// terrain is not, so wherever the ground bulges up between them it wins the depth test and
+// pokes through the ribbon as terrain-triangle-shaped patches. No vertex-side fix can reach a
+// between-vertex error; the per-pixel one hugs the rasterised ground everywhere.
+pub(crate) fn road_pixel_conform() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("WGR_ROAD_PIXEL_CONFORM")
+            .map(|v| !v.is_empty() && v != "0")
+            .unwrap_or(true)
+    })
+}
+
+// Metres an fs_surface fragment is pulled toward the camera along its view ray after the
+// re-seat, on top of the vertex path's WGR_DECAL_SCALE bias. Small on purpose: the owner has
+// also seen roads THROUGH mountains, which is what over-biasing looks like.
+pub(crate) fn road_pixel_lift() -> f32 {
+    env_f32("WGR_ROAD_PIXEL_LIFT", 0.02).min(1.0)
+}
+
+/// The GAME-log announcement (the launcher discards stderr): which arm drew the roads.
+pub(crate) fn road_pixel_conform_log_line() -> String {
+    if road_pixel_conform() {
+        format!(
+            "wgpu road pixel conform: ON (WGR_ROAD_PIXEL_CONFORM=1) -- OnSurface draws re-seat \
+             depth per fragment on the terrain height field, lift {:.3} m (WGR_ROAD_PIXEL_LIFT) \
+             + 0.5 mm/m",
+            road_pixel_lift()
+        )
+    } else {
+        "wgpu road pixel conform: OFF (WGR_ROAD_PIXEL_CONFORM=0) -- vertex-only conform, \
+         terrain can poke through the road ribbon between road vertices"
+            .to_string()
+    }
+}
+
 // Fraction of a NON-FIXTURE material's emissive kept at full night; see the `emissive_night`
 // override in shader3d.wgsl for the measurement that motivates it. Default 0: the imported
 // corpora use the lane as fixed-function brightness compensation (Arma 2 vegetation 2.6, Arma 3
@@ -1131,12 +1170,16 @@ struct ConformGroup {
 
 impl ConformGroup {
     fn new(device: &wgpu::Device) -> Self {
+        // VERTEX | FRAGMENT: the vertex conform reads the heightmap per vertex; fs_surface
+        // (WGR_ROAD_PIXEL_CONFORM) reads the SAME heightmap per fragment to re-seat an
+        // OnSurface draw's depth on the terrain. Broadening visibility costs nothing for the
+        // shaders that never touch it from the fragment stage.
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_conform_layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -1146,7 +1189,7 @@ impl ConformGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -3532,7 +3575,9 @@ impl Gfx3d {
                 .unwrap_or(true),
             sky_bake: None,
             sky_volumes: FxHashMap::default(),
-            queued_log: Vec::new(),
+            // Announced through the GAME log (drained by lib.rs into the LogSink on the first
+            // frame) so a captured road screenshot can be matched to which arm produced it.
+            queued_log: vec![road_pixel_conform_log_line()],
             staging_refusals: FxHashMap::default(),
             sky_volume_meta: StorageArray::new("wgr_sky_volume_meta"),
             sky_volume_data: StorageArray::new("wgr_sky_volume_data"),
@@ -3758,7 +3803,19 @@ impl Gfx3d {
             ("translucent", translucent),
             ("emissive_night", emissive_night() as f64),
             ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+            ("pixel_lift", road_pixel_lift() as f64),
         ];
+        // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
+        // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
+        // fs_surface reads `objects`-conformed varyings and the heightmap group, and the
+        // skinned pipeline binds the bone palette at that slot; roads are never skinned.
+        // Everything else keeps fs_main and its early-Z. Decal draws are never prepassed
+        // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
+        let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
+            "fs_surface"
+        } else {
+            "fs_main"
+        };
 
         // Shadow draws exclude already-shadowed pixels via the stencil: test EQUAL
         // 0 (stencil is cleared to 0 each segment; opaque geometry leaves it 0) and
@@ -3820,7 +3877,7 @@ impl Gfx3d {
             },
             fragment: Some(wgpu::FragmentState {
                 module,
-                entry_point: Some("fs_main"),
+                entry_point: Some(fs_entry),
                 compilation_options: wgpu::PipelineCompilationOptions {
                     constants: &constants,
                     ..Default::default()
@@ -8077,6 +8134,103 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
         lib.contains("log.log(log_level::INFO, &crate::gfx3d::normal_relief_log_line());")
             && !lib.contains("eprintln!(\"{}\", crate::gfx3d::normal_relief_log_line()"),
         "the announcement must go through the LogSink (game log), not eprintln!"
+    );
+}
+
+// WGR_ROAD_PIXEL_CONFORM: the road's DEPTH is re-seated on the terrain per FRAGMENT, on a
+// separate entry point that only OnSurface (Offset::Decal) plain-path pipelines use. Guards the
+// four ways this silently stops working: fs_main growing a frag_depth (early-Z off for every
+// draw), fs_surface losing its heightmap taps, the pipeline selection drifting to some other
+// key, and the heightmap group not being visible to the fragment stage at all.
+#[test]
+fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
+    let shader = include_str!("shader3d.wgsl");
+    // The plain colour fragment keeps fixed-function depth (early-Z on).
+    assert!(
+        shader.contains("fn fs_main(in: VsOut) -> @location(0) vec4<f32> {"),
+        "fs_main must not write frag_depth; only the OnSurface twin does"
+    );
+    // The OnSurface twin writes frag_depth from the SAME height source the vertex conform
+    // reads (surface_y_raster), walked along the view ray, on top of the vertex decal bias.
+    let fs_surface = shader.find("fn fs_surface(in: VsOut) -> SurfaceOut {").expect("fs_surface");
+    let depth_fn = shader.find("fn surface_pixel_depth(in: VsOut) -> f32 {").expect("surface_pixel_depth");
+    assert!(fs_surface < depth_fn, "fs_surface must precede its depth helper in the source");
+    let depth_body = &shader[depth_fn..];
+    let depth_body = &depth_body[..depth_body.find("\nfn shade_fragment").expect("shade_fragment follows")];
+    for needle in [
+        "@builtin(frag_depth) depth: f32,",
+        "surface_y_raster(p.xz + cam.xz, cam) - cam.y",
+        "if (w <= 0.0 || hm_params.enabled < 0.5 || dist <= 1e-3) {",
+        "let t = clamp(hy / dir.y, 0.5 * dist, 1.5 * dist);",
+        "ndc = ndc + depth_bias * ndc * ndc;",
+        "return mix(in.clip.z, clamp(ndc, 0.0, 1.0), w);",
+    ] {
+        assert!(
+            shader.contains(needle) && (needle.starts_with('@') || depth_body.contains(needle)),
+            "surface_pixel_depth must contain `{needle}`"
+        );
+    }
+    // The pull is ALONG THE RAY toward the camera, not a vertical lift: looking up at a road
+    // on a hillside, a vertical lift moves the point AWAY under reversed-Z and the terrain wins.
+    assert!(
+        depth_body.contains("let pulled = p * max(seated_dist - lift, 1e-3) / max(seated_dist, 1e-3);"),
+        "the lift must move the seated point toward the camera along its view ray"
+    );
+    // The vertex path tells the fragment which vertices were pinned; skinned draws never are.
+    assert!(
+        shader.contains("@location(7) conform_w: f32,")
+            && shader.contains("conform_w = 1.0;")
+            && shader.contains("vec3<f32>(0.0), vec3<f32>(0.0), uv, instance, 0.0);"),
+        "conform_w must be 1 for pinned (conform_sel 2) vertices and 0 for skinned draws"
+    );
+    // Pipeline selection: Offset::Decal, plain path, knob on -> fs_surface; nothing else.
+    let this = include_str!("mod.rs");
+    assert!(
+        this.contains("let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {")
+            && this.contains("entry_point: Some(fs_entry),"),
+        "only OnSurface plain-path colour pipelines may take the frag_depth entry point"
+    );
+    // The prepass never sees a Decal draw, so its fs_prepass twin needs no depth agreement.
+    assert!(
+        this.contains("&& self.offset == Offset::None") && this.contains("(\"depth_bias\", 0.0),"),
+        "prepassed() must keep excluding Offset::Decal, or the prepass depth would disagree"
+    );
+    // The heightmap group must be visible to the fragment stage, or wgpu rejects the pipeline.
+    let conform_layout = this.find("label: Some(\"wgr_3d_conform_layout\"),").expect("conform layout");
+    let conform_layout = &this[conform_layout..conform_layout + 1200];
+    assert_eq!(
+        conform_layout.matches("visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,").count(),
+        2,
+        "both conform bindings (heightmap + params) must be VERTEX_FRAGMENT"
+    );
+    // The lift constant is published to the shader.
+    assert!(
+        this.contains("(\"pixel_lift\", road_pixel_lift() as f64),") && shader.contains("override pixel_lift: f32 = 0.02;"),
+        "WGR_ROAD_PIXEL_LIFT must reach the pixel_lift override"
+    );
+    // Default ON; 0 is the vertex-only A/B arm.
+    if std::env::var("WGR_ROAD_PIXEL_CONFORM").is_err() {
+        assert!(road_pixel_conform(), "the fix ships on; WGR_ROAD_PIXEL_CONFORM=0 is the A/B arm");
+    }
+    if std::env::var("WGR_ROAD_PIXEL_LIFT").is_err() {
+        assert_eq!(road_pixel_lift(), 0.02, "a few centimetres, not metres: the owner has seen roads through mountains");
+    }
+    // Announced through the GAME log (queued in Gfx3d::new, drained by render_frame), naming
+    // the knob, so a captured screenshot can be matched to its arm. Not stderr.
+    let line = road_pixel_conform_log_line();
+    assert!(
+        line.contains("WGR_ROAD_PIXEL_CONFORM"),
+        "the log line must name the knob, got: {line}"
+    );
+    assert!(
+        this.contains("queued_log: vec![road_pixel_conform_log_line()],")
+            && !this.contains("eprintln!(\"{}\", road_pixel_conform_log_line()"),
+        "the announcement must ride the queued game log, not eprintln!"
+    );
+    let lib = include_str!("../lib.rs");
+    assert!(
+        lib.contains("for line in self.gfx3d.take_queued_log() {"),
+        "render_frame must still drain the queued log into the LogSink"
     );
 }
 
