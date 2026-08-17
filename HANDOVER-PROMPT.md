@@ -1,470 +1,193 @@
-# Handover — paste this whole file into a fresh session
+# Handover — what is still open after 2026-08-17
 
-> **WHERE THE WORK IS.** Branch **`feat/texture-streaming`**, in the worktree:
->
-> ```
-> C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\.claude\worktrees\texstream
-> ```
->
-> **Work there, not in the main checkout.**
+Branch **`feat/texture-streaming`**, worktree
+`C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\.claude\worktrees\texstream`.
+Push to `safety` (private mirror) after every milestone. HEAD at the time of writing: `cb2736f`.
 
-## Where to push
+Deployed binary: **12:02, 2026-08-17**. Reforger game data re-exported **11:34** (rollback tree at
+`D:\reforger-p3d-backups\<timestamp>\`, robocopy line in `%TEMP%\rf\reexport-*\`).
 
-**Push after every milestone. Never let work sit uncommitted — an unattended crash with hours of
-uncommitted work is the one genuinely unrecoverable outcome here.**
+---
 
-```
-git push safety feat/texture-streaming
-```
+## Ground rules learned the hard way this session
 
-| remote | URL | use |
+1. **Never run `.tmp-shadow/capture-arms.ps1` while the owner is playing.** Its cleanup does
+   `Get-Process ColdWarAssault | Stop-Process -Force` — it will close his session.
+2. **Subagents get killed mid-edit by the usage session limit.** When that happens: save
+   `git diff -- <their files>` to `.tmp-shadow/wip-patches/`, stash so the build is clean, and
+   respawn with a brief that starts "run `git diff`, read the untracked files, finish it".
+   Old agent IDs are NOT resumable after a session rollover.
+3. **PowerShell 5.1 + `$ErrorActionPreference='Stop'` turns any native stderr line into a
+   terminating error.** Call tools as `& $exe @args 2>&1 | ForEach-Object { "$_" }`.
+4. **`--test-world-max-objects N` truncates the world**: it keeps the first N placements in file
+   order, and file order is spatial, so whole regions get no objects. Chernarus places 2,971,218.
+   It is a triage lever, never a performance setting — streaming already bounds what is resident.
+5. **Score the region, and score consecutive frames.** A 30-frame gap measures wind, not flicker;
+   an empty-scene control (0.01%) is what makes a grass number mean anything.
+
+---
+
+# OPEN — in the owner's priority order
+
+## 1. Card grass still flickers ~3.5x more than procedural blades
+
+**Measured** (Takistan `6970.40 5700.31 352.57 az 20 el -18`, hour 12, consecutive frames 900/901,
+fraction of grass pixels changing by >48/255 — the popping signature, not sway):
+
+| arm | >24 | >48 |
+|---|---:|---:|
+| empty scene (control) | 0.02% | 0.01% |
+| procedural blades | 7.66% | 0.83% |
+| cards, before today | 13.05% | 4.77% |
+| **cards, shipped now** | **7.72%** | **2.89%** |
+| cards with `WGR_GRASS_CARD_A2C=0` | 16.49% | 10.16% |
+
+So: alpha-to-coverage is load-bearing (do not turn it off), density was the biggest lever
+(`photoCoverage 0.24`, `photoCoverageAuto=false` now default), and **2.89% vs 0.83% is what is
+left**. Evidence `.tmp-shadow/cards{4,5,6,7}/`.
+
+**Next step, cheapest first:** `photoCardScale` is still 1.0 and our card is 2-3x the plate area
+of the Arma clutter plant it stands for — try 0.5 and re-score; then the per-slice alpha-edge
+report already logged at atlas upload (`Wgpu grass atlas alpha edges ... worst first`) names the
+varieties whose masks have the ragged edges, and the owner has said before that a single variety
+stopped the flicker. `photoSelfShadow=0` in the Grass tab isolates the CSM grass-on-grass term,
+which was never ruled out.
+
+## 2. Reforger buildings: roofs with no walls
+
+Not the sink and not the culling. The walls are **prefab children the exporter never produced** —
+`13,449 placements skipped: prefab resolves to no converted model`. Owner pose
+`4875.35 6954.80 181.51 az 282 el -15`. This is exporter coverage work in `XobCommand.cpp`
+(`xob export` resolves prefabs to models; the children of a prefab are not walked).
+
+## 3. Reforger "buildings render depending on the viewing angle"
+
+Owner pose `1222.42 6003.50 40.35 az 339 el -10.7`. **Not reproduced from a static capture** —
+both the default and `WGR_GPU_OCCLUSION=0` arms drew the building fine
+(`.tmp-shadow/reforger/cull/`, `.tmp-shadow/reforger3/owner-cull.png`). The normal/winding fix
+and today's UV fix may have removed it. **Ask the owner to re-check before investigating.**
+
+## 4. Reforger near trees stuck on a coarse LOD
+
+Registration hypothesis is refuted (618 models log `lod=0`). The LOD governor remains the
+suspect: `Scene::AdjustComplexity` drives `_lodInvWidth` over a 16x range from **wall-clock**
+frame time, and the GPU is a small share of the Everon frame, so it strips detail chasing time it
+cannot recover. `WGR_LOD_GOVERNOR_TARGET=1` measured +36% on Everon but was never shipped as a
+default because one world is not enough. **Three arms (Stratis, Chernarus, Sahrani) and it can
+ship.** The proper fix is to feed the loop GPU frame time (`Engine::GetWaterGpuTimings` exposes
+it) in `SceneDraw.cpp`.
+
+## 5. Streaming: the last stall lever
+
+Today: moving throughput 20.2 -> **28.9 fps**, p95 216 -> **47 ms**, frames >100 ms 391 -> 160
+(one binary, `.tmp-movecam/out/everon-vehicle30-texstream{,-off}/`). Still open:
+
+- **160 frames over 100 ms remain.** The split row (`Object stream cold model: ... [reg= mesh=
+  sect= tex= ffi= prox=]`) now says exactly where each cold model's time goes — read it before
+  choosing the next lever.
+- `WGR_OBJECT_STREAM_REGISTER_MS` (a per-frame GPU-registration budget with placeholder draws)
+  was deliberately NOT implemented: it means deferring `AddObject`, i.e. an object-lifetime
+  change. That is the next lever if `reg` still dominates.
+- Worker texture prepare does **not** cover `.emat`/`.rvmat`-resolved maps (nohq/spec/mask) —
+  they are not in the IR. `prep=` vs `up=` in the log measures the uncovered share honestly. A
+  worker-safe emat text reader would close it.
+- **Static frame rate went 39.3 -> 34-35 fps** on Everon. The OFF arm is 34.1, so it is NOT the
+  streaming code: it is the corrected data (leaves now sample real 1024^2 textures instead of one
+  texel; every model now carries a geometry LOD). Price of correctness, but if it is worth
+  clawing back, that is a texture-residency question, not a streamer one.
+
+## 6. Collision — shipped, NOT yet walked
+
+Everon: 516 of 549 models report `passable=0` (`WGR_COLLISION_STATS=1`); the 33 left are
+bushes/decals/litter, which do not block in Reforger either. A1/A2/A3/DayZ got mass from the ODOL
+readers. **Nobody has actually walked into a wall in any generation.** That is the acceptance
+test, and it is the owner's original complaint.
+
+## 7. Arma 2 roads: the near ribbon is patchy
+
+The white/see-through/night-glow half is fixed and verified
+(`.tmp-shadow/road-gpu-vb/ridge-prebuild/{default,legacy}.png`). What remains: the near dirt road
+is patchy and partly under the terrain, and `WGR_CONFORM_RASTER=1` moved nothing
+(`.tmp-shadow/road-gpu-vb/ridge/{default,raster}.png` are identical). So the conform is not the
+mechanism for the patchiness — look at the road's own geometry/decal blend instead.
+
+## 8. Black triangular wedges inside Arma 2 buildings
+
+**The owner ranks this last.** Pose `6761.87 6022.92 303.94 az 18.4 el -1.9`. Inside a wedge the
+value is exactly `(0,0,0)` — the scene clear colour — while genuinely shadowed wall 5 px away
+reads 27-55. Refuted: GPU occlusion, GTAO, sky bake volumes, prepass skinned-VS mismatch,
+colour/prepass LOD divergence. **Stop hypothesising: read back the prepass depth and the colour
+depth at a wedge pixel** (or draw the colour pass with depth test ALWAYS as an arm) and dump which
+record wrote it.
+
+## 9. Sunlit walls blow out — PAUSED at the owner's request
+
+Local overexposure on a lit surface; auto-exposure meters the whole frame so it cannot fix it.
+Look at diffuse/specular response and whether the tonemap shoulder rolls off at all at the top.
+Related: materials may carry values the shading model treats as absolute radiance
+(`forcedDiffuse` folded into `sun_ambient` on the direct path).
+
+## 10. Smaller / unverified
+
+- **Photo grass "mix" slider** reconnected today (0% = one variety) — never seen in a run.
+- **Blade shading options** (self-shadow, contrast, hue variation, root shade) ship at
+  defaults that reproduce the old look exactly — unverified by eye.
+- **Reset-to-defaults buttons** on every dev-panel tab — unverified by eye.
+- **A3 tree sway calm floor** (`WGR_TREE_SWAY_CALM_FLOOR=0.5`) — shipped, never seen.
+- **Cockpit translucency**: "visual confirmation still inconclusive" from 2026-08-16;
+  `WGR_COCKPIT_FORCEALPHA_LEGACY=1` is the A/B, repro `scripts/cockpit-capture.ps1`.
+- **Stones transparent from one side** (MAT-047 partial-alpha granite) — untouched.
+- **Auto-exposure pumping on camera turns** — never measured; `scripts/farfield-movecam.ps1`
+  exists and would score frame-to-frame luminance delta. If it pumps, narrow Min scale first.
+- **Moonlight amount** and **iris/eye adaptation** — shipped 2026-08-16, owner has not judged.
+- **Underwater system** — disabled by default (`Engine.hpp` `underwaterEffect=false`), owner
+  calls it "not good at all", low priority. Turn it on and capture before changing anything;
+  `WGR_WATER_DEBUG_UNDERWATER_EXTINCTION` / `..._INSCATTER` isolate the two halves.
+- **DayZ performance** ("performance is lacky") — never measured on Chernarus. Use
+  `scripts/farfield-movecam.ps1`, and drop `--test-world-max-objects` (see trap 4).
+- **Reforger roads** — NOT a bug: Everon's roads are World Editor splines with no mesh in the
+  pak corpus. It is a missing feature, not a broken one.
+
+---
+
+# Worlds and commands
+
+| world | `-World` | extra |
 |---|---|---|
-| **`safety`** | `https://github.com/koosoli/PoseidonWGPU-private-safety-mirror.git` | **Default. Push here, freely and often.** Private mirror. |
-| `origin` / `poseidon-wgpu` | `https://github.com/koosoli/PoseidonWGPU.git` | The real repo. **Only push here if the owner asks.** |
-
-Commit messages on this branch carry the measurement and the reasoning, not just the change. Match
-that. If a number is in the message it must come from a run, not an estimate.
-
-## How to talk to the owner
-
-**Be concise and plain. He has said so directly, twice.**
-
-- Lead with **what is fixed** and **what is not**, as a short list or small table.
-- When something is not done, say **why** in one line.
-- Prove fixes with a **picture or a number**, not a description.
-- No walls of text, no narrating your process, no repeating the diagnosis he already has.
-- If you were wrong about something earlier, say so in one sentence and move on.
-
-He does not want root-cause essays. He wants working software and a straight answer about its state.
-
----
-
-# THE ONE INSTRUCTION THAT OVERRIDES EVERYTHING ELSE
-
-**The owner's words: "i do not care about finding root causes, i want it fixed."**
-
-The previous session was good at diagnosis and bad at shipping. It produced eleven root causes and
-**four** user-visible fixes. Almost everything below is already diagnosed to a file and a line —
-your job is to **apply the fix, build it, verify it with a capture, and confirm it to the owner
-with a picture or a number**. A root cause with no shipped fix is worth nothing to him.
-
-Rules that follow from that:
-
-1. **Do not re-diagnose anything in the "READY TO SHIP" list.** The work is done. Ship it.
-2. **Every item ends in a deployed binary and a verification capture**, not a decision record.
-3. **Use subagents aggressively and in parallel** — the owner asked for this explicitly. Rules that
-   made them work last time: disjoint file ownership stated in the brief, who else is editing right
-   now, **DO NOT BUILD / DO NOT RUN THE GAME** (you own the machine, they hand you env + poses),
-   and **ask for null results explicitly**. The most valuable outputs last session were agents
-   refusing the premise they were handed.
-4. **Do not stop.** If an item is blocked, move to the next and come back.
-
----
-
-# NIGHT OF 2026-08-16/17 — what moved (read this before the older sections below)
-
-Measured on the deployed binary unless stated. Commits: 530c5bd (orphaned foam work committed),
-fb3d83b (card grass grid + A2C, roads `WGR_ROAD_GPU_VB` lever).
-
-| item | state | proof |
-|---|---|---|
-| §6 streaming stall, 30 m/s Everon traverse | **measured**: moving throughput 11.9 → **22.5 fps**, worst 1555 → 575 ms, frames >250 ms 169 → 35, wall in >100 ms frames 77% → **53%**; static unchanged 39–40 fps | `.tmp-movecam/out/everon-vehicle30-cache/` vs `everon-vehicle30/`; `python scripts/farfield-frametimes.py <log>` |
-| §4 Arma 2 roads | **section 4 below is stale** — 94e9ebb (16th, 09:33) already re-routes RoadType; verified tonight on Takistan ridge pose: default `ROAD_CPUPATH=0`, road lit/grey and occluded by the ridge; legacy arm white + through the hill. Residual: near dirt road patchy, partly under the terrain | `.tmp-shadow/road-gpu-vb/ridge-prebuild/{default,legacy}.png` |
-| card grass flicker/density | fb3d83b: cards on own 1.11 m grid + alpha-to-coverage (`WGR_GRASS_CARD_SPACING`, `WGR_GRASS_CARD_A2C`). The "A2C ordering" note below was wrong: there WAS no A2C. Capture pending in `.tmp-shadow/cards/` | commit message |
-| house origins (§2) | re-export ran 21:23; `houses.png` post-export shows the house on grade but there is no before-arm; owner to judge | `.tmp-shadow/reforger/houses.png` |
-| collision (walk through walls, all non-OFP) — **NEW owner report** | agent work in progress (P3D readers + ShapeAdapter geometry LOD/components) | — |
-| Reforger `.emat` / BCR alpha / rock `map` property | agent work in progress | — |
-| grass panel: 0.24 default coverage, photo-mix slider dead, self-shadow/contrast options; dev-panel "reset to defaults" per tab | agent work in progress | — |
-| Arma 3 trees no wind sway; Reforger rocks sway | agent work in progress (leading hypothesis: b299a1e's map-type resolver does not recognise A3 tree ODOLs) | — |
-
-Owner's remaining list from tonight, not yet started: DayZ towns missing = `--test-world-max-objects 100000` truncates placements (use 0, plus `WGR_OBJECT_STREAM_MAX_OBJECTS=200000`, `WGR_TEXTURE_MIP_BIAS=1`); Reforger buildings culled by view angle at `1222.42 6003.50 40.35 az 339 el -10.7` and still partly in the ground; Reforger near-tree LOD; the streaming residual (single cold model decoded synchronously — needs async admission).
-
-**Two agents died on the session limit at ~22:15 mid-edit; their partial diffs are saved in
-`.tmp-shadow/wip-patches/` and re-applied to the tree; fresh agents were started at 01:05.**
-
-# READY TO SHIP — diagnosed, fix known, NOT yet delivered
-
-## 1. Reforger rocks show only their backside — HIGHEST CONFIDENCE FIX IN THIS FILE
-
-**Every Reforger model has its vertex normals AND its triangle winding inverted, together.**
-Measured absolutely (does a stored normal point away from the centroid on a closed solid):
-`graniteboulder_01` 5156/5156 faces outward, `graniteboulder_02` 3732/3732,
-`granitebeachstone_01/02/03` 3874/3874, 3526/3526, 2298/2298. `.xob` normals are **outward**; this
-engine's are **inward** (`MeshBuild.cpp:43-44` negates on the way to the GPU while
-`shader3d.wgsl:226` declares the result "outward"; `Odol73.hpp:1004-1009` decodes ODOL with a
-deliberate negative scale whose comment says dropping it "would flip every normal in the model",
-while `XobModel.hpp:115-117` uses a positive one).
-
-**The fix already exists and is default-off:** `XobCommand.cpp` `--fix-orientation` /
-`XOB_FIX_ORIENTATION=1`. It negates the written normal **and** swaps corners 0/1 — deliberately one
-flag, because either alone trades one wrong for the other.
-
-**What you must do:** rebuild `PoseidonTools`, back up the rock `.p3d` tree, re-export the rocks
-with the flag, copy over the game tree, capture, confirm. The tool now prints `nrm <f> out` per
-model — **without the flag it prints 1.00, with it 0.00.**
-
-```
-PoseidonTools xob convert "<Reforger>\addons" -f "rocks/granite" -o <scratch> `
-  --virtual-prefix "reforger\everon\models" -n 200 --fix-orientation --textures
-```
-Capture at a rock field: `--test-world-freefly 3800 7960 4 40 -5`
-(8,981 `granite_cluster_01` around 3810.6/7974.0; 10,853 `granitebeachstone_01` around 4420.9/9307.3).
-**Expected: rocks become solid, correctly silhouetted, and lit bright on the sunlit side.** If they
-become solid but *dark* on the sunlit side, only the winding half took.
-
-**Free pre-check, no run needed:** the shadow pipeline is already `cull_mode: None`
-(`gfx3d/mod.rs:4429-4431`). In any existing Everon capture, if the rocks' *shadows* are solid and
-correctly shaped while the rocks are see-through, this is confirmed before you launch anything.
-
-## 2. Reforger buildings partly in the ground — SAME SHAPE, SAME CONFIDENCE
-
-A converted `.p3d` carries no named properties, and `autocenter` defaults **ON** when absent, in
-both implementations (`Model.cpp:64-108` and `ShapeLOD.cpp:413-441`). It subtracts the bbox centre
-from every vertex and records the offset nowhere; `ShapeAdapter.cpp:723-745` restores
-`_boundingCenter` only for `sourceFormat == "ODOL"`. Nothing puts it back, because
-`LandSave.cpp:2467` passes `preserveAuthoredElevation` for OPRW25, so the one place that re-grounds
-the authored origin never runs.
-
-Measured sink, LOD0 point table: `shophouse_e_2i01t` **4.83 m**, `house_prefab_2i02t` 3.71,
-`farmhouse_e_1l01` 3.38, `garage_e_01` 1.07, `birdhouse_01` 0.01. The negative minima are foundation
-skirts, and across 304,035 placements the median of (object Y − terrain Y) is **−0.004 m** — the
-authored Y already puts the *origin* on the ground. That is exactly "lots of buildings are partly in
-the ground", including which ones.
-
-**Fix exists, default-off:** `--fix-origin` / `XOB_FIX_ORIGIN=1` writes `autocenter=0` on every LOD.
-Re-export `-f "structures"`, capture at `--test-world-freefly 4535 10760 20 50 -3`.
-**Expected: each building rises by exactly its printed `originY`; flat props must not move at all.**
-
-## 3. Cockpit body is translucent — root cause found, POLICY DECISION NEEDED THEN SHIP
-
-The owner corrected an earlier misreading: **it is not the glass**, it is the solid cockpit body.
-
-`TextureWgpu::Init()` (`TextureWgpu.cpp:616-620`) calls `_src->ForceAlpha()` for **every**
-ARGB4444/AI88/ARGB8888 texture, overriding the FLAG tagg that MAT-047 established is the only real
-alpha signal. So `ShapeSetup.cpp:727-732` stamps `IsAlpha|IsAlphaOrdered`, the descriptor becomes
-`AlphaBlend`, and `ClassifyAlpha`'s ≥2%-partial rule returns **Blend**. Measured on `oh58.pbo`:
-**28 of 44 textures classify Blend — the solid body** — with mean alpha `kiowa_insidtga` 10/255,
-`kiowa_inspanl` 11, `kiowa_in_doors` 12, `kiowa_inspanr` 23. The Kiowa interior is being submitted
-alpha-blended at 4–20% opacity.
-
-**The blend-depth change shipped last session made the symptom worse** (honest finding from the
-agent that wrote it): with depth-write on, the first blend section occluded the rest so you saw one
-translucent layer; with it off, all 28 composite. `WGR_COCKPIT_BLEND_LEGACY=1` is the A/B.
-
-**Why it was not fixed:** the authored data offers no clean discriminator — the Kiowa's *real* glass
-(`oh58_sklotest*`) has no FLAG tagg either, so simply gating on FLAG would turn the side windows
-opaque. **That is a judgement call, and it is yours to make and ship.** A defensible approach:
-gate on FLAG *and* keep a texture-name or alpha-histogram escape for genuine glass.
-
-**Repro exists:** `scripts/cockpit-capture.ps1` (already written and verified against the SQS
-commands). A free camera inside a helicopter does **not** show a cockpit —
-`World.cpp:1568-1570` selects the cockpit LOD only when `obj == camInsideVehicle`, so the script
-seats the player. **Run it; it has never been run.**
-```powershell
-.\scripts\cockpit-capture.ps1 -Label kiowa-new    -Vehicle OH58
-.\scripts\cockpit-capture.ps1 -Label kiowa-legacy -Vehicle OH58 -Env @{ WGR_COCKPIT_BLEND_LEGACY='1' }
-.\scripts\cockpit-capture.ps1 -Label kiowa-gl33   -Vehicle OH58 -Backend gl33
-```
-GL33 has the identical `ForceAlpha`, so it should show the **same** translucent cockpit. If GL33 is
-clean, the whole diagnosis is wrong.
-
-## 4. Arma 2 roads — root cause proven, current fix is not shippable, better fix named
-
-**Roads never run the 3D shader.** `ShapeDraw.cpp:503-506` denies a vertex buffer to any
-`OnSurface` shape, `RoadType` sets `OnSurface` on every road of every generation, so `_buffer` is
-always null, the T&L gate fails, and the road goes to `EngineWgpu::DrawSection(FaceArray&)` which
-converts to **screen space** and submits to the **2D pipeline** — `textureSample * color` mixed
-toward fog. No lighting, no sRGB decode, no conform. One fact explains white-by-day (gamma-space
-colour into an HDR target, ~2.3× at mid-tones), glow-at-night (legacy CPU lighting double-exposed),
-see-through (nothing conforms the road), and why `ROAD_TRACE` never matched a road.
-
-`WGR_ROAD_CPU_SPLIT=1` **works and is verified**: `ROAD_CPUPATH` 42→0, `ROAD_TRACE` 68→320, road at
-night (41.9,42.1,45.7)→**(0.1,0.1,0.1)** against terrain's (0.2,0.2,0.1). But it renders the near
-road as a **dark scalloped, segmented ribbon** — the CPU `SurfaceSplit` emits one piece per terrain
-triangle and they shade inconsistently — and it allocates a unique `Shape` + vertex buffer per
-visible placement. So it stays default-off.
-
-**The fix to ship instead:** let roads **keep** a vertex buffer and be GPU-conformed like everything
-else — remove `OnSurface` from the `optimizeHW` deny at `ShapeDraw.cpp:503` and let the existing GPU
-conform handle it. `WGR_CONFORM_RASTER=1` (already implemented) makes that conform agree with the
-rasterised terrain lattice. No CPU split needed. **This is the highest-value unshipped road work.**
-
-## 5. Auto-exposure is default-ON — verify it does not pump, then it is done
-
-Shipped this session at the owner's request. Measured: Takistan hour 8 worst-clipping pose,
-mean luminance 155.1→123.9 and **23.17%→0.59%** of pixels clipped; Stratis 10.62%→0.17%. Controls
-are in the dev panel **Tonemap** tab, including a new framerate-independent "Adapt time (s)"
-(`ExposureSettings::rateTau`, default 0.4 s; `rate` was per-frame and adapted twice as fast on a
-45 fps world as a 20 fps one).
-
-**The one untested risk is pumping on camera turns — the exact reason the original author disabled
-it.** A still capture cannot show it. Run `scripts/farfield-movecam.ps1` (30 m/s and 5 m/s arms
-already exist) and score frame-to-frame luminance delta. If it pumps, **narrow Min scale first** —
-0.55..1.10 measured within 0.2% of the full 0.25..4.0 range, so almost all the benefit survives a
-much narrower band. Turning it off is the last resort, not the first.
-
-## 6. Streaming stall — implemented, never measured
-
-The owner's 4 fps is **vehicle-speed only**: 30 m/s gives a median second of **4 frames**, 5 m/s
-gives 46.6 fps (*faster* than standing still). Median frame time barely moves (25.0→24.0 ms); all
-damage is in the tail, 74% of wall time inside frames >100 ms. Cause: residency recentres on a
-4-cell quantised boundary, the set is already at cap, there is no cache ("what the camera left
-behind must be rebuilt"), and a mandatory floor of 128 admits makes the 4 ms budget unreachable.
-
-A shape-level eviction cache, velocity prefetch and an admission ceiling are **implemented and
-default-on** (`WGR_OBJECT_STREAM_EVICT_CACHE=256`, `WGR_OBJECT_STREAM_MAX_MS=16`,
-`WGR_OBJECT_STREAM_PREFETCH_SECONDS=2.0`, `WGR_OBJECT_STREAM_PREFETCH_MIN_SPEED=8`). **Nobody has
-ever measured them.** Re-run the 30 m/s arm and compare against the numbers above. This is the
-owner's single biggest performance complaint — measure it.
-
----
-
-# SHIPPED 2026-08-16 (afternoon) — three owner items closed, one open
-
-## R0. Self-illuminating trees at night — FIXED, all generations (d727de7 + 7329f43)
-
-**The previous handover's verdict was wrong.** It declared the trees fixed on a "0 pixels ≥ 200"
-threshold; the same capture at any lower threshold, and the `WGR_AUTO_EXPOSURE=0` arm, still
-showed dead trees at ~150/255 and canopy at ~60 against terrain at 0.2. **Exposure was never the
-cause.** The `emmisive` lane in the imported corpora is fixed-function brightness compensation
-(Arma 2 OA vegetation `{2.6,2.3,2.0}`, the Arma 3 pine crown `1.0`) and both shading paths turned
-it into source radiance (retained: `* 0.10`; direct: peak-clamped to 1.0 = white).
-
-Fix: every material's emissive is multiplied by a **sun-only daylight factor** unless the CPU
-marked it a light fixture (`MaterialEmitsAtNight` in `EngineWgpu.cpp`: the `\lamps\`, `\lights\`,
-runway, warning families + `okn*`/`window`), carried as `WGR_DRAW3D_NIGHT_EMITTER` (bit 2 of the
-per-draw `normal_map.w` bitfield) and `WGR_MODEL_SECTION_NIGHT_EMITTER` (retained section flags bit
-1). `WGR_EMISSIVE_NIGHT` defaults to 0 and reaches the GPU-driven pipeline; `=1` is the A/B back.
-The daylight factor is CPU-published in `sun_dir_world.w` because the old shader proxy (peak of
-`sun_diffuse`) counted the MOON as 40% daylight and re-lit the trees under a full moon.
-
-Measured (scene region, pixels ≥ 100): Takistan hour 0 **3518 → 73** (the 73 are stars); Stratis
-hour 0: pale trees gone, the village's real street lamps still lit. `.tmp-shadow/nightfix*/`.
-**If the owner names a lamp or a lit window that went dark, add its path fragment to
-`MaterialEmitsAtNight` — that is the whole mechanism.**
-
-## R1. Sea level rose (Arma 3) — FIXED (99f05b4)
-
-It was OFP's **tide**: `Landscape::Simulate` sets `_seaLevel = maxTide(5 m) * (sunDir.y² +
-moonDir.y²)/2`, so a summer noon puts the sea 2–3 m up. CWA's islands were built for it; Arma
-1/2/3, DayZ and Reforger have no tide and author their coasts to a sea at 0. It became visible
-when f88f0ea put the moon on a real ephemeris and moved the moon half of the term.
-`LoadOprwModern` now clears `Landscape::_tidal`; every substituted world holds the sea at 0, CWA
-is unchanged. The log prints `Sea level: tidal=... -> N m` once per kind of world.
-Evidence: `.tmp-shadow/sealevel/pier-compare.png` (Agia Marina breakwater, before/after).
-
-## R3. Moonlight — SHIPPED (7329f43), owner has NOT yet judged the amount
-
-The lighting path already existed (f88f0ea); what was missing: (1) `SceneDraw.cpp` skipped the
-cascade depth pass at full night, so **no moon shadows by construction** — gate is now
-`max(1 - NightEffect, MoonLightAmount())`; (2) colour read brown on Takistan — now `0.50/0.66/1.10`
-at `moonIntensity 0.09` (was 0.06), moon-facing slopes ≈ 10/255 vs 0.2 without moon; (3) water
-needed nothing — it already reads `sun_dir_world`/`sun_diffuse`, which ARE the moon at night, and
-the planar reflection shows the disc.
-Verified: `.tmp-shadow/moon4/` (tree shadows on/off with `WGR_SHADOW_MAPS`), `moon6/` (sea).
-Levers, no rebuild: `WGR_MOON_AZEL=az,el`, `WGR_MOON_PHASE=1`, `WGR_MOON_BRIGHT=k`, `WGR_MOON_LIGHT=0`.
-**Open:** the owner asked for "not much but a little" — he was flying a forced-moon Stratis session
-when this was written. If he wants more/less, `Engine::SkySettings::moonIntensity` and the three
-colour multipliers in `EngineWgpu.cpp` (search `Purkinje`) are the knobs.
-
-## Also shipped 2026-08-16 evening (all verified with captures, all pushed to `safety`)
-
-| commit | what | proof |
-|---|---|---|
-| d01a55e | moon light gain 4x, separated from the disc (`moonLightGain`, `WGR_MOON_LIGHT_GAIN`); tonemap `linear_white` lever (`WGR_TONEMAP_WHITE`) | owner: "i liked what you just had with gain 4" |
-| 97d5024 | cockpit body opaque again: format-forced alpha demoted by histogram SHAPE, glass-named textures exempt (`WGR_COCKPIT_FORCEALPHA_LEGACY=1`) — **visual confirmation still inconclusive**, `.tmp-cockpit/out/kiowa-{fix,legacy}` | corpus census in the commit; the handover's "mean alpha 10-23" was PARTIAL %, not mean |
-| df3a778 | legacy emissive is not radiance at ANY hour (dawn re-lit the trees) | `.tmp-shadow/dawn/{fixed,legacy}.png` |
-| 19f4d11 | grass source selector: `GrassSettings::clutterSource` 0 Auto (map's own clutter where the map built an atlas) / 1 procedural / 2 cards; panel shows "ON SCREEN NOW"; `WGR_GRASS_CLUTTER_SOURCE`. Owner still calls the card path "flickering" (open: A2C ordering, not coverage) | `.tmp-shadow/dawn/grass-compare.png` |
-| bf21c92 | **grey rectangles on Multi walls** (owner: A2/A3/DayZ): mask is on `tex1` — second UV set now flows loader→VertexTable→SVertex/WgrMeshVertex (60→68 B, `uv1` @location(7))→`WGR_MODEL_SECTION_MASK_UV1`; AND binarised rvmats store `texGen` as a STRING so no stage ever linked its TexGen (layer scales were all 1.0 too). Witness test `WGR_TEST_RVMAT=<raP file>` | `.tmp-shadow/greywall3/compare.png`; log now `mask uvSource=tex1`, `uv scales 1.0 2.0 1.5 1.0` |
-| 7a21c8f | **tree leaves only near**: cutout mip alpha lifted per LOD (`mip_alpha_boost`, k=0.5, `WGR_CUTOUT_MIP_ALPHA`), applied in fs + all prepass twins | `.tmp-shadow/leaves2/compare.png` |
-
-Still open from the owner's list: **sunlit-wall blow-out (paused at his request)**, **card-grass flicker**, and the READY-TO-SHIP Reforger items — the re-export script is written and dry-run clean at `.tmp-shadow/run-reforger-reexport.ps1` (rebuild target `PoseidonTools`, exe is stale), it has just not been run. Item 6 traverse: `.tmp-movecam/run-vehicle30-cache.ps1` is the corrected wrapper (the `-Start` array trap), baseline pre-cache was 11.9 fps / 77% wall in >100 ms frames.
-
-## Reforger — state after 2026-08-16 evening
-
-**Re-export RAN** (script `.tmp-shadow/run-reforger-reexport.ps1`, pass `-PoseidonTools <abs exe>` — `$PSScriptRoot` is empty under `-File`): 30 rocks + 702 structures re-exported with `--fix-orientation --fix-origin --textures`, installed over the game tree, **backup at `D:
-eforger-p3d-backups60816-212305`** (rollback robocopy line is in the log `%TEMP%
-f
-eexport-20260816-212305\`). Closed solids read `nrm 0.00 out` as promised; clusters/cliffs and hollow houses read >0 because the centroid metric is not diagnostic for non-convex shapes — do not chase that number.
-- **Rocks: fixed and seen** — solid, sun-lit, `.tmp-shadow/reforger/rocks.png`.
-- **House origins: shipped, NOT verified** — no before-shot at the same pose. A/B = rollback dir vs game tree at `--test-world-freefly 4535 10760 20 50 -3`.
-- **Grass on Everon: fixed** (single catch-all layer, `65536/65536` cells) — probably too dense/tall for Everon; tune, do not re-diagnose.
-- **Owner's building at 4875.35 6954.80 181.51 az 282 el -15 (roof, no walls)**: NOT the sink — the walls are prefab children the export never produced (`13449 placements skipped: prefab resolves to no converted model`, and 845 MatPBRMulti bound one library tile). Exporter coverage work.
-- **Owner's near trees at 5157.37 6968.01 185.53 az 250 el -12 (big flat leaf polygons)**: the model's finest LOD is what it is (alder `2f`: 1215→6 faces over 5 LODs); the leaves are solid planes because Reforger foliage OPACITY lives in the `.emat` (`MaskMap` / BCR alpha — "BCR alpha varies in 1112 of 1312 albedos. Nothing binds it") and `TranslateEmat` reads DayZ keys. The 140 cutout masks the exporter did write are the exception. **This is the `.emat` reader project the previous handover named; it is the whole of Reforger vegetation.**
-
-## R2. Sunlit walls blow out — OPEN, owner explicitly dislikes it
-"the sun when it hits a surface like a wall from a house, it can totally overexpose it... this i do
-not like." This is *local* overexposure on a lit surface, not the global sky white-out that
-auto-exposure already fixes. Auto-exposure meters the whole frame (log-average), so a single bright
-wall does not move it much. Look at the material/lighting side: specular or diffuse response on a
-sunlit wall, and whether the tonemap shoulder is doing any roll-off at all at the top end. Same
-family as R0: materials may carry values the shading model treats as absolute radiance
-(`forcedDiffuse` on A3 materials is folded into `sun_ambient` on the direct path).
-
-## Harness trap that cost two runs
-A wrapper script invoked via `powershell -File` can get an EMPTY `$PSScriptRoot`, so
-`& "$PSScriptRoot\capture-arms.ps1"` silently resolves to `\capture-arms.ps1` and the whole run
-produces nothing. Call `capture-arms.ps1` with an explicit absolute path (the `run-*.ps1` scripts
-in `.tmp-shadow/` written this afternoon do). Also: **when the owner is at the machine he may move
-the camera during a capture** — he did once — so a still taken while he is present is not a pose.
-
----
-
-# OPEN — no root cause yet, do not assume the previous guesses
-
-## Black triangular wedges inside buildings (Arma 2, "seen in many buildings")
-
-**Owner's pose (2026-08-16): `6761.87 6022.92 303.94 az 18.4 el -1.9`, and he ranks it LAST — do the
-Reforger `.emat` reader, the card-grass flicker and the wall blow-out before this.** Two more
-hypotheses eliminated by reading (2026-08-16 evening), so do not spend on them: (a) "the prepass draws
-skinned objects with the unskinned VS" — `ensure_prepass_pipeline` has a `vs_skinned` variant keyed on
-`PrepassKey.skinned`; (b) "the colour cull picks a different LOD than the prepass cull" — both are
-built from the same `params_from_camera` inputs (`mod.rs` ~6489/6520), and with occlusion off the
-colour draw uses the prepass args verbatim, which is exactly the `WGR_GPU_OCCLUSION=0` null.
-**Stop hypothesising and measure**: the pixels are the clear colour, so at a wedge pixel read back the
-PREPASS depth and the COLOUR pass depth (or draw the colour pass with depth test ALWAYS as an arm): if
-the prepass depth is nearer than anything the colour pass draws there, dump which record wrote it
-(instance + section + LOD) — that names the mismatch in one run. The wedge shape (long triangles from
-ceiling to floor) reads as a coarse-LOD triangle, so log the LOD chosen for the house in each cull.
-
-Hard black wedges hanging down interior walls, one per roof beam. Inside them the value is exactly
-`(0,0,0)` — the scene target's clear colour — while genuinely shadowed wall 5 px away reads 27–55.
-
-**Two hypotheses tested and BOTH REFUTED.** Culling: `WGR_GPU_OCCLUSION=0` changed nothing (28.22%
-vs 27.40% base). Ambient occlusion: `WGR_GTAO=0` gave 27.90% against a predicted <3%, and
-`WGR_SKY_BAKE_VOLUMES=0` 28.04%. Note the two arms that *did* clear it (`WGR_PREPASS=0` → 0.07%,
-`WGR_GPU_DRIVEN=0` → 0.21%) are **confounded** — each removes several AO factors as well.
-Repro: `--test-world-freefly 6907.68 6017.04 313.98 187.2 -1.7 --test-world-hour 8`, hour 8,
-score exact-black inside x 200-1400 / y 105-790.
-
-## Orbs / "light posts look like white sticks" — OWNER CONFIRMS FIXED ON ARMA 3 (2026-08-16); Reforger unverified
-A ~16 m mast rendering at pure white, bloom turning the bar into a disc. **The slot-0 untextured
-fallback is REFUTED**: with `WGR_UNTEXTURED_ALBEDO=255,0,255` and even `...,all`, zero magenta
-pixels appeared while all 34 pure-white pixels survived — and the log proved the lever fired
-(`untextured-albedo correction is ON`). So these pixels are not sections resolving to bindless
-slot 0. Something else makes them white.
-
-Real and worth keeping: `EngineWgpu.cpp:2807-2817` logs "no bindable Stage0" and **never assigns
-`d.texture_id`**, so those sections do keep 0 and go to the white texel — it just is not what the
-owner is seeing. A per-draw UNTEXTURED warning now exists (the retained-path one could never name a
-lamp: the emitter bail at `:4450` rejects `\lamps\`, `lamphalogen`, `lamp_searchlight`, `\lights\`,
-`\runwaylights\`, `warninglight` before registration).
-
-**On Reforger, white may be correct-by-construction:** 100% of Everon materials are `.emat`, none
-opens, and `TranslateEmat` reads DayZ keys while only **2.2% of 10,312** real Reforger `.emat` files
-name any key it reads (the real ones are `BCRMap`, `NMOMap`, `MaskMap`). Fixing the `.emat` reader
-is the Reforger path and it is untouched.
-
-## Reforger near trees stuck on a coarse LOD — UNTESTED, my pose was invalid
-The registration hypothesis is **refuted** (618 models log `lod=0`, so fine LODs are registered).
-The governor test was **invalid**: the pose `7156 2450 alt 3` landed the camera *inside a structure*,
-where near geometry is naturally fine (`lod0=18158 lod1=22262 lod2=15983`, lod3+ = 0). **Re-run
-outdoors, in trees.** The governor remains the leading suspect: `Scene::AdjustComplexity` drives
-`_lodInvWidth` over a 16× range from **wall-clock** frame time, and on Everon the GPU is only 8.9%
-of the frame, so it strips detail chasing time it cannot recover. Levers with no rebuild:
-`WGR_LOD_GOVERNOR_TARGET=1`, `WGR_LOD_GOVERNOR_RANGE`. The proper fix is to feed the loop **GPU**
-frame time (`Engine::GetWaterGpuTimings` already exposes it) — that lives in `SceneDraw.cpp`.
-
-## Reforger roads do not render — NOT A BUG, it is a missing feature
-Everon's roads are generated by the World Editor from `RoadGeneratorEntity` splines and **have no
-mesh in the pak corpus**: of 51,452 GUIDs, 406 match "road" and only 6 are `.xob` (all `RoadBlock_01`
-props/markers); `ev_DALL.wrp`'s 1,123-model table contains **zero** road models. Every road fix on
-this branch is a no-op there. **Trap: `WGR_ROAD_TRACE` cannot help on Everon** — `ROAD_CPUPATH` is
-gated on `OnSurface|IsOnSurface`, which no Everon shape carries. Zero `ROAD_*` lines there is
-evidence of nothing.
-
-## Reforger "buildings look wrong from the inside"
-Not independently diagnosed. Fully accounted for by inverted normals + the 3–5 m sink. Re-check
-after shipping items 1 and 2 before opening a new investigation.
-
-## Reforger performance
-Unmeasured since the streaming work landed. See item 6.
-
----
-
-# TRAPS THAT COST REAL TIME — read before running anything
-
-1. **`--test-world-freefly` takes `X Z Y` — ALTITUDE LAST — while every log and the in-game readout
-   prints `(x, altitude, z)`.** Copying a pose from a log put a camera at 6099 m photographing
-   clouds, with no error. The owner's in-game readout, however, is *already* in CLI order.
-2. **`cargo test` from the REPO ROOT tests the main checkout, not the worktree.** It reported
-   "33 passed" for a shader change whose tests had not been compiled, and the deployed renderer then
-   failed to start. Always `cd .claude/worktrees/texstream && cargo test -p wgpu_renderer`.
-3. **`patch` is a WGSL reserved keyword.** Naming a local that made `wgr_create` panic and the wgpu
-   backend unavailable — no window, no error the owner would recognise.
-4. **A diagnostic whose inactivity is indistinguishable from a clean result is worse than none.**
-   The magenta fallback lever announced via `eprintln!`, and the launcher deliberately never
-   redirects stderr (it kills the renderer, os error 232). One arm was run and had to be discarded.
-   Both sides now announce through the game log. **Never accept a null from a lever that cannot
-   prove it fired.**
-5. **The last gate-trace line in every run is teardown, not steady state.** Screenshots land 8–32 ms
-   before it. Reading it as a result produces a confident, wrong confirmation.
-6. **`WGR_ALPHA_BLOCK_SCAN=0` is inert on CWA** — of 6,976 textures there are zero BC2 and exactly
-   one BC3 (a startup logo). A null from that A/B means nothing.
-7. **Ablation flags that silently do nothing.** `env_f32` filtered `*v > 0.0`, so
-   `WGR_DECAL_SCALE=0` returned the default — the effect at *full* strength. Every prior "ablated
-   it, no change" conclusion was void. Fixed, but check the pattern before trusting an ablation.
-8. **Score the region, not the frame.** A whole-frame pixel diff called the conform arms
-   "inconclusive"; masking the road ribbon showed `WGR_CONFORM_RASTER` moved **exactly 0** road
-   pixels, which was decisive.
-9. **Do not build or run two things at once.** A game process resident during a build corrupts any
-   frame number. One machine, one job.
-
----
-
-# HOW TO BUILD, DEPLOY, CAPTURE
-
-`scripts\Build.ps1` does not work from an agent shell. Use:
+| Reforger Everon | `%TEMP%\rf\world\ev_DALL.wrp` | — |
+| Arma 3 Stratis | `%TEMP%\ff-worlds\stratis\stratis.wrp` | `-Mods a3stratis` |
+| DayZ Chernarus | `<repo>\packages\dayz-compat\world\chernarusplus\chernarusplus.wrp` | `-Addons "D:\SteamLibrary\steamapps\common\DayZ\Addons"` |
+| Arma 1 Sahrani | `%TEMP%\ff-worlds\sahrani\sara.wrp` | `-Addons "<repo>\packages\a1-compat\addons"` |
+| Arma 2 Takistan | `%TEMP%\poseidon-a2oa-takistan-inspect\takistan.wrp` | `-Addons "<repo>\.tmp-perf-modernisation\a2-addons"` |
+
+The Arma 2 addon corpus is the only copy on the machine — read it, never move or delete it.
+Everything under `%TEMP%` is deletable by Windows Storage Sense; check the file exists before
+blaming a failed load.
+
+Build and deploy (from the worktree):
 ```bash
 export PATH="$PATH:/c/Program Files (x86)/Windows Kits/10/bin/10.0.26100.0/x64:/d/Program Files/LLVM/bin"
-cmake --build build/win-x64-clang-rwdi --target PoseidonGame -- -j 8
-```
-Deploy **both** binaries or the game dies with `Entry Point Not Found`:
-```bash
+cmake --build build/win-x64-clang-rwdi --target PoseidonGame PoseidonTools PoseidonTests -- -j 10
 G="/d/SteamLibrary/steamapps/common/ARMA Cold War Assault"
 cp build/win-x64-clang-rwdi/apps/cwr/Game/PoseidonGame.exe  "$G/ColdWarAssault.exe"
 cp build/win-x64-clang-rwdi/apps/cwr/Game/wgpu_renderer.dll "$G/wgpu_renderer.dll"
 ```
-
-**Capture harness (written this session, use it):** `.tmp-shadow/capture-arms.ps1` takes `-Out`,
-`-World`, `-Addons`, `-Mods`, `-Freefly "X Z Y az el"`, `-Hour`, `-ShotFrame` or `-ShotSpec "150s"`,
-and `-Arms ([ordered]@{ name = @{ ENV='value' } })`. It encodes every launch trap above. Everon and
-Chernarus settle slowly — use the **time** form, never a frame number.
-
-Worlds:
-| world | `-World` | extra |
-|---|---|---|
-| Reforger Everon | `%TEMP%\rf\world\ev_DALL.wrp` | no addon root |
-| Arma 3 Stratis | `%TEMP%\ff-worlds\stratis\stratis.wrp` | `-Mods a3stratis` |
-| DayZ Chernarus | `%TEMP%\ff-worlds\chernarus\chernarusplus.wrp` | `-Addons "D:\...\DayZ\Addons"` |
-| Arma 1 Sahrani | `%TEMP%\ff-worlds\sahrani\sara.wrp` | `-Addons "<repo>\packages\a1-compat\addons"` |
-| Arma 2 Takistan | `%TEMP%\poseidon-a2oa-takistan-inspect\takistan.wrp` | `-Addons "<repo>\.tmp-perf-modernisation\a2-addons"` |
-
-**The Arma 2 addon corpus is the only copy on the machine — read it, never delete or move it.**
-All worlds live under `%TEMP%`, which Windows Storage Sense deletes. Check the file exists before
-blaming a failed load.
-
-**The owner will give you coordinates and will fly the game himself if you leave a session open.**
-That produced the interior pose nothing else could construct. Use him — it is far cheaper than
-searching for a pose.
+Reforger re-export (needed after any xob/converter change):
+```
+.tmp-shadow\run-reforger-reexport.ps1 -PoseidonTools <abs exe> -CopyAllModels
+```
 
 ---
 
-# WHAT WAS ACTUALLY DELIVERED THIS SESSION
+# What was fixed on 2026-08-16/17, so nobody re-opens it
 
-Fixed and verified: auto-exposure default-on with framerate-independent adaptation and dev controls;
-the wall wobble (`mapType` defaulted to 0 and `MapTree` **is** 0, so every modern-format model loaded
-as a tree and got the grass-wind shader on its walls — CWA was immune only because its older loader
-reads the byte); the decal depth bias (the previous "fix" was numerically nulled to one micron); the
-`env_f32` ablation bug; white roads proven to be overexposure rather than a texture bug.
-
-Implemented but unmeasured: streaming cache/prefetch/ceiling, prepass-colour parity,
-`WGR_CONFORM_RASTER`, cockpit blend depth-write.
-
-Diagnosed but unshipped: everything in READY TO SHIP above.
-
-**The gap between those three lists is the whole job.** Close it.
-
-Added 2026-08-16 afternoon (see the SHIPPED section): night emissive fade for all generations,
-no-tide on foreign worlds, moon shadows/colour/level, and the sun-only daylight factor. Owner
-confirmed the white orbs are gone on Arma 3.
+Walk-through-walls on A1/A2/A3/DayZ (imported models arrived with mass 0, so the engine treated
+them as passable); Reforger collision (the `.xob` COLL chunk is real collision geometry, now
+converted into a Geometry LOD with convex components); Reforger leaves as solid planes (the `.xob`
+vertex streams are pos/normal/**colour**/UV — reading UVs first made every leaf card sample one
+texel); Reforger materials opening at all (deploy-root fallback + sidecar `.emat`), rocks swaying
+(MLOD branch never set `_mapType`), FLAG tagg on cutout textures; Arma 2 roads white/see-through/
+glowing; card grass dark plates (A2/OA clutter plates are authored dark for a material multiplier
+this engine never read) and the 10 Hz turbulence term cards were taking from the blade wind field;
+grass panel (0.24 coverage, mix slider, blade options, reset buttons); A3 tree sway on calm days;
+moving-camera streaming stall 11.9 -> 28.9 fps.
