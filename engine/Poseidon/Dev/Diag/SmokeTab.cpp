@@ -340,6 +340,14 @@ void DrawTuningSection()
     ImGui::SliderFloat("Flame rise (m/s)", &GParams.fireRiseSpeed, 0.5f, 10.0f, "%.2f");
     ImGui::SliderFloat("Flame intensity", &GParams.fireIntensity, 0.2f, 5.0f, "%.2f");
     ImGui::SliderFloat("Smoke lift from fire", &GParams.fireSmokeLift, 0.0f, 8.0f, "%.2f");
+    ImGui::SliderFloat("Smoke yield", &GParams.fireSmokeYield, 0.0f, 1.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Fraction of dying flames that become smoke. With fire on this is\n"
+                          "the ONLY smoke source - the plume is what the fire produces.\n"
+                          "1 = heavy oil fire, 0.2 = clean hot burn with wisps.");
+    }
+    ImGui::SliderFloat("Flame stretch", &GParams.fireStretch, 0.0f, 3.0f, "%.2f");
     ImGui::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
 
     ImGui::SeparatorText("Collision and shelter");

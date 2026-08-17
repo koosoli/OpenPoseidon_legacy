@@ -116,6 +116,22 @@ void SmokeVolume::Emit(float deltaT)
     {
         return;
     }
+    if (_params.fire && !_fireShape.IsNull())
+    {
+        // With fire on, the flames ARE the smoke source: each flame that burns
+        // out becomes a smoke particle where it died (see SimulateFire). The
+        // nozzle stops emitting so the smoke visibly originates from the fire,
+        // not from a point beneath it. The duration timer still runs here.
+        if (_duration >= 0.0f)
+        {
+            _duration -= deltaT;
+            if (_duration <= 0.0f)
+            {
+                _emitting = false;
+            }
+        }
+        return;
+    }
 
     if (_duration >= 0.0f)
     {
@@ -141,33 +157,42 @@ void SmokeVolume::Emit(float deltaT)
             break;
         }
 
-        SmokeParticle particle;
-        particle.lifetime = _params.particleLifetime * (0.80f + 0.40f * RandUnit());
-
         const float r = _params.emitterRadius * std::sqrt(RandUnit());
         const float theta = RandUnit() * 6.2831853f;
-        particle.position = _emitterPosition + Vector3(r * std::cos(theta), 0.0f, r * std::sin(theta));
-
-        particle.velocity = Vector3(_params.initialSpeed * _params.spread * RandSymmetric(),
-                                    _params.initialSpeed * (0.7f + 0.3f * RandUnit()),
-                                    _params.initialSpeed * _params.spread * RandSymmetric());
-
-        particle.sizeJitter = 0.75f + 0.5f * RandUnit();
-        particle.alphaJitter = 0.7f + 0.6f * RandUnit();
-
-        // Jittered so the whole plume does not sweep on the same frame. A plume
-        // that sweeps in lockstep costs the same on average and produces a
-        // periodic hitch instead of a flat cost.
-        particle.sweepTimer = _params.sweepInterval * RandUnit();
-        particle.shelterTimer = RandUnit() * 0.5f;
-
-        // Born with the shelter state unknown; the first probe runs on the first
-        // tick. Starting at "exposed" and easing in would make a grenade thrown
-        // into a room visibly get blown sideways before settling.
-        particle.exposure = GSmokeWorldQuery().IsSheltered(particle.position, _params.shelterProbeHeight) ? 0.0f : 1.0f;
-
-        _particles.push_back(particle);
+        const Vector3 position = _emitterPosition + Vector3(r * std::cos(theta), 0.0f, r * std::sin(theta));
+        const Vector3 velocity(_params.initialSpeed * _params.spread * RandSymmetric(),
+                               _params.initialSpeed * (0.7f + 0.3f * RandUnit()),
+                               _params.initialSpeed * _params.spread * RandSymmetric());
+        SpawnSmoke(position, velocity, 1.0f);
     }
+}
+
+void SmokeVolume::SpawnSmoke(Vector3Par position, Vector3Par velocity, float sizeScale)
+{
+    if (static_cast<int>(_particles.size()) >= _params.maxParticles)
+    {
+        return;
+    }
+
+    SmokeParticle particle;
+    particle.lifetime = _params.particleLifetime * (0.80f + 0.40f * RandUnit());
+    particle.position = position;
+    particle.velocity = velocity;
+    particle.sizeJitter = (0.75f + 0.5f * RandUnit()) * sizeScale;
+    particle.alphaJitter = 0.7f + 0.6f * RandUnit();
+
+    // Jittered so the whole plume does not sweep on the same frame. A plume
+    // that sweeps in lockstep costs the same on average and produces a
+    // periodic hitch instead of a flat cost.
+    particle.sweepTimer = _params.sweepInterval * RandUnit();
+    particle.shelterTimer = RandUnit() * 0.5f;
+
+    // Born with the shelter state unknown; the first probe runs on the first
+    // tick. Starting at "exposed" and easing in would make a grenade thrown
+    // into a room visibly get blown sideways before settling.
+    particle.exposure = GSmokeWorldQuery().IsSheltered(particle.position, _params.shelterProbeHeight) ? 0.0f : 1.0f;
+
+    _particles.push_back(particle);
 }
 
 void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
@@ -389,6 +414,19 @@ void SmokeVolume::SimulateFire(float deltaT)
         flame.age += deltaT;
         if (flame.age >= flame.lifetime)
         {
+            // THE FLAME BECOMES SMOKE. This is what makes it read as fire rather
+            // than as a smoke grenade with flames painted under it: the smoke is
+            // born where combustion ends, carrying the flame's upward velocity,
+            // so it visibly rises OUT of the top of the fire. Not every flame
+            // makes a puff (fireSmokeYield), or a hot fire chokes itself in
+            // smoke; and the puff starts small and hot (sizeScale < 1) so the
+            // fire's tips are dark wisps that swell as they cool.
+            if (_emitting && RandUnit() < _params.fireSmokeYield)
+            {
+                Vector3 velocity = flame.velocity;
+                velocity[1] = std::max(velocity[1], 0.5f) * 0.6f;
+                SpawnSmoke(flame.position, velocity, 0.55f);
+            }
             continue;
         }
         // Flicker: a random lateral kick, and a slight deceleration upward so
@@ -421,17 +459,18 @@ Color FlameColour(float t)
         float r, g, b, a;
     };
     static const Key kRamp[] = {
-        {0.00f, 1.00f, 0.98f, 0.85f, 0.85f}, // white-hot core
-        {0.18f, 1.00f, 0.85f, 0.35f, 1.00f}, // yellow
-        {0.45f, 1.00f, 0.50f, 0.10f, 0.95f}, // orange
-        {0.75f, 0.85f, 0.18f, 0.03f, 0.55f}, // red
-        {1.00f, 0.30f, 0.03f, 0.00f, 0.00f}, // dull, gone
+        {0.00f, 1.00f, 0.96f, 0.80f, 0.70f}, // white-hot core, still faint (born small)
+        {0.12f, 1.00f, 0.88f, 0.40f, 1.00f}, // yellow, full
+        {0.40f, 1.00f, 0.52f, 0.10f, 0.95f}, // orange
+        {0.70f, 0.80f, 0.20f, 0.03f, 0.60f}, // red, dimming
+        {0.90f, 0.35f, 0.06f, 0.01f, 0.20f}, // sooty ember
+        {1.00f, 0.10f, 0.02f, 0.00f, 0.00f}, // gone -- and a smoke puff is born
     };
     if (t <= kRamp[0].t)
     {
         return Color(kRamp[0].r, kRamp[0].g, kRamp[0].b, kRamp[0].a);
     }
-    for (int i = 1; i < 5; ++i)
+    for (int i = 1; i < 6; ++i)
     {
         if (t <= kRamp[i].t)
         {
@@ -441,7 +480,7 @@ Color FlameColour(float t)
             return Color(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f, a.a + (b.a - a.a) * f);
         }
     }
-    return Color(kRamp[4].r, kRamp[4].g, kRamp[4].b, kRamp[4].a);
+    return Color(kRamp[5].r, kRamp[5].g, kRamp[5].b, kRamp[5].a);
 }
 } // namespace
 
@@ -470,13 +509,22 @@ void SmokeVolume::DrawFire(int level)
     const float nearest = camera.Near() * 10.0f;
     const float invLeft = camera.InvLeft();
     const float invTop = camera.InvTop();
+    // Per-frame flicker: one value for the whole fire (a fire brightens and dims
+    // as a body -- gusts feed it) plus a per-flame phase so individual tongues
+    // pulse out of step. Cheap sin() on the mission clock; no state to keep.
+    const float clock = Glob.time.toFloat();
+    const float bodyFlicker = 0.85f + 0.15f * std::sin(clock * 9.7f) * std::sin(clock * 3.1f + 1.3f);
+
     // Additive sprites do not need sorting; drawn in emission order.
-    for (const SmokeParticle& flame : _flames)
+    for (std::size_t i = 0; i < _flames.size(); ++i)
     {
+        const SmokeParticle& flame = _flames[i];
         const float t = std::clamp(flame.age / std::max(flame.lifetime, 1e-3f), 0.0f, 1.0f);
         Color colour = FlameColour(t);
-        colour = Color(colour.R() * _params.fireIntensity, colour.G() * _params.fireIntensity,
-                       colour.B() * _params.fireIntensity, colour.A() * flame.alphaJitter);
+        const float phase = static_cast<float>(i) * 0.61803f;
+        const float flicker = bodyFlicker * (0.80f + 0.20f * std::sin(clock * 21.0f + phase * 6.2831853f));
+        colour = Color(colour.R() * _params.fireIntensity * flicker, colour.G() * _params.fireIntensity * flicker,
+                       colour.B() * _params.fireIntensity * flicker, colour.A() * flame.alphaJitter);
         if (colour.A() <= 0.01f)
         {
             continue;
@@ -494,8 +542,17 @@ void SmokeVolume::DrawFire(int level)
         const float nearPos = floatMax(posp[2] - std::min(size * 0.10f, 0.35f), nearest);
         const float invNearPos = 1.0f / nearPos;
         posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
-        const float sizeX = +project(0, 0) * size * invW * invLeft * 0.5f;
-        const float sizeY = -project(1, 1) * size * invW * invTop * 0.5f;
+
+        // LICK, NOT BLOB. A flame is taller than it is wide because it is
+        // being carried upward: stretch the sprite vertically by its rise
+        // speed, most at birth (fast, narrow tongue) and relaxing to round as
+        // it slows and dies into a puff of smoke. The round flame billboard is
+        // what made the first pass read as cotton wool.
+        const float rise = std::max(flame.velocity.Y(), 0.0f);
+        const float stretch = 1.0f + std::clamp(rise / std::max(_params.fireRiseSpeed, 0.1f), 0.0f, 1.0f) *
+                                          _params.fireStretch * (1.0f - t * 0.6f);
+        const float sizeX = +project(0, 0) * size * invW * invLeft * 0.5f / std::sqrt(stretch);
+        const float sizeY = -project(1, 1) * size * stretch * invW * invTop * 0.5f / std::sqrt(stretch);
         if (sizeX * sizeY < 0.5f)
         {
             continue;

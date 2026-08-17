@@ -111,6 +111,14 @@ struct SmokeParams
     /// Extra buoyancy the SMOKE gets while fire is on, m/s^2 — hot air rises
     /// harder off a fire than off a smoke grenade.
     float fireSmokeLift = 2.0f;
+    /// Fraction of dying flames that become a smoke particle. With fire on the
+    /// nozzle stops emitting and THIS is the only smoke source: the plume is
+    /// literally what the fire produces. 1 = every flame smokes (a heavy oil
+    /// fire); 0.2 = a clean hot burn with only wisps.
+    float fireSmokeYield = 0.6f;
+    /// Vertical stretch of a flame sprite at full rise speed. 0 = round puffs
+    /// (the first pass, which read as cotton wool); ~1.6 = tongues.
+    float fireStretch = 1.6f;
 
     // -- budget -----------------------------------------------------------
     int maxParticles = 400;
@@ -213,6 +221,9 @@ class SmokeVolume : public Entity
 
   private:
     void Emit(float deltaT);
+    /// The one place a smoke particle is born. The nozzle calls it, and so does
+    /// a dying flame -- which is how fire produces its own smoke.
+    void SpawnSmoke(Vector3Par position, Vector3Par velocity, float sizeScale);
     void EmitFire(float deltaT);
     void SimulateFire(float deltaT);
     void DrawFire(int level);
