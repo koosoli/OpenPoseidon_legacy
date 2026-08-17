@@ -1595,7 +1595,17 @@ void EngineWgpu::NextFrame()
         if (GScene && GScene->MainLight())
         {
             const float night = GScene->MainLight()->NightEffect();
-            if (night > 0.0f)
+            // The night gate is per LIGHT now, not per frame: a lamp is scaled by
+            // NightEffect and dropped by day, but a light flagged daylight-visible
+            // (fire, muzzle flash) is pushed at full strength regardless. So the
+            // frame is walked whenever the sun is down OR any such light exists.
+            bool anyDaylight = false;
+            for (int i = 0, n = GScene->NLights(); i < n && !anyDaylight; ++i)
+            {
+                const Light* l = GScene->GetLight(i);
+                anyDaylight = l != nullptr && l->IsOn() && l->IsDaylightVisible();
+            }
+            if (night > 0.0f || anyDaylight)
             {
                 struct LightCandidate
                 {
@@ -1621,8 +1631,16 @@ void EngineWgpu::NextFrame()
                         // point + spot only; the sun is the directional main light
                         continue;
                     }
-                    const Color dif = desc.diffuse * night;
-                    const Color amb = desc.ambient * night;
+                    // Daylight-visible lights are not dimmed by the sun. In HDR a
+                    // fire has to be genuinely bright to read at noon; the light's
+                    // own colour carries that, so pass it through unscaled.
+                    const float gate = light->IsDaylightVisible() ? 1.0f : night;
+                    if (gate <= 0.0f)
+                    {
+                        continue;
+                    }
+                    const Color dif = desc.diffuse * gate;
+                    const Color amb = desc.ambient * gate;
                     Vector3 beam = desc.dir;
                     beam.Normalize();
                     WgrLight pl{};

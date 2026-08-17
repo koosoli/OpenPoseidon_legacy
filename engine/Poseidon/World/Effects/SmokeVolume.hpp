@@ -83,8 +83,10 @@ struct SmokeParams
     float friction = 0.30f;
     /// Fraction of the visual radius used for the collision sphere. Less than 1
     /// on purpose: a puff's visible edge is diffuse, and colliding on the full
-    /// radius makes plumes stand visibly off walls.
-    float collisionRadiusScale = 0.35f;
+    /// radius makes plumes stand visibly off walls. 0.35 let 3 m of a 5 m puff
+    /// poke through a wall, which is what "clips through walls" was; 0.7 keeps
+    /// the dense core inside with only the faint rim crossing.
+    float collisionRadiusScale = 0.70f;
 
     // -- shelter ----------------------------------------------------------
     /// While sheltered, the prevailing wind is scaled by this. The requirement
@@ -126,7 +128,13 @@ struct SmokeParams
     /// flickering light DOES to a scene -- near surfaces pulse, far ones do
     /// not, and anything between fire and wall reads dark against it.
     float fireLightIntensity = 1.0f;
-    float fireLightRadius = 18.0f; ///< reach, m (attenuation start)
+    float fireLightRadius = 10.0f; ///< reach, m (attenuation start)
+    /// Radiance multiplier so the light competes with DAYLIGHT. The renderer
+    /// is HDR and the sun is far above the legacy LDR unit; at 1.0 the fire's
+    /// glow vanished by day. 6 reads at noon and the tonemapper's night
+    /// exposure keeps it from blowing out after dark. Eases to 1x at night
+    /// (scaled by NightEffect in UpdateFireLight); this is the DAYTIME value.
+    float fireLightHdrScale = 2.5f;
 
     // -- budget -----------------------------------------------------------
     int maxParticles = 400;

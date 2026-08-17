@@ -732,6 +732,7 @@ void LightSun::Recalculate(World* world)
 Light::Light()
 {
     _on = true;
+    _daylightVisible = false;
 }
 
 Light::~Light()

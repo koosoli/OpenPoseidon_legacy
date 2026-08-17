@@ -34,6 +34,7 @@ class Light: public RefCountWithLinks, virtual public Poseidon::Frame
 {
 protected:
 	bool _on;
+	bool _daylightVisible;
 
 	public:
 	virtual float FlareIntensity( Vector3Par camPos, Vector3Par camDir ) const {return 0;}
@@ -55,6 +56,14 @@ protected:
 
 	bool IsOn() const {return _on;}
 	void Switch(bool on = true) {_on = on;}
+
+	// By default a local light is scaled by the sun's NightEffect and dropped
+	// entirely in daylight -- right for a street lamp, which should not glow at
+	// noon. A fire, a muzzle flash or headlights are bright enough to read
+	// against daylight and must not be gated on it. Off by default so every
+	// existing lamp keeps its behaviour exactly.
+	bool IsDaylightVisible() const {return _daylightVisible;}
+	void SetDaylightVisible(bool visible) {_daylightVisible = visible;}
 
 	float SquareDistance( Vector3Par from ) const
 	{

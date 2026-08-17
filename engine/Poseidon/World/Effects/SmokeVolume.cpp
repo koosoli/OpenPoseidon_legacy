@@ -193,10 +193,11 @@ void SmokeVolume::SpawnSmoke(Vector3Par position, Vector3Par velocity, float siz
     particle.sizeJitter = (0.75f + 0.5f * RandUnit()) * sizeScale;
     particle.alphaJitter = 0.7f + 0.6f * RandUnit();
 
-    // Jittered so the whole plume does not sweep on the same frame. A plume
-    // that sweeps in lockstep costs the same on average and produces a
-    // periodic hitch instead of a flat cost.
-    particle.sweepTimer = _params.sweepInterval * RandUnit();
+    // First sweep on the FIRST tick (timer 0), so a particle born against a
+    // wall -- a grenade rolled into a corner, a fire against a building --
+    // finds its contact plane before it has moved at all. Subsequent sweeps
+    // are jittered so the plume does not sweep in lockstep.
+    particle.sweepTimer = 0.0f;
     particle.shelterTimer = RandUnit() * 0.5f;
 
     // Born with the shelter state unknown; the first probe runs on the first
@@ -599,6 +600,8 @@ void SmokeVolume::UpdateFireLight(float deltaT)
         // Same construction the legacy explosion uses (Smokes.cpp): black at
         // birth, coloured per frame below. Scene owns it once added.
         _fireLight = new LightPoint(HBlack, HBlack);
+        // Not gated on night: a fire is bright enough to read against the sun.
+        _fireLight->SetDaylightVisible(true);
         GScene->AddLight(_fireLight);
     }
 
@@ -624,7 +627,19 @@ void SmokeVolume::UpdateFireLight(float deltaT)
     // Scale with how much fire there is: more flames, more light, saturating
     // so a raging preset does not become a searchlight.
     const float fill = std::min(static_cast<float>(_flames.size()) / 40.0f, 1.0f);
-    const float intensity = _params.fireLightIntensity * flicker * (0.4f + 0.6f * fill);
+    // HDR: in daylight the sun is orders of magnitude above the old LDR "1.0",
+    // so a fire light that reads at noon needs real radiance -- but the same
+    // radiance after dark, under the night exposure, paints the ground yellow.
+    // The renderer does not auto-expose, so scale with the SUN: full HDR boost
+    // in daylight, easing to 1x as NightEffect rises. NightEffect is 0 by day
+    // and 1 at full night.
+    float dayBoost = _params.fireLightHdrScale;
+    if (GScene != nullptr && GScene->MainLight() != nullptr)
+    {
+        const float night = std::clamp(GScene->MainLight()->NightEffect(), 0.0f, 1.0f);
+        dayBoost = Lerp(_params.fireLightHdrScale, 1.0f, night);
+    }
+    const float intensity = _params.fireLightIntensity * flicker * (0.4f + 0.6f * fill) * dayBoost;
 
     // Warm: fire light is orange, and the ambient term is a dimmer, redder
     // version so the shadowed sides of nearby things pick up a glow rather

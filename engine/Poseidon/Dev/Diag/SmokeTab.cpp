@@ -101,7 +101,29 @@ bool SpawnPosition(Vector3& out)
     const Camera& camera = *GScene->GetCamera();
     const Vector3 forward = camera.Direction();
     Vector3 position = camera.Position() + forward * GSpawnDistance;
-    position[1] = GSmokeWorldQuery().FloorHeight(position.X(), position.Z()) + 0.2f;
+    // Drop to the floor of the storey the CAMERA is on, not the topmost
+    // surface. Indoors the topmost surface is the roof, and clamping to it put
+    // every plume on top of the building -- which is why spawning indoors
+    // "almost always" landed outside. Probing from the camera's height finds
+    // the room's floor.
+    Vector3 probe = position;
+    probe[1] = camera.Position().Y();
+    position[1] = GSmokeWorldQuery().FloorHeightBelow(probe) + 0.2f;
+    out = position;
+    return true;
+}
+
+/// Spawn right where the camera is, floor-clamped. The only reliable way to put
+/// a plume in a specific room: walk in, press the button.
+bool SpawnPositionHere(Vector3& out)
+{
+    if (GWorld == nullptr || GScene == nullptr || GScene->GetCamera() == nullptr)
+    {
+        return false;
+    }
+    const Camera& camera = *GScene->GetCamera();
+    Vector3 position = camera.Position();
+    position[1] = GSmokeWorldQuery().FloorHeightBelow(position) + 0.2f;
     out = position;
     return true;
 }
@@ -158,8 +180,9 @@ void DrawSpawnSection()
                           "above them. Pair with the Black colour preset for a burning wreck.");
     }
     ImGui::SameLine();
-    if (ImGui::Button("Burning wreck preset"))
+    if (ImGui::Button("Burning wreck"))
     {
+        GParams = SmokeParams{};
         GParams.fire = true;
         GColorPreset = 1; // Black
         ApplySmokeColorPreset(GParams, SmokeColorPreset::Black);
@@ -169,6 +192,58 @@ void DrawSpawnSection()
         GParams.startRadius = 0.8f;
         GParams.endRadius = 6.0f;
         GParams.particleLifetime = 18.0f;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Campfire"))
+    {
+        GParams = SmokeParams{};
+        GParams.fire = true;
+        GColorPreset = 0;
+        ApplySmokeColorPreset(GParams, SmokeColorPreset::White);
+        GParams.opacity = 0.18f;
+        GParams.emitterRadius = 0.35f;
+        GParams.fireRate = 30.0f;
+        GParams.fireStartRadius = 0.25f;
+        GParams.fireEndRadius = 0.6f;
+        GParams.fireRiseSpeed = 1.8f;
+        GParams.fireLifetime = 0.7f;
+        GParams.fireSmokeYield = 0.25f;
+        GParams.startRadius = 0.3f;
+        GParams.endRadius = 2.5f;
+        GParams.fireLightRadius = 8.0f;
+        GParams.fireLightIntensity = 0.6f;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("INFERNO"))
+    {
+        // Everything up: a wide, hot, roaring fire that chokes on its own smoke.
+        GParams = SmokeParams{};
+        GParams.fire = true;
+        GColorPreset = 1;
+        ApplySmokeColorPreset(GParams, SmokeColorPreset::Black);
+        GParams.opacity = 0.7f;
+        GParams.emitterRadius = 4.0f;
+        GParams.fireRate = 220.0f;
+        GParams.maxFlames = 400;
+        GParams.fireStartRadius = 1.2f;
+        GParams.fireEndRadius = 3.5f;
+        GParams.fireRiseSpeed = 6.0f;
+        GParams.fireLifetime = 1.4f;
+        GParams.fireIntensity = 2.2f;
+        GParams.fireStretch = 2.2f;
+        GParams.fireSmokeYield = 0.9f;
+        GParams.fireSmokeLift = 5.0f;
+        GParams.startRadius = 1.5f;
+        GParams.endRadius = 10.0f;
+        GParams.particleLifetime = 25.0f;
+        GParams.maxParticles = 800;
+        GParams.fireLightRadius = 22.0f;
+        GParams.fireLightIntensity = 1.8f;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Wide, hot, roaring. Also try 'Spawn ring of fires' below to cover an\n"
+                          "area - a burning building is many fires, not one big one.");
     }
 
     ImGui::BeginDisabled(!havePosition);
@@ -182,6 +257,45 @@ void DrawSpawnSection()
         GSmokeSystem.SpawnLegacy(position, GLegacyDensity, GLegacySize, GSpawnDuration);
     }
     ImGui::EndDisabled();
+
+    static int ringCount = 5;
+    static float ringRadius = 6.0f;
+    ImGui::SetNextItemWidth(90.0f);
+    ImGui::SliderInt("##ringN", &ringCount, 2, 16);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(90.0f);
+    ImGui::SliderFloat("##ringR", &ringRadius, 1.0f, 30.0f, "%.0f m");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!havePosition);
+    if (ImGui::Button("Spawn ring of fires"))
+    {
+        // N plumes on a circle around the spawn point, each with the current
+        // params. A large fire is many sources: this is how you make a
+        // building or a fuel dump burn rather than a single tall column.
+        for (int i = 0; i < ringCount; ++i)
+        {
+            const float a = static_cast<float>(i) / static_cast<float>(ringCount) * 6.2831853f;
+            Vector3 p = position + Vector3(std::cos(a) * ringRadius, 0.0f, std::sin(a) * ringRadius);
+            p[1] = GSmokeWorldQuery().FloorHeight(p.X(), p.Z()) + 0.2f;
+            GSmokeSystem.Spawn(p, GParams, GSpawnDuration);
+        }
+    }
+    ImGui::EndDisabled();
+
+    Vector3 here;
+    const bool haveHere = SpawnPositionHere(here);
+    ImGui::BeginDisabled(!haveHere);
+    if (ImGui::Button("Spawn NEW smoke HERE (at camera)", ImVec2(260, 0)))
+    {
+        GSmokeSystem.Spawn(here, GParams, GSpawnDuration);
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Right where you are standing, on the floor of THIS storey. Walk into\n"
+                          "a room and press it - the only reliable way to put smoke indoors.\n"
+                          "Then step back to watch it.");
+    }
 
     if (ImGui::IsItemHovered())
     {
@@ -356,6 +470,13 @@ void DrawTuningSection()
                           "what the light does to nearby surfaces. Best judged at night.");
     }
     ImGui::SliderFloat("Fire light radius (m)", &GParams.fireLightRadius, 2.0f, 60.0f, "%.0f");
+    ImGui::SliderFloat("Fire light HDR scale", &GParams.fireLightHdrScale, 0.5f, 20.0f, "%.1f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Radiance multiplier so the glow reads in DAYLIGHT. The renderer is\n"
+                          "HDR; at 1.0 the fire's light vanished at noon. Raise for day, the\n"
+                          "night exposure keeps it from blowing out.");
+    }
     ImGui::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
 
     ImGui::SeparatorText("Collision and shelter");

@@ -59,6 +59,12 @@ class ISmokeWorldQuery
     /// Costs a roadway lookup; fine for spawn and for a per-particle clamp.
     virtual float FloorHeight(float x, float z) const = 0;
 
+    /// The nearest surface UNDER `pos` — the floor of whatever storey the point
+    /// is on. FloorHeight(x, z) is the TOPMOST surface, which inside a building
+    /// is the roof: spawning on it put every indoor plume on top of the house.
+    /// This is what a spawn at the camera must use.
+    virtual float FloorHeightBelow(Vector3Par pos) const = 0;
+
     /// Is there geometry directly overhead within `probeHeight` metres? This is
     /// the "am I indoors" test, and it is deliberately that crude: a roof is
     /// what stops the wind, and asking whether a point is inside a closed

@@ -21,6 +21,7 @@ class NullSmokeWorldQuery final : public ISmokeWorldQuery
     SmokeSurfaceHit SweepSphere(Vector3Par, Vector3Par, float) const override { return SmokeSurfaceHit{}; }
     float GroundHeight(float, float) const override { return 0.0f; }
     float FloorHeight(float, float) const override { return 0.0f; }
+    float FloorHeightBelow(Vector3Par) const override { return 0.0f; }
     bool IsSheltered(Vector3Par, float) const override { return false; }
 };
 
@@ -185,6 +186,13 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         // "find topmost surface on given x,z coordinates" — terrain OR a
         // roadway LOD (building floor, bridge deck) above it.
         return GLandscape != nullptr ? GLandscape->RoadSurfaceY(x, z) : 0.0f;
+    }
+
+    float FloorHeightBelow(Vector3Par pos) const override
+    {
+        // "find nearest surface under given point": terrain, or the roadway
+        // LOD of the storey the point is on.
+        return GLandscape != nullptr ? GLandscape->RoadSurfaceY(pos) : 0.0f;
     }
 
     bool IsSheltered(Vector3Par pos, float probeHeight) const override
