@@ -373,3 +373,123 @@ TEST_CASE("MLODWriter: an SP3X model re-emits as P3DM without losing geometry", 
 
     requireModelsAgree(original, reemit(original));
 }
+
+// COL-001: the writer's ComponentXX selections and #Mass# tagg. What the engine
+// does with them is asserted in test_xob_collision.cpp through ShapeAdapter; here
+// the question is only whether the bytes come back through the reader as written.
+TEST_CASE("MLODWriter: named selections and #Mass# round-trip through the reader", "[mlod][writer][COL-001]")
+{
+    MLODW::WriteModel model = buildTestModel();
+    MLODW::WriteLod& geometry = model.lods[1];
+
+    MLODW::WriteNamedSelection component;
+    component.name = "Component01";
+    component.points = {0, 1, 2};
+    component.faces = {0};
+    geometry.selections.push_back(component);
+
+    // A second selection with per-point weights, to see the bytes survive.
+    MLODW::WriteNamedSelection soft;
+    soft.name = "soft";
+    soft.points = {1, 2};
+    soft.pointWeights = {200, 17};
+    geometry.selections.push_back(soft);
+
+    geometry.mass = {10.0f, 20.0f, 30.0f};
+
+    const std::vector<char> bytes = MLODWriter::writeToBuffer(model);
+    const auto loaded = MLODLoader::loadFromBuffer(bytes.data(), static_cast<int>(bytes.size()), "selections");
+    REQUIRE(loaded.lodLevels.size() == 2);
+    const auto& mesh = loaded.lodLevels[1].mesh;
+    REQUIRE(mesh.vertices.size() == 3);
+
+    REQUIRE(mesh.selections.size() == 2);
+    REQUIRE(mesh.selections[0].name == "Component01");
+    REQUIRE(mesh.selections[0].vertexIndices.size() == 3);
+    REQUIRE(mesh.selections[0].triangleIndices == std::vector<uint32_t>{0});
+    REQUIRE(mesh.selections[1].name == "soft");
+    REQUIRE(mesh.selections[1].vertexIndices.size() == 2);
+    REQUIRE(mesh.selections[1].triangleIndices.empty());
+    // The raw source bytes, undecoded, as the reader keeps them (AST-018).
+    REQUIRE(mesh.selections[1].sourceVertexWeights.size() == 2);
+    REQUIRE(mesh.selections[1].sourceVertexWeights[0] == 200);
+    REQUIRE(mesh.selections[1].sourceVertexWeights[1] == 17);
+
+    REQUIRE(mesh.vertexMass.size() == 3);
+    float total = 0.0f;
+    for (float m : mesh.vertexMass)
+        total += m;
+    REQUIRE(total == 60.0f);
+    // The visual LOD wrote no #Mass# and reads back none.
+    REQUIRE(loaded.lodLevels[0].mesh.vertexMass.empty());
+}
+
+TEST_CASE("MLODWriter: describe() carries a loaded model's selections and mass back out", "[mlod][writer][COL-001]")
+{
+    // The authored fixture: a box geometry LOD, one Component01 of six quads, 8 x 150 kg.
+    auto original = MLODLoader::load(GET_FIXTURE("mlod/p3dm_geometry_mass.p3d"));
+    REQUIRE(original.lodLevels.size() == 2);
+    REQUIRE(original.lodLevels[1].mesh.selections.size() == 1);
+    REQUIRE(original.lodLevels[1].mesh.vertexMass.size() == original.lodLevels[1].mesh.vertices.size());
+
+    const MLODW::WriteModel described = MLODWriter::describe(original);
+    REQUIRE(described.lods.size() == 2);
+    REQUIRE(described.lods[1].selections.size() == 1);
+    REQUIRE(described.lods[1].selections[0].name == "Component01");
+    REQUIRE(described.lods[1].selections[0].faces == std::vector<int32_t>{0, 1, 2, 3, 4, 5});
+    REQUIRE(described.lods[1].mass.size() == described.lods[1].points.size());
+    REQUIRE(described.lods[0].selections.empty());
+    REQUIRE(described.lods[0].mass.empty());
+
+    const auto again = reemit(original);
+    requireModelsAgree(original, again);
+    const auto& before = original.lodLevels[1].mesh;
+    const auto& after = again.lodLevels[1].mesh;
+    REQUIRE(after.selections.size() == 1);
+    REQUIRE(after.selections[0].name == before.selections[0].name);
+    REQUIRE(after.selections[0].vertexIndices.size() == before.selections[0].vertexIndices.size());
+    REQUIRE(after.selections[0].triangleIndices == before.selections[0].triangleIndices);
+    float massBefore = 0.0f, massAfter = 0.0f;
+    for (float m : before.vertexMass)
+        massBefore += m;
+    for (float m : after.vertexMass)
+        massAfter += m;
+    REQUIRE(massAfter == massBefore);
+    REQUIRE(massAfter == 1200.0f);
+}
+
+TEST_CASE("MLODWriter: rejects selections and mass the reader would misread", "[mlod][writer][COL-001]")
+{
+    SECTION("a selection point past the point table")
+    {
+        MLODW::WriteModel model = buildTestModel();
+        MLODW::WriteNamedSelection selection;
+        selection.name = "Component01";
+        selection.points = {0, 7};
+        model.lods[1].selections.push_back(selection);
+        REQUIRE_THROWS_WITH(MLODWriter::writeToBuffer(model), Catch::Matchers::ContainsSubstring("references point"));
+    }
+    SECTION("a selection face past the face table")
+    {
+        MLODW::WriteModel model = buildTestModel();
+        MLODW::WriteNamedSelection selection;
+        selection.name = "Component01";
+        selection.faces = {3};
+        model.lods[1].selections.push_back(selection);
+        REQUIRE_THROWS_WITH(MLODWriter::writeToBuffer(model), Catch::Matchers::ContainsSubstring("references face"));
+    }
+    SECTION("a name the reader would take for a tagg keyword")
+    {
+        MLODW::WriteModel model = buildTestModel();
+        MLODW::WriteNamedSelection selection;
+        selection.name = "#Mass#";
+        model.lods[1].selections.push_back(selection);
+        REQUIRE_THROWS_WITH(MLODWriter::writeToBuffer(model), Catch::Matchers::ContainsSubstring("selection"));
+    }
+    SECTION("a mass table the wrong length")
+    {
+        MLODW::WriteModel model = buildTestModel();
+        model.lods[1].mass = {1.0f, 2.0f};
+        REQUIRE_THROWS_WITH(MLODWriter::writeToBuffer(model), Catch::Matchers::ContainsSubstring("mass"));
+    }
+}

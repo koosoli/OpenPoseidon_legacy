@@ -68,12 +68,40 @@ struct WriteProperty
     std::string value;
 };
 
+// A named selection: a set of points and a set of faces, both by index into the
+// LOD's own tables. On the wire this is one weight byte per POINT followed by one
+// flag byte per FACE (readTAGGNamedSelection), the face bytes indexing the file's
+// mixed triangle/quad stream -- the same unit Triangle::originalIndex carries.
+//
+// COL-001: a Geometry LOD's `ComponentXX` selections are what the engine turns into
+// convex components (LODShape::InitConvexComponents), and a selection with fewer
+// than four faces is dropped there, so a component is a closed convex polytope or
+// it is nothing.
+struct WriteNamedSelection
+{
+    std::string name;            // must not be empty and must not start with '#' (that is a tagg keyword)
+    std::vector<int32_t> points; // indices into WriteLod::points
+    std::vector<int32_t> faces;  // indices into WriteLod::faces
+    // The byte written for a selected point. 1 is O2's "fully selected"; the reader
+    // treats any non-zero byte as membership and keeps the raw value.
+    uint8_t weight = 1;
+    // Optional per-point override, parallel to `points`; empty means every point
+    // gets `weight`. A zero entry here is rejected (it would deselect the point).
+    std::vector<uint8_t> pointWeights;
+};
+
 struct WriteLod
 {
     std::vector<WritePoint> points;
     std::vector<Vector3> normals;
     std::vector<WriteFace> faces;
     std::vector<WriteProperty> properties;
+    std::vector<WriteNamedSelection> selections;
+    // COL-001: the `#Mass#` tagg, one float per point. Empty writes no tagg at all;
+    // anything else must be exactly points.size() long, because the reader sizes
+    // the payload from the point count and nothing else. The engine sums this into
+    // LODShape::Mass(), and Object::IsPassable() is `Mass() < 10`.
+    std::vector<float> mass;
     // Emit two #UVSet# blocks (channel 0 duplicating the face-record UVs, channel 1
     // carrying u1/v1). Off by default: a LOD with no second channel should carry no
     // UV blocks at all rather than a redundant copy of channel 0.

@@ -2,6 +2,8 @@
 
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobCollision.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobCollisionGeometry.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
@@ -167,6 +169,27 @@
 //     `--no-map-property` for the A/B. The engine-side proof is `WGR_SWAY_GATE_DUMP=2`:
 //     one `SwayGate: kind=... property='...' model=...` line per model whose gate is
 //     non-zero, and a granite model in that list is the bug.
+//
+//  9. THE MODEL HAS NO GEOMETRY LOD, SO THE PLAYER WALKS THROUGH IT (COL-001). Every
+//     converted `.p3d` carried visual LODs only, and the collision log said so for
+//     every Everon model: `collision: model=... geometry lod=-1 ... mass=0.0
+//     passable=1`. The engine collides with a Geometry LOD (resolution 1e13) whose
+//     faces form convex `ComponentXX` selections, and skips the object entirely when
+//     its `#Mass#` total is under 10 kg (Object::IsPassable).
+//
+//     The `.xob` carries the answer in its COLL chunk -- the authored physics
+//     shapes, decoded in XobCollision.hpp: boxes, capsules, cylinders, spheres, convex
+//     hulls and triangle meshes, each on a layer preset ("Building", "Tree",
+//     "FireView", "Foliage", ...). Of the 1,132 models Everon places, 1,074 carry a
+//     shape on a character-blocking layer; the 58 that do not are decals, posters,
+//     litter, bushes and plants -- walk-through in Reforger as well, so they get no
+//     geometry LOD here either, on purpose. XobCollisionGeometry.hpp turns the
+//     blocking shapes into components: primitives and hulls one each, meshes
+//     decomposed (near-convex pieces whole, the rest as per-panel slabs, so a house
+//     stays enterable). Mass is by class: house 5000, wall 2000, rock 1000, tree 500,
+//     bush 200, everything else 1000 kg. Default ON, `--no-geometry` for the A/B; the
+//     model line reports `geo <N> comps` and the engine-side proof is
+//     `WGR_COLLISION_STATS=1` showing `passable=0` on the Everon houses.
 //
 //  3. PREFAB INHERITANCE. A world placement names a prefab GUID, not a model. The
 //     `.et` prefab it resolves to often carries no mesh of its own:
@@ -1410,8 +1433,35 @@ struct ConvertOptions
     //! EngineWgpu WGR_INSTANCE_CANOPY_*), so a rock and a tree MUST NOT share a class.
     //! Default ON: `--no-map-property` restores the property-less file, for the A/B.
     bool mapProperty = true;
+    //! Fact 9: write a Geometry LOD built from the `.xob`'s COLL shapes, with
+    //! `ComponentXX` selections and a `#Mass#` tagg. Default ON: `--no-geometry`
+    //! restores the visual-only file, for the A/B.
+    bool geometry = true;
+    //! Fact 9, for inspection: use every COLL shape whatever its layer, so a fire
+    //! geometry mesh and a foliage volume become walls too. Off by default.
+    bool geometryAllLayers = false;
     TextureOptions textures;
 };
+
+//! Fact 9's mass table, keyed by fact 8's class. The numbers are the brief's -- a
+//! house 5000, wall 2000, rock 1000, tree 500 -- with bush and the unclassified rest
+//! chosen to sit well above Object::IsPassable's 10 kg. Mass changes nothing about
+//! WHERE a static object collides, only whether the character response runs at all,
+//! so these are not tuning values.
+float GeometryMassForClass(const std::string& mapClass)
+{
+    if (mapClass == "house")
+        return 5000.0f;
+    if (mapClass == "wall")
+        return 2000.0f;
+    if (mapClass == "rock")
+        return 1000.0f;
+    if (mapClass == "tree")
+        return 500.0f;
+    if (mapClass == "bush")
+        return 200.0f;
+    return 1000.0f;
+}
 
 //! Fact 8's table: what a converted model's `map` named property says, from where the
 //! `.xob` lives in the pak. Spelled in the words `ResolveMapTypeTable` accepts.
@@ -1508,6 +1558,17 @@ struct ConvertStats
     float bboxMin[3] = {0.0f, 0.0f, 0.0f};
     float bboxMax[3] = {0.0f, 0.0f, 0.0f};
     std::string mapProperty; //!< fact 8: the `map` value written on every LOD, "" when none
+    //! Fact 9: the geometry LOD. `geometryWritten` false with `collisionShapes > 0`
+    //! is a model whose shapes are all fire/view/foliage volumes -- correct, and
+    //! worth seeing on the model line as `geo 0 comps`.
+    bool collisionPresent = false; //!< the `.xob` has a COLL chunk
+    bool collisionCloses = true;   //!< its record walk closed
+    std::string collisionError;    //!< why it did not
+    size_t collisionShapes = 0;    //!< records in COLL
+    size_t collisionBlocking = 0;  //!< on a character-blocking layer
+    bool geometryWritten = false;
+    GeometryLodStats geometry;
+    float geometryMass = 0.0f;
 
     float Extent(int axis) const { return bboxMax[axis] - bboxMin[axis]; }
 };
@@ -1801,6 +1862,52 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
         stats.bboxMax[axis] = boxMax[axis];
     }
 
+    // Fact 9: the Geometry LOD, from the COLL chunk. After the visual ladder, so
+    // MLOD's ascending-resolution contract holds (1e13 is above any visual value),
+    // and carrying the same properties as every visual LOD because
+    // LODShape::PropertyValue consults the geometry LOD FIRST -- a geometry LOD
+    // without `autocenter=0` would undo fact 7 on the model that has it.
+    if (options.geometry && !out.lods.empty())
+    {
+        const XobCollision collision = ReadXobCollision(bytes.data(), bytes.size(), header);
+        stats.collisionPresent = collision.present;
+        stats.collisionCloses = collision.closes || !collision.present;
+        stats.collisionError = collision.error;
+        stats.collisionShapes = collision.shapes.size();
+        for (const XobCollisionShape& shape : collision.shapes)
+            if (XobLayerBlocksCharacters(shape.layer))
+                ++stats.collisionBlocking;
+        if (collision.present && !collision.shapes.empty())
+        {
+            GeometryLodOptions geometryOptions;
+            geometryOptions.totalMass = GeometryMassForClass(stats.mapProperty);
+            geometryOptions.allLayers = options.geometryAllLayers;
+            // A boulder is solid, lumpy and sometimes modelled without an underside;
+            // a building's open pieces are sheets around rooms and its concavities
+            // are the rooms. Only the class knows which, so rocks take their mesh
+            // pieces whole at a looser tolerance (a stone's bumps, up to half its
+            // radius, become the intersection of its face half-spaces -- measured on
+            // GraniteBeachCluster_01/02: 9 and 11 stones, 5-50% of radius), chunk
+            // what is still concave, and everything else keeps the tight tolerance
+            // that sends a house shell to slabs.
+            const bool rock = stats.mapProperty == "rock";
+            geometryOptions.solidMesh = rock;
+            if (rock)
+            {
+                geometryOptions.nearConvexTolerance = 0.5f;
+                geometryOptions.nearConvexMaxTolerance = 2.0f;
+            }
+            Fmt::MLOD::WriteLod geometryLod;
+            if (BuildGeometryLod(collision, geometryOptions, geometryLod, stats.geometry))
+            {
+                geometryLod.properties = out.lods.front().properties;
+                stats.geometryWritten = true;
+                stats.geometryMass = geometryOptions.totalMass;
+                out.lods.push_back(std::move(geometryLod));
+            }
+        }
+    }
+
     return !out.lods.empty();
 }
 
@@ -1864,7 +1971,7 @@ RoundTrip VerifyRoundTrip(const std::string& filePath, const Fmt::MLOD::WriteMod
                             std::to_string(source.points.size());
             return result;
         }
-        if (mesh.triangles.size() != source.faces.size() || !mesh.quads.empty())
+        if (mesh.triangles.size() + mesh.quads.size() != source.faces.size())
         {
             result.reason = "LOD " + std::to_string(lodIndex) + " face count " + std::to_string(mesh.triangles.size()) +
                             " (+" + std::to_string(mesh.quads.size()) +
@@ -1880,13 +1987,44 @@ RoundTrip VerifyRoundTrip(const std::string& filePath, const Fmt::MLOD::WriteMod
                 result.positionMismatches++;
         }
 
+        // The loader splits faces into a triangle vector and a quad vector; the
+        // source position of each is originalIndex. The visual LODs are all
+        // triangles; the geometry LOD (fact 9) mixes quads in, so index by
+        // originalIndex rather than assuming the two orders coincide.
+        std::vector<const Poseidon::Model::Triangle*> triangleAt(source.faces.size(), nullptr);
+        std::vector<const Poseidon::Model::Quad*> quadAt(source.faces.size(), nullptr);
+        for (const auto& triangle : mesh.triangles)
+            if (triangle.originalIndex < triangleAt.size())
+                triangleAt[triangle.originalIndex] = &triangle;
+        for (const auto& quad : mesh.quads)
+            if (quad.originalIndex < quadAt.size())
+                quadAt[quad.originalIndex] = &quad;
+
         for (size_t f = 0; f < source.faces.size(); ++f)
         {
             const auto& face = source.faces[f];
-            const auto& triangle = mesh.triangles[f];
-            // MLODLoader.hpp:384 swaps corners 0 and 1 on load; undo it to compare.
-            const uint32_t got[3] = {triangle.indices[1], triangle.indices[0], triangle.indices[2]};
-            for (int c = 0; c < 3; ++c)
+            // MLODLoader.hpp:384 swaps corners 0/1 (and 2/3 on a quad) on load; undo
+            // it to compare.
+            uint32_t got[4] = {0, 0, 0, 0};
+            if (face.vertexCount == 3 && triangleAt[f])
+            {
+                got[0] = triangleAt[f]->indices[1];
+                got[1] = triangleAt[f]->indices[0];
+                got[2] = triangleAt[f]->indices[2];
+            }
+            else if (face.vertexCount == 4 && quadAt[f])
+            {
+                got[0] = quadAt[f]->indices[1];
+                got[1] = quadAt[f]->indices[0];
+                got[2] = quadAt[f]->indices[3];
+                got[3] = quadAt[f]->indices[2];
+            }
+            else
+            {
+                result.topologyMismatches++;
+                continue;
+            }
+            for (int c = 0; c < face.vertexCount; ++c)
             {
                 if (got[c] != static_cast<uint32_t>(face.vertices[c].point))
                 {
@@ -1894,7 +2032,7 @@ RoundTrip VerifyRoundTrip(const std::string& filePath, const Fmt::MLOD::WriteMod
                     break;
                 }
             }
-            for (int c = 0; c < 3; ++c)
+            for (int c = 0; c < face.vertexCount; ++c)
             {
                 const uint32_t vertex = got[c];
                 if (vertex >= mesh.vertices.size())
@@ -2034,8 +2172,57 @@ void PrintModelLine(const ModelResult& result)
                   << " out  ";
     std::cout << "originY " << std::setprecision(2) << ((s.bboxMin[1] + s.bboxMax[1]) * 0.5f) << "  ";
     // Fact 8: the class the engine will read back. `map -` means no property was written.
-    std::cout << "map " << (s.mapProperty.empty() ? "-" : s.mapProperty) << "  "
-              << (result.roundTrip.ok ? "round-trips" : "ROUND-TRIP: " + result.roundTrip.reason) << "\n";
+    std::cout << "map " << (s.mapProperty.empty() ? "-" : s.mapProperty) << "  ";
+    // Fact 9: the geometry LOD. `geo -` is --no-geometry or a source with no COLL
+    // chunk; `geo 0 comps` is a COLL whose every shape is a fire/view/foliage
+    // volume, i.e. walk-through by design.
+    if (!s.collisionPresent)
+        std::cout << "geo -  ";
+    else if (!s.geometryWritten)
+        std::cout << "geo 0 comps (" << s.collisionShapes << " shapes, " << s.collisionBlocking << " blocking)  ";
+    else
+        std::cout << "geo " << s.geometry.Components() << " comps (" << s.geometry.componentsPrimitive << " prim, "
+                  << s.geometry.componentsHull << " hull, " << s.geometry.componentsPiece << " piece, "
+                  << s.geometry.componentsPrism << " slab" << (s.geometry.componentsDropped ? ", " : "")
+                  << (s.geometry.componentsDropped ? std::to_string(s.geometry.componentsDropped) + " dropped" : "")
+                  << ") " << s.geometry.faces << " faces " << std::setprecision(0) << s.geometryMass << " kg  ";
+    if (!s.collisionCloses)
+        std::cout << "COLL: " << s.collisionError << "  ";
+    std::cout << (result.roundTrip.ok ? "round-trips" : "ROUND-TRIP: " + result.roundTrip.reason) << "\n";
+}
+
+//! Fact 9's corpus line: how many written models the engine can collide with. The
+//! COLL closure count is the one that says the reader is right; the geometry count
+//! is the one that says the world will be solid.
+void PrintGeometryReport(const std::vector<ModelResult>& results)
+{
+    size_t written = 0, withColl = 0, closes = 0, withGeometry = 0, blockingNone = 0, components = 0, dropped = 0;
+    for (const ModelResult& result : results)
+    {
+        if (!result.written)
+            continue;
+        ++written;
+        const ConvertStats& s = result.stats;
+        if (!s.collisionPresent)
+            continue;
+        ++withColl;
+        if (s.collisionCloses)
+            ++closes;
+        if (s.geometryWritten)
+        {
+            ++withGeometry;
+            components += s.geometry.Components();
+            dropped += s.geometry.componentsDropped;
+        }
+        else if (s.collisionBlocking == 0)
+            ++blockingNone;
+    }
+    if (written == 0)
+        return;
+    std::cout << "Geometry:   " << withGeometry << " / " << written << " written models carry a geometry LOD ("
+              << components << " convex components, " << dropped << " dropped over the cap); " << withColl
+              << " sources have a COLL chunk, " << closes << " of them close, " << blockingNone
+              << " have no character-blocking shape (walk-through in Reforger too).\n";
 }
 
 //! The one number that says whether the models will draw textured: a part with no
@@ -2140,6 +2327,32 @@ int Inspect(const std::string& root, const std::string& filter, int limit)
             }
             for (const XobMaterial& material : header.materials)
                 std::cout << "  material " << material.path << "\n";
+            // Fact 9: the COLL shapes, one line each, with the character-blocking
+            // verdict the geometry LOD will act on.
+            const XobCollision collision = ReadXobCollision(bytes.data(), bytes.size(), header);
+            if (!collision.present)
+                std::cout << "  collision: none (no COLL chunk)\n";
+            else
+            {
+                std::cout << "  collision: " << collision.shapes.size() << " shapes"
+                          << (collision.closes ? "" : "  NOT CLOSED: " + collision.error) << "\n";
+                for (const XobCollisionShape& shape : collision.shapes)
+                {
+                    std::cout << "    " << ToString(shape.kind) << " '" << shape.name << "' layer '" << shape.layer
+                              << "' " << (XobLayerBlocksCharacters(shape.layer) ? "BLOCKS" : "passable");
+                    if (shape.kind == XobCollisionKind::Box)
+                        std::cout << "  half " << std::setprecision(3) << shape.halfExtents.x << " x "
+                                  << shape.halfExtents.y << " x " << shape.halfExtents.z;
+                    else if (shape.kind == XobCollisionKind::Sphere)
+                        std::cout << "  r " << std::setprecision(3) << shape.radius;
+                    else if (shape.kind == XobCollisionKind::Capsule || shape.kind == XobCollisionKind::Cylinder)
+                        std::cout << "  r " << std::setprecision(3) << shape.radius << " halfH " << shape.halfHeight;
+                    else
+                        std::cout << "  verts " << shape.vertices.size() << " polys " << shape.polygons.size();
+                    std::cout << "  at " << std::setprecision(2) << shape.position.x << "," << shape.position.y << ","
+                              << shape.position.z << "\n";
+                }
+            }
             shown++;
         }
     }
@@ -2183,6 +2396,8 @@ int Convert(const std::string& root, const std::string& filter, const std::strin
     TextureBaker baker(paks, outputRoot, options.textures);
     size_t taken = 0;
     size_t partsTextured = 0, partsTotal = 0;
+    std::vector<ModelResult> results;
+    results.reserve(targets.size());
     for (const std::string& path : targets)
     {
         const ModelResult result =
@@ -2192,10 +2407,13 @@ int Convert(const std::string& root, const std::string& filter, const std::strin
         partsTotal += result.stats.parts;
         if (result.written && result.roundTrip.ok)
             taken++;
+        results.push_back(result);
     }
     std::cout << "\n" << taken << " / " << targets.size() << " models converted and round-tripped.\n";
     if (options.textures.enabled)
         PrintTextureReport(baker.Stats(), partsTextured, partsTotal);
+    if (options.geometry)
+        PrintGeometryReport(results);
     return taken == targets.size() ? 0 : 1;
 }
 
@@ -2427,6 +2645,8 @@ int Export(const ExportOptions& options)
                   << (static_cast<double>(outward) / static_cast<double>(outward + inward))
                   << " outward). This engine wants INWARD -- see fact 6 and --fix-orientation.\n";
     }
+    if (options.convert.geometry)
+        PrintGeometryReport(results);
 
     // --- the manifest -----------------------------------------------------
     std::error_code ec;
@@ -2553,6 +2773,10 @@ void XobCommand::Setup(CLI::App& app)
         cmd->add_flag("--material-emat,!--no-material-emat", options.textures.emats,
                       "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
                       "material slot (default ON; --no-material-emat is the A/B)");
+        cmd->add_flag("--geometry,!--no-geometry", options.geometry,
+                      "Write a Geometry LOD from the .xob COLL shapes (ComponentXX + #Mass#; fact 9, default on)");
+        cmd->add_flag("--geometry-all-layers", options.geometryAllLayers,
+                      "Geometry LOD from EVERY COLL shape, fire/view/foliage layers included (inspection only)");
         cmd->add_flag("--map-property,!--no-map-property", options.mapProperty,
                       "Fact 8: write a `map` named property (rock/tree/bush/house/wall/hide) from the source path "
                       "(default ON; --no-map-property is the A/B)");
@@ -2598,6 +2822,10 @@ void XobCommand::Setup(CLI::App& app)
         cmd->add_flag("--material-emat,!--no-material-emat", options.convert.textures.emats,
                       "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
                       "material slot (default ON; --no-material-emat is the A/B)");
+        cmd->add_flag("--geometry,!--no-geometry", options.convert.geometry,
+                      "Write a Geometry LOD from the .xob COLL shapes (ComponentXX + #Mass#; fact 9, default on)");
+        cmd->add_flag("--geometry-all-layers", options.convert.geometryAllLayers,
+                      "Geometry LOD from EVERY COLL shape, fire/view/foliage layers included (inspection only)");
         cmd->add_flag("--map-property,!--no-map-property", options.convert.mapProperty,
                       "Fact 8: write a `map` named property (rock/tree/bush/house/wall/hide) from the source path "
                       "(default ON; --no-map-property is the A/B)");

@@ -127,6 +127,39 @@ void validateLod(const MLOD::WriteLod& lod, size_t lodIndex)
                                          std::to_string(vertex.normal) + " of " + std::to_string(nNorm));
         }
     }
+
+    const int32_t nFace = static_cast<int32_t>(lod.faces.size());
+    for (size_t selIndex = 0; selIndex < lod.selections.size(); ++selIndex)
+    {
+        const auto& selection = lod.selections[selIndex];
+        const std::string who = where + "selection " + std::to_string(selIndex) + " ('" + selection.name + "') ";
+        // An empty name is unaddressable; a '#'-prefixed one is a tagg keyword and
+        // the reader would dispatch on it (readTAGGSection) instead of keeping it as
+        // a selection. Both load without error and neither is what was asked for.
+        if (selection.name.empty() || selection.name[0] == '#')
+            throw std::runtime_error(who + "has a name the reader would not keep as a selection");
+        if (selection.weight == 0)
+            throw std::runtime_error(who + "has weight 0, which the reader reads as 'not selected'");
+        if (!selection.pointWeights.empty() && selection.pointWeights.size() != selection.points.size())
+            throw std::runtime_error(who + "has " + std::to_string(selection.pointWeights.size()) +
+                                     " point weights for " + std::to_string(selection.points.size()) + " points");
+        for (uint8_t pointWeight : selection.pointWeights)
+            if (pointWeight == 0)
+                throw std::runtime_error(who + "has a point weight of 0, which the reader reads as 'not selected'");
+        for (int32_t point : selection.points)
+            if (point < 0 || point >= nPos)
+                throw std::runtime_error(who + "references point " + std::to_string(point) + " of " +
+                                         std::to_string(nPos));
+        for (int32_t face : selection.faces)
+            if (face < 0 || face >= nFace)
+                throw std::runtime_error(who + "references face " + std::to_string(face) + " of " +
+                                         std::to_string(nFace));
+    }
+
+    if (!lod.mass.empty() && lod.mass.size() != lod.points.size())
+        throw std::runtime_error(where + "has " + std::to_string(lod.mass.size()) + " mass entries for " +
+                                 std::to_string(lod.points.size()) +
+                                 " points (the reader sizes #Mass# from the point count)");
 }
 
 void writeLod(ByteSink& sink, const MLOD::WriteLod& lod, size_t lodIndex)
@@ -184,6 +217,31 @@ void writeLod(ByteSink& sink, const MLOD::WriteLod& lod, size_t lodIndex)
     }
 
     sink.signature("TAGG");
+
+    // Named selections first, then #Mass#, then #Property# -- the order the O2
+    // tooling emits and the fixture generator reproduces. The reader dispatches on
+    // the tag name, so any order loads; this one keeps a diff against an authored
+    // file readable.
+    for (const auto& selection : lod.selections)
+    {
+        // One byte per point, then one per face. Membership is by index, so a
+        // selection listing the same point twice still writes one byte.
+        std::vector<uint8_t> payload(static_cast<size_t>(nPos) + static_cast<size_t>(nFace), 0);
+        for (size_t i = 0; i < selection.points.size(); ++i)
+            payload[static_cast<size_t>(selection.points[i])] =
+                selection.pointWeights.empty() ? selection.weight : selection.pointWeights[i];
+        for (int32_t face : selection.faces)
+            payload[static_cast<size_t>(nPos) + static_cast<size_t>(face)] = 1;
+        writeTagHeader(sink, selection.name, static_cast<int32_t>(payload.size()));
+        sink.raw(payload.data(), payload.size());
+    }
+
+    if (!lod.mass.empty())
+    {
+        writeTagHeader(sink, "#Mass#", 4 * nPos);
+        for (float mass : lod.mass)
+            sink.f32(mass);
+    }
 
     for (const auto& property : lod.properties)
     {
@@ -369,6 +427,42 @@ MLOD::WriteModel MLODWriter::describe(const Poseidon::Model::Model& model)
         lod.properties.reserve(mesh.properties.size());
         for (const auto& property : mesh.properties)
             lod.properties.push_back({property.name, property.value});
+
+        // Selections and #Mass# (COL-001). One vertex is one point, so the vertex
+        // lists are the point lists; the face lists are source face indices, which
+        // are positions in the re-interleaved order built above -- look them up
+        // rather than assuming originalIndex is dense.
+        std::vector<int32_t> positionOfOriginal;
+        for (size_t position = 0; position < order.size(); ++position)
+        {
+            const uint32_t original = order[position].originalIndex;
+            if (original >= positionOfOriginal.size())
+                positionOfOriginal.resize(static_cast<size_t>(original) + 1, -1);
+            positionOfOriginal[original] = static_cast<int32_t>(position);
+        }
+        for (const auto& selection : mesh.selections)
+        {
+            MLOD::WriteNamedSelection written;
+            written.name = selection.name;
+            const bool hasSourceWeights = selection.sourceVertexWeights.size() == selection.vertexIndices.size();
+            for (size_t i = 0; i < selection.vertexIndices.size(); ++i)
+            {
+                const uint32_t vertexIndex = selection.vertexIndices[i];
+                if (vertexIndex >= mesh.vertices.size())
+                    continue;
+                written.points.push_back(static_cast<int32_t>(vertexIndex));
+                // A source byte of 0 cannot have produced membership; treat it as 1.
+                const uint8_t sourceWeight = hasSourceWeights ? selection.sourceVertexWeights[i] : 1;
+                written.pointWeights.push_back(sourceWeight == 0 ? 1 : sourceWeight);
+            }
+            for (uint32_t sourceFace : selection.triangleIndices)
+                if (sourceFace < positionOfOriginal.size() && positionOfOriginal[sourceFace] >= 0)
+                    written.faces.push_back(positionOfOriginal[sourceFace]);
+            if (!written.name.empty() && written.name[0] != '#')
+                lod.selections.push_back(std::move(written));
+        }
+        if (mesh.vertexMass.size() == mesh.vertices.size())
+            lod.mass = mesh.vertexMass;
 
         out.lods.push_back(std::move(lod));
     }

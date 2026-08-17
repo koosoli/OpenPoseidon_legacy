@@ -239,6 +239,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Textures/test_block_compression.cpp
     Asset/Formats/Enfusion/test_pak_archive.cpp
     Asset/Formats/Enfusion/test_xob_model.cpp
+    Asset/Formats/Enfusion/test_xob_collision.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Foundation/Algorithms/test_lz4block.cpp
     Foundation/Algorithms/test_sha256.cpp
