@@ -56,26 +56,28 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::load(const std::string& file
     return model;
 }
 
-std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::string& filePath)
+std::shared_ptr<Poseidon::Model::Model> ModelCache::LoadLooseFile(const std::string& filePath, std::string* error,
+                                                                 bool* opened)
 {
-    _lastError.clear();
+    std::string localError;
+    std::string& lastError = error ? *error : localError;
+    lastError.clear();
 
     std::ifstream file(filePath, std::ios::binary);
     if (!file)
     {
-        // Fallback to PBO archives
-        if (GFileServer)
-        {
-            return loadFromFileServer(filePath);
-        }
-        _lastError = "cannot open file";
+        if (opened)
+            *opened = false;
+        lastError = "cannot open file";
         return nullptr;
     }
+    if (opened)
+        *opened = true;
 
     FormatInfo info = P3DFormatDetector::DetectFormat(file);
     if (!info.isSupported)
     {
-        _lastError = info.errorMessage.empty() ? "unsupported format" : info.errorMessage;
+        lastError = info.errorMessage.empty() ? "unsupported format" : info.errorMessage;
         return nullptr;
     }
 
@@ -93,7 +95,7 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
         }
         else
         {
-            _lastError = "unrecognised P3D signature '" + info.signature + "'";
+            lastError = "unrecognised P3D signature '" + info.signature + "'";
             return nullptr;
         }
     }
@@ -101,26 +103,45 @@ std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::stri
     // a malformed file: the two call for different follow-up.
     catch (const Poseidon::Asset::Formats::P3D::UnsupportedOdolRevision& error)
     {
-        _lastError = error.what();
+        lastError = error.what();
         return nullptr;
     }
     catch (const std::exception& error)
     {
-        _lastError = error.what();
+        lastError = error.what();
         return nullptr;
     }
     catch (...)
     {
-        _lastError = "unknown exception while reading the model";
+        lastError = "unknown exception while reading the model";
         return nullptr;
     }
 
     if (!model->compile() || !model->isCompiled())
     {
-        _lastError = "model read but failed to compile";
+        lastError = "model read but failed to compile";
         return nullptr;
     }
 
+    return model;
+}
+
+std::shared_ptr<Poseidon::Model::Model> ModelCache::loadFromFile(const std::string& filePath)
+{
+    // Same sequence as before the split: loose file first, PBO banks only when the loose
+    // open itself fails (a loose file that fails to PARSE is a failure, not a fallback).
+    bool opened = false;
+    auto model = LoadLooseFile(filePath, &_lastError, &opened);
+    if (!opened)
+    {
+        // Fallback to PBO archives
+        if (GFileServer)
+        {
+            return loadFromFileServer(filePath);
+        }
+        _lastError = "cannot open file";
+        return nullptr;
+    }
     return model;
 }
 

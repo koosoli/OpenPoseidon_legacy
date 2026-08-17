@@ -34,6 +34,11 @@
 #include <Poseidon/Asset/Formats/P3D/ModelProxyBounds.hpp>
 #include <cctype>
 #include <iterator> // std::prev, for the eviction cache's LRU list
+#include <algorithm>
+#include <memory>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // ShapeBank::Find / NewFromModel (async admission)
+#include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
@@ -2233,6 +2238,19 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectVelocityZ = 0.0f;
         _modernObjectLeadMetres = 0.0f;
         _modernObjectDesiredRadiusCells = 0;
+        // (d) Asynchronous cold-model preparation is per-world too: the model table it indexes
+        // is this world's, and every counter on the residency row starts from zero with it.
+        _modernObjectModelPrefetchEpoch.assign(_modernObjectModels.size(), 0);
+        _modernObjectPrefetchEpoch = 0;
+        _modernObjectAsyncInstalled = 0;
+        _modernObjectAsyncWaited = 0;
+        _modernObjectSyncCold = 0;
+        _modernObjectColdModels = 0;
+        _modernObjectColdParseMs = 0.0;
+        _modernObjectColdAdaptMs = 0.0;
+        _modernObjectColdOptimizeMs = 0.0;
+        _modernObjectColdCreateMs = 0.0;
+        EnsureModernObjectPreparer();
         // Registered here rather than in the constructor because this translation unit owns the
         // streaming system and the registry entry must exist exactly once per Landscape: the
         // free-on-demand list is an intrusive CLList, so a second Register() of the same probe
@@ -2426,11 +2444,15 @@ bool Landscape::LoadOprwModern(const char* path)
         LOG_INFO(World,
                  "Modern object streaming: retained {} compact placements in {} land cells; radius={} cells, "
                  "resident budget={}, create batch={}, duplicate ids reassigned={}; evict cache={} shapes, "
-                 "admit ceiling={:.1f} ms, prefetch={:.1f} s above {:.1f} m/s (max {} cells)",
+                 "admit ceiling={:.1f} ms, prefetch={:.1f} s above {:.1f} m/s (max {} cells); async prepare={} "
+                 "(workers={} queue={} ready={})",
                  _modernObjectPlacements.size(), _modernObjectCells.size(), _modernObjectRadius,
                  _modernObjectBudget, _modernObjectCreatesPerUpdate, reassigned, _modernObjectShapeCacheLimit,
                  ObjectStreamCeilingMs(), ObjectStreamPrefetchSeconds(), ObjectStreamPrefetchMinSpeed(),
-                 ObjectStreamPrefetchMaxCells());
+                 ObjectStreamPrefetchMaxCells(),
+                 _modernObjectPreparer && _modernObjectPreparer->Running() ? "on" : "off",
+                 ObjectStreamPreparer::WorkerCount(), ObjectStreamPreparer::QueueLimit(),
+                 ObjectStreamPreparer::ReadyLimit());
         ProgressFinish();
         return true;
     }
@@ -2607,7 +2629,12 @@ static bool ResidencyCandidateCacheEnabled()
 // budget for admission, so it should cost far less fill time than MIN_BATCH=1 did. It cannot
 // bound the frame below `ceiling + one object`, because one object must always be attempted or
 // the fill would never terminate -- a single cold model is the residual tail and async
-// admission is the only thing that removes it.
+// admission is the only thing that removes it. That is (d): ObjectStreamPreparer moves the
+// parse half of a cold model to worker threads and the admit loop skips, rather than waits
+// for, a model whose IR is not ready (WGR_OBJECT_STREAM_ASYNC, ObjectStreamPrepare.hpp). The
+// adapter and GPU half stays on this thread, so the residual after (d) is `ceiling + adapt +
+// vertex buffers + registration` of one model, and the per-model split row says how big
+// that is.
 //
 // 0 disables the ceiling and restores exactly today's behaviour, so both arms come from one
 // binary.
@@ -2846,10 +2873,97 @@ size_t Landscape::TrimModernObjectShapeCache(size_t keep)
     return dropped;
 }
 
+// (d) Hand the preparer this world's model table. Creating the preparer is what starts the
+// worker threads, so under WGR_OBJECT_STREAM_ASYNC=0 it is never created at all and the admit
+// loop below sees `asyncOn == false` -- the old loop, with the same engine calls in the same
+// order (plus a ShapeBank cache lookup per placement that feeds the split timers).
+void Landscape::EnsureModernObjectPreparer()
+{
+    if (!ObjectStreamPreparer::AsyncEnabled())
+        return;
+    if (!_modernObjectPreparer)
+        _modernObjectPreparer = std::make_unique<ObjectStreamPreparer>();
+    std::vector<std::string> paths;
+    paths.reserve(_modernObjectModels.size());
+    for (const RStringB& model : _modernObjectModels)
+        paths.emplace_back(model.GetLength() > 0 ? (const char*)model : "");
+    _modernObjectPreparer->Reset(paths.data(), paths.size());
+    LOG_INFO(World, "Object stream prepare: {} workers armed for {} models (queue<={} ready<={})",
+             ObjectStreamPreparer::WorkerCount(), paths.size(), ObjectStreamPreparer::QueueLimit(),
+             ObjectStreamPreparer::ReadyLimit());
+}
+
+// (d) Give the workers lead time. Called once per recentre, after the desired set is known:
+// every distinct model that has a non-resident placement in a desired, not-yet-active cell and
+// is not resident in ShapeBank is requested, in candidate (distance) order, so the queue is
+// sorted the way the admit loop will ask. The epoch stamp makes this one request per model per
+// recentre, not per placement; the admit loop's own on-demand Request covers anything this
+// walk did not reach (a full queue, or a model that went cold since).
+void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCandidate>& candidates)
+{
+    if (!_modernObjectPreparer || !_modernObjectPreparer->Running())
+        return;
+    if (_modernObjectModelPrefetchEpoch.size() != _modernObjectModels.size())
+        _modernObjectModelPrefetchEpoch.assign(_modernObjectModels.size(), 0);
+    ++_modernObjectPrefetchEpoch;
+    // Pass 1: the distinct cold models of the new desired set, nearest first. Stamping is what
+    // makes this one entry per model, and the stamp is also what DropStale reads.
+    std::vector<uint32_t> wanted;
+    uint32_t alreadyWarm = 0;
+    for (const ModernObjectCellCandidate& cell : candidates)
+    {
+        if (!_modernObjectCellDesired[cell.index] || _modernObjectCellActive[cell.index])
+            continue;
+        for (uint32_t index : _modernObjectCells[cell.index])
+        {
+            const ModernObjectPlacement& placement = _modernObjectPlacements[index];
+            if (placement.resident || placement.modelIndex >= _modernObjectModels.size())
+                continue;
+            const uint32_t model = placement.modelIndex;
+            if (_modernObjectModelPrefetchEpoch[model] == _modernObjectPrefetchEpoch)
+                continue;
+            _modernObjectModelPrefetchEpoch[model] = _modernObjectPrefetchEpoch;
+            if (Shapes.Find(_modernObjectModels[model], false, true) != nullptr)
+            {
+                ++alreadyWarm;
+                continue;
+            }
+            wanted.push_back(model);
+        }
+    }
+    // Drop what the previous window asked for and this one does not: queued requests and
+    // ready IRs for models with no non-resident placement in the new desired set. Without
+    // this the ready set (bounded, and the workers park when it is full) could fill with
+    // models nobody will Take, and the models this window needs would sit behind them.
+    const size_t staleDropped = _modernObjectPreparer->DropStale(
+        _modernObjectModelPrefetchEpoch.data(), _modernObjectModelPrefetchEpoch.size(), _modernObjectPrefetchEpoch);
+    // Pass 2: enqueue in that order. A full queue is not an error -- the admit loop
+    // re-requests on demand when it reaches a placement whose model is still Unknown.
+    uint32_t requested = 0;
+    for (uint32_t model : wanted)
+    {
+        if (_modernObjectPreparer->Query(model) != ObjectStreamPreparer::State::Unknown)
+            continue;
+        if (!_modernObjectPreparer->Request(model))
+            break;
+        ++requested;
+    }
+    if (requested > 0 || staleDropped > 0)
+        LOG_INFO(World,
+                 "Object stream prepare: recentre wants {} cold models ({} already warm); requested {} ahead, "
+                 "dropped {} stale",
+                 wanted.size(), alreadyWarm, requested, staleDropped);
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
     {
+        // (d) Same teardown argument as the cache below: a preparer still holding a dead
+        // world's IRs, or a queue of its models, must be flushed. Reset only bumps a
+        // generation and drops results; it never joins, so this costs nothing per frame.
+        if (_modernObjectPreparer && _modernObjectPreparer->ModelCount() > 0)
+            _modernObjectPreparer->Reset(nullptr, 0);
         // (a) STREAMING IS OFF, SO THE CACHE MUST NOT SURVIVE. This is reached both on a world
         // that does not stream at all (the CWA islands) and on the frame after a world is torn
         // down: Landscape's reset clears the placement database and sets _modernObjectStreaming
@@ -3139,11 +3253,22 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             _modernObjectCellActive[cell] = 0;
             _modernObjectCellCursor[cell] = 0;
         }
+        // (d) AFTER the release, not before: a model whose last placement was just released
+        // (and that the eviction cache did not keep) is cold now, and this is the walk that
+        // must see it as such.
+        PrefetchModernObjectModels(candidates);
     }
 
     uint32_t created = 0;
     uint32_t refused = 0;
     uint32_t attempted = 0;
+    // (d) per-update async accounting, for the row below.
+    uint32_t installed = 0; // admitted on a worker-prepared IR
+    uint32_t waited = 0;    // skipped this update because the IR was not ready
+    uint32_t syncCold = 0;  // cold models loaded synchronously on this thread
+    double warmMs = 0.0;    // time in ObjectCreate for objects whose model was already resident
+    double coldMs = 0.0;    // time in ShapeBank + ObjectCreate for cold models, this update
+    const bool asyncOn = _modernObjectPreparer != nullptr && _modernObjectPreparer->Running();
 
     // Admission is denominated in TIME, not frames.
     //
@@ -3219,18 +3344,77 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         return elapsedMs >= admitBudgetMs;
     };
 
+    // (d) THE ADMIT LOOP, WITH SKIP-NOT-WAIT.
+    //
+    // A cell's placement list is partitioned in place as it drains: [0, cursor) is done
+    // (resident, or refused), [cursor, scan) has been visited THIS update and is waiting for a
+    // worker, [scan, end) is not yet visited. Admitting a placement swaps it down to `cursor`;
+    // a waiting one is left where it is and `scan` moves past it. So the ready placements
+    // behind a cold one are admitted this frame instead of queueing behind it, and a cell
+    // whose only remaining placements are waiting stays inactive with cursor < size and is
+    // rescanned next update from `cursor`. Order within a cell is not meaningful to anything
+    // (the release loop walks the whole list), which is what makes the swap safe. `scan`
+    // strictly increases, so the loop terminates regardless of what the workers do.
+    //
+    // Under WGR_OBJECT_STREAM_ASYNC=0 nothing is ever "waiting": every placement is admitted
+    // in order exactly as before, through the same ObjectCreate. The only extra work is the
+    // ShapeBank::Find that classifies warm against cold for the split timers.
     for (const CellCandidate& cell : candidates)
     {
         if (!_modernObjectCellDesired[cell.index] || _modernObjectCellActive[cell.index])
             continue;
         std::vector<uint32_t>& placements = _modernObjectCells[cell.index];
         uint32_t& cursor = _modernObjectCellCursor[cell.index];
-        while (cursor < placements.size() && !admitBudgetSpent())
+        uint32_t scan = cursor;
+        while (scan < placements.size() && !admitBudgetSpent())
         {
-            const uint32_t index = placements[cursor++];
+            const uint32_t index = placements[scan];
             ModernObjectPlacement& placement = _modernObjectPlacements[index];
             if (placement.resident || placement.modelIndex >= _modernObjectModels.size())
+            {
+                std::swap(placements[scan], placements[cursor]);
+                ++cursor;
+                ++scan;
                 continue;
+            }
+            const RStringB& modelName = _modernObjectModels[placement.modelIndex];
+            // Warm or cold? Warm = ShapeBank still holds it (an Object or the eviction cache
+            // keeps it alive), and ObjectCreate below is the ~0.03 ms path. Cold is the ~90 ms
+            // path, and the only one the preparer has anything to say about.
+            const bool cold = Shapes.Find(modelName, false, true) == nullptr;
+            std::shared_ptr<Model::Model> preparsed;
+            if (cold && asyncOn)
+            {
+                const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
+                if (state == ObjectStreamPreparer::State::Ready)
+                {
+                    preparsed = _modernObjectPreparer->Take(placement.modelIndex);
+                    if (!preparsed)
+                    {
+                        // Ready at Query, gone at Take: the ready-limit trim on a worker got
+                        // there first. Re-request and skip rather than parse it here.
+                        _modernObjectPreparer->Request(placement.modelIndex);
+                        ++waited;
+                        ++scan;
+                        continue;
+                    }
+                }
+                else if (state != ObjectStreamPreparer::State::NotLoose && state != ObjectStreamPreparer::State::Failed)
+                {
+                    // Unknown (first sight, or dropped from the ready set), Queued or Parsing:
+                    // not ready. Ask (a no-op unless Unknown) and SKIP. Never wait.
+                    if (state == ObjectStreamPreparer::State::Unknown)
+                        _modernObjectPreparer->Request(placement.modelIndex);
+                    ++waited;
+                    ++scan;
+                    continue;
+                }
+                // NotLoose / Failed: sticky, the worker cannot help; fall through to the
+                // synchronous path, which is exactly the old behaviour for this model.
+            }
+            std::swap(placements[scan], placements[cursor]);
+            ++cursor;
+            ++scan;
             ++attempted;
             Matrix4 transform;
             transform.SetDirectionAside(Vector3(placement.rows[0], placement.rows[1], placement.rows[2]));
@@ -3238,15 +3422,62 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             transform.SetDirection(Vector3(placement.rows[6], placement.rows[7], placement.rows[8]));
             transform.SetPosition(Vector3(placement.rows[9], placement.rows[10], placement.rows[11]));
             Object* admitted = nullptr;
+            ShapeBank::LoadTiming timing;
+            double shapeMs = 0.0;
+            const auto createStart = std::chrono::steady_clock::now();
             try
             {
-                admitted = ObjectCreate(placement.id, _modernObjectModels[placement.modelIndex], transform, nullptr,
-                                        nullptr, false, true);
+                if (cold)
+                {
+                    // Install the shape first, on the pre-parsed IR when there is one, so the
+                    // ObjectCreate below finds it in ShapeBank and pays only NewObject /
+                    // AddObject / GPU registration. Held by a Ref across the create so the
+                    // freshly built shape (refcount 0 out of the bank) cannot die between the
+                    // two calls; the Object takes its own reference inside.
+                    Ref<LODShapeWithShadow> installedShape =
+                        Shapes.NewFromModel(modelName, false, true, std::move(preparsed), &timing);
+                    shapeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
+                                                                        createStart)
+                                  .count();
+                    admitted = ObjectCreate(placement.id, modelName, transform, nullptr, nullptr, false, true);
+                    (void)installedShape;
+                }
+                else
+                {
+                    admitted = ObjectCreate(placement.id, modelName, transform, nullptr, nullptr, false, true);
+                }
             }
             catch (const std::exception&)
             {
                 admitted = nullptr;
             }
+            const double totalMs =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - createStart).count();
+            if (cold)
+            {
+                const double createMs = std::max(0.0, totalMs - shapeMs);
+                coldMs += totalMs;
+                if (timing.preparsed)
+                    ++installed;
+                else
+                    ++syncCold;
+                ++_modernObjectColdModels;
+                _modernObjectColdParseMs += timing.parseMs;
+                _modernObjectColdAdaptMs += timing.adaptMs;
+                _modernObjectColdOptimizeMs += timing.optimizeMs;
+                _modernObjectColdCreateMs += createMs;
+                // One row per cold model. This is the split timer the whole change is judged
+                // by: if `parse` is small next to `adapt`+`opt`+`create`, moving the parse off
+                // the thread cannot have removed the stall, and the row says so per model.
+                LOG_INFO(World,
+                         "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
+                         "total={:.1f} ms{}",
+                         (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
+                         timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, totalMs,
+                         timing.canonical ? "" : " (legacy loader)");
+            }
+            else
+                warmMs += totalMs;
             placement.resident = admitted;
             if (admitted)
             {
@@ -3267,6 +3498,9 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         if (admitBudgetSpent())
             break;
     }
+    _modernObjectAsyncInstalled += installed;
+    _modernObjectAsyncWaited += waited;
+    _modernObjectSyncCold += syncCold;
     _modernResidentObjectCount = released > _modernResidentObjectCount + created
                                      ? 0
                                      : _modernResidentObjectCount + created - released;
@@ -3290,7 +3524,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     constexpr uint32_t ProgressLogEveryUpdates = 16;
     const bool progressRow =
         _modernObjectResidencyPending && (_modernObjectUpdateCount % ProgressLogEveryUpdates) == 0;
-    if (centerChanged || !_modernObjectResidencyPending || progressRow)
+    // (d) A row is also due on any update that admitted a cold model, else the interesting
+    // frames -- the ones this change exists for -- would be exactly the silent ones. Bounded by
+    // the number of distinct cold models a run touches (hundreds), not by frames.
+    const bool asyncRow = (installed + syncCold) > 0;
+    if (centerChanged || !_modernObjectResidencyPending || progressRow || asyncRow)
+    {
         // The three new fields exist so the fix can be judged from the log alone. `desired` is
         // the effective window radius (the candidate `window` is the grown one and has always
         // been much larger); `lead` is the prefetch bias in metres, and is 0 whenever the camera
@@ -3301,15 +3540,35 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         // idea is wrong. RND-040's headline number to beat is created=15958 / released=77643
         // over 112 s at 30 m/s: if hits do not grow into that, the cache is not earning its
         // memory on this world.
+        //
+        // (d) `async` fields, this update then cumulative: inst = objects admitted on a
+        // worker-prepared IR, wait = admissions skipped because the IR was not ready, sync =
+        // cold models loaded on this thread anyway; warm/cold ms = this update's time in
+        // ObjectCreate for resident vs cold models; then the preparer's own counters (prepared
+        // IRs, currently queued / ready, cumulative worker parse time and the slowest parse),
+        // and the cumulative cold split parse/adapt/opt/create in ms over N cold models. If
+        // `parse` is a small share of that split, the parse was not where the ~90 ms lived
+        // and this change is a measured null result -- read it before believing `inst`.
+        ObjectStreamPreparer::Stats prep;
+        if (asyncOn)
+            prep = _modernObjectPreparer->SnapshotStats();
         LOG_INFO(World,
                  "Modern object residency: centre=({}, {}) window={} cells desired={} cells lead={:.0f} m "
                  "requested={} resident={} created={} released={} refused={} budget={} pending={} cache={}/{} "
-                 "hits={} ins={} drops={}",
+                 "hits={} ins={} drops={} async={} inst={} wait={} sync={} warm={:.1f}ms cold={:.1f}ms "
+                 "prep={}/{} q={} ready={} notloose={} failed={} dropped={} worker={:.0f}ms max={:.0f}ms "
+                 "coldsplit parse/adapt/opt/create={:.0f}/{:.0f}/{:.0f}/{:.0f}ms over {} models "
+                 "(inst={} wait={} sync={} total)",
                  centerX, centerZ, _modernObjectCandidateRadius, _modernObjectDesiredRadiusCells,
                  _modernObjectLeadMetres, requested, _modernResidentObjectCount, created, released, refused,
                  _modernObjectBudget, _modernObjectResidencyPending ? 1 : 0, _modernObjectShapeCache.size(),
                  _modernObjectShapeCacheLimit, _modernObjectShapeCacheHits, _modernObjectShapeCacheInserts,
-                 _modernObjectShapeCacheDrops);
+                 _modernObjectShapeCacheDrops, asyncOn ? "on" : "off", installed, waited, syncCold, warmMs, coldMs,
+                 prep.prepared, prep.requested, prep.queued, prep.ready, prep.notLoose, prep.failed, prep.dropped,
+                 prep.workerMs, prep.workerMaxMs, _modernObjectColdParseMs, _modernObjectColdAdaptMs,
+                 _modernObjectColdOptimizeMs, _modernObjectColdCreateMs, _modernObjectColdModels,
+                 _modernObjectAsyncInstalled, _modernObjectAsyncWaited, _modernObjectSyncCold);
+    }
 }
 
 void Landscape::SaveOptimized(QOStream& f)

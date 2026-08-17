@@ -458,20 +458,45 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
 #endif
 }
 
-LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
+namespace
 {
-    char lowName[128];
+// Composite cache key: name + reversed + shadow flags.  This
+// replaces the previous linear-scan-with-bit-flag-matching: each
+// (name, reversed, shadow) tuple maps 1:1 to a unique cached
+// shape, so exact-tuple keying produces the same partition as
+// the original bit-flag matcher.  Length budget: max P3D path
+// ~128 + 4-char suffix; comfortably fits the asset paths in tree.
+//
+// Shared by New and Find so the two can never disagree about what "resident" means.
+void BuildShapeCacheKey(const char* name, bool reversed, bool shadow, char (&lowName)[128], char (&cacheKey)[160])
+{
     snprintf(lowName, sizeof(lowName), "%s", (const char*)name);
     strlwr(lowName);
-
-    // Composite cache key: name + reversed + shadow flags.  This
-    // replaces the previous linear-scan-with-bit-flag-matching: each
-    // (name, reversed, shadow) tuple maps 1:1 to a unique cached
-    // shape, so exact-tuple keying produces the same partition as
-    // the original bit-flag matcher.  Length budget: max P3D path
-    // ~128 + 4-char suffix; comfortably fits the asset paths in tree.
-    char cacheKey[160];
     snprintf(cacheKey, sizeof(cacheKey), "%s|R%dS%d", lowName, reversed ? 1 : 0, shadow ? 1 : 0);
+}
+} // namespace
+
+LODShapeWithShadow* ShapeBank::Find(const char* name, bool reversed, bool shadow) const
+{
+    char lowName[128];
+    char cacheKey[160];
+    BuildShapeCacheKey(name, reversed, shadow, lowName, cacheKey);
+    // A dead slot (weak Link auto-nulled) reads as null here exactly as it does in New, which
+    // then drops and reloads it. Find never mutates the cache.
+    return _cache.Lookup(cacheKey);
+}
+
+LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
+{
+    return NewFromModel(name, reversed, shadow, nullptr, nullptr);
+}
+
+LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, bool shadow,
+                                            std::shared_ptr<Model::Model> preparsed, LoadTiming* timing)
+{
+    char lowName[128];
+    char cacheKey[160];
+    BuildShapeCacheKey(name, reversed, shadow, lowName, cacheKey);
 
     int remNeeded = 0;
     if (reversed)
@@ -485,6 +510,8 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
 
     if (LODShapeWithShadow* existing = _cache.Lookup(cacheKey))
     {
+        if (timing)
+            timing->cacheHit = true;
         return existing;
     }
     // Lookup returned nullptr — either the key was never inserted, or a
@@ -506,15 +533,34 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
     {
-        Poseidon::ModelCache cache;
-        auto model = cache.load(lowName);
+        // The parse is the only stage of a cold load that does not touch engine globals, and
+        // it is the stage a caller may have already done on a worker thread (Landscape's
+        // asynchronous streamed admission hands the IR in as `preparsed`). When it did, no
+        // ModelCache is consulted at all; when it did not, this is byte-for-byte the old path.
+        const auto parseStart = ::Poseidon::Dev::Perf::Now();
+        std::shared_ptr<Model::Model> model = std::move(preparsed);
+        const bool arrivedPreparsed = model != nullptr;
+        if (!arrivedPreparsed)
+        {
+            Poseidon::ModelCache cache;
+            model = cache.load(lowName);
+        }
+        if (timing)
+        {
+            timing->preparsed = arrivedPreparsed;
+            timing->parseMs = arrivedPreparsed ? 0.0 : ::Poseidon::Dev::Perf::ElapsedMs(parseStart);
+        }
+        const auto adaptStart = ::Poseidon::Dev::Perf::Now();
         if (model && (model->sourceFormat == "ODOL" || model->sourceFormat == "MLOD"))
         {
-            LOG_INFO(Graphics, "Shape loader: canonical {} adapter for {}", model->sourceFormat, lowName);
+            LOG_INFO(Graphics, "Shape loader: canonical {} adapter for {}{}", model->sourceFormat, lowName,
+                     arrivedPreparsed ? " (pre-parsed)" : "");
             // ShapeAdapter sets shape name from model.sourcePath — must use
             // the original backslash path to match ShapeBank lookup key
             model->sourcePath = lowName;
             shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed);
+            if (timing)
+                timing->canonical = true;
         }
         else
         {
@@ -522,6 +568,8 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
                      model ? model->sourceFormat : "<unavailable>");
             shape = new LODShapeWithShadow(lowName, reversed);
         }
+        if (timing)
+            timing->adaptMs = ::Poseidon::Dev::Perf::ElapsedMs(adaptStart);
     }
     if (!shape)
         shape = new LODShapeWithShadow();
@@ -540,7 +588,10 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
     // so doing it per shape during map load would be pure duplicated work.
     if (_bulkOptimizeDone)
     {
+        const auto optimizeStart = ::Poseidon::Dev::Perf::Now();
         OptimizeOneShape(shape);
+        if (timing)
+            timing->optimizeMs = ::Poseidon::Dev::Perf::ElapsedMs(optimizeStart);
     }
 
     const double _perfShapeLoadMs = ::Poseidon::Dev::Perf::ElapsedMs(_perfShapeLoadStart);

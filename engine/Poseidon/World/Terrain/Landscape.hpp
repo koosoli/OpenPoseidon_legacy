@@ -5,10 +5,12 @@
 #include <Poseidon/AI/Path/AITypes.hpp>
 #include <Poseidon/Foundation/Containers/BankArray.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 
 #include <array>
 #include <chrono>
 #include <list>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -680,6 +682,40 @@ class Landscape : public SerializeClass
     void RetainReleasedShape(LODShapeWithShadow* shape);
     bool AdoptCachedShape(LODShapeWithShadow* shape);
     size_t TrimModernObjectShapeCache(size_t keep);
+
+    // ----------------------------------------------------------------------------------------
+    // (d) ASYNCHRONOUS COLD-MODEL PREPARATION. The residual stall after (a), (b) and (c) is one
+    // cold model admitted synchronously -- file read, P3D decode, IR compile, adapter, vertex
+    // buffers, GPU registration, ~90+ ms on Reforger Everon -- and the admit ceiling cannot cut
+    // below `ceiling + one object`. The preparer runs the thread-safe front half (read + decode
+    // + compile, ModelCache::LoadLooseFile) on worker threads; the admit loop installs a ready
+    // IR through ShapeBank::NewFromModel and SKIPS, rather than waits for, an object whose IR
+    // is not ready. See ObjectStreamPrepare.hpp for the thread-safety boundary and the levers.
+    // Created lazily on the first streamed world; destroyed (joined) with the Landscape.
+    std::unique_ptr<ObjectStreamPreparer> _modernObjectPreparer;
+    // Per model index: the value of _modernObjectPrefetchEpoch when the desired-set walk last
+    // considered it, so a recentre requests each distinct cold model once, not once per
+    // placement. Sized with _modernObjectModels.
+    std::vector<uint32_t> _modernObjectModelPrefetchEpoch;
+    uint32_t _modernObjectPrefetchEpoch = 0;
+    // Counters for the residency row. `Installed` = objects admitted on a worker-prepared IR;
+    // `Waited` = admission attempts skipped because the IR was not ready yet (a placement can
+    // count several times across frames); `SyncCold` = cold models admitted synchronously
+    // (async off, not a loose file, worker parse failed, or the model was already in flight
+    // for a warm-path sibling and the sync path won); the *Ms figures are the split timers.
+    uint64_t _modernObjectAsyncInstalled = 0;
+    uint64_t _modernObjectAsyncWaited = 0;
+    uint64_t _modernObjectSyncCold = 0;
+    uint64_t _modernObjectColdModels = 0;
+    double _modernObjectColdParseMs = 0.0;    // main-thread parse (sync cold only)
+    double _modernObjectColdAdaptMs = 0.0;    // ShapeAdapter, all cold
+    double _modernObjectColdOptimizeMs = 0.0; // vertex buffers, all cold
+    double _modernObjectColdCreateMs = 0.0;   // ObjectCreate beyond ShapeBank (NewObject/AddObject/GPU)
+    // Ensure the preparer knows this world's model table; no-op if already current.
+    void EnsureModernObjectPreparer();
+    // Walk the desired set once per recentre and enqueue every distinct cold model in
+    // distance order, so the workers have lead time before the admit loop needs the IR.
+    void PrefetchModernObjectModels(const std::vector<ModernObjectCellCandidate>& candidates);
     // Only the small subset of streamed objects that actually emits imported
     // marker lights needs ownership state. Scene keeps non-owning links, so
     // erasing an entry also removes its lights without a map-sized per-placement

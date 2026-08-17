@@ -10,6 +10,8 @@
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 
+#include <memory> // std::shared_ptr<Model::Model> in ShapeBank::NewFromModel
+
 // Forward declarations for ShapeAdapter friend access
 
 namespace Poseidon { namespace Model { struct Model; namespace ShapeAdapter {
@@ -1134,6 +1136,34 @@ class ShapeBank
 
 	LODShapeWithShadow *New(const char *name, bool reversed, bool shadow);
 	LODShapeWithShadow *NewUnique(const char *name, bool reversed, bool shadow);
+
+	// Lookup only: the shape New(name, reversed, shadow) WOULD return without loading anything,
+	// or null if it is not resident. This is what lets a caller tell a warm model (an Object or
+	// an eviction-cache Ref still holds it) from a cold one before paying for the cold one.
+	LODShapeWithShadow *Find(const char *name, bool reversed, bool shadow) const;
+
+	// Where one cold ShapeBank::New spends its time. Filled by NewFromModel so the streamed
+	// admission path can log a per-model split instead of one opaque number: `parseMs` is
+	// file read + ODOL/MLOD decode + IR compile (zero when the model arrived pre-parsed),
+	// `adaptMs` is ShapeAdapter::convertToLODShape (IR -> LODShape, texture bank lookups,
+	// material bank, proxies), `optimizeMs` is OptimizeOneShape (vertex-buffer creation).
+	struct LoadTiming
+	{
+		double parseMs = 0.0;
+		double adaptMs = 0.0;
+		double optimizeMs = 0.0;
+		bool cacheHit = false;   // returned an already-resident shape; nothing was loaded
+		bool preparsed = false;  // the caller supplied the IR, so parseMs was paid elsewhere
+		bool canonical = false;  // went through the ODOL/MLOD adapter (else the legacy loader)
+	};
+
+	// New(), with the file read + P3D parse optionally done ALREADY: `model` is the compiled
+	// IR for `name` (see ModelCache::LoadLooseFile), or null to parse here exactly as New does.
+	// Everything after the parse -- adapter, cache insert, vertex buffers -- happens here, on
+	// the calling (main) thread, because it touches the texture bank, the material bank, proxy
+	// object creation and GEngine. `timing` may be null.
+	LODShapeWithShadow *NewFromModel(const char *name, bool reversed, bool shadow,
+	                                 std::shared_ptr<Model::Model> model, LoadTiming *timing);
 
 	void OptimizeAll();
 	// Build one shape's vertex buffers, for a shape that arrived after the bulk
