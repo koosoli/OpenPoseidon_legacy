@@ -2013,6 +2013,9 @@ extern "C"
     WGR_API void wgr_set_star_intensity(WgrRenderer* renderer, float intensity);
 
     WGR_API void wgr_set_cloud_shadow_strength(WgrRenderer* renderer, float strength);
+    /* Photo-card placement grid (m). 1.11 = the map's own clutter grid; lower packs cards
+     * denser than the map declares, up to the procedural blade density. Clamped 0.16..4.0. */
+    WGR_API void wgr_grass_set_card_spacing(WgrRenderer* renderer, float spacing);
     /* Smoke -> ground shadow: this frame's particles, splatted into the cloud shadow map so
      * every lit surface darkens under a plume. blobs may be null with count 0 to clear. */
     WGR_API void wgr_set_smoke_shadow(WgrRenderer* renderer, const WgrSmokeShadowBlob* blobs, uint32_t count,

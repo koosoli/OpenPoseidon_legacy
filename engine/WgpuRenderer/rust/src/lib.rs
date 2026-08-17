@@ -1438,6 +1438,10 @@ impl Renderer {
         self.sky.set_smoke_shadow(blobs, strength);
     }
 
+    fn set_grass_card_spacing(&mut self, spacing: f32) {
+        self.grass.set_card_spacing(spacing);
+    }
+
     // Material Debug (dev panel, Materials tab) for the retained GPU-driven path.
     // `flags`: bit0 disable normal map, bit1 invert normal Y, bit2 compose Multi layers.
     fn set_material_debug(&mut self, view: u32, flags: u32) {

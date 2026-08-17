@@ -89,6 +89,25 @@ fn mid_placement_spacing(cards: bool, card_spacing: f32) -> f32 {
     }
 }
 
+/// Live override of the photo-card placement grid.
+///
+/// The uniform lane and the dispatch dims are both recomputed per frame from
+/// `self.card_spacing`, so this takes effect on the next frame with no
+/// reallocation -- the instance buffers are capped independently of the grid.
+///
+/// Deliberately its own entry point rather than a `WgrGrassParams` field, for
+/// the same reason `wgr_set_cloud_shadow_strength` is: that struct's size is
+/// part of the ABI handshake. The "renderer-owned, never from the caller" note
+/// on the uniform still holds for MISSION and CONFIG data -- this is the dev
+/// panel reaching in, which is the one caller that should be able to.
+impl Grass {
+    pub fn set_card_spacing(&mut self, spacing: f32) {
+        if spacing.is_finite() {
+            self.card_spacing = spacing.clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1);
+        }
+    }
+}
+
 fn card_spacing_from_env() -> f32 {
     std::env::var("WGR_GRASS_CARD_SPACING")
         .ok()

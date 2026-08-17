@@ -1254,6 +1254,14 @@ class Engine : public IGraphicsEngine
         // over every clutter cell -- most of what reads as a solid mat. Kept at 1.0
         // until measured in a run; ~0.5 is the Arma-sized guess.
         float photoCardScale = 1.0f;
+        // Photo-card PLACEMENT GRID, metres. Coverage above is the fraction of these
+        // cells that grow a card, so this is the ceiling coverage cannot pass: at 1.11
+        // (the A2/A3 worlds' own clutterGrid) even coverage 1.0 is 0.81 cards/m^2, while
+        // the procedural mid ring sits on 0.82 m and the near ring far below that. Lower
+        // this to let the photographed clumps reach procedural density. Renderer clamps
+        // to 0.16..4.0; 0.16 was the original blade grid and is ~90 plates over every
+        // point of ground, which is where the flicker came from.
+        float photoCardSpacing = 1.11f;
         // PROCEDURAL BLADE LOOK (near blades + mid ribbons; cards and the far
         // proxy ignore these). Every default reproduces the pre-existing look, so
         // nothing changes until a slider is moved.

@@ -3084,6 +3084,25 @@ pub unsafe extern "C" fn wgr_set_cloud_shadow_strength(renderer: *mut WgrRendere
     renderer.set_cloud_shadow_strength(strength);
 }
 
+/// Photo-card placement grid in metres. The map's own clutter grid (1.11 m on the A2/A3
+/// worlds) is the default and the natural maximum density for "one card per clutter
+/// object"; going below it packs more cards than the map declares, which is what makes
+/// the photographed clumps reach procedural-grass density. Clamped to 0.16..4.0.
+///
+/// Its own entry point rather than a WgrGrassParams field: that struct's size is part of
+/// the ABI handshake, and this is one float.
+///
+/// # Safety
+/// `renderer` must be a live renderer or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_grass_set_card_spacing(renderer: *mut WgrRenderer, spacing: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_grass_card_spacing(spacing);
+}
+
 /// One smoke particle for the ground-shadow pass. Layout matches
 /// `sky::SmokeShadowBlob` and the C `WgrSmokeShadowBlob` exactly (32 bytes).
 #[repr(C)]

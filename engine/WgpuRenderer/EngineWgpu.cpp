@@ -6890,6 +6890,15 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.card_coverage = std::clamp(settings.photoCoverage, 0.01f, 1.0f);
     params.card_coverage_auto = settings.photoCoverageAuto ? 1.0f : 0.0f;
     params.card_scale = std::clamp(settings.photoCardScale, 0.25f, 2.0f);
+    // Card PLACEMENT GRID. Its own entry point rather than a WgrGrassParams field because
+    // that struct's size is part of the ABI handshake (same reason as the cloud-shadow
+    // strength). Coverage above is a fraction of THIS grid, so the grid is the ceiling
+    // coverage cannot pass -- lowering it is what lets the photographed clumps reach the
+    // procedural rings' density.
+    if (_renderer != nullptr)
+    {
+        wgr_grass_set_card_spacing(_renderer, std::clamp(settings.photoCardSpacing, 0.16f, 4.0f));
+    }
     // Procedural blade look; defaults are the pre-existing shading (see GrassSettings).
     params.blade_self_shadow = std::clamp(settings.bladeSelfShadow, 0.0f, 1.0f);
     params.blade_contrast = std::clamp(settings.bladeContrast, 0.25f, 3.0f);

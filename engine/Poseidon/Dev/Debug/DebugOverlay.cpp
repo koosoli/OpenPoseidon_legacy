@@ -3371,6 +3371,13 @@ void DrawGrassTab()
                             "(1.00 = every cell, the map's own maximum).",
                             c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
     }
+    changed |= ImGui::SliderFloat("Photo card grid (m)", &grass.photoCardSpacing, 0.16f, 4.0f, "%.2f m");
+    ImGui::TextDisabled("The grid coverage above is a fraction OF. 1.11 m is the map's own clutterGrid, so even "
+                        "coverage 1.00 caps at %.2f cards/m2 -- while the procedural mid ring sits on 0.82 m and the "
+                        "near ring far below. Lower this to let the photographed clumps reach procedural density; "
+                        "0.82 matches the mid ring exactly. Below ~0.4 expect the old flicker back: every plate edge "
+                        "shimmers in the wind, and at 0.16 there are ~90 plates over every point of ground.",
+                        1.0f / (1.11f * 1.11f));
     changed |= ImGui::SliderFloat("Photo card size", &grass.photoCardScale, 0.25f, 2.0f, "%.2fx");
     ImGui::TextDisabled("Size of each card. 1.00 = the stock card, 0.5-2.3 m tall and wider than tall; Arma's own "
                         "clutter plants are ~0.3-0.9 m, so at the map's own density the stock card is two to three "

@@ -858,8 +858,9 @@ mod tests {
     // The uniform is written with bytemuck and read by two shaders that declare it independently.
     // Its size is the one thing a layout drift would change without any compiler noticing.
     #[test]
-    fn uniform_layout_is_a_mat4_plus_seven_vec4() {
-        assert_eq!(std::mem::size_of::<GodRayUniform>(), 64 + 7 * 16);
+    fn uniform_layout_is_a_mat4_plus_eight_vec4() {
+        // Eight since tune2 was added for the smoke occluder's influence lane.
+        assert_eq!(std::mem::size_of::<GodRayUniform>(), 64 + 8 * 16);
         assert_eq!(std::mem::align_of::<GodRayUniform>(), 4);
     }
 
