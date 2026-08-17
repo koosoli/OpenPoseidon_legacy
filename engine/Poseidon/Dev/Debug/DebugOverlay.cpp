@@ -3371,13 +3371,34 @@ void DrawGrassTab()
                             "(1.00 = every cell, the map's own maximum).",
                             c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
     }
-    changed |= ImGui::SliderFloat("Photo card grid (m)", &grass.photoCardSpacing, 0.16f, 4.0f, "%.2f m");
-    ImGui::TextDisabled("The grid coverage above is a fraction OF. 1.11 m is the map's own clutterGrid, so even "
-                        "coverage 1.00 caps at %.2f cards/m2 -- while the procedural mid ring sits on 0.82 m and the "
-                        "near ring far below. Lower this to let the photographed clumps reach procedural density; "
-                        "0.82 matches the mid ring exactly. Below ~0.4 expect the old flicker back: every plate edge "
-                        "shimmers in the wind, and at 0.16 there are ~90 plates over every point of ground.",
-                        1.0f / (1.11f * 1.11f));
+    changed |= ImGui::SliderFloat("Photo card grid (m)", &grass.photoCardSpacing, 0.06f, 4.0f, "%.3f m",
+                                  ImGuiSliderFlags_Logarithmic);
+    {
+        // Live arithmetic beats a paragraph: the two densities side by side, in the
+        // same unit, so "as dense as procedural" is a number you can match rather
+        // than a feel you have to chase.
+        const float g = std::clamp(grass.photoCardSpacing, 0.06f, 4.0f);
+        const float cov = std::clamp(grass.photoCoverage, 0.01f, 1.0f);
+        const float cards = cov / (g * g);
+        const float bladeSp = grass.spacing * (grass.clumpRenderer ? 3.20f : 1.72f);
+        const float blades = 1.0f / std::max(bladeSp * bladeSp, 1e-6f);
+        ImGui::TextDisabled("Coverage is a fraction OF this grid, so the grid is the ceiling coverage cannot pass.\n"
+                            "  photo cards now: %.2f /m2   (coverage %.2f on a %.3f m grid)\n"
+                            "  procedural near: %.2f /m2   (spacing %.2f x %.2f = %.3f m)\n"
+                            "Match the two by lowering this grid. 1.11 m is the map's own clutterGrid; the range "
+                            "goes to 0.06 m, which is ~340x the default density.",
+                            cards, cov, g, blades, grass.spacing, grass.clumpRenderer ? 3.20f : 1.72f, bladeSp);
+        if (cards < blades * 0.9f)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
+                               "Cards are %.1fx SPARSER than the procedural near ring. Grid %.3f m would match.",
+                               blades / std::max(cards, 1e-6f), std::sqrt(cov / std::max(blades, 1e-6f)));
+        }
+        ImGui::TextDisabled("Cost: below ~0.4 m the old flicker returns (every plate edge shimmers in wind); at "
+                            "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "
+                            "was. NOTE this only does anything when the card path is actually drawing -- the Grass "
+                            "log line says 'near ring cards' when it is, 'blades' when it is not.");
+    }
     changed |= ImGui::SliderFloat("Photo card size", &grass.photoCardScale, 0.25f, 2.0f, "%.2fx");
     ImGui::TextDisabled("Size of each card. 1.00 = the stock card, 0.5-2.3 m tall and wider than tall; Arma's own "
                         "clutter plants are ~0.3-0.9 m, so at the map's own density the stock card is two to three "

@@ -185,7 +185,7 @@ fn cards_on_near() -> bool { return cards_on_mid() && grass.renderer.x > 0.5; }
 // near ring exists only to draw its own pipeline (shadow, prepass split), so its
 // join with the mid ring must be a change of nothing, not of density.
 fn card_placement_spacing() -> f32 {
-    return clamp(grass.lod_density.w, 0.16, 4.0);
+    return clamp(grass.lod_density.w, 0.06, 4.0);
 }
 
 // Must mirror `near_placement_spacing` in grass/mod.rs: the shader decides where

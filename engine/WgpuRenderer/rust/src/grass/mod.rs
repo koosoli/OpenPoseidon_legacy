@@ -61,7 +61,7 @@ const MID_PLACEMENT_SPACING: f32 = 0.82;
 // one binary (0.16 also puts the MID ring on that grid, which the 2440-cell cap
 // then limits to a ~195 m square -- fine for a density A/B, not a setting).
 const CARD_SPACING_DEFAULT: f32 = 1.11;
-const CARD_SPACING_RANGE: (f32, f32) = (0.16, 4.0);
+const CARD_SPACING_RANGE: (f32, f32) = (0.06, 4.0);
 
 /// Near-ring candidate spacing. Must mirror `near_placement_spacing` in
 /// grass.wgsl: the shader decides where candidates land, this decides how many

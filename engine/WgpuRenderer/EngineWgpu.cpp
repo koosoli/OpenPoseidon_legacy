@@ -6897,7 +6897,15 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // procedural rings' density.
     if (_renderer != nullptr)
     {
-        wgr_grass_set_card_spacing(_renderer, std::clamp(settings.photoCardSpacing, 0.16f, 4.0f));
+        // WGR_GRASS_CARD_SPACING still wins if set, so the startup lever the
+        // renderer documents keeps working and an A/B needs no panel.
+        static const float envOverride = []
+        {
+            const char* v = std::getenv("WGR_GRASS_CARD_SPACING");
+            return v != nullptr ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        const float grid = envOverride > 0.0f ? envOverride : settings.photoCardSpacing;
+        wgr_grass_set_card_spacing(_renderer, std::clamp(grid, 0.06f, 4.0f));
     }
     // Procedural blade look; defaults are the pre-existing shading (see GrassSettings).
     params.blade_self_shadow = std::clamp(settings.bladeSelfShadow, 0.0f, 1.0f);
