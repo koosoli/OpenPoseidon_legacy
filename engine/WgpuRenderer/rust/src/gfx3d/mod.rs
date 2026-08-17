@@ -4682,9 +4682,7 @@ impl Gfx3d {
             // cascade 0 covers metres and cascade 3 covers hundreds of them, so their costs and
             // their fixes are unrelated. Bracketed on the ENCODER around the whole cascade pass,
             // which needs no TIMESTAMP_QUERY_INSIDE_PASSES and captures the depth clear too.
-            let region = crate::gpu_timers::SHADOW_CASCADE_REGIONS
-                .get(c)
-                .copied();
+            let region = crate::gpu_timers::SHADOW_CASCADE_REGIONS.get(c).copied();
             if let Some(r) = region {
                 timers.cpu_begin(r);
                 timers.begin(encoder, r);
@@ -6076,7 +6074,12 @@ impl Gfx3d {
                     textures.texture_slot(m.layer_texture_id[2]),
                 ],
                 flags: s.flags,
-                _pad_layer: [0; 2],
+                layer_normal_slot: [
+                    textures.texture_slot(m.layer_normal_texture_id[0]),
+                    textures.texture_slot(m.layer_normal_texture_id[1]),
+                    textures.texture_slot(m.layer_normal_texture_id[2]),
+                ],
+                _pad_layer: [0; 3],
                 layer_uv: m.layer_uv,
             })
             .collect();
@@ -7396,6 +7399,127 @@ pub struct Pass3dState {
     ibuf: Option<usize>,        // index buffer (pointer identity)
 }
 
+// MAT-048. The layer NORMALS travel four layouts that no compiler checks against each other:
+// the C ABI struct, the GPU section-material struct, and its two WGSL mirrors. Getting the
+// offsets wrong does not fail — it silently feeds layer_uv from the wrong bytes, which renders
+// as white buildings.
+#[test]
+fn multi_layer_normals_keep_every_layout_in_step() {
+    use crate::ffi::WgrModelMaterial;
+    // Mirrors the C++ static_assert in include/wgpu_renderer.hpp.
+    assert_eq!(
+        std::mem::size_of::<WgrModelMaterial>(),
+        216,
+        "WgrModelMaterial grew by three u64 handles (192 -> 216); wgpu_renderer.hpp must agree"
+    );
+    assert_eq!(
+        std::mem::offset_of!(WgrModelMaterial, layer_normal_texture_id),
+        128,
+        "layer normals must follow layer_texture_id[3], leaving every earlier lane put"
+    );
+    assert_eq!(std::mem::offset_of!(WgrModelMaterial, layer_uv), 152);
+
+    // The GPU-side struct: WGSL 16-aligns the trailing array<vec4<f32>>, Rust does not, so
+    // the pad words are explicit and the offsets are the contract.
+    assert_eq!(
+        std::mem::offset_of!(cull::SectionMaterialGpu, layer_normal_slot),
+        104
+    );
+    assert_eq!(
+        std::mem::offset_of!(cull::SectionMaterialGpu, layer_uv),
+        128
+    );
+    assert_eq!(std::mem::size_of::<cull::SectionMaterialGpu>(), 192);
+
+    // Both WGSL mirrors must declare the field, in the same place, with the same padding.
+    for (name, src) in [
+        ("gpu_driven.wgsl", include_str!("gpu_driven.wgsl")),
+        (
+            "gpu_driven_shadow.wgsl",
+            include_str!("gpu_driven_shadow.wgsl"),
+        ),
+    ] {
+        assert!(
+            src.contains("layer_normal_slot: array<u32, 3>,"),
+            "{name} must mirror SectionMaterialGpu::layer_normal_slot"
+        );
+        for pad in [
+            "_pad_layer0: u32,",
+            "_pad_layer1: u32,",
+            "_pad_layer2: u32,",
+        ] {
+            assert!(
+                src.contains(pad),
+                "{name} needs three pad words after layer_normal_slot to 16-align layer_uv"
+            );
+        }
+    }
+}
+
+// MAT-048. The bug this pins: the albedo blended up to four layers while the normal stayed
+// layer 0's for the whole surface, so a wall whose mask selected plaster wore brick relief.
+#[test]
+fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
+    let src = include_str!("gpu_driven.wgsl");
+    // One mask sample, one weight vector, used by both blends. If the normals ever grow their
+    // own weights they can disagree with the colours per fragment, which is the same class of
+    // bug in a subtler form.
+    assert!(
+        src.contains("layer_w = lw;"),
+        "the colour blend must publish its final per-layer weights for the normal blend"
+    );
+    assert!(
+        src.contains("blended + layer * lw[i]"),
+        "colours must use the renormalised weights"
+    );
+    assert!(
+        src.contains("layer_n * layer_w[i]"),
+        "layer normals must be weighted by the SAME mask weights the colours use"
+    );
+    // Each layer's normal at its OWN layer's uv transform -- brick tiles far denser than the
+    // plaster beside it, and a normal sampled at the wrong rate is worse than none.
+    assert!(
+        src.contains("let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;"),
+        "a layer normal must use its own colour layer's uv transform"
+    );
+    assert!(
+        src.contains("let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;"),
+        "layer 0's normal must use layer 0's transform, like layer 0's colour"
+    );
+    // Tangent-space VECTORS, not packed texels: `_nohq` is DXT5nm (X in A, Y in G, Z
+    // reconstructed), and z is not linear in the stored channels, so a mix of raw texels
+    // tilts the surface wrongly exactly at the mask transitions.
+    assert!(
+        src.contains("fn decode_nohq(texel: vec4<f32>) -> vec3<f32>"),
+        "the NOHQ decode must be factored out so every layer is unpacked BEFORE blending"
+    );
+    // The layer sample feeds decode_nohq directly -- nothing accumulates a raw texel.
+    let layer_sample =
+        "textureSample(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn)";
+    assert!(
+        src.contains(layer_sample),
+        "each layer normal must be sampled at its own uv"
+    );
+    let decoded = src
+        .split_once(layer_sample)
+        .map(|(head, _)| head.trim_end().ends_with("decode_nohq("))
+        .unwrap_or(false);
+    assert!(
+        decoded,
+        "each layer's normal must be decoded at its sample site, not blended packed"
+    );
+    assert!(
+        src.contains("normal_ts = normalize(mixed);"),
+        "the weighted sum of unit normals must be renormalised"
+    );
+    // A layer that names no normal (a procedural color(...,DT) stage) keeps layer 0's normal
+    // for its share; slot 0 is the white bindless fallback and would decode leaning hard +X.
+    assert!(
+        src.contains("if (sm.layer_normal_slot[i] == 0u || layer_w[i] <= 0.0) {"),
+        "an unbound layer normal must fall back to layer 0 rather than sample slot 0"
+    );
+}
+
 #[test]
 fn gtao_depth_chain_reduces_toward_the_nearest_surface() {
     let src = include_str!("gtao_depth_mips.wgsl");
@@ -7551,7 +7675,10 @@ mod staging_tests {
         );
         array.invalidate();
         assert!(array.buf.is_none(), "invalidate must drop the handle");
-        assert_eq!(array.cap, 0, "invalidate must forget the asked-for capacity");
+        assert_eq!(
+            array.cap, 0,
+            "invalidate must forget the asked-for capacity"
+        );
         assert!(
             array.ensure(&device, 4096),
             "after invalidate the next ensure must rebuild"

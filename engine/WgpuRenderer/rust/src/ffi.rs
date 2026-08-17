@@ -244,7 +244,7 @@ pub struct WgrModelSection {
     pub variant: u32,
     // Per-section flags (wgpu_renderer.hpp: WgrModelSectionFlags). Bit 0 =
     // WGR_MODEL_SECTION_REFLECTIVE, the material named an EnvironmentMap. Was dead
-    // padding; the bit rides here because WgrModelMaterial is size-locked at 192 bytes.
+    // padding; the bit rides here because WgrModelMaterial is size-pinned by a const assert.
     pub flags: u32,
 }
 
@@ -286,6 +286,9 @@ pub struct WgrModelMaterial {
     // Multi's four-layer masked blend; 0 mask = not layered, take layer 0 alone.
     pub mask_texture_id: u64,
     pub layer_texture_id: [u64; 3],
+    // MAT-048: the layers' OWN normal maps (RVMAT Stage12/13/14, paired with Stage1/2/3's
+    // colours), 0 where the material names none. Sampled at their own layer's UV transform.
+    pub layer_normal_texture_id: [u64; 3],
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     pub layer_uv: [[f32; 4]; 4],
 }
@@ -1387,7 +1390,7 @@ const _: () = assert!(std::mem::size_of::<WgrMeshVertex>() == 68);
 const _: () = assert!(std::mem::size_of::<WgrDraw3D>() == 272);
 const _: () = assert!(std::mem::size_of::<WgrLight>() == 64);
 const _: () = assert!(std::mem::size_of::<WgrModelSection>() == 24);
-const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 192);
+const _: () = assert!(std::mem::size_of::<WgrModelMaterial>() == 216);
 const _: () = assert!(std::mem::size_of::<WgrModelLod>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrInstance>() == 144);
 const _: () = assert!(std::mem::size_of::<WgrTonemap>() == 48);

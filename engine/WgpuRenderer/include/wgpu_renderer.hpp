@@ -340,7 +340,7 @@ struct WgrModelSection
     uint32_t index_count;
     uint32_t variant;
     /* Per-section flags (WgrModelSectionFlags). Was dead padding; the reflective bit
-     * rides here rather than in WgrModelMaterial, which is size-locked at 192 bytes. */
+     * rides here rather than in WgrModelMaterial, whose size is pinned by a static_assert. */
     uint32_t flags;
 };
 
@@ -384,6 +384,12 @@ struct WgrModelMaterial
      * layer 0 alone, exactly as before. */
     WgrTexture mask_texture_id;
     WgrTexture layer_texture_id[3];
+    /* MAT-048: the layers' OWN normal maps (RVMAT Stage12/13/14, paired with Stage1/2/3's
+     * colours), 0 where the material names none. Without these the albedo blended up to four
+     * layers while the normal stayed layer 0's for the whole surface -- plaster colour with
+     * brick bumps on every wall whose mask selects a further layer. Each is sampled at its own
+     * layer's UV transform (layer_uv[i + 1]), the same one its colour uses. */
+    WgrTexture layer_normal_texture_id[3];
     /* Per layer, including layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
      * RVMAT authors these transforms diagonally, so a full 3x3 is not carried. */
     float layer_uv[4][4];
@@ -436,7 +442,7 @@ struct WgrInstance
 };
 
 static_assert(sizeof(WgrModelSection) == 24, "WgrModelSection must match Rust");
-static_assert(sizeof(WgrModelMaterial) == 192, "WgrModelMaterial must match Rust");
+static_assert(sizeof(WgrModelMaterial) == 216, "WgrModelMaterial must match Rust");
 static_assert(sizeof(WgrModelLod) == 16, "WgrModelLod must match Rust");
 static_assert(sizeof(WgrInstance) == 144, "WgrInstance must match Rust");
 

@@ -57,6 +57,10 @@ struct SectionMaterial {
     // SectionMaterialGpu keeps matching gpu_driven.wgsl field for field; the shadow pass
     // has no use for it.
     flags: u32,
+    // MAT-048: the further layers' own normal maps. The shadow pass never shades, so it has
+    // no use for them either -- they are here so this mirror stays field-for-field.
+    layer_normal_slot: array<u32, 3>,
+    _pad_layer0: u32,
     _pad_layer1: u32,
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).

@@ -83,8 +83,12 @@ struct SectionMaterial {
     // Per-section flags, carried over the ABI in WgrModelSection::flags. Bit 0 =
     // SECTION_REFLECTIVE (DZ-003). Occupies the first of the three explicit pad words.
     flags: u32,
+    // MAT-048: the further layers' OWN normal maps (RVMAT Stage12/13/14), 0 = this layer
+    // keeps layer 0's normal. Sampled at layer_uv[i + 1], its colour's transform.
+    layer_normal_slot: array<u32, 3>,
     // Explicit, because WGSL would insert this padding itself to 16-align layer_uv while
-    // Rust would not, and the silent 12-byte disagreement corrupts every later field.
+    // Rust would not, and the silent disagreement corrupts every later field.
+    _pad_layer0: u32,
     _pad_layer1: u32,
     _pad_layer2: u32,
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
@@ -548,6 +552,28 @@ fn vs_gpu(
     return out;
 }
 
+// Unpack one tangent-space normal from a NOHQ sample.
+//
+// PACKING: Arma 3's `_nohq` maps (and Arma 2's, and DayZ's) are DXT5nm — X lives in the
+// ALPHA channel, Y in GREEN, R and B carry nothing usable, and Z is reconstructed as
+// sqrt(1 - x^2 - y^2) because the map is a unit vector by construction (so the sign is +Z).
+// This is the same decode the per-draw path (shader3d.wgsl) and the pre-MAT-048 code used;
+// it is factored out here only so the further Multi layers decode identically.
+//
+// It matters that this is a FUNCTION and not an inline lerp of texels: two `_nohq` samples
+// must be unpacked BEFORE they are blended. A weighted sum of packed texels is not the
+// packing of the weighted sum — A and G are linear in x/y, but the reconstructed z is not,
+// so mixing raw texels tilts the surface wrongly exactly where the mask transitions, which
+// is the seam the blend exists to hide.
+// (`texel`, not `sample`: WGSL reserves `sample` as an interpolation enumerant.)
+fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
+    var xy = vec2<f32>(texel.a, texel.g) * 2.0 - vec2<f32>(1.0);
+    if (matdbg_flag(MATDBG_INVERT_NORMAL_Y)) {
+        xy.y = -xy.y;
+    }
+    return vec3<f32>(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))));
+}
+
 @fragment
 fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
@@ -575,30 +601,45 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     var base = textureSample(textures[sm.texture_slot],
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw);
+    // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
+    // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
+    // sample, one set of weights, colours and normals agreeing per fragment by construction.
+    // All zero means "layer 0 alone", which is every non-Multi section.
+    var layer_w = vec3<f32>(0.0);
     if (sm.mask_slot != 0u && matdbg_flag(MATDBG_COMPOSE_MULTI)) {
         let mask_uv = select(in.uv, in.uv1, (sm.flags & SECTION_MASK_UV1) != 0u);
         let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], mask_uv).rgb;
-        var weight = 0.0;
+        // Slot 0 is the white fallback. A layer the material does not name must contribute
+        // NOTHING and leave its mask weight to layer 0; sampling it blind blends white into
+        // the surface, which blows the building out and drags the whole frame's
+        // auto-exposure down with it.
+        var lw = mask;
+        if (sm.layer_slot[0] == 0u) {
+            lw.x = 0.0;
+        }
+        if (sm.layer_slot[1] == 0u) {
+            lw.y = 0.0;
+        }
+        if (sm.layer_slot[2] == 0u) {
+            lw.z = 0.0;
+        }
+        // The unpainted remainder belongs to layer 0. Where the mask over-paints, the
+        // layers are renormalised rather than allowed to sum past one.
+        let total = lw.x + lw.y + lw.z;
+        if (total > 1.0) {
+            lw = lw / total;
+        }
+        layer_w = lw;
         var blended = vec3<f32>(0.0);
         for (var i = 0u; i < 3u; i = i + 1u) {
-            // Slot 0 is the white fallback. A layer the material does not name must
-            // contribute NOTHING and leave its mask weight to layer 0; sampling it blind
-            // blends white into the surface, which blows the building out and drags the
-            // whole frame's auto-exposure down with it.
             if (sm.layer_slot[i] == 0u) {
                 continue;
             }
             let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
             let layer = textureSample(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i).rgb;
-            blended = blended + layer * mask[i];
-            weight = weight + mask[i];
+            blended = blended + layer * lw[i];
         }
-        // The unpainted remainder belongs to layer 0. Where the mask over-paints, the
-        // layers are renormalised rather than allowed to sum past one.
-        if (weight > 1.0) {
-            blended = blended / weight;
-            weight = 1.0;
-        }
+        let weight = min(total, 1.0);
         base = vec4<f32>(base.rgb * (1.0 - weight) + blended, base.a);
     }
     // A2C (MSAA): cutout sections (sm.alpha_ref > 0, uniform per quad) emit a sharpened coverage
@@ -689,13 +730,52 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // Hoisted out of the branch: the Visualize Normal view needs it for sections that
     // bind no normal map too, where flat (0,0,1) is the honest answer (WGSL rule 7).
     var normal_ts_dbg = vec3<f32>(0.0, 0.0, 1.0);
-    if (sm.normal_slot != 0u && !matdbg_flag(MATDBG_DISABLE_NORMAL)) {
-        let normal_sample = textureSample(textures[sm.normal_slot], samplers[sm.sampler_idx], in.uv);
-        var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
-        if (matdbg_flag(MATDBG_INVERT_NORMAL_Y)) {
-            normal_ts_xy.y = -normal_ts_xy.y;
+    // MAT-048. Multi blends its NORMALS across the same four layers as its colours, with the
+    // same mask weights. Until this, only layer 0's normal was ever bound, so on a wall whose
+    // mask selects the plaster or stone layer you got that layer's colour over layer 0's
+    // brick relief — the owner's "the normals do not really work".
+    //
+    // A layered section can bind layer normals while naming none for layer 0, so the gate is
+    // "any normal at all", not "layer 0's normal".
+    let has_layer_normals =
+        (sm.layer_normal_slot[0] | sm.layer_normal_slot[1] | sm.layer_normal_slot[2]) != 0u;
+    if ((sm.normal_slot != 0u || has_layer_normals) && !matdbg_flag(MATDBG_DISABLE_NORMAL)) {
+        // Layer 0's normal, at LAYER 0's transform. Identity for every non-Multi material
+        // (ResolveMaterialLayers writes identity before any early return), so this is the
+        // previous sample for them; on a Multi surface it is the correction that puts the
+        // normal on the same tiling rate as the colour it belongs to. Flat +Z when the
+        // material names no layer-0 normal — the honest identity to blend the rest against.
+        var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
+        if (sm.normal_slot != 0u) {
+            let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
+            normal_ts = decode_nohq(textureSample(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0));
         }
-        let normal_ts = vec3<f32>(normal_ts_xy, sqrt(max(0.0, 1.0 - dot(normal_ts_xy, normal_ts_xy))));
+        // Decode each layer's normal, THEN blend — see decode_nohq on why the packed texels
+        // must not be mixed. The weighted sum of unit vectors is renormalised at the end.
+        var n_sum = vec3<f32>(0.0);
+        var n_weight = 0.0;
+        for (var i = 0u; i < 3u; i = i + 1u) {
+            // A layer that names no normal — a procedural stage such as
+            // color(0.5,0.5,0.5,1,DT), or a slot the rvmat simply omits — keeps layer 0's
+            // normal for its share of the surface. Slot 0 is the white bindless fallback,
+            // which would decode to a normal leaning hard in +X.
+            if (sm.layer_normal_slot[i] == 0u || layer_w[i] <= 0.0) {
+                continue;
+            }
+            let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
+            let layer_n = decode_nohq(
+                textureSample(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn));
+            n_sum = n_sum + layer_n * layer_w[i];
+            n_weight = n_weight + layer_w[i];
+        }
+        if (n_weight > 0.0) {
+            let mixed = normal_ts * (1.0 - n_weight) + n_sum;
+            // Every contributor would have to lie exactly in the tangent plane and cancel for
+            // this to vanish, but normalize(0) is NaN and a NaN normal blackens the fragment.
+            if (dot(mixed, mixed) > 1.0e-8) {
+                normal_ts = normalize(mixed);
+            }
+        }
         normal_ts_dbg = normal_ts;
         let duv_dx = dpdx(in.uv);
         let duv_dy = dpdy(in.uv);

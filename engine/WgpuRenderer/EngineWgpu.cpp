@@ -4057,6 +4057,24 @@ bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
     return true;
 }
 
+// MAT-048 A/B lever. WGR_MULTI_LAYER_NORMALS=0 binds no layer normal maps at all, which
+// restores the pre-MAT-048 behaviour exactly: layer 0's normal shades the whole surface no
+// matter which layer the mask selects. Read once and announced through the GAME LOG (the
+// launcher discards stderr, so a stderr note would prove nothing about the running binary).
+static bool MultiLayerNormalsEnabled()
+{
+    static const bool enabled = []
+    {
+        bool on = true;
+        if (const char* v = std::getenv("WGR_MULTI_LAYER_NORMALS"))
+            on = !(v[0] == '0' && v[1] == '\0');
+        LOG_INFO(Graphics, "Wgpu material: Multi layer normal maps {} (WGR_MULTI_LAYER_NORMALS={})",
+                 on ? "ENABLED" : "DISABLED (layer 0 normal everywhere)", on ? "1" : "0");
+        return on;
+    }();
+    return enabled;
+}
+
 // Multi's mask and its three further surface layers, each with its own UV transform.
 //
 // MAT-039: the family is a four-layer masked blend and only layer 0 was ever bound, so a
@@ -4118,9 +4136,21 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
     material.mask_texture_id = mask;
     layerUv(Slot::BaseColour, 0);
     const Slot colours[3] = {Slot::LayerColour1, Slot::LayerColour2, Slot::LayerColour3};
+    // MAT-048: each further layer's OWN normal map, paired with its colour. kMulti maps
+    // Stage11 to NormalMap (layer 0) and Stage12/13/14 to these -- measured on
+    // lighthouse_multi_1.rvmat, whose Stage11-14 are ind_brick_nohq / plaster01_4x4_nohq /
+    // concrete_floor_nohq / a procedural color(0.5,0.5,0.5,1,DT), pairing one-for-one with
+    // Stage0-3's colours. Binding only the colours blended the albedo across four layers
+    // while every fragment kept layer 0's bumps, so a plastered wall read as brick relief.
+    const Slot normals[3] = {Slot::LayerNormal1, Slot::LayerNormal2, Slot::LayerNormal3};
     for (size_t i = 0; i < 3; ++i)
     {
         material.layer_texture_id[i] = bind(colours[i]);
+        // A layer's normal MUST be sampled at its colour's transform, not the section's raw
+        // uv: brick tiles ~4x denser than the plaster beside it, and a normal sampled at the
+        // wrong rate is worse than none. bind() returns 0 for a procedural stage
+        // (color(...,DT)), which the shader reads as "this layer keeps layer 0's normal".
+        material.layer_normal_texture_id[i] = MultiLayerNormalsEnabled() ? bind(normals[i]) : 0;
         layerUv(colours[i], i + 1);
     }
 
@@ -4129,9 +4159,12 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
     {
         const auto* maskEntry = cached->second.Find(Slot::Mask);
         LOG_INFO(Graphics,
-                 "Wgpu material: composed {} layers for {} family={} (uv scales {:.1f} {:.1f} {:.1f} {:.1f}; mask uvSource={})",
+                 "Wgpu material: composed {} layers ({} layer normals) for {} family={} (uv scales {:.1f} {:.1f} "
+                 "{:.1f} {:.1f}; mask uvSource={})",
                  1 + (material.layer_texture_id[0] != 0) + (material.layer_texture_id[1] != 0) +
                      (material.layer_texture_id[2] != 0),
+                 (material.layer_normal_texture_id[0] != 0) + (material.layer_normal_texture_id[1] != 0) +
+                     (material.layer_normal_texture_id[2] != 0),
                  materialPath, cached->second.shaderFamily, material.layer_uv[0][0], material.layer_uv[1][0],
                  material.layer_uv[2][0], material.layer_uv[3][0],
                  maskEntry && !maskEntry->uvSource.empty() ? maskEntry->uvSource.c_str() : "tex");

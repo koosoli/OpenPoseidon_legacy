@@ -240,11 +240,20 @@ TEST_CASE("PSConstants: constColor slot and white default", "[Graphics][GL33][su
 
 TEST_CASE("SVertex: correct size for static mesh upload", "[Graphics][GL33]")
 {
-    REQUIRE(sizeof(SVertex) == 36);
+    // 36 bytes was the 2001 layout. The vertex has grown twice since, and each time
+    // by APPENDING, which is what this test now pins: every offset below is the
+    // original one, and the size is whatever the appended fields make it.
+    //   +conform (GPU terrain conform selector, 4 B)      -> 36
+    //   +tangent/binormal (authored ODOL frame, 24 B)     -> 60
+    //   +t1 (the second UV set Multi's mask addresses)    -> 68
+    REQUIRE(sizeof(SVertex) == 68);
     REQUIRE(offsetof(SVertex, pos) == 0);
     REQUIRE(offsetof(SVertex, norm) == 12);
     REQUIRE(offsetof(SVertex, t0) == 24);
     REQUIRE(offsetof(SVertex, conform) == 32);
+    REQUIRE(offsetof(SVertex, tangent) == 36);
+    REQUIRE(offsetof(SVertex, binormal) == 48);
+    REQUIRE(offsetof(SVertex, t1) == 60);
 }
 
 // Engine Constants Tests (shared across backends)
@@ -869,9 +878,17 @@ TEST_CASE("SurfaceInfoGL33::CalculateSize: non-square texture", "[Graphics][GL33
 
 // SVertex Layout Tests — must match vsTransform GLSL attribute layout
 
-TEST_CASE("SVertex: size is 36 bytes (pos+norm+uv+conform)", "[GL33][VertexBuffer]")
+TEST_CASE("SVertex: every GL33 attribute keeps its original offset", "[GL33][VertexBuffer]")
 {
-    REQUIRE(sizeof(SVertex) == 36);
+    // The GL33 VAO reads pos/norm/t0 at their 2001 offsets and takes the stride from
+    // sizeof(SVertex), so appended fields (conform, tangent/binormal, t1) cost GL33
+    // nothing but the stride. Pinning the SIZE at 36 pinned the wrong thing: it broke
+    // the moment WGPU needed a second UV set, while saying nothing about the layout
+    // GL33 actually depends on.
+    REQUIRE(sizeof(SVertex) == 68);
+    REQUIRE(offsetof(SVertex, pos) == 0);
+    REQUIRE(offsetof(SVertex, norm) == 12);
+    REQUIRE(offsetof(SVertex, t0) == 24);
 }
 
 TEST_CASE("SVertex: member offsets match VAO attribute pointers", "[GL33][VertexBuffer]")

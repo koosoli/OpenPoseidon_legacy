@@ -129,10 +129,13 @@ pub struct SectionMaterialGpu {
     // reflective (the material named an EnvironmentMap). Occupies the first of the three
     // explicit pad words below, so the layout is unchanged in size.
     pub flags: u32,
+    // MAT-048: the further layers' OWN normal maps (RVMAT Stage12/13/14), 0 = this layer keeps
+    // layer 0's normal. Sampled at layer_uv[i + 1], the transform its colour uses.
+    pub layer_normal_slot: [u32; 3],
     // WGSL aligns an array<vec4<f32>> to 16 bytes; Rust aligns [[f32; 4]; 4] to 4. Without
-    // this the two layouts disagree by 12 bytes and every field from layer_uv on reads the
-    // wrong memory -- which renders as white buildings, not as an error.
-    pub _pad_layer: [u32; 2],
+    // this the two layouts disagree and every field from layer_uv on reads the wrong memory
+    // -- which renders as white buildings, not as an error.
+    pub _pad_layer: [u32; 3],
     // Per layer, layer 0 at index 0: (scale_u, scale_v, offset_u, offset_v).
     pub layer_uv: [[f32; 4]; 4],
 }
