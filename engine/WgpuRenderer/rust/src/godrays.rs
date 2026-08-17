@@ -268,6 +268,11 @@ struct GodRayUniform {
     tune1: [f32; 4],
     cloud_map: [f32; 4],
     lo_res: [f32; 4],
+    /// x = SMOKE influence on the shafts. Constant 1 for now: how much smoke is IN the
+    /// map is already controlled per plume (SmokeParams::groundShadow) and globally
+    /// (SmokeSystem::GroundShadowStrength), so a third multiplier here would be a third
+    /// place to look when the shafts are wrong. yzw reserved.
+    tune2: [f32; 4],
 }
 
 /// The per-frame camera state the march needs, captured where the sky pass already derives it (the
@@ -666,6 +671,7 @@ impl GodRays {
             // between a shaft and a wash. The Sky tab exposes cloud influence instead, because
             // that is the one an author actually wants to A/B.
             tune1: [s.g, s.cloud_influence, 1.0, 1.0],
+            tune2: [1.0, 0.0, 0.0, 0.0],
             cloud_map,
             lo_res: [
                 lw as f32,

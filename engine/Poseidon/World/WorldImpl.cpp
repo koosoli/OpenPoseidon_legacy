@@ -826,7 +826,9 @@ void World::SimulateCloudlets(float deltaT)
                 SmokeParams inf;
                 ApplySmokeColorPreset(inf, SmokeColorPreset::Black);
                 inf.fire = true;
-                inf.opacity = 0.7f;
+                inf.opacity = 0.8f;
+                inf.selfShadowStrength = 3.2f;
+                inf.groundShadow = 2.6f;
                 inf.emitterRadius = 4.0f;
                 inf.fireRate = 220.0f;
                 inf.maxFlames = 400;
@@ -854,7 +856,9 @@ void World::SimulateCloudlets(float deltaT)
                 SmokeParams wreck;
                 ApplySmokeColorPreset(wreck, SmokeColorPreset::Black);
                 wreck.fire = true;
-                wreck.opacity = 0.55f;
+                wreck.opacity = 0.68f;
+                wreck.selfShadowStrength = 3.0f;
+                wreck.groundShadow = 2.2f;
                 wreck.rate = 45.0f;
                 wreck.emitterRadius = 1.2f;
                 wreck.startRadius = 0.8f;

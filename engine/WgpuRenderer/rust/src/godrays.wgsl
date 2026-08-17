@@ -49,6 +49,10 @@ struct GodRays {
     cloud_map: vec4<f32>,
     // xy = low-res target size in texels, zw = 1/size. Only the composite reads this.
     lo_res: vec4<f32>,
+    // x = SMOKE influence [0,1] on the shafts. Its own lane rather than a tune1 slot
+    // because smoke is a separate occluder from the cloud deck: it must survive cloud
+    // shadows being switched off. yzw reserved.
+    tune2: vec4<f32>,
 };
 
 // Mirrors the first 48 bytes of terrain::TerrainShadowMap (the buffer is larger; WGSL only needs
@@ -170,7 +174,11 @@ fn csm_occlusion(pos: vec3<f32>) -> f32 {
 fn cloud_visibility(world: vec3<f32>, sun: vec3<f32>) -> f32 {
     let strength = clamp(gr.cloud_map.w, 0.0, 1.0);
     let influence = clamp(gr.tune1.y, 0.0, 1.0);
-    if (strength <= 0.001 || influence <= 0.001) {
+    let smoke_influence = clamp(gr.tune2.x, 0.0, 1.0);
+    // NOTE the smoke term below is deliberately NOT gated on the cloud strength or
+    // influence: smoke is a separate occluder that happens to ride the same map, and a
+    // plume must throw shafts on a clear day with cloud shadows dialled to zero.
+    if ((strength <= 0.001 || influence <= 0.001) && smoke_influence <= 0.001) {
         return 1.0;
     }
     let drop = world.y / max(sun.y, 0.05);
@@ -179,12 +187,28 @@ fn cloud_visibility(world: vec3<f32>, sun: vec3<f32>) -> f32 {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;
     }
-    let stored = clamp(textureSampleLevel(cloud_shadow_tex, lin_samp, uv, 0.0).r, 0.0, 1.0);
+    let texel = textureSampleLevel(cloud_shadow_tex, lin_samp, uv, 0.0);
+
+    // -- cloud (.r): undo the ground-shadow strength, as before ------------------
+    let stored = clamp(texel.r, 0.0, 1.0);
     var transmit = stored;
     if (strength > 0.25) {
         transmit = clamp(1.0 - (1.0 - stored) / strength, 0.0, 1.0);
     }
-    return mix(1.0, transmit, influence);
+    var vis = mix(1.0, transmit, influence);
+    if (strength <= 0.001 || influence <= 0.001) {
+        vis = 1.0;
+    }
+
+    // -- smoke (.g): its own occluder, its own influence -------------------------
+    // Stored with no strength lerp folded in, so there is nothing to undo. A plume
+    // between this sample and the sun darkens the shaft here, which is what makes a
+    // burning wreck throw real god rays through its own column.
+    if (smoke_influence > 0.001) {
+        let smoke = clamp(texel.g, 0.0, 1.0);
+        vis = vis * mix(1.0, smoke, smoke_influence);
+    }
+    return vis;
 }
 
 struct VsOut {

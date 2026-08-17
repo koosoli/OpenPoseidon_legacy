@@ -186,7 +186,9 @@ void DrawSpawnSection()
         GParams.fire = true;
         GColorPreset = 1; // Black
         ApplySmokeColorPreset(GParams, SmokeColorPreset::Black);
-        GParams.opacity = 0.55f;
+        GParams.opacity = 0.68f;
+        GParams.selfShadowStrength = 3.0f;
+        GParams.groundShadow = 2.2f;
         GParams.rate = 45.0f;
         GParams.emitterRadius = 1.2f;
         GParams.startRadius = 0.8f;
@@ -221,7 +223,9 @@ void DrawSpawnSection()
         GParams.fire = true;
         GColorPreset = 1;
         ApplySmokeColorPreset(GParams, SmokeColorPreset::Black);
-        GParams.opacity = 0.7f;
+        GParams.opacity = 0.8f;
+        GParams.selfShadowStrength = 3.2f;
+        GParams.groundShadow = 2.6f;
         GParams.emitterRadius = 4.0f;
         GParams.fireRate = 220.0f;
         GParams.maxFlames = 400;

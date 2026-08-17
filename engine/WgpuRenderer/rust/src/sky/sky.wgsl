@@ -57,6 +57,11 @@ struct Sky {
 @group(0) @binding(4) var cloud_noise: texture_3d<f32>;
 @group(0) @binding(6) var cloud_samp: sampler;
 // CLD-020 output: sun transmittance through the cloud deck, one texel per world square.
+// .r = CLOUD sun transmittance, .g = SMOKE sun transmittance. Two channels, not one
+// product, because the consumers weigh them differently: the ground shadow wants r*g,
+// while the god-ray march has to undo the cloud STRENGTH slider on r (which was never
+// applied to smoke) and would otherwise distort the smoke term or, with cloud shadows
+// off, lose it entirely. .b/.a unused.
 @group(0) @binding(7) var cloud_shadow_out: texture_storage_2d<rgba8unorm, write>;
 
 // Smoke -> ground shadow. Each blob is one smoke particle; cs_cloud_shadow
@@ -1601,7 +1606,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
         let texel0 = span0 / f32(dims.x);
         let world_xz0 = sky.cloud_shadow.xy + (vec2<f32>(f32(gid.x), f32(gid.y)) + 0.5) * texel0;
         let smoke0 = smoke_ground_shadow(world_xz0, -normalize(sky.sun_dir.xyz), texel0);
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke0, 0.0, 0.0, 1.0));
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, smoke0, 0.0, 1.0));
         return;
     }
     let span = 1.0 / max(sky.cloud_shadow.z, 1e-6);
@@ -1617,7 +1622,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Below the horizon there is no sun to occlude. Returning lit here also stops the march from
     // running against a ray that never reaches the deck.
     if (sun.y <= 0.02) {
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke, 0.0, 0.0, 1.0));
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, smoke, 0.0, 1.0));
         return;
     }
 
@@ -1631,7 +1636,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let interval = cloud_interval(ground, sun);
     if (interval.y <= interval.x) {
-        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(smoke, 0.0, 0.0, 1.0));
+        textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(1.0, smoke, 0.0, 1.0));
         return;
     }
 
@@ -1648,7 +1653,7 @@ fn cs_cloud_shadow(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Strength lerps toward fully lit rather than scaling the transmittance, so turning it down
     // lightens the shadows instead of shifting what counts as cloud.
     let shadow = mix(1.0, clamp(transmittance, 0.0, 1.0), clamp(sky.cloud_shadow.w, 0.0, 1.0));
-    textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(shadow * smoke, 0.0, 0.0, 1.0));
+    textureStore(cloud_shadow_out, vec2<i32>(gid.xy), vec4<f32>(shadow, smoke, 0.0, 1.0));
 }
 
 @compute @workgroup_size(8, 8, 1)

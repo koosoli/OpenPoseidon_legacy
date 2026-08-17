@@ -86,10 +86,17 @@ void ApplySmokeColorPreset(SmokeParams& params, SmokeColorPreset preset)
             params.red = 1.00f, params.green = 1.00f, params.blue = 1.00f;
             break;
         case SmokeColorPreset::Black:
-            // Not (0,0,0): the tint multiplies a lit billboard, and a true zero
-            // produces a silhouette that reads as a hole in the world rather
-            // than as smoke. Dark grey with the opacity carrying the rest.
-            params.red = 0.13f, params.green = 0.13f, params.blue = 0.14f;
+            // Soot. Not (0,0,0): the tint multiplies a LIT billboard, and a true
+            // zero produces a silhouette that reads as a hole in the world rather
+            // than as smoke -- it loses the sun rim and the self-shadow shape that
+            // make it a volume. This is as dark as it can go while still being lit
+            // by something; the plume reads black because the opacity and the
+            // self-shadow do the rest, not because the albedo is zero.
+            params.red = 0.045f, params.green = 0.045f, params.blue = 0.05f;
+            // Density is deliberately NOT set here: this function is what the
+            // panel's Colour dropdown calls, and a colour control that silently
+            // reset your thickness and self-shadow would be a nasty surprise.
+            // The whole-look buttons (Burning wreck, INFERNO) set those.
             break;
         case SmokeColorPreset::Red:
             params.red = 1.00f, params.green = 0.16f, params.blue = 0.14f;

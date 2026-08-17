@@ -508,7 +508,9 @@ fn cloud_sun_shadow(world_xz: vec2<f32>) -> f32 {
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
         return 1.0;
     }
-    return clamp(textureSampleLevel(cloud_shadow_tex, terrain_shadow_samp, uv, 0.0).r, 0.0, 1.0);
+    // .r cloud x .g smoke: two independent occluders sharing one map.
+    let t = textureSampleLevel(cloud_shadow_tex, terrain_shadow_samp, uv, 0.0);
+    return clamp(t.r * t.g, 0.0, 1.0);
 }
 
 fn terrain_sun_shadow(world_xz: vec2<f32>, world_y: f32) -> f32 {
