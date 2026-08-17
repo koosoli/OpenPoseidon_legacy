@@ -730,7 +730,7 @@ void World::SimulateCloudlets(float deltaT)
             {
                 return 0;
             }
-            return value[0] == '2' ? 2 : (value[0] == '3' ? 3 : 1);
+            return value[0] == '2' ? 2 : (value[0] == '3' ? 3 : (value[0] == '4' ? 4 : 1));
         }();
         static bool spawned = false;
         if (wanted != 0 && !spawned && CameraOn() != nullptr && Glob.time.toFloat() > 2.0f)
@@ -799,7 +799,14 @@ void World::SimulateCloudlets(float deltaT)
                     // usually inside it; 1 m above its floor keeps the emitter
                     // out of the ground plane.
                     position = best->Position();
-                    position[1] = GLandscape->RoadSurfaceY(position.X(), position.Z()) + 0.5f;
+                    // Probe DOWN from 2 m above the model origin: the topmost-surface variant
+                    // returned the roof, and SurfaceY the ground under the slab. The floor
+                    // of the storey the origin sits in is what a "spawn inside" wants.
+                    {
+                        Vector3 probe = position;
+                        probe[1] = best->Position().Y() + 2.0f;
+                        position[1] = GLandscape->RoadSurfaceY(probe) + 0.4f;
+                    }
                     LOG_INFO(World, "POSEIDON_TEST_SMOKE_HOUSE: nearest enterable building '{}' at {:.1f},{:.1f},{:.1f} r={:.1f} ({:.0f} m away)",
                              (const char*)best->GetShape()->Name(), best->Position().X(), best->Position().Y(),
                              best->Position().Z(), best->GetRadius(), std::sqrt(bestD2));
@@ -812,6 +819,34 @@ void World::SimulateCloudlets(float deltaT)
             if (wanted == 2)
             {
                 GSmokeSystem.SpawnLegacy(position, 1.0f, 1.5f, -1.0f);
+            }
+            else if (wanted == 4)
+            {
+                // Inferno: the panel's INFERNO preset, for scripted capture.
+                SmokeParams inf;
+                ApplySmokeColorPreset(inf, SmokeColorPreset::Black);
+                inf.fire = true;
+                inf.opacity = 0.7f;
+                inf.emitterRadius = 4.0f;
+                inf.fireRate = 220.0f;
+                inf.maxFlames = 400;
+                inf.fireStartRadius = 1.2f;
+                inf.fireEndRadius = 3.5f;
+                inf.fireRiseSpeed = 5.0f;
+                inf.fireLifetime = 2.2f;
+                inf.fireIntensity = 2.2f;
+                inf.fireStretch = 2.2f;
+                inf.fireSmokeYield = 0.9f;
+                inf.fireSmokeLift = 5.0f;
+                inf.startRadius = 1.5f;
+                inf.endRadius = 10.0f;
+                inf.particleLifetime = 25.0f;
+                inf.maxParticles = 800;
+                inf.fireLightRadius = 22.0f;
+                inf.fireLightIntensity = 1.8f;
+                inf.fireColumnHeight = 10.0f;
+                inf.fireColumnCohesion = 3.5f;
+                GSmokeSystem.Spawn(position, inf, -1.0f);
             }
             else if (wanted == 3)
             {

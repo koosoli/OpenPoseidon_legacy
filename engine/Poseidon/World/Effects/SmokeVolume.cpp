@@ -273,6 +273,12 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
     particle.velocity += acceleration * deltaT;
 }
 
+float SmokeVolume::sphereRadiusFor(const SmokeParticle& particle) const
+{
+    const float lf = std::clamp(particle.age / std::max(particle.lifetime, 1e-3f), 0.0f, 1.0f);
+    return std::max(Lerp(_params.startRadius, _params.endRadius, lf) * _params.collisionRadiusScale, 0.05f);
+}
+
 void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT)
 {
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
@@ -330,17 +336,25 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     }
 
     // -- real sweep -------------------------------------------------------
-    particle.sweepTimer -= deltaT;
-    if (particle.sweepTimer > 0.0f)
+    // Contain mode sweeps EVERY tick from where the particle was to where it
+    // is: no interval, no cached-plane gap to tunnel through when a particle
+    // turns a corner between sweeps. Costs 7 rays per particle per frame; the
+    // budget is the particle cap.
+    if (!_params.contain)
     {
-        return;
+        particle.sweepTimer -= deltaT;
+        if (particle.sweepTimer > 0.0f)
+        {
+            return;
+        }
+        particle.sweepTimer = _params.sweepInterval * (0.75f + 0.5f * RandUnit());
     }
-    particle.sweepTimer = _params.sweepInterval * (0.75f + 0.5f * RandUnit());
 
     // Sweep past where the particle is now, out to where it will be by the time
     // it next sweeps. Finding the wall before reaching it is what keeps a thin
     // wall from being tunnelled through between sweeps.
-    const Vector3 lookahead = particle.position + particle.velocity * _params.sweepInterval;
+    const float ahead = _params.contain ? deltaT * 2.0f : _params.sweepInterval;
+    const Vector3 lookahead = particle.position + particle.velocity * ahead;
     const SmokeSurfaceHit hit = query.SweepSphere(previousPosition, lookahead, sphereRadius);
     ++_diagSweeps;
 
@@ -348,6 +362,21 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     {
         particle.planeValid = false;
         return;
+    }
+
+    if (_params.contain)
+    {
+        // HARD CONTAINMENT: the segment previous -> current crossed a surface.
+        // Do not slide from where we are (which may already be on the far
+        // side of a thin wall); go back to the previous position -- which was
+        // provably on the right side -- and only then apply the surface
+        // response. A particle can be stopped, it cannot cross.
+        const float sidePrev = hit.normal.DotProduct(previousPosition - hit.position);
+        const float sideNow = hit.normal.DotProduct(particle.position - hit.position);
+        if (sidePrev >= 0.0f && sideNow < sphereRadius * 0.5f)
+        {
+            particle.position = previousPosition;
+        }
     }
     ++_diagHits;
     if (_diagHitLog < 12)
@@ -408,6 +437,19 @@ void SmokeVolume::EmitFire(float deltaT)
         const float theta = RandUnit() * 6.2831853f;
         flame.position = _emitterPosition + Vector3(r * std::cos(theta), 0.0f, r * std::sin(theta));
 
+        if (_params.fireColumnHeight > 0.0f)
+        {
+            // Column mode: born anywhere in the column, biased toward the base
+            // (sqrt), so the body is filled continuously rather than a train
+            // of separate puffs climbing one after another. Lower flames are
+            // hotter (younger); starting some already part-way up with an
+            // advanced age keeps the ramp consistent with height.
+            const float u = RandUnit();
+            const float hFrac = u * u;
+            flame.position[1] += hFrac * _params.fireColumnHeight;
+            flame.age = hFrac * flame.lifetime * 0.5f;
+        }
+
         // Mostly up, a little lick sideways.
         flame.velocity = Vector3(_params.fireRiseSpeed * 0.25f * RandSymmetric(),
                                  _params.fireRiseSpeed * (0.8f + 0.4f * RandUnit()),
@@ -450,6 +492,28 @@ void SmokeVolume::SimulateFire(float deltaT)
         flame.velocity[0] += 6.0f * RandSymmetric() * deltaT;
         flame.velocity[2] += 6.0f * RandSymmetric() * deltaT;
         flame.velocity[1] -= 1.5f * deltaT;
+
+        if (_params.fireColumnHeight > 0.0f)
+        {
+            // Column cohesion: pull back toward the axis over the emitter, so
+            // the body stays a body. Strength falls with height so the tips
+            // are free to lick and lean while the base is tight.
+            const float h = std::max(flame.position.Y() - _emitterPosition.Y(), 0.0f);
+            const float hFrac = std::clamp(h / _params.fireColumnHeight, 0.0f, 1.0f);
+            const float k = _params.fireColumnCohesion * (1.0f - 0.7f * hFrac);
+            flame.velocity[0] -= (flame.position.X() - _emitterPosition.X()) * k * deltaT;
+            flame.velocity[2] -= (flame.position.Z() - _emitterPosition.Z()) * k * deltaT;
+        }
+
+        // Flames lean downwind. Same air the smoke breathes, damped by the
+        // lean factor; a fire in a gale is a horizontal fan.
+        if (_params.fireWindLean > 0.0f)
+        {
+            const Vector3 air = GAirflow.Sample(flame.position);
+            flame.velocity[0] += (air.X() - flame.velocity.X()) * _params.fireWindLean * 2.0f * deltaT;
+            flame.velocity[2] += (air.Z() - flame.velocity.Z()) * _params.fireWindLean * 2.0f * deltaT;
+        }
+
         flame.position += flame.velocity * deltaT;
 
         if (write != read)
@@ -938,8 +1002,19 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             continue;
         }
 
-        const float size =
-            Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
+        float size = Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
+        // A puff pressed against a wall is DRAWN no wider than its distance to
+        // that wall (plus a small bleed). Containment keeps the centre inside
+        // the room; this keeps the picture inside too -- a 5 m sprite whose
+        // centre is 1 m from a wall would otherwise paint 4 m of smoke through
+        // it however well the simulation behaved. The dense core is unaffected
+        // in open air (no plane, no clamp).
+        if (particle.planeValid && _params.contain)
+        {
+            const float toPlane = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
+            const float allowed = std::max(toPlane + sphereRadiusFor(particle) * 0.5f, 0.0f) + 0.6f;
+            size = std::min(size, std::max(allowed, _params.startRadius * 0.5f));
+        }
 
         Vector3 posp = toView * particle.position;
         if (posp.Z() < nearest)

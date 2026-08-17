@@ -125,7 +125,7 @@ class SmokeSystem
   private:
     std::vector<Entry> _entries;
     int _nextId = 1;
-    float _groundShadowStrength = 1.5f;
+    float _groundShadowStrength = 2.5f;
 };
 
 SmokeSystem& GSmokeSystemInstance();

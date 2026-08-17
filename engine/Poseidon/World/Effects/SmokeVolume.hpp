@@ -64,16 +64,16 @@ struct SmokeParams
     /// is what gives a thick column a dark underside and core with a bright
     /// sun-facing rim -- the difference between a lit volume and a sticker.
     /// 0 turns it off (flat, the first-pass look).
-    float selfShadowStrength = 1.2f;
+    float selfShadowStrength = 2.2f;
     /// How far the march reaches, in puff-sized cells. 4 covers a normal plume;
     /// more only matters for a very tall column and costs per particle.
-    int selfShadowSteps = 4;
+    int selfShadowSteps = 6;
     /// Weight of the cool sky term on the plume's top. Smoke in sun is white on
     /// top and blue-grey in shadow; this is the blue-grey.
     float skyAmbient = 0.55f;
     /// How strongly this plume shadows the GROUND (and everything lit under
     /// it) via the renderer's shadow map. 1 = its opacity; 0 = casts none.
-    float groundShadow = 1.0f;
+    float groundShadow = 1.6f;
 
     // -- motion -----------------------------------------------------------
     /// Upward acceleration while the smoke is still hotter than the air, m/s^2.
@@ -94,6 +94,13 @@ struct SmokeParams
 
     // -- collision --------------------------------------------------------
     bool collide = true;
+    /// Hard containment. Sweeps EVERY tick from the last position to this one
+    /// and, if the segment crossed a surface, puts the particle back on the
+    /// side it came from before responding -- a particle can be stopped, it
+    /// cannot cross. Costs 7 rays per particle per frame. This is what makes
+    /// smoke stay in a room and find the door; the reactive default lets a
+    /// wide puff's rim through a thin wall.
+    bool contain = true;
     /// 0 = pure slide along the surface, 1 = elastic. Smoke is not a ball;
     /// values above about 0.3 look wrong. The default is a hint of rebound.
     float restitution = 0.15f;
@@ -140,6 +147,18 @@ struct SmokeParams
     /// Vertical stretch of a flame sprite at full rise speed. 0 = round puffs
     /// (the first pass, which read as cotton wool); ~1.6 = tongues.
     float fireStretch = 1.6f;
+    /// A CONTINUOUS fire column instead of independent puffs. Flames are born
+    /// throughout a column of this height above the emitter (not only at the
+    /// base), pulled back toward the column axis so they do not scatter, and
+    /// stay lit for the whole rise. 0 = the puff behaviour; 6-12 = a roaring
+    /// column that reads as one body of flame with tongues on the outside.
+    float fireColumnHeight = 0.0f;
+    /// How hard flames are pulled toward the column axis (1/s). Only with
+    /// fireColumnHeight > 0. Higher = a tighter, more coherent column.
+    float fireColumnCohesion = 3.0f;
+    /// Wind response of the FLAMES: a fire leans downwind. 0 = rigid, 1 = the
+    /// tips fully follow the air. Real flames lean noticeably in a breeze.
+    float fireWindLean = 0.6f;
     /// The fire lights its surroundings: a point light at the flame centroid,
     /// warm, driven by the same flicker as the flames so the ground and walls
     /// around it breathe with the fire. 0 disables it. Point lights in this
@@ -301,6 +320,7 @@ class SmokeVolume : public Entity
     void DrawFire(int level);
     void Integrate(SmokeParticle& particle, float deltaT);
     void Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT);
+    float sphereRadiusFor(const SmokeParticle& particle) const;
     void UpdateBounds();
 
     SmokeParams _params{};

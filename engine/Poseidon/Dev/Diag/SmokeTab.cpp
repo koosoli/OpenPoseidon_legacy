@@ -239,6 +239,11 @@ void DrawSpawnSection()
         GParams.maxParticles = 800;
         GParams.fireLightRadius = 22.0f;
         GParams.fireLightIntensity = 1.8f;
+        // A COLUMN, not a swarm of puffs.
+        GParams.fireColumnHeight = 10.0f;
+        GParams.fireColumnCohesion = 3.5f;
+        GParams.fireLifetime = 2.2f;
+        GParams.fireRiseSpeed = 5.0f;
     }
     if (ImGui::IsItemHovered())
     {
@@ -481,6 +486,13 @@ void DrawTuningSection()
                           "1 = heavy oil fire, 0.2 = clean hot burn with wisps.");
     }
     ImGui::SliderFloat("Flame stretch", &GParams.fireStretch, 0.0f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Column height (m)", &GParams.fireColumnHeight, 0.0f, 25.0f, "%.1f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("0 = independent puffs. Above 0, flames fill a column of this height as one body: born throughout it, pulled toward the axis, alive for the whole rise. Pair with a longer flame lifetime.");
+    }
+    ImGui::SliderFloat("Column cohesion", &GParams.fireColumnCohesion, 0.0f, 10.0f, "%.1f");
+    ImGui::SliderFloat("Flame wind lean", &GParams.fireWindLean, 0.0f, 1.0f, "%.2f");
     ImGui::SliderFloat("Fire light intensity", &GParams.fireLightIntensity, 0.0f, 4.0f, "%.2f");
     if (ImGui::IsItemHovered())
     {
@@ -500,6 +512,12 @@ void DrawTuningSection()
 
     ImGui::SeparatorText("Collision and shelter");
     ImGui::Checkbox("Collide with world", &GParams.collide);
+    ImGui::SameLine();
+    ImGui::Checkbox("Hard contain", &GParams.contain);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Sweep every tick and refuse to let a particle cross a surface it came from behind. Smoke stays in the room and finds the door. Costs 7 rays per particle per frame.");
+    }
     ImGui::SliderFloat("Restitution", &GParams.restitution, 0.0f, 1.0f, "%.2f");
     if (ImGui::IsItemHovered())
     {

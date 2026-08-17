@@ -97,7 +97,9 @@ fn smoke_ground_shadow(world_xz: vec2<f32>, sun: vec3<f32>, texel: f32) -> f32 {
         let d = length(world_xz - foot);
         // Soft disc, widened to at least most of a texel so a small puff still
         // lands rather than falling between samples.
-        let rr = max(r, texel * 0.6);
+        // The shadow of a soft puff reads wider than its dense core: 1.3x the
+        // visual radius, and never narrower than most of a texel.
+        let rr = max(r * 1.3, texel * 0.6);
         if (d < rr) {
             let w = 0.5 + 0.5 * cos(3.14159265 * d / rr);
             tau = tau + b.density.x * w;
