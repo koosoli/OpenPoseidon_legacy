@@ -384,6 +384,7 @@ static bool CalculateIntersectionsExact(CollisionBuffer& result, const Object* t
                     ret.texture = nullptr;
                     ret.pos = pos;
                     ret.dirOut = direction;
+                    ret.surfaceNormal = direction; // meaningful on this path
                     ret.underVolume = 0;
                     ret.under = under;
                     ret.hierLevel = hierLevel;
@@ -460,6 +461,7 @@ static bool CalculateIntersectionsExact(CollisionBuffer& result, const Object* t
                         ret.texture = nullptr;
                         ret.pos = pos;
                         ret.dirOut = direction;
+                        ret.surfaceNormal = direction; // meaningful on this path
                         ret.hierLevel = hierLevel;
                         ret.underVolume = 0;
                         ret.under = under;
@@ -792,7 +794,12 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
         // clip the b..e line with all planes of cThis
         int i;
         PoseidonAssert(cThis.NPlanes() >= 4);
-        Vector3 dirOut;
+        // The normal of the last plane that clipped the segment — i.e. the face
+        // the segment entered through. Was computed and then thrown away; it is
+        // now published as `surfaceNormal`. Zero-initialised because a segment
+        // lying entirely inside the component clips against nothing, and reading
+        // the uninitialised value was a latent bug waiting for a consumer.
+        Vector3 dirOut(VZero);
 
 #if LOG_ISECT
         LOG_DEBUG(Graphics, "{} ({}): component {}", (const char*)GetDebugName(), (const char*)GetShape()->Name(),
@@ -891,7 +898,8 @@ void Object::Intersect(const FrameBase& pos, CollisionBuffer& result, Vector3Par
             // get texture from any face of the component
 
             ret.texture = cThis.GetTexture();
-            ret.dirOut = e - b; // note: dir out is nonsense
+            ret.dirOut = e - b; // note: dir out is nonsense (left as-is: consumers depend on it)
+            ret.surfaceNormal = dirOut; // ...and this is the real one
             ret.under = t;
             ret.hierLevel = hierLevel;
             ret.object = const_cast<Object*>(this);

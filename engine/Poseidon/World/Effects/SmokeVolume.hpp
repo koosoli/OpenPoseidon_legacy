@@ -1,0 +1,211 @@
+#pragma once
+
+#include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+
+#include <vector>
+
+namespace Poseidon
+{
+
+// ---------------------------------------------------------------------------
+// A smoke plume: ONE scene entity that owns many particles.
+//
+// The legacy design (Graphics/Rendering/Effects/Smokes.cpp) makes every puff a
+// full Vehicle in the world — its own LOD shape, its own entry in the scene's
+// simulate and draw lists, its own per-puff sun-plus-point-lights solve inside
+// Object::DrawDecal. That is where the cost is, and it is also why the legacy
+// smoke has no collision: there is nowhere sensible to put a sweep when each
+// particle is an independent entity being ticked by the generic simulator.
+//
+// Here the plume is the entity. Consequences that matter:
+//
+//   * One scene-list entry, one lighting solve, one texture bind per plume
+//     instead of per particle.
+//   * The particle loop is a flat array, so the collision budget can be
+//     rationed across the whole plume rather than guessed at per puff.
+//   * Wind is re-sampled every frame per particle instead of being baked in at
+//     spawn. Legacy bakes it (Smokes.cpp CloudletSource::Simulate), which is
+//     why changing the wind never moves smoke that is already in the air.
+//
+// This does NOT replace the legacy path. It runs alongside it, off by default,
+// so the two can be spawned side by side and compared — see SmokeSystem.
+// ---------------------------------------------------------------------------
+
+/// Everything a plume's look and behaviour is made of. All of it is live-
+/// editable from the dev panel; none of it is authored in config yet, because
+/// the first consumers are dev-spawned emitters and smoke grenades.
+struct SmokeParams
+{
+    // -- emission ---------------------------------------------------------
+    float rate = 35.0f;            ///< particles per second
+    float particleLifetime = 14.0f; ///< seconds
+    float emitterRadius = 0.35f;   ///< nozzle radius, m
+    float initialSpeed = 2.2f;     ///< upward jet at the nozzle, m/s
+    float spread = 0.30f;          ///< lateral randomisation of the jet, 0..1
+
+    // -- appearance -------------------------------------------------------
+    float startRadius = 0.5f; ///< particle radius at birth, m
+    float endRadius = 5.0f;   ///< particle radius at death, m
+    /// Peak per-particle alpha. This is the "thickness" control: raising it
+    /// makes the plume opaque without changing how it moves. Note that overlap
+    /// compounds, so 0.35 already reads as solid smoke in the core of a plume.
+    float opacity = 0.35f;
+    float fadeIn = 0.12f;  ///< fraction of life spent fading up
+    float fadeOut = 0.45f; ///< fraction of life spent fading out
+    float red = 1.0f;
+    float green = 1.0f;
+    float blue = 1.0f;
+
+    // -- motion -----------------------------------------------------------
+    /// Upward acceleration while the smoke is still hotter than the air, m/s^2.
+    float buoyancy = 2.4f;
+    /// Fraction of lifetime over which buoyancy decays to zero as the plume
+    /// cools. Without this a plume rises forever and never forms a drifting
+    /// layer, which is the single most obvious tell of fake smoke.
+    float buoyancyDecay = 0.35f;
+    /// How hard the particle is dragged toward the local air velocity, 1/s.
+    /// This is what makes wind work: the particle relaxes toward the air rather
+    /// than having wind added to it, so a gust accelerates it and a lull lets it
+    /// coast, both for free.
+    float drag = 1.1f;
+    float turbulence = 0.55f; ///< random acceleration magnitude, m/s^2
+    /// Scales the PREVAILING wind only (0 = ignores weather entirely). Local
+    /// airflow — rotor downwash — is not affected by this.
+    float windResponse = 1.0f;
+
+    // -- collision --------------------------------------------------------
+    bool collide = true;
+    /// 0 = pure slide along the surface, 1 = elastic. Smoke is not a ball;
+    /// values above about 0.3 look wrong. The default is a hint of rebound.
+    float restitution = 0.15f;
+    /// Tangential speed lost at a contact, 0..1. This is what makes smoke crawl
+    /// along a wall rather than skate down it.
+    float friction = 0.30f;
+    /// Fraction of the visual radius used for the collision sphere. Less than 1
+    /// on purpose: a puff's visible edge is diffuse, and colliding on the full
+    /// radius makes plumes stand visibly off walls.
+    float collisionRadiusScale = 0.35f;
+
+    // -- shelter ----------------------------------------------------------
+    /// While sheltered, the prevailing wind is scaled by this. The requirement
+    /// is that indoor smoke ignores the weather; a small residual keeps a
+    /// draughty interior from looking dead.
+    float shelteredWindScale = 0.05f;
+    /// How far up the roof probe reaches, m.
+    float shelterProbeHeight = 12.0f;
+
+    // -- budget -----------------------------------------------------------
+    int maxParticles = 400;
+    /// Seconds between real sphere sweeps for a given particle. Between sweeps
+    /// the cached contact plane still blocks it, so this trades exactness for
+    /// cost rather than trading away the collision itself.
+    float sweepInterval = 0.10f;
+};
+
+/// One live particle. Deliberately a flat struct in a flat vector: the whole
+/// point of this system over the legacy one is that a plume is an array walk.
+struct SmokeParticle
+{
+    Vector3 position{VZero};
+    Vector3 velocity{VZero};
+    float age = 0.0f;
+    float lifetime = 1.0f;
+    float exposure = 1.0f;      ///< 0 = fully sheltered, 1 = open sky (smoothed)
+    float shelterTimer = 0.0f;  ///< seconds until the next roof probe
+    float sweepTimer = 0.0f;    ///< seconds until the next sphere sweep
+    Vector3 planeNormal{VZero}; ///< cached contact plane from the last sweep
+    float planeOffset = 0.0f;   ///< plane is { p : dot(n, p) >= planeOffset }
+    bool planeValid = false;
+    float sizeJitter = 1.0f;
+    float alphaJitter = 1.0f;
+};
+
+class SmokeVolume : public Entity
+{
+    typedef Entity base;
+
+  public:
+    SmokeVolume(LODShapeWithShadow* shape, const SmokeParams& params);
+    ~SmokeVolume() override;
+
+    // -- control ----------------------------------------------------------
+    const SmokeParams& Params() const { return _params; }
+    /// Live edit. Existing particles keep their assigned lifetime but pick up
+    /// every other change on their next tick, which is what makes the dev panel
+    /// sliders useful rather than only applying to new smoke.
+    void SetParams(const SmokeParams& params) { _params = params; }
+
+    void SetEmitterPosition(Vector3Par position);
+    Vector3 EmitterPosition() const { return _emitterPosition; }
+
+    /// Stop emitting; existing particles live out their lifetimes and the
+    /// volume then deletes itself. This is what "despawn" should mean — a plume
+    /// that vanishes instantly is a much worse artefact than one that thins out.
+    void Extinguish() { _emitting = false; }
+    bool IsEmitting() const { return _emitting; }
+
+    /// Emit for a fixed time then stop. Negative means forever.
+    void SetDuration(float seconds) { _duration = seconds; }
+
+    std::size_t ParticleCount() const { return _particles.size(); }
+
+    /// Microseconds spent in the last Simulate / Draw. Read by the dev panel's
+    /// benchmark section; costs one clock read per call.
+    double LastSimulateMicroseconds() const { return _lastSimulateUs; }
+    double LastDrawMicroseconds() const { return _lastDrawUs; }
+
+    // -- Entity -----------------------------------------------------------
+    void Simulate(float deltaT, SimulationImportance prec) override;
+    void Draw(int level, ClipFlags clipFlags, const FrameBase& frame) override;
+
+    bool IsAnimated(int level) const override { return true; }
+    bool IsAnimatedShadow(int level) const override { return false; }
+    void Animate(int level) override {}
+    void Deanimate(int level) override {}
+
+    float CloudletClippingCoef() const override { return 10.0f; }
+    SimulationImportance WorstImportance() const override;
+    SimulationImportance BestImportance() const override;
+
+    // Smoke must not block line of fire or line of sight as a solid; gameplay
+    // visibility through smoke is a separate, coarser question that this system
+    // deliberately does not answer yet (roadmap FX-130 keeps that server-side).
+    bool OcclusionFire() const override { return false; }
+    bool OcclusionView() const override { return false; }
+    bool MustBeSaved() const override { return false; }
+
+    LSError Serialize(ParamArchive& ar) override { return LSOK; }
+
+    void Sound(bool inside, float deltaT) override {}
+    void UnloadSound() override {}
+
+    USE_FAST_ALLOCATOR;
+
+  private:
+    void Emit(float deltaT);
+    void Integrate(SmokeParticle& particle, float deltaT);
+    void Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT);
+    void UpdateBounds();
+
+    SmokeParams _params{};
+    std::vector<SmokeParticle> _particles;
+    std::vector<int> _drawOrder;
+
+    Vector3 _emitterPosition{VZero};
+    float _emitAccumulator = 0.0f;
+    float _duration = -1.0f;
+    bool _emitting = true;
+
+    double _lastSimulateUs = 0.0;
+    double _lastDrawUs = 0.0;
+
+    /// Rate limit for the draw diagnostics. Without it a plume logs once per
+    /// particle per frame and the log becomes the performance problem.
+    Foundation::Time _nextDiagTime;
+
+    unsigned _rand = 0x1234567u;
+    float RandUnit();      ///< [0, 1)
+    float RandSymmetric(); ///< [-1, 1)
+};
+
+} // namespace Poseidon

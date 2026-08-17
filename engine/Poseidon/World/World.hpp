@@ -596,7 +596,15 @@ class World
 	// (overcast/fog), so dev-panel time scrubbing changes only the sun/sky.
 	void SetFreezeWeather(bool freeze) {_freezeWeather = freeze;}
 	bool IsWeatherFrozen() const {return _freezeWeather;}
-	
+
+	// The simulated (not the forecast) weather scalars. Read-only; SetWeather is
+	// the way to change them, and it drives them through the normal transition.
+	// The Weather dev tab needs the current values to seed its sliders and to
+	// pass fog through unchanged when only overcast is being edited.
+	float GetOvercast() const {return _actualOvercast;}
+	float GetFog() const {return _actualFog;}
+
+
 	AbstractUI *UI() const {return _ui;}
 	AbstractOptionsUI *Options() const {return _options;}
 	AbstractOptionsUI *UserDialog() const {return _userDlg;}

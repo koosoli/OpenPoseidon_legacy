@@ -84,9 +84,31 @@ struct WindConditions
     /// How far the mean heading veers either side of `baseDirectionRad` (rad).
     float veerAmplitudeRad = 0.55f;
 
+    /// Fractional slow drift of the mean speed, minutes-long. 0.18 is the value
+    /// this model shipped with and is the default so nothing changes; the field
+    /// exists so a *steady* field can be requested (the dev override sets it to
+    /// zero, otherwise the speed you dial in is not the speed you get).
+    float meanVariation = 0.18f;
+
     /// Decorrelates the sine phases per mission. Any two machines with the same
     /// seed produce the same wind; it is NOT consumed from a shared RNG stream.
     uint32_t seed = 1337u;
+};
+
+/// A developer's hand on the wind. LOCAL AND UNREPLICATED BY DESIGN: it is not
+/// serialized with the world and it is not sent to anyone, so switching it on in
+/// a network game makes this machine disagree with the server about the air. It
+/// exists so a dev can dial in "9 m/s, due east, no gusts" and watch what
+/// answers — smoke, grass, sea, tracer drift — which is impossible against a
+/// closed form in mission time. Do not wire gameplay to it.
+struct WindOverride
+{
+    bool enabled = false;
+    float speed = 6.0f;        ///< mean speed, m/s
+    float directionRad = 0.0f; ///< heading the air travels TOWARD, atan2(z, x)
+    /// 0 = dead steady (the mean *is* the instantaneous value), 1 = full gust
+    /// envelope. Defaults to steady: an override exists to remove variables.
+    float gustiness = 0.0f;
 };
 
 /// Pure, side-effect-free evaluation. `timeMilliseconds` should be the
@@ -120,6 +142,15 @@ class WindModel
 
     float Overcast() const { return _overcast; }
 
+    // -- Dev override -----------------------------------------------------
+    // While enabled, Sample() reports the override instead of the closed form.
+    // Conditions() and Overcast() keep reporting the real mission state, so
+    // turning the override off restores the exact vector the mission would have
+    // had at that instant — there is no state to unwind.
+    const WindOverride& Override() const { return _override; }
+    void SetOverride(const WindOverride& value) { _override = value; }
+    bool IsOverridden() const { return _override.enabled; }
+
     // -- Ballistics opt-in ------------------------------------------------
     // OFF BY DEFAULT AND DELIBERATELY SO. Classic OFP missions were authored
     // and tested against a windless ballistic solution; letting a 9 m/s
@@ -131,6 +162,7 @@ class WindModel
 
   private:
     WindConditions _conditions{};
+    WindOverride _override{};
     WindSample _sample{};
     float _overcast = 0.0f;
     bool _active = false;

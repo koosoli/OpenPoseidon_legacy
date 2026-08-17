@@ -78,7 +78,7 @@ WindSample EvaluateWind(const WindConditions& conditions, float overcast, int64_
     // spectrum hold still (see the hysteresis rule in WaterWgpu.cpp).
     const float meanSpeedBase = conditions.calmSpeed + conditions.overcastSpeed * o;
     const float speedTrend = Composite(t, seed, 11u, 1290.0, 487.0, 233.0);
-    const float meanSpeed = std::max(meanSpeedBase * (1.0f + 0.18f * speedTrend), 0.0f);
+    const float meanSpeed = std::max(meanSpeedBase * (1.0f + conditions.meanVariation * speedTrend), 0.0f);
 
     const float veer = Composite(t, seed, 21u, 903.0, 331.0, 149.0);
     const float meanDirection = conditions.baseDirectionRad + conditions.veerAmplitudeRad * veer;
@@ -120,7 +120,32 @@ void WindModel::Init(const WindConditions& conditions)
 void WindModel::Update(int64_t netTimeMilliseconds, float overcast)
 {
     _overcast = std::clamp(overcast, 0.0f, 1.0f);
-    _sample = EvaluateWind(_conditions, _overcast, netTimeMilliseconds);
+
+    if (_override.enabled)
+    {
+        // Expressed as conditions rather than as a hand-built WindSample, so the
+        // override goes through the same evaluator every consumer is calibrated
+        // against — a dialled-in gust has the same shape as a real one.
+        //
+        // Evaluated at overcast 1 because the gust envelope is scaled by
+        // overcast (0.30 + 0.70*o); at 1 the envelope is exactly `gustiness`, so
+        // the slider means what it says regardless of the mission's weather.
+        WindConditions steady;
+        steady.baseDirectionRad = _override.directionRad;
+        steady.calmSpeed = std::max(_override.speed, 0.0f);
+        steady.overcastSpeed = 0.0f;
+        steady.gustiness = std::clamp(_override.gustiness, 0.0f, 1.0f);
+        steady.veerAmplitudeRad = 0.0f; // the heading you set is the heading you get
+        steady.meanVariation = 0.0f;    // ...and likewise the speed
+        steady.seed = _conditions.seed;
+
+        _sample = EvaluateWind(steady, 1.0f, netTimeMilliseconds);
+    }
+    else
+    {
+        _sample = EvaluateWind(_conditions, _overcast, netTimeMilliseconds);
+    }
+
     _active = true;
 }
 

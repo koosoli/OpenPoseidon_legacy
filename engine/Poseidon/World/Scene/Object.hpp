@@ -905,6 +905,19 @@ struct CollisionInfo
 	Texture *texture;
 	Point3 pos; // position of collision - may differ from vertex
 	Vector3 dirOut; // direction outside
+	// The surface normal at the contact, in MODEL space like everything else
+	// here, or zero when none could be determined.
+	//
+	// This exists because `dirOut` is only a real normal on the object-vs-object
+	// path. On the beg/end/radius sweep path it is set to the penetration chord
+	// (e - b) and carries the engine's own "dir out is nonsense" comment - fine
+	// for the vehicle code, which never takes that path, and useless to anything
+	// sweeping a point through the world. Effects that need to reflect off a
+	// surface (smoke) read this instead.
+	//
+	// `dirOut` is left exactly as it was on every path, so no existing consumer
+	// changes behaviour.
+	Vector3 surfaceNormal;
 	Ref<Object> object; // which object we collide with (nullptr if none)
 	// Which hierarchy level is the collision detected at
 	int hierLevel;
