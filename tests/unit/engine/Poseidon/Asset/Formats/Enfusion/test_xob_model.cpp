@@ -445,6 +445,94 @@ TEST_CASE("XOB: a whole model decodes and list B remaps onto list A", "[asset][e
     REQUIRE(part.RenderPosition(4).y == Approx(part.positions[2].y));
 }
 
+TEST_CASE("XOB: the colour stream precedes the UV sets in a colour-bearing part",
+          "[asset][enfusion][xob][arf-002][mat-051]")
+{
+    // vertexFormat 0x20 adds a u32 colour per deduplicated vertex, and it sits
+    // BETWEEN the normals and the UV sets. Both orders total the same bytes, so the
+    // dataSizeRaw closure cannot tell them apart; only the decoded values can. Read
+    // UV-first, every Everon polyplane (all colour-bearing) got its colour words as
+    // UVs -- 0xFFxx0000, i.e. u == 0 and v in a 512-step band -- and every leaf card
+    // sampled one texel: the flat, uncut olive pine crowns. Measured on 309 colour-
+    // bearing parts across 150 corpus models, colour-first decodes 263 to a UV span
+    // >= 90% of the declared rect on both axes; UV-first decodes 0.
+    //
+    // The payload here has colour words that are recognisable as colours and UVs
+    // that hit the rect corners, so a swapped read fails on values, not on size.
+    PartSpec spec;
+    spec.triangleCountLow = 2;
+    spec.vertexCount = 4;
+    spec.renderVertexCount = 4;
+    spec.uvSetCount = 1;
+    spec.vertexFormat = 0x2F; // 0x0F base + 0x20 colour stream (the polyplane format)
+    spec.uv0 = XobUvSet{0.0f, 1.0f, 0.0f, 1.0f, 1.0f};
+
+    const uint16_t list[6] = {0, 1, 2, 2, 1, 3};
+    const float positions[4][3] = {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}};
+    const uint32_t colours[4] = {0xFF810000u, 0xFF000000u, 0xFE000000u, 0xFFFF0000u};
+    const uint32_t packedUvs[4] = {PackUv(-32767, -32767), PackUv(32767, -32767), PackUv(-32767, 32767),
+                                   PackUv(32767, 32767)};
+
+    std::vector<uint8_t> raw;
+    for (uint16_t index : list)
+        AppendLe16(raw, index);
+    for (uint16_t index : list)
+        AppendLe16(raw, index);
+    for (const auto& position : positions)
+        AppendVec3(raw, position[0], position[1], position[2]);
+    for (int i = 0; i < 4; ++i)
+        AppendLe32(raw, PackDirection(1023, 1023, 1023));
+    for (uint32_t colour : colours) // colour stream FIRST
+        AppendLe32(raw, colour);
+    for (uint32_t uv : packedUvs) // then UV set 0
+        AppendLe32(raw, uv);
+    for (uint32_t source = 0; source < 4; ++source)
+    {
+        AppendLe32(raw, source);
+        AppendLe32(raw, PackDirection(2047, 1023, 512));
+        AppendLe32(raw, PackDirection(1023, 2047, 512));
+    }
+
+    const auto file = BuildXob({spec}, raw, {"{ABCD}t_picea_abies_1f_polyplane.emat"},
+                               static_cast<uint32_t>(raw.size()));
+    const auto header = ReadXobHeader(file.data(), file.size());
+    INFO(header.error);
+    REQUIRE(header.valid());
+    REQUIRE(header.sizesClose); // the stride still counts the colour word exactly once
+    REQUIRE(header.lods[0].parts[0].hasColours());
+
+    const auto model = ReadXobModel(file.data(), file.size());
+    INFO(model.error);
+    REQUIRE(model.valid());
+    const auto& part = model.lods[0].parts[0];
+    REQUIRE(part.colours.size() == 4);
+    REQUIRE(part.uvSets.size() == 1);
+    REQUIRE(part.uvSets[0].size() == 4);
+
+    // The colour words came back as colours...
+    for (size_t i = 0; i < 4; ++i)
+        REQUIRE(part.colours[i] == colours[i]);
+    // ...and the UVs span the whole rect: corner (0,0) to corner (1,1). A swapped
+    // read would put every u at 0.5 and every v within 0.4922..0.5 -- exactly the
+    // degenerate band the deployed pine MLODs carried.
+    REQUIRE(part.uvSets[0][0].u == Approx(0.0f).margin(1e-6));
+    REQUIRE(part.uvSets[0][0].v == Approx(0.0f).margin(1e-6));
+    REQUIRE(part.uvSets[0][1].u == Approx(1.0f));
+    REQUIRE(part.uvSets[0][2].v == Approx(1.0f));
+    REQUIRE(part.uvSets[0][3].u == Approx(1.0f));
+    REQUIRE(part.uvSets[0][3].v == Approx(1.0f));
+    float uMin = 1.0f, uMax = 0.0f, vMin = 1.0f, vMax = 0.0f;
+    for (const auto& uv : part.uvSets[0])
+    {
+        uMin = std::min(uMin, uv.u);
+        uMax = std::max(uMax, uv.u);
+        vMin = std::min(vMin, uv.v);
+        vMax = std::max(vMax, uv.v);
+    }
+    REQUIRE(uMax - uMin > 0.9f);
+    REQUIRE(vMax - vMin > 0.9f);
+}
+
 TEST_CASE("XOB: the LZ4 chain is linked and bit 31 means last, not compressed",
           "[asset][enfusion][xob][arf-002]")
 {

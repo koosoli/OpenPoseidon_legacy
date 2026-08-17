@@ -512,19 +512,28 @@ bool ReadXobLod(const void* data, size_t size, const XobHeader& header, size_t l
         for (XobVec3& normal : part.normals)
             normal = UnpackXobDirection(cursor.U32());
 
+        // The colour stream comes BEFORE the UV sets, not after. The byte total is
+        // the same either way, so every size closure held with the order reversed --
+        // and every colour-bearing part (vertexFormat 0x20: all the vegetation
+        // polyplanes, most tree bark) decoded its colour words as UVs. Measured on
+        // 309 colour-bearing LOD0 parts across 150 corpus models: read colour-first,
+        // 263 parts span >= 90% of their declared UV rect in both axes (mean 0.95 /
+        // 0.97); read UV-first, 0 do (mean 0.23 / 0.002) -- the "UVs" were
+        // 0xFFxx0000 colour words, which is why every Everon pine crown rendered as
+        // flat single-texel cards.
+        if (desc.hasColours())
+        {
+            part.colours.resize(desc.vertexCount);
+            for (uint32_t& colour : part.colours)
+                colour = cursor.U32();
+        }
+
         part.uvSets.resize(desc.uvSetCount);
         for (uint8_t s = 0; s < desc.uvSetCount; ++s)
         {
             part.uvSets[s].resize(desc.vertexCount);
             for (XobVec2& uv : part.uvSets[s])
                 uv = UnpackXobUv(cursor.U32(), desc.uvSets[s]);
-        }
-
-        if (desc.hasColours())
-        {
-            part.colours.resize(desc.vertexCount);
-            for (uint32_t& colour : part.colours)
-                colour = cursor.U32();
         }
 
         part.renderSource.resize(desc.renderVertexCount);

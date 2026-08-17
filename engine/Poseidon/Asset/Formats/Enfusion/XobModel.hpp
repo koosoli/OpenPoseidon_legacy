@@ -169,7 +169,8 @@ struct XobPartDesc
     bool hasColours() const { return (vertexFormat & 0x20u) != 0; }
 
     //! Bytes per deduplicated vertex: position (16 when skinned, the extra u32 being
-    //! a skin-table index), packed normal, one packed UV per set, optional colour.
+    //! a skin-table index), packed normal, optional colour, one packed UV per set --
+    //! in THAT stream order (the colour word precedes the UV sets; see ReadXobLod).
     uint64_t VertexStride() const
     {
         return (skinned() ? 16u : 12u) + 4u + 4u * static_cast<uint64_t>(uvSetCount) + (hasColours() ? 4u : 0u);
