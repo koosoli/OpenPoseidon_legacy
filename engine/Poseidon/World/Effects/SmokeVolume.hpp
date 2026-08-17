@@ -3,6 +3,7 @@
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 
 #include <vector>
+#include <unordered_map>
 
 namespace Poseidon
 {
@@ -55,6 +56,20 @@ struct SmokeParams
     float red = 1.0f;
     float green = 1.0f;
     float blue = 1.0f;
+
+    // -- volumetric lighting ---------------------------------------------
+    /// Self-shadow: each particle marches toward the sun through the plume's
+    /// own particles and darkens by the density it passes (Beer-Lambert). This
+    /// is what gives a thick column a dark underside and core with a bright
+    /// sun-facing rim -- the difference between a lit volume and a sticker.
+    /// 0 turns it off (flat, the first-pass look).
+    float selfShadowStrength = 1.2f;
+    /// How far the march reaches, in puff-sized cells. 4 covers a normal plume;
+    /// more only matters for a very tall column and costs per particle.
+    int selfShadowSteps = 4;
+    /// Weight of the cool sky term on the plume's top. Smoke in sun is white on
+    /// top and blue-grey in shadow; this is the blue-grey.
+    float skyAmbient = 0.55f;
 
     // -- motion -----------------------------------------------------------
     /// Upward acceleration while the smoke is still hotter than the air, m/s^2.
@@ -249,6 +264,10 @@ class SmokeVolume : public Entity
 
     SmokeParams _params{};
     std::vector<SmokeParticle> _particles;
+    /// Per-particle transmittance toward the sun, rebuilt each Draw. Scratch,
+    /// kept as a member so the allocation is not paid every frame.
+    std::vector<float> _shadowScratch;
+    std::unordered_multimap<uint64_t, int> _hash;
 
     /// Flame particles. Same struct, far fewer fields used: no collision, no
     /// shelter, they live under a second. Kept separate so the smoke loop's

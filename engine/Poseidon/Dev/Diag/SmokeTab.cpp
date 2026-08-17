@@ -415,6 +415,13 @@ void DrawTuningSection()
     }
     ImGui::SliderFloat("Start radius (m)", &GParams.startRadius, 0.1f, 4.0f, "%.2f");
     ImGui::SliderFloat("End radius (m)", &GParams.endRadius, 0.5f, 20.0f, "%.2f");
+    ImGui::SliderFloat("Self-shadow", &GParams.selfShadowStrength, 0.0f, 4.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Each particle marches toward the sun through the plume and darkens by the smoke it passes. Dark core and underside, bright sun rim. 0 = flat sticker.");
+    }
+    ImGui::SliderInt("Self-shadow reach", &GParams.selfShadowSteps, 0, 10);
+    ImGui::SliderFloat("Sky ambient", &GParams.skyAmbient, 0.0f, 1.5f, "%.2f");
     ImGui::SliderFloat("Fade in", &GParams.fadeIn, 0.0f, 0.9f, "%.2f");
     ImGui::SliderFloat("Fade out", &GParams.fadeOut, 0.0f, 0.9f, "%.2f");
 

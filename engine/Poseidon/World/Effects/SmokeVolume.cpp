@@ -17,6 +17,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
+#include <unordered_map>
 
 namespace Poseidon
 {
@@ -806,49 +808,87 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     const float invLeft = camera.InvLeft();
     const float invTop = camera.InvTop();
 
-    // ONE lighting solve for the whole plume.
+    // VOLUMETRIC LIGHTING, split into terms a lit cloud actually has.
     //
-    // Object::DrawDecal does this per billboard: a full sun material solve plus
-    // a pass over every active point light, for every puff. Smoke is a diffuse
-    // blob metres across; the difference between lighting it at its own centre
-    // and at the plume's centre is not visible, and the difference in cost is
-    // the entire reason the legacy system is expensive with a big plume up.
-    Color lit;
+    // The first pass did one flat solve for the whole plume and tinted every
+    // billboard with it, which is why a thick column read as a grey sticker:
+    // its sun side and its underside were the same colour. A real plume has a
+    // bright sun-facing rim, a dark self-shadowed core and underside, cool sky
+    // ambient on top, and a little warm bounce from the ground. Six-way-lit
+    // smoke (Unity/UE) bakes those directions into six textures; there is no
+    // such texture here, so the same result is built per PARTICLE from where
+    // it sits in the plume:
+    //
+    //   sun     * transmittance(particle -> sun through the plume)  [self-shadow]
+    //   + sky   * (how much of the sky the particle can see)        [top bright]
+    //   + ground bounce * (facing down)                             [warm base]
+    //
+    // Then the local point lights (fire, flares) at the particle. Costs a short
+    // march per particle over a small spatial hash of the plume; see the
+    // shadow-density loop below.
+    LightSun* sun = GScene->MainLight();
+    const Vector3 toSun = -sun->SunDirection(); // SunDirection points FROM the sun
+    const Color sunColour = sun->GetDiffuse() * GEngine->GetAccomodateEye();
+    const Color skyColour = sun->SkyColor() * GEngine->GetAccomodateEye();
+    const Color ambientColour = sun->Ambient() * GEngine->GetAccomodateEye();
+    const float nightFactor = sun->NightEffect();
+    const Color tint(_params.red, _params.green, _params.blue, 1.0f);
+
+    // Precompute each particle's transmittance to the sun. A coarse spatial hash
+    // (cell = one typical puff) makes the neighbour march O(k) per particle.
+    _shadowScratch.resize(_particles.size());
     {
-        TLMaterial material;
-        material.ambient = HWhite;
-        material.diffuse = HWhite * 0.25f;
-        material.emmisive = HBlack;
-        material.forcedDiffuse = HWhite * 0.25f;
-        material.specFlags = 0;
-
-        LightSun* sun = GScene->MainLight();
-        sun->SetMaterial(material);
-        lit = sun->FullResult(0.5f);
-
-        const float nightFactor = sun->NightEffect();
-        if (nightFactor > 0.01f)
+        const float cell = std::max(Lerp(_params.startRadius, _params.endRadius, 0.5f), 0.5f);
+        const float invCell = 1.0f / cell;
+        _hash.clear();
+        _hash.reserve(_particles.size() * 2);
+        auto key = [](int x, int y, int z) -> uint64_t
         {
-            const LightList& lights = GScene->ActiveLights();
-            if (lights.Size() > 0)
-            {
-                Matrix4 worldToModel(MTranslation, -Position());
-                for (int i = 0; i < lights.Size(); ++i)
-                {
-                    lights[i]->Prepare(worldToModel);
-                    lights[i]->SetMaterial(material);
-                }
-                for (int i = 0; i < lights.Size(); ++i)
-                {
-                    lit += lights[i]->Apply(VZero, VForward);
-                }
-            }
+            // 21 bits per axis, offset so negatives pack.
+            const uint64_t ux = static_cast<uint64_t>(x + (1 << 20)) & 0x1FFFFF;
+            const uint64_t uy = static_cast<uint64_t>(y + (1 << 20)) & 0x1FFFFF;
+            const uint64_t uz = static_cast<uint64_t>(z + (1 << 20)) & 0x1FFFFF;
+            return (ux << 42) | (uy << 21) | uz;
+        };
+        for (int i = 0; i < static_cast<int>(_particles.size()); ++i)
+        {
+            const Vector3& p = _particles[i].position;
+            _hash.emplace(key(toIntFloor(p.X() * invCell), toIntFloor(p.Y() * invCell), toIntFloor(p.Z() * invCell)), i);
         }
 
-        lit = lit * GEngine->GetAccomodateEye();
+        // March toward the sun in steps of one cell, up to `steps` cells;
+        // accumulate the density of the neighbours in each cell. Density per
+        // particle is its opacity times how much of its life it has left
+        // (a fading puff shadows less). Beer-Lambert -> transmittance.
+        const int steps = _params.selfShadowSteps;
+        const float stepLength = cell;
+        for (int i = 0; i < static_cast<int>(_particles.size()); ++i)
+        {
+            const SmokeParticle& self = _particles[i];
+            float density = 0.0f;
+            Vector3 probe = self.position;
+            for (int st = 0; st < steps; ++st)
+            {
+                probe += toSun * stepLength;
+                const int cx = toIntFloor(probe.X() * invCell);
+                const int cy = toIntFloor(probe.Y() * invCell);
+                const int cz = toIntFloor(probe.Z() * invCell);
+                auto range = _hash.equal_range(key(cx, cy, cz));
+                for (auto it = range.first; it != range.second; ++it)
+                {
+                    if (it->second == i)
+                    {
+                        continue;
+                    }
+                    const SmokeParticle& other = _particles[it->second];
+                    const float lf = std::clamp(other.age / std::max(other.lifetime, 1e-3f), 0.0f, 1.0f);
+                    const float alive = lf < 1.0f - _params.fadeOut ? 1.0f : (1.0f - lf) / std::max(_params.fadeOut, 1e-3f);
+                    density += _params.opacity * other.alphaJitter * alive;
+                }
+            }
+            _shadowScratch[i] = std::exp(-density * _params.selfShadowStrength);
+        }
     }
-
-    lit = lit * Color(_params.red, _params.green, _params.blue, 1.0f);
 
     // -- back-to-front ordering -------------------------------------------
     // The scene sorts OBJECTS. Inside one object the order is ours, and alpha
@@ -937,7 +977,77 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             continue; // sub-pixel; drawing it costs a draw call and shows nothing
         }
 
-        Color colour = lit;
+        // -- per-particle light ---------------------------------------------
+        // Where the particle sits relative to the plume centre, as a unit
+        // vector: this is the "normal" a six-way lightmap would rotate. A
+        // particle on the sun side of the plume faces the sun; one on the far
+        // side faces away. Combined with the marched transmittance it gives a
+        // lit rim and a dark core that track the sun as it moves.
+        Vector3 fromCentre = particle.position - Position();
+        const float fcLen = fromCentre.Size();
+        if (fcLen > 1e-3f)
+        {
+            fromCentre = fromCentre / fcLen;
+        }
+        else
+        {
+            fromCentre = Vector3(0.0f, 1.0f, 0.0f);
+        }
+        const float transmittance = _shadowScratch[index];
+
+        // Sun: N.L wrapped (smoke is translucent, light bleeds around it), times
+        // self-shadow. The wrap keeps the far side from going pitch black.
+        const float ndl = fromCentre.DotProduct(toSun);
+        const float sunWrap = std::clamp(ndl * 0.5f + 0.5f, 0.0f, 1.0f);
+        const float sunTerm = (0.35f + 0.65f * sunWrap) * transmittance;
+
+        // Sky: how much of the upper hemisphere this particle sees. Top of the
+        // plume bright and cool; underside sees the ground instead.
+        const float up = fromCentre.Y();
+        const float skyTerm = std::clamp(0.5f + 0.5f * up, 0.0f, 1.0f) * (0.6f + 0.4f * transmittance);
+        // Ground bounce, warm and dim, on the underside.
+        const float groundTerm = std::clamp(0.5f - 0.5f * up, 0.0f, 1.0f) * 0.25f;
+
+        Color colour = Color(sunColour.R() * sunTerm + skyColour.R() * skyTerm * _params.skyAmbient +
+                                 ambientColour.R() * groundTerm,
+                             sunColour.G() * sunTerm + skyColour.G() * skyTerm * _params.skyAmbient +
+                                 ambientColour.G() * groundTerm,
+                             sunColour.B() * sunTerm + skyColour.B() * skyTerm * _params.skyAmbient +
+                                 ambientColour.B() * groundTerm,
+                             1.0f);
+
+        // Local lights (the fire's own glow, flares) at THIS particle, so a
+        // plume over a fire is lit orange from below and dark on top -- the
+        // single strongest cue that it is a volume and not a decal.
+        if (nightFactor > 0.01f || _params.fire)
+        {
+            const LightList& lights = GScene->ActiveLights();
+            for (int li = 0; li < lights.Size(); ++li)
+            {
+                LightDescription desc;
+                lights[li]->GetDescription(desc);
+                if (desc.type != LTPoint)
+                {
+                    continue;
+                }
+                const Vector3 toLight = desc.pos - particle.position;
+                const float d2 = toLight.SquareSize();
+                const float reach = std::max(desc.startAtten * 3.0f, 0.5f);
+                if (d2 > reach * reach)
+                {
+                    continue;
+                }
+                const float d = std::sqrt(d2);
+                const float atten = std::clamp(1.0f - d / reach, 0.0f, 1.0f);
+                // Wrapped so light bleeds through the puff toward the viewer.
+                const float wrap = 0.5f + 0.5f * fromCentre.DotProduct(toLight / std::max(d, 1e-3f));
+                const float k = atten * atten * (0.4f + 0.6f * wrap);
+                colour = Color(colour.R() + desc.diffuse.R() * k, colour.G() + desc.diffuse.G() * k,
+                               colour.B() + desc.diffuse.B() * k, 1.0f);
+            }
+        }
+
+        colour = colour * tint;
         const float distance2 = (particle.position - cameraPosition).SquareSize();
         const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
         colour.SetA(alphaFog ? (1.0f - fog) * alpha : 1.0f - (1.0f - fog) * alpha);
