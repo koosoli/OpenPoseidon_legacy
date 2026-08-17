@@ -730,7 +730,7 @@ void World::SimulateCloudlets(float deltaT)
             {
                 return 0;
             }
-            return value[0] == '2' ? 2 : (value[0] == '3' ? 3 : (value[0] == '4' ? 4 : 1));
+            return value[0] == '2' ? 2 : (value[0] == '3' ? 3 : (value[0] == '4' ? 4 : (value[0] == '5' ? 5 : 1)));
         }();
         static bool spawned = false;
         if (wanted != 0 && !spawned && CameraOn() != nullptr && Glob.time.toFloat() > 2.0f)
@@ -819,6 +819,29 @@ void World::SimulateCloudlets(float deltaT)
             if (wanted == 2)
             {
                 GSmokeSystem.SpawnLegacy(position, 1.0f, 1.5f, -1.0f);
+            }
+            else if (wanted == 5)
+            {
+                // Balloons, for scripted capture.
+                SmokeParams b;
+                b.balloons = true;
+                b.rate = 9.0f;
+                b.particleLifetime = 60.0f;
+                b.maxParticles = 500;
+                b.emitterRadius = 1.4f;
+                b.initialSpeed = 0.6f;
+                b.opacity = 1.0f;
+                b.fadeIn = 0.02f;
+                b.fadeOut = 0.06f;
+                b.drag = 0.5f;
+                b.turbulence = 0.0f;
+                b.diffusion = 0.0f;
+                b.densityFalloff = 0.0f;
+                b.restitution = 0.55f;
+                b.collisionRadiusScale = 1.0f;
+                b.groundShadow = 0.0f;
+                b.selfShadowStrength = 0.0f;
+                GSmokeSystem.Spawn(position, b, -1.0f);
             }
             else if (wanted == 4)
             {

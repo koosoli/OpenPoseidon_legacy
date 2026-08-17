@@ -221,6 +221,33 @@ void DrawSpawnSection()
         GParams.fireLightIntensity = 0.6f;
     }
     ImGui::SameLine();
+    if (ImGui::Button("Balloons"))
+    {
+        GParams = SmokeParams{};
+        GParams.balloons = true;
+        GParams.fire = false;
+        GParams.rate = 9.0f;
+        GParams.particleLifetime = 60.0f;
+        GParams.maxParticles = 500;
+        GParams.emitterRadius = 1.4f;
+        GParams.initialSpeed = 0.6f;
+        GParams.opacity = 1.0f;
+        GParams.fadeIn = 0.02f;
+        GParams.fadeOut = 0.06f;
+        GParams.drag = 0.5f;      // they follow the wind, gently
+        GParams.turbulence = 0.0f;
+        GParams.diffusion = 0.0f;
+        GParams.densityFalloff = 0.0f;
+        GParams.restitution = 0.55f; // and they bounce off walls
+        GParams.collisionRadiusScale = 1.0f;
+        GParams.groundShadow = 0.0f;
+        GParams.selfShadowStrength = 0.0f;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Coloured balloons instead of smoke. Also the clearest test rig there is: they are countable, they hold their size, they bounce, and their colour makes the lighting and the wind obvious.");
+    }
+    ImGui::SameLine();
     if (ImGui::Button("INFERNO"))
     {
         // Everything up: a wide, hot, roaring fire that chokes on its own smoke.
@@ -501,6 +528,17 @@ void DrawTuningSection()
         ImGui::SetTooltip("How fast the plume comes APART. A random walk growing as sqrt(age), so young smoke holds the column and old smoke wanders into a cloud. 0 keeps the plume rigid forever.");
     }
     ImGui::SliderFloat("Wind response", &GParams.windResponse, 0.0f, 2.0f, "%.2f");
+
+    ImGui::SeparatorText("Balloons");
+    ImGui::Checkbox("Balloons instead of smoke", &GParams.balloons);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Overrides the smoke terms rather than tuning them: no growth, no diffusion, no thinning, no self-shadow. Set Thickness to 1.0 so they read as solid.");
+    }
+    ImGui::SliderFloat("Balloon rise (m/s)", &GParams.balloonRise, 0.0f, 8.0f, "%.2f");
+    ImGui::SliderFloat("Balloon sway", &GParams.balloonSway, 0.0f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Balloon size (m)", &GParams.balloonSize, 0.05f, 2.0f, "%.2f");
+    ImGui::SliderFloat("Hue spread", &GParams.balloonHueSpread, 0.0f, 1.0f, "%.2f");
 
     ImGui::SeparatorText("Fire");
     ImGui::Checkbox("Fire enabled", &GParams.fire);

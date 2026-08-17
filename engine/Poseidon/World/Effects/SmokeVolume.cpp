@@ -50,6 +50,18 @@ inline float Lerp(float a, float b, float t)
     return a + (b - a) * t;
 }
 
+/// Fully-saturated hue to RGB. Balloons only; smoke never needs it. Kept simple
+/// (the classic six-sector form) because the input is already a random number --
+/// perceptual uniformity would buy nothing a party balloon cares about.
+Color HueToRgb(float h)
+{
+    h = h - std::floor(h);
+    const float r = std::fabs(h * 6.0f - 3.0f) - 1.0f;
+    const float g = 2.0f - std::fabs(h * 6.0f - 2.0f);
+    const float b = 2.0f - std::fabs(h * 6.0f - 4.0f);
+    return Color(std::clamp(r, 0.0f, 1.0f), std::clamp(g, 0.0f, 1.0f), std::clamp(b, 0.0f, 1.0f), 1.0f);
+}
+
 } // namespace
 
 SmokeVolume::SmokeVolume(LODShapeWithShadow* shape, LODShapeWithShadow* fireShape, const SmokeParams& params)
@@ -194,6 +206,8 @@ void SmokeVolume::SpawnSmoke(Vector3Par position, Vector3Par velocity, float siz
     particle.velocity = velocity;
     particle.sizeJitter = (0.75f + 0.5f * RandUnit()) * sizeScale;
     particle.alphaJitter = 0.7f + 0.6f * RandUnit();
+    particle.hue = RandUnit();
+    particle.swayPhase = RandUnit() * 6.2831853f;
 
     // First sweep on the FIRST tick (timer 0), so a particle born against a
     // wall -- a grenade rolled into a corner, a fire against a building --
@@ -251,6 +265,21 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
     // the wind controls in the dev panel behave: the particle is accelerated
     // toward the air it is in, so it lags a gust and coasts through a lull.
     Vector3 acceleration = (air - particle.velocity) * _params.drag;
+
+    if (_params.balloons)
+    {
+        // A balloon is a small solid object with fixed lift, not a parcel of hot
+        // gas: it climbs at a steady rate rather than decelerating as it cools,
+        // and it bobs because it is light enough for the air to push around.
+        // Everything below (buoyancy decay, turbulence, diffusion) is smoke
+        // behaviour and is skipped.
+        const float t = Glob.time.toFloat() + particle.swayPhase;
+        acceleration[1] += (_params.balloonRise - particle.velocity.Y()) * 1.5f;
+        acceleration[0] += std::cos(t * 1.7f) * _params.balloonSway;
+        acceleration[2] += std::sin(t * 1.3f) * _params.balloonSway;
+        particle.velocity += acceleration * deltaT;
+        return;
+    }
 
     // Buoyancy dies as the plume cools, which is what forms the flat drifting
     // layer at the top of a real plume.
@@ -1022,7 +1051,8 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             fade = (1.0f - lifeFraction) / _params.fadeOut;
         }
 
-        float size = Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
+        float size = _params.balloons ? _params.balloonSize * particle.sizeJitter
+                                      : Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
         // A puff pressed against a wall is DRAWN no wider than its distance to
         // that wall (plus a small bleed). Containment keeps the centre inside
         // the room; this keeps the picture inside too -- a 5 m sprite whose
@@ -1044,7 +1074,12 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         // the wall clamp, so a puff squeezed against a wall does not also get
         // spuriously denser for it.
         float density = 1.0f;
-        if (_params.densityFalloff > 0.0f && size > 1e-3f)
+        if (_params.balloons)
+        {
+            // A balloon is opaque and stays opaque; it does not thin as it rises.
+            density = 1.0f;
+        }
+        else if (_params.densityFalloff > 0.0f && size > 1e-3f)
         {
             const float ratio = std::clamp(_params.startRadius / size, 0.0f, 1.0f);
             density = std::pow(ratio, _params.densityFalloff);
@@ -1162,7 +1197,30 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             }
         }
 
-        colour = colour * tint;
+        if (_params.balloons)
+        {
+            // Its own colour, lit but never self-shadowed: a balloon is not a
+            // parcel of smoke and neighbours do not darken it. Keep a little of
+            // the sky term so it still reads as being in the scene's light.
+            // Albedo is the balloon's own hue, blended toward the plume tint by
+            // hueSpread so 0 gives a uniform batch and 1 the full wheel.
+            const Color hueRgb = HueToRgb(particle.hue);
+            const Color albedo(Lerp(tint.R(), hueRgb.R(), _params.balloonHueSpread),
+                               Lerp(tint.G(), hueRgb.G(), _params.balloonHueSpread),
+                               Lerp(tint.B(), hueRgb.B(), _params.balloonHueSpread), 1.0f);
+            // Lit by the sun with the SELF-SHADOW DIVIDED OUT: neighbours do not
+            // darken a balloon. A floor keeps the unlit side coloured rather
+            // than black, and a little sky term sits it in the scene's light.
+            const float unshadowed = sunTerm / std::max(transmittance, 1e-3f);
+            const float lit = std::clamp(0.55f + 0.45f * unshadowed, 0.0f, 1.6f);
+            colour = Color(albedo.R() * (sunColour.R() * lit + skyColour.R() * 0.25f),
+                           albedo.G() * (sunColour.G() * lit + skyColour.G() * 0.25f),
+                           albedo.B() * (sunColour.B() * lit + skyColour.B() * 0.25f), 1.0f);
+        }
+        else
+        {
+            colour = colour * tint;
+        }
         const float distance2 = (particle.position - cameraPosition).SquareSize();
         const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
         colour.SetA(alphaFog ? (1.0f - fog) * alpha : 1.0f - (1.0f - fog) * alpha);

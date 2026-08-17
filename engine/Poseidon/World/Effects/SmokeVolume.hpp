@@ -140,6 +140,24 @@ struct SmokeParams
     /// How far up the roof probe reaches, m.
     float shelterProbeHeight = 12.0f;
 
+    // -- balloons ---------------------------------------------------------
+    // Party mode, and a genuinely useful test rig: balloons make every part of
+    // the pipeline legible at a glance. They are discrete, so you can COUNT
+    // them; they hold their size, so the growth curve is out of the picture;
+    // they are vivid, so the lighting and the wind response are obvious; and
+    // they bounce, so collision is visible without a smoke cloud hiding it.
+    //
+    // Physically they are the opposite of smoke: a balloon does not diffuse,
+    // does not thin, and is not self-shadowed by its neighbours -- it is a
+    // small solid object with lift. So this mode overrides those terms rather
+    // than being tuned into them.
+    bool balloons = false;
+    float balloonRise = 2.4f;   ///< steady climb, m/s (drag pulls toward it)
+    float balloonSway = 0.55f;  ///< lateral bob amplitude, m/s
+    float balloonSize = 0.42f;  ///< radius, m — held for the whole life
+    /// 0 = every balloon takes the plume's tint; 1 = the full hue wheel.
+    float balloonHueSpread = 1.0f;
+
     // -- fire -------------------------------------------------------------
     // A second, short-lived particle layer at the base of the plume: flames.
     // Drawn ADDITIVE with the engine's flame billboard (CloudletFire) and a
@@ -217,6 +235,8 @@ struct SmokeParticle
     bool planeValid = false;
     float sizeJitter = 1.0f;
     float alphaJitter = 1.0f;
+    float hue = 0.0f;      ///< balloon colour, 0..1 around the wheel
+    float swayPhase = 0.0f; ///< balloon bob phase, so they do not move as one
     float groundY = 0.0f; ///< floor height under the particle, from the last clamp
 };
 
