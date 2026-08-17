@@ -49,9 +49,16 @@ inline float Lerp(float a, float b, float t)
 
 } // namespace
 
-SmokeVolume::SmokeVolume(LODShapeWithShadow* shape, const SmokeParams& params)
-    : Entity(shape, SmokeVolumeType(), -1), _params(params)
+SmokeVolume::SmokeVolume(LODShapeWithShadow* shape, LODShapeWithShadow* fireShape, const SmokeParams& params)
+    : Entity(shape, SmokeVolumeType(), -1), _params(params), _fireShape(fireShape)
 {
+    if (fireShape != nullptr)
+    {
+        // Additive, unfogged, no depth write: the legacy engine's own light-
+        // sprite flags (Backend::IsLight -> BlendMode::Additive). A flame is an
+        // emitter, not a surface; fog on it would grey it out.
+        fireShape->OrSpecial(ClampU | ClampV | NoZWrite | IsAlpha | IsLight | NoShadow | IsColored);
+    }
     // TypeTempVehicle keeps the volume out of every collision query in the
     // engine, including SmokeWorldQuery's own sweeps. Plumes therefore cannot
     // collide with each other or with themselves — correct, and free.
@@ -209,6 +216,12 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
     // layer at the top of a real plume.
     const float heat = 1.0f - std::clamp(lifeFraction / std::max(_params.buoyancyDecay, 1e-3f), 0.0f, 1.0f);
     acceleration[1] += _params.buoyancy * heat;
+    if (_params.fire)
+    {
+        // Hot air off a fire. Applied with the same cooling curve so the smoke
+        // still forms a drifting layer at the top instead of rising forever.
+        acceleration[1] += _params.fireSmokeLift * heat;
+    }
 
     if (_params.turbulence > 0.0f)
     {
@@ -328,6 +341,171 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     }
 }
 
+void SmokeVolume::EmitFire(float deltaT)
+{
+    if (!_params.fire || !_emitting || _fireShape.IsNull())
+    {
+        return;
+    }
+
+    _fireAccumulator += _params.fireRate * deltaT;
+    while (_fireAccumulator >= 1.0f)
+    {
+        _fireAccumulator -= 1.0f;
+        if (static_cast<int>(_flames.size()) >= _params.maxFlames)
+        {
+            _fireAccumulator = 0.0f;
+            break;
+        }
+
+        SmokeParticle flame;
+        flame.lifetime = _params.fireLifetime * (0.7f + 0.6f * RandUnit());
+
+        // Same nozzle disc as the smoke, so the flames sit exactly where the
+        // smoke is born and the smoke visibly rises OUT of them.
+        const float r = _params.emitterRadius * std::sqrt(RandUnit());
+        const float theta = RandUnit() * 6.2831853f;
+        flame.position = _emitterPosition + Vector3(r * std::cos(theta), 0.0f, r * std::sin(theta));
+
+        // Mostly up, a little lick sideways.
+        flame.velocity = Vector3(_params.fireRiseSpeed * 0.25f * RandSymmetric(),
+                                 _params.fireRiseSpeed * (0.8f + 0.4f * RandUnit()),
+                                 _params.fireRiseSpeed * 0.25f * RandSymmetric());
+        flame.sizeJitter = 0.7f + 0.6f * RandUnit();
+        flame.alphaJitter = 0.8f + 0.4f * RandUnit();
+        _flames.push_back(flame);
+    }
+}
+
+void SmokeVolume::SimulateFire(float deltaT)
+{
+    // No collision, no shelter, no wind drag worth the cost: a flame lives
+    // under a second and travels a couple of metres. It rises, flickers and
+    // dies. Anything more is spent on something nobody sees.
+    std::size_t write = 0;
+    for (std::size_t read = 0; read < _flames.size(); ++read)
+    {
+        SmokeParticle& flame = _flames[read];
+        flame.age += deltaT;
+        if (flame.age >= flame.lifetime)
+        {
+            continue;
+        }
+        // Flicker: a random lateral kick, and a slight deceleration upward so
+        // the tips of the flames hang before dying rather than shooting off.
+        flame.velocity[0] += 6.0f * RandSymmetric() * deltaT;
+        flame.velocity[2] += 6.0f * RandSymmetric() * deltaT;
+        flame.velocity[1] -= 1.5f * deltaT;
+        flame.position += flame.velocity * deltaT;
+
+        if (write != read)
+        {
+            _flames[write] = flame;
+        }
+        ++write;
+    }
+    _flames.resize(write);
+}
+
+namespace
+{
+/// Temperature colour ramp by life fraction: white-hot -> yellow -> orange ->
+/// dull red -> out. The values are what a flame billboard multiplied by them
+/// LOOKS like on screen, not blackbody physics; the fire texture already
+/// carries most of the shape and the ramp only has to carry the cooling.
+Color FlameColour(float t)
+{
+    struct Key
+    {
+        float t;
+        float r, g, b, a;
+    };
+    static const Key kRamp[] = {
+        {0.00f, 1.00f, 0.98f, 0.85f, 0.85f}, // white-hot core
+        {0.18f, 1.00f, 0.85f, 0.35f, 1.00f}, // yellow
+        {0.45f, 1.00f, 0.50f, 0.10f, 0.95f}, // orange
+        {0.75f, 0.85f, 0.18f, 0.03f, 0.55f}, // red
+        {1.00f, 0.30f, 0.03f, 0.00f, 0.00f}, // dull, gone
+    };
+    if (t <= kRamp[0].t)
+    {
+        return Color(kRamp[0].r, kRamp[0].g, kRamp[0].b, kRamp[0].a);
+    }
+    for (int i = 1; i < 5; ++i)
+    {
+        if (t <= kRamp[i].t)
+        {
+            const Key& a = kRamp[i - 1];
+            const Key& b = kRamp[i];
+            const float f = (t - a.t) / std::max(b.t - a.t, 1e-4f);
+            return Color(a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f, a.b + (b.b - a.b) * f, a.a + (b.a - a.a) * f);
+        }
+    }
+    return Color(kRamp[4].r, kRamp[4].g, kRamp[4].b, kRamp[4].a);
+}
+} // namespace
+
+void SmokeVolume::DrawFire(int level)
+{
+    if (_flames.empty() || _fireShape.IsNull() || GScene == nullptr || GEngine == nullptr)
+    {
+        return;
+    }
+    Shape* shape = _fireShape->LevelOpaque(level);
+    if (shape == nullptr || shape->NFaces() != 1)
+    {
+        return;
+    }
+    Texture* texture = shape->FaceIndexed(0).GetTexture();
+    MipInfo mip = GEngine->TextBank()->UseMipmap(texture, 0, 0);
+    if (!mip.IsOK())
+    {
+        return;
+    }
+    const int special = shape->Special() | GetObjSpecial();
+
+    const Camera& camera = *GScene->GetCamera();
+    const Matrix4Val project = camera.Projection();
+    const Matrix4Val toView = GScene->ScaledInvTransform();
+    const float nearest = camera.Near() * 10.0f;
+    const float invLeft = camera.InvLeft();
+    const float invTop = camera.InvTop();
+    // Additive sprites do not need sorting; drawn in emission order.
+    for (const SmokeParticle& flame : _flames)
+    {
+        const float t = std::clamp(flame.age / std::max(flame.lifetime, 1e-3f), 0.0f, 1.0f);
+        Color colour = FlameColour(t);
+        colour = Color(colour.R() * _params.fireIntensity, colour.G() * _params.fireIntensity,
+                       colour.B() * _params.fireIntensity, colour.A() * flame.alphaJitter);
+        if (colour.A() <= 0.01f)
+        {
+            continue;
+        }
+        const float size = Lerp(_params.fireStartRadius, _params.fireEndRadius, t) * flame.sizeJitter;
+
+        Vector3 posp = toView * flame.position;
+        if (posp.Z() < nearest)
+        {
+            continue;
+        }
+        const float invW = 1.0f / posp[2];
+        posp[0] = project(0, 2) + project(0, 0) * posp[0] * invW;
+        posp[1] = project(1, 2) + project(1, 1) * posp[1] * invW;
+        const float nearPos = floatMax(posp[2] - std::min(size * 0.10f, 0.35f), nearest);
+        const float invNearPos = 1.0f / nearPos;
+        posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
+        const float sizeX = +project(0, 0) * size * invW * invLeft * 0.5f;
+        const float sizeY = -project(1, 1) * size * invW * invTop * 0.5f;
+        if (sizeX * sizeY < 0.5f)
+        {
+            continue;
+        }
+        // Additive: IsLight bypasses the fog branch in DrawDecal (no IsAlphaFog),
+        // so pass the colour straight through with alpha as intensity.
+        GEngine->DrawDecal(posp, invNearPos, sizeX, sizeY, PackedColor(colour), mip, special);
+    }
+}
+
 void SmokeVolume::UpdateBounds()
 {
     if (_particles.empty())
@@ -377,6 +555,8 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
         deltaT = std::min(deltaT, 0.10f);
 
         Emit(deltaT);
+        EmitFire(deltaT);
+        SimulateFire(deltaT);
 
         std::size_t write = 0;
         for (std::size_t read = 0; read < _particles.size(); ++read)
@@ -408,7 +588,7 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
 
     // A spent volume removes itself. `_delete` is the same mechanism the legacy
     // Smoke uses, so teardown goes through exactly one path.
-    if (!_emitting && _particles.empty())
+    if (!_emitting && _particles.empty() && _flames.empty())
     {
         _delete = true;
     }
@@ -432,6 +612,11 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             LOG_WARN(World, "SmokeVolume draw skipped: {} (level={} particles={})", reason, level, _particles.size());
         }
     };
+
+    // Flames first: they sit at the base, and the smoke rising through them
+    // then composites over the top of the fire the way real smoke shrouds a
+    // blaze rather than sitting under a clean flame layer.
+    DrawFire(level);
 
     if (_particles.empty())
     {

@@ -94,8 +94,27 @@ struct SmokeParams
     /// How far up the roof probe reaches, m.
     float shelterProbeHeight = 12.0f;
 
+    // -- fire -------------------------------------------------------------
+    // A second, short-lived particle layer at the base of the plume: flames.
+    // Drawn ADDITIVE with the engine's flame billboard (CloudletFire) and a
+    // temperature colour ramp, white-hot at birth cooling through yellow and
+    // orange to a dull red as they die. The smoke above them is unchanged; a
+    // burning wreck is "fire at the bottom, smoke rising off it", and this is
+    // that. Fire also raises the smoke's buoyancy at the source (hot air).
+    bool fire = false;
+    float fireRate = 60.0f;         ///< flames per second
+    float fireLifetime = 0.9f;      ///< seconds; flames are brief
+    float fireStartRadius = 0.6f;   ///< m
+    float fireEndRadius = 1.4f;     ///< m — a flame grows a little then dies
+    float fireRiseSpeed = 3.0f;     ///< upward speed at birth, m/s
+    float fireIntensity = 1.6f;     ///< brightness multiplier on the ramp (HDR headroom)
+    /// Extra buoyancy the SMOKE gets while fire is on, m/s^2 — hot air rises
+    /// harder off a fire than off a smoke grenade.
+    float fireSmokeLift = 2.0f;
+
     // -- budget -----------------------------------------------------------
     int maxParticles = 400;
+    int maxFlames = 120;
     /// Seconds between real sphere sweeps for a given particle. Between sweeps
     /// the cached contact plane still blocks it, so this trades exactness for
     /// cost rather than trading away the collision itself.
@@ -125,7 +144,9 @@ class SmokeVolume : public Entity
     typedef Entity base;
 
   public:
-    SmokeVolume(LODShapeWithShadow* shape, const SmokeParams& params);
+    /// `shape` is the smoke billboard (CloudletBasic); `fireShape` the flame
+    /// billboard (CloudletFire), may be null in which case fire is silently off.
+    SmokeVolume(LODShapeWithShadow* shape, LODShapeWithShadow* fireShape, const SmokeParams& params);
     ~SmokeVolume() override;
 
     // -- control ----------------------------------------------------------
@@ -148,6 +169,7 @@ class SmokeVolume : public Entity
     void SetDuration(float seconds) { _duration = seconds; }
 
     std::size_t ParticleCount() const { return _particles.size(); }
+    std::size_t FlameCount() const { return _flames.size(); }
 
     /// Microseconds spent in the last Simulate / Draw. Read by the dev panel's
     /// benchmark section; costs one clock read per call.
@@ -191,12 +213,22 @@ class SmokeVolume : public Entity
 
   private:
     void Emit(float deltaT);
+    void EmitFire(float deltaT);
+    void SimulateFire(float deltaT);
+    void DrawFire(int level);
     void Integrate(SmokeParticle& particle, float deltaT);
     void Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT);
     void UpdateBounds();
 
     SmokeParams _params{};
     std::vector<SmokeParticle> _particles;
+
+    /// Flame particles. Same struct, far fewer fields used: no collision, no
+    /// shelter, they live under a second. Kept separate so the smoke loop's
+    /// cost is unchanged when fire is off.
+    std::vector<SmokeParticle> _flames;
+    Ref<LODShapeWithShadow> _fireShape;
+    float _fireAccumulator = 0.0f;
     std::vector<int> _drawOrder;
 
     Vector3 _emitterPosition{VZero};

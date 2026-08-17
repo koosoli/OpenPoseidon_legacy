@@ -22,6 +22,13 @@ LODShapeWithShadow* CloudletShape()
     return GScene != nullptr ? GScene->Preloaded(CloudletBasic) : nullptr;
 }
 
+/// The flame billboard the legacy explosion/fire sources draw with. Null when
+/// the data lacks it; the volume then simply has no fire layer.
+LODShapeWithShadow* FireShape()
+{
+    return GScene != nullptr ? GScene->Preloaded(CloudletFire) : nullptr;
+}
+
 /// A legacy smoke source that does NOT blow up first.
 ///
 /// `SmokeSourceVehicle::Simulate` calls `SimulateExplosion()` before it emits
@@ -118,7 +125,7 @@ int SmokeSystem::Spawn(Vector3Par position, const SmokeParams& params, float dur
         return -1;
     }
 
-    SmokeVolume* volume = new SmokeVolume(shape, params);
+    SmokeVolume* volume = new SmokeVolume(shape, FireShape(), params);
     volume->SetEmitterPosition(position);
     volume->SetPosition(position);
     volume->SetDuration(duration);

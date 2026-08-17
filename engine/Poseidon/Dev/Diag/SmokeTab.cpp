@@ -150,6 +150,27 @@ void DrawSpawnSection()
     Vector3 position;
     const bool havePosition = SpawnPosition(position);
 
+    ImGui::Checkbox("Fire at the base", &GParams.fire);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Adds a flame layer at the emitter: short-lived additive sprites on\n"
+                          "a white-yellow-orange-red cooling ramp, and extra lift on the smoke\n"
+                          "above them. Pair with the Black colour preset for a burning wreck.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Burning wreck preset"))
+    {
+        GParams.fire = true;
+        GColorPreset = 1; // Black
+        ApplySmokeColorPreset(GParams, SmokeColorPreset::Black);
+        GParams.opacity = 0.55f;
+        GParams.rate = 45.0f;
+        GParams.emitterRadius = 1.2f;
+        GParams.startRadius = 0.8f;
+        GParams.endRadius = 6.0f;
+        GParams.particleLifetime = 18.0f;
+    }
+
     ImGui::BeginDisabled(!havePosition);
     if (ImGui::Button("Spawn NEW smoke", ImVec2(160, 0)))
     {
@@ -309,6 +330,17 @@ void DrawTuningSection()
     }
     ImGui::SliderFloat("Turbulence", &GParams.turbulence, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("Wind response", &GParams.windResponse, 0.0f, 2.0f, "%.2f");
+
+    ImGui::SeparatorText("Fire");
+    ImGui::Checkbox("Fire enabled", &GParams.fire);
+    ImGui::SliderFloat("Flame rate (/s)", &GParams.fireRate, 5.0f, 300.0f, "%.0f");
+    ImGui::SliderFloat("Flame lifetime (s)", &GParams.fireLifetime, 0.2f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Flame start radius", &GParams.fireStartRadius, 0.1f, 3.0f, "%.2f");
+    ImGui::SliderFloat("Flame end radius", &GParams.fireEndRadius, 0.1f, 5.0f, "%.2f");
+    ImGui::SliderFloat("Flame rise (m/s)", &GParams.fireRiseSpeed, 0.5f, 10.0f, "%.2f");
+    ImGui::SliderFloat("Flame intensity", &GParams.fireIntensity, 0.2f, 5.0f, "%.2f");
+    ImGui::SliderFloat("Smoke lift from fire", &GParams.fireSmokeLift, 0.0f, 8.0f, "%.2f");
+    ImGui::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
 
     ImGui::SeparatorText("Collision and shelter");
     ImGui::Checkbox("Collide with world", &GParams.collide);

@@ -730,7 +730,7 @@ void World::SimulateCloudlets(float deltaT)
             {
                 return 0;
             }
-            return value[0] == '2' ? 2 : 1;
+            return value[0] == '2' ? 2 : (value[0] == '3' ? 3 : 1);
         }();
         static bool spawned = false;
         if (wanted != 0 && !spawned && CameraOn() != nullptr && Glob.time.toFloat() > 2.0f)
@@ -812,6 +812,20 @@ void World::SimulateCloudlets(float deltaT)
             if (wanted == 2)
             {
                 GSmokeSystem.SpawnLegacy(position, 1.0f, 1.5f, -1.0f);
+            }
+            else if (wanted == 3)
+            {
+                // Burning wreck: black smoke with fire at the base.
+                SmokeParams wreck;
+                ApplySmokeColorPreset(wreck, SmokeColorPreset::Black);
+                wreck.fire = true;
+                wreck.opacity = 0.55f;
+                wreck.rate = 45.0f;
+                wreck.emitterRadius = 1.2f;
+                wreck.startRadius = 0.8f;
+                wreck.endRadius = 6.0f;
+                wreck.particleLifetime = 18.0f;
+                GSmokeSystem.Spawn(position, wreck, -1.0f);
             }
             else
             {
