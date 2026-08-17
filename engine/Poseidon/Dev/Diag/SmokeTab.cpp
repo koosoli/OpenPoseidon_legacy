@@ -444,11 +444,16 @@ void DrawTuningSection()
 
     ImGui::SeparatorText("Emission");
     ImGui::SliderFloat("Rate (/s)", &GParams.rate, 1.0f, 200.0f, "%.0f");
-    ImGui::SliderFloat("Lifetime (s)", &GParams.particleLifetime, 1.0f, 60.0f, "%.1f");
+    ImGui::SliderFloat("Lifetime (s)", &GParams.particleLifetime, 1.0f, 180.0f, "%.0f",
+                       ImGuiSliderFlags_Logarithmic);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Up to 3 minutes. Log scale: fine control at the short end. Long lifetimes with a high rate need Max particles raised too, or the cap throttles emission.");
+    }
     ImGui::SliderFloat("Nozzle speed (m/s)", &GParams.initialSpeed, 0.0f, 15.0f, "%.2f");
     ImGui::SliderFloat("Nozzle radius (m)", &GParams.emitterRadius, 0.0f, 4.0f, "%.2f");
     ImGui::SliderFloat("Spread", &GParams.spread, 0.0f, 1.5f, "%.2f");
-    ImGui::SliderInt("Max particles", &GParams.maxParticles, 10, 2000);
+    ImGui::SliderInt("Max particles", &GParams.maxParticles, 10, 4000);
 
     ImGui::SeparatorText("Motion");
     ImGui::SliderFloat("Buoyancy (m/s^2)", &GParams.buoyancy, -2.0f, 10.0f, "%.2f");
@@ -458,6 +463,11 @@ void DrawTuningSection()
         ImGui::SetTooltip("Fraction of lifetime over which the plume cools. Turn it up and\n"
                           "the plume rises forever; the flat drifting layer at the top of a\n"
                           "real plume is this term running out.");
+    }
+    ImGui::SliderFloat("Calm rise boost", &GParams.calmRiseBoost, 1.0f, 8.0f, "%.1f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("How much longer the plume stays buoyant in still air. Wind mixes and cools a plume; with no wind it climbs far higher. Set the Weather override to 0 m/s to see it.");
     }
     ImGui::SliderFloat("Drag (1/s)", &GParams.drag, 0.05f, 6.0f, "%.2f");
     if (ImGui::IsItemHovered())

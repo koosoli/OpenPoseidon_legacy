@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 namespace Poseidon
@@ -115,6 +116,25 @@ void WindModel::Init(const WindConditions& conditions)
     _overcast = 0.0f;
     _sample = EvaluateWind(_conditions, 0.0f, 0);
     _active = true;
+
+    // POSEIDON_WIND_OVERRIDE="speed bearingDeg [gustiness]" arms the dev
+    // override from the environment, so a scripted capture can hold the air
+    // still (or at a fixed speed) without the panel. Same object the Weather
+    // tab drives; same caveats: local, unreplicated.
+    if (const char* env = std::getenv("POSEIDON_WIND_OVERRIDE"))
+    {
+        float speed = 0.0f, bearing = 0.0f, gust = 0.0f;
+        const int n = std::sscanf(env, "%f %f %f", &speed, &bearing, &gust);
+        if (n >= 1)
+        {
+            WindOverride o;
+            o.enabled = true;
+            o.speed = speed;
+            o.directionRad = (90.0f - bearing) * 3.14159265f / 180.0f;
+            o.gustiness = n >= 3 ? gust : 0.0f;
+            _override = o;
+        }
+    }
 }
 
 void WindModel::Update(int64_t netTimeMilliseconds, float overcast)

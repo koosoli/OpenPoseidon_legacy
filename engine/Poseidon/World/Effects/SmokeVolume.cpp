@@ -254,7 +254,19 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
 
     // Buoyancy dies as the plume cools, which is what forms the flat drifting
     // layer at the top of a real plume.
-    const float heat = 1.0f - std::clamp(lifeFraction / std::max(_params.buoyancyDecay, 1e-3f), 0.0f, 1.0f);
+    //
+    // ...but it cools much SLOWER in still air. Wind shears a plume apart and
+    // mixes it with cold air, which is why a windy-day column flattens within
+    // tens of metres while a calm-day one climbs hundreds. Stretch the decay by
+    // how still the air is: at 0 m/s the plume stays hot for calmStillnessBoost
+    // times longer, at ~6 m/s and above it cools on the authored schedule.
+    float decay = _params.buoyancyDecay;
+    {
+        const float airSpeed = std::sqrt(air.X() * air.X() + air.Z() * air.Z());
+        const float stillness = 1.0f - std::clamp(airSpeed / 6.0f, 0.0f, 1.0f);
+        decay *= 1.0f + (_params.calmRiseBoost - 1.0f) * stillness * stillness;
+    }
+    const float heat = 1.0f - std::clamp(lifeFraction / std::max(decay, 1e-3f), 0.0f, 1.0f);
     acceleration[1] += _params.buoyancy * heat;
     if (_params.fire)
     {

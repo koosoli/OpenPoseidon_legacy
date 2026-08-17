@@ -82,6 +82,10 @@ struct SmokeParams
     /// cools. Without this a plume rises forever and never forms a drifting
     /// layer, which is the single most obvious tell of fake smoke.
     float buoyancyDecay = 0.35f;
+    /// How much LONGER the plume stays buoyant in dead-still air than in a
+    /// breeze. Wind mixes and cools a plume; calm lets it climb. 1 = no
+    /// difference; 3 = a calm-day column rises roughly three times as far.
+    float calmRiseBoost = 3.0f;
     /// How hard the particle is dragged toward the local air velocity, 1/s.
     /// This is what makes wind work: the particle relaxes toward the air rather
     /// than having wind added to it, so a gust accelerates it and a lull lets it
