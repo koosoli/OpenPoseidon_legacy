@@ -282,6 +282,20 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
         acceleration[2] += _params.turbulence * RandSymmetric();
     }
 
+    // Turbulent diffusion: a random walk whose step GROWS with age. Fickian
+    // spread goes as sqrt(t), so the kick does too -- young puffs stay in the
+    // column and old ones wander apart, which is exactly how a plume becomes a
+    // cloud instead of a rigid shape that drifts. Horizontal is stronger than
+    // vertical: the atmosphere is stably stratified and spreads smoke sideways
+    // far more readily than it lifts or sinks it.
+    if (_params.diffusion > 0.0f)
+    {
+        const float spread = _params.diffusion * std::sqrt(std::max(particle.age, 0.0f));
+        acceleration[0] += spread * RandSymmetric();
+        acceleration[1] += spread * RandSymmetric() * 0.35f;
+        acceleration[2] += spread * RandSymmetric();
+    }
+
     particle.velocity += acceleration * deltaT;
 }
 
@@ -1008,12 +1022,6 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             fade = (1.0f - lifeFraction) / _params.fadeOut;
         }
 
-        const float alpha = std::clamp(_params.opacity * particle.alphaJitter * fade, 0.0f, 1.0f);
-        if (alpha <= 0.004f)
-        {
-            continue;
-        }
-
         float size = Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
         // A puff pressed against a wall is DRAWN no wider than its distance to
         // that wall (plus a small bleed). Containment keeps the centre inside
@@ -1026,6 +1034,25 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             const float toPlane = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
             const float allowed = std::max(toPlane + sphereRadiusFor(particle) * 0.5f, 0.0f) + 0.6f;
             size = std::min(size, std::max(allowed, _params.startRadius * 0.5f));
+        }
+
+        // A fixed amount of soot spread over a growing puff gets thinner. Without
+        // this the plume keeps its birth opacity at every size and reads as a
+        // solid object; with it, the column is dense at the source and the old
+        // smoke overhead is a faint drifting cloud -- which is the whole
+        // difference between "smoke" and "a grey shape". Computed here, after
+        // the wall clamp, so a puff squeezed against a wall does not also get
+        // spuriously denser for it.
+        float density = 1.0f;
+        if (_params.densityFalloff > 0.0f && size > 1e-3f)
+        {
+            const float ratio = std::clamp(_params.startRadius / size, 0.0f, 1.0f);
+            density = std::pow(ratio, _params.densityFalloff);
+        }
+        const float alpha = std::clamp(_params.opacity * particle.alphaJitter * fade * density, 0.0f, 1.0f);
+        if (alpha <= 0.004f)
+        {
+            continue;
         }
 
         Vector3 posp = toView * particle.position;

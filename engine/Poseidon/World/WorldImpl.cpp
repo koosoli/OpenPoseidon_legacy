@@ -841,9 +841,13 @@ void World::SimulateCloudlets(float deltaT)
                 inf.fireSmokeYield = 0.9f;
                 inf.fireSmokeLift = 5.0f;
                 inf.startRadius = 1.5f;
-                inf.endRadius = 10.0f;
-                inf.particleLifetime = 25.0f;
-                inf.maxParticles = 800;
+                inf.endRadius = 26.0f;
+                inf.particleLifetime = 150.0f;
+                inf.maxParticles = 2000;
+                inf.diffusion = 1.6f;
+                inf.densityFalloff = 0.95f;
+                inf.buoyancyDecay = 0.6f;
+                inf.calmRiseBoost = 5.0f;
                 inf.fireLightRadius = 22.0f;
                 inf.fireLightIntensity = 1.8f;
                 inf.fireColumnHeight = 10.0f;
@@ -862,8 +866,13 @@ void World::SimulateCloudlets(float deltaT)
                 wreck.rate = 45.0f;
                 wreck.emitterRadius = 1.2f;
                 wreck.startRadius = 0.8f;
-                wreck.endRadius = 6.0f;
-                wreck.particleLifetime = 18.0f;
+                wreck.endRadius = 14.0f;
+                wreck.particleLifetime = 95.0f;
+                wreck.maxParticles = 900;
+                wreck.diffusion = 1.3f;
+                wreck.densityFalloff = 0.9f;
+                wreck.buoyancyDecay = 0.5f;
+                wreck.calmRiseBoost = 4.0f;
                 GSmokeSystem.Spawn(position, wreck, -1.0f);
             }
             else

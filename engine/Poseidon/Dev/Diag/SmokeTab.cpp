@@ -192,8 +192,13 @@ void DrawSpawnSection()
         GParams.rate = 45.0f;
         GParams.emitterRadius = 1.2f;
         GParams.startRadius = 0.8f;
-        GParams.endRadius = 6.0f;
-        GParams.particleLifetime = 18.0f;
+        GParams.endRadius = 14.0f;
+        GParams.particleLifetime = 95.0f;
+        GParams.maxParticles = 900;
+        GParams.diffusion = 1.3f;
+        GParams.densityFalloff = 0.9f;
+        GParams.buoyancyDecay = 0.5f;
+        GParams.calmRiseBoost = 4.0f;
     }
     ImGui::SameLine();
     if (ImGui::Button("Campfire"))
@@ -238,9 +243,13 @@ void DrawSpawnSection()
         GParams.fireSmokeYield = 0.9f;
         GParams.fireSmokeLift = 5.0f;
         GParams.startRadius = 1.5f;
-        GParams.endRadius = 10.0f;
-        GParams.particleLifetime = 25.0f;
-        GParams.maxParticles = 800;
+        GParams.endRadius = 26.0f;
+        GParams.particleLifetime = 150.0f;
+        GParams.maxParticles = 2000;
+        GParams.diffusion = 1.6f;
+        GParams.densityFalloff = 0.95f;
+        GParams.buoyancyDecay = 0.6f;
+        GParams.calmRiseBoost = 5.0f;
         GParams.fireLightRadius = 22.0f;
         GParams.fireLightIntensity = 1.8f;
         // A COLUMN, not a swarm of puffs.
@@ -417,6 +426,11 @@ void DrawTuningSection()
 
     ImGui::SeparatorText("Look");
     ImGui::SliderFloat("Thickness", &GParams.opacity, 0.02f, 1.0f, "%.3f");
+    ImGui::SliderFloat("Thins as it grows", &GParams.densityFalloff, 0.0f, 2.5f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Alpha scales by (start radius / current radius) to this power: the same soot spread over a bigger puff. 0 = every puff keeps its birth opacity (a solid grey shape). ~0.85 = dense at the source, faint cloud overhead.");
+    }
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Peak alpha per particle. Overlap compounds, so a plume core\n"
@@ -481,6 +495,11 @@ void DrawTuningSection()
                           "wind, lower it and it coasts through gusts.");
     }
     ImGui::SliderFloat("Turbulence", &GParams.turbulence, 0.0f, 4.0f, "%.2f");
+    ImGui::SliderFloat("Diffusion", &GParams.diffusion, 0.0f, 5.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("How fast the plume comes APART. A random walk growing as sqrt(age), so young smoke holds the column and old smoke wanders into a cloud. 0 keeps the plume rigid forever.");
+    }
     ImGui::SliderFloat("Wind response", &GParams.windResponse, 0.0f, 2.0f, "%.2f");
 
     ImGui::SeparatorText("Fire");

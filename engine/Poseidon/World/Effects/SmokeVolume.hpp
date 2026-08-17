@@ -92,6 +92,20 @@ struct SmokeParams
     /// coast, both for free.
     float drag = 1.1f;
     float turbulence = 0.55f; ///< random acceleration magnitude, m/s^2
+    /// TURBULENT DIFFUSION. A real plume does not just grow, it comes APART:
+    /// eddies pull it into filaments and the puffs wander away from each other,
+    /// which is what turns a column into a drifting cloud. Modelled as a random
+    /// walk whose step grows with the square root of age -- Fickian diffusion,
+    /// the same sqrt(t) spread a smoke puff actually has. 0 = the old rigid
+    /// plume that keeps its shape forever.
+    float diffusion = 1.1f;
+    /// How much the puff THINS as it expands. Alpha was independent of radius,
+    /// so a 10 m puff was as opaque as a 0.5 m one and a big plume read as a
+    /// solid blob rather than a thinning cloud. Now alpha scales by
+    /// (startRadius / radius)^densityFalloff -- a fixed amount of soot spread
+    /// over a growing volume. 0 = the old behaviour; 1 = area-ish; 2+ thins
+    /// very fast. This is the single strongest "it became a cloud" cue.
+    float densityFalloff = 0.85f;
     /// Scales the PREVAILING wind only (0 = ignores weather entirely). Local
     /// airflow — rotor downwash — is not affected by this.
     float windResponse = 1.0f;
