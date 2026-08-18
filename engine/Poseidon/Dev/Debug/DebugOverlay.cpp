@@ -3394,13 +3394,16 @@ void DrawGrassTab()
                             "(1.00 = every cell, the map's own maximum).",
                             c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
     }
-    changed |= ImGui::SliderFloat("Photo card grid (m)", &grass.photoCardSpacing, 0.06f, 4.0f, "%.3f m",
+    // DENSITY, not spacing. The metres control this replaced ran the wrong way --
+    // dragging it up made the field sparser, so "max everything out" produced less
+    // grass than the default and read as the slider doing nothing.
+    changed |= ImGui::SliderFloat("Photo card density", &grass.photoCardDensity, 1.0f, 300.0f, "%.1fx",
                                   ImGuiSliderFlags_Logarithmic);
     {
         // Live arithmetic beats a paragraph: the two densities side by side, in the
         // same unit, so "as dense as procedural" is a number you can match rather
         // than a feel you have to chase.
-        const float g = std::clamp(grass.photoCardSpacing, 0.06f, 4.0f);
+        const float g = std::clamp(1.11f / std::sqrt(std::max(grass.photoCardDensity, 1.0f)), 0.06f, 4.0f);
         const float cov = std::clamp(grass.photoCoverage, 0.01f, 1.0f);
         const float cards = cov / (g * g);
         const float bladeSp = grass.spacing * (grass.clumpRenderer ? 3.20f : 1.72f);
@@ -3408,16 +3411,16 @@ void DrawGrassTab()
         ImGui::TextDisabled("Coverage is a fraction OF this grid, so the grid is the ceiling coverage cannot pass.\n"
                             "  photo cards now: %.2f /m2   (coverage %.2f on a %.3f m grid)\n"
                             "  procedural near: %.2f /m2   (spacing %.2f x %.2f = %.3f m)\n"
-                            "Match the two by lowering this grid. 1.11 m is the map's own clutterGrid; the range "
-                            "goes to 0.06 m, which is ~340x the default density.",
+                            "1x is the map's own clutterGrid; the slider goes to 300x (a 0.06 m grid).",
                             cards, cov, g, blades, grass.spacing, grass.clumpRenderer ? 3.20f : 1.72f, bladeSp);
         if (cards < blades * 0.9f)
         {
+            const float need = blades / std::max(cards, 1e-6f);
             ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
-                               "Cards are %.1fx SPARSER than the procedural near ring. Grid %.3f m would match.",
-                               blades / std::max(cards, 1e-6f), std::sqrt(cov / std::max(blades, 1e-6f)));
+                               "Cards are %.1fx SPARSER than the procedural near ring. Set density to %.0fx to match.",
+                               need, std::max(grass.photoCardDensity, 1.0f) * need);
         }
-        ImGui::TextDisabled("Cost: below ~0.4 m the old flicker returns (every plate edge shimmers in wind); at "
+        ImGui::TextDisabled("Cost: above ~8x the old flicker returns (every plate edge shimmers in wind); at "
                             "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "
                             "was. NOTE this only does anything when the card path is actually drawing -- the Grass "
                             "log line says 'near ring cards' when it is, 'blades' when it is not.");

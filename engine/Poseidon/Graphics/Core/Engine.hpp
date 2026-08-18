@@ -1262,6 +1262,14 @@ class Engine : public IGraphicsEngine
         // to 0.16..4.0; 0.16 was the original blade grid and is ~90 plates over every
         // point of ground, which is where the flicker came from.
         float photoCardSpacing = 1.11f;
+        // ...and the same thing the way a human wants it: a DENSITY MULTIPLIER,
+        // 1 = the map's own clutter density, 20 = twenty times as many cards.
+        // The panel drives this and derives the spacing above from it
+        // (spacing = clutterGrid / sqrt(density)), because a spacing slider is
+        // the reciprocal of what everything else in the tab does -- "max it
+        // out" on a metres control makes the grass SPARSER, which is exactly
+        // the trap it laid the first time. Renderer still consumes metres.
+        float photoCardDensity = 1.0f;
         // PROCEDURAL BLADE LOOK (near blades + mid ribbons; cards and the far
         // proxy ignore these). Every default reproduces the pre-existing look, so
         // nothing changes until a slider is moved.

@@ -6904,7 +6904,12 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
             const char* v = std::getenv("WGR_GRASS_CARD_SPACING");
             return v != nullptr ? static_cast<float>(std::atof(v)) : -1.0f;
         }();
-        const float grid = envOverride > 0.0f ? envOverride : settings.photoCardSpacing;
+        // Density multiplier wins when it is above 1: it is what the panel drives.
+        // spacing = clutterGrid / sqrt(density), so 20x density is 1.11/4.47 = 0.248 m.
+        const float density = std::max(settings.photoCardDensity, 1.0f);
+        const float fromDensity = 1.11f / std::sqrt(density);
+        const float grid = envOverride > 0.0f ? envOverride
+                                              : (density > 1.001f ? fromDensity : settings.photoCardSpacing);
         wgr_grass_set_card_spacing(_renderer, std::clamp(grid, 0.06f, 4.0f));
     }
     // Procedural blade look; defaults are the pre-existing shading (see GrassSettings).
