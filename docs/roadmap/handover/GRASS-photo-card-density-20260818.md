@@ -4,6 +4,29 @@ Written 2026-08-18. One open problem, everything else around it is proven.
 
 ---
 
+## RESOLVED 2026-08-18 — read this before section 3
+
+**Outcome 3. See [GRS-002](../decisions/GRS-002-photo-card-density-works-the-mid-ring-reach-does-not-20260818.md).**
+
+The control works. Measured on Malden, mission camera, cards forced on, only the density differing:
+**1x is scattered tufts, 25x is a continuous meadow** (`.tmp-grass-reach/after-{1,25,300}x.png`).
+25x is the answer for that world; 1x is deliberately the map's own `clutterGrid`.
+
+Outcomes 1 and 2 are dead by inspection, not by a slider test: `SetGrassSettings` has exactly one
+caller in the whole tree, `DebugOverlay.cpp:3762`, against the single read at `:2997` in the same
+scope on the same local. Nothing can stomp it and nothing else writes it.
+
+**The real bug was the one section 3 guessed at, and it is fixed.** `MID_GRID_MAX` (2440) caps the
+mid ring's candidate grid, so on the card grid its reach is `1219 x card_spacing` — 78 m at 300x
+against the 210 m `midRadius` was asking for. `mid_ring_end()` still returned 210, so the field was
+bounded by the grid's *square*: a hard camera-locked edge, and grass that got SHORTER the denser you
+asked for. It now clamps to the reach, the announce line and the Grass tab both print that reach,
+and `mid_ring_radius_is_clamped_to_the_capped_grid_reach` pins it.
+
+Sections 1-5 below are left as written. Section 4's traps are all still true.
+
+---
+
 ## 0. BRANCH AND WORKTREE — READ THIS FIRST
 
 **Branch: `feat/wgpu-decal-billboards`. Remote: `safety`. Tip when written: `f7101250`.**

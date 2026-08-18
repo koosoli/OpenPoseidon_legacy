@@ -170,7 +170,11 @@ impl CardTone {
         )
     }
 
-    fn from_env_values(target: Option<&str>, gain_max: Option<&str>, flutter: Option<&str>) -> Self {
+    fn from_env_values(
+        target: Option<&str>,
+        gain_max: Option<&str>,
+        flutter: Option<&str>,
+    ) -> Self {
         let parse = |v: Option<&str>, default: f32| {
             v.and_then(|s| s.trim().parse::<f32>().ok())
                 .filter(|f| f.is_finite())
@@ -1353,9 +1357,16 @@ impl Grass {
             )
         };
         let mid_spacing = mid_placement_spacing(key.cards_mid, self.card_spacing);
+        // How far the mid grid's square actually reaches. On the CARD grid this is
+        // the ceiling the requested mid radius is clamped to (mid_ring_end in
+        // grass.wgsl): past ~45x card density it is SHORTER than the radius the
+        // Grass tab asks for, which is the number that explains "denser made the
+        // field smaller". Same one-cell jitter margin as the shader.
+        let mid_reach = (key.mid_grid_dim as f32 * 0.5 - 1.0).max(1.0) * mid_spacing;
         self.pending_log.push(format!(
             "Wgpu grass cards: drawn={} (atlas resident={}, opt-in={}), near ring {} at {:.2} m \
-             ({}x{} grid), mid ring {} at {:.2} m ({}x{} grid), a2c={}, card coverage {:.2} auto={}",
+             ({}x{} grid), mid ring {} at {:.2} m ({}x{} grid, reach {:.0} m), a2c={}, \
+             card coverage {:.2} auto={}",
             key.cards_mid as u8,
             key.have_tuft as u8,
             key.opt_in as u8,
@@ -1367,6 +1378,7 @@ impl Grass {
             mid_spacing,
             key.mid_grid_dim,
             key.mid_grid_dim,
+            mid_reach,
             self.card_a2c as u8,
             key.coverage_centi as f32 / 100.0,
             key.coverage_auto as u8,
@@ -1642,10 +1654,19 @@ impl Grass {
         // both now read the same capped `near_radius`, since the shader takes it
         // from these params rather than recomputing it.
         //
-        // The mid grid needs no equivalent cap: MID_GRID_MAX * MID_PLACEMENT_SPACING
-        // / 2 is 1000.4 m against a MID_RING_MAX of 1000, so it always spans its
-        // disc. Adding a cap here anyway would diverge from mid_ring_end(), which
-        // recomputes the reach in the shader.
+        // The mid grid's cap DOES bite, and only on the card grid. The old note
+        // here read "needs no equivalent cap" because MID_GRID_MAX *
+        // MID_PLACEMENT_SPACING / 2 is 1000.4 m against a MID_RING_MAX of 1000 --
+        // true for the 0.82 m ribbon grid, and false for the card grid, which the
+        // density control drives down to 0.06 m. At 50x card density the reach is
+        // 191 m against a requested 210, at 300x it is 78: the field ended in a
+        // camera-locked SQUARE and got SHORTER the denser it was asked to be.
+        //
+        // mid_ring_end() in grass.wgsl now clamps the radius to that reach, the
+        // same way near_reach does above. This side deliberately sizes the grid
+        // from the UNCAPPED request -- the request is what asks for the cells, and
+        // the clamp above already limits them -- so the two still agree: at the
+        // cap the grid is MID_GRID_MAX and the shader accepts within its reach.
         let mid_radius = params.mid_radius.clamp(8.0, MID_RING_MAX);
         let mid_natural = (near_radius + 10.0).max((near_radius * 2.5).min(MID_RING_MAX));
         let mid_end = if mid_radius > near_radius {
@@ -2365,6 +2386,52 @@ mod tests {
         );
     }
 
+    // The mid ring must never be bounded by its candidate SQUARE. Its grid is
+    // capped at MID_GRID_MAX cells, and on the card grid that cap bites well
+    // inside the radius the Grass tab asks for -- which made raising the density
+    // SHORTEN the field, in a camera-locked square with no dissolve. The near
+    // ring has always clamped its radius to near_reach; mid_ring_end() now does
+    // the same, and this pins both the arithmetic and the shader clamp that
+    // implements it.
+    #[test]
+    fn mid_ring_radius_is_clamped_to_the_capped_grid_reach() {
+        // The shader clamps, using the grid dim the renderer wrote into place.y.
+        assert!(SHADER.contains(
+            "let reach = max(grass.place.y * 0.5 - 1.0, 1.0) * mid_placement_spacing();"
+        ));
+        assert!(
+            SHADER.contains(
+                "return clamp(min(want, reach), grass.near_radius + 10.0, MID_RING_MAX);"
+            )
+        );
+        // ...and the announce line reports the reach, so a shortened field is
+        // readable from the game log rather than only visible on screen.
+        assert!(SHADER.contains("fn mid_ring_end() -> f32 {"));
+
+        // The arithmetic the shader is mirroring, for the defaults that matter.
+        // 210 m is GrassSettings::midRadius' default.
+        let reach_at = |density: f32| {
+            let spacing = (CARD_SPACING_DEFAULT / density.sqrt())
+                .clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1);
+            let dim = ((2.0 * 210.0 / spacing).ceil() as u32)
+                .div_ceil(8)
+                .saturating_mul(8)
+                .clamp(MID_GRID_MIN, MID_GRID_MAX);
+            (dim as f32 * 0.5 - 1.0).max(1.0) * spacing
+        };
+        // The ribbon grid always spans its disc, which is why this was missed.
+        assert!(
+            (MID_GRID_MAX as f32 * 0.5) * MID_PLACEMENT_SPACING > MID_RING_MAX,
+            "the 0.82 m grid should still span the whole 1000 m ring"
+        );
+        // The card grid does not: at the panel's own maximum the ring is a third
+        // of the radius the panel is showing.
+        assert!(reach_at(1.0) >= 210.0, "{}", reach_at(1.0));
+        assert!(reach_at(25.0) >= 210.0, "{}", reach_at(25.0));
+        assert!(reach_at(50.0) < 210.0, "{}", reach_at(50.0));
+        assert!(reach_at(300.0) < 90.0, "{}", reach_at(300.0));
+    }
+
     // "Far too dense": the plates stacked over any one point of ground. A card
     // spans ~1.5 m; on the 0.16 m blade grid that is ~90 candidates under it,
     // on the clutter grid it is a handful. The default must be in the range the
@@ -2417,7 +2484,9 @@ mod tests {
         assert!(SHADER.contains("let tone_gain = card_tone_gain(u32(in.blade_uv.z));"));
         assert!(SHADER.contains("tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;"));
         assert_eq!(
-            SHADER.matches("PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;").count(),
+            SHADER
+                .matches("PHOTO_TONE_CORRECTION * photo_brightness * tone_gain;")
+                .count(),
             2,
             "sample and pivot"
         );
@@ -2456,8 +2525,18 @@ mod tests {
     #[test]
     fn card_flutter_is_one_uniform_read_by_both_card_vertex_shaders() {
         for (name, src, entry, turb) in [
-            ("grass.wgsl", SHADER, "fn vs_grass_mid_tuft(", "wind.turbulence * card_flutter"),
-            ("grass_shadow.wgsl", SHADOW, "fn vs_grass_tuft_shadow(", "wind.w * card_flutter"),
+            (
+                "grass.wgsl",
+                SHADER,
+                "fn vs_grass_mid_tuft(",
+                "wind.turbulence * card_flutter",
+            ),
+            (
+                "grass_shadow.wgsl",
+                SHADOW,
+                "fn vs_grass_tuft_shadow(",
+                "wind.w * card_flutter",
+            ),
         ] {
             let start = src.find(entry).unwrap_or_else(|| panic!("{name}: {entry}"));
             let body = &src[start..];
@@ -2467,7 +2546,10 @@ mod tests {
                 body.contains("let card_flutter = clamp(grass.card_tone.z, 0.0, 1.0);"),
                 "{name}: card_flutter must come from card_tone.z"
             );
-            assert!(body.contains(turb), "{name}: turbulence must be scaled by card_flutter");
+            assert!(
+                body.contains(turb),
+                "{name}: turbulence must be scaled by card_flutter"
+            );
             // The gust term is untouched: 0.030 + 0.18 * gust, as before.
             assert!(body.contains("(0.030 + 0.18 * wind."), "{name}");
         }
@@ -2477,7 +2559,9 @@ mod tests {
         assert!(SHADER.contains("(0.035 + 0.21 * wind.gust + wind.turbulence)"));
         assert!(SHADER.contains("(0.030 + 0.18 * wind.gust + wind.turbulence);"));
         // Contour tilt is bounded (per-pixel sun flip = sparkle under motion).
-        assert!(SHADER.contains("let bounded = tilt * (min(tilt_len, 1.2) / max(tilt_len, 1e-5));"));
+        assert!(
+            SHADER.contains("let bounded = tilt * (min(tilt_len, 1.2) / max(tilt_len, 1e-5));")
+        );
     }
 
     fn headless() -> Option<(wgpu::Device, wgpu::Queue)> {

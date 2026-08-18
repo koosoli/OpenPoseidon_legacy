@@ -3420,6 +3420,33 @@ void DrawGrassTab()
                                "Cards are %.1fx SPARSER than the procedural near ring. Set density to %.0fx to match.",
                                need, std::max(grass.photoCardDensity, 1.0f) * need);
         }
+        // REACH, not just density. The mid ring's candidate grid is capped at
+        // MID_GRID_MAX (2440) cells, so on the card grid its square reaches only
+        // dim/2 x spacing: at 50x that is 191 m against a 210 m radius, at 300x
+        // it is 78 m. Past that point raising the density makes the FIELD SMALLER
+        // -- which is exactly the "maxed it out and it still is not a meadow"
+        // report, and it is invisible unless the panel says the number. The
+        // renderer now clamps the ring to this reach (mid_ring_end in grass.wgsl)
+        // so it ends in its own dissolve rather than a camera-locked square.
+        {
+            const float midWanted = std::clamp(grass.midRadius, 8.0f, 1000.0f);
+            const int cells = std::min(static_cast<int>(std::ceil(2.0f * midWanted / g) + 7) / 8 * 8, 2440);
+            const float reach = std::max(cells * 0.5f - 1.0f, 1.0f) * g;
+            if (reach < midWanted - 0.5f)
+            {
+                ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+                                   "Mid ring reaches only %.0f m at this density, not the %.0f m asked for: the "
+                                   "2440-cell candidate grid on a %.3f m grid. Denser from here makes the field "
+                                   "SHORTER, not thicker -- lower the density or accept the shorter field.",
+                                   reach, midWanted, g);
+            }
+            else
+            {
+                ImGui::TextDisabled("Mid ring reach %.0f m (2440-cell grid ceiling) vs %.0f m asked for -- the "
+                                    "density has room before the ring starts shrinking.",
+                                    reach, midWanted);
+            }
+        }
         ImGui::TextDisabled("Cost: above ~8x the old flicker returns (every plate edge shimmers in wind); at "
                             "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "
                             "was. NOTE this only does anything when the card path is actually drawing -- the Grass "

@@ -339,7 +339,27 @@ fn blade_texture_strength(world_rel: vec3<f32>) -> f32 {
 const MID_RING_MAX: f32 = 1000.0;
 fn mid_ring_end() -> f32 {
     let natural = max(grass.near_radius + 10.0, min(MID_RING_MAX, grass.near_radius * 2.5));
-    return clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, MID_RING_MAX);
+    let want = clamp(select(natural, grass.look.w, grass.look.w > grass.near_radius), grass.near_radius + 10.0, MID_RING_MAX);
+    // The candidate grid is capped (MID_GRID_MAX, 2440, in grass/mod.rs), and on
+    // the CARD grid that cap bites: the reach is dim/2 * spacing, so 50x card
+    // density asks for 210 m and gets 191, and 300x gets 78. Past the cap the
+    // field was bounded by the grid's SQUARE instead -- a hard camera-locked edge
+    // with no dissolve, and grass that gets SHORTER the denser you ask for, which
+    // is exactly "maxing the density out makes the meadow smaller". This is the
+    // same failure the near ring already fixes with near_reach in grass/mod.rs;
+    // the mid ring never got it because MID_PLACEMENT_SPACING (0.82 m, blades)
+    // always spanned its disc and the card grid does not.
+    //
+    // Cap the radius at what the grid actually covers. The mid ring then ends in
+    // its own circular dissolve strictly inside the square, and cs_place_far --
+    // which starts from this same function -- no longer leaves a bare annulus
+    // between the last card and the far ring.
+    //
+    // One cell of margin: mid candidates jitter by up to +-0.925 of a cell out of
+    // their own square. The lower clamp is kept because cs_place_mid rejects the
+    // whole ring when mid_end <= near_radius.
+    let reach = max(grass.place.y * 0.5 - 1.0, 1.0) * mid_placement_spacing();
+    return clamp(min(want, reach), grass.near_radius + 10.0, MID_RING_MAX);
 }
 
 // LOD dissolve band, in metres. Each ring thins out across it while the next
