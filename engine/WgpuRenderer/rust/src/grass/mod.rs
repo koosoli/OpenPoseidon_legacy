@@ -2408,12 +2408,13 @@ mod tests {
         // readable from the game log rather than only visible on screen.
         assert!(SHADER.contains("fn mid_ring_end() -> f32 {"));
 
-        // The arithmetic the shader is mirroring, for the defaults that matter.
-        // 210 m is GrassSettings::midRadius' default.
+        // The arithmetic the shader is mirroring, at GrassSettings::midRadius'
+        // default of 500 m. The wider the ring, the earlier the cap bites: a
+        // 500 m ring needs 0.41 m spacing or wider, which is only ~7x density.
         let reach_at = |density: f32| {
             let spacing = (CARD_SPACING_DEFAULT / density.sqrt())
                 .clamp(CARD_SPACING_RANGE.0, CARD_SPACING_RANGE.1);
-            let dim = ((2.0 * 210.0 / spacing).ceil() as u32)
+            let dim = ((2.0 * 500.0 / spacing).ceil() as u32)
                 .div_ceil(8)
                 .saturating_mul(8)
                 .clamp(MID_GRID_MIN, MID_GRID_MAX);
@@ -2426,9 +2427,9 @@ mod tests {
         );
         // The card grid does not: at the panel's own maximum the ring is a third
         // of the radius the panel is showing.
-        assert!(reach_at(1.0) >= 210.0, "{}", reach_at(1.0));
-        assert!(reach_at(25.0) >= 210.0, "{}", reach_at(25.0));
-        assert!(reach_at(50.0) < 210.0, "{}", reach_at(50.0));
+        assert!(reach_at(1.0) >= 500.0, "{}", reach_at(1.0));
+        assert!(reach_at(4.0) >= 500.0, "{}", reach_at(4.0));
+        assert!(reach_at(25.0) < 500.0, "{}", reach_at(25.0));
         assert!(reach_at(300.0) < 90.0, "{}", reach_at(300.0));
     }
 

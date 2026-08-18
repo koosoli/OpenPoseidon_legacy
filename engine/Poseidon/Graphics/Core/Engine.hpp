@@ -1130,8 +1130,17 @@ class Engine : public IGraphicsEngine
         float radius = 41.0f;
         // Opaque mid-clump reach. Clamped above the near ring by the WGPU
         // backend, which sizes the mid placement grid from this so its spacing --
-        // and therefore mid density -- stays fixed all the way to 400 m.
-        float midRadius = 210.0f;
+        // and therefore mid density -- stays fixed all the way out.
+        //
+        // NOTE the interaction with photo-card density. The mid candidate grid is
+        // capped at MID_GRID_MAX (2440) cells, so its reach is dim/2 x spacing:
+        // on the card grid a 500 m ring needs a spacing of 0.41 m or wider, which
+        // is card density ~7x. Past that the ring is clamped to what the grid
+        // covers (mid_ring_end in grass.wgsl) and the field is SHORTER than this
+        // number -- the Grass tab turns the reach line orange when it happens.
+        // Raising the cap is a real compute cost (cells are dim^2), not a
+        // one-line change; nobody has measured it.
+        float midRadius = 500.0f;
         // Outer terrain-cover ring. 0 = off (the historical behaviour: grass
         // simply ends at the mid ring). When on it MUST stay above the mid
         // ring's reach or the far LOD's accept band is empty, so the mapping
