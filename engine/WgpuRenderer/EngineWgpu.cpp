@@ -6906,11 +6906,35 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         }();
         // Density multiplier wins when it is above 1: it is what the panel drives.
         // spacing = clutterGrid / sqrt(density), so 20x density is 1.11/4.47 = 0.248 m.
-        const float density = std::max(settings.photoCardDensity, 1.0f);
+        // POSEIDON_GRASS_CARD_DENSITY=<x> forces the multiplier, so the exact code
+        // path the panel drives can be exercised without the panel.
+        static const float densityEnv = []
+        {
+            const char* v = std::getenv("POSEIDON_GRASS_CARD_DENSITY");
+            return v != nullptr ? static_cast<float>(std::atof(v)) : -1.0f;
+        }();
+        const float density =
+            densityEnv > 0.0f ? densityEnv : std::max(settings.photoCardDensity, 1.0f);
         const float fromDensity = 1.11f / std::sqrt(density);
         const float grid = envOverride > 0.0f ? envOverride
                                               : (density > 1.001f ? fromDensity : settings.photoCardSpacing);
-        wgr_grass_set_card_spacing(_renderer, std::clamp(grid, 0.06f, 4.0f));
+        const float applied = std::clamp(grid, 0.06f, 4.0f);
+        wgr_grass_set_card_spacing(_renderer, applied);
+        // Say what arrived, on change only. SubmitGrass re-pushes this every frame,
+        // so an unrate-limited line would be one per frame; a line ONLY when the
+        // number moves is exactly the signal "did my slider reach the renderer".
+        {
+            static float lastApplied = -1.0f;
+            if (std::fabs(applied - lastApplied) > 1e-4f)
+            {
+                lastApplied = applied;
+                LOG_INFO(Graphics,
+                         "Wgpu grass card density: {:.1f}x -> grid {:.3f} m (setting {:.1f}x, spacing {:.3f}, "
+                         "env {:.3f}/{:.3f})",
+                         density, applied, settings.photoCardDensity, settings.photoCardSpacing, densityEnv,
+                         envOverride);
+            }
+        }
     }
     // Procedural blade look; defaults are the pre-existing shading (see GrassSettings).
     params.blade_self_shadow = std::clamp(settings.bladeSelfShadow, 0.0f, 1.0f);
