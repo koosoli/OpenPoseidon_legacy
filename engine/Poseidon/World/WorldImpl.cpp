@@ -750,6 +750,36 @@ void World::SimulateCloudlets(float deltaT)
             }
             LOG_INFO(World, "POSEIDON_TEST_SMOKE spawn at {:.1f},{:.1f},{:.1f}", position.X(), position.Y(),
                      position.Z());
+            // POSEIDON_SMOKE_THICKNESS=<x> multiplies emission rate AND the
+            // particle cap together, which is the only pair that actually makes
+            // a plume denser: raising the rate alone stops at the cap, and
+            // raising the cap alone leaves nothing to fill it. Opacity is not
+            // touched -- 1.0 is already the physical maximum for one billboard,
+            // so thickness past that is overlap, i.e. count.
+            //
+            // Exists so a thick plume can be CAPTURED. --auto-screenshot cannot
+            // drag a slider, same reason as POSEIDON_PANEL_SEARCH.
+            const float thicken = []
+            {
+                const char* v = std::getenv("POSEIDON_SMOKE_THICKNESS");
+                const float parsed = v != nullptr ? static_cast<float>(std::atof(v)) : 1.0f;
+                return parsed > 0.0f ? std::min(parsed, 64.0f) : 1.0f;
+            }();
+            const auto thicken_params = [thicken](SmokeParams& p)
+            {
+                if (thicken <= 1.0f)
+                {
+                    return;
+                }
+                p.rate *= thicken;
+                p.fireRate *= thicken;
+                // The cap has to move with the rate or it simply throttles it
+                // straight back; 200000 mirrors the panel's own ceiling.
+                p.maxParticles = static_cast<int>(std::min(static_cast<float>(p.maxParticles) * thicken, 200000.0f));
+                p.maxFlames = static_cast<int>(std::min(static_cast<float>(p.maxFlames) * thicken, 40000.0f));
+                LOG_INFO(World, "POSEIDON_SMOKE_THICKNESS={:.1f}x -> rate {:.0f}/s, cap {} particles", thicken, p.rate,
+                         p.maxParticles);
+            };
             // POSEIDON_TEST_SMOKE_HOUSE=1: find the nearest ENTERABLE building on
             // the map (a shape with a Roadway LOD is one you can walk inside) and
             // put the emitter inside it, 1 m off its floor. This is the only way
@@ -807,7 +837,9 @@ void World::SimulateCloudlets(float deltaT)
                         probe[1] = best->Position().Y() + 2.0f;
                         position[1] = GLandscape->RoadSurfaceY(probe) + 0.4f;
                     }
-                    LOG_INFO(World, "POSEIDON_TEST_SMOKE_HOUSE: nearest enterable building '{}' at {:.1f},{:.1f},{:.1f} r={:.1f} ({:.0f} m away)",
+                    LOG_INFO(World,
+                             "POSEIDON_TEST_SMOKE_HOUSE: nearest enterable building '{}' at {:.1f},{:.1f},{:.1f} "
+                             "r={:.1f} ({:.0f} m away)",
                              (const char*)best->GetShape()->Name(), best->Position().X(), best->Position().Y(),
                              best->Position().Z(), best->GetRadius(), std::sqrt(bestD2));
                 }
@@ -827,7 +859,7 @@ void World::SimulateCloudlets(float deltaT)
                 b.balloons = true;
                 b.rate = 9.0f;
                 b.particleLifetime = 60.0f;
-                b.maxParticles = 500;
+                b.maxParticles = 700; // 9/s x 60 s = 540, plus lifetime jitter
                 b.emitterRadius = 1.4f;
                 b.initialSpeed = 0.6f;
                 b.opacity = 1.0f;
@@ -841,6 +873,7 @@ void World::SimulateCloudlets(float deltaT)
                 b.collisionRadiusScale = 1.0f;
                 b.groundShadow = 0.0f;
                 b.selfShadowStrength = 0.0f;
+                thicken_params(b);
                 GSmokeSystem.Spawn(position, b, -1.0f);
             }
             else if (wanted == 4)
@@ -866,7 +899,7 @@ void World::SimulateCloudlets(float deltaT)
                 inf.startRadius = 1.5f;
                 inf.endRadius = 26.0f;
                 inf.particleLifetime = 150.0f;
-                inf.maxParticles = 2000;
+                inf.maxParticles = 6400; // 35/s x 150 s = 5250; 2000 throttled it to a third
                 inf.diffusion = 1.6f;
                 inf.densityFalloff = 0.95f;
                 inf.buoyancyDecay = 0.6f;
@@ -875,6 +908,7 @@ void World::SimulateCloudlets(float deltaT)
                 inf.fireLightIntensity = 1.8f;
                 inf.fireColumnHeight = 10.0f;
                 inf.fireColumnCohesion = 3.5f;
+                thicken_params(inf);
                 GSmokeSystem.Spawn(position, inf, -1.0f);
             }
             else if (wanted == 3)
@@ -891,16 +925,19 @@ void World::SimulateCloudlets(float deltaT)
                 wreck.startRadius = 0.8f;
                 wreck.endRadius = 14.0f;
                 wreck.particleLifetime = 95.0f;
-                wreck.maxParticles = 900;
+                wreck.maxParticles = 5200; // 45/s x 95 s = 4275; 900 throttled it to a fifth
                 wreck.diffusion = 1.3f;
                 wreck.densityFalloff = 0.9f;
                 wreck.buoyancyDecay = 0.5f;
                 wreck.calmRiseBoost = 4.0f;
+                thicken_params(wreck);
                 GSmokeSystem.Spawn(position, wreck, -1.0f);
             }
             else
             {
-                GSmokeSystem.Spawn(position, SmokeParams{}, -1.0f);
+                SmokeParams plain;
+                thicken_params(plain);
+                GSmokeSystem.Spawn(position, plain, -1.0f);
             }
         }
         if (wanted == 2 && spawned)

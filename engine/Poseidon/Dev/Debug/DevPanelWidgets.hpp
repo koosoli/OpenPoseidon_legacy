@@ -20,6 +20,7 @@
 // panel behaves exactly as it did before.
 
 struct ImGuiInputTextCallbackData;
+struct ImVec2;
 typedef int ImGuiSliderFlags;
 typedef int ImGuiColorEditFlags;
 
@@ -56,6 +57,7 @@ bool ColorEdit3(const char* label, float col[3], ImGuiColorEditFlags flags = 0);
 /// filtered tab that still lists every button is barely filtered at all. Clear
 /// the search to use them.
 bool Button(const char* label);
+bool Button(const char* label, const ImVec2& size);
 bool SmallButton(const char* label);
 bool RadioButton(const char* label, bool active);
 

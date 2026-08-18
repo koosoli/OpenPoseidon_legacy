@@ -23,6 +23,7 @@
 
 #include <imgui.h>
 
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/World.hpp>
@@ -140,27 +141,27 @@ void DrawSpawnSection()
     }
 
     ImGui::SetNextItemWidth(140.0f);
-    ImGui::SliderFloat("Distance ahead (m)", &GSpawnDistance, 2.0f, 60.0f, "%.0f");
+    Dev::SliderFloat("Distance ahead (m)", &GSpawnDistance, 2.0f, 60.0f, "%.0f");
 
     ImGui::SetNextItemWidth(140.0f);
     ImGui::InputFloat("Emit duration (s)", &GSpawnDuration, 0.0f, 0.0f, "%.0f");
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::TextDisabled("(negative = forever)");
 
     // -- colour -----------------------------------------------------------
     const char* presetNames[] = {"White", "Black", "Red", "Green", "Blue", "Yellow", "Purple", "Orange"};
     ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::Combo("Colour", &GColorPreset, presetNames, IM_ARRAYSIZE(presetNames)))
+    if (Dev::Combo("Colour", &GColorPreset, presetNames, IM_ARRAYSIZE(presetNames)))
     {
         ApplySmokeColorPreset(GParams, static_cast<SmokeColorPreset>(GColorPreset));
     }
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::ColorButton("##smokeTint", ImVec4(GParams.red, GParams.green, GParams.blue, 1.0f),
                        ImGuiColorEditFlags_NoTooltip, ImVec2(20, 20));
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     float tint[3] = {GParams.red, GParams.green, GParams.blue};
     ImGui::SetNextItemWidth(180.0f);
-    if (ImGui::ColorEdit3("Custom tint", tint, ImGuiColorEditFlags_NoInputs))
+    if (Dev::ColorEdit3("Custom tint", tint, ImGuiColorEditFlags_NoInputs))
     {
         GParams.red = tint[0];
         GParams.green = tint[1];
@@ -172,15 +173,15 @@ void DrawSpawnSection()
     Vector3 position;
     const bool havePosition = SpawnPosition(position);
 
-    ImGui::Checkbox("Fire at the base", &GParams.fire);
-    if (ImGui::IsItemHovered())
+    Dev::Checkbox("Fire at the base", &GParams.fire);
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Adds a flame layer at the emitter: short-lived additive sprites on\n"
                           "a white-yellow-orange-red cooling ramp, and extra lift on the smoke\n"
                           "above them. Pair with the Black colour preset for a burning wreck.");
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Burning wreck"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Burning wreck"))
     {
         GParams = SmokeParams{};
         GParams.fire = true;
@@ -200,8 +201,8 @@ void DrawSpawnSection()
         GParams.buoyancyDecay = 0.5f;
         GParams.calmRiseBoost = 4.0f;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Campfire"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Campfire"))
     {
         GParams = SmokeParams{};
         GParams.fire = true;
@@ -220,8 +221,8 @@ void DrawSpawnSection()
         GParams.fireLightRadius = 8.0f;
         GParams.fireLightIntensity = 0.6f;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Balloons"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Balloons"))
     {
         GParams = SmokeParams{};
         GParams.balloons = true;
@@ -234,7 +235,7 @@ void DrawSpawnSection()
         GParams.opacity = 1.0f;
         GParams.fadeIn = 0.02f;
         GParams.fadeOut = 0.06f;
-        GParams.drag = 0.5f;      // they follow the wind, gently
+        GParams.drag = 0.5f; // they follow the wind, gently
         GParams.turbulence = 0.0f;
         GParams.diffusion = 0.0f;
         GParams.densityFalloff = 0.0f;
@@ -243,12 +244,14 @@ void DrawSpawnSection()
         GParams.groundShadow = 0.0f;
         GParams.selfShadowStrength = 0.0f;
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Coloured balloons instead of smoke. Also the clearest test rig there is: they are countable, they hold their size, they bounce, and their colour makes the lighting and the wind obvious.");
+        ImGui::SetTooltip(
+            "Coloured balloons instead of smoke. Also the clearest test rig there is: they are countable, they hold "
+            "their size, they bounce, and their colour makes the lighting and the wind obvious.");
     }
-    ImGui::SameLine();
-    if (ImGui::Button("INFERNO"))
+    Dev::PanelSameLine();
+    if (Dev::Button("INFERNO"))
     {
         // Everything up: a wide, hot, roaring fire that chokes on its own smoke.
         GParams = SmokeParams{};
@@ -285,19 +288,19 @@ void DrawSpawnSection()
         GParams.fireLifetime = 2.2f;
         GParams.fireRiseSpeed = 5.0f;
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Wide, hot, roaring. Also try 'Spawn ring of fires' below to cover an\n"
                           "area - a burning building is many fires, not one big one.");
     }
 
     ImGui::BeginDisabled(!havePosition);
-    if (ImGui::Button("Spawn NEW smoke", ImVec2(160, 0)))
+    if (Dev::Button("Spawn NEW smoke", ImVec2(160, 0)))
     {
         GSmokeSystem.Spawn(position, GParams, GSpawnDuration);
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Spawn LEGACY smoke", ImVec2(170, 0)))
+    Dev::PanelSameLine();
+    if (Dev::Button("Spawn LEGACY smoke", ImVec2(170, 0)))
     {
         GSmokeSystem.SpawnLegacy(position, GLegacyDensity, GLegacySize, GSpawnDuration);
     }
@@ -306,13 +309,13 @@ void DrawSpawnSection()
     static int ringCount = 5;
     static float ringRadius = 6.0f;
     ImGui::SetNextItemWidth(90.0f);
-    ImGui::SliderInt("##ringN", &ringCount, 2, 16);
-    ImGui::SameLine();
+    Dev::SliderInt("##ringN", &ringCount, 2, 16);
+    Dev::PanelSameLine();
     ImGui::SetNextItemWidth(90.0f);
-    ImGui::SliderFloat("##ringR", &ringRadius, 1.0f, 30.0f, "%.0f m");
-    ImGui::SameLine();
+    Dev::SliderFloat("##ringR", &ringRadius, 1.0f, 30.0f, "%.0f m");
+    Dev::PanelSameLine();
     ImGui::BeginDisabled(!havePosition);
-    if (ImGui::Button("Spawn ring of fires"))
+    if (Dev::Button("Spawn ring of fires"))
     {
         // N plumes on a circle around the spawn point, each with the current
         // params. A large fire is many sources: this is how you make a
@@ -330,19 +333,19 @@ void DrawSpawnSection()
     Vector3 here;
     const bool haveHere = SpawnPositionHere(here);
     ImGui::BeginDisabled(!haveHere);
-    if (ImGui::Button("Spawn NEW smoke HERE (at camera)", ImVec2(260, 0)))
+    if (Dev::Button("Spawn NEW smoke HERE (at camera)", ImVec2(260, 0)))
     {
         GSmokeSystem.Spawn(here, GParams, GSpawnDuration);
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Right where you are standing, on the floor of THIS storey. Walk into\n"
                           "a room and press it - the only reliable way to put smoke indoors.\n"
                           "Then step back to watch it.");
     }
 
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("SmokeSourceVehicle - the 2001 engine's standalone emitter, the\n"
                           "one a burning wreck carries. It is the fairest available\n"
@@ -352,17 +355,17 @@ void DrawSpawnSection()
     }
 
     ImGui::SetNextItemWidth(110.0f);
-    ImGui::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");
-    ImGui::SameLine();
+    Dev::SliderFloat("Legacy density", &GLegacyDensity, 0.1f, 3.0f, "%.2f");
+    Dev::PanelSameLine();
     ImGui::SetNextItemWidth(110.0f);
-    ImGui::SliderFloat("Legacy size", &GLegacySize, 0.2f, 6.0f, "%.2f");
+    Dev::SliderFloat("Legacy size", &GLegacySize, 0.2f, 6.0f, "%.2f");
 
     ImGui::Spacing();
-    if (ImGui::Button("Extinguish all"))
+    if (Dev::Button("Extinguish all"))
     {
         GSmokeSystem.ExtinguishAll();
     }
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::TextDisabled("emitters stop; existing particles disperse");
 
     if (havePosition)
@@ -432,7 +435,7 @@ void DrawEmitterList()
             }
 
             ImGui::TableNextColumn();
-            if (ImGui::SmallButton("Extinguish"))
+            if (Dev::SmallButton("Extinguish"))
             {
                 GSmokeSystem.Extinguish(entry.id);
             }
@@ -452,170 +455,214 @@ void DrawTuningSection()
     }
 
     ImGui::SeparatorText("Look");
-    ImGui::SliderFloat("Thickness", &GParams.opacity, 0.02f, 1.0f, "%.3f");
-    ImGui::SliderFloat("Thins as it grows", &GParams.densityFalloff, 0.0f, 2.5f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Thickness", &GParams.opacity, 0.02f, 1.0f, "%.3f");
+    // These two tooltips used to sit BOTH after "Thins as it grows", so the
+    // second silently won: Thickness had no tooltip at all, and the falloff
+    // slider explained the wrong control. Each now follows its own.
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Alpha scales by (start radius / current radius) to this power: the same soot spread over a bigger puff. 0 = every puff keeps its birth opacity (a solid grey shape). ~0.85 = dense at the source, faint cloud overhead.");
+        ImGui::SetTooltip("Peak alpha per particle, and 1.0 is the physical maximum a single billboard has.\n"
+                          "Thickness BEYOND that comes from overlap, not from here: more particles (Rate x\n"
+                          "Lifetime, under Max particles) and bigger ones (End radius). A plume core reads\n"
+                          "as solid well before this reaches 1.");
     }
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Thins as it grows", &GParams.densityFalloff, 0.0f, 2.5f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Peak alpha per particle. Overlap compounds, so a plume core\n"
-                          "reads as solid well before this reaches 1.");
+        ImGui::SetTooltip("Alpha scales by (start radius / current radius) to this power: the same soot spread over a "
+                          "bigger puff. 0 = every puff keeps its birth opacity (a solid grey shape). ~0.85 = dense at "
+                          "the source, faint cloud overhead.");
     }
-    ImGui::SliderFloat("Start radius (m)", &GParams.startRadius, 0.1f, 4.0f, "%.2f");
-    ImGui::SliderFloat("End radius (m)", &GParams.endRadius, 0.5f, 20.0f, "%.2f");
-    ImGui::SliderFloat("Self-shadow", &GParams.selfShadowStrength, 0.0f, 4.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Start radius (m)", &GParams.startRadius, 0.1f, 4.0f, "%.2f");
+    Dev::SliderFloat("End radius (m)", &GParams.endRadius, 0.5f, 60.0f, "%.2f");
+    Dev::SliderFloat("Self-shadow", &GParams.selfShadowStrength, 0.0f, 4.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Each particle marches toward the sun through the plume and darkens by the smoke it passes. Dark core and underside, bright sun rim. 0 = flat sticker.");
+        ImGui::SetTooltip("Each particle marches toward the sun through the plume and darkens by the smoke it passes. "
+                          "Dark core and underside, bright sun rim. 0 = flat sticker.");
     }
-    ImGui::SliderInt("Self-shadow reach", &GParams.selfShadowSteps, 0, 10);
-    ImGui::SliderFloat("Sky ambient", &GParams.skyAmbient, 0.0f, 1.5f, "%.2f");
-    ImGui::SliderFloat("Ground shadow (this plume)", &GParams.groundShadow, 0.0f, 2.0f, "%.2f");
+    Dev::SliderInt("Self-shadow reach", &GParams.selfShadowSteps, 0, 10);
+    Dev::SliderFloat("Sky ambient", &GParams.skyAmbient, 0.0f, 1.5f, "%.2f");
+    Dev::SliderFloat("Ground shadow (this plume)", &GParams.groundShadow, 0.0f, 2.0f, "%.2f");
     {
         float g = GSmokeSystem.GroundShadowStrength();
-        if (ImGui::SliderFloat("Ground shadow (global)", &g, 0.0f, 3.0f, "%.2f"))
+        if (Dev::SliderFloat("Ground shadow (global)", &g, 0.0f, 3.0f, "%.2f"))
         {
             GSmokeSystem.SetGroundShadowStrength(g);
         }
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
         {
-            ImGui::SetTooltip("Smoke particles are splatted into the sun shadow map the terrain and objects already sample, so everything lit under a plume darkens. Texel is ~8 m: a soft ground shadow for a plume, not a crisp one for a puff.");
+            ImGui::SetTooltip("Smoke particles are splatted into the sun shadow map the terrain and objects already "
+                              "sample, so everything lit under a plume darkens. Texel is ~8 m: a soft ground shadow "
+                              "for a plume, not a crisp one for a puff.");
         }
     }
-    ImGui::SliderFloat("Fade in", &GParams.fadeIn, 0.0f, 0.9f, "%.2f");
-    ImGui::SliderFloat("Fade out", &GParams.fadeOut, 0.0f, 0.9f, "%.2f");
+    Dev::SliderFloat("Fade in", &GParams.fadeIn, 0.0f, 0.9f, "%.2f");
+    Dev::SliderFloat("Fade out", &GParams.fadeOut, 0.0f, 0.9f, "%.2f");
 
     ImGui::SeparatorText("Emission");
-    ImGui::SliderFloat("Rate (/s)", &GParams.rate, 1.0f, 200.0f, "%.0f");
-    ImGui::SliderFloat("Lifetime (s)", &GParams.particleLifetime, 1.0f, 180.0f, "%.0f",
-                       ImGuiSliderFlags_Logarithmic);
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Rate (/s)", &GParams.rate, 1.0f, 4000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    Dev::SliderFloat("Lifetime (s)", &GParams.particleLifetime, 1.0f, 180.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Up to 3 minutes. Log scale: fine control at the short end. Long lifetimes with a high rate need Max particles raised too, or the cap throttles emission.");
+        ImGui::SetTooltip("Up to 3 minutes. Log scale: fine control at the short end. Long lifetimes with a high rate "
+                          "need Max particles raised too, or the cap throttles emission.");
     }
-    ImGui::SliderFloat("Nozzle speed (m/s)", &GParams.initialSpeed, 0.0f, 15.0f, "%.2f");
-    ImGui::SliderFloat("Nozzle radius (m)", &GParams.emitterRadius, 0.0f, 4.0f, "%.2f");
-    ImGui::SliderFloat("Spread", &GParams.spread, 0.0f, 1.5f, "%.2f");
-    ImGui::SliderInt("Max particles", &GParams.maxParticles, 10, 4000);
+    Dev::SliderFloat("Nozzle speed (m/s)", &GParams.initialSpeed, 0.0f, 15.0f, "%.2f");
+    Dev::SliderFloat("Nozzle radius (m)", &GParams.emitterRadius, 0.0f, 4.0f, "%.2f");
+    Dev::SliderFloat("Spread", &GParams.spread, 0.0f, 1.5f, "%.2f");
+    Dev::SliderInt("Max particles", &GParams.maxParticles, 10, 200000, "%d", ImGuiSliderFlags_Logarithmic);
+    {
+        // THE CEILING NOBODY COULD SEE. A plume holds about rate x lifetime
+        // particles at steady state and emission simply STOPS at the cap, so the
+        // Rate slider can be dragged to its top and change nothing, with no
+        // indication of why. The stock defaults were already in that state:
+        // 35/s x 14 s wants 490 against a cap of 400.
+        //
+        // Say the number rather than leaving it to be rediscovered. Same reason
+        // the Grass tab now prints its mid-ring reach.
+        const float wanted = GParams.rate * GParams.particleLifetime;
+        const float cap = static_cast<float>(GParams.maxParticles);
+        if (wanted > cap * 1.02f)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+                               "Cap is throttling: %.0f/s x %.0f s wants ~%.0f particles against a cap of %d. "
+                               "Rate above ~%.0f/s does nothing until you raise the cap.",
+                               GParams.rate, GParams.particleLifetime, wanted, GParams.maxParticles,
+                               cap / std::max(GParams.particleLifetime, 0.01f));
+        }
+        else
+        {
+            ImGui::TextDisabled("~%.0f particles at steady state (%.0f/s x %.0f s) against a cap of %d.", wanted,
+                                GParams.rate, GParams.particleLifetime, GParams.maxParticles);
+        }
+        ImGui::TextDisabled("Thickness comes from OVERLAP, so once Thickness is at 1 this and End radius ARE the "
+                            "density controls. Each particle is one soft billboard and consecutive ones merge "
+                            "into a single 2D batch, so the cost of a huge plume is fill rate, not draw calls.");
+    }
 
     ImGui::SeparatorText("Motion");
-    ImGui::SliderFloat("Buoyancy (m/s^2)", &GParams.buoyancy, -2.0f, 10.0f, "%.2f");
-    ImGui::SliderFloat("Buoyancy decay", &GParams.buoyancyDecay, 0.02f, 1.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Buoyancy (m/s^2)", &GParams.buoyancy, -2.0f, 10.0f, "%.2f");
+    Dev::SliderFloat("Buoyancy decay", &GParams.buoyancyDecay, 0.02f, 1.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Fraction of lifetime over which the plume cools. Turn it up and\n"
                           "the plume rises forever; the flat drifting layer at the top of a\n"
                           "real plume is this term running out.");
     }
-    ImGui::SliderFloat("Calm rise boost", &GParams.calmRiseBoost, 1.0f, 8.0f, "%.1f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Calm rise boost", &GParams.calmRiseBoost, 1.0f, 8.0f, "%.1f");
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("How much longer the plume stays buoyant in still air. Wind mixes and cools a plume; with no wind it climbs far higher. Set the Weather override to 0 m/s to see it.");
+        ImGui::SetTooltip("How much longer the plume stays buoyant in still air. Wind mixes and cools a plume; with no "
+                          "wind it climbs far higher. Set the Weather override to 0 m/s to see it.");
     }
-    ImGui::SliderFloat("Drag (1/s)", &GParams.drag, 0.05f, 6.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Drag (1/s)", &GParams.drag, 0.05f, 6.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("How hard a particle is pulled toward the air velocity around it.\n"
                           "This is what makes wind work: raise it and the plume snaps to the\n"
                           "wind, lower it and it coasts through gusts.");
     }
-    ImGui::SliderFloat("Turbulence", &GParams.turbulence, 0.0f, 4.0f, "%.2f");
-    ImGui::SliderFloat("Diffusion", &GParams.diffusion, 0.0f, 5.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Turbulence", &GParams.turbulence, 0.0f, 4.0f, "%.2f");
+    Dev::SliderFloat("Diffusion", &GParams.diffusion, 0.0f, 5.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("How fast the plume comes APART. A random walk growing as sqrt(age), so young smoke holds the column and old smoke wanders into a cloud. 0 keeps the plume rigid forever.");
+        ImGui::SetTooltip("How fast the plume comes APART. A random walk growing as sqrt(age), so young smoke holds "
+                          "the column and old smoke wanders into a cloud. 0 keeps the plume rigid forever.");
     }
-    ImGui::SliderFloat("Wind response", &GParams.windResponse, 0.0f, 2.0f, "%.2f");
+    Dev::SliderFloat("Wind response", &GParams.windResponse, 0.0f, 2.0f, "%.2f");
 
     ImGui::SeparatorText("Balloons");
-    ImGui::Checkbox("Balloons instead of smoke", &GParams.balloons);
-    if (ImGui::IsItemHovered())
+    Dev::Checkbox("Balloons instead of smoke", &GParams.balloons);
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Overrides the smoke terms rather than tuning them: no growth, no diffusion, no thinning, no self-shadow. Set Thickness to 1.0 so they read as solid.");
+        ImGui::SetTooltip("Overrides the smoke terms rather than tuning them: no growth, no diffusion, no thinning, no "
+                          "self-shadow. Set Thickness to 1.0 so they read as solid.");
     }
-    ImGui::SliderFloat("Balloon rise (m/s)", &GParams.balloonRise, 0.0f, 8.0f, "%.2f");
-    ImGui::SliderFloat("Balloon sway", &GParams.balloonSway, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("Balloon size (m)", &GParams.balloonSize, 0.05f, 2.0f, "%.2f");
-    ImGui::SliderFloat("Hue spread", &GParams.balloonHueSpread, 0.0f, 1.0f, "%.2f");
+    Dev::SliderFloat("Balloon rise (m/s)", &GParams.balloonRise, 0.0f, 8.0f, "%.2f");
+    Dev::SliderFloat("Balloon sway", &GParams.balloonSway, 0.0f, 3.0f, "%.2f");
+    Dev::SliderFloat("Balloon size (m)", &GParams.balloonSize, 0.05f, 2.0f, "%.2f");
+    Dev::SliderFloat("Hue spread", &GParams.balloonHueSpread, 0.0f, 1.0f, "%.2f");
 
     ImGui::SeparatorText("Fire");
-    ImGui::Checkbox("Fire enabled", &GParams.fire);
-    ImGui::SliderFloat("Flame rate (/s)", &GParams.fireRate, 5.0f, 300.0f, "%.0f");
-    ImGui::SliderFloat("Flame lifetime (s)", &GParams.fireLifetime, 0.2f, 3.0f, "%.2f");
-    ImGui::SliderFloat("Flame start radius", &GParams.fireStartRadius, 0.1f, 3.0f, "%.2f");
-    ImGui::SliderFloat("Flame end radius", &GParams.fireEndRadius, 0.1f, 5.0f, "%.2f");
-    ImGui::SliderFloat("Flame rise (m/s)", &GParams.fireRiseSpeed, 0.5f, 10.0f, "%.2f");
-    ImGui::SliderFloat("Flame intensity", &GParams.fireIntensity, 0.2f, 5.0f, "%.2f");
-    ImGui::SliderFloat("Smoke lift from fire", &GParams.fireSmokeLift, 0.0f, 8.0f, "%.2f");
-    ImGui::SliderFloat("Smoke yield", &GParams.fireSmokeYield, 0.0f, 1.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::Checkbox("Fire enabled", &GParams.fire);
+    Dev::SliderFloat("Flame rate (/s)", &GParams.fireRate, 5.0f, 300.0f, "%.0f");
+    Dev::SliderFloat("Flame lifetime (s)", &GParams.fireLifetime, 0.2f, 3.0f, "%.2f");
+    Dev::SliderFloat("Flame start radius", &GParams.fireStartRadius, 0.1f, 3.0f, "%.2f");
+    Dev::SliderFloat("Flame end radius", &GParams.fireEndRadius, 0.1f, 5.0f, "%.2f");
+    Dev::SliderFloat("Flame rise (m/s)", &GParams.fireRiseSpeed, 0.5f, 10.0f, "%.2f");
+    Dev::SliderFloat("Flame intensity", &GParams.fireIntensity, 0.2f, 5.0f, "%.2f");
+    Dev::SliderFloat("Smoke lift from fire", &GParams.fireSmokeLift, 0.0f, 8.0f, "%.2f");
+    Dev::SliderFloat("Smoke yield", &GParams.fireSmokeYield, 0.0f, 1.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Fraction of dying flames that become smoke. With fire on this is\n"
                           "the ONLY smoke source - the plume is what the fire produces.\n"
                           "1 = heavy oil fire, 0.2 = clean hot burn with wisps.");
     }
-    ImGui::SliderFloat("Flame stretch", &GParams.fireStretch, 0.0f, 3.0f, "%.2f");
-    ImGui::SliderFloat("Column height (m)", &GParams.fireColumnHeight, 0.0f, 25.0f, "%.1f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Flame stretch", &GParams.fireStretch, 0.0f, 3.0f, "%.2f");
+    Dev::SliderFloat("Column height (m)", &GParams.fireColumnHeight, 0.0f, 25.0f, "%.1f");
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("0 = independent puffs. Above 0, flames fill a column of this height as one body: born throughout it, pulled toward the axis, alive for the whole rise. Pair with a longer flame lifetime.");
+        ImGui::SetTooltip(
+            "0 = independent puffs. Above 0, flames fill a column of this height as one body: born throughout it, "
+            "pulled toward the axis, alive for the whole rise. Pair with a longer flame lifetime.");
     }
-    ImGui::SliderFloat("Column cohesion", &GParams.fireColumnCohesion, 0.0f, 10.0f, "%.1f");
-    ImGui::SliderFloat("Flame wind lean", &GParams.fireWindLean, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Fire light intensity", &GParams.fireLightIntensity, 0.0f, 4.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Column cohesion", &GParams.fireColumnCohesion, 0.0f, 10.0f, "%.1f");
+    Dev::SliderFloat("Flame wind lean", &GParams.fireWindLean, 0.0f, 1.0f, "%.2f");
+    Dev::SliderFloat("Fire light intensity", &GParams.fireLightIntensity, 0.0f, 4.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("A warm point light at the flame centroid, flickering with the fire.\n"
                           "Point lights here cast no shadow maps, so 'flickering shadows' is\n"
                           "what the light does to nearby surfaces. Best judged at night.");
     }
-    ImGui::SliderFloat("Fire light radius (m)", &GParams.fireLightRadius, 2.0f, 60.0f, "%.0f");
-    ImGui::SliderFloat("Fire light HDR scale", &GParams.fireLightHdrScale, 0.5f, 20.0f, "%.1f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Fire light radius (m)", &GParams.fireLightRadius, 2.0f, 60.0f, "%.0f");
+    Dev::SliderFloat("Fire light HDR scale", &GParams.fireLightHdrScale, 0.5f, 20.0f, "%.1f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Radiance multiplier so the glow reads in DAYLIGHT. The renderer is\n"
                           "HDR; at 1.0 the fire's light vanished at noon. Raise for day, the\n"
                           "night exposure keeps it from blowing out.");
     }
-    ImGui::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
+    Dev::SliderInt("Max flames", &GParams.maxFlames, 10, 500);
 
     ImGui::SeparatorText("Collision and shelter");
-    ImGui::Checkbox("Collide with world", &GParams.collide);
-    ImGui::SameLine();
-    ImGui::Checkbox("Hard contain", &GParams.contain);
-    if (ImGui::IsItemHovered())
+    Dev::Checkbox("Collide with world", &GParams.collide);
+    Dev::PanelSameLine();
+    Dev::Checkbox("Hard contain", &GParams.contain);
+    if (Dev::PanelItemHovered())
     {
-        ImGui::SetTooltip("Sweep every tick and refuse to let a particle cross a surface it came from behind. Smoke stays in the room and finds the door. Costs 7 rays per particle per frame.");
+        ImGui::SetTooltip("Sweep every tick and refuse to let a particle cross a surface it came from behind. Smoke "
+                          "stays in the room and finds the door. Costs 7 rays per particle per frame.");
     }
-    ImGui::SliderFloat("Restitution", &GParams.restitution, 0.0f, 1.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Restitution", &GParams.restitution, 0.0f, 1.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("0 slides along the surface, 1 is elastic. Smoke is not a ball -\n"
                           "above about 0.3 it stops reading as smoke.");
     }
-    ImGui::SliderFloat("Surface friction", &GParams.friction, 0.0f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Collision radius x", &GParams.collisionRadiusScale, 0.05f, 1.0f, "%.2f");
-    ImGui::SliderFloat("Sweep interval (s)", &GParams.sweepInterval, 0.02f, 0.5f, "%.3f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Surface friction", &GParams.friction, 0.0f, 1.0f, "%.2f");
+    Dev::SliderFloat("Collision radius x", &GParams.collisionRadiusScale, 0.05f, 1.0f, "%.2f");
+    Dev::SliderFloat("Sweep interval (s)", &GParams.sweepInterval, 0.02f, 0.5f, "%.3f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Seconds between real world sweeps per particle. Between sweeps the\n"
                           "cached contact plane still blocks the particle, so raising this\n"
                           "trades exactness for cost - it does not switch collision off.\n"
                           "Watch the sweeps/frame counter below as you move it.");
     }
-    ImGui::SliderFloat("Sheltered wind x", &GParams.shelteredWindScale, 0.0f, 1.0f, "%.2f");
-    if (ImGui::IsItemHovered())
+    Dev::SliderFloat("Sheltered wind x", &GParams.shelteredWindScale, 0.0f, 1.0f, "%.2f");
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("What the prevailing wind is multiplied by when a particle has a\n"
                           "roof over it. 0 is dead-still indoor smoke; a little residual\n"
                           "keeps a room from looking airless.");
     }
-    ImGui::SliderFloat("Roof probe (m)", &GParams.shelterProbeHeight, 2.0f, 40.0f, "%.0f");
+    Dev::SliderFloat("Roof probe (m)", &GParams.shelterProbeHeight, 2.0f, 40.0f, "%.0f");
 
     ImGui::Spacing();
-    if (ImGui::Button("Reset to defaults"))
+    if (Dev::Button("Reset to defaults"))
     {
         GParams = SmokeParams{};
         ApplySmokeColorPreset(GParams, static_cast<SmokeColorPreset>(GColorPreset));
@@ -643,17 +690,17 @@ void DrawAirflowSection()
     }
 
     bool enabled = GAirflow.LocalEnabled();
-    if (ImGui::Checkbox("Local airflow enabled", &enabled))
+    if (Dev::Checkbox("Local airflow enabled", &enabled))
     {
         GAirflow.SetLocalEnabled(enabled);
     }
 
     float scale = GAirflow.LocalScale();
-    if (ImGui::SliderFloat("Strength x", &scale, 0.0f, 5.0f, "%.2f"))
+    if (Dev::SliderFloat("Strength x", &scale, 0.0f, 5.0f, "%.2f"))
     {
         GAirflow.SetLocalScale(scale);
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip("Exaggerating this is the quickest way to answer 'is the downwash\n"
                           "reaching the smoke at all', which is hard to see at 1x from the\n"
@@ -672,9 +719,8 @@ void DrawAirflowSection()
     for (std::size_t i = 0; i < count; ++i)
     {
         const RotorWash& wash = GAirflow.Rotor(i);
-        ImGui::BulletText("%.0f, %.0f, %.0f   disc %.1f m   %.1f m/s   %.0f m up", wash.position.X(),
-                          wash.position.Y(), wash.position.Z(), wash.discRadius, wash.strength,
-                          wash.position.Y() - wash.groundY);
+        ImGui::BulletText("%.0f, %.0f, %.0f   disc %.1f m   %.1f m/s   %.0f m up", wash.position.X(), wash.position.Y(),
+                          wash.position.Z(), wash.discRadius, wash.strength, wash.position.Y() - wash.groundY);
     }
 }
 
@@ -708,8 +754,7 @@ void DrawBenchmarkSection()
 
         if (stats.particles > 0)
         {
-            row("per particle", "%.3f us sim + %.3f us draw",
-                simAverage / static_cast<float>(stats.particles),
+            row("per particle", "%.3f us sim + %.3f us draw", simAverage / static_cast<float>(stats.particles),
                 drawAverage / static_cast<float>(stats.particles));
         }
 
@@ -733,11 +778,11 @@ void DrawBenchmarkSection()
     static int stressCount = 8;
     static bool stressLegacy = false;
     ImGui::SetNextItemWidth(120.0f);
-    ImGui::SliderInt("Plumes", &stressCount, 1, 64);
-    ImGui::SameLine();
-    ImGui::Checkbox("legacy", &stressLegacy);
+    Dev::SliderInt("Plumes", &stressCount, 1, 64);
+    Dev::PanelSameLine();
+    Dev::Checkbox("legacy", &stressLegacy);
 
-    if (ImGui::Button("Spawn grid"))
+    if (Dev::Button("Spawn grid"))
     {
         Vector3 centre;
         if (SpawnPosition(centre))
@@ -764,7 +809,7 @@ void DrawBenchmarkSection()
             }
         }
     }
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::TextDisabled("then read the Perf tab's frame time");
 }
 

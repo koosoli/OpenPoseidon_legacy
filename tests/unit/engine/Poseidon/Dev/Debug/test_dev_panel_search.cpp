@@ -63,11 +63,27 @@ std::vector<int> LinesContaining(const std::string& src, const std::string& need
 
 TEST_CASE("Dev panel controls all go through the search filter", "[dev][panel]")
 {
-    const std::filesystem::path overlay = RepoFile("engine/Poseidon/Dev/Debug/DebugOverlay.cpp");
+    // Every file that draws panel controls, not just the big one. The Smoke tab
+    // lives in its own translation unit and was invisible to the search for
+    // exactly as long as this test only knew about DebugOverlay.cpp -- which is
+    // the failure mode the whole design exists to prevent, reappearing one
+    // directory over. A new tab in a new file must be added here.
+    const char* const panelSources[] = {
+        "engine/Poseidon/Dev/Debug/DebugOverlay.cpp",
+        "engine/Poseidon/Dev/Diag/SmokeTab.cpp",
+    };
+    const std::filesystem::path overlay = RepoFile(panelSources[0]);
     INFO("searched upward from " << std::filesystem::path(__FILE__).parent_path().string()
                                  << " for engine/Poseidon/Dev/Debug/DebugOverlay.cpp");
     REQUIRE(std::filesystem::is_regular_file(overlay));
-    const std::string src = ReadTextFile(overlay);
+    std::string src;
+    for (const char* relative : panelSources)
+    {
+        const std::filesystem::path at = RepoFile(relative);
+        INFO("panel source " << relative);
+        REQUIRE(std::filesystem::is_regular_file(at));
+        src += ReadTextFile(at);
+    }
     REQUIRE_FALSE(src.empty());
 
     // Every widget type the wrapper covers. ImGui::Text and ImGui::TextColored
@@ -85,7 +101,7 @@ TEST_CASE("Dev panel controls all go through the search filter", "[dev][panel]")
         const std::vector<int> hits = LinesContaining(src, raw);
         std::string where;
         for (const int line : hits)
-            where += " DebugOverlay.cpp:" + std::to_string(line);
+            where += " line " + std::to_string(line);
         INFO("call " << raw << " through the Dev:: wrapper instead, at" << where);
         CHECK(hits.empty());
     }

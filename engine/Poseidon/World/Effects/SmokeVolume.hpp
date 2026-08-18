@@ -39,11 +39,11 @@ namespace Poseidon
 struct SmokeParams
 {
     // -- emission ---------------------------------------------------------
-    float rate = 35.0f;            ///< particles per second
+    float rate = 35.0f;             ///< particles per second
     float particleLifetime = 14.0f; ///< seconds
-    float emitterRadius = 0.35f;   ///< nozzle radius, m
-    float initialSpeed = 2.2f;     ///< upward jet at the nozzle, m/s
-    float spread = 0.30f;          ///< lateral randomisation of the jet, 0..1
+    float emitterRadius = 0.35f;    ///< nozzle radius, m
+    float initialSpeed = 2.2f;      ///< upward jet at the nozzle, m/s
+    float spread = 0.30f;           ///< lateral randomisation of the jet, 0..1
 
     // -- appearance -------------------------------------------------------
     float startRadius = 0.5f; ///< particle radius at birth, m
@@ -152,9 +152,9 @@ struct SmokeParams
     // small solid object with lift. So this mode overrides those terms rather
     // than being tuned into them.
     bool balloons = false;
-    float balloonRise = 2.4f;   ///< steady climb, m/s (drag pulls toward it)
-    float balloonSway = 0.55f;  ///< lateral bob amplitude, m/s
-    float balloonSize = 0.42f;  ///< radius, m — held for the whole life
+    float balloonRise = 2.4f;  ///< steady climb, m/s (drag pulls toward it)
+    float balloonSway = 0.55f; ///< lateral bob amplitude, m/s
+    float balloonSize = 0.42f; ///< radius, m — held for the whole life
     /// 0 = every balloon takes the plume's tint; 1 = the full hue wheel.
     float balloonHueSpread = 1.0f;
 
@@ -166,12 +166,12 @@ struct SmokeParams
     // burning wreck is "fire at the bottom, smoke rising off it", and this is
     // that. Fire also raises the smoke's buoyancy at the source (hot air).
     bool fire = false;
-    float fireRate = 60.0f;         ///< flames per second
-    float fireLifetime = 0.9f;      ///< seconds; flames are brief
-    float fireStartRadius = 0.6f;   ///< m
-    float fireEndRadius = 1.4f;     ///< m — a flame grows a little then dies
-    float fireRiseSpeed = 3.0f;     ///< upward speed at birth, m/s
-    float fireIntensity = 1.6f;     ///< brightness multiplier on the ramp (HDR headroom)
+    float fireRate = 60.0f;       ///< flames per second
+    float fireLifetime = 0.9f;    ///< seconds; flames are brief
+    float fireStartRadius = 0.6f; ///< m
+    float fireEndRadius = 1.4f;   ///< m — a flame grows a little then dies
+    float fireRiseSpeed = 3.0f;   ///< upward speed at birth, m/s
+    float fireIntensity = 1.6f;   ///< brightness multiplier on the ramp (HDR headroom)
     /// Extra buoyancy the SMOKE gets while fire is on, m/s^2 — hot air rises
     /// harder off a fire than off a smoke grenade.
     float fireSmokeLift = 2.0f;
@@ -211,7 +211,16 @@ struct SmokeParams
     float fireLightHdrScale = 2.5f;
 
     // -- budget -----------------------------------------------------------
-    int maxParticles = 400;
+    //
+    // Has to cover rate x particleLifetime, or the cap throttles emission and
+    // the rate slider stops meaning anything. The stock 35/s over 14 s wants
+    // ~490, so the old 400 was already clipping its own defaults -- the plume
+    // never reached the density the other defaults were asking for. 700 leaves
+    // headroom for the +-20% lifetime jitter on top.
+    //
+    // The panel prints the arithmetic live and turns it orange when the cap
+    // bites, so this being wrong again is visible rather than silent.
+    int maxParticles = 700;
     int maxFlames = 120;
     /// Seconds between real sphere sweeps for a given particle. Between sweeps
     /// the cached contact plane still blocks it, so this trades exactness for
@@ -235,9 +244,9 @@ struct SmokeParticle
     bool planeValid = false;
     float sizeJitter = 1.0f;
     float alphaJitter = 1.0f;
-    float hue = 0.0f;      ///< balloon colour, 0..1 around the wheel
+    float hue = 0.0f;       ///< balloon colour, 0..1 around the wheel
     float swayPhase = 0.0f; ///< balloon bob phase, so they do not move as one
-    float groundY = 0.0f; ///< floor height under the particle, from the last clamp
+    float groundY = 0.0f;   ///< floor height under the particle, from the last clamp
 };
 
 class SmokeVolume : public Entity

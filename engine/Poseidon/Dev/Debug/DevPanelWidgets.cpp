@@ -219,6 +219,12 @@ bool Button(const char* label)
     return g_lastShown && ImGui::Button(label);
 }
 
+bool Button(const char* label, const ImVec2& size)
+{
+    g_lastShown = Match(label);
+    return g_lastShown && ImGui::Button(label, size);
+}
+
 bool SmallButton(const char* label)
 {
     g_lastShown = Match(label);
