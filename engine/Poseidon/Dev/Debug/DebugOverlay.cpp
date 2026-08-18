@@ -3357,6 +3357,29 @@ void DrawGrassTab()
 
     ImGui::Separator();
     ImGui::TextUnformatted("Photo card coverage (density of the card path)");
+    {
+        // IS THE CARD PATH EVEN DRAWING? Every control in this block is inert
+        // unless it is, and nothing on screen said so -- which is exactly how an
+        // afternoon goes into "the slider does nothing". Mirrors
+        // EngineWgpu::SetGrassSettings' photoTuft, which is the same expression
+        // the renderer evaluates.
+        const bool mapAtlas = GEngine->HasGrassMapClutter();
+        const bool cardsWanted = grass.clutterSource == 2 || (grass.clutterSource == 0 && mapAtlas);
+        if (cardsWanted)
+        {
+            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                               "Card path ON (source %d, map atlas %d) - the controls below apply.",
+                               grass.clutterSource, mapAtlas ? 1 : 0);
+        }
+        else
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+                               "Card path OFF (source %d, map atlas %d) - you are looking at PROCEDURAL blades and "
+                               "every control below does nothing. Set Grass source to the photo clumps.",
+                               grass.clutterSource, mapAtlas ? 1 : 0);
+        }
+        ImGui::TextDisabled("The game log settles it either way: \"near ring cards\" vs \"near ring blades\".");
+    }
     changed |= ImGui::Checkbox("Auto: the map's own clutter density where the map declares one",
                                &grass.photoCoverageAuto);
     changed |= ImGui::SliderFloat("Photo card coverage", &grass.photoCoverage, 0.01f, 1.0f, "%.2f");
