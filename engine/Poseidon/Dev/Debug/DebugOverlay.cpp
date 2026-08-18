@@ -26,6 +26,7 @@
 #include <glad/gl.h>
 
 #include <Poseidon/Dev/Debug/DebugOverlay.hpp>
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 #include <Poseidon/Dev/Debug/DebugCheats.hpp>
 #include <Poseidon/Dev/Debug/DebugCommands.hpp>
 #include <Poseidon/Dev/Debug/WtrTestHarness.hpp>
@@ -1079,26 +1080,26 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
         hour = Glob.clock.GetTimeOfDay() * 24.0f;
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Weather and time");
-    ImGui::Separator();
+    Dev::PanelHeading("Weather and time");
+    Dev::PanelSeparator();
 
     const bool available = worldAvailable && DebugCheats::Cmd_SetWeather::Available();
     ImGui::BeginDisabled(!available);
 
     std::string out;
     bool applyWeather = false;
-    applyWeather |= ImGui::SliderFloat("Overcast##zeus", &overcast, 0.0f, 1.0f, "%.2f");
+    applyWeather |= Dev::SliderFloat("Overcast##zeus", &overcast, 0.0f, 1.0f, "%.2f");
     editingOvercast = ImGui::IsItemActive();
-    ImGui::SetItemTooltip("0 = clear, 1 = fully overcast. Drives cloud cover and the sky's light.");
+    Dev::PanelTooltip("0 = clear, 1 = fully overcast. Drives cloud cover and the sky's light.");
 
-    applyWeather |= ImGui::SliderFloat("Fog##zeus", &fog, 0.0f, 1.0f, "%.2f");
+    applyWeather |= Dev::SliderFloat("Fog##zeus", &fog, 0.0f, 1.0f, "%.2f");
     editingFog = ImGui::IsItemActive();
-    ImGui::SetItemTooltip("0 = clear, 1 = thickest. Independent of overcast — the console 'weather' "
-                          "command and triCheatWeather both force this to 0, this slider does not.");
+    Dev::PanelTooltip("0 = clear, 1 = thickest. Independent of overcast — the console 'weather' "
+                      "command and triCheatWeather both force this to 0, this slider does not.");
 
-    ImGui::SliderFloat("Transition (s)##zeus", &transition, 0.0f, 600.0f, "%.0f");
-    ImGui::SetItemTooltip("0 applies the change on the next frame. Anything higher lets the engine "
-                          "interpolate, which is what you want while someone is watching.");
+    Dev::SliderFloat("Transition (s)##zeus", &transition, 0.0f, 600.0f, "%.0f");
+    Dev::PanelTooltip("0 applies the change on the next frame. Anything higher lets the engine "
+                      "interpolate, which is what you want while someone is watching.");
 
     if (applyWeather)
     {
@@ -1107,8 +1108,8 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     }
 
     // Presets are the common case: nobody wants to hunt for 0.75 on a slider.
-    ImGui::TextDisabled("  Presets");
-    ImGui::SameLine();
+    Dev::PanelHelp("  Presets");
+    Dev::PanelSameLine();
     const struct
     {
         const char* label;
@@ -1121,14 +1122,14 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     ImGui::PushID("zeus_weather_presets");
     for (const auto& preset : presets)
     {
-        if (ImGui::SmallButton(preset.label))
+        if (Dev::SmallButton(preset.label))
         {
             overcast = preset.overcast;
             fog = preset.fog;
             DebugCheats::Cmd_SetWeather::InvokeWeather(overcast, fog, transition, out);
             s_zeusStatus = out;
         }
-        ImGui::SameLine();
+        Dev::PanelSameLine();
     }
     ImGui::PopID();
     ImGui::NewLine();
@@ -1137,21 +1138,21 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     // The clock is display-only until released: the engine only offers a
     // relative skip, so applying every frame of a drag would fire dozens of
     // skips and sail past the target.
-    ImGui::SliderFloat("Time of day##zeus", &hour, 0.0f, 24.0f, "%05.2f h");
+    Dev::SliderFloat("Time of day##zeus", &hour, 0.0f, 24.0f, "%05.2f h");
     const bool hourActive = ImGui::IsItemActive();
     const bool hourReleased = editingHour && !hourActive;
     editingHour = hourActive;
-    ImGui::SetItemTooltip("Applied when you release the slider, not while dragging. The engine only "
-                          "offers a relative skip, so the clock moves FORWARD to the requested hour "
-                          "— asking for an earlier time wraps through midnight.");
+    Dev::PanelTooltip("Applied when you release the slider, not while dragging. The engine only "
+                      "offers a relative skip, so the clock moves FORWARD to the requested hour "
+                      "— asking for an earlier time wraps through midnight.");
     if (hourReleased && DebugCheats::Cmd_SetTimeOfDay::Available())
     {
         DebugCheats::Cmd_SetTimeOfDay::InvokeHour(hour, out);
         s_zeusStatus = out;
     }
 
-    ImGui::TextDisabled("  Jump to");
-    ImGui::SameLine();
+    Dev::PanelHelp("  Jump to");
+    Dev::PanelSameLine();
     const struct
     {
         const char* label;
@@ -1162,26 +1163,26 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
     ImGui::PushID("zeus_time_presets");
     for (const auto& time : times)
     {
-        if (ImGui::SmallButton(time.label))
+        if (Dev::SmallButton(time.label))
         {
             hour = time.hour;
             DebugCheats::Cmd_SetTimeOfDay::InvokeHour(hour, out);
             s_zeusStatus = out;
         }
-        ImGui::SameLine();
+        Dev::PanelSameLine();
     }
     ImGui::PopID();
     ImGui::NewLine();
 
     float multiplier = DebugCheats::Cmd_TimeMultiplier::Get();
-    if (ImGui::SliderFloat("Time scale##zeus", &multiplier, 0.1f, 60.0f, "%.1fx", ImGuiSliderFlags_Logarithmic))
+    if (Dev::SliderFloat("Time scale##zeus", &multiplier, 0.1f, 60.0f, "%.1fx", ImGuiSliderFlags_Logarithmic))
     {
         DebugCheats::Cmd_TimeMultiplier::SetValue(multiplier, out);
         s_zeusStatus = out;
     }
-    ImGui::SetItemTooltip("How fast the world clock runs. The engine clamps this to its own range, "
-                          "and the value shown is read back from the engine, so what you see is what "
-                          "it accepted.");
+    Dev::PanelTooltip("How fast the world clock runs. The engine clamps this to its own range, "
+                      "and the value shown is read back from the engine, so what you see is what "
+                      "it accepted.");
 
     ImGui::EndDisabled();
 }
@@ -1189,48 +1190,48 @@ void DrawZeusWeatherAndTime(bool worldAvailable)
 void DrawZeusTab()
 {
     const bool worldAvailable = ZeusWorldAvailable();
-    ImGui::TextUnformatted("Zeus Mode");
-    ImGui::SameLine();
-    ImGui::TextDisabled("native free-fly camera and live spawning");
-    ImGui::Separator();
+    Dev::PanelHeading("Zeus Mode");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("native free-fly camera and live spawning");
+    Dev::PanelSeparator();
 
     ImGui::BeginDisabled(!worldAvailable);
     if (!s_zeusCamera)
     {
-        if (ImGui::Button("Enable free-fly"))
+        if (Dev::Button("Enable free-fly"))
             EnableZeusCamera();
     }
     else
     {
-        if (ImGui::Button("Exit free-fly"))
+        if (Dev::Button("Exit free-fly"))
             DisableZeusCamera();
-        ImGui::SameLine();
-        if (ImGui::Button("Beam player here"))
+        Dev::PanelSameLine();
+        if (Dev::Button("Beam player here"))
             Defer([] { BeamPlayerToZeusCamera(); });
-        ImGui::SetItemTooltip(
+        Dev::PanelTooltip(
             "Places the real player at the current free-fly X/Z position on the terrain, then exits free-fly.");
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("WASD moves, Q/Z changes altitude, and the mouse looks around.\nKeypad +/- changes zoom.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Go to coordinates");
-    ImGui::Separator();
+    Dev::PanelHeading("Go to coordinates");
+    Dev::PanelSeparator();
     ImGui::BeginDisabled(!worldAvailable);
     ImGui::SetNextItemWidth(-1.0f);
     // Enter in the box is the same as pressing the button: pasting a pose and hitting
     // return is the whole gesture this exists for.
-    const bool submitted = ImGui::InputTextWithHint("##zeusgoto", "paste a pose, e.g. 2721.96 944.30 99.33 306.9 -5.4",
-                                                    s_zeusGotoBuf, sizeof(s_zeusGotoBuf),
-                                                    ImGuiInputTextFlags_EnterReturnsTrue);
-    ImGui::SetItemTooltip("X Z ALTITUDE [azimuth elevation] -- the same order this panel's freefly readout prints,\n"
-                          "so you can paste that line back in verbatim, brackets and labels and all.\n"
-                          "Two numbers = X and Z at head height on the terrain.");
-    if (ImGui::Button("Go") || submitted)
+    const bool submitted =
+        Dev::InputTextWithHint("##zeusgoto", "paste a pose, e.g. 2721.96 944.30 99.33 306.9 -5.4", s_zeusGotoBuf,
+                               sizeof(s_zeusGotoBuf), ImGuiInputTextFlags_EnterReturnsTrue);
+    Dev::PanelTooltip("X Z ALTITUDE [azimuth elevation] -- the same order this panel's freefly readout prints,\n"
+                      "so you can paste that line back in verbatim, brackets and labels and all.\n"
+                      "Two numbers = X and Z at head height on the terrain.");
+    if (Dev::Button("Go") || submitted)
         Defer([] { GoToZeusCoordinates(); });
-    ImGui::SameLine();
-    if (ImGui::Button("Copy current pose"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Copy current pose"))
     {
         if (s_zeusCamera)
         {
@@ -1246,21 +1247,21 @@ void DrawZeusTab()
             s_zeusStatus = "No free-fly camera active to copy a pose from.";
         }
     }
-    ImGui::SetItemTooltip("Puts the current free-fly position on the clipboard in the order this box expects.");
+    Dev::PanelTooltip("Puts the current free-fly position on the clipboard in the order this box expects.");
     ImGui::EndDisabled();
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Spawn at camera aim");
-    ImGui::Separator();
+    Dev::PanelHeading("Spawn at camera aim");
+    Dev::PanelSeparator();
     ImGui::BeginDisabled(!worldAvailable);
-    if (ImGui::RadioButton("Unit", s_zeusSpawnKind == 0))
+    if (Dev::RadioButton("Unit", s_zeusSpawnKind == 0))
     {
         s_zeusSpawnKind = 0;
         s_zeusPreset = 0;
         SetZeusClassFromPreset();
     }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("Vehicle", s_zeusSpawnKind == 1))
+    Dev::PanelSameLine();
+    if (Dev::RadioButton("Vehicle", s_zeusSpawnKind == 1))
     {
         s_zeusSpawnKind = 1;
         s_zeusPreset = 0;
@@ -1273,7 +1274,7 @@ void DrawZeusTab()
                    ? kZeusUnitPresets[std::clamp(s_zeusPreset, 0, static_cast<int>(kZeusUnitPresets.size()) - 1)]
                    : kZeusVehiclePresets[std::clamp(s_zeusPreset, 0, static_cast<int>(kZeusVehiclePresets.size()) - 1)];
     };
-    if (ImGui::BeginCombo("Preset", presetName()))
+    if (Dev::BeginCombo("Preset", presetName()))
     {
         const int count = s_zeusSpawnKind == 0 ? static_cast<int>(kZeusUnitPresets.size())
                                                : static_cast<int>(kZeusVehiclePresets.size());
@@ -1289,18 +1290,18 @@ void DrawZeusTab()
         ImGui::EndCombo();
     }
     if (s_zeusSpawnKind == 0)
-        ImGui::Combo("Side", &s_zeusSide, kZeusSideNames.data(), static_cast<int>(kZeusSideNames.size()));
-    ImGui::InputText("Config class", s_zeusClassName, sizeof(s_zeusClassName));
-    ImGui::SetItemTooltip("Any loaded CfgVehicles class can be entered here. Presets use original CWA class names.");
-    ImGui::SliderFloat("Distance (m)", &s_zeusDistance, 2.0f, 250.0f, "%.0f");
-    ImGui::SliderFloat("Heading (deg)", &s_zeusHeading, 0.0f, 359.0f, "%.0f");
-    ImGui::SetItemTooltip("Sets the facing direction before spawning. This is safer than changing a live AI unit.");
-    ImGui::SliderInt("Count", &s_zeusCount, 1, 32);
-    if (ImGui::Button("Spawn"))
+        Dev::Combo("Side", &s_zeusSide, kZeusSideNames.data(), static_cast<int>(kZeusSideNames.size()));
+    Dev::InputText("Config class", s_zeusClassName, sizeof(s_zeusClassName));
+    Dev::PanelTooltip("Any loaded CfgVehicles class can be entered here. Presets use original CWA class names.");
+    Dev::SliderFloat("Distance (m)", &s_zeusDistance, 2.0f, 250.0f, "%.0f");
+    Dev::SliderFloat("Heading (deg)", &s_zeusHeading, 0.0f, 359.0f, "%.0f");
+    Dev::PanelTooltip("Sets the facing direction before spawning. This is safer than changing a live AI unit.");
+    Dev::SliderInt("Count", &s_zeusCount, 1, 32);
+    if (Dev::Button("Spawn"))
         Defer([] { SpawnZeusSelection(); });
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::BeginDisabled(!s_zeusCamera);
-    if (ImGui::Button(s_zeusClickPlacement ? "Stop click placement" : "Place with clicks"))
+    if (Dev::Button(s_zeusClickPlacement ? "Stop click placement" : "Place with clicks"))
     {
         s_zeusClickPlacement = !s_zeusClickPlacement;
         s_zeusStatus = s_zeusClickPlacement
@@ -1313,18 +1314,18 @@ void DrawZeusTab()
     ImGui::EndDisabled();
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Zeus-spawned object editing");
-    ImGui::Separator();
+    Dev::PanelHeading("Zeus-spawned object editing");
+    Dev::PanelSeparator();
     ImGui::BeginDisabled(!s_zeusCamera);
-    if (ImGui::Button("Select under cursor"))
+    if (Dev::Button("Select under cursor"))
         Defer(
             []
             {
                 const ZeusPoint cursor = ZeusCursorPixel();
                 SelectZeusAtCursor(cursor.x, cursor.y);
             });
-    ImGui::SameLine();
-    if (ImGui::Button("Select all Zeus objects"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Select all Zeus objects"))
         Defer(
             []
             {
@@ -1332,23 +1333,23 @@ void DrawZeusTab()
                 s_zeusSelection = s_zeusSpawned;
                 s_zeusStatus = "Selected " + std::to_string(s_zeusSelection.size()) + " Zeus object(s).";
             });
-    ImGui::TextDisabled("Selected: %d", static_cast<int>(s_zeusSelection.size()));
-    ImGui::TextDisabled("With a selection: wheel raises/lowers (Shift = 5m), Shift+drag rotates,");
-    ImGui::TextDisabled("Ctrl+C / Ctrl+V copies at the cursor, Delete removes.");
+    Dev::PanelHelp("Selected: %d", static_cast<int>(s_zeusSelection.size()));
+    Dev::PanelHelp("With a selection: wheel raises/lowers (Shift = 5m), Shift+drag rotates,");
+    Dev::PanelHelp("Ctrl+C / Ctrl+V copies at the cursor, Delete removes.");
     ImGui::BeginDisabled(s_zeusSelection.empty());
-    if (ImGui::Button("Rotate selected to heading"))
+    if (Dev::Button("Rotate selected to heading"))
         Defer([] { RotateZeusSelection(); });
-    ImGui::SameLine();
-    if (ImGui::Button("Delete selected"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Delete selected"))
         Defer([] { DeleteZeusSelection(); });
-    if (ImGui::Button("Copy selected"))
+    if (Dev::Button("Copy selected"))
     {
         s_zeusClipboard = s_zeusSelection;
         s_zeusStatus = "Copied " + std::to_string(s_zeusClipboard.size()) + " Zeus object(s).";
     }
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::BeginDisabled(s_zeusClipboard.empty());
-    if (ImGui::Button("Paste at crosshair"))
+    if (Dev::Button("Paste at crosshair"))
         Defer(
             []
             {
@@ -1379,10 +1380,10 @@ void DrawZeusTab()
     DrawZeusWeatherAndTime(worldAvailable);
 
     if (!worldAvailable)
-        ImGui::TextDisabled("Load a mission or world to use Zeus.");
+        Dev::PanelHelp("Load a mission or world to use Zeus.");
     if (!s_zeusStatus.empty())
     {
-        ImGui::Separator();
+        Dev::PanelSeparator();
         ImGui::TextWrapped("%s", s_zeusStatus.c_str());
     }
 }
@@ -1472,16 +1473,16 @@ void DrawFontTab()
     for (int r = 0; r < 5; r++)
     {
         if (r > 0)
-            ImGui::SameLine();
+            Dev::PanelSameLine();
         bool active = (s_currentRole == r);
         if (active)
             ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.6f, 0.9f, 1.0f));
-        if (ImGui::Button(kRoleNames[r]))
+        if (Dev::Button(kRoleNames[r]))
             s_currentRole = r;
         if (active)
             ImGui::PopStyleColor();
     }
-    ImGui::Separator();
+    Dev::PanelSeparator();
 
     // ── Sliders for the selected face ─────────────────────────────
     LoadTuningIfNeeded();
@@ -1490,11 +1491,11 @@ void DrawFontTab()
     ImGui::Text("%s - %s (alias %s)", kRoleNames[s_currentRole], role.prefix, role.alias ? role.alias : "(none)");
 
     bool changed = false;
-    changed |= ImGui::SliderInt("renderPx", &role.renderPx, 8, 128);
-    changed |= ImGui::SliderFloat("widthScale", &role.widthScale, 0.3f, 1.6f, "%.3f");
-    changed |= ImGui::SliderFloat("baseline", &role.baselineOffset, -16.0f, 16.0f, "%.1f px");
-    changed |= ImGui::SliderFloat("bold", &role.syntheticBold, -2.0f, 4.0f, "%.1f px");
-    changed |= ImGui::SliderFloat("spacing", &role.letterSpacing, -4.0f, 8.0f, "%.1f px");
+    changed |= Dev::SliderInt("renderPx", &role.renderPx, 8, 128);
+    changed |= Dev::SliderFloat("widthScale", &role.widthScale, 0.3f, 1.6f, "%.3f");
+    changed |= Dev::SliderFloat("baseline", &role.baselineOffset, -16.0f, 16.0f, "%.1f px");
+    changed |= Dev::SliderFloat("bold", &role.syntheticBold, -2.0f, 4.0f, "%.1f px");
+    changed |= Dev::SliderFloat("spacing", &role.letterSpacing, -4.0f, 8.0f, "%.1f px");
     if (changed)
     {
         SetFontMappingTuning(role.prefix, role.renderPx, role.widthScale, role.baselineOffset, role.syntheticBold,
@@ -1503,28 +1504,28 @@ void DrawFontTab()
             SetFontMappingTuning(role.alias, role.renderPx, role.widthScale, role.baselineOffset, role.syntheticBold,
                                  role.letterSpacing, nullptr);
     }
-    ImGui::Separator();
+    Dev::PanelSeparator();
 
-    if (ImGui::Button("Dump font table to log"))
+    if (Dev::Button("Dump font table to log"))
     {
         LOG_INFO(Graphics, "\n{}", DumpFontTable());
     }
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("License plates");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("License plates");
     LicensePlateTextTuning plate = GetLicensePlateTextTuning();
     bool plateChanged = false;
-    plateChanged |= ImGui::SliderFloat("plate width", &plate.widthScale, 0.30f, 1.20f, "%.3f");
-    plateChanged |= ImGui::SliderFloat("plate x offset", &plate.horizontalOffset, -5.00f, 1.00f, "%.2f em");
-    plateChanged |= ImGui::SliderFloat("plate y offset", &plate.verticalOffset, -1.00f, 2.00f, "%.2f em");
-    plateChanged |= ImGui::SliderFloat("plate surface offset", &plate.surfaceOffset, 0.000f, 0.050f, "%.3f m");
-    plateChanged |= ImGui::SliderFloat("plate softness", &plate.softness, 0.000f, 0.050f, "%.3f em");
+    plateChanged |= Dev::SliderFloat("plate width", &plate.widthScale, 0.30f, 1.20f, "%.3f");
+    plateChanged |= Dev::SliderFloat("plate x offset", &plate.horizontalOffset, -5.00f, 1.00f, "%.2f em");
+    plateChanged |= Dev::SliderFloat("plate y offset", &plate.verticalOffset, -1.00f, 2.00f, "%.2f em");
+    plateChanged |= Dev::SliderFloat("plate surface offset", &plate.surfaceOffset, 0.000f, 0.050f, "%.3f m");
+    plateChanged |= Dev::SliderFloat("plate softness", &plate.softness, 0.000f, 0.050f, "%.3f em");
     if (plateChanged)
         SetLicensePlateTextTuning(plate);
-    ImGui::SameLine();
-    if (ImGui::Button("Reset plate"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Reset plate"))
         ResetLicensePlateTextTuning();
-    ImGui::TextDisabled("  session-only override; defaults come from CfgLicensePlateText");
+    Dev::PanelHelp("  session-only override; defaults come from CfgLicensePlateText");
 }
 
 // Last command output for the Cheats tab — shown under the buttons so
@@ -1535,17 +1536,17 @@ template <typename ClickFn>
 void CheatButton(const char* label, bool enabled, const char* tooltip, ClickFn&& click)
 {
     ImGui::BeginDisabled(!enabled);
-    if (ImGui::Button(label))
+    if (Dev::Button(label))
         click();
     ImGui::EndDisabled();
-    if (tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (tooltip && Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tooltip);
 }
 
 void DrawCheatsTab()
 {
-    ImGui::TextUnformatted("Mission");
-    ImGui::Separator();
+    Dev::PanelHeading("Mission");
+    Dev::PanelSeparator();
 
     // One-button End Mission, matching the original OFP ENDMISSION word
     // cheat shape — no outcome picker; the cheat just wins the mission.
@@ -1577,8 +1578,8 @@ void DrawCheatsTab()
                 });
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("System");
-    ImGui::Separator();
+    Dev::PanelHeading("System");
+    Dev::PanelSeparator();
 
     // Full in-process reload — re-mounts all banks/addons/config and rebuilds
     // the world on the same window (the mod "Apply" path).  Gated to outside a
@@ -1611,8 +1612,8 @@ void DrawCheatsTab()
                 });
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Player");
-    ImGui::Separator();
+    Dev::PanelHeading("Player");
+    Dev::PanelSeparator();
 
     // God mode — sticky toggle.  Disabled state mirrors EndMission's
     // gating: needs a mission with a real player.  The toggle itself
@@ -1620,10 +1621,10 @@ void DrawCheatsTab()
     const bool canGod = DebugCheats::Cmd_God::Available();
     bool god = DebugCheats::Cmd_God::IsActive();
     ImGui::BeginDisabled(!canGod);
-    if (ImGui::Checkbox("God mode", &god))
+    if (Dev::Checkbox("God mode", &god))
         DebugCheats::Cmd_God::SetActive(god);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canGod ? "Silently drop all damage applied to the real player.\n"
                                          "Hooked in Object::SetDammage so every weapon / explosion /\n"
                                          "fall is covered, not just script-driven damage."
@@ -1633,18 +1634,18 @@ void DrawCheatsTab()
     const bool canAmmo = DebugCheats::Cmd_InfiniteAmmo::Available();
     bool infammo = DebugCheats::Cmd_InfiniteAmmo::IsActive();
     ImGui::BeginDisabled(!canAmmo);
-    if (ImGui::Checkbox("Infinite ammo", &infammo))
+    if (Dev::Checkbox("Infinite ammo", &infammo))
         DebugCheats::Cmd_InfiniteAmmo::SetActive(infammo);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canAmmo ? "Refund the burst the real player just fired so the current\n"
                                           "magazine never depletes.  Hooked in EntityAI::FireWeapon.\n"
                                           "AI weapons fire normally; magazine swaps are unaffected."
                                         : "Requires an active mission.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Vehicle (player's current)");
-    ImGui::Separator();
+    Dev::PanelHeading("Vehicle (player's current)");
+    Dev::PanelSeparator();
 
     // Infinite fuel — hooked in Transport::ConsumeFuel.  Only meaningful
     // when the player is inside a vehicle; the gating logic itself
@@ -1653,10 +1654,10 @@ void DrawCheatsTab()
     const bool canFuel = DebugCheats::Cmd_InfiniteFuel::Available();
     bool inffuel = DebugCheats::Cmd_InfiniteFuel::IsActive();
     ImGui::BeginDisabled(!canFuel);
-    if (ImGui::Checkbox("Infinite fuel", &inffuel))
+    if (Dev::Checkbox("Infinite fuel", &inffuel))
         DebugCheats::Cmd_InfiniteFuel::SetActive(inffuel);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canFuel ? "Refund fuel consumption on the vehicle the player is in.\n"
                                           "Hook lives in Transport::ConsumeFuel.  Refuel still works.\n"
                                           "No effect when on foot or in an AI-driven vehicle."
@@ -1667,18 +1668,18 @@ void DrawCheatsTab()
     const bool canArmor = DebugCheats::Cmd_InfiniteArmor::Available();
     bool infarmor = DebugCheats::Cmd_InfiniteArmor::IsActive();
     ImGui::BeginDisabled(!canArmor);
-    if (ImGui::Checkbox("Infinite armor", &infarmor))
+    if (Dev::Checkbox("Infinite armor", &infarmor))
         DebugCheats::Cmd_InfiniteArmor::SetActive(infarmor);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canArmor ? "Drop damage to the vehicle the player is currently in.\n"
                                            "Hooked alongside god mode in Object::SetDammage.\n"
                                            "Covers tanks, jeeps, planes, helicopters."
                                          : "Requires an active mission.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Actions");
-    ImGui::Separator();
+    Dev::PanelHeading("Actions");
+    Dev::PanelSeparator();
 
     // Store position — log + clipboard.  The original OFP INSERT dev
     // hotkey.  Always available when a scene is up (works in the menu
@@ -1704,7 +1705,7 @@ void DrawCheatsTab()
 
     // Load game — inverse.  Grey out when the save file isn't on disk.
     const bool canLoad = DebugCheats::Cmd_LoadGame::Available();
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     CheatButton("Load game now", canLoad,
                 canLoad ? "Restore from <SaveDir>/save.fps via World::LoadBin.\n"
                           "Same engine path the normal 'Load Game' menu uses;\n"
@@ -1720,19 +1721,19 @@ void DrawCheatsTab()
     // discrete buttons match the dev panel's click-driven UI better.
     const bool canTime = DebugCheats::Cmd_SkipTime::Available();
     ImGui::BeginDisabled(!canTime);
-    if (ImGui::Button("Time -1h"))
+    if (Dev::Button("Time -1h"))
         DebugCheats::Cmd_SkipTime::InvokeHours(-1.0f, s_cheatsStatus);
-    ImGui::SameLine();
-    if (ImGui::Button("Time +1h"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Time +1h"))
         DebugCheats::Cmd_SkipTime::InvokeHours(+1.0f, s_cheatsStatus);
-    ImGui::SameLine();
-    if (ImGui::Button("Time -24h"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Time -24h"))
         DebugCheats::Cmd_SkipTime::InvokeHours(-24.0f, s_cheatsStatus);
-    ImGui::SameLine();
-    if (ImGui::Button("Time +24h"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Time +24h"))
         DebugCheats::Cmd_SkipTime::InvokeHours(+24.0f, s_cheatsStatus);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !canTime)
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !canTime)
         ImGui::SetTooltip("Requires an active mission.");
 
     // Precise time-of-day seek.  The slider re-reads the clock every frame, so it
@@ -1742,13 +1743,13 @@ void DrawCheatsTab()
     ImGui::BeginDisabled(!canTime);
     float todHours = Glob.clock.GetTimeOfDay() * 24.0f;
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::SliderFloat("Time of day", &todHours, 0.0f, 24.0f, "%05.2f h"))
+    if (Dev::SliderFloat("Time of day", &todHours, 0.0f, 24.0f, "%05.2f h"))
     {
         const float cur = Glob.clock.GetTimeOfDay() * 24.0f;
         DebugCheats::Cmd_SkipTime::InvokeHours(todHours - cur, s_cheatsStatus);
     }
-    ImGui::SetItemTooltip("Seek the time of day. Ctrl+click to type an exact hour.\n"
-                          "Sun angle & season stay consistent (skips real time).");
+    Dev::PanelTooltip("Seek the time of day. Ctrl+click to type an exact hour.\n"
+                      "Sun angle & season stay consistent (skips real time).");
     ImGui::EndDisabled();
 
     // Skipping time advances the overcast/fog forecast (World::SimulateLandscape), which
@@ -1756,18 +1757,18 @@ void DrawCheatsTab()
     if (GWorld)
     {
         bool freeze = GWorld->IsWeatherFrozen();
-        if (ImGui::Checkbox("Freeze weather while scrubbing time", &freeze))
+        if (Dev::Checkbox("Freeze weather while scrubbing time", &freeze))
             GWorld->SetFreezeWeather(freeze);
-        ImGui::SetItemTooltip("Stops the overcast/fog forecast from advancing when you skip time,\n"
-                              "so scrubbing changes only the sun/sky — not rain or view distance.");
+        Dev::PanelTooltip("Stops the overcast/fog forecast from advancing when you skip time,\n"
+                          "so scrubbing changes only the sun/sky — not rain or view distance.");
     }
 
     // Weather presets — instant overcast change.  No active-value
     // highlight: there's no public World::GetOvercast() to read back,
     // so we can't reliably show which preset is in effect.
     const bool canWeather = DebugCheats::Cmd_SetWeather::Available();
-    ImGui::TextUnformatted("Weather:");
-    ImGui::SameLine();
+    Dev::PanelHeading("Weather:");
+    Dev::PanelSameLine();
     ImGui::BeginDisabled(!canWeather);
     struct WeatherPreset
     {
@@ -1783,12 +1784,12 @@ void DrawCheatsTab()
     for (int i = 0; i < (int)(sizeof(kWeather) / sizeof(kWeather[0])); i++)
     {
         if (i > 0)
-            ImGui::SameLine();
-        if (ImGui::Button(kWeather[i].label))
+            Dev::PanelSameLine();
+        if (Dev::Button(kWeather[i].label))
             DebugCheats::Cmd_SetWeather::InvokeOvercast(kWeather[i].overcast, s_cheatsStatus);
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !canWeather)
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && !canWeather)
         ImGui::SetTooltip("Requires an active mission.");
 
     // Time multiplier — preset list.  Highlights the active value so
@@ -1797,8 +1798,8 @@ void DrawCheatsTab()
     // clamped value.
     const bool canMult = DebugCheats::Cmd_TimeMultiplier::Available();
     const float currentMult = canMult ? DebugCheats::Cmd_TimeMultiplier::Get() : 1.0f;
-    ImGui::TextUnformatted("Time multiplier:");
-    ImGui::SameLine();
+    Dev::PanelHeading("Time multiplier:");
+    Dev::PanelSameLine();
     ImGui::BeginDisabled(!canMult);
     static const float kPresets[] = {0.5f, 1.0f, 2.0f, 4.0f};
     for (int i = 0; i < (int)(sizeof(kPresets) / sizeof(kPresets[0])); i++)
@@ -1811,8 +1812,8 @@ void DrawCheatsTab()
         char label[16];
         snprintf(label, sizeof(label), "%.1fx", v);
         if (i > 0)
-            ImGui::SameLine();
-        if (ImGui::Button(label))
+            Dev::PanelSameLine();
+        if (Dev::Button(label))
             DebugCheats::Cmd_TimeMultiplier::SetValue(v, s_cheatsStatus);
         if (isActive)
             ImGui::PopStyleColor();
@@ -1822,17 +1823,17 @@ void DrawCheatsTab()
     // Unlock campaign — writes <TmpSaveDir>/<campaign>.sqc files
     // directly so the unlock survives reopening the campaign load
     // screen.  Works from any display.
-    if (ImGui::Button("Unlock all campaigns"))
+    if (Dev::Button("Unlock all campaigns"))
         Defer([] { DebugCheats::Cmd_UnlockCampaign::Invoke("", s_cheatsStatus); });
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("%s", "Mark every mission of every installed campaign as available.\n"
                                 "Writes the unlock to <TmpSaveDir>/<campaign>.sqc so the\n"
                                 "next Campaign Load open sees it.  Refreshes the live list\n"
                                 "if the Campaign Load screen happens to be open right now.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Map");
-    ImGui::Separator();
+    Dev::PanelHeading("Map");
+    Dev::PanelSeparator();
 
     // Show all units — independent of the _showUnits flag (which is
     // _ENABLE_CHEATS-gated).  Adds an unconditional DrawUnits pass in
@@ -1840,10 +1841,10 @@ void DrawCheatsTab()
     const bool canShowAll = DebugCheats::Cmd_ShowAllUnits::Available();
     bool showAll = DebugCheats::Cmd_ShowAllUnits::IsActive();
     ImGui::BeginDisabled(!canShowAll);
-    if (ImGui::Checkbox("Show all units on map", &showAll))
+    if (Dev::Checkbox("Show all units on map", &showAll))
         DebugCheats::Cmd_ShowAllUnits::SetActive(showAll);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canShowAll ? "Draw every unit of every side on the in-mission map,\n"
                                              "bypassing fog-of-war and side filtering.  Hooked in\n"
                                              "CStaticMapMain::DrawExt."
@@ -1855,10 +1856,10 @@ void DrawCheatsTab()
     const bool canTeleport = DebugCheats::Cmd_MapTeleport::Available();
     bool teleport = DebugCheats::Cmd_MapTeleport::IsActive();
     ImGui::BeginDisabled(!canTeleport);
-    if (ImGui::Checkbox("Click-on-map to teleport", &teleport))
+    if (Dev::Checkbox("Click-on-map to teleport", &teleport))
         DebugCheats::Cmd_MapTeleport::SetActive(teleport);
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", canTeleport ? "Open the in-mission map (M) and left-click anywhere to\n"
                                               "teleport the player's vehicle.  Snaps to the ground\n"
                                               "surface height; if you're in a tank/chopper, the whole\n"
@@ -1867,7 +1868,7 @@ void DrawCheatsTab()
 
     if (!s_cheatsStatus.empty())
     {
-        ImGui::Separator();
+        Dev::PanelSeparator();
         ImGui::TextWrapped("Last: %s", s_cheatsStatus.c_str());
     }
 }
@@ -1928,10 +1929,10 @@ ControlsCategory DebugSettingsCategoryForContext(InputContext context)
 
 void DrawInputContextDiagnostics()
 {
-    ImGui::TextUnformatted("Input context");
+    Dev::PanelHeading("Input context");
     if (!GWorld)
     {
-        ImGui::TextDisabled("world not loaded");
+        Dev::PanelHelp("world not loaded");
         return;
     }
 
@@ -2130,52 +2131,52 @@ PositionLines BuildPositionLines(int prec)
 
 void DrawPositionDiagnostics()
 {
-    ImGui::TextUnformatted("Position");
-    ImGui::Separator();
+    Dev::PanelHeading("Position");
+    Dev::PanelSeparator();
     const PositionLines out = BuildPositionLines(gPosPrecision);
     if (!out.valid)
     {
-        ImGui::TextDisabled("no world loaded");
+        Dev::PanelHelp("no world loaded");
         return;
     }
 
-    ImGui::TextUnformatted(out.player);
-    ImGui::SameLine();
-    if (ImGui::Button("Copy##pl"))
+    Dev::PanelHeading(out.player);
+    Dev::PanelSameLine();
+    if (Dev::Button("Copy##pl"))
         ImGui::SetClipboardText(out.player);
 
-    ImGui::TextUnformatted(out.cam);
-    ImGui::SameLine();
-    if (ImGui::Button("Copy##cam"))
+    Dev::PanelHeading(out.cam);
+    Dev::PanelSameLine();
+    if (Dev::Button("Copy##cam"))
         ImGui::SetClipboardText(out.cam);
 
     if (out.hasFreefly)
     {
-        ImGui::TextUnformatted(out.freefly);
-        ImGui::SameLine();
-        if (ImGui::Button("Copy##freefly"))
+        Dev::PanelHeading(out.freefly);
+        Dev::PanelSameLine();
+        if (Dev::Button("Copy##freefly"))
             ImGui::SetClipboardText(out.freefly);
     }
 
-    ImGui::TextUnformatted(out.tgt);
-    ImGui::SameLine();
-    if (ImGui::Button("Copy##tgt"))
+    Dev::PanelHeading(out.tgt);
+    Dev::PanelSameLine();
+    if (Dev::Button("Copy##tgt"))
         ImGui::SetClipboardText(out.tgt);
 
-    ImGui::TextUnformatted(out.time);
+    Dev::PanelHeading(out.time);
 
     char all[960];
     if (out.hasFreefly)
         snprintf(all, sizeof(all), "%s | %s | %s | %s | %s", out.player, out.cam, out.freefly, out.tgt, out.time);
     else
         snprintf(all, sizeof(all), "%s | %s | %s | %s", out.player, out.cam, out.tgt, out.time);
-    if (ImGui::Button("Copy all##pos"))
+    if (Dev::Button("Copy all##pos"))
         ImGui::SetClipboardText(all);
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     ImGui::SetNextItemWidth(110.0f);
-    ImGui::SliderInt("decimals", &gPosPrecision, 0, 4);
-    ImGui::Checkbox("Compact HUD overlay", &gPosCompactHud);
-    if (ImGui::IsItemHovered())
+    Dev::SliderInt("decimals", &gPosPrecision, 0, 4);
+    Dev::Checkbox("Compact HUD overlay", &gPosCompactHud);
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Draw the same numbers as a small always-on overlay,\nfor lining a shot up without the "
                           "panel covering it.");
 }
@@ -2219,42 +2220,42 @@ void DrawGameTab()
     DrawPositionDiagnostics();
     ImGui::Spacing();
 
-    ImGui::TextUnformatted("Language");
-    ImGui::Separator();
+    Dev::PanelHeading("Language");
+    Dev::PanelSeparator();
 
     // Text language — drives stringtables, mission briefings, UI.
     const char* currentText = GLanguage;
     int textIdx = FindLangIndex(currentText);
-    if (ImGui::Combo("Text", &textIdx, kGameLangs, kGameLangsCount))
+    if (Dev::Combo("Text", &textIdx, kGameLangs, kGameLangsCount))
         Defer([picked = std::string(kGameLangs[textIdx])] { SetLanguage(RString(picked.c_str())); });
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Stringtables, mission briefings, UI labels.\nSame as the F12 dev-only hotkey.");
 
     // Voice language — drives <base>.<voiceLang>.<ext> sound lookups.
     const std::string voiceLang = GetSelectedVoiceLanguage();
     int voiceIdx = FindLangIndex(voiceLang.c_str());
-    if (ImGui::Combo("Voice", &voiceIdx, kGameLangs, kGameLangsCount))
+    if (Dev::Combo("Voice", &voiceIdx, kGameLangs, kGameLangsCount))
         Defer([picked = std::string(kGameLangs[voiceIdx])] { SetSelectedVoiceLanguage(picked); });
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Voice-over track for say / playSound / radio.\nSame as the F11 dev-only hotkey.\nIn-flight "
                           "audio is unaffected; lookup applies on the next play.");
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("View distance");
-    ImGui::Separator();
+    Dev::PanelHeading("View distance");
+    Dev::PanelSeparator();
 
     // VD slider — clamped to the same range as the Options UI.  Engine
     // saturates internally too; we mirror so the slider can't request
     // a value that just gets clipped silently.
     static float s_vd = ENGINE_CONFIG.tacticalZ;
     s_vd = ENGINE_CONFIG.tacticalZ; // sync with whatever else set it
-    if (ImGui::SliderFloat("VD (m)", &s_vd, GameSettingsConfig::kMinViewDistance, GameSettingsConfig::kMaxViewDistance,
-                           "%.0f m"))
+    if (Dev::SliderFloat("VD (m)", &s_vd, GameSettingsConfig::kMinViewDistance, GameSettingsConfig::kMaxViewDistance,
+                         "%.0f m"))
     {
         const float v = s_vd;
         Defer([v] { SetVisibility(v); });
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Terrain / horizon distance (the master).\nRange %.0f..%.0f m.  Bypasses the "
                           "per-tier graphics preset.",
                           GameSettingsConfig::kMinViewDistance, GameSettingsConfig::kMaxViewDistance);
@@ -2262,8 +2263,8 @@ void DrawGameTab()
     // there are no separate sliders — moving VD moves all three.
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Diagnostics");
-    ImGui::Separator();
+    Dev::PanelHeading("Diagnostics");
+    Dev::PanelSeparator();
 
     DrawInputContextDiagnostics();
     ImGui::Spacing();
@@ -2272,9 +2273,9 @@ void DrawGameTab()
     // diagnostic overlay, hidden from players by default.  Off shows the plain
     // mission overview; on prepends the per-language text/voice/view-distance table.
     bool showLoc = MissionLanguageDetector::ShowLocalizationDebugInfo();
-    if (ImGui::Checkbox("Mission localization info (TXT/VO/VD)", &showLoc))
+    if (Dev::Checkbox("Mission localization info (TXT/VO/VD)", &showLoc))
         MissionLanguageDetector::SetShowLocalizationDebugInfo(showLoc);
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Prepend the per-language text/voice availability and view-distance\n"
                           "table to the mission preview.  Re-select a mission to refresh.");
 }
@@ -2363,15 +2364,15 @@ void ConsoleRun(std::string_view line)
 
 void DrawConsoleTab()
 {
-    ImGui::TextUnformatted("SQF / DebugCommands console");
-    ImGui::Separator();
+    Dev::PanelHeading("SQF / DebugCommands console");
+    Dev::PanelSeparator();
 
     // Scrollback region.  Reserve room for the input row at the bottom.
     const float inputRowH = ImGui::GetFrameHeightWithSpacing();
     if (ImGui::BeginChild("ConsoleScroll", ImVec2(0, -inputRowH), true, ImGuiWindowFlags_HorizontalScrollbar))
     {
         for (const auto& line : s_console.scrollback)
-            ImGui::TextUnformatted(line.c_str());
+            Dev::PanelHeading(line.c_str());
         if (s_console.autoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
             ImGui::SetScrollHereY(1.0f);
     }
@@ -2386,10 +2387,10 @@ void DrawConsoleTab()
         ImGui::SetKeyboardFocusHere();
         s_console.focusOnShow = false;
     }
-    bool entered = ImGui::InputText("##ConsoleInput", s_console.input, sizeof(s_console.input),
-                                    ImGuiInputTextFlags_EnterReturnsTrue);
-    ImGui::SameLine();
-    bool clicked = ImGui::Button("Run");
+    bool entered = Dev::InputText("##ConsoleInput", s_console.input, sizeof(s_console.input),
+                                  ImGuiInputTextFlags_EnterReturnsTrue);
+    Dev::PanelSameLine();
+    bool clicked = Dev::Button("Run");
     if (entered || clicked)
     {
         std::string line(s_console.input);
@@ -2398,13 +2399,13 @@ void DrawConsoleTab()
             Defer([line] { ConsoleRun(line); });
         ImGui::SetKeyboardFocusHere(-1); // refocus the text box
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Clear"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Clear"))
         s_console.scrollback.clear();
-    ImGui::SameLine();
-    ImGui::Checkbox("Auto-scroll", &s_console.autoScroll);
+    Dev::PanelSameLine();
+    Dev::Checkbox("Auto-scroll", &s_console.autoScroll);
 
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Bare lines dispatch through DebugCommands first\n"
                           "(save, endmission win, weather 0.5, …).\n"
                           "Prefix `:` to force SQF (e.g. `:hint \"hi\"`)");
@@ -2449,8 +2450,8 @@ void DrawProfileTab()
 {
     ProfileSample(); // pump every draw
 
-    ImGui::TextUnformatted("Frame stats");
-    ImGui::Separator();
+    Dev::PanelHeading("Frame stats");
+    Dev::PanelSeparator();
 
     const float fps = ProfileFps();
     const float ms = ProfileFrameMs();
@@ -2463,25 +2464,25 @@ void DrawProfileTab()
         // the requested command-line backend, which can differ after a
         // fallback or a failed backend construction.
         ImGui::Text("Renderer: %s", static_cast<const char*>(GEngine->GetRendererName()));
-        ImGui::TextDisabled("Runtime: %s", static_cast<const char*>(GEngine->GetDebugName()));
+        Dev::PanelHelp("Runtime: %s", static_cast<const char*>(GEngine->GetDebugName()));
         const uint32_t caps = GEngine->GetRuntimeCapabilityFlags();
         if (caps)
         {
-            ImGui::TextDisabled("Capabilities: BC=%s bindless=%s timestamps=%s in-pass=%s HDR=%s MSAA=%s",
-                                (caps & (1u << 0)) ? "yes" : "no", "yes", (caps & (1u << 4)) ? "yes" : "no",
-                                (caps & (1u << 5)) ? "yes" : "no", (caps & (1u << 6)) ? "yes" : "no",
-                                (caps & (1u << 7)) ? "yes" : "no");
+            Dev::PanelHelp("Capabilities: BC=%s bindless=%s timestamps=%s in-pass=%s HDR=%s MSAA=%s",
+                           (caps & (1u << 0)) ? "yes" : "no", "yes", (caps & (1u << 4)) ? "yes" : "no",
+                           (caps & (1u << 5)) ? "yes" : "no", (caps & (1u << 6)) ? "yes" : "no",
+                           (caps & (1u << 7)) ? "yes" : "no");
         }
     }
 
     // Frame-time plot.  PlotLines is fine for ring-buffered floats;
     // ImGui handles the visual stride.  Y-axis fixed 0..50 ms (~20fps
     // floor) so spikes are visible without auto-rescaling jitter.
-    ImGui::Separator();
+    Dev::PanelSeparator();
     ImGui::PlotLines("##frame_ms", s_frameMs, kProfHistory, s_frameMsHead, "frame ms (last 240)", 0.0f, 50.0f,
                      ImVec2(0, 80));
 
-    if (ImGui::Button("Reset history"))
+    if (Dev::Button("Reset history"))
     {
         for (int i = 0; i < kProfHistory; i++)
             s_frameMs[i] = 0.0f;
@@ -2520,27 +2521,27 @@ void DrawMemoryTab()
     const float mb = ToMB(stats.used);
     const float peakMb = ToMB(s_memPeak);
 
-    ImGui::TextUnformatted("Process heap");
-    ImGui::Separator();
+    Dev::PanelHeading("Process heap");
+    Dev::PanelSeparator();
     ImGui::Text("Current: %.1f MB", mb);
     ImGui::Text("Peak:    %.1f MB", peakMb);
     if (stats.softLimit || stats.hardLimit)
     {
         ImGui::Text("Soft (trim):  %.0f MB%s", ToMB(stats.softLimit),
                     stats.softLimit && stats.used > stats.softLimit ? "  (OVER — trimming to budgets)" : "");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("Pressure watermark. Over it, each cache is trimmed back to its own\n"
                               "declared budget once per frame (FrameMaintenance). Never refuses.");
         ImGui::Text("Hard (evict): %.0f MB%s", ToMB(stats.hardLimit),
                     stats.hardLimit && stats.used > stats.hardLimit ? "  (OVER — evicting caches)" : "");
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("Eviction target, not a wall. Over it the allocator additionally claws\n"
                               "memory back with cost-ordered cache eviction — but never refuses an\n"
                               "allocation: refusing would crash the engine's many unchecked `new` sites.");
     }
     else
     {
-        ImGui::TextDisabled("No process limit set (unlimited).");
+        Dev::PanelHelp("No process limit set (unlimited).");
     }
 
     // Plot — same shape as the profile tab.  Y-axis floats around the
@@ -2551,7 +2552,7 @@ void DrawMemoryTab()
     ImGui::PlotHistogram("##mem_mb", s_memMb, kMemHistory, s_memHead, overlay, 0.0f, peakMb * 1.1f + 1.0f,
                          ImVec2(0, 80));
 
-    if (ImGui::Button("Reset peak / history"))
+    if (Dev::Button("Reset peak / history"))
     {
         for (int i = 0; i < kMemHistory; i++)
             s_memMb[i] = 0.0f;
@@ -2566,17 +2567,17 @@ void DrawMemoryTab()
 
     ImGui::Spacing();
     ImGui::Text("Subsystems (%d registered)", n);
-    ImGui::SameLine();
-    if (ImGui::Button("Trim caches now"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Trim caches now"))
         Defer([] { Foundation::MemoryEnforceBudgets(); });
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Evict every registered cache back to its declared budget\n"
                           "(FreeOnDemand). Domains with no budget are untouched.");
-    ImGui::Separator();
+    Dev::PanelSeparator();
 
     if (n == 0)
     {
-        ImGui::TextDisabled("(no subsystems registered yet)");
+        Dev::PanelHelp("(no subsystems registered yet)");
     }
     else if (ImGui::BeginTable("mem_domains", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
@@ -2589,7 +2590,7 @@ void DrawMemoryTab()
             const Foundation::MemoryDomainStat& d = domains[i];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(d.name);
+            Dev::PanelHeading(d.name);
             ImGui::TableNextColumn();
             // Byte-accounted caches show MB; count-only registries (shapes,
             // materials) show their item count instead of a misleading 0 MB.
@@ -2607,7 +2608,7 @@ void DrawMemoryTab()
             }
             else
             {
-                ImGui::TextDisabled("— (no budget)");
+                Dev::PanelHelp("— (no budget)");
             }
         }
         ImGui::EndTable();
@@ -2618,23 +2619,22 @@ void DrawMemoryTab()
     if (GEngine && GEngine->GetGpuMemoryStats(gpu))
     {
         ImGui::Spacing();
-        ImGui::TextUnformatted("WGPU dynamic residency (portable lower bound)");
-        ImGui::Separator();
+        Dev::PanelHeading("WGPU dynamic residency (portable lower bound)");
+        Dev::PanelSeparator();
         ImGui::Text("Tracked allocation: %.1f / %.0f MB%s", ToMB(gpu.trackedBytes), ToMB(gpu.budgetBytes),
                     gpu.overBudget ? "  (OVER BUDGET)" : "");
-        ImGui::Text("Object textures:   %.1f MB in %u textures", ToMB(gpu.objectTextureBytes),
-                    gpu.objectTextureCount);
+        ImGui::Text("Object textures:   %.1f MB in %u textures", ToMB(gpu.objectTextureBytes), gpu.objectTextureCount);
         ImGui::Text("Geometry payload:  %.1f MB live", ToMB(gpu.geometryLiveBytes));
-        ImGui::Text("Geometry buffers:  %.1f MB capacity + %.1f MB retired in-flight",
-                    ToMB(gpu.geometryCapacityBytes), ToMB(gpu.geometryRetiredBytes));
-        if (ImGui::IsItemHovered())
+        ImGui::Text("Geometry buffers:  %.1f MB capacity + %.1f MB retired in-flight", ToMB(gpu.geometryCapacityBytes),
+                    ToMB(gpu.geometryRetiredBytes));
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("WebGPU does not expose driver-private alignment and metadata.\n"
                               "These are exact resource payload/buffer sizes and therefore\n"
                               "a lower bound, not total physical VRAM usage.");
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("Set process limits (MB; soft=trim, hard=evict; 0 = unlimited):");
+    Dev::PanelHelp("Set process limits (MB; soft=trim, hard=evict; 0 = unlimited):");
     static int s_softMB = -1, s_hardMB = -1;
     if (s_softMB < 0) // seed once from the live values
     {
@@ -2642,22 +2642,22 @@ void DrawMemoryTab()
         s_hardMB = static_cast<int>(ToMB(stats.hardLimit));
     }
     ImGui::SetNextItemWidth(120);
-    ImGui::InputInt("soft (trim) MB", &s_softMB, 32, 256);
-    ImGui::SameLine();
+    Dev::InputInt("soft (trim) MB", &s_softMB, 32, 256);
+    Dev::PanelSameLine();
     ImGui::SetNextItemWidth(120);
-    ImGui::InputInt("hard (evict) MB", &s_hardMB, 32, 256);
+    Dev::InputInt("hard (evict) MB", &s_hardMB, 32, 256);
     if (s_softMB < 0)
         s_softMB = 0;
     if (s_hardMB < 0)
         s_hardMB = 0;
-    if (ImGui::Button("Apply limits"))
+    if (Dev::Button("Apply limits"))
     {
         const size_t soft = static_cast<size_t>(s_softMB) * (1024 * 1024);
         const size_t hard = static_cast<size_t>(s_hardMB) * (1024 * 1024);
         Defer([soft, hard] { Foundation::SetProcessMemoryLimits(soft, hard); });
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("session-only; persist via EngineConfig");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("session-only; persist via EngineConfig");
 }
 
 // Live mod picker + in-process reload. Lists the @<mod> folders actually present
@@ -2669,9 +2669,9 @@ void DrawModsTab()
     namespace fs = std::filesystem;
     const std::string modsRoot = GamePaths::Instance().ModsDir();
 
-    ImGui::TextUnformatted("Mods folder (scanned live):");
+    Dev::PanelHeading("Mods folder (scanned live):");
     ImGui::TextWrapped("%s", modsRoot.c_str());
-    ImGui::Separator();
+    Dev::PanelSeparator();
 
     // Checkbox state persists across frames: modId ("@foo") -> checked.
     static std::map<std::string, bool> s_modChecked;
@@ -2694,13 +2694,13 @@ void DrawModsTab()
     std::sort(mods.begin(), mods.end());
 
     if (mods.empty())
-        ImGui::TextDisabled("(no @<mod> folders here yet — drop one in and it shows up)");
+        Dev::PanelHelp("(no @<mod> folders here yet — drop one in and it shows up)");
 
     for (const std::string& modId : mods)
     {
         auto it = s_modChecked.find(modId);
         bool checked = (it != s_modChecked.end()) ? it->second : false;
-        if (ImGui::Checkbox(modId.c_str(), &checked) || it == s_modChecked.end())
+        if (Dev::Checkbox(modId.c_str(), &checked) || it == s_modChecked.end())
             s_modChecked[modId] = checked;
     }
 
@@ -2719,7 +2719,7 @@ void DrawModsTab()
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
+    Dev::PanelSeparator();
     ImGui::TextWrapped("Apply set: %s", modPath.empty() ? "(none — base game only)" : modPath.c_str());
 
     const bool canReload = Poseidon::GApp != nullptr && Poseidon::GApp->m_canRender && GWorld != nullptr &&
@@ -2841,7 +2841,7 @@ void DrawAspectTab()
         SDL_Rect ub{};
         if (SDL_GetDisplayUsableBounds(disp, &ub) && ub.h > 0)
             ImGui::Text("monitor: %d x %d  (%.3f)", ub.w, ub.h, static_cast<float>(ub.w) / static_cast<float>(ub.h));
-        ImGui::TextDisabled("resize window (fits monitor, centered):");
+        Dev::PanelHelp("resize window (fits monitor, centered):");
         struct RatioPreset
         {
             const char* label;
@@ -2854,48 +2854,48 @@ void DrawAspectTab()
         for (int i = 0; i < static_cast<int>(sizeof(presets) / sizeof(presets[0])); ++i)
         {
             if (i > 0 && i != 4) // row break before "3:2"
-                ImGui::SameLine();
-            if (ImGui::Button(presets[i].label))
+                Dev::PanelSameLine();
+            if (Dev::Button(presets[i].label))
             {
                 const float r = presets[i].ratio;
                 Defer([r] { ResizeWindowToRatio(r); });
             }
         }
-        ImGui::Separator();
+        Dev::PanelSeparator();
     }
 
-    changed |= ImGui::Checkbox("Override enabled", &live.overrideEnabled);
-    ImGui::SameLine();
-    ImGui::TextDisabled("(off = display.cfg policy)");
-    ImGui::Separator();
+    changed |= Dev::Checkbox("Override enabled", &live.overrideEnabled);
+    Dev::PanelSameLine();
+    Dev::PanelHelp("(off = display.cfg policy)");
+    Dev::PanelSeparator();
 
     int style = static_cast<int>(live.style);
-    if (ImGui::Combo("Display style", &style, "Modern\0Legacy\0"))
+    if (Dev::Combo("Display style", &style, "Modern\0Legacy\0"))
     {
         live.style = (style == 1) ? AspectRatio::Legacy : AspectRatio::Modern;
         changed = true;
     }
     int clamp = static_cast<int>(live.clamp);
-    if (ImGui::Combo("Ultrawide clamp", &clamp,
-                     "Off\0"
-                     "21:9\0"
-                     "16:9\0"))
+    if (Dev::Combo("Ultrawide clamp", &clamp,
+                   "Off\0"
+                   "21:9\0"
+                   "16:9\0"))
     {
         live.clamp = static_cast<AspectRatio::UltrawideClamp>(clamp);
         changed = true;
     }
 
-    ImGui::Separator();
-    changed |= ImGui::Checkbox("Pillarbox  (crop world to band + black bars)", &live.pillarbox);
-    changed |= ImGui::Checkbox("HUD clamp  (center UI in band, world full)", &live.hudClamp);
+    Dev::PanelSeparator();
+    changed |= Dev::Checkbox("Pillarbox  (crop world to band + black bars)", &live.pillarbox);
+    changed |= Dev::Checkbox("HUD clamp  (center UI in band, world full)", &live.hudClamp);
 
-    ImGui::Separator();
-    changed |= ImGui::Checkbox("Manual viewport (noodle)", &live.manualRect);
-    changed |= ImGui::SliderFloat("rect Left", &live.rectL, 0.0f, 1.0f, "%.3f");
-    changed |= ImGui::SliderFloat("rect Top", &live.rectT, 0.0f, 1.0f, "%.3f");
-    changed |= ImGui::SliderFloat("rect Right", &live.rectR, 0.0f, 1.0f, "%.3f");
-    changed |= ImGui::SliderFloat("rect Bottom", &live.rectB, 0.0f, 1.0f, "%.3f");
-    if (ImGui::Button("Reset rect to full"))
+    Dev::PanelSeparator();
+    changed |= Dev::Checkbox("Manual viewport (noodle)", &live.manualRect);
+    changed |= Dev::SliderFloat("rect Left", &live.rectL, 0.0f, 1.0f, "%.3f");
+    changed |= Dev::SliderFloat("rect Top", &live.rectT, 0.0f, 1.0f, "%.3f");
+    changed |= Dev::SliderFloat("rect Right", &live.rectR, 0.0f, 1.0f, "%.3f");
+    changed |= Dev::SliderFloat("rect Bottom", &live.rectB, 0.0f, 1.0f, "%.3f");
+    if (Dev::Button("Reset rect to full"))
     {
         live.rectL = 0.0f;
         live.rectT = 0.0f;
@@ -2908,7 +2908,7 @@ void DrawAspectTab()
     if (changed)
         AspectReapply();
 
-    ImGui::Separator();
+    Dev::PanelSeparator();
     if (GEngine)
     {
         Poseidon::AspectSettings a;
@@ -2932,13 +2932,13 @@ template <typename T>
 bool ResetToDefaultsButton(T& settings, const char* label = "Reset to defaults",
                            const char* note = "(every control on this tab back to the engine's built-in defaults)")
 {
-    const bool pressed = ImGui::Button(label);
+    const bool pressed = Dev::Button(label);
     if (pressed)
         settings = T{};
     if (note != nullptr && *note != 0)
     {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", note);
+        Dev::PanelSameLine();
+        Dev::PanelHelp("%s", note);
     }
     return pressed;
 }
@@ -2947,7 +2947,7 @@ void DrawGrassTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("No engine.");
+        Dev::PanelHelp("No engine.");
         return;
     }
 
@@ -2998,7 +2998,7 @@ void DrawGrassTab()
     bool changed = false;
 
     changed |= ResetToDefaultsButton(grass);
-    if (ImGui::Button("Copy grass settings"))
+    if (Dev::Button("Copy grass settings"))
     {
         char copy[4096];
         snprintf(copy, sizeof(copy),
@@ -3039,12 +3039,12 @@ void DrawGrassTab()
                  grass.catchAllHeight, grass.photoCardScale);
         ImGui::SetClipboardText(copy);
     }
-    ImGui::SameLine();
-    ImGui::TextDisabled("Copies a pasteable snapshot for sharing with Codex.");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("Copies a pasteable snapshot for sharing with Codex.");
 
-    ImGui::TextUnformatted("Map and terrain surface");
+    Dev::PanelHeading("Map and terrain surface");
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::BeginCombo("Map", maps[selectedMap].label))
+    if (Dev::BeginCombo("Map", maps[selectedMap].label))
     {
         for (int i = 0; i < static_cast<int>(std::size(maps)); ++i)
         {
@@ -3057,18 +3057,18 @@ void DrawGrassTab()
         ImGui::EndCombo();
     }
     const bool selectedMapLoaded = strcmpi(activeWorld.c_str(), maps[selectedMap].worldKey) == 0;
-    ImGui::SameLine();
+    Dev::PanelSameLine();
     const bool canSwitchMap = GWorld != nullptr && GWorld->GetMode() == GModeIntro;
     bool loadMap = false;
     if (canSwitchMap)
     {
         ImGui::BeginDisabled(selectedMapLoaded);
-        loadMap = ImGui::Button("Load selected map");
+        loadMap = Dev::Button("Load selected map");
         ImGui::EndDisabled();
     }
     else if (!selectedMapLoaded && GWorld != nullptr)
     {
-        loadMap = ImGui::Button("Force-load selected map (dev)");
+        loadMap = Dev::Button("Force-load selected map (dev)");
     }
     if (loadMap)
     {
@@ -3086,11 +3086,11 @@ void DrawGrassTab()
                     GWorld->SwitchLandscape(worldFile.c_str());
             });
     }
-    ImGui::TextDisabled("Active terrain WRP: %s. Everon uses the internal name Eden.", activeMapFile.c_str());
+    Dev::PanelHelp("Active terrain WRP: %s. Everon uses the internal name Eden.", activeMapFile.c_str());
     const RString selectedWorldFile = GetWorldName(maps[selectedMap].worldKey);
-    ImGui::TextDisabled("Selected WRP: %s", static_cast<const char*>(selectedWorldFile));
+    Dev::PanelHelp("Selected WRP: %s", static_cast<const char*>(selectedWorldFile));
     if (!canSwitchMap && !selectedMapLoaded)
-        ImGui::TextDisabled("Force-load replaces the active mission landscape; use it only for grass testing.");
+        Dev::PanelHelp("Force-load replaces the active mission landscape; use it only for grass testing.");
 
     // The terrain combo is deliberately separate from the map combo. It always
     // comes from the loaded map, so an Everon selection cannot accidentally
@@ -3098,13 +3098,13 @@ void DrawGrassTab()
     const int surfaceCount = GEngine->GetGrassSurfaceCount();
     if (surfaceCount == 0)
     {
-        ImGui::TextDisabled("Loading map terrain materials...");
+        Dev::PanelHelp("Loading map terrain materials...");
     }
     else
     {
         selectedSurface = std::clamp(selectedSurface, 0, surfaceCount - 1);
         ImGui::SetNextItemWidth(390.0f);
-        if (ImGui::BeginCombo("Terrain surface", GEngine->GetGrassSurfaceName(selectedSurface)))
+        if (Dev::BeginCombo("Terrain surface", GEngine->GetGrassSurfaceName(selectedSurface)))
         {
             for (int i = 0; i < surfaceCount; ++i)
             {
@@ -3119,169 +3119,168 @@ void DrawGrassTab()
             ImGui::EndCombo();
         }
         bool selectedEnabled = GEngine->IsGrassSurfaceEnabled(selectedSurface);
-        if (ImGui::Checkbox("Spawn on selected terrain", &selectedEnabled))
+        if (Dev::Checkbox("Spawn on selected terrain", &selectedEnabled))
             GEngine->SetGrassSurfaceEnabled(selectedSurface, selectedEnabled);
-        ImGui::SameLine();
-        if (ImGui::Button("Use selected only"))
+        Dev::PanelSameLine();
+        if (Dev::Button("Use selected only"))
         {
             for (int i = 0; i < surfaceCount; ++i)
                 GEngine->SetGrassSurfaceEnabled(i, i == selectedSurface);
         }
-        if (ImGui::Button("Clear all surfaces"))
+        if (Dev::Button("Clear all surfaces"))
         {
             for (int i = 0; i < surfaceCount; ++i)
                 GEngine->SetGrassSurfaceEnabled(i, false);
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Enable all surfaces"))
+        Dev::PanelSameLine();
+        if (Dev::Button("Enable all surfaces"))
         {
             for (int i = 0; i < surfaceCount; ++i)
                 GEngine->SetGrassSurfaceEnabled(i, true);
         }
-        ImGui::TextDisabled(
-            "Select a material, then toggle it. The selector contains every terrain layer of this map.");
+        Dev::PanelHelp("Select a material, then toggle it. The selector contains every terrain layer of this map.");
     }
 
-    ImGui::Separator();
-    ImGui::TextDisabled("GPU-generated terrain blades. Placement follows the terrain grass pass and excludes water, "
-                        "roads, forests and buildings.");
-    ImGui::Separator();
-    changed |= ImGui::Checkbox("Enabled", &grass.enabled);
-    changed |= ImGui::Checkbox("Cast close grass shadows", &grass.castShadows);
-    changed |= ImGui::Checkbox("Apply grass distance fog", &grass.applyFog);
-    ImGui::TextDisabled("Both are grass-only visual controls; turn either off to inspect the procedural field.");
-    changed |= ImGui::Checkbox("Ignore terrain exclusions (diagnostic)", &grass.ignoreGeographyExclusions);
-    ImGui::TextDisabled("Relaxes only the FOREST flags, which some legacy Everon WRPs set across ordinary ground. "
-                        "Water, roads, tracks and buildings stay excluded either way -- there is no setting that "
-                        "puts grass on a road.");
-    changed |= ImGui::SliderFloat("Coverage", &grass.density, 0.05f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Retained fraction of procedural candidate blades, applied to every LOD. 1.00 uses every "
-                        "candidate.");
-    changed |= ImGui::SliderFloat("Coverage: near", &grass.nearDensity, 0.02f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Multiplies the master coverage for the near ring only. Procedural blades: the near clump "
-                        "count. Photo cards: a plain multiplier on top of the card coverage below (cards place on "
-                        "their own 1.11 m clutter grid now, not the 0.16 m blade grid, so this is no longer the "
-                        "overdraw lever it was).");
-    changed |= ImGui::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 1.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
-    ImGui::TextDisabled("0.95 was the mid ring's former built-in coverage, so these defaults change nothing on "
-                        "their own -- they exist to rebalance the rings against each other.");
-    changed |= ImGui::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 64.0f, "%.1fx");
-    ImGui::TextDisabled("Divides the base spacing by its square root, so this is the coverage multiplier: 4x is the "
-                        "old ceiling, 64x is eight times finer placement again. Cost scales with it -- watch the "
-                        "benchmark table below, and note that the near instance buffer caps at 1,048,576 clumps.");
-    changed |= ImGui::SliderFloat("Base spacing (m)", &grass.spacing, 0.02f, 0.75f, "%.3f");
-    ImGui::TextDisabled(
+    Dev::PanelSeparator();
+    Dev::PanelHelp("GPU-generated terrain blades. Placement follows the terrain grass pass and excludes water, "
+                   "roads, forests and buildings.");
+    Dev::PanelSeparator();
+    changed |= Dev::Checkbox("Enabled", &grass.enabled);
+    changed |= Dev::Checkbox("Cast close grass shadows", &grass.castShadows);
+    changed |= Dev::Checkbox("Apply grass distance fog", &grass.applyFog);
+    Dev::PanelHelp("Both are grass-only visual controls; turn either off to inspect the procedural field.");
+    changed |= Dev::Checkbox("Ignore terrain exclusions (diagnostic)", &grass.ignoreGeographyExclusions);
+    Dev::PanelHelp("Relaxes only the FOREST flags, which some legacy Everon WRPs set across ordinary ground. "
+                   "Water, roads, tracks and buildings stay excluded either way -- there is no setting that "
+                   "puts grass on a road.");
+    changed |= Dev::SliderFloat("Coverage", &grass.density, 0.05f, 1.0f, "%.2f");
+    Dev::PanelHelp("Retained fraction of procedural candidate blades, applied to every LOD. 1.00 uses every "
+                   "candidate.");
+    changed |= Dev::SliderFloat("Coverage: near", &grass.nearDensity, 0.02f, 1.0f, "%.2f");
+    Dev::PanelHelp("Multiplies the master coverage for the near ring only. Procedural blades: the near clump "
+                   "count. Photo cards: a plain multiplier on top of the card coverage below (cards place on "
+                   "their own 1.11 m clutter grid now, not the 0.16 m blade grid, so this is no longer the "
+                   "overdraw lever it was).");
+    changed |= Dev::SliderFloat("Coverage: mid", &grass.midDensity, 0.02f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Coverage: far", &grass.farDensity, 0.02f, 1.0f, "%.2f");
+    Dev::PanelHelp("0.95 was the mid ring's former built-in coverage, so these defaults change nothing on "
+                   "their own -- they exist to rebalance the rings against each other.");
+    changed |= Dev::SliderFloat("Density boost", &grass.densityBoost, 1.0f, 64.0f, "%.1fx");
+    Dev::PanelHelp("Divides the base spacing by its square root, so this is the coverage multiplier: 4x is the "
+                   "old ceiling, 64x is eight times finer placement again. Cost scales with it -- watch the "
+                   "benchmark table below, and note that the near instance buffer caps at 1,048,576 clumps.");
+    changed |= Dev::SliderFloat("Base spacing (m)", &grass.spacing, 0.02f, 0.75f, "%.3f");
+    Dev::PanelHelp(
         "Distance between candidates before the density boost; lower values make grass substantially denser. "
         "This is the ONLY near-density control -- it is independent of the radius below.");
-    changed |= ImGui::SliderFloat("Near clump radius (m)", &grass.radius, 8.0f, 200.0f, "%.0f");
-    ImGui::TextDisabled("Close-field reach. Density is unaffected: the placement grid is sized from this radius "
-                        "rather than the spacing being stretched to fit a fixed grid, which is what used to make "
-                        "this slider look dead past ~30 m while quietly thinning the field.");
-    changed |= ImGui::SliderFloat("Mid clump radius (m)", &grass.midRadius, 18.0f, 1000.0f, "%.0f");
-    ImGui::TextDisabled("Opaque mid-clump reach, at one fixed placement spacing, so this is also coverage-only: "
-                        "the mid placement grid is sized from this radius, and mid density is identical at 400 m "
-                        "and at 60 m.");
-    changed |= ImGui::SliderFloat("Far radius (m)", &grass.farRadius, 0.0f, 5000.0f, "%.0f");
-    ImGui::TextDisabled("Outer terrain-cover proxy. 0 = off. Any other value is floored "
-                        "past the mid ring, and its dispatch is skipped entirely when off.");
-    changed |= ImGui::SliderFloat("LOD dissolve (m)", &grass.lodBlend, 0.0f, 40.0f, "%.1f");
-    ImGui::TextDisabled("Width of the crossfade at EVERY LOD join. Each ring thins out stochastically across this "
-                        "band while the next thickens, and blades shrink as they go, so grass no longer changes "
-                        "representation on a hard circle. The dissolve is world-space deterministic, so a clump "
-                        "vanishes once at its own distance rather than blinking as the camera moves. 0 restores "
-                        "the abrupt joins. Wider bands overlap two rings over more ground, which costs "
-                        "proportionally more instances.");
-    changed |= ImGui::SliderFloat("Density noise scale", &grass.densityNoiseScale, 0.002f, 0.5f, "%.3f");
-    ImGui::TextDisabled(
+    changed |= Dev::SliderFloat("Near clump radius (m)", &grass.radius, 8.0f, 200.0f, "%.0f");
+    Dev::PanelHelp("Close-field reach. Density is unaffected: the placement grid is sized from this radius "
+                   "rather than the spacing being stretched to fit a fixed grid, which is what used to make "
+                   "this slider look dead past ~30 m while quietly thinning the field.");
+    changed |= Dev::SliderFloat("Mid clump radius (m)", &grass.midRadius, 18.0f, 1000.0f, "%.0f");
+    Dev::PanelHelp("Opaque mid-clump reach, at one fixed placement spacing, so this is also coverage-only: "
+                   "the mid placement grid is sized from this radius, and mid density is identical at 400 m "
+                   "and at 60 m.");
+    changed |= Dev::SliderFloat("Far radius (m)", &grass.farRadius, 0.0f, 5000.0f, "%.0f");
+    Dev::PanelHelp("Outer terrain-cover proxy. 0 = off. Any other value is floored "
+                   "past the mid ring, and its dispatch is skipped entirely when off.");
+    changed |= Dev::SliderFloat("LOD dissolve (m)", &grass.lodBlend, 0.0f, 40.0f, "%.1f");
+    Dev::PanelHelp("Width of the crossfade at EVERY LOD join. Each ring thins out stochastically across this "
+                   "band while the next thickens, and blades shrink as they go, so grass no longer changes "
+                   "representation on a hard circle. The dissolve is world-space deterministic, so a clump "
+                   "vanishes once at its own distance rather than blinking as the camera moves. 0 restores "
+                   "the abrupt joins. Wider bands overlap two rings over more ground, which costs "
+                   "proportionally more instances.");
+    changed |= Dev::SliderFloat("Density noise scale", &grass.densityNoiseScale, 0.002f, 0.5f, "%.3f");
+    Dev::PanelHelp(
         "Patch frequency in 1/metres. 0.075 gives ~13 m patches; lower = broader sweeps, higher = finer mottling.");
-    changed |= ImGui::SliderFloat("Density noise strength", &grass.densityNoiseStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("0 = perfectly uniform coverage; 1 = bare ground between dense clumps. Applies to every LOD.");
+    changed |= Dev::SliderFloat("Density noise strength", &grass.densityNoiseStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("0 = perfectly uniform coverage; 1 = bare ground between dense clumps. Applies to every LOD.");
 
-    changed |= ImGui::ColorEdit3("Tint: procedural grass", grass.tintProcedural);
-    ImGui::TextDisabled("Multiplies albedo before lighting, so the sun still does what it did. Covers near blades, "
-                        "mid ribbons and the far proxy together. White = untinted.");
-    changed |= ImGui::ColorEdit3("Tint: photographed cards", grass.tintPhoto);
-    ImGui::TextDisabled("The same, for the photographed clump cards only. Separate from the procedural tint so the "
-                        "two paths can be matched to each other rather than moving together.");
-    changed |= ImGui::SliderFloat("Colour saturation", &grass.saturation, 0.0f, 2.0f, "%.2f");
-    ImGui::TextDisabled("1.00 = untouched, 0.00 = greyscale. Pushed about the luma axis, so brightness is "
-                        "unchanged -- this pulls colour out without darkening. Applies to near blades, mid "
-                        "ribbons/clump cards and the far proxy together.");
-    changed |= ImGui::SliderFloat("Dry patches", &grass.dryPatches, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Fraction of the field that bleaches toward dry straw. 0 = uniformly green. Tips dry "
-                        "before roots, and it uses its own noise field so dry ground does not line up with "
-                        "thin ground.");
-    changed |= ImGui::SliderFloat("Dry patch size", &grass.dryPatchScale, 0.002f, 0.3f, "%.3f");
-    ImGui::TextDisabled("Noise frequency in 1/metres: 0.03 gives ~33 m patches, higher values break the field "
-                        "into smaller dry spots.");
-    changed |= ImGui::SliderFloat("Blade width", &grass.bladeWidth, 0.25f, 6.0f, "%.2fx");
-    ImGui::TextDisabled("1.00 = the long-standing look. The near-LOD blade texture only becomes visible above "
-                        "roughly 3x: a stock 3 cm blade is about 4 pixels wide on screen, and a 64-pixel-wide "
-                        "texture is averaged down to flat colour before it is ever drawn. Wider blades read as "
-                        "broad leaves rather than fine grass, so this is a look choice, not a fix.");
+    changed |= Dev::ColorEdit3("Tint: procedural grass", grass.tintProcedural);
+    Dev::PanelHelp("Multiplies albedo before lighting, so the sun still does what it did. Covers near blades, "
+                   "mid ribbons and the far proxy together. White = untinted.");
+    changed |= Dev::ColorEdit3("Tint: photographed cards", grass.tintPhoto);
+    Dev::PanelHelp("The same, for the photographed clump cards only. Separate from the procedural tint so the "
+                   "two paths can be matched to each other rather than moving together.");
+    changed |= Dev::SliderFloat("Colour saturation", &grass.saturation, 0.0f, 2.0f, "%.2f");
+    Dev::PanelHelp("1.00 = untouched, 0.00 = greyscale. Pushed about the luma axis, so brightness is "
+                   "unchanged -- this pulls colour out without darkening. Applies to near blades, mid "
+                   "ribbons/clump cards and the far proxy together.");
+    changed |= Dev::SliderFloat("Dry patches", &grass.dryPatches, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Fraction of the field that bleaches toward dry straw. 0 = uniformly green. Tips dry "
+                   "before roots, and it uses its own noise field so dry ground does not line up with "
+                   "thin ground.");
+    changed |= Dev::SliderFloat("Dry patch size", &grass.dryPatchScale, 0.002f, 0.3f, "%.3f");
+    Dev::PanelHelp("Noise frequency in 1/metres: 0.03 gives ~33 m patches, higher values break the field "
+                   "into smaller dry spots.");
+    changed |= Dev::SliderFloat("Blade width", &grass.bladeWidth, 0.25f, 6.0f, "%.2fx");
+    Dev::PanelHelp("1.00 = the long-standing look. The near-LOD blade texture only becomes visible above "
+                   "roughly 3x: a stock 3 cm blade is about 4 pixels wide on screen, and a 64-pixel-wide "
+                   "texture is averaged down to flat colour before it is ever drawn. Wider blades read as "
+                   "broad leaves rather than fine grass, so this is a look choice, not a fix.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Blade shape (procedural blades only -- ignored by photographed clump cards)");
-    changed |= ImGui::SliderFloat("Shape variety", &grass.shapeVariety, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("0 = the legacy look, where all FOUR grass species shared one silhouette and the field "
-                        "read as the same blade repeated. 1 = eight distinct width/height/taper profiles. This "
-                        "is geometry, not texture, so it costs nothing either way.");
-    changed |= ImGui::SliderFloat("Taper jitter", &grass.taperJitter, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Per-blade spread on the taper exponent, so neighbouring blades of the same species do "
-                        "not narrow identically. Multiplicative about 1.0: 0 leaves the chosen profile alone "
-                        "rather than shifting it.");
-    changed |= ImGui::SliderFloat("Arch", &grass.bladeArch, 0.0f, 3.0f, "%.2f");
-    ImGui::TextDisabled("How far a blade arcs over, as a multiple of its own height. 0 = rigid spikes standing "
-                        "to attention, which is what the stock bend gave: it moved a tip 5-19 cm on a ~0.8 m "
-                        "blade, about ten degrees. Taller blades arc further, so this scales with height rather "
-                        "than being a fixed distance. Costs nothing -- it is a vertex-shader curve.");
-    changed |= ImGui::Checkbox("GRS-030 clump renderer", &grass.clumpRenderer);
-    ImGui::TextDisabled("On = sparse twelve-blade meadow clumps. Off restores legacy six-ribbon grass.");
-    changed |= ImGui::SliderFloat("Bend jitter", &grass.bendJitter, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Per-blade spread on the resting lean. Also multiplicative about the stock range, so "
-                        "turning it up widens the spread in both directions instead of leaning the whole field "
-                        "further over.");
-    changed |= ImGui::SliderFloat("Photo texture strength", &grass.bladeTextureStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Scales the near-LOD photo atlas on top of its distance fade. 0 keeps the procedural "
-                        "surface even when photo layers are installed -- the quickest way to tell whether a look "
-                        "problem is the texture or the geometry. No effect when no photo atlas is loaded.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Blade shape (procedural blades only -- ignored by photographed clump cards)");
+    changed |= Dev::SliderFloat("Shape variety", &grass.shapeVariety, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("0 = the legacy look, where all FOUR grass species shared one silhouette and the field "
+                   "read as the same blade repeated. 1 = eight distinct width/height/taper profiles. This "
+                   "is geometry, not texture, so it costs nothing either way.");
+    changed |= Dev::SliderFloat("Taper jitter", &grass.taperJitter, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Per-blade spread on the taper exponent, so neighbouring blades of the same species do "
+                   "not narrow identically. Multiplicative about 1.0: 0 leaves the chosen profile alone "
+                   "rather than shifting it.");
+    changed |= Dev::SliderFloat("Arch", &grass.bladeArch, 0.0f, 3.0f, "%.2f");
+    Dev::PanelHelp("How far a blade arcs over, as a multiple of its own height. 0 = rigid spikes standing "
+                   "to attention, which is what the stock bend gave: it moved a tip 5-19 cm on a ~0.8 m "
+                   "blade, about ten degrees. Taller blades arc further, so this scales with height rather "
+                   "than being a fixed distance. Costs nothing -- it is a vertex-shader curve.");
+    changed |= Dev::Checkbox("GRS-030 clump renderer", &grass.clumpRenderer);
+    Dev::PanelHelp("On = sparse twelve-blade meadow clumps. Off restores legacy six-ribbon grass.");
+    changed |= Dev::SliderFloat("Bend jitter", &grass.bendJitter, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Per-blade spread on the resting lean. Also multiplicative about the stock range, so "
+                   "turning it up widens the spread in both directions instead of leaning the whole field "
+                   "further over.");
+    changed |= Dev::SliderFloat("Photo texture strength", &grass.bladeTextureStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Scales the near-LOD photo atlas on top of its distance fade. 0 keeps the procedural "
+                   "surface even when photo layers are installed -- the quickest way to tell whether a look "
+                   "problem is the texture or the geometry. No effect when no photo atlas is loaded.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Blade shading (procedural blades and mid ribbons only -- cards ignore these)");
-    ImGui::TextDisabled("Every default here is the look before these existed; nothing moves until a slider does.");
-    changed |= ImGui::SliderFloat("Blade self shadow", &grass.bladeSelfShadow, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Blade-on-blade shadowing, the cheap way: occlusion toward the root of a tuft (the base of "
-                        "a blade sees ~40%% of the sky a tip does at full strength) plus a sample of the cascade "
-                        "the near grass itself writes, so a clump in front shades the one behind. The cascade half "
-                        "needs 'Cast close grass shadows' on and fades out past 30-60 m, where a shadow texel is "
-                        "bigger than a tuft. 0 = off (the old look).");
-    changed |= ImGui::SliderFloat("Blade contrast", &grass.bladeContrast, 0.25f, 3.0f, "%.2f");
-    ImGui::TextDisabled("Contrast about the palette's own mid-tone, before the tint and the lighting. 1.00 = the "
-                        "untouched palette; higher separates dark roots from bright tips, lower flattens the field.");
-    changed |= ImGui::SliderFloat("Blade hue variation", &grass.bladeHueVariation, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Per-patch hue drift (~11 m field of its own): warm straw one way, cool blue-green the "
-                        "other, on top of the luminance-only 'Colour variation' below. 0 = none.");
-    changed |= ImGui::SliderFloat("Blade root shade", &grass.bladeRootShade, 0.0f, 0.95f, "%.2f");
-    ImGui::TextDisabled("How much darker a blade is at its root than at its tip. 0.70 is the long-standing value; "
-                        "0 = a flat blade.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Blade shading (procedural blades and mid ribbons only -- cards ignore these)");
+    Dev::PanelHelp("Every default here is the look before these existed; nothing moves until a slider does.");
+    changed |= Dev::SliderFloat("Blade self shadow", &grass.bladeSelfShadow, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Blade-on-blade shadowing, the cheap way: occlusion toward the root of a tuft (the base of "
+                   "a blade sees ~40%% of the sky a tip does at full strength) plus a sample of the cascade "
+                   "the near grass itself writes, so a clump in front shades the one behind. The cascade half "
+                   "needs 'Cast close grass shadows' on and fades out past 30-60 m, where a shadow texel is "
+                   "bigger than a tuft. 0 = off (the old look).");
+    changed |= Dev::SliderFloat("Blade contrast", &grass.bladeContrast, 0.25f, 3.0f, "%.2f");
+    Dev::PanelHelp("Contrast about the palette's own mid-tone, before the tint and the lighting. 1.00 = the "
+                   "untouched palette; higher separates dark roots from bright tips, lower flattens the field.");
+    changed |= Dev::SliderFloat("Blade hue variation", &grass.bladeHueVariation, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Per-patch hue drift (~11 m field of its own): warm straw one way, cool blue-green the "
+                   "other, on top of the luminance-only 'Colour variation' below. 0 = none.");
+    changed |= Dev::SliderFloat("Blade root shade", &grass.bladeRootShade, 0.0f, 0.95f, "%.2f");
+    Dev::PanelHelp("How much darker a blade is at its root than at its tip. 0.70 is the long-standing value; "
+                   "0 = a flat blade.");
 
     // ------------------------------------------------------------------------
     // Everything below the header up to the next separator applies ONLY while
     // photographed clump cards are on. They were previously mixed in with the
     // procedural blade-shape controls, where there was no way to tell which
     // sliders were inert for the look actually on screen.
-    ImGui::Separator();
-    ImGui::TextUnformatted("PHOTOGRAPHED CLUMP CARDS");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("PHOTOGRAPHED CLUMP CARDS");
     const bool photoClumpsAvailable = GEngine->HasGrassPhotoClumps();
     if (!photoClumpsAvailable)
     {
         ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
                            "Photo clump assets are not installed -- procedural grass is in use.");
-        ImGui::TextDisabled("assets/grass/meadow-grass-clump-alpha-1024.png (or $WGR_GRASS_TUFT) was not found. "
-                            "This is a supported configuration, not an error: the near ring keeps its individual "
-                            "textured blades and the mid ring its procedural ribbons. The toggle and the settings "
-                            "below stay editable, and take effect the moment the assets are present.");
+        Dev::PanelHelp("assets/grass/meadow-grass-clump-alpha-1024.png (or $WGR_GRASS_TUFT) was not found. "
+                       "This is a supported configuration, not an error: the near ring keeps its individual "
+                       "textured blades and the mid ring its procedural ribbons. The toggle and the settings "
+                       "below stay editable, and take effect the moment the assets are present.");
     }
     // WHICH grass is drawn. Three sources, and the label below says which one is actually on
     // screen for THIS world -- the owner's complaint was a checkbox that read unchecked while
@@ -3299,7 +3298,7 @@ void DrawGrassTab()
                                  "Procedural blades (own implementation) everywhere",
                                  "Photographed clump cards everywhere"};
         int src = grass.clutterSource < 0 ? 0 : (grass.clutterSource > 2 ? 2 : grass.clutterSource);
-        if (ImGui::Combo("Grass source", &src, sources, 3))
+        if (Dev::Combo("Grass source", &src, sources, 3))
         {
             // No near-coverage hack on the switch any more: cards place on their own 1.11 m
             // clutter grid (fb3d83b) and have their own coverage control below, so a 0.15 near
@@ -3314,49 +3313,51 @@ void DrawGrassTab()
         }
         const bool cardsOnScreen = src == 2 || (src == 0 && mapClutter);
         if (cardsOnScreen)
-            ImGui::TextColored(ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
-                               mapClutter ? "ON SCREEN NOW: the map's own clutter (photo cards from its CfgSurfaces)"
-                                          : "ON SCREEN NOW: photo cards (loose primary card; this world has no clutter atlas)");
+            ImGui::TextColored(
+                ImVec4(0.55f, 0.85f, 0.55f, 1.0f),
+                mapClutter ? "ON SCREEN NOW: the map's own clutter (photo cards from its CfgSurfaces)"
+                           : "ON SCREEN NOW: photo cards (loose primary card; this world has no clutter atlas)");
         else
-            ImGui::TextColored(ImVec4(0.85f, 0.85f, 0.55f, 1.0f),
-                               mapClutter ? "ON SCREEN NOW: procedural blades (this world HAS its own clutter; Auto would draw it)"
-                                          : "ON SCREEN NOW: procedural blades (this world has no clutter of its own)");
+            ImGui::TextColored(
+                ImVec4(0.85f, 0.85f, 0.55f, 1.0f),
+                mapClutter ? "ON SCREEN NOW: procedural blades (this world HAS its own clutter; Auto would draw it)"
+                           : "ON SCREEN NOW: procedural blades (this world has no clutter of its own)");
     }
-    ImGui::TextDisabled("Photo cards are alpha-tested clump plates for close and mid grass; procedural is stable "
-                        "individual textured blades nearby and ribbons in the mid ring. Everything in THIS section "
-                        "does nothing unless cards are on screen.");
+    Dev::PanelHelp("Photo cards are alpha-tested clump plates for close and mid grass; procedural is stable "
+                   "individual textured blades nearby and ribbons in the mid ring. Everything in THIS section "
+                   "does nothing unless cards are on screen.");
     ImGui::BeginDisabled(!(grass.clutterSource == 2 || (grass.clutterSource == 0 && GEngine->HasGrassMapClutter())));
-    changed |= ImGui::SliderFloat("Photo clump brightness", &grass.photoTuftBrightness, 0.50f, 2.50f, "%.2fx");
-    ImGui::TextDisabled("1.00 = the calibrated source plate; raise it to lift dark clumps.");
-    changed |= ImGui::SliderFloat("Photo clump saturation", &grass.photoSaturation, 0.0f, 2.0f, "%.2f");
-    ImGui::TextDisabled("Saturation of the photographed cards about their own luma. 0.62 is the long-standing "
-                        "value, 0 is greyscale, above 1 pushes past the source plate. Separate from the field-wide "
-                        "Colour saturation above so the cards can be matched to the procedural grass rather than "
-                        "moving with it -- the global control still applies on top.");
-    changed |= ImGui::SliderFloat("Photo clump contrast", &grass.photoContrast, 0.5f, 2.5f, "%.2f");
-    ImGui::TextDisabled("Contrast about each plate's own mean colour, which is what separates individual stems from "
-                        "the mass behind them. The source photographs are flatly lit by design, so 1.00 (the raw "
-                        "photograph) is exactly the flat look; higher gives the silhouette contour. The pivot is "
-                        "measured per plate at load, so this cannot double as a brightness change.");
-    changed |= ImGui::SliderFloat("Photo clump contour lighting", &grass.photoContour, 0.0f, 2.0f, "%.2f");
-    ImGui::TextDisabled("Rebuilds a per-texel surface normal from the plate's luma gradient, so stems inside one "
-                        "card catch the sun separately instead of the whole plate taking one value. 0 = the former "
-                        "single flat upright normal. Costs four extra texture taps on card fragments.");
-    changed |= ImGui::SliderFloat("Photo clump self-shadowing", &grass.photoSelfShadow, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Grass shadowing grass: the cards are already in the cascade the grass writes, so this is a "
-                        "real occlusion test rather than a fake. Needs 'Cast close grass shadows' on. 1.00 is a "
-                        "full-strength shadow; foliage usually wants contact contrast, not solid-black cards.");
-    changed |= ImGui::SliderFloat("Photo clump root occlusion", &grass.photoRootAo, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Darkens the base of each clump, where light does not reach. This is what gives a card a "
-                        "bottom -- without it a plate reads as floating on the terrain.");
-    changed |= ImGui::SliderFloat("Photo card alpha cutoff", &grass.photoAlphaCutoff, 0.05f, 0.95f, "%.2f");
-    ImGui::TextDisabled("Texels below this alpha are discarded. 0.50 is neutral -- the atlas mip chain preserves "
-                        "coverage against it. Several local family plates carry JPEG opacity maps, whose "
-                        "compression noise around thin stems is a genuine flicker source; raising this trims "
-                        "those partial texels away. The shadow pass uses the same value.");
+    changed |= Dev::SliderFloat("Photo clump brightness", &grass.photoTuftBrightness, 0.50f, 2.50f, "%.2fx");
+    Dev::PanelHelp("1.00 = the calibrated source plate; raise it to lift dark clumps.");
+    changed |= Dev::SliderFloat("Photo clump saturation", &grass.photoSaturation, 0.0f, 2.0f, "%.2f");
+    Dev::PanelHelp("Saturation of the photographed cards about their own luma. 0.62 is the long-standing "
+                   "value, 0 is greyscale, above 1 pushes past the source plate. Separate from the field-wide "
+                   "Colour saturation above so the cards can be matched to the procedural grass rather than "
+                   "moving with it -- the global control still applies on top.");
+    changed |= Dev::SliderFloat("Photo clump contrast", &grass.photoContrast, 0.5f, 2.5f, "%.2f");
+    Dev::PanelHelp("Contrast about each plate's own mean colour, which is what separates individual stems from "
+                   "the mass behind them. The source photographs are flatly lit by design, so 1.00 (the raw "
+                   "photograph) is exactly the flat look; higher gives the silhouette contour. The pivot is "
+                   "measured per plate at load, so this cannot double as a brightness change.");
+    changed |= Dev::SliderFloat("Photo clump contour lighting", &grass.photoContour, 0.0f, 2.0f, "%.2f");
+    Dev::PanelHelp("Rebuilds a per-texel surface normal from the plate's luma gradient, so stems inside one "
+                   "card catch the sun separately instead of the whole plate taking one value. 0 = the former "
+                   "single flat upright normal. Costs four extra texture taps on card fragments.");
+    changed |= Dev::SliderFloat("Photo clump self-shadowing", &grass.photoSelfShadow, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Grass shadowing grass: the cards are already in the cascade the grass writes, so this is a "
+                   "real occlusion test rather than a fake. Needs 'Cast close grass shadows' on. 1.00 is a "
+                   "full-strength shadow; foliage usually wants contact contrast, not solid-black cards.");
+    changed |= Dev::SliderFloat("Photo clump root occlusion", &grass.photoRootAo, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Darkens the base of each clump, where light does not reach. This is what gives a card a "
+                   "bottom -- without it a plate reads as floating on the terrain.");
+    changed |= Dev::SliderFloat("Photo card alpha cutoff", &grass.photoAlphaCutoff, 0.05f, 0.95f, "%.2f");
+    Dev::PanelHelp("Texels below this alpha are discarded. 0.50 is neutral -- the atlas mip chain preserves "
+                   "coverage against it. Several local family plates carry JPEG opacity maps, whose "
+                   "compression noise around thin stems is a genuine flicker source; raising this trims "
+                   "those partial texels away. The shadow pass uses the same value.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Photo card coverage (density of the card path)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Photo card coverage (density of the card path)");
     {
         // IS THE CARD PATH EVEN DRAWING? Every control in this block is inert
         // unless it is, and nothing on screen said so -- which is exactly how an
@@ -3378,27 +3379,27 @@ void DrawGrassTab()
                                "every control below does nothing. Set Grass source to the photo clumps.",
                                grass.clutterSource, mapAtlas ? 1 : 0);
         }
-        ImGui::TextDisabled("The game log settles it either way: \"near ring cards\" vs \"near ring blades\".");
+        Dev::PanelHelp("The game log settles it either way: \"near ring cards\" vs \"near ring blades\".");
     }
-    changed |= ImGui::Checkbox("Auto: the map's own clutter density where the map declares one",
-                               &grass.photoCoverageAuto);
-    changed |= ImGui::SliderFloat("Photo card coverage", &grass.photoCoverage, 0.01f, 1.0f, "%.2f");
+    changed |=
+        Dev::Checkbox("Auto: the map's own clutter density where the map declares one", &grass.photoCoverageAuto);
+    changed |= Dev::SliderFloat("Photo card coverage", &grass.photoCoverage, 0.01f, 1.0f, "%.2f");
     {
         // Mirrors card_coverage_for / card_placement_spacing in grass.wgsl: cards place on a
         // 1.11 m clutter grid (WGR_GRASS_CARD_SPACING) and this is the fraction of those cells
         // that grow one, so mean spacing = grid / sqrt(coverage) and density = coverage / grid^2.
         const float grid = 1.11f;
         const float c = std::clamp(grass.photoCoverage, 0.01f, 1.0f);
-        ImGui::TextDisabled("Coverage <-> spacing: cards sit on the map's 1.11 m clutter grid; %.2f means a card in "
-                            "one cell in %.1f, i.e. one card every %.2f m on average, %.2f cards per square metre "
-                            "(1.00 = every cell, the map's own maximum).",
-                            c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
+        Dev::PanelHelp("Coverage <-> spacing: cards sit on the map's 1.11 m clutter grid; %.2f means a card in "
+                       "one cell in %.1f, i.e. one card every %.2f m on average, %.2f cards per square metre "
+                       "(1.00 = every cell, the map's own maximum).",
+                       c, 1.0f / c, grid / std::sqrt(c), c / (grid * grid));
     }
     // DENSITY, not spacing. The metres control this replaced ran the wrong way --
     // dragging it up made the field sparser, so "max everything out" produced less
     // grass than the default and read as the slider doing nothing.
-    changed |= ImGui::SliderFloat("Photo card density", &grass.photoCardDensity, 1.0f, 300.0f, "%.1fx",
-                                  ImGuiSliderFlags_Logarithmic);
+    changed |= Dev::SliderFloat("Photo card density", &grass.photoCardDensity, 1.0f, 300.0f, "%.1fx",
+                                ImGuiSliderFlags_Logarithmic);
     {
         // Live arithmetic beats a paragraph: the two densities side by side, in the
         // same unit, so "as dense as procedural" is a number you can match rather
@@ -3408,11 +3409,11 @@ void DrawGrassTab()
         const float cards = cov / (g * g);
         const float bladeSp = grass.spacing * (grass.clumpRenderer ? 3.20f : 1.72f);
         const float blades = 1.0f / std::max(bladeSp * bladeSp, 1e-6f);
-        ImGui::TextDisabled("Coverage is a fraction OF this grid, so the grid is the ceiling coverage cannot pass.\n"
-                            "  photo cards now: %.2f /m2   (coverage %.2f on a %.3f m grid)\n"
-                            "  procedural near: %.2f /m2   (spacing %.2f x %.2f = %.3f m)\n"
-                            "1x is the map's own clutterGrid; the slider goes to 300x (a 0.06 m grid).",
-                            cards, cov, g, blades, grass.spacing, grass.clumpRenderer ? 3.20f : 1.72f, bladeSp);
+        Dev::PanelHelp("Coverage is a fraction OF this grid, so the grid is the ceiling coverage cannot pass.\n"
+                       "  photo cards now: %.2f /m2   (coverage %.2f on a %.3f m grid)\n"
+                       "  procedural near: %.2f /m2   (spacing %.2f x %.2f = %.3f m)\n"
+                       "1x is the map's own clutterGrid; the slider goes to 300x (a 0.06 m grid).",
+                       cards, cov, g, blades, grass.spacing, grass.clumpRenderer ? 3.20f : 1.72f, bladeSp);
         if (cards < blades * 0.9f)
         {
             const float need = blades / std::max(cards, 1e-6f);
@@ -3442,39 +3443,39 @@ void DrawGrassTab()
             }
             else
             {
-                ImGui::TextDisabled("Mid ring reach %.0f m (2440-cell grid ceiling) vs %.0f m asked for -- the "
-                                    "density has room before the ring starts shrinking.",
-                                    reach, midWanted);
+                Dev::PanelHelp("Mid ring reach %.0f m (2440-cell grid ceiling) vs %.0f m asked for -- the "
+                               "density has room before the ring starts shrinking.",
+                               reach, midWanted);
             }
         }
-        ImGui::TextDisabled("Cost: above ~8x the old flicker returns (every plate edge shimmers in wind); at "
-                            "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "
-                            "was. NOTE this only does anything when the card path is actually drawing -- the Grass "
-                            "log line says 'near ring cards' when it is, 'blades' when it is not.");
+        Dev::PanelHelp("Cost: above ~8x the old flicker returns (every plate edge shimmers in wind); at "
+                       "0.16 m there are ~90 plates over every point of ground, which is what 'far too dense' "
+                       "was. NOTE this only does anything when the card path is actually drawing -- the Grass "
+                       "log line says 'near ring cards' when it is, 'blades' when it is not.");
     }
-    changed |= ImGui::SliderFloat("Photo card size", &grass.photoCardScale, 0.25f, 2.0f, "%.2fx");
-    ImGui::TextDisabled("Size of each card. 1.00 = the stock card, 0.5-2.3 m tall and wider than tall; Arma's own "
-                        "clutter plants are ~0.3-0.9 m, so at the map's own density the stock card is two to three "
-                        "plants' worth of plate over every clutter cell -- try ~0.5 if the field still reads as a "
-                        "solid mat at the map's density. Shadows follow.");
-    ImGui::TextDisabled("Auto ON: wherever the map's geography bake answered (Arma worlds with a CfgSurfaces "
-                        "atlas: Takistan, Stratis...) the map's OWN clutter density is used -- one card per "
-                        "clutter cell thinned by the surface's authored probability, which is what Arma draws -- "
-                        "and this slider is only the fallback where nothing is known (every OFP world with cards "
-                        "forced on). Auto OFF: the slider multiplies everywhere, on top of the map's thinning, so "
-                        "1.00 is the map's density and 0.24 is a quarter of it. 0.24 is the owner's default for "
-                        "an unknown clutter density.");
+    changed |= Dev::SliderFloat("Photo card size", &grass.photoCardScale, 0.25f, 2.0f, "%.2fx");
+    Dev::PanelHelp("Size of each card. 1.00 = the stock card, 0.5-2.3 m tall and wider than tall; Arma's own "
+                   "clutter plants are ~0.3-0.9 m, so at the map's own density the stock card is two to three "
+                   "plants' worth of plate over every clutter cell -- try ~0.5 if the field still reads as a "
+                   "solid mat at the map's density. Shadows follow.");
+    Dev::PanelHelp("Auto ON: wherever the map's geography bake answered (Arma worlds with a CfgSurfaces "
+                   "atlas: Takistan, Stratis...) the map's OWN clutter density is used -- one card per "
+                   "clutter cell thinned by the surface's authored probability, which is what Arma draws -- "
+                   "and this slider is only the fallback where nothing is known (every OFP world with cards "
+                   "forced on). Auto OFF: the slider multiplies everywhere, on top of the map's thinning, so "
+                   "1.00 is the map's density and 0.24 is a quarter of it. 0.24 is the owner's default for "
+                   "an unknown clutter density.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Photographed family mix");
-    changed |= ImGui::SliderFloat("Photo grass mix", &grass.photoTuftMix, 0.0f, 1.0f, "%.0f%%");
-    changed |= ImGui::SliderFloat("Photo grass patch size (m)", &grass.photoTuftPatchSize, 4.0f, 80.0f, "%.0f");
-    ImGui::TextDisabled("Fraction of world-space patches that draw from the FULL variety. 0%% = ONE variety "
-                        "everywhere: on a map-clutter world each surface's first clutter class, on a loose-card "
-                        "world the primary clump -- the 'single variety' setting that stopped the flicker. 100%% = "
-                        "every patch picks freely (a map surface's own classes, or the weighted families below). "
-                        "It used to be consulted only on the loose-card path, so on Takistan and Stratis it did "
-                        "nothing; both paths honour it now, shadows included.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Photographed family mix");
+    changed |= Dev::SliderFloat("Photo grass mix", &grass.photoTuftMix, 0.0f, 1.0f, "%.0f%%");
+    changed |= Dev::SliderFloat("Photo grass patch size (m)", &grass.photoTuftPatchSize, 4.0f, 80.0f, "%.0f");
+    Dev::PanelHelp("Fraction of world-space patches that draw from the FULL variety. 0%% = ONE variety "
+                   "everywhere: on a map-clutter world each surface's first clutter class, on a loose-card "
+                   "world the primary clump -- the 'single variety' setting that stopped the flicker. 100%% = "
+                   "every patch picks freely (a map surface's own classes, or the weighted families below). "
+                   "It used to be consulted only on the loose-card path, so on Takistan and Stratis it did "
+                   "nothing; both paths honour it now, shadows included.");
     // Isolating one plate is the fastest way to identify a flickering source, so
     // the override comes before the weights rather than being buried under them.
     {
@@ -3497,52 +3498,52 @@ void DrawGrassTab()
 
         if (familyCount <= 1)
         {
-            ImGui::TextDisabled("No additional grass families installed. Drop a pack into "
-                                "assets/grass/more_grass -- any colour plate with a matching opacity plate beside "
-                                "it (albedo/opacity or diff/alpha naming) is picked up automatically, up to eight.");
+            Dev::PanelHelp("No additional grass families installed. Drop a pack into "
+                           "assets/grass/more_grass -- any colour plate with a matching opacity plate beside "
+                           "it (albedo/opacity or diff/alpha naming) is picked up automatically, up to eight.");
         }
         int forced = std::clamp(grass.photoForceLayer, -1, familyCount - 1) + 1;
         ImGui::SetNextItemWidth(390.0f);
-        if (ImGui::Combo("Force one family", &forced, labelPtrs.data(), static_cast<int>(labelPtrs.size())))
+        if (Dev::Combo("Force one family", &forced, labelPtrs.data(), static_cast<int>(labelPtrs.size())))
         {
             grass.photoForceLayer = forced - 1;
             changed = true;
         }
-        ImGui::TextDisabled("Draws every photographed clump from a single atlas layer, ignoring the mix and the "
-                            "weights. Step through the families to find which plate flickers, then zero its "
-                            "weight below to remove just that one.");
+        Dev::PanelHelp("Draws every photographed clump from a single atlas layer, ignoring the mix and the "
+                       "weights. Step through the families to find which plate flickers, then zero its "
+                       "weight below to remove just that one.");
         // The map clutter atlas has up to 32 layers behind ONE named family ("map clutter (per
         // surface)"), so the combo cannot reach them; this slider can. -1 = off. The game log's
         // "Wgpu grass atlas alpha edges" line (worst plates first) says which layer to try.
         int forcedLayer = std::clamp(grass.photoForceLayer, -1, 31);
-        if (ImGui::SliderInt("Force atlas layer (-1 = off, 0..31)", &forcedLayer, -1, 31))
+        if (Dev::SliderInt("Force atlas layer (-1 = off, 0..31)", &forcedLayer, -1, 31))
         {
             grass.photoForceLayer = forcedLayer;
             changed = true;
         }
-        ImGui::TextDisabled("Same override by atlas layer number, for map-clutter worlds whose classes are not "
-                            "listed above (Takistan: 26 layers). Which layer flickers is measured at upload: grep "
-                            "the game log for 'Wgpu grass atlas alpha edges' -- plates are listed worst first by "
-                            "speckle (isolated one-texel stem fragments) and partial-alpha fraction.");
+        Dev::PanelHelp("Same override by atlas layer number, for map-clutter worlds whose classes are not "
+                       "listed above (Takistan: 26 layers). Which layer flickers is measured at upload: grep "
+                       "the game log for 'Wgpu grass atlas alpha edges' -- plates are listed worst first by "
+                       "speckle (isolated one-texel stem fragments) and partial-alpha fraction.");
         // Weights cover layers 1..8; layer 0 is reached through the mix slider.
         for (int i = 1; i < familyCount; ++i)
         {
-            changed |= ImGui::SliderFloat(labelPtrs[i + 1], &grass.photoLayerWeights[i - 1], 0.0f, 1.0f, "%.2f");
+            changed |= Dev::SliderFloat(labelPtrs[i + 1], &grass.photoLayerWeights[i - 1], 0.0f, 1.0f, "%.2f");
         }
         if (familyCount > 1)
         {
-            ImGui::TextDisabled("Relative selection weights, not percentages: they are normalised against each "
-                                "other. 0 removes a family entirely. All at 0 falls back to the primary clump.");
+            Dev::PanelHelp("Relative selection weights, not percentages: they are normalised against each "
+                           "other. 0 removes a family entirely. All at 0 falls back to the primary clump.");
         }
-        if (ImGui::Button("All families on"))
+        if (Dev::Button("All families on"))
         {
             for (float& w : grass.photoLayerWeights)
                 w = 1.0f;
             grass.photoForceLayer = -1;
             changed = true;
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Primary clump only"))
+        Dev::PanelSameLine();
+        if (Dev::Button("Primary clump only"))
         {
             for (float& w : grass.photoLayerWeights)
                 w = 0.0f;
@@ -3552,45 +3553,44 @@ void DrawGrassTab()
     }
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Alpha cut-out cards (experimental, procedural blades only)");
-    changed |= ImGui::Checkbox("Silhouette from texture alpha", &grass.alphaCards);
-    ImGui::TextDisabled("Off = the blade outline is geometry (default). On = the quad is widened and the outline "
-                        "is cut out of the texture's alpha, so one card can carry several blade shapes. This is "
-                        "the Reforger-style approach and it buys shape variety without more geometry -- but it "
-                        "discards, which loses the early-Z the solid path relies on, and the wider quad adds "
-                        "overdraw. Watch the Grass rows in the benchmark table when turning it on.");
-    changed |= ImGui::SliderFloat("Alpha cutoff", &grass.alphaCutoff, 0.05f, 0.95f, "%.2f");
-    ImGui::TextDisabled("Texels below this alpha are discarded. Lower keeps more of the blade and its soft edge; "
-                        "higher trims harder and thins the silhouette. Only used when cards are on.");
-    changed |= ImGui::SliderFloat("Card widening", &grass.cardWiden, 1.0f, 4.0f, "%.2fx");
-    ImGui::TextDisabled("How much wider the quad is than the blade it draws. The cutout needs material to "
-                        "remove: at 1.00x there is nothing spare and the card reads as a rectangle again. "
-                        "Directly proportional to the overdraw this path costs.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Alpha cut-out cards (experimental, procedural blades only)");
+    changed |= Dev::Checkbox("Silhouette from texture alpha", &grass.alphaCards);
+    Dev::PanelHelp("Off = the blade outline is geometry (default). On = the quad is widened and the outline "
+                   "is cut out of the texture's alpha, so one card can carry several blade shapes. This is "
+                   "the Reforger-style approach and it buys shape variety without more geometry -- but it "
+                   "discards, which loses the early-Z the solid path relies on, and the wider quad adds "
+                   "overdraw. Watch the Grass rows in the benchmark table when turning it on.");
+    changed |= Dev::SliderFloat("Alpha cutoff", &grass.alphaCutoff, 0.05f, 0.95f, "%.2f");
+    Dev::PanelHelp("Texels below this alpha are discarded. Lower keeps more of the blade and its soft edge; "
+                   "higher trims harder and thins the silhouette. Only used when cards are on.");
+    changed |= Dev::SliderFloat("Card widening", &grass.cardWiden, 1.0f, 4.0f, "%.2fx");
+    Dev::PanelHelp("How much wider the quad is than the blade it draws. The cutout needs material to "
+                   "remove: at 1.00x there is nothing spare and the card reads as a rectangle again. "
+                   "Directly proportional to the overdraw this path costs.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Species mix");
-    changed |= ImGui::SliderFloat("Weed %", &grass.weedPercent, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Broad flat leaves (clover, ragged weed). Wider and shorter than grass.");
-    changed |= ImGui::SliderFloat("Flower %", &grass.flowerPercent, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Daisy and poppy heads on slim untapered stems. Clamped so weed + flower never exceeds 100%%.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Species mix");
+    changed |= Dev::SliderFloat("Weed %", &grass.weedPercent, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Broad flat leaves (clover, ragged weed). Wider and shorter than grass.");
+    changed |= Dev::SliderFloat("Flower %", &grass.flowerPercent, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("Daisy and poppy heads on slim untapered stems. Clamped so weed + flower never exceeds 100%%.");
     // Mirror the renderer's clamp so the readout cannot claim an impossible mix.
     {
         const float weed = std::clamp(grass.weedPercent, 0.0f, 1.0f);
         const float flower = std::clamp(grass.flowerPercent, 0.0f, 1.0f - weed);
-        ImGui::TextDisabled("Effective mix: %.0f%% grass, %.0f%% weed, %.0f%% flower. Chosen per clump (~25 m "
-                            "patches), so these are area fractions, not per-blade odds.",
-                            (1.0f - weed - flower) * 100.0f, weed * 100.0f, flower * 100.0f);
+        Dev::PanelHelp("Effective mix: %.0f%% grass, %.0f%% weed, %.0f%% flower. Chosen per clump (~25 m "
+                       "patches), so these are area fractions, not per-blade odds.",
+                       (1.0f - weed - flower) * 100.0f, weed * 100.0f, flower * 100.0f);
     }
-    changed |= ImGui::SliderFloat("Blade height", &grass.height, 0.10f, 3.0f, "%.2fx");
-    changed |= ImGui::Checkbox("Use live world wind", &grass.useLiveWind);
-    changed |= ImGui::SliderFloat("Wind strength", &grass.windStrength, 0.0f, 3.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Wind direction", &grass.windDirection, -180.0f, 180.0f, "%.0f deg");
-    ImGui::TextDisabled(
-        "Live wind follows weather. Disable it to test a manual direction; 0 degrees points east (+X).");
-    changed |= ImGui::SliderFloat("Field clumping", &grass.clumping, 0.0f, 1.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Colour variation", &grass.colorVariation, 0.0f, 1.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Blade height", &grass.height, 0.10f, 3.0f, "%.2fx");
+    changed |= Dev::Checkbox("Use live world wind", &grass.useLiveWind);
+    changed |= Dev::SliderFloat("Wind strength", &grass.windStrength, 0.0f, 3.0f, "%.2f");
+    changed |= Dev::SliderFloat("Wind direction", &grass.windDirection, -180.0f, 180.0f, "%.0f deg");
+    Dev::PanelHelp("Live wind follows weather. Disable it to test a manual direction; 0 degrees points east (+X).");
+    changed |= Dev::SliderFloat("Field clumping", &grass.clumping, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Colour variation", &grass.colorVariation, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
     const float requestedNearRadius = std::clamp(grass.radius, 8.0f, 200.0f);
     // Mirrors EngineWgpu::SetGrassSettings. Deliberately NOT a function of the
     // radius any more: near density is radius-independent.
@@ -3606,8 +3606,8 @@ void DrawGrassTab()
         const float wantCells = std::ceil(2.0f * nearDetailRadius / clumpSpacing);
         const float cells = std::clamp(wantCells, 64.0f, 1536.0f);
         const float reach = cells * clumpSpacing * 0.5f;
-        ImGui::TextDisabled("Near placement: %.0f cm clump spacing, %.0f x %.0f candidate grid.", clumpSpacing * 100.0f,
-                            cells, cells);
+        Dev::PanelHelp("Near placement: %.0f cm clump spacing, %.0f x %.0f candidate grid.", clumpSpacing * 100.0f,
+                       cells, cells);
         if (wantCells > 1536.0f)
             ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.25f, 1.0f),
                                "Candidate grid capped: near grass reaches ~%.0f m of the requested %.0f m at this "
@@ -3615,31 +3615,30 @@ void DrawGrassTab()
                                reach, nearDetailRadius);
     }
     if (grass.farRadius <= 0.0f)
-        ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, no far ring.", nearDetailRadius,
-                            midReach);
+        Dev::PanelHelp("LOD field: near clumps %.0f m, mid clumps to %.0f m, no far ring.", nearDetailRadius, midReach);
     else
     {
         const float farReach = std::clamp(grass.farRadius, midReach + 8.0f, 5000.0f);
-        ImGui::TextDisabled("LOD field: near clumps %.0f m, mid clumps to %.0f m, far cover %.0f-%.0f m.",
-                            nearDetailRadius, midReach, midReach, farReach);
+        Dev::PanelHelp("LOD field: near clumps %.0f m, mid clumps to %.0f m, far cover %.0f-%.0f m.", nearDetailRadius,
+                       midReach, midReach, farReach);
     }
-    ImGui::Separator();
-    ImGui::TextUnformatted("Walked imprints (both grass modes)");
-    changed |= ImGui::SliderFloat("Imprint lifetime (s)", &grass.trackLifetime, 5.0f, 3600.0f, "%.0f");
-    ImGui::TextDisabled("How long a footprint survives; it recovers over the last third, so a trail thins out "
-                        "rather than blinking away. The record is a ring of 256 stamps consumed by DISTANCE "
-                        "walked, not by time, so standing still no longer erases the trail you just made -- which "
-                        "is what used to make imprints expire far sooner than their stated lifetime.");
-    changed |= ImGui::SliderFloat("Imprint depth", &grass.imprintDepth, 0.0f, 0.95f, "%.2f");
-    ImGui::TextDisabled("How far a crushed plant is pressed down, as a fraction of its own height. 0.55 is the "
-                        "long-standing value. Photographed clump cards scale this up internally by 1.45x and "
-                        "rotate 1.35x further: one plate stands for a whole clump nearly two metres across, so "
-                        "tipping it the ~30 degrees that flattens a blade would leave an obviously upright bush. "
-                        "The shadow pass uses the same numbers, so a flattened clump casts a flattened shadow.");
-    ImGui::TextDisabled("Wind: travelling direction field plus local gusts; roots stay pinned.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Walked imprints (both grass modes)");
+    changed |= Dev::SliderFloat("Imprint lifetime (s)", &grass.trackLifetime, 5.0f, 3600.0f, "%.0f");
+    Dev::PanelHelp("How long a footprint survives; it recovers over the last third, so a trail thins out "
+                   "rather than blinking away. The record is a ring of 256 stamps consumed by DISTANCE "
+                   "walked, not by time, so standing still no longer erases the trail you just made -- which "
+                   "is what used to make imprints expire far sooner than their stated lifetime.");
+    changed |= Dev::SliderFloat("Imprint depth", &grass.imprintDepth, 0.0f, 0.95f, "%.2f");
+    Dev::PanelHelp("How far a crushed plant is pressed down, as a fraction of its own height. 0.55 is the "
+                   "long-standing value. Photographed clump cards scale this up internally by 1.45x and "
+                   "rotate 1.35x further: one plate stands for a whole clump nearly two metres across, so "
+                   "tipping it the ~30 degrees that flattens a blade would leave an obviously upright bush. "
+                   "The shadow pass uses the same numbers, so a flattened clump casts a flattened shadow.");
+    Dev::PanelHelp("Wind: travelling direction field plus local gusts; roots stay pinned.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Catch-all worlds (one terrain material, no clutter classification)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Catch-all worlds (one terrain material, no clutter classification)");
     {
         // Mirrors EngineWgpu::SetGrassSettings: a world whose terrain is ONE material (a converted
         // Enfusion world such as Reforger's Everon) has no per-surface clutter answer, so the whole
@@ -3652,25 +3651,25 @@ void DrawGrassTab()
                                "(WGR_GRASS_CATCHALL=0 disables)",
                                grass.catchAllCoverage, grass.catchAllHeight);
         else
-            ImGui::TextDisabled("Not active here: this world has %d terrain materials, so its own surface "
-                                "classification decides where grass grows. The two values below are 1.0-neutral.",
-                                materials);
+            Dev::PanelHelp("Not active here: this world has %d terrain materials, so its own surface "
+                           "classification decides where grass grows. The two values below are 1.0-neutral.",
+                           materials);
     }
-    changed |= ImGui::SliderFloat("Catch-all coverage", &grass.catchAllCoverage, 0.02f, 1.0f, "%.2f");
-    ImGui::TextDisabled("Multiplies the master coverage on a catch-all world. 0.24 is the owner's default for an "
-                        "unknown clutter density; 1.00 = the stock field.");
-    changed |= ImGui::SliderFloat("Catch-all blade height", &grass.catchAllHeight, 0.10f, 1.0f, "%.2fx");
-    ImGui::TextDisabled("Multiplies 'Blade height' on a catch-all world. 0.55 turns the waist-high uniform meadow "
-                        "into ankle-to-shin grass; 1.00 = the stock height.");
+    changed |= Dev::SliderFloat("Catch-all coverage", &grass.catchAllCoverage, 0.02f, 1.0f, "%.2f");
+    Dev::PanelHelp("Multiplies the master coverage on a catch-all world. 0.24 is the owner's default for an "
+                   "unknown clutter density; 1.00 = the stock field.");
+    changed |= Dev::SliderFloat("Catch-all blade height", &grass.catchAllHeight, 0.10f, 1.0f, "%.2fx");
+    Dev::PanelHelp("Multiplies 'Blade height' on a catch-all world. 0.55 turns the waist-high uniform meadow "
+                   "into ankle-to-shin grass; 1.00 = the stock height.");
 
-    ImGui::Separator();
-    if (ImGui::Button("Reset to defaults##grassBottom"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset to defaults##grassBottom"))
     {
         grass = Engine::GrassSettings{};
         changed = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Ultra dense"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Ultra dense"))
     {
         grass.enabled = true;
         grass.density = 1.0f;
@@ -3730,8 +3729,8 @@ void DrawGrassTab()
         grass.applyFog = true;
         changed = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Max coverage"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Max coverage"))
     {
         // Deliberately expensive: the top of every coverage control, so the cost
         // of the new density ceiling can be measured in the table below rather
@@ -3751,8 +3750,8 @@ void DrawGrassTab()
         grass.farDensity = 1.0f;
         changed = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Disable"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Disable"))
     {
         grass.enabled = false;
         changed = true;
@@ -3764,8 +3763,8 @@ void DrawGrassTab()
     // GRS-A — grass benchmark panel, mirroring the Water tab's WTR-002 table.
     // Both GPU timings and instance counts are harvested asynchronously, so they
     // lag the displayed frame by the readback ring depth (~2-3 frames).
-    ImGui::Separator();
-    ImGui::TextUnformatted("Benchmark (GRS-A)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Benchmark (GRS-A)");
 
     Engine::GrassStatsOut stats;
     if (GEngine->GetGrassStats(stats) &&
@@ -3792,7 +3791,7 @@ void DrawGrassTab()
         {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(r.name);
+            Dev::PanelHeading(r.name);
             ImGui::TableNextColumn();
             ImGui::Text("%u", r.instances);
             ImGui::TableNextColumn();
@@ -3806,18 +3805,18 @@ void DrawGrassTab()
         }
         ImGui::EndTable();
         ImGui::Text("Total: %u instances, %u vertices submitted", totalInstances, totalVertices);
-        ImGui::SetItemTooltip("Vertices are the geometry the colour pass submits. The prepass "
-                              "re-submits near+mid, and the shadow pass re-submits near, so the "
-                              "frame's true grass vertex load is higher than this row.");
+        Dev::PanelTooltip("Vertices are the geometry the colour pass submits. The prepass "
+                          "re-submits near+mid, and the shadow pass re-submits near, so the "
+                          "frame's true grass vertex load is higher than this row.");
         if (stats.farInstances == 0 && grass.farRadius > 0.0f)
-            ImGui::TextDisabled("Far ring is on but empty — check geography exclusions for this map.");
+            Dev::PanelHelp("Far ring is on but empty — check geography exclusions for this map.");
     }
 
     float gpuMs[64];
     const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 64);
     if (gpuRegions <= 0)
     {
-        ImGui::TextDisabled("GPU timings unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
+        Dev::PanelHelp("GPU timings unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
     }
     else if (ImGui::BeginTable("grsGpuTimings", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
@@ -3827,7 +3826,7 @@ void DrawGrassTab()
         {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(GEngine->GetWaterGpuTimingName(i));
+            Dev::PanelHeading(GEngine->GetWaterGpuTimingName(i));
             ImGui::TableNextColumn();
             if (gpuMs[i] < 0.0f)
                 ImGui::TextDisabled("n/a");
@@ -3839,68 +3838,67 @@ void DrawGrassTab()
         }
         ImGui::EndTable();
         ImGui::Text("Measured grass total: %.3f ms", gpuTotal);
-        ImGui::SetItemTooltip("Placement rows are exact (standalone compute passes). The draw "
-                              "rows need TIMESTAMP_QUERY_INSIDE_PASSES and read \"n/a\" without "
-                              "it, because grass draws share a render pass with the rest of the "
-                              "3D plan. Passes can overlap on the GPU, so this is not wall-clock.");
+        Dev::PanelTooltip("Placement rows are exact (standalone compute passes). The draw "
+                          "rows need TIMESTAMP_QUERY_INSIDE_PASSES and read \"n/a\" without "
+                          "it, because grass draws share a render pass with the rest of the "
+                          "3D plan. Passes can overlap on the GPU, so this is not wall-clock.");
     }
 
-    ImGui::TextDisabled("A/B a change: note instances + ms here, apply the change, compare. "
-                        "Keep the camera still -- placement is camera-relative.");
+    Dev::PanelHelp("A/B a change: note instances + ms here, apply the change, compare. "
+                   "Keep the camera still -- placement is camera-relative.");
 }
 
 void DrawFoliageTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("No engine.");
+        Dev::PanelHelp("No engine.");
         return;
     }
 
-    ImGui::TextDisabled("Emulated leaf subsurface scattering for alpha-tested vegetation (wgpu).");
-    ImGui::TextDisabled("Evens out the hard lit/dark split on low-poly canopy at harsh sun angles.");
-    ImGui::TextDisabled("Stage 1: applies to every alpha-tested cutout section.");
-    ImGui::Separator();
+    Dev::PanelHelp("Emulated leaf subsurface scattering for alpha-tested vegetation (wgpu).");
+    Dev::PanelHelp("Evens out the hard lit/dark split on low-poly canopy at harsh sun angles.");
+    Dev::PanelHelp("Stage 1: applies to every alpha-tested cutout section.");
+    Dev::PanelSeparator();
 
     Engine::FoliageSettings f = GEngine->GetFoliageSettings();
     bool changed = false;
     changed |= ResetToDefaultsButton(f);
 
-    changed |= ImGui::SliderFloat("Transmission", &f.transScale, 0.0f, 2.0f, "%.2f");
-    ImGui::TextDisabled("  DICE fast-SSS: light through the leaf, lifting the dark/backlit side (0 = off)");
-    changed |= ImGui::SliderFloat("Distortion", &f.distortion, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  bends the transmitted light toward the normal; higher = broader wrap-around");
-    changed |= ImGui::SliderFloat("Transmission power", &f.transPower, 1.0f, 16.0f, "%.1f");
-    ImGui::TextDisabled("  lobe tightness; higher = a smaller, sharper backlit glow near the sun");
-    changed |= ImGui::SliderFloat("Wrap", &f.wrap, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  softens the front terminator; 0 = hard Lambert (lit side stays unchanged)");
-    changed |= ImGui::SliderFloat("Ambient boost", &f.ambientBoost, 0.5f, 4.0f, "%.2f");
-    ImGui::TextDisabled("  sky-ambient multiplier for foliage only (1 = off); fades with distance");
-    changed |= ImGui::SliderFloat("GI (ambient x light)", &f.giStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  scale ambient by terrain light level so shadowed foliage stops glowing (0 = off)");
-    changed |= ImGui::SliderFloat("Fill fade end (m)", &f.fillFadeEnd, 0.0f, 1000.0f, "%.0f");
-    ImGui::TextDisabled(
-        "  distance where fill + ambient boost fade out (distant foliage -> plain sky-ambient; 0 = never)");
+    changed |= Dev::SliderFloat("Transmission", &f.transScale, 0.0f, 2.0f, "%.2f");
+    Dev::PanelHelp("  DICE fast-SSS: light through the leaf, lifting the dark/backlit side (0 = off)");
+    changed |= Dev::SliderFloat("Distortion", &f.distortion, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  bends the transmitted light toward the normal; higher = broader wrap-around");
+    changed |= Dev::SliderFloat("Transmission power", &f.transPower, 1.0f, 16.0f, "%.1f");
+    Dev::PanelHelp("  lobe tightness; higher = a smaller, sharper backlit glow near the sun");
+    changed |= Dev::SliderFloat("Wrap", &f.wrap, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  softens the front terminator; 0 = hard Lambert (lit side stays unchanged)");
+    changed |= Dev::SliderFloat("Ambient boost", &f.ambientBoost, 0.5f, 4.0f, "%.2f");
+    Dev::PanelHelp("  sky-ambient multiplier for foliage only (1 = off); fades with distance");
+    changed |= Dev::SliderFloat("GI (ambient x light)", &f.giStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  scale ambient by terrain light level so shadowed foliage stops glowing (0 = off)");
+    changed |= Dev::SliderFloat("Fill fade end (m)", &f.fillFadeEnd, 0.0f, 1000.0f, "%.0f");
+    Dev::PanelHelp("  distance where fill + ambient boost fade out (distant foliage -> plain sky-ambient; 0 = never)");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Spherical canopy normals (GPU-driven path; leaf sections only)");
-    changed |= ImGui::SliderFloat("Bush bend", &f.normalBend, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  bend bush leaf normals toward a radial crown normal so the blob shades round (0 = off)");
-    changed |= ImGui::SliderFloat("Bush crown Y (m)", &f.crownYOffset, -5.0f, 5.0f, "%.2f");
-    ImGui::TextDisabled("  lift the bush crown centre up into the canopy (bounding-sphere centre sits a bit low)");
-    changed |= ImGui::SliderFloat("Tree bend", &f.treeBend, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  same, for trees — applies only to leaf/canopy sections; the solid trunk is untouched");
-    changed |= ImGui::SliderFloat("Tree crown Y (m)", &f.treeCrownY, -2.0f, 12.0f, "%.2f");
-    ImGui::TextDisabled("  lift the tree crown centre up above the trunk (the centre sits mid-trunk)");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Spherical canopy normals (GPU-driven path; leaf sections only)");
+    changed |= Dev::SliderFloat("Bush bend", &f.normalBend, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  bend bush leaf normals toward a radial crown normal so the blob shades round (0 = off)");
+    changed |= Dev::SliderFloat("Bush crown Y (m)", &f.crownYOffset, -5.0f, 5.0f, "%.2f");
+    Dev::PanelHelp("  lift the bush crown centre up into the canopy (bounding-sphere centre sits a bit low)");
+    changed |= Dev::SliderFloat("Tree bend", &f.treeBend, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  same, for trees — applies only to leaf/canopy sections; the solid trunk is untouched");
+    changed |= Dev::SliderFloat("Tree crown Y (m)", &f.treeCrownY, -2.0f, 12.0f, "%.2f");
+    Dev::PanelHelp("  lift the tree crown centre up above the trunk (the centre sits mid-trunk)");
 
-    ImGui::Separator();
-    if (ImGui::Button("Reset foliage to defaults"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset foliage to defaults"))
     {
         f = Engine::FoliageSettings{};
         changed = true;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Disable (zero strengths)"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Disable (zero strengths)"))
     {
         f.transScale = 0.0f;
         f.wrap = 0.0f;
@@ -3912,8 +3910,8 @@ void DrawFoliageTab()
     if (changed)
         GEngine->SetFoliageSettings(f);
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Current tuning (copy back to share):");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Current tuning (copy back to share):");
     char summary[256];
     snprintf(summary, sizeof(summary),
              "foliage: trans=%.2f dist=%.2f transPow=%.1f wrap=%.2f amb=%.2f gi=%.2f fadeEnd=%.0f | "
@@ -3921,8 +3919,8 @@ void DrawFoliageTab()
              f.transScale, f.distortion, f.transPower, f.wrap, f.ambientBoost, f.giStrength, f.fillFadeEnd,
              f.normalBend, f.crownYOffset, f.treeBend, f.treeCrownY);
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##foliageSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Copy foliage summary to clipboard"))
+    Dev::InputText("##foliageSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
+    if (Dev::Button("Copy foliage summary to clipboard"))
         ImGui::SetClipboardText(summary);
 }
 
@@ -3930,7 +3928,7 @@ void DrawShadowsTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("No engine.");
+        Dev::PanelHelp("No engine.");
         return;
     }
 
@@ -3938,103 +3936,103 @@ void DrawShadowsTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(t);
 
-    ImGui::TextDisabled("Depth-buffer shadow maps (durable fix).");
-    ImGui::TextDisabled("OFF = legacy projected shadows. ON = light-space shadow map (no flicker).");
-    ImGui::Separator();
+    Dev::PanelHelp("Depth-buffer shadow maps (durable fix).");
+    Dev::PanelHelp("OFF = legacy projected shadows. ON = light-space shadow map (no flicker).");
+    Dev::PanelSeparator();
 
-    changed |= ImGui::Checkbox("Enabled (shadow maps)", &t.enabled);
-    ImGui::SameLine();
-    ImGui::TextDisabled(t.enabled ? "(projected path skipped)" : "(projected path active)");
+    changed |= Dev::Checkbox("Enabled (shadow maps)", &t.enabled);
+    Dev::PanelSameLine();
+    Dev::PanelHelp(t.enabled ? "(projected path skipped)" : "(projected path active)");
 
-    ImGui::Separator();
+    Dev::PanelSeparator();
 
-    changed |= ImGui::SliderFloat("Darkness", &t.darkness, 0.0f, 1.0f, "%.3f");
-    ImGui::TextDisabled("  lit-colour multiplier where shadowed; lower = darker (1.0 = no shadow)");
+    changed |= Dev::SliderFloat("Darkness", &t.darkness, 0.0f, 1.0f, "%.3f");
+    Dev::PanelHelp("  lit-colour multiplier where shadowed; lower = darker (1.0 = no shadow)");
 
-    changed |= ImGui::SliderInt("Cascades", &t.cascadeCount, 1, 4);
-    ImGui::TextDisabled("  total tiers (omni + frustum); more = crisper across distance");
+    changed |= Dev::SliderInt("Cascades", &t.cascadeCount, 1, 4);
+    Dev::PanelHelp("  total tiers (omni + frustum); more = crisper across distance");
 
-    changed |= ImGui::SliderFloat("Distance coef", &t.distanceCoef, 0.05f, 1.0f, "%.3f");
-    ImGui::TextDisabled("  frustum-tier far distance as a fraction of view distance (1.0 = full VD)");
+    changed |= Dev::SliderFloat("Distance coef", &t.distanceCoef, 0.05f, 1.0f, "%.3f");
+    Dev::PanelHelp("  frustum-tier far distance as a fraction of view distance (1.0 = full VD)");
 
-    changed |= ImGui::SliderFloat("Shadow distance (m)", &t.shadowDistance, 0.0f, 1500.0f, "%.0f");
-    ImGui::TextDisabled("  explicit cascade reach, decoupled from the 250 m clamp (0 = use game slider)");
+    changed |= Dev::SliderFloat("Shadow distance (m)", &t.shadowDistance, 0.0f, 1500.0f, "%.0f");
+    Dev::PanelHelp("  explicit cascade reach, decoupled from the 250 m clamp (0 = use game slider)");
 
-    changed |= ImGui::SliderFloat("Split coef", &t.splitCoef, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  PSSM blend: 0 = uniform splits, 1 = logarithmic (FP 0.95)");
+    changed |= Dev::SliderFloat("Split coef", &t.splitCoef, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  PSSM blend: 0 = uniform splits, 1 = logarithmic (FP 0.95)");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Omni near tiers — camera-centred spheres, all-direction coverage");
-    ImGui::TextDisabled("(so a caster behind/beside you still casts a shadow into view)");
-    changed |= ImGui::SliderInt("Omni tiers", &t.omniCount, 0, t.cascadeCount);
-    ImGui::TextDisabled("  leading tiers fit a sphere around the camera (0 = pure frustum)");
-    changed |= ImGui::SliderFloat("Omni radius 0", &t.omniCoef0, 0.02f, 0.5f, "%.3f");
-    changed |= ImGui::SliderFloat("Omni radius 1", &t.omniCoef1, 0.02f, 0.8f, "%.3f");
-    ImGui::TextDisabled("  sphere radii as a fraction of the shadow range (ascending)");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Omni near tiers — camera-centred spheres, all-direction coverage");
+    Dev::PanelHelp("(so a caster behind/beside you still casts a shadow into view)");
+    changed |= Dev::SliderInt("Omni tiers", &t.omniCount, 0, t.cascadeCount);
+    Dev::PanelHelp("  leading tiers fit a sphere around the camera (0 = pure frustum)");
+    changed |= Dev::SliderFloat("Omni radius 0", &t.omniCoef0, 0.02f, 0.5f, "%.3f");
+    changed |= Dev::SliderFloat("Omni radius 1", &t.omniCoef1, 0.02f, 0.8f, "%.3f");
+    Dev::PanelHelp("  sphere radii as a fraction of the shadow range (ascending)");
 
-    changed |= ImGui::SliderFloat("Bias base", &t.biasBase, 0.0f, 0.0005f, "%.6f");
-    ImGui::TextDisabled("  per-cascade depth bias base*(i+1)^2; raise to kill acne");
+    changed |= Dev::SliderFloat("Bias base", &t.biasBase, 0.0f, 0.0005f, "%.6f");
+    Dev::PanelHelp("  per-cascade depth bias base*(i+1)^2; raise to kill acne");
 
-    changed |= ImGui::SliderFloat("Normal offset", &t.normalOffset, 0.0f, 4.0f, "%.2f");
-    ImGui::TextDisabled("  receiver push toward the light in world texels; raise to kill acne (wgpu)");
+    changed |= Dev::SliderFloat("Normal offset", &t.normalOffset, 0.0f, 4.0f, "%.2f");
+    Dev::PanelHelp("  receiver push toward the light in world texels; raise to kill acne (wgpu)");
 
-    changed |= ImGui::SliderFloat("PCF spread", &t.pcf, 0.0f, 3.0f, "%.2f");
-    ImGui::TextDisabled("  < 0.5 = single tap (crisp); >= 0.5 = 4 taps this many texels apart (wgpu)");
+    changed |= Dev::SliderFloat("PCF spread", &t.pcf, 0.0f, 3.0f, "%.2f");
+    Dev::PanelHelp("  < 0.5 = single tap (crisp); >= 0.5 = 4 taps this many texels apart (wgpu)");
 
-    changed |= ImGui::SliderFloat("Caster LOD bias", &t.casterLodBias, 1.0f, 8.0f, "%.1f");
-    ImGui::TextDisabled("  casters pick their LOD as if this many times farther away");
+    changed |= Dev::SliderFloat("Caster LOD bias", &t.casterLodBias, 1.0f, 8.0f, "%.1f");
+    Dev::PanelHelp("  casters pick their LOD as if this many times farther away");
 
-    changed |= ImGui::SliderFloat("Far fade (m)", &t.fadeRange, 1.0f, 120.0f, "%.1f");
-    ImGui::TextDisabled("  distant shadows dissolve over this band instead of a hard cut-off");
+    changed |= Dev::SliderFloat("Far fade (m)", &t.fadeRange, 1.0f, 120.0f, "%.1f");
+    Dev::PanelHelp("  distant shadows dissolve over this band instead of a hard cut-off");
 
     static const int resOptions[] = {512, 1024, 2048, 4096};
     int resIdx = 2;
     for (int i = 0; i < 4; ++i)
         if (resOptions[i] == t.resolution)
             resIdx = i;
-    if (ImGui::Combo("Resolution", &resIdx,
-                     "512\0"
-                     "1024\0"
-                     "2048\0"
-                     "4096\0"))
+    if (Dev::Combo("Resolution", &resIdx,
+                   "512\0"
+                   "1024\0"
+                   "2048\0"
+                   "4096\0"))
     {
         t.resolution = resOptions[resIdx];
         changed = true;
     }
-    ImGui::TextDisabled("  per-cascade depth-map size; higher = sharper, more VRAM");
+    Dev::PanelHelp("  per-cascade depth-map size; higher = sharper, more VRAM");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Terrain sun-shadows (wgpu)");
-    changed |= ImGui::Checkbox("Enabled (terrain sun-shadow)", &t.terrainShadowEnabled);
-    changed |= ImGui::SliderFloat("Strength", &t.terrainShadowStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  occlusion scale; 1 = physical");
-    changed |= ImGui::SliderInt("Mask supersample", &t.terrainShadowScale, 1, 8);
-    ImGui::TextDisabled("  mask resolution vs heightmap");
-    changed |= ImGui::SliderInt("March steps", &t.terrainShadowSteps, 16, 2048);
-    ImGui::TextDisabled("  hard range cap");
-    changed |= ImGui::SliderFloat("Penumbra (deg)", &t.terrainShadowPenumbra, 0.0f, 8.0f, "%.2f");
-    ImGui::TextDisabled("  soft-edge half-width; 0 = hard, larger = softer");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Terrain sun-shadows (wgpu)");
+    changed |= Dev::Checkbox("Enabled (terrain sun-shadow)", &t.terrainShadowEnabled);
+    changed |= Dev::SliderFloat("Strength", &t.terrainShadowStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  occlusion scale; 1 = physical");
+    changed |= Dev::SliderInt("Mask supersample", &t.terrainShadowScale, 1, 8);
+    Dev::PanelHelp("  mask resolution vs heightmap");
+    changed |= Dev::SliderInt("March steps", &t.terrainShadowSteps, 16, 2048);
+    Dev::PanelHelp("  hard range cap");
+    changed |= Dev::SliderFloat("Penumbra (deg)", &t.terrainShadowPenumbra, 0.0f, 8.0f, "%.2f");
+    Dev::PanelHelp("  soft-edge half-width; 0 = hard, larger = softer");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Terrain sky-visibility AO (wgpu) — darkens AMBIENT in valleys/gorges/coves");
-    changed |= ImGui::Checkbox("Enabled (sky-visibility AO)", &t.terrainSkyVisEnabled);
-    changed |= ImGui::SliderFloat("SkyVis strength", &t.terrainSkyVisStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  how strongly occluded columns lose ambient (0 = off)");
-    changed |= ImGui::SliderFloat("SkyVis contrast", &t.terrainSkyVisContrast, 1.0f, 12.0f, "%.1f");
-    ImGui::TextDisabled("  occ = 1-pow(V,contrast); smooth terrain gives V~1, so raise this to see it");
-    changed |= ImGui::SliderFloat("SkyVis floor", &t.terrainSkyVisFloor, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  minimum ambient kept where fully occluded (never fully black)");
-    changed |= ImGui::SliderFloat("SkyVis radius (m)", &t.terrainSkyVisRadius, 50.0f, 2000.0f, "%.0f");
-    ImGui::TextDisabled("  horizon-scan reach; larger = distant ridges occlude too (re-runs the scan)");
-    changed |= ImGui::SliderInt("SkyVis azimuths", &t.terrainSkyVisAzimuths, 4, 32);
-    ImGui::TextDisabled("  scan direction count; more = smoother (re-runs the scan)");
-    changed |= ImGui::SliderInt("SkyVis downsample", &t.terrainSkyVisDownsample, 1, 4);
-    ImGui::TextDisabled("  mask coarseness vs heightmap; 1 = sharpest cliffs, slower (re-runs the scan)");
-    changed |= ImGui::Checkbox("SkyVis debug (greyscale factor)", &t.terrainSkyVisDebug);
-    ImGui::TextDisabled("  terrain shows the contrast-shaped sky-view factor for tuning");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Terrain sky-visibility AO (wgpu) — darkens AMBIENT in valleys/gorges/coves");
+    changed |= Dev::Checkbox("Enabled (sky-visibility AO)", &t.terrainSkyVisEnabled);
+    changed |= Dev::SliderFloat("SkyVis strength", &t.terrainSkyVisStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  how strongly occluded columns lose ambient (0 = off)");
+    changed |= Dev::SliderFloat("SkyVis contrast", &t.terrainSkyVisContrast, 1.0f, 12.0f, "%.1f");
+    Dev::PanelHelp("  occ = 1-pow(V,contrast); smooth terrain gives V~1, so raise this to see it");
+    changed |= Dev::SliderFloat("SkyVis floor", &t.terrainSkyVisFloor, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  minimum ambient kept where fully occluded (never fully black)");
+    changed |= Dev::SliderFloat("SkyVis radius (m)", &t.terrainSkyVisRadius, 50.0f, 2000.0f, "%.0f");
+    Dev::PanelHelp("  horizon-scan reach; larger = distant ridges occlude too (re-runs the scan)");
+    changed |= Dev::SliderInt("SkyVis azimuths", &t.terrainSkyVisAzimuths, 4, 32);
+    Dev::PanelHelp("  scan direction count; more = smoother (re-runs the scan)");
+    changed |= Dev::SliderInt("SkyVis downsample", &t.terrainSkyVisDownsample, 1, 4);
+    Dev::PanelHelp("  mask coarseness vs heightmap; 1 = sharpest cliffs, slower (re-runs the scan)");
+    changed |= Dev::Checkbox("SkyVis debug (greyscale factor)", &t.terrainSkyVisDebug);
+    Dev::PanelHelp("  terrain shows the contrast-shaped sky-view factor for tuning");
 
-    ImGui::Separator();
-    if (ImGui::Button("Reset knobs to defaults"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset knobs to defaults"))
     {
         const bool keepEnabled = t.enabled;
         t = Engine::ShadowMapTuning{};
@@ -4047,8 +4045,8 @@ void DrawShadowsTab()
 
     // Read-back: a one-line summary the user can copy and paste back so the
     // values they tuned by eye can be baked into the engine defaults.
-    ImGui::Separator();
-    ImGui::TextDisabled("Current tuning (copy back to share):");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Current tuning (copy back to share):");
     char summary[512];
     snprintf(summary, sizeof(summary),
              "shadows: enabled=%s darkness=%.3f cascades=%d omni=%d/%.3f/%.3f dist=%.3f shadowDist=%.0f split=%.2f "
@@ -4061,8 +4059,8 @@ void DrawShadowsTab()
              t.terrainSkyVisEnabled ? "true" : "false", t.terrainSkyVisStrength, t.terrainSkyVisContrast,
              t.terrainSkyVisFloor, t.terrainSkyVisRadius, t.terrainSkyVisAzimuths, t.terrainSkyVisDownsample);
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##shadowSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Copy summary to clipboard"))
+    Dev::InputText("##shadowSummary", summary, sizeof(summary), ImGuiInputTextFlags_ReadOnly);
+    if (Dev::Button("Copy summary to clipboard"))
         ImGui::SetClipboardText(summary);
 }
 
@@ -4079,62 +4077,62 @@ void DrawAmbientOcclusionTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(ao);
 
-    ImGui::TextDisabled("Short-range AO from the depth+normal prepass: local folds, corners,");
-    ImGui::TextDisabled("and the contact between objects and the ground. Ambient term only.");
-    ImGui::Separator();
+    Dev::PanelHelp("Short-range AO from the depth+normal prepass: local folds, corners,");
+    Dev::PanelHelp("and the contact between objects and the ground. Ambient term only.");
+    Dev::PanelSeparator();
 
-    changed |= ImGui::Checkbox("Enabled", &ao.enabled);
-    ImGui::TextDisabled("  the A/B: toggle this and watch corners and object bases");
-    changed |= ImGui::Checkbox("Directional ambient (bent normal)", &ao.bentNormal);
-    ImGui::TextDisabled("  Stage 2: light the ambient from the direction that is actually OPEN,");
-    ImGui::TextDisabled("  not from the surface normal. Changes where light comes from, not just");
-    ImGui::TextDisabled("  how much — this is the one that gives shaded surfaces form.");
-    changed |= ImGui::Combo("Raw buffer view", &ao.debugMode, "Off (lit scene) AO (greyscale) Bent normal (RGB) ");
-    ImGui::TextDisabled("  Off        = the normal lit scene in colour, AO folded into ambient");
-    ImGui::TextDisabled("  AO         = the visibility buffer; white = open, dark = occluded");
-    ImGui::TextDisabled("  Bent normal= the direction light arrives from, as colour. Use this to");
-    ImGui::TextDisabled("               see what 'Directional ambient' is actually doing.");
+    changed |= Dev::Checkbox("Enabled", &ao.enabled);
+    Dev::PanelHelp("  the A/B: toggle this and watch corners and object bases");
+    changed |= Dev::Checkbox("Directional ambient (bent normal)", &ao.bentNormal);
+    Dev::PanelHelp("  Stage 2: light the ambient from the direction that is actually OPEN,");
+    Dev::PanelHelp("  not from the surface normal. Changes where light comes from, not just");
+    Dev::PanelHelp("  how much — this is the one that gives shaded surfaces form.");
+    changed |= Dev::Combo("Raw buffer view", &ao.debugMode, "Off (lit scene) AO (greyscale) Bent normal (RGB) ");
+    Dev::PanelHelp("  Off        = the normal lit scene in colour, AO folded into ambient");
+    Dev::PanelHelp("  AO         = the visibility buffer; white = open, dark = occluded");
+    Dev::PanelHelp("  Bent normal= the direction light arrives from, as colour. Use this to");
+    Dev::PanelHelp("               see what 'Directional ambient' is actually doing.");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Coverage");
-    changed |= ImGui::SliderFloat("Radius (m)", &ao.radius, 0.1f, 10.0f, "%.2f");
-    ImGui::TextDisabled("  world-space reach. ~1 m = tight contact shadow, 2-4 m = room corners");
-    changed |= ImGui::SliderFloat("Max radius (px)", &ao.maxRadiusPixels, 8.0f, 512.0f, "%.0f");
-    ImGui::TextDisabled("  cost clamp. WATCH THIS: whenever it bites it SHORTENS the radius above,");
-    ImGui::TextDisabled("  so a low value looks exactly like 'AO does nothing' up close");
-    changed |= ImGui::SliderFloat("Strength", &ao.strength, 0.1f, 4.0f, "%.2f");
-    ImGui::TextDisabled("  exponent on visibility; 1 = physical, higher = deeper");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Coverage");
+    changed |= Dev::SliderFloat("Radius (m)", &ao.radius, 0.1f, 10.0f, "%.2f");
+    Dev::PanelHelp("  world-space reach. ~1 m = tight contact shadow, 2-4 m = room corners");
+    changed |= Dev::SliderFloat("Max radius (px)", &ao.maxRadiusPixels, 8.0f, 512.0f, "%.0f");
+    Dev::PanelHelp("  cost clamp. WATCH THIS: whenever it bites it SHORTENS the radius above,");
+    Dev::PanelHelp("  so a low value looks exactly like 'AO does nothing' up close");
+    changed |= Dev::SliderFloat("Strength", &ao.strength, 0.1f, 4.0f, "%.2f");
+    Dev::PanelHelp("  exponent on visibility; 1 = physical, higher = deeper");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Sample budget (no TAA here, so this is the whole per-frame budget)");
-    changed |= ImGui::SliderInt("Slices", &ao.slices, 1, 8);
-    ImGui::TextDisabled("  azimuthal directions per pixel");
-    changed |= ImGui::SliderInt("Steps", &ao.steps, 2, 32);
-    ImGui::TextDisabled("  horizon march steps per slice. Raise this BEFORE widening the blur;");
-    ImGui::TextDisabled("  a wide radius with few steps steps over small occluders");
-    changed |= ImGui::SliderInt("Mip march (0 = off)", &ao.maxMip, 0, 6);
-    ImGui::TextDisabled("  0 = every tap full-res (stable). Higher = more reach close to a");
-    ImGui::TextDisabled("  surface, but FLICKERS while moving — no TAA here to absorb it.");
-    changed |= ImGui::SliderFloat("Thickness", &ao.thickness, 0.05f, 8.0f, "%.2f");
-    ImGui::TextDisabled("  falloff past the radius; too low and thin poles shadow the sky behind them");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Sample budget (no TAA here, so this is the whole per-frame budget)");
+    changed |= Dev::SliderInt("Slices", &ao.slices, 1, 8);
+    Dev::PanelHelp("  azimuthal directions per pixel");
+    changed |= Dev::SliderInt("Steps", &ao.steps, 2, 32);
+    Dev::PanelHelp("  horizon march steps per slice. Raise this BEFORE widening the blur;");
+    Dev::PanelHelp("  a wide radius with few steps steps over small occluders");
+    changed |= Dev::SliderInt("Mip march (0 = off)", &ao.maxMip, 0, 6);
+    Dev::PanelHelp("  0 = every tap full-res (stable). Higher = more reach close to a");
+    Dev::PanelHelp("  surface, but FLICKERS while moving — no TAA here to absorb it.");
+    changed |= Dev::SliderFloat("Thickness", &ao.thickness, 0.05f, 8.0f, "%.2f");
+    Dev::PanelHelp("  falloff past the radius; too low and thin poles shadow the sky behind them");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Bilateral denoise (this replaces temporal filtering entirely)");
-    changed |= ImGui::SliderFloat("Blur radius", &ao.blurRadius, 0.0f, 16.0f, "%.1f");
-    ImGui::TextDisabled("  too wide washes out the contact darkening that is the point");
-    changed |= ImGui::SliderFloat("Depth reject", &ao.blurDepthScale, 1.0f, 128.0f, "%.0f");
-    ImGui::TextDisabled("  higher = stops harder at silhouettes");
-    changed |= ImGui::SliderFloat("Normal reject", &ao.blurNormalPower, 1.0f, 32.0f, "%.0f");
-    ImGui::TextDisabled("  higher = stops harder at creases (keeps wall/floor contact)");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Bilateral denoise (this replaces temporal filtering entirely)");
+    changed |= Dev::SliderFloat("Blur radius", &ao.blurRadius, 0.0f, 16.0f, "%.1f");
+    Dev::PanelHelp("  too wide washes out the contact darkening that is the point");
+    changed |= Dev::SliderFloat("Depth reject", &ao.blurDepthScale, 1.0f, 128.0f, "%.0f");
+    Dev::PanelHelp("  higher = stops harder at silhouettes");
+    changed |= Dev::SliderFloat("Normal reject", &ao.blurNormalPower, 1.0f, 32.0f, "%.0f");
+    Dev::PanelHelp("  higher = stops harder at creases (keeps wall/floor contact)");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("GPU cost (last completed frame)");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("GPU cost (last completed frame)");
     {
         float gpuMs[64];
         const int regions = GEngine->GetWaterGpuTimings(gpuMs, 64);
         if (regions <= (int)Engine::kGtaoGpuRegionBegin)
         {
-            ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
+            Dev::PanelHelp("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
         }
         else if (ImGui::BeginTable("aoGpuTimings", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
@@ -4144,7 +4142,7 @@ void DrawAmbientOcclusionTab()
             {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(GEngine->GetWaterGpuTimingName(i));
+                Dev::PanelHeading(GEngine->GetWaterGpuTimingName(i));
                 ImGui::TableNextColumn();
                 if (gpuMs[i] < 0.0f)
                     ImGui::TextDisabled("n/a");
@@ -4157,7 +4155,7 @@ void DrawAmbientOcclusionTab()
             const float frame = gpuMs[(int)Engine::kFrameGpuRegionTotal];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted("GPU frame total");
+            Dev::PanelHeading("GPU frame total");
             ImGui::TableNextColumn();
             if (frame < 0.0f)
                 ImGui::TextDisabled("n/a");
@@ -4167,20 +4165,20 @@ void DrawAmbientOcclusionTab()
             ImGui::Text("AO: %.3f ms", total);
             if (frame > 0.0f)
             {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(%.1f%% of the GPU frame)", 100.0f * total / frame);
+                Dev::PanelSameLine();
+                Dev::PanelHelp("(%.1f%% of the GPU frame)", 100.0f * total / frame);
             }
-            ImGui::SetItemTooltip("Split three ways because they answer different questions: prep "
-                                  "is fixed setup (partly shared with occlusion culling), the "
-                                  "horizon march scales with slices x steps, and the blur scales "
-                                  "with its radius. Toggle Enabled off and watch the frame total "
-                                  "for the honest delta — passes can overlap, so this sum is an "
-                                  "upper bound on what disabling AO gives back.");
+            Dev::PanelTooltip("Split three ways because they answer different questions: prep "
+                              "is fixed setup (partly shared with occlusion culling), the "
+                              "horizon march scales with slices x steps, and the blur scales "
+                              "with its radius. Toggle Enabled off and watch the frame total "
+                              "for the honest delta — passes can overlap, so this sum is an "
+                              "upper bound on what disabling AO gives back.");
         }
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Reset AO to defaults"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset AO to defaults"))
     {
         const bool keepEnabled = ao.enabled;
         ao = Engine::AoSettings{};
@@ -4207,51 +4205,51 @@ void DrawInteriorSkyTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(is);
 
-    ImGui::TextDisabled("Tells the renderer it is INDOORS: a top-down depth map of the object");
-    ImGui::TextDisabled("scene. Geometry above a surface removes its SKY AMBIENT, toward a floor.");
-    ImGui::TextDisabled("Direct sun (shadow maps) and local lights are never touched.");
-    ImGui::Separator();
+    Dev::PanelHelp("Tells the renderer it is INDOORS: a top-down depth map of the object");
+    Dev::PanelHelp("scene. Geometry above a surface removes its SKY AMBIENT, toward a floor.");
+    Dev::PanelHelp("Direct sun (shadow maps) and local lights are never touched.");
+    Dev::PanelSeparator();
 
-    changed |= ImGui::Checkbox("Enabled (per-frame maps, Stage 1)", &is.enabled);
-    ImGui::TextDisabled("  the A/B: stand in a doorway and toggle. Hotkey: Ctrl+Shift+I");
-    changed |= ImGui::Checkbox("Baked volumes (Stage 2)", &is.baked);
-    ImGui::TextDisabled("  the other implementation: occlusion resolved per MODEL, so its edges");
-    ImGui::TextDisabled("  follow the building instead of a camera-space grid — which is what");
-    ImGui::TextDisabled("  caused the shadow patches. Hotkey: Ctrl+Shift+B.");
-    ImGui::TextDisabled("  Needs WGR_SKY_BAKE_VOLUMES=1 at STARTUP to produce the volumes; this");
-    ImGui::TextDisabled("  switch only decides whether shading reads them. Both can be on, but");
-    ImGui::TextDisabled("  compare them one at a time.");
-    changed |= ImGui::Checkbox("Reach buffer (greyscale)", &is.debug);
-    ImGui::TextDisabled("  white = open sky above, black = fully roofed. Applies to whichever of");
-    ImGui::TextDisabled("  the two is on. Tune against THIS,");
-    ImGui::TextDisabled("  not against the lit scene. Hotkey: Ctrl+Shift+O");
-    ImGui::TextDisabled("  (both work with this panel closed — Ctrl+` reopens it)");
+    changed |= Dev::Checkbox("Enabled (per-frame maps, Stage 1)", &is.enabled);
+    Dev::PanelHelp("  the A/B: stand in a doorway and toggle. Hotkey: Ctrl+Shift+I");
+    changed |= Dev::Checkbox("Baked volumes (Stage 2)", &is.baked);
+    Dev::PanelHelp("  the other implementation: occlusion resolved per MODEL, so its edges");
+    Dev::PanelHelp("  follow the building instead of a camera-space grid — which is what");
+    Dev::PanelHelp("  caused the shadow patches. Hotkey: Ctrl+Shift+B.");
+    Dev::PanelHelp("  Needs WGR_SKY_BAKE_VOLUMES=1 at STARTUP to produce the volumes; this");
+    Dev::PanelHelp("  switch only decides whether shading reads them. Both can be on, but");
+    Dev::PanelHelp("  compare them one at a time.");
+    changed |= Dev::Checkbox("Reach buffer (greyscale)", &is.debug);
+    Dev::PanelHelp("  white = open sky above, black = fully roofed. Applies to whichever of");
+    Dev::PanelHelp("  the two is on. Tune against THIS,");
+    Dev::PanelHelp("  not against the lit scene. Hotkey: Ctrl+Shift+O");
+    Dev::PanelHelp("  (both work with this panel closed — Ctrl+` reopens it)");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Look (Strength and Floor apply to BOTH implementations)");
-    changed |= ImGui::SliderFloat("Strength", &is.strength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  0 = inert, 1 = full attenuation down to the floor");
-    changed |= ImGui::SliderFloat("Floor", &is.floorLevel, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  minimum ambient in a sealed room. NOT optional — OFP interiors carry");
-    ImGui::TextDisabled("  almost no local lights, so 0 here is a black box you cannot play in.");
-    changed |= ImGui::SliderFloat("Kernel (m)", &is.kernel, 0.0f, 8.0f, "%.2f");
-    ImGui::TextDisabled("  softening radius: roughly how far light appears to reach in past an");
-    ImGui::TextDisabled("  opening. This is what grades a porch instead of drawing a hard line.");
-    changed |= ImGui::SliderFloat("Directional", &is.directional, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("  0 = the room just gets darker. 1 = the ambient arrives FROM the");
-    ImGui::TextDisabled("  opening, so the wall facing the window is brighter than the wall");
-    ImGui::TextDisabled("  beside it. This is the knob that reads as 'light through the window'.");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Look (Strength and Floor apply to BOTH implementations)");
+    changed |= Dev::SliderFloat("Strength", &is.strength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  0 = inert, 1 = full attenuation down to the floor");
+    changed |= Dev::SliderFloat("Floor", &is.floorLevel, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  minimum ambient in a sealed room. NOT optional — OFP interiors carry");
+    Dev::PanelHelp("  almost no local lights, so 0 here is a black box you cannot play in.");
+    changed |= Dev::SliderFloat("Kernel (m)", &is.kernel, 0.0f, 8.0f, "%.2f");
+    Dev::PanelHelp("  softening radius: roughly how far light appears to reach in past an");
+    Dev::PanelHelp("  opening. This is what grades a porch instead of drawing a hard line.");
+    changed |= Dev::SliderFloat("Directional", &is.directional, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  0 = the room just gets darker. 1 = the ambient arrives FROM the");
+    Dev::PanelHelp("  opening, so the wall facing the window is brighter than the wall");
+    Dev::PanelHelp("  beside it. This is the knob that reads as 'light through the window'.");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Map (cost + resolving power)");
-    changed |= ImGui::SliderInt("Resolution", &is.resolution, 256, 4096);
-    changed |= ImGui::SliderFloat("Extent (m, half-box)", &is.extent, 32.0f, 512.0f, "%.0f");
-    ImGui::TextDisabled("  %.2f m per texel. Roofs and walls need well under a metre; window",
-                        is.resolution > 0 ? (2.0f * is.extent / float(is.resolution)) : 0.0f);
-    ImGui::TextDisabled("  reveals are NOT reachable here at any setting (that is the Stage 2 bake).");
-    changed |= ImGui::SliderFloat("Height (m)", &is.height, 32.0f, 1024.0f, "%.0f");
-    ImGui::TextDisabled("  how far above/below the camera the box reaches; must clear the tallest");
-    ImGui::TextDisabled("  roof you can stand under");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Map (cost + resolving power)");
+    changed |= Dev::SliderInt("Resolution", &is.resolution, 256, 4096);
+    changed |= Dev::SliderFloat("Extent (m, half-box)", &is.extent, 32.0f, 512.0f, "%.0f");
+    Dev::PanelHelp("  %.2f m per texel. Roofs and walls need well under a metre; window",
+                   is.resolution > 0 ? (2.0f * is.extent / float(is.resolution)) : 0.0f);
+    Dev::PanelHelp("  reveals are NOT reachable here at any setting (that is the Stage 2 bake).");
+    changed |= Dev::SliderFloat("Height (m)", &is.height, 32.0f, 1024.0f, "%.0f");
+    Dev::PanelHelp("  how far above/below the camera the box reaches; must clear the tallest");
+    Dev::PanelHelp("  roof you can stand under");
     // The tilted maps look along a ~50 deg slant, so a point `extent` away laterally sits
     // extent*sin(50) along their view axis and falls out of the depth slab once that passes
     // `height`. The zenith map is unaffected, so the symptom is subtle: window light quietly
@@ -4261,21 +4259,21 @@ void DrawInteriorSkyTab()
     {
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
                            "  ! extent too large for height: the TILTED maps clip past %.0f m", is.height / 0.766f);
-        ImGui::TextDisabled("  raise Height above %.0f, or lower Extent, or the window-light", tiltReach);
-        ImGui::TextDisabled("  directions silently stop contributing at range.");
+        Dev::PanelHelp("  raise Height above %.0f, or lower Extent, or the window-light", tiltReach);
+        Dev::PanelHelp("  directions silently stop contributing at range.");
     }
-    changed |= ImGui::SliderFloat("Bias (m)", &is.bias, 0.0f, 4.0f, "%.2f");
-    ImGui::TextDisabled("  too low: open ground occludes itself (the whole world dims). Too high:");
-    ImGui::TextDisabled("  light leaks in under thin roofs.");
+    changed |= Dev::SliderFloat("Bias (m)", &is.bias, 0.0f, 4.0f, "%.2f");
+    Dev::PanelHelp("  too low: open ground occludes itself (the whole world dims). Too high:");
+    Dev::PanelHelp("  light leaks in under thin roofs.");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("GPU cost (last completed frame)");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("GPU cost (last completed frame)");
     {
         float gpuMs[64];
         const int regions = GEngine->GetWaterGpuTimings(gpuMs, 64);
         if (regions <= (int)Engine::kInteriorSkyGpuRegionBegin)
         {
-            ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
+            Dev::PanelHelp("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
         }
         else if (ImGui::BeginTable("isGpuTimings", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
         {
@@ -4285,7 +4283,7 @@ void DrawInteriorSkyTab()
             {
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(GEngine->GetWaterGpuTimingName(i));
+                Dev::PanelHeading(GEngine->GetWaterGpuTimingName(i));
                 ImGui::TableNextColumn();
                 if (gpuMs[i] < 0.0f)
                     ImGui::TextDisabled("n/a");
@@ -4300,7 +4298,7 @@ void DrawInteriorSkyTab()
             const float frame = gpuMs[(int)Engine::kFrameGpuRegionTotal];
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted("GPU frame total");
+            Dev::PanelHeading("GPU frame total");
             ImGui::TableNextColumn();
             if (frame < 0.0f)
                 ImGui::TextDisabled("n/a");
@@ -4310,18 +4308,18 @@ void DrawInteriorSkyTab()
             ImGui::Text("Interior sky: %.3f ms", total);
             if (frame > 0.0f)
             {
-                ImGui::SameLine();
-                ImGui::TextDisabled("(%.1f%% of the GPU frame)", 100.0f * total / frame);
+                Dev::PanelSameLine();
+                Dev::PanelHelp("(%.1f%% of the GPU frame)", 100.0f * total / frame);
             }
-            ImGui::SetItemTooltip("Sum of the rows above, from the last completed frame. Toggle "
-                                  "Enabled off and watch the frame total to get the honest "
-                                  "delta: passes can overlap on the GPU, so this sum is an "
-                                  "upper bound on what disabling the feature gives back.");
+            Dev::PanelTooltip("Sum of the rows above, from the last completed frame. Toggle "
+                              "Enabled off and watch the frame total to get the honest "
+                              "delta: passes can overlap on the GPU, so this sum is an "
+                              "upper bound on what disabling the feature gives back.");
         }
     }
 
-    ImGui::Separator();
-    if (ImGui::Button("Reset interior sky to defaults"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset interior sky to defaults"))
     {
         const bool keepEnabled = is.enabled;
         is = Engine::InteriorSkySettings{};
@@ -4346,15 +4344,15 @@ void DrawPerfTab()
     const int frames = perf.FrameCount();
     if (frames == 0)
     {
-        ImGui::TextDisabled("no frames recorded yet");
+        Dev::PanelHelp("no frames recorded yet");
         return;
     }
 
     const Dev::FrameProfiler::PhaseStats total = perf.TotalStats();
     ImGui::Text("FPS %.1f", perf.AvgFps());
-    ImGui::SameLine();
-    ImGui::TextDisabled("frame %.2f ms avg / %.2f p95 / %.2f max (last %d frames)", total.avgMs, total.p95Ms,
-                        total.maxMs, frames);
+    Dev::PanelSameLine();
+    Dev::PanelHelp("frame %.2f ms avg / %.2f p95 / %.2f max (last %d frames)", total.avgMs, total.p95Ms, total.maxMs,
+                   frames);
 
     static float history[Dev::FrameProfiler::kRingSize];
     const int n = frames;
@@ -4375,7 +4373,7 @@ void DrawPerfTab()
             const auto s = perf.Stats(static_cast<Dev::FrameProfiler::Phase>(p));
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(Dev::FrameProfiler::PhaseName(p));
+            Dev::PanelHeading(Dev::FrameProfiler::PhaseName(p));
             ImGui::TableNextColumn();
             ImGui::Text("%.2f", s.avgMs);
             ImGui::TableNextColumn();
@@ -4405,22 +4403,22 @@ void DrawPerfTab()
             if (terrainPrepass >= 0.0f)
                 ImGui::Text("Main terrain prepass %.3f ms", terrainPrepass);
             else
-                ImGui::TextDisabled("Main terrain prepass n/a");
+                Dev::PanelHelp("Main terrain prepass n/a");
             if (terrainColor >= 0.0f)
                 ImGui::Text("Main terrain colour %.3f ms", terrainColor);
             else
-                ImGui::TextDisabled("Main terrain colour n/a");
+                Dev::PanelHelp("Main terrain colour n/a");
         }
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Reset window"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Reset window"))
         perf.Reset();
 }
 void DrawMaterialDebugTab()
 {
     if (!GEngine || !GEngine->SupportsMaterialDebug())
     {
-        ImGui::TextDisabled("Material Debug is available on the WGPU renderer only.");
+        Dev::PanelHelp("Material Debug is available on the WGPU renderer only.");
         return;
     }
 
@@ -4428,50 +4426,50 @@ void DrawMaterialDebugTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(settings);
     int view = static_cast<int>(settings.view);
-    changed |= ImGui::Combo("Rendering mode", &view, "Full Material\0Base Color Only\0Visualize Normal Map\0");
+    changed |= Dev::Combo("Rendering mode", &view, "Full Material\0Base Color Only\0Visualize Normal Map\0");
     settings.view = static_cast<Engine::MaterialDebugSettings::View>(view);
-    ImGui::TextDisabled(
+    Dev::PanelHelp(
         "Base Color Only is the controlled reference. Normal visualization decodes NOHQ as X=A, Y=G, Z reconstructed.");
-    ImGui::Separator();
-    changed |= ImGui::Checkbox("Disable Normal Map", &settings.disableNormalMap);
-    if (ImGui::IsItemHovered())
+    Dev::PanelSeparator();
+    changed |= Dev::Checkbox("Disable Normal Map", &settings.disableNormalMap);
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Applies to the retained GPU-driven set as well as the per-draw path, which is\n"
                           "what makes it an A/B of the whole world rather than of a handful of sections.\n"
                           "Toggling drops the retained model cache, so shapes re-register as you look at\n"
                           "them; expect a brief hitch, and nothing else.");
-    changed |= ImGui::Checkbox("Compose Multi layers", &settings.composeMultiLayers);
-    if (ImGui::IsItemHovered())
+    changed |= Dev::Checkbox("Compose Multi layers", &settings.composeMultiLayers);
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("The Multi shader family is a four-layer masked blend, each layer at its own UV scale. "
                           "Off binds layer 0 alone, which is how these surfaces rendered before MAT-039 -- a brick "
                           "house drawn as the rock underneath it. On costs one mask fetch plus three texture "
                           "fetches, and only on sections that are actually layered, so it is on by default. "
                           "Toggling drops the retained model cache; expect a brief hitch.");
-    changed |= ImGui::Checkbox("Legacy OFP/CWA enhancement", &settings.legacyEnhancement);
-    if (ImGui::IsItemHovered())
+    changed |= Dev::Checkbox("Legacy OFP/CWA enhancement", &settings.legacyEnhancement);
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Original CWA assets have no RVMAT, so they normally render as they did in 2001.\n"
                           "When a sibling <texture>_nohq.paa exists it is bound as that section's normal\n"
                           "map through the same slot the Arma 3 materials use. Turn this off to see the\n"
                           "unenhanced original in the same frame.\n"
                           "Stock content has no such files, so this changes nothing without an\n"
                           "enhancement pack present.");
-    changed |= ImGui::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
-    ImGui::TextDisabled("Compare only under fixed lighting; this does not edit the imported material.");
-    changed |= ImGui::Checkbox("Disable Detail", &settings.disableDetail);
-    changed |= ImGui::Checkbox("Disable Macro", &settings.disableMacro);
-    changed |= ImGui::Checkbox("Disable Ambient Shadow", &settings.disableAmbientShadow);
-    changed |= ImGui::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
-    changed |= ImGui::Checkbox("Disable Fresnel / Environment", &settings.disableFresnelEnvironment);
-    ImGui::TextDisabled("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic "
-                        "state for their incremental implementation.");
+    changed |= Dev::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
+    Dev::PanelHelp("Compare only under fixed lighting; this does not edit the imported material.");
+    changed |= Dev::Checkbox("Disable Detail", &settings.disableDetail);
+    changed |= Dev::Checkbox("Disable Macro", &settings.disableMacro);
+    changed |= Dev::Checkbox("Disable Ambient Shadow", &settings.disableAmbientShadow);
+    changed |= Dev::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
+    changed |= Dev::Checkbox("Disable Fresnel / Environment", &settings.disableFresnelEnvironment);
+    Dev::PanelHelp("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic "
+                   "state for their incremental implementation.");
     if (changed)
         GEngine->SetMaterialDebugSettings(settings);
 
     const Engine::MaterialDebugInfo info = GEngine->GetMaterialDebugInfo();
-    ImGui::Separator();
-    ImGui::TextDisabled("Active production section");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Active production section");
     if (!info.active)
     {
-        ImGui::TextDisabled("No RVMAT-backed section has been drawn yet.");
+        Dev::PanelHelp("No RVMAT-backed section has been drawn yet.");
         return;
     }
     ImGui::Text("RVMAT: %s", info.rvmatPath.Data());
@@ -4486,47 +4484,47 @@ void DrawRenderTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("engine not up");
+        Dev::PanelHelp("engine not up");
         return;
     }
 
     int samples = GEngine->GetMsaaSamples();
     int sampleIdx = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
-    if (ImGui::Combo("MSAA", &sampleIdx,
-                     "Off\0"
-                     "2x\0"
-                     "4x\0"
-                     "8x\0"))
+    if (Dev::Combo("MSAA", &sampleIdx,
+                   "Off\0"
+                   "2x\0"
+                   "4x\0"
+                   "8x\0"))
     {
         static const int kSamples[] = {0, 2, 4, 8};
         GEngine->SetMsaaSamples(kSamples[sampleIdx]);
     }
 
     float scale = GEngine->GetRenderScale();
-    if (ImGui::SliderFloat("Render scale (SSAA)", &scale, 1.0f, 2.0f, "%.2f"))
+    if (Dev::SliderFloat("Render scale (SSAA)", &scale, 1.0f, 2.0f, "%.2f"))
         GEngine->SetRenderScale(scale);
-    ImGui::SameLine();
-    if (ImGui::Button("1x"))
+    Dev::PanelSameLine();
+    if (Dev::Button("1x"))
         GEngine->SetRenderScale(1.0f);
-    ImGui::SameLine();
-    if (ImGui::Button("1.5x"))
+    Dev::PanelSameLine();
+    if (Dev::Button("1.5x"))
         GEngine->SetRenderScale(1.5f);
-    ImGui::SameLine();
-    if (ImGui::Button("2x"))
+    Dev::PanelSameLine();
+    if (Dev::Button("2x"))
         GEngine->SetRenderScale(2.0f);
 
     bool a2c = GEngine->GetAlphaToCoverage();
-    if (ImGui::Checkbox("Alpha-to-coverage (cutout AA; needs MSAA)", &a2c))
+    if (Dev::Checkbox("Alpha-to-coverage (cutout AA; needs MSAA)", &a2c))
         GEngine->SetAlphaToCoverage(a2c);
 
     bool flat = GEngine->GetDebugFlatColor();
-    if (ImGui::Checkbox("Flat shading (objects -> solid red; shading-vs-geometry probe)", &flat))
+    if (Dev::Checkbox("Flat shading (objects -> solid red; shading-vs-geometry probe)", &flat))
         GEngine->SetDebugFlatColor(flat);
 
-    ImGui::Separator();
+    Dev::PanelSeparator();
     ImGui::Text("window  %d x %d", GEngine->Width(), GEngine->Height());
     ImGui::Text("target  scale %.2fx, %dx MSAA", GEngine->GetRenderScale(), GEngine->GetMsaaSamples());
-    ImGui::TextDisabled("settings are session-only; persist via graphics.cfg");
+    Dev::PanelHelp("settings are session-only; persist via graphics.cfg");
 }
 // HDR tonemap / look tuning (wgpu HDR path). The Hable curve is fixed; these are
 // exposure + a colour-grade block. "Auto (time of day)" drives the grade from the
@@ -4536,22 +4534,22 @@ void DrawTonemapTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("engine not up");
+        Dev::PanelHelp("engine not up");
         return;
     }
     if (!GEngine->SupportsTonemap())
     {
-        ImGui::TextDisabled("HDR path off (run the wgpu backend with WGR_HDR=1)");
+        Dev::PanelHelp("HDR path off (run the wgpu backend with WGR_HDR=1)");
         return;
     }
 
     bool autoTod = GEngine->GetTonemapAuto();
-    if (ImGui::Checkbox("Auto (time of day)", &autoTod))
+    if (Dev::Checkbox("Auto (time of day)", &autoTod))
         GEngine->SetTonemapAuto(autoTod);
-    ImGui::SameLine();
-    ImGui::TextDisabled("ToD %.2f h", Glob.clock.GetTimeOfDay() * 24.0f);
+    Dev::PanelSameLine();
+    Dev::PanelHelp("ToD %.2f h", Glob.clock.GetTimeOfDay() * 24.0f);
     if (autoTod)
-        ImGui::TextDisabled("grade driven by per-ToD presets; uncheck to override + tune");
+        Dev::PanelHelp("grade driven by per-ToD presets; uncheck to override + tune");
 
     // In auto mode the sliders reflect the live interpolated grade but are read-only
     // (UpdateAutoTonemap overwrites them each frame).
@@ -4560,23 +4558,23 @@ void DrawTonemapTab()
 
     ImGui::BeginDisabled(autoTod);
 
-    changed |= ImGui::Checkbox("Hable filmic", &t.hable);
-    ImGui::SameLine();
-    changed |= ImGui::Checkbox("sRGB encode", &t.encode);
-    ImGui::SetItemTooltip("Off = passthrough clamp / write-as-is (debug only)");
+    changed |= Dev::Checkbox("Hable filmic", &t.hable);
+    Dev::PanelSameLine();
+    changed |= Dev::Checkbox("sRGB encode", &t.encode);
+    Dev::PanelTooltip("Off = passthrough clamp / write-as-is (debug only)");
 
-    changed |= ImGui::SliderFloat("Exposure", &t.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    changed |= Dev::SliderFloat("Exposure", &t.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Grade");
-    changed |= ImGui::SliderFloat("Temperature (warm+/cool-)", &t.temperature, -1.0f, 1.0f, "%.3f");
-    changed |= ImGui::SliderFloat("Tint (magenta+/green-)", &t.tint, -1.0f, 1.0f, "%.3f");
-    changed |= ImGui::SliderFloat("Contrast", &t.contrast, 0.5f, 2.0f, "%.3f");
-    changed |= ImGui::SliderFloat("Saturation", &t.saturation, 0.0f, 2.0f, "%.3f");
-    changed |= ImGui::SliderFloat("Shadow lift", &t.lift, 0.0f, 0.3f, "%.3f");
-    changed |= ImGui::SliderFloat("Gain", &t.gain, 0.1f, 4.0f, "%.3f");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Grade");
+    changed |= Dev::SliderFloat("Temperature (warm+/cool-)", &t.temperature, -1.0f, 1.0f, "%.3f");
+    changed |= Dev::SliderFloat("Tint (magenta+/green-)", &t.tint, -1.0f, 1.0f, "%.3f");
+    changed |= Dev::SliderFloat("Contrast", &t.contrast, 0.5f, 2.0f, "%.3f");
+    changed |= Dev::SliderFloat("Saturation", &t.saturation, 0.0f, 2.0f, "%.3f");
+    changed |= Dev::SliderFloat("Shadow lift", &t.lift, 0.0f, 0.3f, "%.3f");
+    changed |= Dev::SliderFloat("Gain", &t.gain, 0.1f, 4.0f, "%.3f");
 
-    if (ImGui::Button("Reset to defaults"))
+    if (Dev::Button("Reset to defaults"))
     {
         t = decltype(t){};
         changed = true;
@@ -4589,56 +4587,56 @@ void DrawTonemapTab()
 
     // Bloom is a global look setting (not per-ToD keyframed), so it stays editable even
     // in auto mode — its values are preserved across the per-frame preset overwrite.
-    ImGui::Separator();
-    ImGui::TextUnformatted("Bloom");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Bloom");
     bool bloomChanged = false;
-    bloomChanged |= ImGui::SliderFloat("Intensity##bloom", &t.bloomIntensity, 0.0f, 0.3f, "%.3f");
-    ImGui::SetItemTooltip("Linear weight of the bloom added to the scene (0 = off).");
-    bloomChanged |= ImGui::SliderFloat("Threshold##bloom", &t.bloomThreshold, 0.0f, 4.0f, "%.3f");
-    ImGui::SetItemTooltip("Scene-referred luminance where bloom begins (soft knee).");
-    bloomChanged |= ImGui::SliderFloat("Knee##bloom", &t.bloomKnee, 0.0f, 2.0f, "%.3f");
+    bloomChanged |= Dev::SliderFloat("Intensity##bloom", &t.bloomIntensity, 0.0f, 0.3f, "%.3f");
+    Dev::PanelTooltip("Linear weight of the bloom added to the scene (0 = off).");
+    bloomChanged |= Dev::SliderFloat("Threshold##bloom", &t.bloomThreshold, 0.0f, 4.0f, "%.3f");
+    Dev::PanelTooltip("Scene-referred luminance where bloom begins (soft knee).");
+    bloomChanged |= Dev::SliderFloat("Knee##bloom", &t.bloomKnee, 0.0f, 2.0f, "%.3f");
     if (bloomChanged)
         GEngine->SetTonemapSettings(t);
 
     // Auto-exposure / eye adaptation. Separate from the grade (its own setter), off by
     // default so it doesn't fight manual per-ToD exposure. Independent of auto/manual.
-    ImGui::Separator();
-    ImGui::TextUnformatted("Auto exposure (eye adaptation)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Auto exposure (eye adaptation)");
     auto ex = GEngine->GetExposureSettings();
     bool exChanged = false;
     exChanged |= ResetToDefaultsButton(ex, "Reset auto exposure to defaults", "");
-    exChanged |= ImGui::Checkbox("Enabled##exposure", &ex.enabled);
-    ImGui::SetItemTooltip("ON by default since 2026-08-16. Exposure is scaled toward\n"
-                          "key / scene-average luminance, so a bright sky no longer\n"
-                          "burns out (measured: 23.2% of pixels clipped -> 0.6%).\n\n"
-                          "If the scene visibly PUMPS as you turn the camera, narrow\n"
-                          "Min/Max scale before turning this off — 0.55..1.10 measured\n"
-                          "within 0.2% of the full 0.25..4.0 range on the test pose.");
+    exChanged |= Dev::Checkbox("Enabled##exposure", &ex.enabled);
+    Dev::PanelTooltip("ON by default since 2026-08-16. Exposure is scaled toward\n"
+                      "key / scene-average luminance, so a bright sky no longer\n"
+                      "burns out (measured: 23.2% of pixels clipped -> 0.6%).\n\n"
+                      "If the scene visibly PUMPS as you turn the camera, narrow\n"
+                      "Min/Max scale before turning this off — 0.55..1.10 measured\n"
+                      "within 0.2% of the full 0.25..4.0 range on the test pose.");
     ImGui::BeginDisabled(!ex.enabled);
     exChanged |=
-        ImGui::SliderFloat("Key (target grey)##exposure", &ex.key, 0.02f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    exChanged |= ImGui::SliderFloat("Min scale##exposure", &ex.minScale, 0.05f, 1.0f, "%.3f");
-    ImGui::SetItemTooltip("Lower bound on the exposure multiplier. Raising this toward 1.0\n"
-                          "is the first thing to try against pumping — it bounds how dark\n"
-                          "the iris can close, which is what makes a turn visible.");
-    exChanged |= ImGui::SliderFloat("Max scale##exposure", &ex.maxScale, 1.0f, 16.0f, "%.3f");
-    exChanged |= ImGui::SliderFloat("Adapt time (s)##exposure", &ex.rateTau, 0.0f, 3.0f, "%.2f");
-    ImGui::SetItemTooltip("Adaptation TIME CONSTANT in seconds: 1 - exp(-dt / tau).\n"
-                          "Framerate-independent, so the same setting adapts at the same\n"
-                          "real speed on a 20 fps world and a 45 fps one.\n"
-                          "Set to 0 to fall back to the legacy per-frame rate below.");
+        Dev::SliderFloat("Key (target grey)##exposure", &ex.key, 0.02f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    exChanged |= Dev::SliderFloat("Min scale##exposure", &ex.minScale, 0.05f, 1.0f, "%.3f");
+    Dev::PanelTooltip("Lower bound on the exposure multiplier. Raising this toward 1.0\n"
+                      "is the first thing to try against pumping — it bounds how dark\n"
+                      "the iris can close, which is what makes a turn visible.");
+    exChanged |= Dev::SliderFloat("Max scale##exposure", &ex.maxScale, 1.0f, 16.0f, "%.3f");
+    exChanged |= Dev::SliderFloat("Adapt time (s)##exposure", &ex.rateTau, 0.0f, 3.0f, "%.2f");
+    Dev::PanelTooltip("Adaptation TIME CONSTANT in seconds: 1 - exp(-dt / tau).\n"
+                      "Framerate-independent, so the same setting adapts at the same\n"
+                      "real speed on a 20 fps world and a 45 fps one.\n"
+                      "Set to 0 to fall back to the legacy per-frame rate below.");
     ImGui::BeginDisabled(ex.rateTau > 0.0f);
     exChanged |=
-        ImGui::SliderFloat("Adapt rate (legacy)##exposure", &ex.rate, 0.005f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Per-frame ease toward the target. FRAMERATE-DEPENDENT: the same\n"
-                          "value adapts twice as fast on a 45 fps world as on a 20 fps one,\n"
-                          "so anything tuned with it is tuned against one world's framerate.\n"
-                          "Only used when Adapt time is 0.");
+        Dev::SliderFloat("Adapt rate (legacy)##exposure", &ex.rate, 0.005f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Per-frame ease toward the target. FRAMERATE-DEPENDENT: the same\n"
+                      "value adapts twice as fast on a 45 fps world as on a 20 fps one,\n"
+                      "so anything tuned with it is tuned against one world's framerate.\n"
+                      "Only used when Adapt time is 0.");
     ImGui::EndDisabled();
-    exChanged |= ImGui::SliderFloat("Sky weight##exposure", &ex.skyWeight, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Metering weight of the top of the frame (sky) vs the bottom (ground).\n"
-                          "1.0 = uniform; lower biases exposure toward the ground so a bright\n"
-                          "sky in view doesn't over-darken the scene.");
+    exChanged |= Dev::SliderFloat("Sky weight##exposure", &ex.skyWeight, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Metering weight of the top of the frame (sky) vs the bottom (ground).\n"
+                      "1.0 = uniform; lower biases exposure toward the ground so a bright\n"
+                      "sky in view doesn't over-darken the scene.");
     ImGui::EndDisabled();
     if (exChanged)
         GEngine->SetExposureSettings(ex);
@@ -4646,8 +4644,8 @@ void DrawTonemapTab()
     // neutral; if this never budges across scenes the reduction/adapt isn't feeding it.
     ImGui::Text("Current scale: %.3f", GEngine->GetAutoExposureScale());
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Preset (copy back to bake into the ToD keyframes):");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Preset (copy back to bake into the ToD keyframes):");
     char preset[512];
     snprintf(preset, sizeof(preset),
              "tonemap: exposure=%.3f temp=%.3f tint=%.3f contrast=%.3f sat=%.3f lift=%.3f gain=%.3f "
@@ -4655,10 +4653,10 @@ void DrawTonemapTab()
              t.exposure, t.temperature, t.tint, t.contrast, t.saturation, t.lift, t.gain, t.hable ? "true" : "false",
              t.encode ? "true" : "false");
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##tonemapPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Copy preset to clipboard"))
+    Dev::InputText("##tonemapPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
+    if (Dev::Button("Copy preset to clipboard"))
         ImGui::SetClipboardText(preset);
-    ImGui::TextDisabled("session-only; paste back to bake into the kTonemapPresets keyframes");
+    Dev::PanelHelp("session-only; paste back to bake into the kTonemapPresets keyframes");
 }
 
 // Procedural sky tuning (wgpu). Celestial inputs (sun/moon direction, night factor)
@@ -4669,12 +4667,12 @@ void DrawSkyTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("engine not up");
+        Dev::PanelHelp("engine not up");
         return;
     }
     if (!GEngine->SupportsSky())
     {
-        ImGui::TextDisabled("procedural sky unavailable (run the wgpu backend)");
+        Dev::PanelHelp("procedural sky unavailable (run the wgpu backend)");
         return;
     }
 
@@ -4682,13 +4680,13 @@ void DrawSkyTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(s);
 
-    changed |= ImGui::Checkbox("Enabled", &s.enabled);
-    ImGui::SetItemTooltip("Off = skip the sky pass and restore the legacy skydome");
-    ImGui::SameLine();
-    ImGui::TextDisabled("ToD %.2f h", Glob.clock.GetTimeOfDay() * 24.0f);
+    changed |= Dev::Checkbox("Enabled", &s.enabled);
+    Dev::PanelTooltip("Off = skip the sky pass and restore the legacy skydome");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("ToD %.2f h", Glob.clock.GetTimeOfDay() * 24.0f);
 
-    changed |= ImGui::Checkbox("Auto (time-of-day presets)", &s.autoToD);
-    ImGui::SetItemTooltip(
+    changed |= Dev::Checkbox("Auto (time-of-day presets)", &s.autoToD);
+    Dev::PanelTooltip(
         "On = drive the atmosphere look (exposure, sun intensity, rayleigh, mie, ozone, "
         "turbidity, sun radius, night intensity) from the per-ToD preset table each frame, "
         "interpolated like the tonemap grade — the sliders below show the live values but "
@@ -4697,21 +4695,21 @@ void DrawSkyTab()
 
     ImGui::BeginDisabled(!s.enabled);
 
-    changed |= ImGui::SliderFloat("Exposure", &s.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    changed |= Dev::SliderFloat("Exposure", &s.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Sun");
-    changed |= ImGui::SliderFloat("Intensity", &s.sunIntensity, 1.0f, 60.0f, "%.2f");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Sun");
+    changed |= Dev::SliderFloat("Intensity", &s.sunIntensity, 1.0f, 60.0f, "%.2f");
     float sunDeg = s.sunAngularRadius * 180.0f / 3.14159265f;
-    if (ImGui::SliderFloat("Angular radius (deg)", &sunDeg, 0.1f, 5.0f, "%.2f"))
+    if (Dev::SliderFloat("Angular radius (deg)", &sunDeg, 0.1f, 5.0f, "%.2f"))
     {
         s.sunAngularRadius = sunDeg * 3.14159265f / 180.0f;
         changed = true;
     }
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Moon");
-    ImGui::TextDisabled("position, phase and moonlight from a real ephemeris (date + world lat/long)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Moon");
+    Dev::PanelHelp("position, phase and moonlight from a real ephemeris (date + world lat/long)");
 
     // Live readout. The point of showing all four together is that a wrong-looking moon is
     // almost always one of them disagreeing with the others — a phase that does not match the
@@ -4729,110 +4727,109 @@ void DrawSkyTab()
         char dateBuf[64] = {0};
         Glob.clock.FormatDate("%Y-%m-%d", dateBuf);
         const float tod = Glob.clock.GetTimeOfDay();
-        ImGui::TextDisabled("sim date %s  %02d:%02d", dateBuf, static_cast<int>(tod * 24.0f),
-                            static_cast<int>(tod * 1440.0f) % 60);
-        ImGui::TextDisabled("az %.1f  el %+.1f  lit %.0f%%  size %.3f deg", moonAz, moonEl,
-                            ml->MoonIllumination() * 100.0f, ml->MoonAngularRadius() * 2.0f * 180.0f / 3.14159265f);
-        ImGui::TextDisabled("phase brightness %.3f x full   moonlight %.3f", ml->MoonBrightness(),
-                            ml->MoonLightAmount());
+        Dev::PanelHelp("sim date %s  %02d:%02d", dateBuf, static_cast<int>(tod * 24.0f),
+                       static_cast<int>(tod * 1440.0f) % 60);
+        Dev::PanelHelp("az %.1f  el %+.1f  lit %.0f%%  size %.3f deg", moonAz, moonEl, ml->MoonIllumination() * 100.0f,
+                       ml->MoonAngularRadius() * 2.0f * 180.0f / 3.14159265f);
+        Dev::PanelHelp("phase brightness %.3f x full   moonlight %.3f", ml->MoonBrightness(), ml->MoonLightAmount());
     }
 
-    changed |= ImGui::Checkbox("Realistic position (ephemeris)", &s.moonRealistic);
-    ImGui::SetItemTooltip("On: position, phase, illuminated fraction and apparent size from a low-precision\n"
-                          "lunar ephemeris (accurate to ~0.015 deg -- a thirty-fifth of the moon's own\n"
-                          "diameter), driven by the simulation date and the world's latitude/longitude.\n"
-                          "Off: the 2001 model -- a 28-day month with no eccentricity and no perturbations,\n"
-                          "which puts the moon tens of degrees from where it belongs.");
+    changed |= Dev::Checkbox("Realistic position (ephemeris)", &s.moonRealistic);
+    Dev::PanelTooltip("On: position, phase, illuminated fraction and apparent size from a low-precision\n"
+                      "lunar ephemeris (accurate to ~0.015 deg -- a thirty-fifth of the moon's own\n"
+                      "diameter), driven by the simulation date and the world's latitude/longitude.\n"
+                      "Off: the 2001 model -- a 28-day month with no eccentricity and no perturbations,\n"
+                      "which puts the moon tens of degrees from where it belongs.");
 
-    changed |= ImGui::Checkbox("Realistic SUN position too", &s.sunRealistic);
-    ImGui::SetItemTooltip("MOVES DAYLIGHT. Solar transit shifts by up to the +/-16 min equation of time and\n"
-                          "the altitude track through the day changes shape, and every time-of-day preset\n"
-                          "was authored against the legacy sun. Measured divergence is small (<5 deg in\n"
-                          "azimuth all year) but it is not zero. The moon's PHASE and terminator always come\n"
-                          "from the ephemeris sun regardless of this switch, so they never disagree.");
+    changed |= Dev::Checkbox("Realistic SUN position too", &s.sunRealistic);
+    Dev::PanelTooltip("MOVES DAYLIGHT. Solar transit shifts by up to the +/-16 min equation of time and\n"
+                      "the altitude track through the day changes shape, and every time-of-day preset\n"
+                      "was authored against the legacy sun. Measured divergence is small (<5 deg in\n"
+                      "azimuth all year) but it is not zero. The moon's PHASE and terminator always come\n"
+                      "from the ephemeris sun regardless of this switch, so they never disagree.");
 
-    changed |= ImGui::Checkbox("Manual placement (screenshots)", &s.moonManual);
-    ImGui::SetItemTooltip("Ignore the astronomy and put the moon where you want it. Position only -- the "
-                          "phase and brightness stay whatever the date says, so framing a shot does not "
-                          "silently change the look.");
+    changed |= Dev::Checkbox("Manual placement (screenshots)", &s.moonManual);
+    Dev::PanelTooltip("Ignore the astronomy and put the moon where you want it. Position only -- the "
+                      "phase and brightness stay whatever the date says, so framing a shot does not "
+                      "silently change the look.");
     ImGui::BeginDisabled(!s.moonManual);
-    changed |= ImGui::SliderFloat("  azimuth (deg)", &s.moonManualAzimuthDeg, 0.0f, 360.0f, "%.1f");
-    ImGui::SetItemTooltip("From NORTH, increasing toward EAST. 90 = due east, 180 = due south.");
-    changed |= ImGui::SliderFloat("  elevation (deg)", &s.moonManualElevationDeg, -20.0f, 90.0f, "%.1f");
+    changed |= Dev::SliderFloat("  azimuth (deg)", &s.moonManualAzimuthDeg, 0.0f, 360.0f, "%.1f");
+    Dev::PanelTooltip("From NORTH, increasing toward EAST. 90 = due east, 180 = due south.");
+    changed |= Dev::SliderFloat("  elevation (deg)", &s.moonManualElevationDeg, -20.0f, 90.0f, "%.1f");
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Observer / date");
-    changed |= ImGui::Checkbox("Override date", &s.moonDateOverride);
-    ImGui::SetItemTooltip("Celestial date ONLY -- it does not move the simulation clock, so it is local, "
-                          "not replicated, and safe to scrub while a mission runs. Use it to find a phase; "
-                          "use the mission Intel / setDate to actually move the world.");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Observer / date");
+    changed |= Dev::Checkbox("Override date", &s.moonDateOverride);
+    Dev::PanelTooltip("Celestial date ONLY -- it does not move the simulation clock, so it is local, "
+                      "not replicated, and safe to scrub while a mission runs. Use it to find a phase; "
+                      "use the mission Intel / setDate to actually move the world.");
     ImGui::BeginDisabled(!s.moonDateOverride);
-    changed |= ImGui::InputInt("  year", &s.moonDateYear);
-    changed |= ImGui::SliderInt("  month", &s.moonDateMonth, 1, 12);
-    changed |= ImGui::SliderInt("  day", &s.moonDateDay, 1, 31);
-    ImGui::TextDisabled("  a full lunation is 29.53 days -- step the day to walk the phases");
+    changed |= Dev::InputInt("  year", &s.moonDateYear);
+    changed |= Dev::SliderInt("  month", &s.moonDateMonth, 1, 12);
+    changed |= Dev::SliderInt("  day", &s.moonDateDay, 1, 31);
+    Dev::PanelHelp("  a full lunation is 29.53 days -- step the day to walk the phases");
     ImGui::EndDisabled();
 
-    changed |= ImGui::Checkbox("Override latitude", &s.moonLatitudeOverride);
-    ImGui::SetItemTooltip("Off = the world config's `latitude`. NOTE the sign: CfgWorlds stores NEGATIVE for "
-                          "the northern hemisphere; the slider below is plain GEOGRAPHIC latitude, north "
-                          "positive, so 45 means 45 N.");
+    changed |= Dev::Checkbox("Override latitude", &s.moonLatitudeOverride);
+    Dev::PanelTooltip("Off = the world config's `latitude`. NOTE the sign: CfgWorlds stores NEGATIVE for "
+                      "the northern hemisphere; the slider below is plain GEOGRAPHIC latitude, north "
+                      "positive, so 45 means 45 N.");
     ImGui::BeginDisabled(!s.moonLatitudeOverride);
-    changed |= ImGui::SliderFloat("  latitude (deg N)", &s.moonLatitudeDeg, -90.0f, 90.0f, "%.1f");
+    changed |= Dev::SliderFloat("  latitude (deg N)", &s.moonLatitudeDeg, -90.0f, 90.0f, "%.1f");
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Look");
-    changed |= ImGui::SliderFloat("Moon size scale", &s.moonSizeScale, 0.25f, 6.0f, "%.2f");
-    ImGui::SetItemTooltip("Multiplies the TRUE angular radius (~0.26 deg, which is genuinely tiny -- the "
-                          "huge moon of photographs is a long lens, not the sky). The disc is drawn "
-                          "energy-conserving, so inflating it lowers its radiance and total power holds.");
-    changed |= ImGui::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
-    ImGui::SetItemTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
-                          "phase falloff. 0 turns the moon off entirely.");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Look");
+    changed |= Dev::SliderFloat("Moon size scale", &s.moonSizeScale, 0.25f, 6.0f, "%.2f");
+    Dev::PanelTooltip("Multiplies the TRUE angular radius (~0.26 deg, which is genuinely tiny -- the "
+                      "huge moon of photographs is a long lens, not the sky). The disc is drawn "
+                      "energy-conserving, so inflating it lowers its radiance and total power holds.");
+    changed |= Dev::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
+    Dev::PanelTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
+                      "phase falloff. 0 turns the moon off entirely.");
     changed |=
-        ImGui::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
-                          "disc's radiance, because they are the same body: the disc/ground ratio is fixed by\n"
-                          "the moon's solid angle, so one knob is the honest number of knobs.\n"
-                          "\n"
-                          "The physical ratio is 2.5e-6, which renders as black -- night vision is scotopic and\n"
-                          "this tonemap is not. What it has to beat is the engine's night AMBIENT floor, which\n"
-                          "on the HDR sky-lit path works out at ~0.023 radiance at the 22:00 preset. The moon's\n"
-                          "directional term is roughly intensity * 0.41, so:\n"
-                          "  0.0025  moon =  4% of ambient -- present in the buffer, invisible on screen\n"
-                          "  0.02    moon =  35% of ambient -- a hint of directional shading\n"
-                          "  0.06    moon = 1.1x ambient -- clear moonlight, readable shadows  <- default\n"
-                          "  0.11    moon = 2.0x ambient -- matches the legacy/GL33 path's moonlit look\n"
-                          "Scaled by the phase curve on top, so a quarter moon is ~11x dimmer than these.");
-    changed |= ImGui::Checkbox("Moonlight (directional + shadows)", &s.moonLighting);
-    ImGui::SetItemTooltip("On: the moon becomes the scene's directional light once the sun is below -2 deg "
-                          "and the moon is above the horizon, and casts shadows. Off: the pre-existing "
-                          "behaviour -- night lit by flat ambient only, moon purely scenery.");
+        Dev::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
+                      "disc's radiance, because they are the same body: the disc/ground ratio is fixed by\n"
+                      "the moon's solid angle, so one knob is the honest number of knobs.\n"
+                      "\n"
+                      "The physical ratio is 2.5e-6, which renders as black -- night vision is scotopic and\n"
+                      "this tonemap is not. What it has to beat is the engine's night AMBIENT floor, which\n"
+                      "on the HDR sky-lit path works out at ~0.023 radiance at the 22:00 preset. The moon's\n"
+                      "directional term is roughly intensity * 0.41, so:\n"
+                      "  0.0025  moon =  4% of ambient -- present in the buffer, invisible on screen\n"
+                      "  0.02    moon =  35% of ambient -- a hint of directional shading\n"
+                      "  0.06    moon = 1.1x ambient -- clear moonlight, readable shadows  <- default\n"
+                      "  0.11    moon = 2.0x ambient -- matches the legacy/GL33 path's moonlit look\n"
+                      "Scaled by the phase curve on top, so a quarter moon is ~11x dimmer than these.");
+    changed |= Dev::Checkbox("Moonlight (directional + shadows)", &s.moonLighting);
+    Dev::PanelTooltip("On: the moon becomes the scene's directional light once the sun is below -2 deg "
+                      "and the moon is above the horizon, and casts shadows. Off: the pre-existing "
+                      "behaviour -- night lit by flat ambient only, moon purely scenery.");
 
     bool forcePhase = s.moonPhaseOverride >= 0.0f;
-    if (ImGui::Checkbox("Force phase", &forcePhase))
+    if (Dev::Checkbox("Force phase", &forcePhase))
     {
         s.moonPhaseOverride = forcePhase ? 1.0f : -1.0f;
         changed = true;
     }
-    ImGui::SetItemTooltip("Pin the illuminated fraction for a screenshot. Position is unchanged -- only the "
-                          "look. Brightness follows the forced phase through the same curve.");
+    Dev::PanelTooltip("Pin the illuminated fraction for a screenshot. Position is unchanged -- only the "
+                      "look. Brightness follows the forced phase through the same curve.");
     ImGui::BeginDisabled(!forcePhase);
     {
         float forcedK = forcePhase ? s.moonPhaseOverride : 1.0f;
-        if (ImGui::SliderFloat("  illuminated fraction", &forcedK, 0.0f, 1.0f, "%.2f"))
+        if (Dev::SliderFloat("  illuminated fraction", &forcedK, 0.0f, 1.0f, "%.2f"))
         {
             s.moonPhaseOverride = forcedK;
             changed = true;
         }
-        ImGui::TextDisabled("  0 = new, 0.5 = quarter, 1 = full");
+        Dev::PanelHelp("  0 = new, 0.5 = quarter, 1 = full");
     }
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Atmosphere");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Atmosphere");
     // Rayleigh/Mie coeffs are tiny (1/m); edit in convenient 1e-6 units.
     float rayleigh[3] = {s.rayleigh[0] * 1e6f, s.rayleigh[1] * 1e6f, s.rayleigh[2] * 1e6f};
     if (ImGui::SliderFloat3("Rayleigh (x1e-6)", rayleigh, 0.0f, 60.0f, "%.2f"))
@@ -4843,238 +4840,237 @@ void DrawSkyTab()
         changed = true;
     }
     float mie = s.mie * 1e6f;
-    if (ImGui::SliderFloat("Mie (x1e-6)", &mie, 0.0f, 100.0f, "%.2f"))
+    if (Dev::SliderFloat("Mie (x1e-6)", &mie, 0.0f, 100.0f, "%.2f"))
     {
         s.mie = mie * 1e-6f;
         changed = true;
     }
-    changed |= ImGui::SliderFloat("Mie anisotropy g", &s.mieG, 0.0f, 0.99f, "%.3f");
-    changed |= ImGui::SliderFloat("Rayleigh height (m)", &s.rayleighHeight, 1000.0f, 16000.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Mie height (m)", &s.mieHeight, 200.0f, 4000.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Turbidity", &s.turbidity, 0.5f, 10.0f, "%.2f");
-    changed |= ImGui::SliderFloat("Ozone", &s.ozone, 0.0f, 4.0f, "%.2f");
-    ImGui::SetItemTooltip("Ozone absorption strength — higher keeps twilight blue (the blue-hour knob)");
-    changed |= ImGui::ColorEdit3("Ground albedo", s.ground);
-    changed |= ImGui::SliderFloat("Horizon haze", &s.horizonHaze, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Blend the sky toward the scene fog colour at the horizon so it meets the fogged terrain");
-    changed |= ImGui::SliderFloat("Aerial sun shadow", &s.aerialShadow, 0.0f, 4.0f, "%.2f");
-    ImGui::SetItemTooltip("Terrain occlusion of the froxel fog: 0 = off (sun lights the haze everywhere, for A/B), "
-                          "1 = physical, >1 exaggerated to make the shadowed fog / god-ray shafts obvious");
-    changed |= ImGui::SliderFloat("Fog falloff", &s.fogFalloff, 0.5f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Aerial fog distance ramp exponent. High (default 3) = clear near/mid, fog only near the "
-                          "draw edge. Low (~1) = dense fog throughout the view, which makes the volumetric terrain "
-                          "sun-shadowing visible. Drop this to see the aerial-shadow effect.");
+    changed |= Dev::SliderFloat("Mie anisotropy g", &s.mieG, 0.0f, 0.99f, "%.3f");
+    changed |= Dev::SliderFloat("Rayleigh height (m)", &s.rayleighHeight, 1000.0f, 16000.0f, "%.0f");
+    changed |= Dev::SliderFloat("Mie height (m)", &s.mieHeight, 200.0f, 4000.0f, "%.0f");
+    changed |= Dev::SliderFloat("Turbidity", &s.turbidity, 0.5f, 10.0f, "%.2f");
+    changed |= Dev::SliderFloat("Ozone", &s.ozone, 0.0f, 4.0f, "%.2f");
+    Dev::PanelTooltip("Ozone absorption strength — higher keeps twilight blue (the blue-hour knob)");
+    changed |= Dev::ColorEdit3("Ground albedo", s.ground);
+    changed |= Dev::SliderFloat("Horizon haze", &s.horizonHaze, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Blend the sky toward the scene fog colour at the horizon so it meets the fogged terrain");
+    changed |= Dev::SliderFloat("Aerial sun shadow", &s.aerialShadow, 0.0f, 4.0f, "%.2f");
+    Dev::PanelTooltip("Terrain occlusion of the froxel fog: 0 = off (sun lights the haze everywhere, for A/B), "
+                      "1 = physical, >1 exaggerated to make the shadowed fog / god-ray shafts obvious");
+    changed |= Dev::SliderFloat("Fog falloff", &s.fogFalloff, 0.5f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Aerial fog distance ramp exponent. High (default 3) = clear near/mid, fog only near the "
+                      "draw edge. Low (~1) = dense fog throughout the view, which makes the volumetric terrain "
+                      "sun-shadowing visible. Drop this to see the aerial-shadow effect.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Scene lighting (experimental, HDR only)");
-    changed |= ImGui::Checkbox("Sky-based lighting", &s.skyLighting);
-    ImGui::SetItemTooltip("Light terrain + objects FROM the atmosphere: sun = sunIntensity*exposure*transmittance "
-                          "(reddens at dusk, fades below the horizon), on the physical scale. Off = legacy GL33 sun. "
-                          "Toggle for A/B; the whole scene shifts scale, so exposure/grade will need re-tuning.");
-    changed |= ImGui::SliderFloat("Sky ambient", &s.skyAmbient, 0.0f, 2.0f, "%.2f");
-    ImGui::SetItemTooltip("Ambient scale for sky-based lighting (Stage 1 bootstrap: the engine's ToD ambient scaled "
-                          "to the physical range; real sky irradiance later).");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Scene lighting (experimental, HDR only)");
+    changed |= Dev::Checkbox("Sky-based lighting", &s.skyLighting);
+    Dev::PanelTooltip("Light terrain + objects FROM the atmosphere: sun = sunIntensity*exposure*transmittance "
+                      "(reddens at dusk, fades below the horizon), on the physical scale. Off = legacy GL33 sun. "
+                      "Toggle for A/B; the whole scene shifts scale, so exposure/grade will need re-tuning.");
+    changed |= Dev::SliderFloat("Sky ambient", &s.skyAmbient, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("Ambient scale for sky-based lighting (Stage 1 bootstrap: the engine's ToD ambient scaled "
+                      "to the physical range; real sky irradiance later).");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Quality");
-    changed |= ImGui::SliderInt("View samples", &s.viewSamples, 4, 64);
-    changed |= ImGui::SliderInt("Light samples", &s.lightSamples, 2, 32);
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Quality");
+    changed |= Dev::SliderInt("View samples", &s.viewSamples, 4, 64);
+    changed |= Dev::SliderInt("Light samples", &s.lightSamples, 2, 32);
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Clouds");
-    ImGui::TextDisabled("raymarched cloud shell in the sky (also reflected in water + SH ambient)");
-    changed |= ImGui::Checkbox("Coverage follows weather", &s.cloudCoverageFromWeather);
-    ImGui::SetItemTooltip("On: cloud cover is driven by the world's overcast, so Zeus, the "
-                          "`weather` console command and mission weather all move the sky. "
-                          "Off: the Coverage slider below authors it directly.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Clouds");
+    Dev::PanelHelp("raymarched cloud shell in the sky (also reflected in water + SH ambient)");
+    changed |= Dev::Checkbox("Coverage follows weather", &s.cloudCoverageFromWeather);
+    Dev::PanelTooltip("On: cloud cover is driven by the world's overcast, so Zeus, the "
+                      "`weather` console command and mission weather all move the sky. "
+                      "Off: the Coverage slider below authors it directly.");
     ImGui::BeginDisabled(s.cloudCoverageFromWeather);
-    changed |= ImGui::SliderFloat("Coverage", &s.cloudCoverage, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Coverage", &s.cloudCoverage, 0.0f, 1.0f, "%.2f");
     ImGui::EndDisabled();
     if (s.cloudCoverageFromWeather)
     {
-        changed |= ImGui::SliderFloat("  clear cover", &s.cloudCoverageClear, 0.0f, 1.0f, "%.2f");
-        changed |= ImGui::SliderFloat("  overcast cover", &s.cloudCoverageFull, 0.0f, 1.0f, "%.2f");
-        ImGui::TextDisabled("  cover at overcast 0 and 1; the Zeus slider lerps between them");
+        changed |= Dev::SliderFloat("  clear cover", &s.cloudCoverageClear, 0.0f, 1.0f, "%.2f");
+        changed |= Dev::SliderFloat("  overcast cover", &s.cloudCoverageFull, 0.0f, 1.0f, "%.2f");
+        Dev::PanelHelp("  cover at overcast 0 and 1; the Zeus slider lerps between them");
     }
-    changed |= ImGui::SliderFloat("Evolve (m/s)", &s.cloudEvolve, 0.0f, 60.0f, "%.1f");
-    ImGui::TextDisabled("  how fast clouds FORM and DISSOLVE (0 = frozen shapes that only drift");
-    ImGui::TextDisabled("  with the wind). Slow on purpose: ~8 turns the field over in ~20 min.");
-    ImGui::SetItemTooltip("0 = clear sky; low = isolated cumulus; high = solid overcast deck. Also dims the "
-                          "directional sun / lifts ambient as it rises (overcast reads flat).");
-    changed |= ImGui::SliderFloat("Density", &s.cloudDensity, 0.005f, 0.3f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Cloud extinction (1/m): higher = more opaque / darker undersides");
-    changed |= ImGui::SliderFloat("Base altitude (m)", &s.cloudBottom, 200.0f, 6000.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Top altitude (m)", &s.cloudTop, 400.0f, 10000.0f, "%.0f");
+    changed |= Dev::SliderFloat("Evolve (m/s)", &s.cloudEvolve, 0.0f, 60.0f, "%.1f");
+    Dev::PanelHelp("  how fast clouds FORM and DISSOLVE (0 = frozen shapes that only drift");
+    Dev::PanelHelp("  with the wind). Slow on purpose: ~8 turns the field over in ~20 min.");
+    Dev::PanelTooltip("0 = clear sky; low = isolated cumulus; high = solid overcast deck. Also dims the "
+                      "directional sun / lifts ambient as it rises (overcast reads flat).");
+    changed |= Dev::SliderFloat("Density", &s.cloudDensity, 0.005f, 0.3f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Cloud extinction (1/m): higher = more opaque / darker undersides");
+    changed |= Dev::SliderFloat("Base altitude (m)", &s.cloudBottom, 200.0f, 6000.0f, "%.0f");
+    changed |= Dev::SliderFloat("Top altitude (m)", &s.cloudTop, 400.0f, 10000.0f, "%.0f");
     changed |= ImGui::SliderFloat2("Wind (m/s)", s.cloudWind, -30.0f, 30.0f, "%.1f");
-    changed |= ImGui::SliderFloat("Shape size (m)", &s.cloudShapeSize, 2000.0f, 20000.0f, "%.0f");
-    ImGui::SetItemTooltip("World size of the base cloud blobs — LARGER = less visible tiling across the map");
-    changed |= ImGui::SliderFloat("Detail size (m)", &s.cloudDetailSize, 400.0f, 5000.0f, "%.0f");
-    ImGui::SetItemTooltip("Edge detail tile — keep INCOMMENSURATE with shape (not a simple multiple) so the "
-                          "combined pattern's visual period is long");
-    changed |= ImGui::SliderFloat("Warp amount (m)", &s.cloudWarpAmount, 0.0f, 3000.0f, "%.0f");
-    ImGui::SetItemTooltip("Domain-warp displacement — the single highest-impact anti-repetition knob (breaks "
-                          "the grid regularity that makes tiling legible)");
-    changed |= ImGui::SliderFloat("Warp size (m)", &s.cloudWarpSize, 2000.0f, 20000.0f, "%.0f");
-    changed |= ImGui::SliderFloat("Weather amount", &s.cloudWeatherAmount, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("How much coverage DRIFTS across the sky (0 = uniform everywhere, which reads same-y)");
-    changed |= ImGui::SliderFloat("Weather size (m)", &s.cloudWeatherSize, 5000.0f, 40000.0f, "%.0f");
-    ImGui::SetItemTooltip("World scale of the coverage drift — big, so cloudy/clear regions span the map");
-    changed |= ImGui::SliderFloat("Forward scatter g", &s.cloudHgG, 0.0f, 0.9f, "%.2f");
-    ImGui::SetItemTooltip("Henyey-Greenstein anisotropy: higher = brighter silver lining toward the sun");
-    changed |= ImGui::SliderFloat("Powder", &s.cloudPowder, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Beer-Powder dark-edge term (the fluffy look)");
-    changed |= ImGui::SliderFloat("Ambient fill", &s.cloudAmbient, 0.0f, 2.0f, "%.2f");
-    ImGui::SetItemTooltip("Sky-ambient scale on the shadowed cloud sides");
-    changed |= ImGui::SliderFloat("Max distance (m)", &s.cloudMaxDist, 5000.0f, 80000.0f, "%.0f");
-    ImGui::SetItemTooltip("March / visibility cap; the far deck dissolves into the horizon haze");
+    changed |= Dev::SliderFloat("Shape size (m)", &s.cloudShapeSize, 2000.0f, 20000.0f, "%.0f");
+    Dev::PanelTooltip("World size of the base cloud blobs — LARGER = less visible tiling across the map");
+    changed |= Dev::SliderFloat("Detail size (m)", &s.cloudDetailSize, 400.0f, 5000.0f, "%.0f");
+    Dev::PanelTooltip("Edge detail tile — keep INCOMMENSURATE with shape (not a simple multiple) so the "
+                      "combined pattern's visual period is long");
+    changed |= Dev::SliderFloat("Warp amount (m)", &s.cloudWarpAmount, 0.0f, 3000.0f, "%.0f");
+    Dev::PanelTooltip("Domain-warp displacement — the single highest-impact anti-repetition knob (breaks "
+                      "the grid regularity that makes tiling legible)");
+    changed |= Dev::SliderFloat("Warp size (m)", &s.cloudWarpSize, 2000.0f, 20000.0f, "%.0f");
+    changed |= Dev::SliderFloat("Weather amount", &s.cloudWeatherAmount, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How much coverage DRIFTS across the sky (0 = uniform everywhere, which reads same-y)");
+    changed |= Dev::SliderFloat("Weather size (m)", &s.cloudWeatherSize, 5000.0f, 40000.0f, "%.0f");
+    Dev::PanelTooltip("World scale of the coverage drift — big, so cloudy/clear regions span the map");
+    changed |= Dev::SliderFloat("Forward scatter g", &s.cloudHgG, 0.0f, 0.9f, "%.2f");
+    Dev::PanelTooltip("Henyey-Greenstein anisotropy: higher = brighter silver lining toward the sun");
+    changed |= Dev::SliderFloat("Powder", &s.cloudPowder, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Beer-Powder dark-edge term (the fluffy look)");
+    changed |= Dev::SliderFloat("Ambient fill", &s.cloudAmbient, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("Sky-ambient scale on the shadowed cloud sides");
+    changed |= Dev::SliderFloat("Max distance (m)", &s.cloudMaxDist, 5000.0f, 80000.0f, "%.0f");
+    Dev::PanelTooltip("March / visibility cap; the far deck dissolves into the horizon haze");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Second layer (high cirrus, ~7 km)");
-    ImGui::TextDisabled("ice cloud ABOVE the deck, so the sky has two altitudes instead of one slab");
-    changed |= ImGui::Checkbox("Cirrus layer", &s.cirrusEnabled);
-    ImGui::SetItemTooltip("Off = bare upper sky. It follows the deck's coverage, so clear weather is "
-                          "still clear with this on.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Second layer (high cirrus, ~7 km)");
+    Dev::PanelHelp("ice cloud ABOVE the deck, so the sky has two altitudes instead of one slab");
+    changed |= Dev::Checkbox("Cirrus layer", &s.cirrusEnabled);
+    Dev::PanelTooltip("Off = bare upper sky. It follows the deck's coverage, so clear weather is "
+                      "still clear with this on.");
     ImGui::BeginDisabled(!s.cirrusEnabled);
-    changed |= ImGui::Checkbox("Volumetric (thin shell march)", &s.cirrusVolumetric);
-    ImGui::SetItemTooltip("On: 6 samples through a 900 m shell, the noise field walking its third axis "
-                          "with height, so the top and bottom of the layer are different cloud and a "
-                          "grazing ray travels kilometres THROUGH it.\n"
-                          "Off: one ray/sheet intersection at 7 km -- cheaper, but a sheet is pierced, "
-                          "never travelled through, so it has no parallax and no soft grazing edge.");
-    changed |= ImGui::SliderFloat("Puffiness", &s.cirrusPuffiness, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("What KIND of ice cloud it is, which up there is one question: is the air being "
-                          "sheared, or is it convecting?\n"
-                          "0 = cirrus fibratus -- shear draws the ice out into long parallel fibres: "
-                          "elongated, heavily striated, flat.\n"
-                          "1 = cirrocumulus -- shallow convection breaks the sheet into a raft of nearly "
-                          "round cells: short, lumpy, and genuinely deeper (the marched shell runs 500 m "
-                          "at the fibrous end, 900 m at the default and 1400 m at the puffy one, always at "
-                          "the SAME step count, so the whole slider is free).\n"
-                          "0.5 is exactly the look this layer shipped with. Total opacity is held roughly "
-                          "constant across the range on purpose -- this is a shape control, not a "
-                          "brightness one.");
-    changed |= ImGui::SliderFloat("Puffiness variation", &s.cirrusPuffVariation, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("How far the layer wanders from that on its own, so a still day is sometimes "
-                          "flatter and sometimes lumpier without anyone touching it.\n"
-                          "0 = perfectly steady (exactly the look at the puffiness above).\n"
-                          "Driven by the world's weather-drift clock -- the same one the cumulus shapes "
-                          "form and dissolve on -- so it is continuous, moves with sim time, freezes when "
-                          "the sim does, and speeds up with the Evolve slider. A full cycle is the better "
-                          "part of an hour at Evolve 8, so this is weather, not animation.\n"
-                          "Neither slider can pop: the renderer eases toward the value they imply.");
-    ImGui::TextDisabled("  capture/benchmark override: WGR_CIRRUS_PUFF=<puff>[,<variation>[,<phase turns>]]");
+    changed |= Dev::Checkbox("Volumetric (thin shell march)", &s.cirrusVolumetric);
+    Dev::PanelTooltip("On: 6 samples through a 900 m shell, the noise field walking its third axis "
+                      "with height, so the top and bottom of the layer are different cloud and a "
+                      "grazing ray travels kilometres THROUGH it.\n"
+                      "Off: one ray/sheet intersection at 7 km -- cheaper, but a sheet is pierced, "
+                      "never travelled through, so it has no parallax and no soft grazing edge.");
+    changed |= Dev::SliderFloat("Puffiness", &s.cirrusPuffiness, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("What KIND of ice cloud it is, which up there is one question: is the air being "
+                      "sheared, or is it convecting?\n"
+                      "0 = cirrus fibratus -- shear draws the ice out into long parallel fibres: "
+                      "elongated, heavily striated, flat.\n"
+                      "1 = cirrocumulus -- shallow convection breaks the sheet into a raft of nearly "
+                      "round cells: short, lumpy, and genuinely deeper (the marched shell runs 500 m "
+                      "at the fibrous end, 900 m at the default and 1400 m at the puffy one, always at "
+                      "the SAME step count, so the whole slider is free).\n"
+                      "0.5 is exactly the look this layer shipped with. Total opacity is held roughly "
+                      "constant across the range on purpose -- this is a shape control, not a "
+                      "brightness one.");
+    changed |= Dev::SliderFloat("Puffiness variation", &s.cirrusPuffVariation, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How far the layer wanders from that on its own, so a still day is sometimes "
+                      "flatter and sometimes lumpier without anyone touching it.\n"
+                      "0 = perfectly steady (exactly the look at the puffiness above).\n"
+                      "Driven by the world's weather-drift clock -- the same one the cumulus shapes "
+                      "form and dissolve on -- so it is continuous, moves with sim time, freezes when "
+                      "the sim does, and speeds up with the Evolve slider. A full cycle is the better "
+                      "part of an hour at Evolve 8, so this is weather, not animation.\n"
+                      "Neither slider can pop: the renderer eases toward the value they imply.");
+    Dev::PanelHelp("  capture/benchmark override: WGR_CIRRUS_PUFF=<puff>[,<variation>[,<phase turns>]]");
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Ground shadows (CLD-020)");
-    changed |= ImGui::SliderFloat("Cloud shadow strength", &s.cloudShadowStrength, 0.0f, 1.0f, "%.2f");
-    ImGui::TextDisabled("How much the deck dims direct sun on terrain, objects, grass and water. 0 = off, and "
-                        "the pass then writes fully-lit texels rather than being skipped, so switching it off "
-                        "clears the shadows instead of freezing the last ones on the ground.");
-    ImGui::TextDisabled("Ambient is untouched, so shaded ground settles toward sky ambient rather than black. "
-                        "Two limits worth knowing: the map is evaluated at sea level, so a hillside and the "
-                        "valley below it get the same shadow (fine for something this soft), and it covers a "
-                        "4 km square around the camera -- outside that, surfaces read fully lit rather than "
-                        "dark, because missing data must never invent shadow.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Ground shadows (CLD-020)");
+    changed |= Dev::SliderFloat("Cloud shadow strength", &s.cloudShadowStrength, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("How much the deck dims direct sun on terrain, objects, grass and water. 0 = off, and "
+                   "the pass then writes fully-lit texels rather than being skipped, so switching it off "
+                   "clears the shadows instead of freezing the last ones on the ground.");
+    Dev::PanelHelp("Ambient is untouched, so shaded ground settles toward sky ambient rather than black. "
+                   "Two limits worth knowing: the map is evaluated at sea level, so a hillside and the "
+                   "valley below it get the same shadow (fine for something this soft), and it covers a "
+                   "4 km square around the camera -- outside that, surfaces read fully lit rather than "
+                   "dark, because missing data must never invent shadow.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("God rays (crepuscular shafts)");
-    ImGui::TextDisabled("sunlight scattering in the air between the camera and whatever is shading it");
-    changed |= ImGui::Checkbox("God rays", &s.godRays);
-    ImGui::SetItemTooltip("A world-space volumetric march, NOT a radial blur around the sun on screen. Each "
-                          "low-res view ray is walked and asked whether the sun is visible from that point, "
-                          "against three maps that already exist: the cloud sun-transmittance map above, the "
-                          "long-range terrain shadow ceiling, and the cascade shadow map (buildings, tree "
-                          "crowns). So the shafts are shaped by the clouds and by real geometry, an off-screen "
-                          "sun cannot smear a halo into the frame edge, and the effect fades out on its own "
-                          "below the horizon and behind the camera.\n"
-                          "Composited into the linear HDR scene BEFORE bloom and eye adaptation, so shafts "
-                          "bloom and roll off like any other light rather than sitting on top as white paint.\n"
-                          "Capture/benchmark override: WGR_GODRAYS=<on>[,<intensity>[,<density x1e-6>"
-                          "[,<steps>[,<res divisor>]]]] -- WGR_GODRAYS=0 is the A/B ablation.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("God rays (crepuscular shafts)");
+    Dev::PanelHelp("sunlight scattering in the air between the camera and whatever is shading it");
+    changed |= Dev::Checkbox("God rays", &s.godRays);
+    Dev::PanelTooltip("A world-space volumetric march, NOT a radial blur around the sun on screen. Each "
+                      "low-res view ray is walked and asked whether the sun is visible from that point, "
+                      "against three maps that already exist: the cloud sun-transmittance map above, the "
+                      "long-range terrain shadow ceiling, and the cascade shadow map (buildings, tree "
+                      "crowns). So the shafts are shaped by the clouds and by real geometry, an off-screen "
+                      "sun cannot smear a halo into the frame edge, and the effect fades out on its own "
+                      "below the horizon and behind the camera.\n"
+                      "Composited into the linear HDR scene BEFORE bloom and eye adaptation, so shafts "
+                      "bloom and roll off like any other light rather than sitting on top as white paint.\n"
+                      "Capture/benchmark override: WGR_GODRAYS=<on>[,<intensity>[,<density x1e-6>"
+                      "[,<steps>[,<res divisor>]]]] -- WGR_GODRAYS=0 is the A/B ablation.");
     ImGui::BeginDisabled(!s.godRays);
     // Range tops out where the renderer's own clamp does (GodRaySettings::sanitized), so the
     // default of 4 sits mid-scale and can be pushed up as well as down.
-    changed |= ImGui::SliderFloat("Shaft intensity", &s.godRayIntensity, 0.0f, 8.0f, "%.2f");
-    ImGui::SetItemTooltip("Multiplier on the physical single-scatter estimate. 1 = as computed from the sun "
-                          "radiance, the density below and the phase function.");
-    changed |= ImGui::SliderFloat("Cloud shaping", &s.godRayCloudInfluence, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("How much the cloud deck carves the shafts. 1 = full, 0 = terrain and objects only, "
-                          "which is the A/B for 'is this actually following the clouds'.\n"
-                          "Reads the same CLD-020 map as the ground shadows above, with that slider's strength "
-                          "divided back out, so dialling ground cloud shadows DOWN does not flatten the shafts. "
-                          "At Cloud shadow strength = 0 the map is uniformly lit and there is no cloud shape "
-                          "left to read, so this control goes inert -- keep that slider above 0.");
+    changed |= Dev::SliderFloat("Shaft intensity", &s.godRayIntensity, 0.0f, 8.0f, "%.2f");
+    Dev::PanelTooltip("Multiplier on the physical single-scatter estimate. 1 = as computed from the sun "
+                      "radiance, the density below and the phase function.");
+    changed |= Dev::SliderFloat("Cloud shaping", &s.godRayCloudInfluence, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How much the cloud deck carves the shafts. 1 = full, 0 = terrain and objects only, "
+                      "which is the A/B for 'is this actually following the clouds'.\n"
+                      "Reads the same CLD-020 map as the ground shadows above, with that slider's strength "
+                      "divided back out, so dialling ground cloud shadows DOWN does not flatten the shafts. "
+                      "At Cloud shadow strength = 0 the map is uniformly lit and there is no cloud shape "
+                      "left to read, so this control goes inert -- keep that slider above 0.");
     float rayDensity = s.godRayDensity * 1e6f;
     // Headroom above the default of 60 (the renderer clamps at 200), so the default is not pinned
     // to the end of the track and float round-trip through *1e6 cannot land outside the range.
-    if (ImGui::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 120.0f, "%.2f"))
+    if (Dev::SliderFloat("Air density (x1e-6)", &rayDensity, 0.0f, 120.0f, "%.2f"))
     {
         s.godRayDensity = rayDensity * 1e-6f;
         changed = true;
     }
-    ImGui::SetItemTooltip("Scattering coefficient of the air the shafts live in (1/m). The engine's clear-day "
-                          "Mie is 6; the default sits above it because the march is capped at the reach below "
-                          "instead of running to the horizon, so the truncated tail has to be paid for here.");
-    changed |= ImGui::SliderFloat("Shaft reach (m)", &s.godRayDistance, 500.0f, 20000.0f, "%.0f");
-    ImGui::SetItemTooltip("March cap. Past this the aerial-perspective froxel already owns the look; raising "
-                          "it spends the SAME number of samples over a longer path, so the far shafts get "
-                          "coarser rather than the pass getting slower.");
-    changed |= ImGui::SliderFloat("Forward scatter g", &s.godRayG, 0.0f, 0.95f, "%.2f");
-    ImGui::SetItemTooltip("Henyey-Greenstein anisotropy: higher = a tighter, brighter beam toward the sun and "
-                          "a faster fade away from it. This is also what makes the shafts vanish when you turn "
-                          "your back on the sun, so it is not purely a look knob.");
-    ImGui::TextDisabled("  cost knobs -- the march is the whole feature's budget:");
-    changed |= ImGui::SliderInt("Ray steps", &s.godRaySteps, 4, 48);
-    ImGui::SetItemTooltip("Samples per ray, distributed with the square of distance (dense near the camera, "
-                          "where a shaft edge covers many pixels). Cost is linear in this.");
-    changed |= ImGui::SliderInt("Ray resolution divisor", &s.godRayResDiv, 1, 4);
-    ImGui::SetItemTooltip("Screen-resolution divisor for the march. 2 = half in each axis (a quarter of the "
-                          "pixels), the default; 4 quarters each axis and costs a sixteenth. The result is "
-                          "upsampled with a depth-aware filter, so raising this softens the shafts rather than "
-                          "haloing them around silhouettes -- but it will eventually show as steppiness on a "
-                          "shaft edge that crosses the screen at a shallow angle.");
+    Dev::PanelTooltip("Scattering coefficient of the air the shafts live in (1/m). The engine's clear-day "
+                      "Mie is 6; the default sits above it because the march is capped at the reach below "
+                      "instead of running to the horizon, so the truncated tail has to be paid for here.");
+    changed |= Dev::SliderFloat("Shaft reach (m)", &s.godRayDistance, 500.0f, 20000.0f, "%.0f");
+    Dev::PanelTooltip("March cap. Past this the aerial-perspective froxel already owns the look; raising "
+                      "it spends the SAME number of samples over a longer path, so the far shafts get "
+                      "coarser rather than the pass getting slower.");
+    changed |= Dev::SliderFloat("Forward scatter g", &s.godRayG, 0.0f, 0.95f, "%.2f");
+    Dev::PanelTooltip("Henyey-Greenstein anisotropy: higher = a tighter, brighter beam toward the sun and "
+                      "a faster fade away from it. This is also what makes the shafts vanish when you turn "
+                      "your back on the sun, so it is not purely a look knob.");
+    Dev::PanelHelp("  cost knobs -- the march is the whole feature's budget:");
+    changed |= Dev::SliderInt("Ray steps", &s.godRaySteps, 4, 48);
+    Dev::PanelTooltip("Samples per ray, distributed with the square of distance (dense near the camera, "
+                      "where a shaft edge covers many pixels). Cost is linear in this.");
+    changed |= Dev::SliderInt("Ray resolution divisor", &s.godRayResDiv, 1, 4);
+    Dev::PanelTooltip("Screen-resolution divisor for the march. 2 = half in each axis (a quarter of the "
+                      "pixels), the default; 4 quarters each axis and costs a sixteenth. The result is "
+                      "upsampled with a depth-aware filter, so raising this softens the shafts rather than "
+                      "haloing them around silhouettes -- but it will eventually show as steppiness on a "
+                      "shaft edge that crosses the screen at a shallow angle.");
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Stars");
-    changed |= ImGui::SliderFloat("Star brightness", &s.starIntensity, 0.0f, 4.0f, "%.2f");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Stars");
+    changed |= Dev::SliderFloat("Star brightness", &s.starIntensity, 0.0f, 4.0f, "%.2f");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Lens flare");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Lens flare");
     bool flareOn = s.lensFlare > 0.0f;
-    if (ImGui::Checkbox("Lens Flare", &flareOn))
+    if (Dev::Checkbox("Lens Flare", &flareOn))
     {
         s.lensFlare = flareOn ? 1.0f : 0.0f;
         changed = true;
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Occluded by terrain and objects via the scene depth the cloud pass already\n"
                           "reads, and dimmed by cloud through that ray's own transmittance -- so a thick\n"
                           "cloud crossing the sun fades it out continuously rather than popping.\n"
                           "Off costs nothing: the shader early-outs on the gain.");
     if (flareOn)
-        changed |= ImGui::SliderFloat("Flare intensity", &s.lensFlare, 0.05f, 4.0f, "%.2f");
-    ImGui::TextDisabled("Procedural star field, gated to night by sun altitude -- it cannot affect a daytime sky. "
-                        "Added before the cloud composite, so a deck covers the stars the way it covers the sky "
-                        "behind them. It wheels with the sun's bearing, which is the celestial clock, so stars "
-                        "drift through the night. No twinkle: that needs a per-frame clock the sky UBO does not "
-                        "carry, and faking it from the sun's bearing would change over hours, not seconds.");
+        changed |= Dev::SliderFloat("Flare intensity", &s.lensFlare, 0.05f, 4.0f, "%.2f");
+    Dev::PanelHelp("Procedural star field, gated to night by sun altitude -- it cannot affect a daytime sky. "
+                   "Added before the cloud composite, so a deck covers the stars the way it covers the sky "
+                   "behind them. It wheels with the sun's bearing, which is the celestial clock, so stars "
+                   "drift through the night. No twinkle: that needs a per-frame clock the sky UBO does not "
+                   "carry, and faking it from the sun's bearing would change over hours, not seconds.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Night floor");
-    ImGui::TextDisabled("authored deep-blue that fills in as the sun sets (the physical model goes near-black)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Night floor");
+    Dev::PanelHelp("authored deep-blue that fills in as the sun sets (the physical model goes near-black)");
     // Colours are normalised (click the swatch for the picker); intensity scales them.
-    changed |= ImGui::ColorEdit3("Zenith colour", s.nightZenith);
-    changed |= ImGui::ColorEdit3("Horizon colour", s.nightHorizon);
-    changed |=
-        ImGui::SliderFloat("Night intensity", &s.nightIntensity, 0.0f, 0.2f, "%.4f", ImGuiSliderFlags_Logarithmic);
-    changed |= ImGui::SliderFloat("Day at sun elev (deg)", &s.nightStartDeg, -10.0f, 20.0f, "%.1f");
-    ImGui::SetItemTooltip("Sun elevation at/above which it's full day (night floor off)");
-    changed |= ImGui::SliderFloat("Night at sun elev (deg)", &s.nightEndDeg, -20.0f, 5.0f, "%.1f");
-    ImGui::SetItemTooltip("Sun elevation at/below which it's full night (night floor at full intensity)");
+    changed |= Dev::ColorEdit3("Zenith colour", s.nightZenith);
+    changed |= Dev::ColorEdit3("Horizon colour", s.nightHorizon);
+    changed |= Dev::SliderFloat("Night intensity", &s.nightIntensity, 0.0f, 0.2f, "%.4f", ImGuiSliderFlags_Logarithmic);
+    changed |= Dev::SliderFloat("Day at sun elev (deg)", &s.nightStartDeg, -10.0f, 20.0f, "%.1f");
+    Dev::PanelTooltip("Sun elevation at/above which it's full day (night floor off)");
+    changed |= Dev::SliderFloat("Night at sun elev (deg)", &s.nightEndDeg, -20.0f, 5.0f, "%.1f");
+    Dev::PanelTooltip("Sun elevation at/below which it's full night (night floor at full intensity)");
 
-    if (ImGui::Button("Reset to defaults"))
+    if (Dev::Button("Reset to defaults"))
     {
         s = decltype(s){};
         changed = true;
@@ -5100,8 +5096,8 @@ void DrawSkyTab()
 
     // Copy the full authored sky state so it can be pasted into per-ToD keyframes
     // (no auto-interpolation for the sky yet; this is the hand-authoring hook).
-    ImGui::Separator();
-    ImGui::TextDisabled("Preset (copy to hand-author keyframes):");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Preset (copy to hand-author keyframes):");
     char preset[768];
     snprintf(preset, sizeof(preset),
              "sky: exposure=%.3f sunInt=%.2f sunRad=%.4f rayleigh=%.2f,%.2f,%.2f mie=%.2f mieG=%.3f "
@@ -5112,20 +5108,20 @@ void DrawSkyTab()
              s.horizonHaze, s.nightZenith[0], s.nightZenith[1], s.nightZenith[2], s.nightHorizon[0], s.nightHorizon[1],
              s.nightHorizon[2], s.nightIntensity, s.nightStartDeg, s.nightEndDeg);
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##skyPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Copy preset to clipboard"))
+    Dev::InputText("##skyPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
+    if (Dev::Button("Copy preset to clipboard"))
         ImGui::SetClipboardText(preset);
 }
 void DrawCullingTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("engine not up");
+        Dev::PanelHelp("engine not up");
         return;
     }
     if (!GEngine->SupportsCullDebug())
     {
-        ImGui::TextDisabled("GPU-driven rendering off (run the wgpu backend with WGR_GPU_DRIVEN=1)");
+        Dev::PanelHelp("GPU-driven rendering off (run the wgpu backend with WGR_GPU_DRIVEN=1)");
         return;
     }
 
@@ -5133,36 +5129,36 @@ void DrawCullingTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(s);
 
-    changed |= ImGui::Checkbox("Draw cull spheres", &s.drawSpheres);
-    ImGui::SetItemTooltip("Green wireframe of each retained instance's frustum-cull sphere "
-                          "(centre = Object Position, radius = GetRadius), drawn on top of the "
-                          "scene. Shows whether a sphere sits on its object and how high it floats.");
+    changed |= Dev::Checkbox("Draw cull spheres", &s.drawSpheres);
+    Dev::PanelTooltip("Green wireframe of each retained instance's frustum-cull sphere "
+                      "(centre = Object Position, radius = GetRadius), drawn on top of the "
+                      "scene. Shows whether a sphere sits on its object and how high it floats.");
     // Shown as "Enable" (checked = on, like the occlusion toggle below) for a coherent tab; the
     // stored flag is still disableFrustum, so invert around the checkbox.
     bool enableFrustum = !s.disableFrustum;
-    if (ImGui::Checkbox("Enable frustum culling", &enableFrustum))
+    if (Dev::Checkbox("Enable frustum culling", &enableFrustum))
     {
         s.disableFrustum = !enableFrustum;
         changed = true;
     }
-    ImGui::SetItemTooltip("GPU frustum test. Turn OFF to draw everything in range: if objects that "
-                          "vanish at certain pitches reappear with this off, the frustum cull is the "
-                          "cause; if they still vanish, the cull is innocent and it's the draw/LOD path.");
-    changed |= ImGui::Checkbox("Enable occlusion culling", &s.occlusion);
-    ImGui::SetItemTooltip("Cull retained objects hidden behind the depth-prepass occluders "
-                          "(terrain + drawn objects) via a Hi-Z depth pyramid. When on, the "
-                          "engine's built-in software occlusion is disabled (GPU Hi-Z replaces it).");
+    Dev::PanelTooltip("GPU frustum test. Turn OFF to draw everything in range: if objects that "
+                      "vanish at certain pitches reappear with this off, the frustum cull is the "
+                      "cause; if they still vanish, the cull is innocent and it's the draw/LOD path.");
+    changed |= Dev::Checkbox("Enable occlusion culling", &s.occlusion);
+    Dev::PanelTooltip("Cull retained objects hidden behind the depth-prepass occluders "
+                      "(terrain + drawn objects) via a Hi-Z depth pyramid. When on, the "
+                      "engine's built-in software occlusion is disabled (GPU Hi-Z replaces it).");
 
-    ImGui::Separator();
-    if (ImGui::Button("Dump nearby instances to log"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Dump nearby instances to log"))
     {
         s.dumpNearby = true;
         changed = true;
     }
-    ImGui::SetItemTooltip("Log every GPU-driven instance within 60 m: live Position vs the "
-                          "position captured at registration vs the terrain surface. Stand next "
-                          "to a misbehaving object first. above >> 0 = floating placement; "
-                          "stale > 0 = the retained buffer holds an outdated transform.");
+    Dev::PanelTooltip("Log every GPU-driven instance within 60 m: live Position vs the "
+                      "position captured at registration vs the terrain surface. Stand next "
+                      "to a misbehaving object first. above >> 0 = floating placement; "
+                      "stale > 0 = the retained buffer holds an outdated transform.");
 
     if (changed)
     {
@@ -5319,12 +5315,12 @@ void DrawWaterTab()
 {
     if (!GEngine)
     {
-        ImGui::TextDisabled("engine not up");
+        Dev::PanelHelp("engine not up");
         return;
     }
     if (!GEngine->SupportsWater())
     {
-        ImGui::TextDisabled("GPU water unavailable (run the wgpu backend with WGR_GPU_WATER)");
+        Dev::PanelHelp("GPU water unavailable (run the wgpu backend with WGR_GPU_WATER)");
         return;
     }
 
@@ -5333,315 +5329,314 @@ void DrawWaterTab()
     bool changed = false;
     changed |= ResetToDefaultsButton(s);
 
-    changed |= ImGui::Checkbox("Enabled", &s.enabled);
-    ImGui::SetItemTooltip("Off = draw no water surface (the seabed shows through), for A/B");
+    changed |= Dev::Checkbox("Enabled", &s.enabled);
+    Dev::PanelTooltip("Off = draw no water surface (the seabed shows through), for A/B");
 
     // Keep this immediately below the master Water switch: it controls the old CPU
     // impact presentation and must be easy to find during gameplay testing.
-    changed |= ImGui::Checkbox("Water splash particles", &s.rifleImpactSpray);
-    ImGui::SetItemTooltip("On by default at restrained activity. Enables/disables GPU whitewater "
-                          "and water-impact particle billboards. Ripples and foam remain active.");
+    changed |= Dev::Checkbox("Water splash particles", &s.rifleImpactSpray);
+    Dev::PanelTooltip("On by default at restrained activity. Enables/disables GPU whitewater "
+                      "and water-impact particle billboards. Ripples and foam remain active.");
     SetRifleWaterImpactSprayEnabled(s.rifleImpactSpray);
     ImGui::BeginDisabled(!s.rifleImpactSpray);
-    changed |= ImGui::SliderFloat("Splash particle activity", &s.waterSplashParticleActivity, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Splash particle activity", &s.waterSplashParticleActivity, 0.0f, 1.0f, "%.2f");
     ImGui::EndDisabled();
-    ImGui::SetItemTooltip("Strength of the GPU water-spray emitter when enabled. 0.25 is the restrained default; 1.00 "
-                          "restores the original full effect.");
+    Dev::PanelTooltip("Strength of the GPU water-spray emitter when enabled. 0.25 is the restrained default; 1.00 "
+                      "restores the original full effect.");
 
     ImGui::BeginDisabled(!s.enabled);
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Waves (cosmetic — buoyancy stays on the flat plane)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Waves (cosmetic — buoyancy stays on the flat plane)");
 
     const char* cascadePresets[] = {"Production Non-Harmonic (37m, 89m, 211m, 503m - >50km repeat)",
                                     "GodotOceanWaves Reference Style (88m, 57m, 16m - 3 cascades)",
                                     "Legacy Harmonic (48m, 144m, 432m, 1296m - 1296m repeat)"};
-    if (ImGui::Combo("Cascade Preset", &s.cascadePreset, cascadePresets, IM_ARRAYSIZE(cascadePresets)))
+    if (Dev::Combo("Cascade Preset", &s.cascadePreset, cascadePresets, IM_ARRAYSIZE(cascadePresets)))
     {
         changed = true;
     }
-    ImGui::SetItemTooltip("WTR-036C / WTR-037: Toggle between production non-harmonic coprime cascades, "
-                          "GodotOceanWaves reference parity preset, and legacy harmonic cascades.");
+    Dev::PanelTooltip("WTR-036C / WTR-037: Toggle between production non-harmonic coprime cascades, "
+                      "GodotOceanWaves reference parity preset, and legacy harmonic cascades.");
     const char* fftResolutionPresets[] = {"256 (Performance)", "512 (Optimized default)", "1024 (Godot reference)"};
     int fftResolutionIndex = s.fftResolution == 256 ? 0 : (s.fftResolution == 1024 ? 2 : 1);
-    if (ImGui::Combo("FFT resolution", &fftResolutionIndex, fftResolutionPresets, IM_ARRAYSIZE(fftResolutionPresets)))
+    if (Dev::Combo("FFT resolution", &fftResolutionIndex, fftResolutionPresets, IM_ARRAYSIZE(fftResolutionPresets)))
     {
         static constexpr int resolutions[] = {256, 512, 1024};
         s.fftResolution = resolutions[fftResolutionIndex];
         changed = true;
     }
-    ImGui::SetItemTooltip("Live spectral-map resolution. 1024 matches GodotOceanWaves; 512 retains "
-                          "the important long-wave modes at roughly one quarter of its FFT cost. "
-                          "Changing this rebuilds only the water FFT resources.");
+    Dev::PanelTooltip("Live spectral-map resolution. 1024 matches GodotOceanWaves; 512 retains "
+                      "the important long-wave modes at roughly one quarter of its FFT cost. "
+                      "Changing this rebuilds only the water FFT resources.");
 
-    changed |= ImGui::SliderFloat("Amplitude", &s.waveAmp, 0.0f, 4.0f, "%.2f");
-    ImGui::SetItemTooltip("Overall wave height scale. Kept gentle so boats never float in air.");
-    changed |= ImGui::SliderFloat("Choppiness", &s.waveChoppy, 0.0f, 1.5f, "%.2f");
-    ImGui::SetItemTooltip("Horizontal steepness of the crests (Gerstner Q).");
-    changed |= ImGui::SliderFloat("Speed", &s.waveSpeed, 0.0f, 3.0f, "%.2f");
-    changed |=
-        ImGui::SliderFloat("Scale (wavelength)", &s.waveScale, 0.25f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Multiplies every wavelength: >1 makes larger, farther-apart waves — the main "
-                          "knob for how the field reads from a distance.");
+    changed |= Dev::SliderFloat("Amplitude", &s.waveAmp, 0.0f, 4.0f, "%.2f");
+    Dev::PanelTooltip("Overall wave height scale. Kept gentle so boats never float in air.");
+    changed |= Dev::SliderFloat("Choppiness", &s.waveChoppy, 0.0f, 1.5f, "%.2f");
+    Dev::PanelTooltip("Horizontal steepness of the crests (Gerstner Q).");
+    changed |= Dev::SliderFloat("Speed", &s.waveSpeed, 0.0f, 3.0f, "%.2f");
+    changed |= Dev::SliderFloat("Scale (wavelength)", &s.waveScale, 0.25f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Multiplies every wavelength: >1 makes larger, farther-apart waves — the main "
+                      "knob for how the field reads from a distance.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Distance detail (kills far-field moiré / repetition)");
-    changed |= ImGui::SliderFloat("Fade start (m)", &s.fadeStart, 0.0f, 4000.0f, "%.0f");
-    ImGui::SetItemTooltip("Distance at which wave detail begins to flatten.");
-    changed |= ImGui::SliderFloat("Fade end (m)", &s.fadeEnd, 0.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Distance by which the water is fully flat (a smooth horizon mirror). Lower this "
-                          "if the airplane view still shimmers or looks tiled; raise it if distant water "
-                          "looks too dead.");
-    changed |= ImGui::SliderFloat("De-tile warp (m)", &s.warpAmp, 0.0f, 20.0f, "%.2f");
-    ImGui::SetItemTooltip("Low-frequency domain warp that bends the wave field off the regular grid.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Distance detail (kills far-field moiré / repetition)");
+    changed |= Dev::SliderFloat("Fade start (m)", &s.fadeStart, 0.0f, 4000.0f, "%.0f");
+    Dev::PanelTooltip("Distance at which wave detail begins to flatten.");
+    changed |= Dev::SliderFloat("Fade end (m)", &s.fadeEnd, 0.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Distance by which the water is fully flat (a smooth horizon mirror). Lower this "
+                      "if the airplane view still shimmers or looks tiled; raise it if distant water "
+                      "looks too dead.");
+    changed |= Dev::SliderFloat("De-tile warp (m)", &s.warpAmp, 0.0f, 20.0f, "%.2f");
+    Dev::PanelTooltip("Low-frequency domain warp that bends the wave field off the regular grid.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Shading");
-    changed |= ImGui::SliderFloat("Specular power", &s.specPower, 8.0f, 2000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Sun-glint sharpness (higher = tighter highlight).");
-    changed |= ImGui::SliderFloat("Specular intensity", &s.specIntensity, 0.0f, 60.0f, "%.2f");
-    ImGui::SetItemTooltip("Sun-glint brightness. Un-clamped on HDR so it blooms.");
-    changed |= ImGui::SliderFloat("Opacity", &s.alpha, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Base opacity looking straight down (grazing angles go opaque via Fresnel).");
-    changed |= ImGui::SliderFloat("Shadow dim", &s.shadowDim, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Terrain + CSM sun-shadow always removes the glint/direct sun on shadowed water; "
-                          "this additionally darkens the shadowed surface (0 = physical sun-only removal).");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Shading");
+    changed |= Dev::SliderFloat("Specular power", &s.specPower, 8.0f, 2000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Sun-glint sharpness (higher = tighter highlight).");
+    changed |= Dev::SliderFloat("Specular intensity", &s.specIntensity, 0.0f, 60.0f, "%.2f");
+    Dev::PanelTooltip("Sun-glint brightness. Un-clamped on HDR so it blooms.");
+    changed |= Dev::SliderFloat("Opacity", &s.alpha, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Base opacity looking straight down (grazing angles go opaque via Fresnel).");
+    changed |= Dev::SliderFloat("Shadow dim", &s.shadowDim, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Terrain + CSM sun-shadow always removes the glint/direct sun on shadowed water; "
+                      "this additionally darkens the shadowed surface (0 = physical sun-only removal).");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Surface look (energy model)");
-    changed |= ImGui::Checkbox("Physical composite", &s.physicalLook);
-    ImGui::SetItemTooltip("ON: Fresnel runs uncapped, the sun lobe is evaluated at the variance-filtered "
-                          "roughness at full radiance, and subsurface scattering gets its own light path. "
-                          "OFF: the legacy composite (Fresnel capped at 0.43-0.72, specular scaled to 0.12x, "
-                          "SSS multiplied by the near-black deep colour). Toggle for a direct A/B.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Surface look (energy model)");
+    changed |= Dev::Checkbox("Physical composite", &s.physicalLook);
+    Dev::PanelTooltip("ON: Fresnel runs uncapped, the sun lobe is evaluated at the variance-filtered "
+                      "roughness at full radiance, and subsurface scattering gets its own light path. "
+                      "OFF: the legacy composite (Fresnel capped at 0.43-0.72, specular scaled to 0.12x, "
+                      "SSS multiplied by the near-black deep colour). Toggle for a direct A/B.");
     ImGui::BeginDisabled(!s.physicalLook);
-    changed |= ImGui::SliderFloat("Sun glitter gain", &s.glitterGain, 0.0f, 3.0f, "%.2f");
-    ImGui::SetItemTooltip("Sun-specular gain; 1 = the model's own energy. This is the sparkle path — raise it "
-                          "if the sun track looks dull, lower it if crests fire white specks.");
-    changed |= ImGui::SliderFloat("Subsurface gain", &s.sssGain, 0.0f, 3.0f, "%.2f");
-    ImGui::SetItemTooltip("Backlit-crest glow (the turquoise scatter through a wave with the sun behind it). "
-                          "1 = the reference's energy mapped onto our HDR sun radiance.");
-    changed |= ImGui::SliderFloat("Reflection gain", &s.reflectionGain, 0.0f, 1.5f, "%.2f");
-    changed |= ImGui::SliderFloat("Reflection FOV padding", &s.reflectionFovPad, 1.0f, 3.0f, "%.2fx");
-    changed |= ImGui::SliderFloat("Reflection edge fade", &s.reflectionEdgeFade, 0.02f, 0.49f, "%.2f");
-    ImGui::TextDisabled("Fraction of the reflection target over which the planar reflection hands back to the "
-                        "sky/environment sample. Some water cannot be covered by a planar reflection at all: "
-                        "tilt down and the water beneath you maps outside the mirrored camera's frustum at ANY "
-                        "field of view, so padding cannot reach it and this fade is what carries those pixels. "
-                        "At 0.03 the swap read as a line across the sea, because planar has parallax-correct "
-                        "clouds and the environment sample does not. Wider = the reflection loses parallax "
-                        "gradually instead of ending; too wide and you lose planar parallax over most of the "
-                        "water.");
-    ImGui::TextDisabled("How much wider the planar reflection renders than the screen's field of view. The "
-                        "reflected camera otherwise inherits the main projection exactly, so a grazing "
-                        "reflection needs directions that were never rendered -- the lookup runs off the edge "
-                        "of the reflection target and the reflected clouds end in a visible line across the "
-                        "water. 1.00 restores that. Padding trades angular resolution for coverage; the planar "
-                        "sample is mip-filtered by design, so a little softness costs less than a hard edge.");
-    ImGui::SetItemTooltip("Scales the physical Fresnel reflection weight. 1 = uncapped (correct); lower only "
-                          "if the sky/planar reflection itself is wrong and you need to hide it.");
+    changed |= Dev::SliderFloat("Sun glitter gain", &s.glitterGain, 0.0f, 3.0f, "%.2f");
+    Dev::PanelTooltip("Sun-specular gain; 1 = the model's own energy. This is the sparkle path — raise it "
+                      "if the sun track looks dull, lower it if crests fire white specks.");
+    changed |= Dev::SliderFloat("Subsurface gain", &s.sssGain, 0.0f, 3.0f, "%.2f");
+    Dev::PanelTooltip("Backlit-crest glow (the turquoise scatter through a wave with the sun behind it). "
+                      "1 = the reference's energy mapped onto our HDR sun radiance.");
+    changed |= Dev::SliderFloat("Reflection gain", &s.reflectionGain, 0.0f, 1.5f, "%.2f");
+    changed |= Dev::SliderFloat("Reflection FOV padding", &s.reflectionFovPad, 1.0f, 3.0f, "%.2fx");
+    changed |= Dev::SliderFloat("Reflection edge fade", &s.reflectionEdgeFade, 0.02f, 0.49f, "%.2f");
+    Dev::PanelHelp("Fraction of the reflection target over which the planar reflection hands back to the "
+                   "sky/environment sample. Some water cannot be covered by a planar reflection at all: "
+                   "tilt down and the water beneath you maps outside the mirrored camera's frustum at ANY "
+                   "field of view, so padding cannot reach it and this fade is what carries those pixels. "
+                   "At 0.03 the swap read as a line across the sea, because planar has parallax-correct "
+                   "clouds and the environment sample does not. Wider = the reflection loses parallax "
+                   "gradually instead of ending; too wide and you lose planar parallax over most of the "
+                   "water.");
+    Dev::PanelHelp("How much wider the planar reflection renders than the screen's field of view. The "
+                   "reflected camera otherwise inherits the main projection exactly, so a grazing "
+                   "reflection needs directions that were never rendered -- the lookup runs off the edge "
+                   "of the reflection target and the reflected clouds end in a visible line across the "
+                   "water. 1.00 restores that. Padding trades angular resolution for coverage; the planar "
+                   "sample is mip-filtered by design, so a little softness costs less than a hard edge.");
+    Dev::PanelTooltip("Scales the physical Fresnel reflection weight. 1 = uncapped (correct); lower only "
+                      "if the sky/planar reflection itself is wrong and you need to hide it.");
     ImGui::EndDisabled();
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Sea state");
-    changed |= ImGui::Checkbox("Physical sea-state coupling", &s.seaStateCoupling);
-    ImGui::SetItemTooltip("ON: the amplitude slider sets a wind speed, so the JONSWAP peak moves with "
-                          "it and a rougher sea grows LONGER waves (height linear in the slider, "
-                          "wavelength ~amp^0.75). OFF: the legacy behaviour — the whole spectrum is "
-                          "scaled uniformly, so waves only get taller at the same wavelength, which "
-                          "reads as short steep chop.");
-    changed |= ImGui::SliderFloat("Shore breaker gain", &s.shoreWaveGain, 0.0f, 3.0f, "%.2f");
-    ImGui::SetItemTooltip("Strength of the shoaling swell that runs in toward the beach. The train "
-                          "grows (Green's law) and its crests sharpen as the water shallows.");
-    changed |= ImGui::Checkbox("Underwater effect", &s.underwaterEffect);
-    ImGui::SetItemTooltip("OFF by default — the look is not good enough to ship on yet. ON: metric "
-                          "underwater extinction and in-scattering using the Water tab's "
-                          "shallow/deep colours, classifying each view ray separately near the "
-                          "surface so a half-submerged view keeps its above-water part, plus "
-                          "world-anchored caustics on nearby seabed geometry. This also gates the "
-                          "water shader's own underwater distance fog, so OFF means a submerged "
-                          "view has no volume and no fog at all.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Sea state");
+    changed |= Dev::Checkbox("Physical sea-state coupling", &s.seaStateCoupling);
+    Dev::PanelTooltip("ON: the amplitude slider sets a wind speed, so the JONSWAP peak moves with "
+                      "it and a rougher sea grows LONGER waves (height linear in the slider, "
+                      "wavelength ~amp^0.75). OFF: the legacy behaviour — the whole spectrum is "
+                      "scaled uniformly, so waves only get taller at the same wavelength, which "
+                      "reads as short steep chop.");
+    changed |= Dev::SliderFloat("Shore breaker gain", &s.shoreWaveGain, 0.0f, 3.0f, "%.2f");
+    Dev::PanelTooltip("Strength of the shoaling swell that runs in toward the beach. The train "
+                      "grows (Green's law) and its crests sharpen as the water shallows.");
+    changed |= Dev::Checkbox("Underwater effect", &s.underwaterEffect);
+    Dev::PanelTooltip("OFF by default — the look is not good enough to ship on yet. ON: metric "
+                      "underwater extinction and in-scattering using the Water tab's "
+                      "shallow/deep colours, classifying each view ray separately near the "
+                      "surface so a half-submerged view keeps its above-water part, plus "
+                      "world-anchored caustics on nearby seabed geometry. This also gates the "
+                      "water shader's own underwater distance fog, so OFF means a submerged "
+                      "view has no volume and no fog at all.");
     {
         // Shown even when the effect is off, greyed rather than hidden. Hiding them made the
         // section look like it had no settings at all, which is not what "off" should mean.
         ImGui::BeginDisabled(!s.underwaterEffect);
         ImGui::Indent();
-        ImGui::TextDisabled("Thresholds");
-        changed |= ImGui::SliderFloat("Enter depth (m)", &s.underwaterEnterDepth, 0.0f, 1.0f, "%.3f");
-        ImGui::SetItemTooltip("How far the eye must sink BELOW the local wave-displaced surface "
-                              "before the effect engages.");
-        changed |= ImGui::SliderFloat("Exit depth (m)", &s.underwaterExitDepth, 0.0f, 1.0f, "%.3f");
-        ImGui::SetItemTooltip("How far the eye must rise ABOVE the surface before it releases. Keep "
-                              "this larger than Enter depth — equal values make the effect flicker "
-                              "while the eye rides a moving crest.");
-        changed |= ImGui::SliderFloat("Engage band (m)", &s.underwaterEngageBand, 0.0f, 6.0f, "%.2f");
-        ImGui::SetItemTooltip("How far above sea level the compositor keeps running. It must run a "
-                              "little while dry so a half-submerged view can be classified ray by "
-                              "ray. Past the crest height it only costs the froxel and caustic "
-                              "dispatches for a frame that resolves to no water.");
-        ImGui::TextDisabled("Colour");
-        changed |= ImGui::SliderFloat("Density", &s.underwaterDensity, 0.0f, 4.0f, "%.2f");
-        ImGui::SetItemTooltip("Absorption density multiplier. Lower is clearer water and a longer "
-                              "view; higher closes the view down faster. 1.0 is the tuned default.");
-        changed |= ImGui::SliderFloat("Colour bias", &s.underwaterColorBias, 0.0f, 1.0f, "%.2f");
-        ImGui::SetItemTooltip("1 = absorption hue taken from the Deep colour above, so submerging "
-                              "keeps the same substance you swam into. 0 = the fixed curve the "
-                              "effect used before, which was unrelated to the water's own colour "
-                              "and read as a more turquoise liquid. Drag between the two to "
-                              "compare.");
-        changed |= ImGui::SliderFloat("Caustic gain", &s.underwaterCausticGain, 0.0f, 4.0f, "%.2f");
-        ImGui::SetItemTooltip("Strength of the caustic pattern on nearby seabed geometry. Only "
-                              "visible where there is geometry to receive it.");
-        ImGui::TextDisabled("  Shallow/Deep colour and Extinction above also drive this.");
+        Dev::PanelHelp("Thresholds");
+        changed |= Dev::SliderFloat("Enter depth (m)", &s.underwaterEnterDepth, 0.0f, 1.0f, "%.3f");
+        Dev::PanelTooltip("How far the eye must sink BELOW the local wave-displaced surface "
+                          "before the effect engages.");
+        changed |= Dev::SliderFloat("Exit depth (m)", &s.underwaterExitDepth, 0.0f, 1.0f, "%.3f");
+        Dev::PanelTooltip("How far the eye must rise ABOVE the surface before it releases. Keep "
+                          "this larger than Enter depth — equal values make the effect flicker "
+                          "while the eye rides a moving crest.");
+        changed |= Dev::SliderFloat("Engage band (m)", &s.underwaterEngageBand, 0.0f, 6.0f, "%.2f");
+        Dev::PanelTooltip("How far above sea level the compositor keeps running. It must run a "
+                          "little while dry so a half-submerged view can be classified ray by "
+                          "ray. Past the crest height it only costs the froxel and caustic "
+                          "dispatches for a frame that resolves to no water.");
+        Dev::PanelHelp("Colour");
+        changed |= Dev::SliderFloat("Density", &s.underwaterDensity, 0.0f, 4.0f, "%.2f");
+        Dev::PanelTooltip("Absorption density multiplier. Lower is clearer water and a longer "
+                          "view; higher closes the view down faster. 1.0 is the tuned default.");
+        changed |= Dev::SliderFloat("Colour bias", &s.underwaterColorBias, 0.0f, 1.0f, "%.2f");
+        Dev::PanelTooltip("1 = absorption hue taken from the Deep colour above, so submerging "
+                          "keeps the same substance you swam into. 0 = the fixed curve the "
+                          "effect used before, which was unrelated to the water's own colour "
+                          "and read as a more turquoise liquid. Drag between the two to "
+                          "compare.");
+        changed |= Dev::SliderFloat("Caustic gain", &s.underwaterCausticGain, 0.0f, 4.0f, "%.2f");
+        Dev::PanelTooltip("Strength of the caustic pattern on nearby seabed geometry. Only "
+                          "visible where there is geometry to receive it.");
+        Dev::PanelHelp("  Shallow/Deep colour and Extinction above also drive this.");
         ImGui::Unindent();
         ImGui::EndDisabled();
     }
-    changed |= ImGui::Checkbox("Low water quality (performance)", &s.lowQuality);
-    ImGui::SetItemTooltip("Drops SSR, planar reflection, bicubic filtering and the two smallest wave "
-                          "cascades. The reflected camera and its sky, terrain, objects, clouds and mip "
-                          "passes are not rendered, saving their full GPU cost.");
+    changed |= Dev::Checkbox("Low water quality (performance)", &s.lowQuality);
+    Dev::PanelTooltip("Drops SSR, planar reflection, bicubic filtering and the two smallest wave "
+                      "cascades. The reflected camera and its sky, terrain, objects, clouds and mip "
+                      "passes are not rendered, saving their full GPU cost.");
     const char* geometryPresets[] = {"Performance (4x CDLOD range)", "Balanced (6x CDLOD range)",
                                      "Reference High (8x CDLOD range)", "Ultra (12x CDLOD range)"};
-    changed |= ImGui::Combo("Wave mesh quality", &s.geometryQuality, geometryPresets, IM_ARRAYSIZE(geometryPresets));
-    ImGui::SetItemTooltip("Live coast-aware equivalent of GodotOceanWaves' clipmap mesh-quality selector. "
-                          "Higher settings retain dense wave geometry farther from the camera. Balanced "
-                          "is the default; Performance roughly halves visible water triangles, while "
-                          "Ultra is intended for screenshots or fast GPUs. Shoreline pruning and the ocean "
-                          "horizon remain active at every setting.");
+    changed |= Dev::Combo("Wave mesh quality", &s.geometryQuality, geometryPresets, IM_ARRAYSIZE(geometryPresets));
+    Dev::PanelTooltip("Live coast-aware equivalent of GodotOceanWaves' clipmap mesh-quality selector. "
+                      "Higher settings retain dense wave geometry farther from the camera. Balanced "
+                      "is the default; Performance roughly halves visible water triangles, while "
+                      "Ultra is intended for screenshots or fast GPUs. Shoreline pruning and the ocean "
+                      "horizon remain active at every setting.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Coast (depth-based colour + soft shoreline)");
-    changed |= ImGui::ColorEdit3("Shallow colour", s.shallowColor);
-    ImGui::SetItemTooltip("Body tint of shallow water (near the coast).");
-    changed |= ImGui::ColorEdit3("Deep colour", s.deepColor);
-    ImGui::SetItemTooltip("Body tint of deep water; the surface blends shallow -> deep with the water "
-                          "column depth reconstructed from the opaque-depth prepass.");
-    changed |= ImGui::SliderFloat("Colour clarity", &s.colorExt, 0.02f, 3.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Extinction (1/m): higher = the tint reaches the deep colour in shallower water, "
-                          "so the depth colouring reads stronger. Lower = subtler, more uniform colour.");
-    changed |= ImGui::SliderFloat("Soft edge width (m)", &s.coastFade, 0.0f, 3.0f, "%.2f");
-    ImGui::SetItemTooltip("Metres of water depth over which the shoreline fades transparent -> opaque. "
-                          "Large values look misty/foggy at the coast; lower it for a crisper waterline.");
-    changed |= ImGui::SliderFloat("Foam width (m)", &s.foamWidth, 0.0f, 8.0f, "%.2f");
-    ImGui::SetItemTooltip("Column-depth band the churning foam spans (peaks ~1/4 in). 0 = no foam.");
-    changed |= ImGui::SliderFloat("Foam intensity", &s.foamIntensity, 0.0f, 2.0f, "%.2f");
-    ImGui::SetItemTooltip("Brightness / coverage of the shoreline foam.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Coast (depth-based colour + soft shoreline)");
+    changed |= Dev::ColorEdit3("Shallow colour", s.shallowColor);
+    Dev::PanelTooltip("Body tint of shallow water (near the coast).");
+    changed |= Dev::ColorEdit3("Deep colour", s.deepColor);
+    Dev::PanelTooltip("Body tint of deep water; the surface blends shallow -> deep with the water "
+                      "column depth reconstructed from the opaque-depth prepass.");
+    changed |= Dev::SliderFloat("Colour clarity", &s.colorExt, 0.02f, 3.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Extinction (1/m): higher = the tint reaches the deep colour in shallower water, "
+                      "so the depth colouring reads stronger. Lower = subtler, more uniform colour.");
+    changed |= Dev::SliderFloat("Soft edge width (m)", &s.coastFade, 0.0f, 3.0f, "%.2f");
+    Dev::PanelTooltip("Metres of water depth over which the shoreline fades transparent -> opaque. "
+                      "Large values look misty/foggy at the coast; lower it for a crisper waterline.");
+    changed |= Dev::SliderFloat("Foam width (m)", &s.foamWidth, 0.0f, 8.0f, "%.2f");
+    Dev::PanelTooltip("Column-depth band the churning foam spans (peaks ~1/4 in). 0 = no foam.");
+    changed |= Dev::SliderFloat("Foam intensity", &s.foamIntensity, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("Brightness / coverage of the shoreline foam.");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Ripple diagnostics");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Ripple diagnostics");
     ImGui::Text("Player water depth: %.3f m", static_cast<double>(GetPlayerWaterDepth()));
     ImGui::Text("Events submitted (total): %u   drained last frame: %u", TotalWaterInteractionsSubmitted(),
                 LastWaterInteractionsDrained());
-    ImGui::TextDisabled("Walk into water and watch these three. Depth stays 0 = ground collision is not "
-                        "reporting water under the player, and nothing downstream can help. Depth rises but "
-                        "the submitted total does not = the emit conditions in Man::Simulate are not met "
-                        "(it needs depth > 0.05 m, and the continuous ripple also needs horizontal speed > "
-                        "0.15 m/s). Both rise but the water is flat = the events reach the renderer and the "
-                        "solver or its display is the problem -- check debug view 12 (interaction height).");
+    Dev::PanelHelp("Walk into water and watch these three. Depth stays 0 = ground collision is not "
+                   "reporting water under the player, and nothing downstream can help. Depth rises but "
+                   "the submitted total does not = the emit conditions in Man::Simulate are not met "
+                   "(it needs depth > 0.05 m, and the continuous ripple also needs horizontal speed > "
+                   "0.15 m/s). Both rise but the water is flat = the events reach the renderer and the "
+                   "solver or its display is the problem -- check debug view 12 (interaction height).");
 
-    ImGui::Separator();
-    ImGui::TextUnformatted("Wave foam (whitecaps)");
-    ImGui::TextDisabled("Crests breaking on open water, separate from the shoreline band above. These are "
-                        "different phenomena -- water breaking on land versus a crest collapsing under its own "
-                        "steepness -- and 'Foam intensity' used to scale both, so calming the ocean also "
-                        "stripped the surf.");
-    changed |= ImGui::SliderFloat("Wave foam intensity", &s.waveFoamIntensity, 0.0f, 2.0f, "%.2f");
-    ImGui::SetItemTooltip("Whitecaps and persistent breaker foam. 0 = none; the shoreline band is unaffected.");
-    changed |= ImGui::SliderFloat("Deep-water falloff", &s.waveFoamDeepFalloff, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("How strongly deep water suppresses whitecaps. 0 = waves break the same everywhere "
-                          "(the old behaviour, which is why the open ocean read as too foamy). 1 = open water "
-                          "stays nearly smooth and breaking concentrates in shoaling water near the coast, "
-                          "which is where a real sea breaks. Depth ramp is 6 m to 45 m.");
-    changed |= ImGui::SliderFloat("Swash amplitude (m)", &s.swashAmp, 0.0f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("How far the near-shore waterline oscillates in/out over the wet beach "
-                          "(cosmetic — buoyancy stays on the flat plane).");
-    changed |= ImGui::SliderFloat("Swash speed (Hz)", &s.swashSpeed, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
-    ImGui::SetItemTooltip("Swash cycles per second (slow = long, lazy wash).");
-    changed |= ImGui::SliderFloat("Wet band height (m)", &s.wetHeight, 0.0f, 4.0f, "%.2f");
-    ImGui::SetItemTooltip("Terrain side: metres above sea level the damp/darkened intertidal band "
-                          "reaches, on near-flat ground only (cliffs stay dry).");
-    changed |= ImGui::SliderFloat("Wet darkening", &s.wetDarken, 0.3f, 1.0f, "%.2f");
-    ImGui::SetItemTooltip("Albedo multiplier for wet sand (lower = darker). 1 = off.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Wave foam (whitecaps)");
+    Dev::PanelHelp("Crests breaking on open water, separate from the shoreline band above. These are "
+                   "different phenomena -- water breaking on land versus a crest collapsing under its own "
+                   "steepness -- and 'Foam intensity' used to scale both, so calming the ocean also "
+                   "stripped the surf.");
+    changed |= Dev::SliderFloat("Wave foam intensity", &s.waveFoamIntensity, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("Whitecaps and persistent breaker foam. 0 = none; the shoreline band is unaffected.");
+    changed |= Dev::SliderFloat("Deep-water falloff", &s.waveFoamDeepFalloff, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How strongly deep water suppresses whitecaps. 0 = waves break the same everywhere "
+                      "(the old behaviour, which is why the open ocean read as too foamy). 1 = open water "
+                      "stays nearly smooth and breaking concentrates in shoaling water near the coast, "
+                      "which is where a real sea breaks. Depth ramp is 6 m to 45 m.");
+    changed |= Dev::SliderFloat("Swash amplitude (m)", &s.swashAmp, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How far the near-shore waterline oscillates in/out over the wet beach "
+                      "(cosmetic — buoyancy stays on the flat plane).");
+    changed |= Dev::SliderFloat("Swash speed (Hz)", &s.swashSpeed, 0.0f, 1.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    Dev::PanelTooltip("Swash cycles per second (slow = long, lazy wash).");
+    changed |= Dev::SliderFloat("Wet band height (m)", &s.wetHeight, 0.0f, 4.0f, "%.2f");
+    Dev::PanelTooltip("Terrain side: metres above sea level the damp/darkened intertidal band "
+                      "reaches, on near-flat ground only (cliffs stay dry).");
+    changed |= Dev::SliderFloat("Wet darkening", &s.wetDarken, 0.3f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Albedo multiplier for wet sand (lower = darker). 1 = off.");
 
     // WTR-001 — deterministic water debug controls (dev / capture / A-B / shader-diff use only).
     // All freezes are renderer-local substitutions: they replace the UBO time/dt/seed the water,
     // interaction, foam, cloud, and underwater caustic shaders see, WITHOUT touching Glob.time
     // (gameplay + net clock) or any non-water subsystem other than the cloud wind offset (which
     // rides the same water sim clock by design). Leave "Freeze time" off to retain live animation.
-    ImGui::Separator();
-    ImGui::TextUnformatted("Debug (WTR-001 — deterministic capture / A-B)");
-    ImGui::SetItemTooltip("Holds the water-sim clock, FFT, interaction solver, foam, or clouds "
-                          "at a fixed value so the same frame reproduces across launches for "
-                          "before/after captures and shader-diff work. Dev-only.");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Debug (WTR-001 — deterministic capture / A-B)");
+    Dev::PanelTooltip("Holds the water-sim clock, FFT, interaction solver, foam, or clouds "
+                      "at a fixed value so the same frame reproduces across launches for "
+                      "before/after captures and shader-diff work. Dev-only.");
     auto& fz = s.freeze;
     bool freezeFft = fz.freezeFft;
-    if (ImGui::Checkbox("Freeze FFT##bool", &freezeFft))
+    if (Dev::Checkbox("Freeze FFT##bool", &freezeFft))
     {
         fz.freezeFft = freezeFft;
         changed = true;
     }
-    ImGui::SetItemTooltip("Skip Fft::dispatch: the wave-spectrum holds at its last computed state. "
-                          "Combine with Freeze time to capture one frame's spectrum exactly.");
+    Dev::PanelTooltip("Skip Fft::dispatch: the wave-spectrum holds at its last computed state. "
+                      "Combine with Freeze time to capture one frame's spectrum exactly.");
     bool freezeInteraction = fz.freezeInteraction;
-    if (ImGui::Checkbox("Freeze interaction solver##bool", &freezeInteraction))
+    if (Dev::Checkbox("Freeze interaction solver##bool", &freezeInteraction))
     {
         fz.freezeInteraction = freezeInteraction;
         changed = true;
     }
-    ImGui::SetItemTooltip("dt = 0 + skip Interaction::dispatch: the local ripple field holds its "
-                          "last state (no decay, no propagation, no event injection).");
+    Dev::PanelTooltip("dt = 0 + skip Interaction::dispatch: the local ripple field holds its "
+                      "last state (no decay, no propagation, no event injection).");
     bool freezeFoam = fz.freezeFoam;
-    if (ImGui::Checkbox("Freeze foam##bool", &freezeFoam))
+    if (Dev::Checkbox("Freeze foam##bool", &freezeFoam))
     {
         fz.freezeFoam = freezeFoam;
         changed = true;
     }
-    ImGui::SetItemTooltip("Skip Foam::dispatch: persistent foam stops advection + ageing at the "
-                          "last state (use with Freeze time so the advecting surface velocity is 0).");
+    Dev::PanelTooltip("Skip Foam::dispatch: persistent foam stops advection + ageing at the "
+                      "last state (use with Freeze time so the advecting surface velocity is 0).");
     bool freezeClouds = fz.freezeClouds;
-    if (ImGui::Checkbox("Freeze clouds##bool", &freezeClouds))
+    if (Dev::Checkbox("Freeze clouds##bool", &freezeClouds))
     {
         fz.freezeClouds = freezeClouds;
         changed = true;
     }
-    ImGui::SetItemTooltip("Hold the cloud wind world offset at fixed time, so the cloud shell does "
-                          "not drift between captures. Implicit when Freeze time is on.");
+    Dev::PanelTooltip("Hold the cloud wind world offset at fixed time, so the cloud shell does "
+                      "not drift between captures. Implicit when Freeze time is on.");
     bool freezeWeather = fz.freezeWeather;
-    if (ImGui::Checkbox("Freeze weather##bool", &freezeWeather))
+    if (Dev::Checkbox("Freeze weather##bool", &freezeWeather))
     {
         fz.freezeWeather = freezeWeather;
         changed = true;
     }
-    ImGui::SetItemTooltip("Reserve bit for future weather threading (no per-frame weather "
-                          "recomputation today). Implicit when Freeze time is on, since the "
-                          "interaction weather vector recomputes off the frozen time.");
+    Dev::PanelTooltip("Reserve bit for future weather threading (no per-frame weather "
+                      "recomputation today). Implicit when Freeze time is on, since the "
+                      "interaction weather vector recomputes off the frozen time.");
     bool freezeTime = fz.freezeTime;
-    if (ImGui::Checkbox("Freeze water-sim clock##bool", &freezeTime))
+    if (Dev::Checkbox("Freeze water-sim clock##bool", &freezeTime))
     {
         fz.freezeTime = freezeTime;
         changed = true;
     }
-    ImGui::SetItemTooltip("Hold the water-sim clock passed to the FFT, interaction, foam and "
-                          "underwater caustic shaders at fixed time. Clouds honour this too.");
-    changed |= ImGui::SliderFloat("Fixed time (s)", &fz.fixedTime, 0.0f, 3600.0f, "%.2f");
-    ImGui::SetItemTooltip("Seconds (replaces Glob.time when Freeze time or Freeze clouds is on). "
-                          "One value keeps the four sim clocks (water, interaction, cloud, "
-                          "underwater caustic) coherent for a single reproducible test frame.");
-    changed |= ImGui::SliderInt("FFT seed override", &fz.fftSeed, -1, 0x00ff'ffff);
-    ImGui::SetItemTooltip("Replaces fft_control[1] (authored default 1337). -1 = use 1337 (no "
-                          "swap). Any non-negative value rewrites the spectrum's random field on "
-                          "the next dispatch; two runs with the same seed reproduce h0 bit-for-bit.");
-    changed |= ImGui::SliderFloat("Fixed delta (s)", &fz.fixedDelta, 0.0f, 1.0f / 30.0f, "%.4f");
-    ImGui::SetItemTooltip("Fixes the interaction-solver step regardless of render FPS (0 = use the "
-                          "live frame delta clamped to 1/30). For WTR-063 fixed-timestep validation; "
-                          "leave 0 for capture mode (Freeze interaction is the standard freeze).");
-    changed |= ImGui::SliderInt("Camera path frame", &fz.cameraPathFrame, -1, 100000);
-    ImGui::SetItemTooltip("WTR-001 foundation only: when >= 0 the renderer tags each frame's water "
-                          "UBO digest with this integer so two runs compare frame-by-frame. The "
-                          "camera-path recorder itself is a separate WTR-004 work package; here we "
-                          "expose just the integer index for manual capture-then-replay audits.");
+    Dev::PanelTooltip("Hold the water-sim clock passed to the FFT, interaction, foam and "
+                      "underwater caustic shaders at fixed time. Clouds honour this too.");
+    changed |= Dev::SliderFloat("Fixed time (s)", &fz.fixedTime, 0.0f, 3600.0f, "%.2f");
+    Dev::PanelTooltip("Seconds (replaces Glob.time when Freeze time or Freeze clouds is on). "
+                      "One value keeps the four sim clocks (water, interaction, cloud, "
+                      "underwater caustic) coherent for a single reproducible test frame.");
+    changed |= Dev::SliderInt("FFT seed override", &fz.fftSeed, -1, 0x00ff'ffff);
+    Dev::PanelTooltip("Replaces fft_control[1] (authored default 1337). -1 = use 1337 (no "
+                      "swap). Any non-negative value rewrites the spectrum's random field on "
+                      "the next dispatch; two runs with the same seed reproduce h0 bit-for-bit.");
+    changed |= Dev::SliderFloat("Fixed delta (s)", &fz.fixedDelta, 0.0f, 1.0f / 30.0f, "%.4f");
+    Dev::PanelTooltip("Fixes the interaction-solver step regardless of render FPS (0 = use the "
+                      "live frame delta clamped to 1/30). For WTR-063 fixed-timestep validation; "
+                      "leave 0 for capture mode (Freeze interaction is the standard freeze).");
+    changed |= Dev::SliderInt("Camera path frame", &fz.cameraPathFrame, -1, 100000);
+    Dev::PanelTooltip("WTR-001 foundation only: when >= 0 the renderer tags each frame's water "
+                      "UBO digest with this integer so two runs compare frame-by-frame. The "
+                      "camera-path recorder itself is a separate WTR-004 work package; here we "
+                      "expose just the integer index for manual capture-then-replay audits.");
 
-    if (ImGui::Button("Reset to defaults"))
+    if (Dev::Button("Reset to defaults"))
     {
         s = decltype(s){};
         changed = true;
@@ -5653,33 +5648,33 @@ void DrawWaterTab()
     // (WgrWaterDebugView). Kept outside the disabled block so it works even with the water
     // surface toggled off. Reserved slots (underwater/god-ray/caustic/whitewater) render black
     // until their passes exist. The combo index maps 1:1 onto WgrWaterDebugView.
-    ImGui::Separator();
-    ImGui::TextUnformatted("Debug views (WTR-003)  [Ctrl+Shift+W cycles]");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Debug views (WTR-003)  [Ctrl+Shift+W cycles]");
     // kWaterDebugViews / kWaterDebugViewCount are at file scope (shared with the hotkey).
     int debugView = (s.debugView >= 0 && s.debugView < kWaterDebugViewCount) ? s.debugView : 0;
-    if (ImGui::Combo("Debug view", &debugView, kWaterDebugViews, (int)std::size(kWaterDebugViews)))
+    if (Dev::Combo("Debug view", &debugView, kWaterDebugViews, (int)std::size(kWaterDebugViews)))
     {
         s.debugView = debugView;
         changed = true;
     }
-    ImGui::SetItemTooltip("Replaces the water surface output with the selected diagnostic. FFT / "
-                          "interaction / foam views aggregate the four cascades; interaction & foam "
-                          "fields read zero outside the 256 m camera domain. Reserved entries have no "
-                          "backing pass yet and render black. wgpu backend only.");
+    Dev::PanelTooltip("Replaces the water surface output with the selected diagnostic. FFT / "
+                      "interaction / foam views aggregate the four cascades; interaction & foam "
+                      "fields read zero outside the 256 m camera domain. Reserved entries have no "
+                      "backing pass yet and render black. wgpu backend only.");
 
     // WTR-004 — Standard test harness (deterministic animation, frame-stepping, snapshot/restore)
-    ImGui::Separator();
-    ImGui::TextUnformatted("Standard test harness (WTR-004)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Standard test harness (WTR-004)");
     auto& harness = Poseidon::WtrTestHarness::Instance();
     int testScene = harness.IsActive() ? harness.GetCurrentPresetId()
                                        : ((s.testScene >= 0 && s.testScene < kWaterTestSceneCount) ? s.testScene : 0);
-    if (ImGui::Combo("Test scene preset", &testScene, kWaterTestScenes, kWaterTestSceneCount))
+    if (Dev::Combo("Test scene preset", &testScene, kWaterTestScenes, kWaterTestSceneCount))
     {
         s.testScene = testScene;
         harness.SelectPreset(testScene, s, s.debugView);
         changed = true;
     }
-    ImGui::SetItemTooltip("Selects a standard WTR-Test-01..10 test scene preset.");
+    Dev::PanelTooltip("Selects a standard WTR-Test-01..10 test scene preset.");
 
     if (testScene > 0)
     {
@@ -5703,7 +5698,7 @@ void DrawWaterTab()
         ImGui::Spacing();
         if (!harness.IsActive())
         {
-            if (ImGui::Button("Start Test Harness"))
+            if (Dev::Button("Start Test Harness"))
             {
                 harness.Start(s, s.debugView);
                 changed = true;
@@ -5711,24 +5706,24 @@ void DrawWaterTab()
         }
         else
         {
-            if (ImGui::Button(harness.IsPaused() ? "Resume" : "Pause"))
+            if (Dev::Button(harness.IsPaused() ? "Resume" : "Pause"))
             {
                 harness.Pause();
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Step Frame"))
+            Dev::PanelSameLine();
+            if (Dev::Button("Step Frame"))
             {
                 harness.StepFrame(s);
                 changed = true;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Restart"))
+            Dev::PanelSameLine();
+            if (Dev::Button("Restart"))
             {
                 harness.Restart(s);
                 changed = true;
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Stop & Restore Settings"))
+            Dev::PanelSameLine();
+            if (Dev::Button("Stop & Restore Settings"))
             {
                 int restoredDebugView = s.debugView;
                 harness.Stop(s, restoredDebugView);
@@ -5741,7 +5736,7 @@ void DrawWaterTab()
                         static_cast<double>(harness.GetFrameIndex() * harness.GetFixedDeltaTime()),
                         harness.GetTriggeredEventCount());
 
-            if (ImGui::Button("Copy Metadata Log JSON"))
+            if (Dev::Button("Copy Metadata Log JSON"))
             {
                 Vector3 dummyPos(100.0f, 5.0f, 100.0f);
                 Vector3 dummyRot(0.0f, 0.0f, 0.0f);
@@ -5756,8 +5751,8 @@ void DrawWaterTab()
 
     // Copy the full authored water look so the tuned values can be pasted back as the
     // Engine::WaterSettings defaults (like the Sky / Tonemap tabs).
-    ImGui::Separator();
-    ImGui::TextDisabled("Preset (copy to persist as defaults):");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Preset (copy to persist as defaults):");
     char preset[720];
     snprintf(preset, sizeof(preset),
              "water: amp=%.2f choppy=%.2f speed=%.2f scale=%.2f fade=%.0f,%.0f warp=%.2f "
@@ -5768,21 +5763,21 @@ void DrawWaterTab()
              s.deepColor[0], s.deepColor[1], s.deepColor[2], s.colorExt, s.coastFade, s.foamWidth, s.foamIntensity,
              s.swashAmp, s.swashSpeed, s.wetHeight, s.wetDarken);
     ImGui::SetNextItemWidth(-1.0f);
-    ImGui::InputText("##waterPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
-    if (ImGui::Button("Copy preset to clipboard"))
+    Dev::InputText("##waterPreset", preset, sizeof(preset), ImGuiInputTextFlags_ReadOnly);
+    if (Dev::Button("Copy preset to clipboard"))
         ImGui::SetClipboardText(preset);
 
     // WTR-002 — per-region GPU pass timings (timestamp queries; the renderer harvests the
     // readback asynchronously, so values lag the displayed frame by the ring depth, ~2-3
     // frames). "n/a" rows are reserved spec slots (no standalone pass yet) or passes that
     // haven't run since launch (e.g. frozen dispatches, spectrum init after the first frame).
-    ImGui::Separator();
-    ImGui::TextUnformatted("GPU timings (WTR-002)");
+    Dev::PanelSeparator();
+    Dev::PanelHeading("GPU timings (WTR-002)");
     float gpuMs[64];
     const int gpuRegions = GEngine->GetWaterGpuTimings(gpuMs, 64);
     if (gpuRegions <= 0)
     {
-        ImGui::TextDisabled("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
+        Dev::PanelHelp("Unavailable (adapter lacks TIMESTAMP_QUERY / non-wgpu backend).");
     }
     else if (ImGui::BeginTable("wtrGpuTimings", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
@@ -5793,7 +5788,7 @@ void DrawWaterTab()
         {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::TextUnformatted(GEngine->GetWaterGpuTimingName(i));
+            Dev::PanelHeading(GEngine->GetWaterGpuTimingName(i));
             ImGui::TableNextColumn();
             if (gpuMs[i] < 0.0f)
                 ImGui::TextDisabled("n/a");
@@ -5805,10 +5800,10 @@ void DrawWaterTab()
         }
         ImGui::EndTable();
         ImGui::Text("Measured total: %.3f ms", gpuTotal);
-        ImGui::SetItemTooltip("Sum of the rows above (last completed frame). Not the water "
-                              "pipeline's wall-clock cost: passes may overlap on the GPU and "
-                              "reserved rows are folded into their host pass (SSR/refraction "
-                              "inside Water draw, caustics inside Underwater composite).");
+        Dev::PanelTooltip("Sum of the rows above (last completed frame). Not the water "
+                          "pipeline's wall-clock cost: passes may overlap on the GPU and "
+                          "reserved rows are folded into their host pass (SSR/refraction "
+                          "inside Water draw, caustics inside Underwater composite).");
     }
 }
 void DrawMouseTab()
@@ -5817,8 +5812,8 @@ void DrawMouseTab()
     auto& sub = InputSubsystem::Instance();
     MouseTuning& t = sub.GetMouseTuning();
 
-    ImGui::TextUnformatted("Player settings (final)");
-    ImGui::Separator();
+    Dev::PanelHeading("Player settings (final)");
+    Dev::PanelSeparator();
 
     int dpiIdx = 0; // Off
     if (t.dpiNormalize)
@@ -5836,34 +5831,34 @@ void DrawMouseTab()
             }
         }
     }
-    if (ImGui::Combo("Mouse DPI", &dpiIdx, kMouseDpiLabels, kMouseDpiPresetCount))
+    if (Dev::Combo("Mouse DPI", &dpiIdx, kMouseDpiLabels, kMouseDpiPresetCount))
     {
         t.dpiNormalize = dpiIdx > 0;
         if (dpiIdx > 0)
             t.mouseDpi = kMouseDpiPresets[dpiIdx];
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Set this to your mouse's DPI. The game then feels like %d DPI at any hardware.\n"
                           "Off = classic (no compensation).",
                           t.referenceDpi);
 
     float sx = sub.GetMouseSensitivityX();
-    if (ImGui::SliderFloat("Sensitivity X", &sx, t.SensMin(), t.SensMax(), "%.3f"))
+    if (Dev::SliderFloat("Sensitivity X", &sx, t.SensMin(), t.SensMax(), "%.3f"))
         sub.SetMouseSensitivityX(sx);
     float sy = sub.GetMouseSensitivityY();
-    if (ImGui::SliderFloat("Sensitivity Y", &sy, t.SensMin(), t.SensMax(), "%.3f"))
+    if (Dev::SliderFloat("Sensitivity Y", &sy, t.SensMin(), t.SensMax(), "%.3f"))
         sub.SetMouseSensitivityY(sy);
 
     bool rev = sub.IsReverseMouse();
-    if (ImGui::Checkbox("Invert Y axis", &rev))
+    if (Dev::Checkbox("Invert Y axis", &rev))
         sub.SetReverseMouse(rev);
     bool swap = sub.IsMouseButtonsReversed();
-    if (ImGui::Checkbox("Swap mouse buttons", &swap))
+    if (Dev::Checkbox("Swap mouse buttons", &swap))
         sub.SetMouseButtonsReversed(swap);
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("Final values (live)");
-    ImGui::Separator();
+    Dev::PanelHeading("Final values (live)");
+    Dev::PanelSeparator();
 
     // Cursor math mirrors MouseState::Update (kCursorScaleX = 1/200; screen = 2 NDC).
     const float dpiF = t.DpiFactor();
@@ -5879,48 +5874,48 @@ void DrawMouseTab()
             // Normalized: physical hand travel is DPI-independent (mouseDpi cancels).
             const float inch = countsCrossX / static_cast<float>(t.mouseDpi);
             ImGui::Text("Hand travel to cross screen (X): %.2f in / %.1f cm", inch, inch * 2.54f);
-            ImGui::TextDisabled("  same physical feel at every DPI — normalization working");
+            Dev::PanelHelp("  same physical feel at every DPI — normalization working");
         }
         else
         {
-            ImGui::TextDisabled("  Off: raw counts — physical feel depends on your hardware DPI");
+            Dev::PanelHelp("  Off: raw counts — physical feel depends on your hardware DPI");
         }
     }
     if (s_window)
         ImGui::Text("SDL display scale: %.2f   pixel density: %.2f", SDL_GetWindowDisplayScale(s_window),
                     SDL_GetWindowPixelDensity(s_window));
-    ImGui::TextDisabled("Mouse moves over this panel are captured by ImGui — close it to feel changes in game.");
+    Dev::PanelHelp("Mouse moves over this panel are captured by ImGui — close it to feel changes in game.");
 
     ImGui::Spacing();
     if (ImGui::CollapsingHeader("Advanced (dev only)"))
     {
-        ImGui::SliderFloat("Base scale", &t.baseScale, 0.1f, 3.0f, "%.3f");
-        if (ImGui::IsItemHovered())
+        Dev::SliderFloat("Base scale", &t.baseScale, 0.1f, 3.0f, "%.3f");
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("Master look scale (was the hard-coded 1.5).");
-        ImGui::SliderInt("Reference DPI", &t.referenceDpi, 100, 3200);
-        ImGui::SliderFloat("Smoothing", &t.smoothing, 0.0f, 0.95f, "%.2f");
-        ImGui::Checkbox("Acceleration", &t.acceleration);
+        Dev::SliderInt("Reference DPI", &t.referenceDpi, 100, 3200);
+        Dev::SliderFloat("Smoothing", &t.smoothing, 0.0f, 0.95f, "%.2f");
+        Dev::Checkbox("Acceleration", &t.acceleration);
         ImGui::BeginDisabled(!t.acceleration);
-        ImGui::SliderFloat("Accel exponent", &t.accelExponent, 1.0f, 2.0f, "%.2f");
+        Dev::SliderFloat("Accel exponent", &t.accelExponent, 1.0f, 2.0f, "%.2f");
         ImGui::EndDisabled();
-        ImGui::SliderFloat("Menu cursor scale", &t.menuCursorScale, 0.1f, 4.0f, "%.2f");
-        if (ImGui::Checkbox("Extended sensitivity range", &t.extendedRange))
+        Dev::SliderFloat("Menu cursor scale", &t.menuCursorScale, 0.1f, 4.0f, "%.2f");
+        if (Dev::Checkbox("Extended sensitivity range", &t.extendedRange))
         {
             sub.SetMouseSensitivityX(std::clamp(sub.GetMouseSensitivityX(), t.SensMin(), t.SensMax()));
             sub.SetMouseSensitivityY(std::clamp(sub.GetMouseSensitivityY(), t.SensMin(), t.SensMax()));
         }
-        if (ImGui::IsItemHovered())
+        if (Dev::PanelItemHovered())
             ImGui::SetTooltip("Off = legacy 0.5..2.0 sensitivity range. On = 0.05..3.0.");
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
-    if (ImGui::Button("Reset tuning to classic"))
+    Dev::PanelSeparator();
+    if (Dev::Button("Reset tuning to classic"))
         t = MouseTuning{};
-    ImGui::SameLine();
-    if (ImGui::Button("Save to mouse.cfg"))
+    Dev::PanelSameLine();
+    if (Dev::Button("Save to mouse.cfg"))
         Defer([] { InputSubsystem::Instance().SaveKeys(); });
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
         ImGui::SetTooltip("Persist sensitivity + tuning to mouse.cfg (also written for old builds).");
 }
 
@@ -5929,57 +5924,63 @@ void DrawMainWindow()
     ImGui::SetNextWindowSize(ImVec2(560, 480), ImGuiCond_FirstUseEver);
     ImGui::Begin("Poseidon Dev Panel");
 
+    // Above the tab bar, so it filters whichever tab is open -- and because it
+    // also resets the per-frame attribution state the wrappers use, it has to
+    // run before any of them. ImGui executes only the selected tab's body, so
+    // once per frame is once per tab.
+    Dev::DrawPanelSearch();
+
     if (ImGui::BeginTabBar("DevPanelTabs"))
     {
-        if (ImGui::BeginTabItem("Zeus"))
+        if (Dev::PanelTabItem("Zeus"))
         {
             DrawZeusTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Cheats"))
+        if (Dev::PanelTabItem("Cheats"))
         {
             DrawCheatsTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Mods"))
+        if (Dev::PanelTabItem("Mods"))
         {
             DrawModsTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Game"))
+        if (Dev::PanelTabItem("Game"))
         {
             DrawGameTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Mouse"))
+        if (Dev::PanelTabItem("Mouse"))
         {
             DrawMouseTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Console"))
+        if (Dev::PanelTabItem("Console"))
         {
             DrawConsoleTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Profile"))
+        if (Dev::PanelTabItem("Profile"))
         {
             DrawProfileTab();
             ImGui::EndTabItem();
         }
         // Fully qualified: the tab body lives in BallisticsTab.cpp, so this call does not
         // depend on where this file's anonymous namespace happens to sit.
-        if (ImGui::BeginTabItem("Ballistics"))
+        if (Dev::PanelTabItem("Ballistics"))
         {
             Poseidon::Dev::DrawBallisticsTab();
             ImGui::EndTabItem();
         }
         // Same arrangement: bodies in WeatherTab.cpp / SmokeTab.cpp.
-        if (ImGui::BeginTabItem("Weather"))
+        if (Dev::PanelTabItem("Weather"))
         {
             Poseidon::Dev::DrawWeatherTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Smoke"))
+        if (Dev::PanelTabItem("Smoke"))
         {
             Poseidon::Dev::DrawSmokeTab();
             ImGui::EndTabItem();
@@ -5990,72 +5991,72 @@ void DrawMainWindow()
             memoryFlags = ImGuiTabItemFlags_SetSelected;
             s_selectMemoryTab = false;
         }
-        if (ImGui::BeginTabItem("Memory", nullptr, memoryFlags))
+        if (Dev::PanelTabItem("Memory", nullptr, memoryFlags))
         {
             DrawMemoryTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Perf"))
+        if (Dev::PanelTabItem("Perf"))
         {
             DrawPerfTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Font"))
+        if (Dev::PanelTabItem("Font"))
         {
             DrawFontTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Aspect"))
+        if (Dev::PanelTabItem("Aspect"))
         {
             DrawAspectTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Render"))
+        if (Dev::PanelTabItem("Render"))
         {
             DrawRenderTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Material Debug"))
+        if (Dev::PanelTabItem("Material Debug"))
         {
             DrawMaterialDebugTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Tonemap"))
+        if (Dev::PanelTabItem("Tonemap"))
         {
             DrawTonemapTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Sky"))
+        if (Dev::PanelTabItem("Sky"))
         {
             DrawSkyTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Water"))
+        if (Dev::PanelTabItem("Water"))
         {
             DrawWaterTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Culling"))
+        if (Dev::PanelTabItem("Culling"))
         {
             DrawCullingTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Foliage"))
+        if (Dev::PanelTabItem("Foliage"))
         {
             DrawFoliageTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Amb. Occlusion"))
+        if (Dev::PanelTabItem("Amb. Occlusion"))
         {
             DrawAmbientOcclusionTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Interior Sky"))
+        if (Dev::PanelTabItem("Interior Sky"))
         {
             DrawInteriorSkyTab();
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Grass"))
+        if (Dev::PanelTabItem("Grass"))
         {
             DrawGrassTab();
             ImGui::EndTabItem();
@@ -6066,7 +6067,7 @@ void DrawMainWindow()
             shadowFlags = ImGuiTabItemFlags_SetSelected;
             s_selectShadowsTab = false;
         }
-        if (ImGui::BeginTabItem("Shadows", nullptr, shadowFlags))
+        if (Dev::PanelTabItem("Shadows", nullptr, shadowFlags))
         {
             DrawShadowsTab();
             ImGui::EndTabItem();
@@ -6074,8 +6075,8 @@ void DrawMainWindow()
         ImGui::EndTabBar();
     }
 
-    ImGui::Separator();
-    ImGui::TextDisabled("Ctrl+` / Ctrl+; to hide");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Ctrl+` / Ctrl+; to hide");
     ImGui::End();
 }
 } // namespace
@@ -6469,7 +6470,10 @@ void NewFrame()
         if (s_zeusCursor)
             s_zeusCursor->DrawCursor();
     }
-    if (s_visible)
+    // POSEIDON_PANEL_SEARCH opens the panel as well as seeding the filter, so a
+    // filtered tab can be captured by --auto-screenshot. An auto-capture has no
+    // hands: without this the search could only ever be checked by a person.
+    if (s_visible || Dev::PanelSearchPreseeded())
         DrawMainWindow();
 }
 
