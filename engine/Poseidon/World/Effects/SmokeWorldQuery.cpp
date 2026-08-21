@@ -1,5 +1,7 @@
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 
+#include <Poseidon/World/Effects/BuildingInterior.hpp>
+#include <Poseidon/World/Entities/Vehicles/House.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 
@@ -11,6 +13,50 @@ namespace
 {
 
 long long GSweepCount = 0;
+
+/// The Building containing `pos`, or null. Fire geometry first (the solid
+/// shell), view geometry as fallback (glass closes holes a fire LOD leaves).
+/// The last answer is cached in an OLink, which clears itself if the building
+/// is deleted: smoke asks about points that barely move between frames, and a
+/// full IsInside scan per query would cost what the room lookup was meant to
+/// save. A particle can cross into another building's volume faster than the
+/// 12 m cache radius only by moving through shared walls, which the room data
+/// does not model anyway.
+Object* BuildingContaining(Vector3Par pos)
+{
+    static OLink<Object> cached;
+    static Vector3 cachedPos(VZero);
+
+    Object* obj = cached.GetLink();
+    if (obj != nullptr && (pos - cachedPos).SquareSize() < Square(12.0f))
+    {
+        return obj;
+    }
+
+    if (GLandscape == nullptr)
+    {
+        return nullptr;
+    }
+
+    Object* found = nullptr;
+    for (int pass = 0; pass < 2 && found == nullptr; ++pass)
+    {
+        StaticArrayAuto<OLink<Object>> objects;
+        GLandscape->IsInside(objects, nullptr, pos, pass == 0 ? ObjIntersectFire : ObjIntersectView);
+        for (int i = 0; i < objects.Size(); ++i)
+        {
+            if (dyn_cast<Building>(objects[i].GetLink()) != nullptr)
+            {
+                found = objects[i].GetLink();
+                break;
+            }
+        }
+    }
+
+    cached = found;
+    cachedPos = pos;
+    return found;
+}
 
 /// The no-world fallback: open sky, flat ground, nothing to hit. Not a stub for
 /// its own sake — it is what lets SmokeVolume::Simulate be exercised in a unit
@@ -210,6 +256,66 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         // sphere would report a wall two metres to the side as a roof.
         GLandscape->ObjectCollision(buffer, nullptr, nullptr, pos, up, 0.05f, ObjIntersectFire);
         return buffer.Size() > 0;
+    }
+
+    bool IndoorRoomAt(Vector3Par pos, int& room) const override
+    {
+        room = -1;
+        const Object* obj = BuildingContaining(pos);
+        if (obj == nullptr)
+        {
+            return false;
+        }
+        const Building* building = dyn_cast<const Building>(obj);
+        const BuildingInterior* interior = BuildingInterior::GetFor(building->GetBType());
+        if (interior == nullptr || !interior->Valid())
+        {
+            return false;
+        }
+        room = interior->RoomOfWorld(obj, pos);
+        return room >= 0;
+    }
+
+    float IndoorClearanceAt(Vector3Par pos, int room, float maxDistance) const override
+    {
+        const Object* obj = BuildingContaining(pos);
+        const Building* building = dyn_cast<const Building>(obj);
+        if (building == nullptr)
+        {
+            return maxDistance;
+        }
+        const BuildingInterior* interior = BuildingInterior::GetFor(building->GetBType());
+        if (interior == nullptr || !interior->Valid() || interior->RoomOfWorld(obj, pos) != room)
+        {
+            return maxDistance;
+        }
+        return interior->ClearanceModel(obj->GetInvTransform().FastTransform(pos), room, maxDistance);
+    }
+
+    SmokeContainStep IndoorContainStep(Vector3Par from, Vector3Par to, int room) const override
+    {
+        SmokeContainStep result;
+        result.position = to;
+        result.room = room;
+
+        const Object* obj = BuildingContaining(to);
+        if (obj == nullptr)
+        {
+            return result;
+        }
+        const Building* building = dyn_cast<const Building>(obj);
+        const BuildingInterior* interior = BuildingInterior::GetFor(building->GetBType());
+        if (interior == nullptr || !interior->Valid())
+        {
+            return result;
+        }
+
+        const InteriorStepResult step = interior->ContainedStepWorld(obj, from, to, room);
+        result.allowed = !step.blocked;
+        result.position = step.position;
+        result.normal = step.normal;
+        result.room = step.room;
+        return result;
     }
 };
 

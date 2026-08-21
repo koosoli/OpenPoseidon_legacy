@@ -64,6 +64,7 @@ using Poseidon::Foundation::Time;
 #include <time.h>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/World/Terrain/Occlusion.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 
 using namespace Poseidon;
 
@@ -554,7 +555,10 @@ void Scene::DrawRain()
     {
         return;
     }
-    float density = GetLandscape()->GetRainDensity();
+    // The dev panel's legacy-density override exists so the old overlay can be
+    // compared against the particle rain on a clear day; -1 means "follow the weather".
+    float density = GRain.LegacyDensityOverride() >= 0.0f ? GRain.LegacyDensityOverride()
+                                                          : GetLandscape()->GetRainDensity();
     if (density >= 0.1)
     {
         Vector3Val dir = GetCamera()->Direction();
@@ -578,8 +582,17 @@ void Scene::DrawRain()
 
 void Scene::ObjectsDrawn()
 {
-    // release all references
-    DrawRain();
+    // RainOff must mute BOTH layers, so the legacy overlay is gated too -- it is no
+    // longer unconditional. RainBoth draws both for A/B comparison.
+    const RainMode mode = GRain.Mode();
+    if (mode == RainLegacy || mode == RainBoth)
+    {
+        DrawRain();
+    }
+    if (mode == RainParticle || mode == RainBoth)
+    {
+        GRain.UpdateAndDraw();
+    }
 
     DrawObjectsAndShadowsPass3();
 

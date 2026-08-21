@@ -140,6 +140,19 @@ struct SmokeParams
     /// How far up the roof probe reaches, m.
     float shelterProbeHeight = 12.0f;
 
+    // -- disturbance ------------------------------------------------------
+    // A body moving through a plume drags the air with it: walking through
+    // smoke should part it, driving through should leave a wake. Modelled as a
+    // radial push around each mover, applied to particles inside its reach.
+    bool disturb = true;
+    /// Radial shove at the mover's surface, m/s of velocity change per second.
+    float disturbStrength = 14.0f;
+    /// Extra radius beyond the mover's own bounding sphere that gets pushed.
+    float disturbReach = 1.6f;
+    /// Fraction of the mover's speed below which it does not disturb at all --
+    /// a man standing in a plume is not a gust.
+    float disturbMinSpeed = 0.8f;
+
     // -- balloons ---------------------------------------------------------
     // Party mode, and a genuinely useful test rig: balloons make every part of
     // the pipeline legible at a glance. They are discrete, so you can COUNT
@@ -157,6 +170,20 @@ struct SmokeParams
     float balloonSize = 0.42f; ///< radius, m — held for the whole life
     /// 0 = every balloon takes the plume's tint; 1 = the full hue wheel.
     float balloonHueSpread = 1.0f;
+    /// Replaces the smoke opacity entirely in balloon mode: a balloon reads as
+    /// a solid, so its alpha cannot come off the smoke thickness dial (~0.35).
+    float balloonOpacity = 0.95f;
+    /// Strength of the sun highlight spot -- the single strongest cue that
+    /// these are glossy balloons and not coloured blobs.
+    float balloonSpecular = 0.85f;
+    /// Highlight tightness (the specular exponent). Higher = a tighter hot spot.
+    float balloonShininess = 28.0f;
+    /// How much the silhouette edge darkens (0 = flat disc). This is what makes
+    /// the sprite read as a SPHERE with a terminator instead of a sticker.
+    float balloonLimbDarken = 0.45f;
+    /// Sky-coloured rim on the side away from the sun, picking the silhouette
+    /// out against dark backgrounds.
+    float balloonRimLight = 0.25f;
 
     // -- fire -------------------------------------------------------------
     // A second, short-lived particle layer at the base of the plume: flames.
@@ -247,6 +274,7 @@ struct SmokeParticle
     float hue = 0.0f;       ///< balloon colour, 0..1 around the wheel
     float swayPhase = 0.0f; ///< balloon bob phase, so they do not move as one
     float groundY = 0.0f;   ///< floor height under the particle, from the last clamp
+    int roomId = -1;        ///< room id from BuildingInterior, -1 = outdoors / untracked
 };
 
 class SmokeVolume : public Entity
@@ -367,8 +395,31 @@ class SmokeVolume : public Entity
     void DrawFire(int level);
     void Integrate(SmokeParticle& particle, float deltaT);
     void Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT);
+    /// Gather the movers (scene camera, the entity the camera is on) and push
+    /// particles radially out of their way. Velocity is estimated from last
+    /// frame's position; one frame of latency is invisible at plume scales.
+    void ApplyDisturbance(float deltaT);
     float sphereRadiusFor(const SmokeParticle& particle) const;
     void UpdateBounds();
+
+    // Disturbance scratch: previous positions for the velocity estimate, and
+    // whether they are valid yet. Two tracked movers: the scene camera (free
+    // fly included) and the entity the camera is on (the walking player, the
+    // vehicle being driven).
+    Vector3 _prevCamPos{VZero};
+    Vector3 _prevCamOnPos{VZero};
+    bool _prevCamValid = false;
+    bool _prevCamOnValid = false;
+
+    struct Disturber
+    {
+        Vector3 position{VZero};
+        float radius = 1.0f;
+    };
+
+    /// Collects up to four movers near this plume. Out-param keeps it
+    /// allocation-free.
+    int CollectDisturbers(Disturber* out, int max) const;
 
     SmokeParams _params{};
     std::vector<SmokeParticle> _particles;
@@ -401,6 +452,9 @@ class SmokeVolume : public Entity
     /// Rate limit for the draw diagnostics. Without it a plume logs once per
     /// particle per frame and the log becomes the performance problem.
     Foundation::Time _nextDiagTime;
+    /// Rate limit for the room/portal dev overlay, separate from the diag log
+    /// so enabling one does not disturb the other's cadence.
+    Foundation::Time _nextOverlayTime;
     long long _diagSweeps = 0; ///< sweeps since the last diag line
     long long _diagHits = 0;   ///< of which hit geometry
     int _diagHitLog = 0;       ///< first-N hit dump, once per volume

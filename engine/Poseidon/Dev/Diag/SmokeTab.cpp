@@ -82,6 +82,30 @@ float Average(const float (&values)[kHistory])
     return total / static_cast<float>(count);
 }
 
+/// Shared indoor guard: is the camera under a roof (room query first, then the
+/// cheap shelter probe for buildings with no Paths data)? Indoors the floor
+/// drop below must NOT run: FloorHeightBelow finds the nearest surface UNDER
+/// the point, and in a building whose interior carries no roadway LOD that is
+/// the terrain beneath the floor slab -- the plume was born in the crawl space
+/// and never appeared in the room. The camera height is already correct; it is
+/// standing in the room.
+bool CameraIndoors(const ISmokeWorldQuery& query)
+{
+    if (GScene == nullptr || GScene->GetCamera() == nullptr)
+    {
+        return false;
+    }
+    const Vector3 cam = GScene->GetCamera()->Position();
+    int room = -1;
+    if (query.IndoorRoomAt(cam, room))
+    {
+        return true;
+    }
+    // No room data (or outdoors by it): a roof overhead still means the floor
+    // drop risks the crawl space, so treat "sheltered" as indoors too.
+    return query.IsSheltered(cam, 6.0f);
+}
+
 /// Where a spawn goes: `GSpawnDistance` metres in front of the camera, dropped
 /// to the ground. Ground-level is what you want almost always — a plume born in
 /// mid-air tells you nothing about collision or pooling.
@@ -99,17 +123,26 @@ bool SpawnPosition(Vector3& out)
         return false;
     }
 
+    const ISmokeWorldQuery& query = GSmokeWorldQuery();
     const Camera& camera = *GScene->GetCamera();
     const Vector3 forward = camera.Direction();
     Vector3 position = camera.Position() + forward * GSpawnDistance;
-    // Drop to the floor of the storey the CAMERA is on, not the topmost
-    // surface. Indoors the topmost surface is the roof, and clamping to it put
-    // every plume on top of the building -- which is why spawning indoors
-    // "almost always" landed outside. Probing from the camera's height finds
-    // the room's floor.
-    Vector3 probe = position;
-    probe[1] = camera.Position().Y();
-    position[1] = GSmokeWorldQuery().FloorHeightBelow(probe) + 0.2f;
+    if (!CameraIndoors(query))
+    {
+        // Outdoors only: drop to the floor of the storey the CAMERA is on, not
+        // the topmost surface. Indoors the topmost surface is the roof, and
+        // clamping to it put every plume on top of the building -- which is why
+        // spawning indoors "almost always" landed outside.
+        Vector3 probe = position;
+        probe[1] = camera.Position().Y();
+        position[1] = query.FloorHeightBelow(probe) + 0.2f;
+    }
+    else
+    {
+        // Indoors trust the camera height, nudged to just above knee height so
+        // the plume visibly rises through the room rather than at eye level.
+        position[1] = camera.Position().Y() - 0.8f;
+    }
     out = position;
     return true;
 }
@@ -122,9 +155,17 @@ bool SpawnPositionHere(Vector3& out)
     {
         return false;
     }
+    const ISmokeWorldQuery& query = GSmokeWorldQuery();
     const Camera& camera = *GScene->GetCamera();
     Vector3 position = camera.Position();
-    position[1] = GSmokeWorldQuery().FloorHeightBelow(position) + 0.2f;
+    if (CameraIndoors(query))
+    {
+        position[1] -= 0.8f;
+    }
+    else
+    {
+        position[1] = query.FloorHeightBelow(position) + 0.2f;
+    }
     out = position;
     return true;
 }
@@ -320,11 +361,22 @@ void DrawSpawnSection()
         // N plumes on a circle around the spawn point, each with the current
         // params. A large fire is many sources: this is how you make a
         // building or a fuel dump burn rather than a single tall column.
+        // Indoors the per-point FloorHeight would land half the ring on the
+        // roof and half in the crawl space; keep the ring on the centre's
+        // floor instead.
+        const bool ringIndoors = CameraIndoors(GSmokeWorldQuery());
         for (int i = 0; i < ringCount; ++i)
         {
             const float a = static_cast<float>(i) / static_cast<float>(ringCount) * 6.2831853f;
             Vector3 p = position + Vector3(std::cos(a) * ringRadius, 0.0f, std::sin(a) * ringRadius);
-            p[1] = GSmokeWorldQuery().FloorHeight(p.X(), p.Z()) + 0.2f;
+            if (ringIndoors)
+            {
+                p[1] = position[1];
+            }
+            else
+            {
+                p[1] = GSmokeWorldQuery().FloorHeight(p.X(), p.Z()) + 0.2f;
+            }
             GSmokeSystem.Spawn(p, GParams, GSpawnDuration);
         }
     }
@@ -583,6 +635,33 @@ void DrawTuningSection()
     Dev::SliderFloat("Balloon sway", &GParams.balloonSway, 0.0f, 3.0f, "%.2f");
     Dev::SliderFloat("Balloon size (m)", &GParams.balloonSize, 0.05f, 2.0f, "%.2f");
     Dev::SliderFloat("Hue spread", &GParams.balloonHueSpread, 0.0f, 1.0f, "%.2f");
+    Dev::SliderFloat("Balloon opacity", &GParams.balloonOpacity, 0.3f, 1.0f, "%.2f");
+    if (Dev::PanelItemHovered())
+    {
+        ImGui::SetTooltip("Balloons have their own alpha, independent of the smoke Thickness slider:\n"
+                          "they are opaque objects, not gas.");
+    }
+    Dev::SliderFloat("Balloon specular", &GParams.balloonSpecular, 0.0f, 2.0f, "%.2f");
+    Dev::SliderFloat("Balloon shininess", &GParams.balloonShininess, 4.0f, 96.0f, "%.0f");
+    Dev::SliderFloat("Balloon limb darken", &GParams.balloonLimbDarken, 0.0f, 0.9f, "%.2f");
+    if (Dev::PanelItemHovered())
+    {
+        ImGui::SetTooltip("How much the silhouette edge darkens. This is what makes the disc read\n"
+                          "as a sphere instead of a flat sticker.");
+    }
+    Dev::SliderFloat("Balloon rim light", &GParams.balloonRimLight, 0.0f, 1.0f, "%.2f");
+
+    ImGui::SeparatorText("Disturbance");
+    Dev::Checkbox("Movers disturb smoke", &GParams.disturb);
+    if (Dev::PanelItemHovered())
+    {
+        ImGui::SetTooltip("The player (or whatever the camera rides) and the free-fly camera push\n"
+                          "particles aside as they move through a plume. Walk through spawned\n"
+                          "smoke to see it part; fly the free camera through for the clearest view.");
+    }
+    Dev::SliderFloat("Disturb strength", &GParams.disturbStrength, 0.0f, 40.0f, "%.1f");
+    Dev::SliderFloat("Disturb reach (m)", &GParams.disturbReach, 0.0f, 6.0f, "%.2f");
+    Dev::SliderFloat("Disturb min speed (m/s)", &GParams.disturbMinSpeed, 0.0f, 5.0f, "%.2f");
 
     ImGui::SeparatorText("Fire");
     Dev::Checkbox("Fire enabled", &GParams.fire);

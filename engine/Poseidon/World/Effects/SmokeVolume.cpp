@@ -1,11 +1,13 @@
 #include <Poseidon/World/Effects/SmokeVolume.hpp>
 
+#include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Weather/AirflowField.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -216,6 +218,11 @@ void SmokeVolume::SpawnSmoke(Vector3Par position, Vector3Par velocity, float siz
     particle.sweepTimer = 0.0f;
     particle.shelterTimer = RandUnit() * 0.5f;
 
+    // Room tracking: a particle born inside a building room is contained
+    // proactively from birth (roomId >= 0); the default -1 keeps the legacy
+    // reactive path.
+    GSmokeWorldQuery().IndoorRoomAt(position, particle.roomId);
+
     // Born with the shelter state unknown; the first probe runs on the first
     // tick. Starting at "exposed" and easing in would make a grenade thrown
     // into a room visibly get blown sideways before settling.
@@ -236,7 +243,22 @@ void SmokeVolume::Integrate(SmokeParticle& particle, float deltaT)
         // the particle, and at smoke speeds half a second is a fraction of a
         // metre. Probing every frame would double the query cost for nothing.
         particle.shelterTimer = 0.4f + 0.3f * RandUnit();
-        const bool sheltered = query.IsSheltered(particle.position, _params.shelterProbeHeight);
+        bool sheltered;
+        if (particle.roomId >= 0)
+        {
+            // In a tracked room: sheltered by definition, no roof probe at all.
+            sheltered = true;
+        }
+        else if (query.IndoorRoomAt(particle.position, particle.roomId))
+        {
+            // Drifted into a room since the last tick -- same answer, still
+            // without spending a probe on it.
+            sheltered = true;
+        }
+        else
+        {
+            sheltered = query.IsSheltered(particle.position, _params.shelterProbeHeight);
+        }
         const float target = sheltered ? 0.0f : 1.0f;
         // Eased rather than switched, so a particle drifting out of a doorway
         // accelerates into the wind over a metre or so instead of snapping.
@@ -334,6 +356,121 @@ float SmokeVolume::sphereRadiusFor(const SmokeParticle& particle) const
     return std::max(Lerp(_params.startRadius, _params.endRadius, lf) * _params.collisionRadiusScale, 0.05f);
 }
 
+// ---------------------------------------------------------------------------
+// Disturbance
+// ---------------------------------------------------------------------------
+
+int SmokeVolume::CollectDisturbers(Disturber* out, int max) const
+{
+    int count = 0;
+    if (GScene == nullptr || GScene->GetCamera() == nullptr)
+    {
+        return 0;
+    }
+
+    // Early-out per mover: only things within a couple of plume radii matter,
+    // and the test is one distance against the plume bound.
+    const float plumeReach = GetRadius() + 8.0f;
+
+    const Vector3 camPos = GScene->GetCamera()->Position();
+    if ((camPos - Position()).SquareSize() < plumeReach * plumeReach && count < max)
+    {
+        // The free-fly camera is a body of its own -- flying it through a plume
+        // is the easiest way to SEE this working.
+        out[count].position = camPos;
+        out[count].radius = 0.9f;
+        ++count;
+    }
+
+    if (GWorld != nullptr)
+    {
+        // The entity the view is attached to: the walking player, or the
+        // vehicle being driven. In free fly this is the player left standing
+        // elsewhere -- its velocity will be ~0 and it drops out on the speed
+        // test, which is the correct behaviour for a body at rest.
+        if (Object* camOn = GWorld->CameraOn())
+        {
+            const Vector3 pos = camOn->Position();
+            if ((pos - Position()).SquareSize() < plumeReach * plumeReach && count < max)
+            {
+                out[count].position = pos;
+                out[count].radius = std::max(camOn->GetRadius(), 0.8f);
+                ++count;
+            }
+        }
+    }
+    return count;
+}
+
+void SmokeVolume::ApplyDisturbance(float deltaT)
+{
+    Disturber movers[4];
+    const int count = CollectDisturbers(movers, 4);
+    if (count <= 0)
+    {
+        return;
+    }
+
+    // Velocity from last frame's position. One frame of latency at plume
+    // speeds is a couple of centimetres -- invisible -- and it spares every
+    // mover its own velocity plumbing.
+    struct MoverVelocity
+    {
+        Vector3 velocity{VZero};
+        float speed = 0.0f;
+    };
+    MoverVelocity velocities[4];
+    for (int m = 0; m < count; ++m)
+    {
+        const Vector3& prev = m == 0 ? _prevCamPos : _prevCamOnPos;
+        const bool valid = m == 0 ? _prevCamValid : _prevCamOnValid;
+        if (valid)
+        {
+            velocities[m].velocity = (movers[m].position - prev) / std::max(deltaT, 1e-3f);
+            velocities[m].speed = velocities[m].velocity.Size();
+        }
+    }
+    _prevCamPos = movers[0].position;
+    _prevCamValid = true;
+    if (count > 1)
+    {
+        _prevCamOnPos = movers[1].position;
+        _prevCamOnValid = true;
+    }
+
+    for (int m = 0; m < count; ++m)
+    {
+        if (velocities[m].speed < _params.disturbMinSpeed)
+        {
+            continue; // a body standing in the plume is not a gust
+        }
+        const float reach = movers[m].radius + _params.disturbReach;
+
+        for (SmokeParticle& particle : _particles)
+        {
+            Vector3 away = particle.position - movers[m].position;
+            const float dist = away.Size();
+            if (dist >= reach)
+            {
+                continue;
+            }
+            // Direction out of the mover, with a degenerate case for a particle
+            // sitting exactly on it.
+            away = dist > 1e-3f
+                       ? away / dist
+                       : Vector3(RandSymmetric(), 0.5f + RandUnit(), RandSymmetric()).Normalized();
+            // Stronger for faster movers, saturating -- a sprint and a jeep
+            // both part the plume; neither should explode it.
+            const float scale = std::clamp(velocities[m].speed / 3.0f, 0.2f, 1.5f);
+            const float falloff = 1.0f - dist / reach;
+            particle.velocity += away * (_params.disturbStrength * scale * falloff * falloff * deltaT);
+            // A body also drags air UP with it -- keeps the parted smoke from
+            // reading as a hole punched by a forcefield.
+            particle.velocity[1] += 0.35f * falloff * scale * deltaT;
+        }
+    }
+}
+
 void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, float deltaT)
 {
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
@@ -342,9 +479,12 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
     // Always, and cheaply: a heightmap lookup, not a geometry query. Smoke
     // sinking into a hillside is the most visible failure of the legacy system
     // and it does not deserve a sphere sweep to fix.
-    // FloorHeight, not GroundHeight: inside a house the surface smoke pools on
-    // is the floor slab, and the terrain under it may be a metre lower.
-    const float ground = query.FloorHeight(particle.position.X(), particle.position.Z());
+    // FloorHeightBelow, not FloorHeight: the clamp must find the surface UNDER
+    // this particle. FloorHeight(x, z) is the TOPMOST surface on the column --
+    // in a multi-storey building that is an upper floor, and every ground-floor
+    // particle was clamped UP through the slab onto the ceiling of the storey
+    // above. Same roadway-lookup cost, correct storey.
+    const float ground = query.FloorHeightBelow(particle.position);
     particle.groundY = ground;
     const float floorY = ground + 0.05f;
     if (particle.position.Y() < floorY)
@@ -388,6 +528,50 @@ void SmokeVolume::Collide(SmokeParticle& particle, Vector3Par previousPosition, 
                 particle.velocity *= (1.0f - _params.friction);
             }
         }
+    }
+
+    // -- proactive indoor containment -------------------------------------
+    // A particle with a room id does not sweep at all: BuildingInterior knows
+    // every opening out of its room, so crossing a wall is impossible by
+    // construction and no ray has to find one first. The contact-plane and
+    // velocity response below is the same bookkeeping the reactive path does.
+    if (_params.contain && particle.roomId >= 0)
+    {
+        const float ahead = deltaT * 2.0f;
+        const Vector3 lookahead = particle.position + particle.velocity * ahead;
+        const SmokeContainStep step = query.IndoorContainStep(previousPosition, lookahead, particle.roomId);
+        ++_diagSweeps;
+
+        if (!step.allowed)
+        {
+            particle.position = step.position;
+            ++_diagHits;
+
+            particle.planeNormal = step.normal;
+            particle.planeOffset = step.normal.DotProduct(step.position) + sphereRadius * 0.5f;
+            particle.planeValid = true;
+
+            const float distance = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
+            if (distance < 0.0f)
+            {
+                particle.position += particle.planeNormal * (-distance);
+            }
+
+            const float into = particle.velocity.DotProduct(particle.planeNormal);
+            if (into < 0.0f)
+            {
+                particle.velocity -= particle.planeNormal * (into * (1.0f + _params.restitution));
+                particle.velocity *= (1.0f - _params.friction);
+            }
+        }
+        else if (step.room != particle.roomId)
+        {
+            // Through a portal into a neighbouring room (or out of the
+            // building entirely, step.room == -1): drop the stale plane.
+            particle.roomId = step.room;
+            particle.planeValid = false;
+        }
+        return;
     }
 
     // -- real sweep -------------------------------------------------------
@@ -639,8 +823,8 @@ void SmokeVolume::DrawFire(int level)
     const int special = shape->Special() | GetObjSpecial();
 
     const Camera& camera = *GScene->GetCamera();
-    const Matrix4Val project = camera.Projection();
-    const Matrix4Val toView = GScene->ScaledInvTransform();
+    Matrix4Val project = camera.Projection();
+    Matrix4Val toView = GScene->ScaledInvTransform();
     const float nearest = camera.Near() * 10.0f;
     const float invLeft = camera.InvLeft();
     const float invTop = camera.InvTop();
@@ -853,6 +1037,11 @@ void SmokeVolume::Simulate(float deltaT, SimulationImportance prec)
         }
         _particles.resize(write);
 
+        if (_params.disturb)
+        {
+            ApplyDisturbance(deltaT);
+        }
+
         UpdateBounds();
     }
 
@@ -882,6 +1071,20 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             LOG_WARN(World, "SmokeVolume draw skipped: {} (level={} particles={})", reason, level, _particles.size());
         }
     };
+
+    // Room/portal overlay (POSEIDON_ROOM_OVERLAY): draws the interior of the
+    // building nearest the emitter. Same env pattern as POSEIDON_TEST_SMOKE
+    // below; rate-limited on its own clock so the two never interfere.
+    static const bool roomOverlay = []
+    {
+        const char* value = std::getenv("POSEIDON_ROOM_OVERLAY");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }();
+    if (roomOverlay && GScene != nullptr && Glob.time > _nextOverlayTime)
+    {
+        _nextOverlayTime = Glob.time + 0.5f;
+        DebugDrawInteriorNear(_emitterPosition);
+    }
 
     // Flames first: they sit at the base, and the smoke rising through them
     // then composites over the top of the fire the way real smoke shrouds a
@@ -923,7 +1126,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     const bool alphaFog = render::Has(specT.backend, render::Backend::IsAlphaFog);
 
     const Camera& camera = *GScene->GetCamera();
-    const Matrix4Val project = camera.Projection();
+    Matrix4Val project = camera.Projection();
     const float nearest = camera.Near() * 10.0f;
     const float invLeft = camera.InvLeft();
     const float invTop = camera.InvTop();
@@ -953,6 +1156,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     const Color ambientColour = sun->Ambient() * GEngine->GetAccomodateEye();
     const float nightFactor = sun->NightEffect();
     const Color tint(_params.red, _params.green, _params.blue, 1.0f);
+    const ISmokeWorldQuery& worldQuery = GSmokeWorldQuery();
 
     // Precompute each particle's transmittance to the sun. A coarse spatial hash
     // (cell = one typical puff) makes the neighbour march O(k) per particle.
@@ -1015,7 +1219,7 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     // billboards that are not sorted show their draw order as hard seams where
     // puffs overlap. Sorting indices rather than particles keeps the simulation
     // array stable and costs one pass.
-    const Matrix4Val toView = GScene->ScaledInvTransform();
+    Matrix4Val toView = GScene->ScaledInvTransform();
 
     _drawOrder.clear();
     _drawOrder.reserve(_particles.size());
@@ -1053,6 +1257,15 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
 
         float size = _params.balloons ? _params.balloonSize * particle.sizeJitter
                                       : Lerp(_params.startRadius, _params.endRadius, lifeFraction) * particle.sizeJitter;
+        if (_params.contain && particle.roomId >= 0)
+        {
+            // Centre containment is not visual containment: a large soft
+            // billboard can overlap a ceiling while its centre remains well
+            // inside the room. Clamp every indoor puff to the cached voxel
+            // clearance, not only after a collision plane has been acquired.
+            const float clearance = worldQuery.IndoorClearanceAt(particle.position, particle.roomId, size);
+            size = std::min(size, std::max(clearance + 0.10f, 0.08f));
+        }
         // A puff pressed against a wall is DRAWN no wider than its distance to
         // that wall (plus a small bleed). Containment keeps the centre inside
         // the room; this keeps the picture inside too -- a 5 m sprite whose
@@ -1062,8 +1275,8 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         if (particle.planeValid && _params.contain)
         {
             const float toPlane = particle.planeNormal.DotProduct(particle.position) - particle.planeOffset;
-            const float allowed = std::max(toPlane + sphereRadiusFor(particle) * 0.5f, 0.0f) + 0.6f;
-            size = std::min(size, std::max(allowed, _params.startRadius * 0.5f));
+            const float allowed = std::max(toPlane + sphereRadiusFor(particle) * 0.5f, 0.0f) + 0.15f;
+            size = std::min(size, std::max(allowed, 0.08f));
         }
 
         // A fixed amount of soot spread over a growing puff gets thinner. Without
@@ -1084,7 +1297,12 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
             const float ratio = std::clamp(_params.startRadius / size, 0.0f, 1.0f);
             density = std::pow(ratio, _params.densityFalloff);
         }
-        const float alpha = std::clamp(_params.opacity * particle.alphaJitter * fade * density, 0.0f, 1.0f);
+        // Balloons swap the smoke thickness dial for their own opacity; the
+        // jitter is softened to a hint of variation so a batch stays uniformly
+        // vivid rather than translucent.
+        const float baseOpacity = _params.balloons ? _params.balloonOpacity : _params.opacity;
+        const float jitter = _params.balloons ? Lerp(1.0f, particle.alphaJitter, 0.2f) : particle.alphaJitter;
+        const float alpha = std::clamp(baseOpacity * jitter * fade * density, 0.0f, 1.0f);
         if (alpha <= 0.004f)
         {
             continue;
@@ -1115,7 +1333,8 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
         // A small pull (a fraction of a metre) is still worth having so a puff
         // resting on the floor is not half-clipped by it; capped so it can never
         // exceed the particle's own contact plane distance.
-        const float depthPull = std::min(size * 0.10f, 0.35f);
+        const float depthPull = particle.roomId >= 0 ? std::min(size * 0.04f, 0.05f)
+                                                     : std::min(size * 0.10f, 0.35f);
         const float nearPos = floatMax(posp[2] - depthPull, nearest);
         const float invNearPos = 1.0f / nearPos;
         posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
@@ -1199,23 +1418,50 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
 
         if (_params.balloons)
         {
-            // Its own colour, lit but never self-shadowed: a balloon is not a
-            // parcel of smoke and neighbours do not darken it. Keep a little of
-            // the sky term so it still reads as being in the scene's light.
+            // A balloon is a small SOLID object, so it gets a shaded-sphere
+            // solve instead of the volume solve above: fromCentre doubles as
+            // the sphere normal. Neighbours' self-shadow is divided out --
+            // one balloon does not darken another.
             // Albedo is the balloon's own hue, blended toward the plume tint by
             // hueSpread so 0 gives a uniform batch and 1 the full wheel.
             const Color hueRgb = HueToRgb(particle.hue);
             const Color albedo(Lerp(tint.R(), hueRgb.R(), _params.balloonHueSpread),
                                Lerp(tint.G(), hueRgb.G(), _params.balloonHueSpread),
                                Lerp(tint.B(), hueRgb.B(), _params.balloonHueSpread), 1.0f);
-            // Lit by the sun with the SELF-SHADOW DIVIDED OUT: neighbours do not
-            // darken a balloon. A floor keeps the unlit side coloured rather
-            // than black, and a little sky term sits it in the scene's light.
+
+            const Vector3 viewDir = (cameraPosition - particle.position).Normalized();
+            // Limb darkening: the disc's edge turns away from the camera and
+            // goes dark like a real balloon's terminator, instead of thinning
+            // out by alpha the way a puff does.
+            const float facing = std::clamp(fromCentre.DotProduct(viewDir), 0.0f, 1.0f);
+            const float limb = Lerp(1.0f - _params.balloonLimbDarken, 1.0f, facing);
+
             const float unshadowed = sunTerm / std::max(transmittance, 1e-3f);
-            const float lit = std::clamp(0.55f + 0.45f * unshadowed, 0.0f, 1.6f);
-            colour = Color(albedo.R() * (sunColour.R() * lit + skyColour.R() * 0.25f),
-                           albedo.G() * (sunColour.G() * lit + skyColour.G() * 0.25f),
-                           albedo.B() * (sunColour.B() * lit + skyColour.B() * 0.25f), 1.0f);
+            const float diffuse = unshadowed * limb;
+
+            // Hand-rolled reflect (Foundation math has none): the additive
+            // highlight spot is the single strongest "balloon" cue.
+            const Vector3 reflected = toSun - fromCentre * (2.0f * toSun.DotProduct(fromCentre));
+            const float specular =
+                std::pow(std::clamp(reflected.DotProduct(viewDir), 0.0f, 1.0f), _params.balloonShininess) *
+                _params.balloonSpecular;
+            // Cool rim on the side away from the sun picks the silhouette out
+            // against dark backgrounds.
+            const float rim = _params.balloonRimLight * (1.0f - facing);
+
+            colour = Color(albedo.R() *
+                                   (sunColour.R() * diffuse + skyColour.R() * skyTerm * _params.skyAmbient +
+                                    ambientColour.R() * groundTerm) +
+                               sunColour.R() * specular + skyColour.R() * rim,
+                           albedo.G() *
+                                   (sunColour.G() * diffuse + skyColour.G() * skyTerm * _params.skyAmbient +
+                                    ambientColour.G() * groundTerm) +
+                               sunColour.G() * specular + skyColour.G() * rim,
+                           albedo.B() *
+                                   (sunColour.B() * diffuse + skyColour.B() * skyTerm * _params.skyAmbient +
+                                    ambientColour.B() * groundTerm) +
+                               sunColour.B() * specular + skyColour.B() * rim,
+                           1.0f);
         }
         else
         {
@@ -1246,18 +1492,23 @@ void SmokeVolume::Draw(int level, ClipFlags clipFlags, const FrameBase& frame)
     {
         _nextDiagTime = Glob.time + 1.0f;
         int sheltered = 0;
+        int indoor = 0;
         for (const SmokeParticle& p : _particles)
         {
             if (p.exposure < 0.5f)
             {
                 ++sheltered;
             }
+            if (p.roomId >= 0)
+            {
+                ++indoor;
+            }
         }
         LOG_INFO(World,
                  "SmokeVolume: particles={} decals={} centre={:.1f},{:.1f},{:.1f} radius={:.2f} emitting={} "
-                 "sweeps={} hits={} sheltered={}",
+                 "sweeps={} hits={} sheltered={} indoor={}",
                  _particles.size(), issued, Position().X(), Position().Y(), Position().Z(), GetRadius(),
-                 _emitting ? 1 : 0, _diagSweeps, _diagHits, sheltered);
+                 _emitting ? 1 : 0, _diagSweeps, _diagHits, sheltered, indoor);
         _diagSweeps = 0;
         _diagHits = 0;
     }

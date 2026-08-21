@@ -306,6 +306,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/test_landscape_layout_no_pch.cpp
     World/Weather/test_wind_model.cpp
     World/Weather/test_airflow_field.cpp
+    World/Effects/test_building_interior.cpp
 
     # Audio tests (batch-09)
     Audio/test_pcm_cache.cpp

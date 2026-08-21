@@ -35,6 +35,18 @@ struct SmokeSurfaceHit
     Vector3 normal{VZero};   ///< unit surface normal pointing OUT of the solid
 };
 
+/// One proactive in-room movement step (rooms and portals). When `allowed` is
+/// false the move would have left the room by any route but a portal:
+/// `position` is the last point provably inside it and `normal` the outward
+/// normal of the boundary about to be crossed -- a contact without a contact.
+struct SmokeContainStep
+{
+    bool allowed = true;
+    Vector3 position{VZero};
+    Vector3 normal{VZero};
+    int room = -1; ///< room the mover ends this step in, -1 = outdoors / unknown
+};
+
 class ISmokeWorldQuery
 {
   public:
@@ -72,6 +84,27 @@ class ISmokeWorldQuery
     /// particle under a bridge or a tree canopy reading as sheltered is a
     /// defensible answer, not a bug.
     virtual bool IsSheltered(Vector3Par pos, float probeHeight) const = 0;
+
+    /// Which room of a building is this point in, false when outdoors or no
+    /// data. Non-pure (default: no data) so existing and test implementations
+    /// keep compiling; only the engine-backed query answers it.
+    virtual bool IndoorRoomAt(Vector3Par pos, int& room) const { return false; }
+
+    /// Conservative distance to the nearest boundary of `room`, capped by
+    /// `maxDistance`. Implementations without room geometry leave the visual
+    /// radius unchanged.
+    virtual float IndoorClearanceAt(Vector3Par, int, float maxDistance) const { return maxDistance; }
+
+    /// Proactive in-room step from -> to while in `room`. Default allows the
+    /// move uncontained -- exactly what an implementation without interior
+    /// data should say.
+    virtual SmokeContainStep IndoorContainStep(Vector3Par from, Vector3Par to, int room) const
+    {
+        SmokeContainStep step;
+        step.position = to;
+        step.room = room;
+        return step;
+    }
 };
 
 /// The live query. Never null: with no world loaded it returns an

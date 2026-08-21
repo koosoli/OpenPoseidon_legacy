@@ -25,8 +25,10 @@
 
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Core/Global.hpp>
-#include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/World.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -322,6 +324,221 @@ void DrawConsumerSection()
     }
 }
 
+/// The particle-rain panel. Same philosophy as the wind override above: every
+/// control here is local, unreplicated and dev-only; a world that never opens
+/// this tab rains exactly as it always did (the shipping default is RainLegacy).
+void DrawRainSection()
+{
+    ImGui::SeparatorText("Rain");
+
+    struct ModeEntry
+    {
+        const char* label;
+        RainMode mode;
+    };
+    static const ModeEntry kModes[] = {
+        {"Off", RainOff}, {"Legacy overlay", RainLegacy}, {"Particle", RainParticle}, {"Both", RainBoth}};
+
+    const RainMode mode = GRain.Mode();
+    for (const ModeEntry& entry : kModes)
+    {
+        if (ImGui::RadioButton(entry.label, mode == entry.mode))
+        {
+            GRain.SetMode(entry.mode);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            switch (entry.mode)
+            {
+                case RainOff:
+                    ImGui::SetTooltip("Mutes both rain systems - even the legacy overlay.\n"
+                                      "Legacy overlay is the shipping default.");
+                    break;
+                case RainBoth:
+                    ImGui::SetTooltip("Legacy overlay and particle drops at once, for\n"
+                                      "side-by-side comparison.");
+                    break;
+                default:
+                    break;
+            }
+        }
+        ImGui::SameLine();
+    }
+    ImGui::NewLine();
+    ImGui::TextDisabled("Legacy is the shipping default: a world that never opens this");
+    ImGui::TextDisabled("tab rains exactly as before. Particle density follows weather.");
+
+    const bool particlesOn = mode == RainParticle || mode == RainBoth;
+    if (particlesOn)
+    {
+        // Copy-edit-commit: one SetParams per frame only when something moved.
+        RainParams params = GRain.Params();
+        bool changed = false;
+
+        ImGui::SeparatorText("Field");
+        if (ImGui::SliderInt("Target drops", &params.targetDrops, 100, 6000))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Steady-state drop count the spawner aims for.");
+        }
+        if (ImGui::SliderInt("Max drops", &params.maxDrops, 500, 8000))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Area radius (m)", &params.areaRadius, 5.0f, 80.0f, "%.0f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Spawn height (m)", &params.spawnHeight, 5.0f, 60.0f, "%.0f"))
+        {
+            changed = true;
+        }
+
+        ImGui::SeparatorText("Motion");
+        if (ImGui::SliderFloat("Fall speed (m/s)", &params.fallSpeed, 2.0f, 25.0f, "%.1f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Speed jitter", &params.speedJitter, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Wind response", &params.windResponse, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("0 falls straight through gusts; 1 is fully advected --\n"
+                              "watch the streaks lean against the Weather tab override\n"
+                              "above");
+        }
+
+        ImGui::SeparatorText("Look");
+        if (ImGui::SliderFloat("Streak length (m)", &params.streakLength, 0.2f, 3.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Streak width (m)", &params.streakWidth, 0.01f, 0.15f, "%.3f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Opacity", &params.opacity, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Tint R", &params.red, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Tint G", &params.green, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Tint B", &params.blue, 0.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+
+        ImGui::SeparatorText("Ground");
+        if (ImGui::Checkbox("Splashes", &params.splashes))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Splash size (m)", &params.splashSize, 0.05f, 1.5f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::SliderFloat("Splash lifetime (s)", &params.splashLifetime, 0.05f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+
+        ImGui::SeparatorText("Occlusion");
+        struct OcclusionEntry
+        {
+            const char* label;
+            RainOcclusion occlusion;
+        };
+        static const OcclusionEntry kOcclusions[] = {
+            {"None", RainOcclusionNone}, {"Roof probe", RainOcclusionSheltered}, {"Rooms", RainOcclusionRooms}};
+        ImGui::BeginGroup();
+        for (const OcclusionEntry& entry : kOcclusions)
+        {
+            if (ImGui::RadioButton(entry.label, params.occlusion == entry.occlusion))
+            {
+                params.occlusion = entry.occlusion;
+                changed = true;
+            }
+            ImGui::SameLine();
+        }
+        ImGui::EndGroup();
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Rooms is the rooms-and-portals query shared with smoke --\n"
+                              "the shipping intent. Roof probe is the cheap IsSheltered\n"
+                              "version. None lets rain fall through roofs (diagnostic).");
+        }
+        ImGui::NewLine();
+        if (ImGui::SliderFloat("Probe cadence (s)", &params.occlusionCadence, 0.05f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Seconds between occlusion probes per drop, staggered so\n"
+                              "the whole pool never queries on the same frame.");
+        }
+
+        if (changed)
+        {
+            GRain.SetParams(params);
+        }
+    }
+
+    if (mode == RainLegacy || mode == RainBoth)
+    {
+        ImGui::SeparatorText("Legacy comparison");
+        float density = GRain.LegacyDensityOverride();
+        if (ImGui::SliderFloat("Legacy density##rain", &density, -1.0f, 1.0f, "%.2f"))
+        {
+            GRain.SetLegacyDensityOverride(density);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("-1 means auto (weather). LOCAL AND UNREPLICATED: lets you\n"
+                              "look at the old overlay on a clear day without dragging the\n"
+                              "weather about. The real density is still driven by the Weather\n"
+                              "state section below.");
+        }
+        if (density < 0.0f && GLandscape != nullptr)
+        {
+            ImGui::TextDisabled("Auto density now: %.2f", GLandscape->GetRainDensity());
+        }
+    }
+
+    ImGui::SeparatorText("Stats");
+    const RainStats& stats = GRain.Stats();
+    ImGui::Text("Live drops %d   live splashes %d", stats.liveDrops, stats.liveSplashes);
+    ImGui::Text("Roof kills %d   indoor kills %d   ground hits %d", stats.roofKills, stats.indoorKills,
+                stats.groundHits);
+    ImGui::TextDisabled("Spawned %d   update %.0f us", stats.spawned, stats.lastUpdateUs);
+    ImGui::TextDisabled("Nearby interiors %d   voxel sweeps this frame %d", stats.nearbyBuildings,
+                        stats.occlusionTests);
+    if (ImGui::Button("Reset stats"))
+    {
+        GRain.ResetStats();
+    }
+    if (!particlesOn)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("particle layer not running");
+    }
+}
+
 void DrawWeatherStateSection()
 {
     ImGui::SeparatorText("Weather state");
@@ -380,6 +597,8 @@ void DrawWeatherTab()
     DrawOverrideSection();
     ImGui::Spacing();
     DrawConsumerSection();
+    ImGui::Spacing();
+    DrawRainSection();
     ImGui::Spacing();
     DrawWeatherStateSection();
 }

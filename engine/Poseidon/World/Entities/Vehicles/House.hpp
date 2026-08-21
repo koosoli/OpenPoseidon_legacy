@@ -6,6 +6,9 @@
 
 namespace Poseidon
 {
+
+class BuildingInterior;
+
 struct HousePathArrayItem
 {
 	Vector3 pos;
@@ -36,6 +39,7 @@ class BuildingType: public TransportType
 {
 	friend class Building;
 	friend class IPaths; // give access to path information
+	friend class BuildingInterior; // reads _exits/_positions/_connections/_shape to derive rooms
 
 	typedef TransportType base;
 

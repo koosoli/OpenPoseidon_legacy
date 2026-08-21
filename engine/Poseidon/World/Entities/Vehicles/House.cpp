@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
+#include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -14,6 +15,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <math.h>
 #include <stdio.h>
+#include <cstdlib>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/BoolArray.hpp>
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
@@ -810,6 +812,20 @@ void Building::DrawDiags()
         }
 
         DrawLines(_shape->FindPaths(), ClipAll, *this);
+    }
+
+    // Room/portal overlay, same POSEIDON_ROOM_OVERLAY switch the smoke volume
+    // draws under (SmokeVolume.cpp): the interior view is useful wherever cheat
+    // diags are, not only near a live plume. Resolves the building itself, so
+    // outdoors this does nothing.
+    static const bool roomOverlay = []
+    {
+        const char* value = std::getenv("POSEIDON_ROOM_OVERLAY");
+        return value != nullptr && value[0] != '\0' && value[0] != '0';
+    }();
+    if (roomOverlay)
+    {
+        DebugDrawInteriorNear(Position());
     }
 }
 
