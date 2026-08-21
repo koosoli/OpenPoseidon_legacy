@@ -50,11 +50,13 @@ struct RainParams
 	int maxDrops = 1500;         ///< hard cap of the pool
 	float areaRadius = 20.0f;    ///< radius of the spawn disc around the camera, m
 	float spawnHeight = 18.0f;   ///< drops are born this far above the camera, m
+	float densityOverride = -1.0f; ///< negative follows weather; 0..1 is a dev/benchmark override
 
 	// -- motion -----------------------------------------------------------
 	float fallSpeed = 9.0f;      ///< terminal velocity, m/s
 	float speedJitter = 0.25f;   ///< +- fraction of per-drop speed variation
-	float windResponse = 0.45f;  ///< 0 = falls straight, 1 = fully advected by the wind
+	float windResponse = 0.85f;  ///< 0 = falls straight, 1 = fully advected by the wind
+	float windAcceleration = 5.0f; ///< horizontal response rate, 1/s; gusts alter drops already in flight
 
 	// -- look -------------------------------------------------------------
 	float streakLength = 1.1f;   ///< vertical size of a drop sprite, m
@@ -87,8 +89,19 @@ struct RainStats
 	int spawned = 0;          ///< drops spawned since ResetStats
 	int nearbyBuildings = 0; ///< valid cached interiors considered this frame
 	int occlusionTests = 0;  ///< cheap voxel segment tests performed this frame
+	int drawnDrops = 0;      ///< visible drops submitted this frame
+	int streakDecals = 0;    ///< decal submissions (several short beads form one wind-aligned streak)
+	double spawnMicroseconds = 0.0;
+	double occlusionMicroseconds = 0.0;
+	double simulateMicroseconds = 0.0;
+	double drawMicroseconds = 0.0;
 	double lastUpdateUs = 0.0;
 };
+
+/// Pure motion helpers, kept public so the wind contract has a focused unit
+/// test without constructing a world or renderer.
+Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse);
+Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responsePerSecond, float deltaT);
 
 class RainSystem
 {
@@ -114,6 +127,12 @@ public:
 
 	const RainStats &Stats() const { return _stats; }
 	void ResetStats() { _stats = RainStats{}; }
+	void ClearParticles()
+	{
+		_drops.clear();
+		_splashes.clear();
+		_spawnAccumulator = 0.0f;
+	}
 
 private:
 	void Spawn(float deltaT);
@@ -136,6 +155,8 @@ private:
 	{
 		Vector3 position{VZero};
 		float speed = 9.0f;       ///< this drop's terminal velocity, m/s
+		float velocityX = 0.0f;   ///< retained horizontal velocity, responds to gust changes
+		float velocityZ = 0.0f;
 		float occlusionTimer = 0.0f; ///< s until its next occlusion probe (Sheltered mode)
 		bool indoor = false;      ///< last probe said "under cover" -- not drawn
 	};

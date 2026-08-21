@@ -165,6 +165,19 @@ use a half-cell segment classification and are removed immediately on shell or
 room contact. The Weather tab exposes nearby-interior and voxel-sweep counts so
 the cost can be judged rather than guessed.
 
+Wind/benchmark follow-up (2026-08-21): particle centres sampled the wind, but
+their sprites were always vertical and the 0.45 default response made moderate
+wind hard to observe. Drops now retain horizontal velocity, relax toward the
+live `GWind` speed/direction (including changes after spawn), and use an 0.85
+default response. Visibly slanted drops render as two overlapping trail beads
+along their actual velocity; calm rain keeps one submission. The Weather tab
+shows wind input and expected lean, last/120-frame-average timings for spawn,
+building gather, simulation/collision, draw and total, visible/drop/decal
+counts, per-live-drop cost, and repeatable 500/1500/4000-drop presets. Presets
+pin particle density to 1, disable splashes, enable Rooms occlusion and clear
+the pool/history. Pure motion regression coverage verifies speed, direction,
+gust relaxation and the zero-response case.
+
 Smoke visual audit (2026-08-21): centre containment alone was insufficient for
 3-5 m soft billboards. The old radius clamp activated only after acquiring a
 collision plane, so a puff could overlap a ceiling while its centre was still

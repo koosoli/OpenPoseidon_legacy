@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 
 #include <utility>
 #include <vector>
@@ -81,4 +83,26 @@ TEST_CASE("Building interior clearance bounds an indoor smoke billboard",
     REQUIRE(centre < 1.05f);
     REQUIRE(nearRoof > 0.10f);
     REQUIRE(nearRoof < 0.30f);
+}
+
+TEST_CASE("Particle rain follows wind speed and direction and relaxes after a gust change",
+          "[Rain][Weather][Wind]")
+{
+    const Vector3 east = RainTargetVelocity(10.0f, 8.0f, 0.0f, 0.75f);
+    const Vector3 north = RainTargetVelocity(10.0f, 0.0f, 12.0f, 0.75f);
+
+    REQUIRE(east.X() == Catch::Approx(6.0f));
+    REQUIRE(east.Y() == Catch::Approx(-10.0f));
+    REQUIRE(east.Z() == Catch::Approx(0.0f));
+    REQUIRE(north.X() == Catch::Approx(0.0f));
+    REQUIRE(north.Z() == Catch::Approx(9.0f));
+
+    const Vector3 afterOneTimeConstant = RainRelaxVelocity(Vector3(6.0f, -10.0f, 0.0f), north, 5.0f, 0.2f);
+    REQUIRE(afterOneTimeConstant.X() < 3.0f);
+    REQUIRE(afterOneTimeConstant.Z() > 5.0f);
+    REQUIRE(afterOneTimeConstant.Y() == Catch::Approx(-10.0f));
+
+    const Vector3 windIgnored = RainTargetVelocity(10.0f, 8.0f, 12.0f, 0.0f);
+    REQUIRE(windIgnored.X() == Catch::Approx(0.0f));
+    REQUIRE(windIgnored.Z() == Catch::Approx(0.0f));
 }

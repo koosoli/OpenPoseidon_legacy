@@ -29,6 +29,18 @@ constexpr int kRainSpecials = ClampU | ClampV | NoZWrite | IsAlpha | IsAlphaFog 
 
 } // namespace
 
+Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse)
+{
+    const float response = std::max(windResponse, 0.0f);
+    return Vector3(windX * response, -std::max(fallSpeed, 0.0f), windZ * response);
+}
+
+Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responsePerSecond, float deltaT)
+{
+    const float alpha = 1.0f - std::exp(-std::max(responsePerSecond, 0.0f) * std::max(deltaT, 0.0f));
+    return current + (target - current) * alpha;
+}
+
 RainSystem::RainSystem() = default;
 
 float RainSystem::RandUnit()
@@ -125,7 +137,9 @@ void RainSystem::Spawn(float deltaT)
     // roughly the fall from spawn height. The cap is a hard stop so lowering
     // the target in the panel cannot build a spawn debt that fires as a burst.
     const float meanLifetime = std::max(_params.spawnHeight / std::max(_params.fallSpeed, 0.5f), 0.1f);
-    const float weatherDensity = GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f;
+    const float weatherDensity = _params.densityOverride >= 0.0f
+                                     ? std::clamp(_params.densityOverride, 0.0f, 1.0f)
+                                     : (GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f);
     const float rate = static_cast<float>(_params.targetDrops) * weatherDensity / meanLifetime;
     _spawnAccumulator += rate * deltaT;
     while (_spawnAccumulator >= 1.0f)
@@ -143,6 +157,12 @@ void RainSystem::Spawn(float deltaT)
         drop.position = camPos + Vector3(r * std::cos(theta), _params.spawnHeight * (0.35f + 0.65f * RandUnit()),
                                          r * std::sin(theta));
         drop.speed = _params.fallSpeed * (1.0f + _params.speedJitter * RandSymmetric());
+        if (GWind.IsActive())
+        {
+            const WindSample& wind = GWind.Sample();
+            drop.velocityX = wind.velocityX * _params.windResponse;
+            drop.velocityZ = wind.velocityZ * _params.windResponse;
+        }
         drop.occlusionTimer = RandUnit() * _params.occlusionCadence;
         drop.indoor = false;
         _drops.push_back(drop);
@@ -167,7 +187,11 @@ void RainSystem::Simulate(float deltaT)
     {
         Drop& drop = _drops[i];
 
-        const Vector3 velocity(windX * _params.windResponse, -drop.speed, windZ * _params.windResponse);
+        const Vector3 currentVelocity(drop.velocityX, -drop.speed, drop.velocityZ);
+        const Vector3 targetVelocity = RainTargetVelocity(drop.speed, windX, windZ, _params.windResponse);
+        const Vector3 velocity = RainRelaxVelocity(currentVelocity, targetVelocity, _params.windAcceleration, deltaT);
+        drop.velocityX = velocity.X();
+        drop.velocityZ = velocity.Z();
         const Vector3 nextPosition = drop.position + velocity * deltaT;
 
         // -- occlusion ----------------------------------------------------
@@ -268,6 +292,8 @@ void RainSystem::Simulate(float deltaT)
 
 void RainSystem::Draw()
 {
+    _stats.drawnDrops = 0;
+    _stats.streakDecals = 0;
     if (GScene == nullptr || GEngine == nullptr || GScene->GetCamera() == nullptr)
     {
         return;
@@ -291,40 +317,57 @@ void RainSystem::Draw()
     const float invTop = camera.InvTop();
     const Color tint(_params.red, _params.green, _params.blue, 1.0f);
 
-    // Drops: vertical streaks. Same projection block as the smoke volume --
-    // depth at the true centre with a small pull so a streak lying along the
-    // near plane is not clipped whole.
+    // Drops: a short chain of overlapping sprites along the true velocity.
+    // DrawDecal itself is axis-aligned, which made the old streaks look vertical
+    // even while their centres moved downwind. Three beads make direction and
+    // wind speed legible without adding a rotated-decal API to every backend.
+    // Calm rain retains the original single submission; only visibly slanted
+    // drops pay for a second bead.
     for (const Drop& drop : _drops)
     {
         if (drop.indoor)
         {
             continue; // the point of the feature: nothing falls indoors
         }
-        Vector3 posp = toView * drop.position;
-        if (posp.Z() < nearest)
-        {
-            continue;
-        }
-        const float invW = 1.0f / posp[2];
-        posp[0] = project(0, 2) + project(0, 0) * posp[0] * invW;
-        posp[1] = project(1, 2) + project(1, 1) * posp[1] * invW;
-        const float depthPull = std::min(_params.streakLength * 0.10f, 0.20f);
-        const float nearPos = floatMax(posp[2] - depthPull, nearest);
-        const float invNearPos = 1.0f / nearPos;
-        posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
-
-        const float sizeX = +project(0, 0) * _params.streakWidth * invW * invLeft * 0.5f;
-        const float sizeY = -project(1, 1) * _params.streakLength * invW * invTop * 0.5f;
-        if (sizeX * sizeY < 0.5f)
-        {
-            continue; // sub-pixel
-        }
-
         const float distance2 = (drop.position - camera.Position()).SquareSize();
         const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
         Color colour = tint;
         colour.SetA(_params.opacity * (1.0f - fog));
-        GEngine->DrawDecal(posp, invNearPos, sizeX, sizeY, PackedColor(colour), mip, kRainSpecials);
+        const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
+        const float speed = std::max(velocity.Size(), 0.001f);
+        const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
+        const int trailBeads = horizontalSpeed > 0.25f ? 2 : 1;
+        const Vector3 trailStep = trailBeads > 1 ? velocity * (-_params.streakLength / speed) : VZero;
+        bool submitted = false;
+        for (int bead = 0; bead < trailBeads; ++bead)
+        {
+            const Vector3 beadPosition = drop.position + trailStep * static_cast<float>(bead);
+            Vector3 posp = toView * beadPosition;
+            if (posp.Z() < nearest)
+            {
+                continue;
+            }
+            const float invW = 1.0f / posp[2];
+            posp[0] = project(0, 2) + project(0, 0) * posp[0] * invW;
+            posp[1] = project(1, 2) + project(1, 1) * posp[1] * invW;
+            const float beadLength = trailBeads > 1 ? _params.streakLength * 0.65f : _params.streakLength;
+            const float nearPos = floatMax(posp[2] - std::min(beadLength * 0.10f, 0.10f), nearest);
+            const float invNearPos = 1.0f / nearPos;
+            posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
+            const float sizeX = +project(0, 0) * _params.streakWidth * invW * invLeft * 0.5f;
+            const float sizeY = -project(1, 1) * beadLength * invW * invTop * 0.5f;
+            if (sizeX * sizeY < 0.5f)
+            {
+                continue;
+            }
+            GEngine->DrawDecal(posp, invNearPos, sizeX, sizeY, PackedColor(colour), mip, kRainSpecials);
+            ++_stats.streakDecals;
+            submitted = true;
+        }
+        if (submitted)
+        {
+            ++_stats.drawnDrops;
+        }
     }
 
     // Splashes: brief expanding faint discs at the ground.
@@ -383,14 +426,26 @@ void RainSystem::UpdateAndDraw()
         return;
     }
 
+    auto phase = std::chrono::steady_clock::now();
     Spawn(deltaT);
+    auto now = std::chrono::steady_clock::now();
+    _stats.spawnMicroseconds = std::chrono::duration<double, std::micro>(now - phase).count();
+    phase = now;
     RefreshOcclusion();
+    now = std::chrono::steady_clock::now();
+    _stats.occlusionMicroseconds = std::chrono::duration<double, std::micro>(now - phase).count();
+    phase = now;
     Simulate(deltaT);
+    now = std::chrono::steady_clock::now();
+    _stats.simulateMicroseconds = std::chrono::duration<double, std::micro>(now - phase).count();
+    phase = now;
     Draw();
+    now = std::chrono::steady_clock::now();
+    _stats.drawMicroseconds = std::chrono::duration<double, std::micro>(now - phase).count();
 
     _stats.liveDrops = static_cast<int>(_drops.size());
     _stats.liveSplashes = static_cast<int>(_splashes.size());
-    _stats.lastUpdateUs = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count();
+    _stats.lastUpdateUs = std::chrono::duration<double, std::micro>(now - begin).count();
 }
 
 } // namespace Poseidon

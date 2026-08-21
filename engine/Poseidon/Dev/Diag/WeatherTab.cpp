@@ -31,6 +31,7 @@
 #include <Poseidon/World/World.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace Poseidon::Dev
@@ -40,6 +41,60 @@ namespace
 {
 
 constexpr float kPi = 3.14159265358979f;
+
+constexpr int kRainBenchmarkFrames = 120;
+struct RainBenchmarkHistory
+{
+    std::array<float, kRainBenchmarkFrames> total{};
+    std::array<float, kRainBenchmarkFrames> spawn{};
+    std::array<float, kRainBenchmarkFrames> occlusion{};
+    std::array<float, kRainBenchmarkFrames> simulate{};
+    std::array<float, kRainBenchmarkFrames> draw{};
+    int cursor = 0;
+    int count = 0;
+};
+RainBenchmarkHistory GRainBenchmark;
+
+void PushRainBenchmark(const RainStats& stats)
+{
+    const int i = GRainBenchmark.cursor;
+    GRainBenchmark.total[i] = static_cast<float>(stats.lastUpdateUs);
+    GRainBenchmark.spawn[i] = static_cast<float>(stats.spawnMicroseconds);
+    GRainBenchmark.occlusion[i] = static_cast<float>(stats.occlusionMicroseconds);
+    GRainBenchmark.simulate[i] = static_cast<float>(stats.simulateMicroseconds);
+    GRainBenchmark.draw[i] = static_cast<float>(stats.drawMicroseconds);
+    GRainBenchmark.cursor = (i + 1) % kRainBenchmarkFrames;
+    GRainBenchmark.count = std::min(GRainBenchmark.count + 1, kRainBenchmarkFrames);
+}
+
+float RainAverage(const std::array<float, kRainBenchmarkFrames>& values)
+{
+    if (GRainBenchmark.count == 0)
+    {
+        return 0.0f;
+    }
+    float sum = 0.0f;
+    for (int i = 0; i < GRainBenchmark.count; ++i)
+    {
+        sum += values[i];
+    }
+    return sum / static_cast<float>(GRainBenchmark.count);
+}
+
+void SetRainBenchmarkPreset(int drops)
+{
+    RainParams params = GRain.Params();
+    params.targetDrops = drops;
+    params.maxDrops = drops;
+    params.densityOverride = 1.0f;
+    params.splashes = false;
+    params.occlusion = RainOcclusionRooms;
+    GRain.SetParams(params);
+    GRain.SetMode(RainParticle);
+    GRain.ClearParticles();
+    GRain.ResetStats();
+    GRainBenchmark = RainBenchmarkHistory{};
+}
 
 /// Compass bearing (degrees, 0 = north/+Z, 90 = east/+X, clockwise) from the
 /// model's `directionRad` (atan2(z, x), the heading the air travels TOWARD).
@@ -396,6 +451,15 @@ void DrawRainSection()
         {
             changed = true;
         }
+        if (ImGui::SliderFloat("Particle density override", &params.densityOverride, -1.0f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("-1 follows live weather; 0..1 pins particle spawn density.\n"
+                              "Benchmark presets use 1.0 so runs are repeatable.");
+        }
 
         ImGui::SeparatorText("Motion");
         if (ImGui::SliderFloat("Fall speed (m/s)", &params.fallSpeed, 2.0f, 25.0f, "%.1f"))
@@ -409,6 +473,15 @@ void DrawRainSection()
         if (ImGui::SliderFloat("Wind response", &params.windResponse, 0.0f, 1.0f, "%.2f"))
         {
             changed = true;
+        }
+        if (ImGui::SliderFloat("Wind acceleration (1/s)", &params.windAcceleration, 0.0f, 20.0f, "%.1f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("How quickly drops already in flight converge on a changed wind.\n"
+                              "5 means roughly 63%% of the change in 0.2 seconds.");
         }
         if (ImGui::IsItemHovered())
         {
@@ -528,9 +601,73 @@ void DrawRainSection()
     ImGui::TextDisabled("Spawned %d   update %.0f us", stats.spawned, stats.lastUpdateUs);
     ImGui::TextDisabled("Nearby interiors %d   voxel sweeps this frame %d", stats.nearbyBuildings,
                         stats.occlusionTests);
+    if (particlesOn && stats.lastUpdateUs > 0.0)
+    {
+        PushRainBenchmark(stats);
+    }
+
+    ImGui::SeparatorText("Particle benchmark");
+    const float avgTotal = RainAverage(GRainBenchmark.total);
+    const float avgSpawn = RainAverage(GRainBenchmark.spawn);
+    const float avgOcclusion = RainAverage(GRainBenchmark.occlusion);
+    const float avgSimulate = RainAverage(GRainBenchmark.simulate);
+    const float avgDraw = RainAverage(GRainBenchmark.draw);
+    if (ImGui::BeginTable("rainCost", 3, ImGuiTableFlags_SizingFixedFit))
+    {
+        ImGui::TableSetupColumn("phase");
+        ImGui::TableSetupColumn("last us");
+        ImGui::TableSetupColumn("120-frame avg us");
+        ImGui::TableHeadersRow();
+        const auto row = [](const char* label, double last, float average)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextDisabled("%s", label);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.1f", last);
+            ImGui::TableNextColumn();
+            ImGui::Text("%.1f", average);
+        };
+        row("spawn", stats.spawnMicroseconds, avgSpawn);
+        row("building gather", stats.occlusionMicroseconds, avgOcclusion);
+        row("simulate + collision", stats.simulateMicroseconds, avgSimulate);
+        row("draw", stats.drawMicroseconds, avgDraw);
+        row("total", stats.lastUpdateUs, avgTotal);
+        ImGui::EndTable();
+    }
+    ImGui::TextDisabled("Visible %d/%d drops   %d streak decals   %.3f us/live drop avg",
+                        stats.drawnDrops, stats.liveDrops, stats.streakDecals,
+                        stats.liveDrops > 0 ? avgTotal / static_cast<float>(stats.liveDrops) : 0.0f);
+    if (GWind.IsActive())
+    {
+        const WindSample& wind = GWind.Sample();
+        const RainParams& rain = GRain.Params();
+        const float horizontal = wind.speed * rain.windResponse;
+        const float lean = std::atan2(horizontal, std::max(rain.fallSpeed, 0.01f)) * (180.0f / kPi);
+        ImGui::TextDisabled("Wind input %.1f m/s toward %.0f deg; target rain lean %.1f deg",
+                            wind.speed, BearingFromRad(wind.directionRad), lean);
+    }
+    ImGui::TextDisabled("Presets pin density=1, disable splashes, enable Rooms occlusion,");
+    ImGui::TextDisabled("clear the pool/history, and set target=max for a comparable run.");
+    if (ImGui::Button("500 drops"))
+    {
+        SetRainBenchmarkPreset(500);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("1500 drops"))
+    {
+        SetRainBenchmarkPreset(1500);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("4000 drops"))
+    {
+        SetRainBenchmarkPreset(4000);
+    }
+    ImGui::SameLine();
     if (ImGui::Button("Reset stats"))
     {
         GRain.ResetStats();
+        GRainBenchmark = RainBenchmarkHistory{};
     }
     if (!particlesOn)
     {
