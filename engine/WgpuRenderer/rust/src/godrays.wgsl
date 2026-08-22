@@ -157,6 +157,11 @@ fn csm_occlusion(pos: vec3<f32>) -> f32 {
     return (1.0 - lit) * fade;
 }
 
+// Fraction of the map's half-extent at which a lookup starts easing back to fully lit. Kept
+// numerically equal to frame.wgsl's CLOUD_SHADOW_EDGE_FADE; a separate name because these two
+// shaders are separate naga_oil modules and a shared const would have to be plumbed as an import.
+const CLOUD_MAP_EDGE_FADE: f32 = 0.85;
+
 // Sun visibility [0,1] through the CLOUD DECK for a world-space sample.
 //
 // The CLD-020 map stores transmittance for a ray leaving SEA LEVEL toward the sun. A sample at
@@ -208,7 +213,18 @@ fn cloud_visibility(world: vec3<f32>, sun: vec3<f32>) -> f32 {
         let smoke = clamp(texel.g, 0.0, 1.0);
         vis = vis * mix(1.0, smoke, smoke_influence);
     }
-    return vis;
+    // Ease to fully lit at the map's boundary, matching frame.wgsl's cloud_sun_shadow so the
+    // shafts and the ground under them stop at the same place and in the same way. This lookup
+    // leaves the map SOONER than the ground one does -- the parallax shift above is hundreds of
+    // metres for a high sample under a low sun -- so without the fade the shafts carried a hard
+    // edge of their own even when the ground's boundary was safely past the far plane.
+    //
+    // Applied to the COMBINED visibility, cloud and smoke together, rather than to the cloud term
+    // alone: both are channels of the same texel of the same map, so both leave it at the same
+    // boundary and both must ease out there.
+    let edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;
+    let keep = 1.0 - smoothstep(CLOUD_MAP_EDGE_FADE, 1.0, edge);
+    return mix(1.0, vis, keep);
 }
 
 struct VsOut {

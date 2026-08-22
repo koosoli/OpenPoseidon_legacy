@@ -291,6 +291,11 @@ extern World* GWorld;
 }
 using Poseidon::GWorld;
 
+// Defined at global scope in engine/Poseidon/World/WorldSetup.cpp, next to the
+// `showCinemaBorder` global it writes.  Declared here the same way DebugOverlay.cpp
+// declares it, rather than pulling in a World header for one setter.
+void ShowCinemaBorder(bool show);
+
 namespace
 {
 // Isolated test-mission staging: --test-mission copies the mission into
@@ -1363,10 +1368,33 @@ void GameApplication::RunMainLoop()
                     camera->ResetTargets();
                     GWorld->AddAnimal(camera);
                     GWorld->SetCameraEffect(CreateCameraEffect(camera, "Internal", CamEffectTop, true));
+                    // A camera effect is a cutscene as far as CameraEffect::Draw is
+                    // concerned (WorldImpl.cpp), and `showCinemaBorder` is a global that
+                    // defaults to true (WorldSetup.cpp) -- so installing this camera also
+                    // switched on the cutscene letterbox: the 4:3-authored CinemaBorder
+                    // model's top/bottom bars plus Object::DrawWidescreenPillarbox's black
+                    // side bars, which are (w - 4h/3)/2 wide.  On a 16:9 surface that is
+                    // 240 px a side at 1920x1080 on top of 127 px top and bottom, so a
+                    // capture taken through this camera showed the world in 1440x826 of
+                    // the 1920x1080 PNG -- 58% of the pixels -- with the rest a dimmed bar
+                    // that reads exactly like a renderer drawing into a sub-rect.  Every
+                    // per-pixel measurement taken that way was against the wrong area.
+                    //
+                    // Zeus already does this (DebugOverlay::EnableZeusCamera): right for a
+                    // cutscene, wrong for a developer camera.  Its AdoptFreeFlyCamera hook
+                    // below only *saves* the flag, and is compiled out of release builds
+                    // and skipped under --no-dev, so the suppression has to live here.
+                    //
+                    // Ordered after the adopt call on purpose: AdoptFreeFlyCamera snapshots
+                    // `showCinemaBorder` so DisableZeusCamera can put it back, and that
+                    // snapshot has to be the mission's value, not ours.
+                    //
                     // Hand it to the dev panel. Without this the panel cannot see a
                     // camera it did not create, so a command-line flight had neither
                     // a coordinate readout on the Game tab nor "Beam player here".
                     Dev::DebugOverlay::AdoptFreeFlyCamera(camera);
+                    ::ShowCinemaBorder(false);
+                    LOG_INFO(Core, "--test-world-freefly: cinema border suppressed (developer camera, not a cutscene)");
                     // Put the player on solid ground under the camera.
                     //
                     // The camera above deliberately does not disturb the player, which is

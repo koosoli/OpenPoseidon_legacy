@@ -325,6 +325,86 @@ composite, HDR resolve, tonemap/bloom/godrays and UI — none ever timed.
 Also fixed: `GameApplication.cpp` declared `float timings[32]` against a 33-region contract, so
 `WGR_GPU_TIMER_TERRAIN_COLOR` was **silently missing from every capture ever written**.
 
+> **SUPERSEDED (2026-08-15, later the same day).** The paragraph above concludes that object draws
+> are 0.5% of the frame and that fixing LOD selection is "near-worthless". That was measured on a
+> **13.7 ms frame**, i.e. a far lighter object load than the full Everon asset set at
+> `WGR_OBJECT_STREAM_MAX_OBJECTS=200000`. At that load objects dominated the frame completely and the
+> LOD fix was worth **6.5x**. The measurement was not wrong; its scope was. Keep the residual/cascade
+> findings, discard the "near-worthless" conclusion. Numbers below.
+
+### Object LOD: the A/B, measured
+
+Every model exported by `XobCommand` carried **exactly one LOD**, so nothing could ever be selected —
+`Objects LOD histogram (main view): lod0=19388` with every other bucket zero. `XobCommand` now
+exports every valid graphical LOD. Both captures below use the same mission, world (`ev_DALL.wrp`),
+camera, hour and budget, and — the part that makes it an A/B rather than two runs — **identical
+streaming residency at capture time (153,600 resident)**. Reconstruct the invocation by reading it
+back out of the baseline's own log, not from notes; `C:\Users\mail\AppData\Local\Temp\rf\caplod.ps1`
+does exactly that.
+
+| | baseline `99f0ff7` | multi-LOD `4b33b5e` |
+|---|---|---|
+| **GPU frame total** | **77.259 ms** | **11.850 ms** |
+| Objects: prepass solid | 28.345 | 0.234 |
+| Objects: colour solid | 16.625 | 0.672 |
+| Shadow cascade 3 | 11.143 | 0.216 |
+| main-view triangles | 115,962,974 | 575,807 |
+| far-shadow (c3) triangles | 54,268,775 | 401,319 |
+| LOD histogram | lod0 = 100% | lod0 = 1, bulk lod4 |
+
+`GPU frame total` is the only figure here that is re-measured every frame; per
+`gpu-timer-regions-persist`, one-shot regions persist stale values in `--capture-metrics`.
+
+**Export correctness is verified, not assumed.** A census parsing all 1132 models in both trees
+(byte accounting closed, 1132/1132 parsed in each): 1117 models gained LODs, mean 4.90; the 15 that
+did not had single-LOD sources. LOD0 is **bit-identical** — SHA-1 over the point table, normal table
+and every face record matches on all 1132 — so the finest LOD was not disturbed. Total LOD0
+triangles 8,197,099 in both trees; all-LOD 14,943,272 in the new one.
+
+**Two conclusions that look right and are not**, both retracted here after measurement:
+
+1. *"The rank ladder is too compressed."* Native Arma models use **the same linear ladder**.
+   `model inspect` on Arma 3's `t_pinuss2s_b_f` (pine) and `cargo_house_v1_f` (building) both give
+   exactly **4 visual LODs at resolutions 1, 2, 3, 4**, everything else >= 10000 (special). That is
+   precisely `VisualLodResolution(rank, base) = base*(rank+1)`. Native A3 also collapses to a
+   **13-face** pine and a **76-face** building at resolution 4 — stub meshes at distance are the RV
+   convention, not an export defect. Do **not** "fix" the ladder into a geometric one on the strength
+   of `Tracks.cpp`'s `lodCoef *= 2`; that is a different mechanism.
+2. *"The coarse trees are an artifact of the 800x600 capture."* Plausible — `cull.wgsl` picks the
+   coarsest LOD whose `resolution <= dist * lod_inv_width * Camera::Left()`, and
+   `Scene.cpp:785` sets `_lodInvWidth = lodCoef*2/Width()`, so a narrow window really does make LODs
+   switch ~2.4x nearer than at 1920. **Tested and refuted:** at matched streaming state
+   (registered ~82k) the histograms are effectively identical — 22.2 vs 25.9 tris/instance, lod4
+   dominant in both, lod0 ~ 0%. Most instances are *clamped* at their model's coarsest rung, so
+   shifting the switch distance does not un-clamp them.
+
+What is actually true is duller and more useful: the aerial reference camera views objects
+600-3000 m out, where `dist * k` runs ~8-40 — past the coarsest rung for **any** model, native or
+converted. Cone trees in that frame are correct LOD behaviour. **The baseline's 116 M triangles was
+the defect**, holding full LOD0 detail out to 3 km.
+
+**The LOD path itself was never broken — only the XOB producer was.** Native ODOL content spreads
+across buckets normally, and the buckets sum exactly to `main inst` in each case:
+
+| world | format | histogram | lod0 share |
+|---|---|---|---|
+| Takistan | Arma 2/OA ODOL | 75 / 118 / 303 / 151 / 506 / 325 | 5.1% of 1478 |
+| Stratis (1500 m) | Arma 3 ODOL | 208 / 160 / 1144 / 3926 / 305 / 955 | 3.1% of 6698 |
+| Everon (before) | XOB-converted | 19388 / 0 / 0 / 0 / 0 / 0 | 100% |
+
+So there is nothing to port to the other compatibility layers: they read real ladders and always did.
+
+**Open / not yet closed.** A ground-level near-field quality capture is still owed — the aerial pose
+cannot answer it, because almost nothing in that frame is within 200 m. Partial evidence from a run
+that was killed mid-capture: shadow cascade 0 carried 183 instances / 428,864 triangles = **2,343
+tris per instance**, between the reference spruce's LOD0 (3,216) and LOD1 (1,188), which indicates
+near-field detail is intact. Finish that capture before calling the fidelity question closed.
+
+**Operational trap worth knowing:** the shared "stop PoseidonGame PIDs that did not exist before my
+launch" cleanup used by every capture script **kills other agents' concurrent runs**, because a run
+started after another agent's snapshot looks new to it. Two captures died this way. Serialise timing
+runs, or the GPU numbers are meaningless anyway.
+
 ---
 
 ## Scratchpad reference (not in the repo)

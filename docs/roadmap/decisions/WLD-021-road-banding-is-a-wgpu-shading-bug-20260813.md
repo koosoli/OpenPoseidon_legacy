@@ -196,3 +196,60 @@ unmoved, the hypothesis is wrong even if ablation happens to change the frame.
 
 Not yet run: the machine was committed to a performance measurement when this was
 written, and interleaving a second GPU workload would have invalidated both.
+
+---
+
+## Amendment, 2026-08-15 — the CSM hypothesis is wrong, and the real cause was already fixed
+
+**The ablation above was run, and it refutes the receiver-plane-bias hypothesis.**
+`WGR_SHADOW_MAPS=0` on a reproducing build removed the bush shadows and left the road
+pattern **pixel-for-pixel intact**. CSM is not involved at any stage. The 2026-08-14
+amendment should not be used as a starting point by anyone.
+
+**The mechanism, isolated.** The banding is produced by the CPU road-split path —
+`Object::Draw` -> `ShadowCache::Shadow` -> `Shape::SurfaceSplit` — which physically cuts an
+all-`ClipLandOn` road into per-terrain-triangle fragments and refits each vertex to the
+landscape. Under the wgpu shading path those fragments alternate between fully lit and
+**sun-term-absent (ambient only)**.
+
+Granularity settles it: the wedges are parallelograms with 45-degree edges following the
+terrain cell diagonal — **per terrain-grid triangle**, not per placed segment. That
+eliminates the per-instance tint / random-id family outright. Photometry confirms both tones
+are road albedo, not terrain showing through (Takistan, hour 08, 1920x1080):
+
+| sample | rgb | R/B |
+|---|---|---|
+| dark wedge | (77, 73, 75) | **1.03** |
+| lit road | (159,145,130) / (200,189,169) | 1.18-1.22 |
+| terrain | (227,185,132) / (244,215,163) | 1.50-1.72 |
+
+**Isolation table** — the split being present is the only variable that tracks the fault.
+Rows 3 and 4 are the same binaries differing only by one env gate:
+
+| binaries | GPU conform | CPU road split | roads |
+|---|---|---|---|
+| 9d846ce (deployed) | on | on | **banded** |
+| 9d846ce + `WGR_GPU_CONFORM=0` | off | on | **banded** |
+| HEAD 4b33b5e | on | off | clean |
+| HEAD 4b33b5e + `WGR_GPU_CONFORM=0` | off | **on** | **banded** |
+
+**The fix is already in the tree**, committed in `aa24c32` (2026-08-14 20:22):
+`engine/Poseidon/World/Scene/Object.cpp:1051-1052` guards the split with
+`&& !GGpuTerrainConform`, so wgpu draws the shared authored mesh and lets the mode-2
+per-vertex ClipLand conform in `gfx3d/shader3d.wgsl` fit it instead. GL33 keeps the CPU split.
+
+**Why it was still being reported: deployment, not code.** The installed
+`ColdWarAssault.exe` / `wgpu_renderer.dll` were build `9d846ce` (Aug 14 17:44/17:48),
+predating `aa24c32` by ~2.5 hours. `dist\x64-win-rwdi` was clean. Re-run `scripts\Install.ps1`
+(or copy **both** binaries — see CLAUDE.md's dual-binary rule).
+
+**Scope: shared engine path, generation-independent.** Reproduced on Arma 2 (Takistan,
+`ca\roads_e`, asphalt and `dirt10_w10`) and Arma 1 (Sara, `ca\roads\asf25`). Base OFP/CWA
+(Everon `abel.wrp`, `silnice25`) shows the same defect with *every* fragment on the unlit
+branch rather than alternating. No layer bypasses `Object.cpp` plus the shared wgpu draw path.
+
+**Residual, not fixed and worth its own ticket:**
+`engine/Poseidon/World/Entities/Vehicles/Tracks.cpp:199` (`TrackStep::Final`) still calls
+`shape->SurfaceSplit(...)` unconditionally, as does `Shadow.cpp:81` for projected shadows.
+Vehicle track marks under wgpu therefore still take exactly the path that bands. Not captured
+— it needs a driving vehicle — but it is the same call site.

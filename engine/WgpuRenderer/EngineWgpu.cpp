@@ -3248,7 +3248,20 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         const Color emissive = _curMaterial.emmisive;
         const float scale = StaticEmitterRadianceScale(debugSection.surfMat, emissive);
-        d.mat_emissive = {emissive.R() * scale, emissive.G() * scale, emissive.B() * scale, emissive.A()};
+        // WGR_NO_EMISSIVE=1 zeroes the sun-independent term for everything on this
+        // path. Diagnostic only: emissive is the one lane that survives sunset, so
+        // if a surface stays lit at midnight this gate says in one run whether the
+        // emissive lane is what is lighting it. It gates the VALUE only -- the
+        // night-emitter FLAG below is a separate decision about which fixtures keep
+        // their emissive after dark, and ablating one must not silently move the other.
+        static const bool suppressEmissive = []
+        {
+            const char* value = std::getenv("WGR_NO_EMISSIVE");
+            return value != nullptr && value[0] != '\0' && value[0] != '0';
+        }();
+        const float emissiveGate = suppressEmissive ? 0.0f : 1.0f;
+        d.mat_emissive = {emissive.R() * scale * emissiveGate, emissive.G() * scale * emissiveGate,
+                          emissive.B() * scale * emissiveGate, emissive.A()};
         // Fixtures keep their emissive through the night; everything else (vegetation
         // included) has it faded out with the sun in the shader.
         if (MaterialEmitsAtNight(debugSection.surfMat))
@@ -5181,6 +5194,35 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 mat.specular.y *= specScale;
                 mat.specular.z *= specScale;
             }
+            // A/B probe for the DayZ distant-foliage colour (audit 2026-08-15). DayZ's coarse
+            // tree LODs bind a near-WHITE canopy billboard and expect the TreeAdv shader to
+            // colourise it -- the colour lives in `treeColorization[]`, the WorldPos-mapped
+            // Stage3 map, and the `ambient[]` tint, none of which are generic lighting terms.
+            // The renderer has no TreeAdv colorization, so it multiplies a white albedo by a
+            // literal ambient of [1, 1, 0.3] and every distant beech reads saturated yellow.
+            // Off by default: this only NEUTRALISES the tint, it does not implement the family,
+            // so it is a measurement lever, not a fix. WGR_TREEADV_NEUTRAL_AMBIENT=1 enables it.
+            static const bool treeAdvNeutralAmbient = []
+            {
+                const char* v = std::getenv("WGR_TREEADV_NEUTRAL_AMBIENT");
+                return v && std::strcmp(v, "0") != 0;
+            }();
+            if (treeAdvNeutralAmbient)
+            {
+                const ShapeSection& secT = s->GetSection(i);
+                const char* mpT = secT.surfMat ? secT.surfMat->GetName().Data() : nullptr;
+                if (mpT && *mpT)
+                {
+                    if (const auto cachedT = _materialBindings.find(mpT); cachedT != _materialBindings.end() &&
+                        cachedT->second.shaderFamily.compare(0, 7, "TreeAdv") == 0)
+                    {
+                        const float grey = (mat.ambient.x + mat.ambient.y + mat.ambient.z) / 3.0f;
+                        mat.ambient = {grey, grey, grey, mat.ambient.w};
+                    }
+                }
+            }
+            ++g_bakedSections;
+            g_bakedSectionTris += sec.index_count / 3;
             sections.push_back(sec);
             materials.push_back(mat);
             count++;
@@ -6313,6 +6355,17 @@ void EngineWgpu::LogObjectPerfRow()
     LOG_INFO(Graphics, "Objects shadow counts: c0={}/{} c1={}/{} c2={}/{} c3={}/{} (instances/tris)",
              o.shadowInstances[0], o.shadowTris[0], o.shadowInstances[1], o.shadowTris[1], o.shadowInstances[2],
              o.shadowTris[2], o.shadowInstances[3], o.shadowTris[3]);
+    // Texture coverage over every section ever baked, with its denominator. The UNTEXTURED
+    // warnings above are deduplicated by model|rvmat and therefore cannot be counted; this row
+    // can. Triangles are reported alongside sections because a section is not a unit of area --
+    // 21 untextured container-interior sections and 21 untextured building walls read the same
+    // in a section count and nothing alike on screen.
+    LOG_INFO(Graphics,
+             "Objects material coverage: baked sections={} untextured={} ({:.3f}%) | tris={} untextured={} ({:.3f}%)",
+             g_bakedSections, g_bakedSectionsUntextured,
+             g_bakedSections ? 100.0 * double(g_bakedSectionsUntextured) / double(g_bakedSections) : 0.0,
+             g_bakedSectionTris, g_bakedSectionTrisUntextured,
+             g_bakedSectionTris ? 100.0 * double(g_bakedSectionTrisUntextured) / double(g_bakedSectionTris) : 0.0);
     // The LOD histogram is the row that tests the standing hypothesis directly: if most distant
     // objects sit in lod0, detail is being held too far out and that is the finding.
     LOG_INFO(Graphics, "Objects LOD histogram (main view): lod0={} lod1={} lod2={} lod3={} lod4={} lod5={} lod6={} lod7+={}",

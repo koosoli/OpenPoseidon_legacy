@@ -11,6 +11,19 @@ mod foam;
 use crate::ffi::{WgrWaterInteractionEvent, WgrWaterInteractionParams};
 use foam::Foam;
 
+/// `WGR_WATER_SIM_ALWAYS=1` keeps the FFT / ripple / foam compute running on frames with no
+/// water surface in the draw stream. Off by default (the sim is skipped); this exists so the
+/// A/B for that skip is one binary and one env var, per the WGR_ABLATE rationale in lib.rs.
+/// Read once and cached — `update_interactions` is a per-frame path.
+fn water_sim_always() -> bool {
+    static ALWAYS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ALWAYS.get_or_init(|| {
+        std::env::var("WGR_WATER_SIM_ALWAYS")
+            .map(|v| v != "0")
+            .unwrap_or(false)
+    })
+}
+
 // Grid mesh resolution: GRID_N quads per axis, (GRID_N+1)^2 vertices, u16 indices.
 // This deliberately exceeds the CDLOD leaf span used by WaterWgpu, because FFT waves
 // are geometric displacement: the original 32x32 mesh faceted crests into low-poly
@@ -1088,10 +1101,27 @@ impl Water {
         const FREEZE_FFT: u32 = 1 << 0;
         const FREEZE_INTERACTION: u32 = 1 << 1;
         const FREEZE_FOAM: u32 = 1 << 2;
-        let freeze_mask: u32 = self
+        let mut freeze_mask: u32 = self
             .last_params
             .map(|p| p.fft_control[2].to_bits())
             .unwrap_or(0);
+        // PERF: no water surface in this frame's draw stream => nothing consumes the FFT,
+        // ripple or foam textures, so simulating them is pure cost. `instance_count` is the
+        // CDLOD selection WaterWgpu::Prepare just published (frustum-culled AND below-sea
+        // filtered, WaterWgpu.cpp:1095-1100); 0 means the water pass will not be recorded
+        // either -- measured as `Water draw = -1` for a whole session on an inland Takistan
+        // view while Spectrum evolve / FFT h+v / compose / Foam still charged
+        // 0.108+0.215+0.213+0.115+0.191 = 0.842 ms of an 8.167 ms frame (10.3%).
+        //
+        // Safe to skip rather than throttle: the FFT spectrum is a pure function of absolute
+        // time (fft.rs evolves from `time`, not from the previous frame), so it resumes exact
+        // on the frame water returns. Ripple/foam are accumulators and resume from wherever
+        // they were left -- with no surface on screen there is nothing to pop.
+        //
+        // WGR_WATER_SIM_ALWAYS=1 restores the unconditional simulation for A/B.
+        if self.instance_count == 0 && !water_sim_always() {
+            freeze_mask |= FREEZE_FFT | FREEZE_INTERACTION | FREEZE_FOAM;
+        }
         if (freeze_mask & FREEZE_FFT) == 0 {
             if let Some(fft) = &mut self.fft {
                 fft.dispatch(encoder, timers);

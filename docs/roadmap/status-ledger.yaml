@@ -320,7 +320,7 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 7fec4b6d9364d8154db19fc15d6adaf5acb3f657a91110a76db3cb4837a10699
+    evidence_hash: 15ba96e50f77cf392883b04b975a3f0d4bbe09a7a95315a6f5f943348a3c1bab
     decision_record: null
     known_failures:
       - >-
@@ -384,7 +384,7 @@ tickets:
         verified_commit: null
     test_ids: [wgpu-capabilities-check, wgpu-windowed-resize-capture, wgpu-normal-loop-minimize-restore, wgpu-lifecycle-repeat-in-session, runtime-diagnostics-once]
     benchmark_artifacts: [docs/roadmap/evidence/preview0-manifest.json]
-    evidence_hash: 462aae9af5b26fb1f0c810a003168ab59ff8dc3a22c2bb5f622a98532926c662
+    evidence_hash: 449ceb8021eb72f947593d33960c6b3ddd47e8fe8f0c8e9ba280727fc6917957
     decision_record: null
     known_failures: []
     fallback: Unsupported optional capabilities are reported and feature paths remain gated.
@@ -826,7 +826,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: 432cebea9958253f9e08133f80d1b331318f6a04651249a132f625724d7c2c74
+    evidence_hash: e181c9034518e47b0d124e2d7612687f6866d652d2287c511c1e74d4e370cfcd
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
@@ -1160,7 +1160,7 @@ tickets:
                ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
                ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 77850e85d0d818b74c00acc6a9050aaae634698d4decec70559a62a1285338eb
+    evidence_hash: 57bbe0738f858c4bd569b786b0c22bdba905afcf38e10405b72a8c636cad001a
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -2309,7 +2309,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: d18da7d7866eaaae3851a8ac255a65cff3625037dd253362e60641c28cac81ab
+    evidence_hash: 1956ab522e77ceda2ecdb67929fca3e2c92185f661f5709b3a77e7cebb78e692
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -4011,7 +4011,7 @@ tickets:
         symbol: StaticEmitterRadianceScale
     test_ids: [preview0-wgpu-check]
     benchmark_artifacts: []
-    evidence_hash: de7b8417f378ac17c6027b9bc31b9ca5518a1b318e06221f2c5b6d63898b1206
+    evidence_hash: efb723be8ffd1701b020c12d688603940333c31196b62d05ec001b630519a530
     decision_record: docs/roadmap/decisions/MAT-041-emitter-radiance-is-a-target-not-a-multiplier-20260812.md
     capability_claims:
       - capability: EMITTER_RADIANCE_TARGET_PEAK
@@ -4254,7 +4254,7 @@ tickets:
         symbol: Modern object streaming
     test_ids: [oprw25-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: e49fdc5a1b4b74b59e8c02277472c97dc22a613791bfcca082f5de440f87a85c
+    evidence_hash: 64e201a80ae1530df013a7b0acb0510ac1da0d5da290f36bd5484b87cb9e2ef5
     decision_record: docs/roadmap/decisions/WLD-014-landscape-assumes-one-grid-20260810.md
     capability_claims:
       - capability: TWO_GRID_MISMATCH_IS_THE_BLOCKER
@@ -4359,7 +4359,7 @@ tickets:
         symbol: Poseidon::TerrainWgpu::UploadGeography
     test_ids: [oprw25-local-corpus, preview0-wgpu-check, original-training-wgpu-capture]
     benchmark_artifacts: []
-    evidence_hash: 8d161094db8553e8125c09a460abc4137e73b69cdefb5597971b82732532446e
+    evidence_hash: afcecbd173a01687e3b2f3a6ce0617cb3eb5dfacd19061de37a5e3aeda5ea49b
     decision_record: docs/roadmap/decisions/WLD-015-first-a3-world-in-engine-20260810.md
     capability_claims:
       - capability: A3_WORLD_LOADS_AND_TERRAIN_RENDERS
@@ -4507,7 +4507,7 @@ tickets:
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
                original-training-wgpu-capture]
     benchmark_artifacts: []
-    evidence_hash: 59fe5b1ceb0152faa3a88cd92dbc292166e0ba62915ccc16d9a60733492750a9
+    evidence_hash: bf8cc7d5ba9405d5d48227ed114845a7466e39b9c45121c704bc086143849ff5
     decision_record: docs/roadmap/decisions/WLD-018-satellite-stage-was-dropped-on-both-generations-20260812.md
     capability_claims:
       - capability: SATELLITE_STAGE_REACHES_THE_IR
@@ -4619,7 +4619,7 @@ tickets:
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
                original-training-wgpu-capture, terrain-census-a3-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: 77dbedb8e42c26a7692563ce1f2805b760dd6383191a7799dfcc06576e21f773
+    evidence_hash: 40b025f75ff9c60fdfc29b9fdc093af840a1e9bdd5d328b24974167d213ff16d
     decision_record: docs/roadmap/decisions/WLD-019-lca-mask-is-an-indexed-selector-20260812.md
     capability_claims:
       - capability: LCA_MASK_IS_AN_INDEXED_SURFACE_SELECTOR
@@ -4924,7 +4924,7 @@ tickets:
         symbol: GGpuTerrainConform
     test_ids: [wld-021-road-banding-ablation]
     benchmark_artifacts: []
-    evidence_hash: 0f62376e575fad5706359d12bfef052c0d8519d2f16717b8099462227db6191a
+    evidence_hash: 60dd5b2cbad24bf340530b2734a4407e10a07fbacb4c469b46905508a82b09f9
     decision_record: docs/roadmap/decisions/WLD-021-road-banding-is-a-wgpu-shading-bug-20260813.md
     capability_claims:
       - capability: ROAD_BANDING_IS_BACKEND_NOT_DATA
@@ -5106,7 +5106,7 @@ tickets:
         symbol: PlanarTerrain
     test_ids: [perf-002-interleaved-ablation]
     benchmark_artifacts: []
-    evidence_hash: 102c1225cb209e9111bda1a880a0db4e122f1c2a6f40b894074cabe6f7522eae
+    evidence_hash: 8ed2dfc38e93f29d9681d4c09fad04e4029c37dd587313fc3f04ec20e5163276
     decision_record: docs/roadmap/decisions/PERF-002-the-arma-3-frame-is-the-water-reflection-20260813.md
     capability_claims:
       - capability: PLANAR_REFLECTION_IS_THE_DOMINANT_A3_FRAME_COST
@@ -5379,7 +5379,7 @@ tickets:
     production_call_sites: []
     test_ids: [arch-001-gengine-call-site-census]
     benchmark_artifacts: []
-    evidence_hash: f26db57b3b8168a4d89122bfbebb41aeb2250bdcd1122a49042721fbe4693c72
+    evidence_hash: cf0070958b24cdeda63da9e3ad253a233106c5fa2306f92bc2b72a6142c0415b
     decision_record: docs/roadmap/decisions/ARCH-001-simulation-render-separation-audit-20260812.md
     capability_claims:
       - capability: SIMULATION_DOES_NOT_READ_RENDERER_STATE
@@ -5548,7 +5548,7 @@ tickets:
     production_call_sites: []
     test_ids: [matching-abi-declaration-accepted, drifted-shared-struct-layout-refused]
     benchmark_artifacts: []
-    evidence_hash: 87f60569ae446ec0557f87e41142da9791d36dede42e6b4ef142b663e28ceab4
+    evidence_hash: f3e5babb385e62f5bd41d91b9eea1241f06826b2678906c341dd83f1c5205881
     decision_record: docs/roadmap/decisions/CORE-NEG-003-abi-guard-checked-four-structs-20260814.md
     capability_claims:
       - capability: ABI_LAYOUT_DRIFT_REFUSED
@@ -5627,7 +5627,7 @@ tickets:
     production_call_sites: []
     test_ids: [rnd-031-viewer-floor-grid-capture]
     benchmark_artifacts: []
-    evidence_hash: 7a72ba51a1c176f6594c5d28aa2bb5cd4bf6d4ff7d557202efa7acd01c062458
+    evidence_hash: 13c105edbcbdd966ddc262e8556afc07c46f13a57ff26454b9efc4a5cdc4a956
     decision_record: docs/roadmap/decisions/RND-031-wgpu-had-no-3d-line-primitive-20260814.md
     capability_claims:
       - capability: WGPU_3D_LINE_PRIMITIVE
@@ -5793,3 +5793,375 @@ tickets:
       - docs/roadmap/decisions/MAT-046-a2-a1-readers-drop-the-hidden-proxy-flag-20260814.md
       - engine/Poseidon/Asset/Formats/P3D/Odol49.hpp
       - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp
+  - id: RND-032
+    overlay: PREVIEW0-EXEC-001
+    is_example: false
+    title: XOB export writes every graphical LOD, restoring object LOD selection
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: PARTIAL
+    outcome: null
+    owner: null
+    branch: codex/wgpu-performance-modernisation
+    baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: [4b33b5e]
+    production_call_sites:
+      - file: apps/tools/Tools/commands/XobCommand.cpp
+        symbol: VisualLodResolution
+        verified_commit: null
+      - file: engine/WgpuRenderer/rust/src/gfx3d/cull.wgsl
+        symbol: lod_select
+        verified_commit: null
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::LogObjectStats
+        verified_commit: null
+    test_ids: [xob-multi-lod-roundtrip, everon-lod-ab-capture]
+    benchmark_artifacts: []
+    evidence_hash: f5ee166f22a3e9e67c712513b26d3e2aaf47dd52cc0cf72ad1e90d4129c9a3c8
+    decision_record: docs/roadmap/decisions/RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md
+    known_failures:
+      - >-
+        Near-field fidelity is NOT closed. The reference camera is aerial and views objects
+        600-3000 m out, where every model -- native or converted -- sits at its coarsest
+        rung, so that frame cannot answer the question. A ground-level capture is owed.
+        Partial evidence from a run killed mid-capture: shadow cascade 0 carried 183
+        instances / 428,864 triangles = 2,343 tris per instance, between the reference
+        spruce's LOD0 (3,216) and LOD1 (1,188), which indicates near-field detail survives.
+      - >-
+        Pixel differences between the two captures conflate two changes. The pre-change
+        backup tree had 1.5% of LOD0 faces carrying a texture string against 99.2% now, so
+        the texture pass is present in the same diff. Triangle counts and the LOD histogram
+        are pure geometry and unaffected, and texturing costs time rather than saving it,
+        so the 6.5x is not inflated by it.
+      - >-
+        Two conclusions were reached and then retracted by measurement, and neither should
+        be revisited. (1) "The linear rank ladder is too compressed": native Arma 3 models
+        use the same ladder -- `t_pinuss2s_b_f` and `cargo_house_v1_f` each carry exactly 4
+        visual LODs at resolutions 1,2,3,4, collapsing to 13 and 76 faces respectively.
+        (2) "The coarse LODs are an 800x600 capture artifact": refuted at matched streaming
+        state, where 800x600 and 1920x1080 give 22.2 vs 25.9 tris/instance with lod4
+        dominant in both, because instances are clamped at their coarsest rung.
+    fallback: >-
+      The change is confined to the converter's write path; the runtime selector was already
+      correct and is untouched. Re-exporting with a single LOD restores the previous
+      behaviour without any engine change, and LOD0 is bit-identical across the change
+      (SHA-1 over point table, normals and every face record matches on all 1132 models),
+      so the finest level cannot have regressed.
+    reviewer: null
+    reviewer_method: >-
+      Not reviewed by the owner, which is what this ledger's review model requires for
+      VALIDATED. What was done instead: an A/B capture holding mission, world, camera, hour,
+      resolution, object budget AND streaming residency (153,600 resident) equal, giving GPU
+      frame total 77.259 ms -> 11.850 ms; and an offline census of all 1132 models in both
+      the new and backup trees with byte accounting closed on every file (1132/1132 parsed,
+      zero failures), confirming 1117 models gained LODs and that LOD0 is bit-identical.
+      Not checked: near-field visual fidelity, and any world other than Everon.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md
+      - docs/roadmap/HANDOVER-20260815-reforger-renders.md
+      - apps/tools/Tools/commands/XobCommand.cpp
+      - engine/WgpuRenderer/rust/src/gfx3d/cull.wgsl
+  - id: RND-033
+    overlay: PREVIEW0-EXEC-001
+    is_example: false
+    title: Cross-layer frame profile; objects are not the bottleneck on any layer
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: PARTIAL
+    outcome: null
+    owner: null
+    branch: codex/wgpu-performance-modernisation
+    baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/water/mod.rs
+        symbol: WaterSim::update
+        verified_commit: null
+      - file: engine/WgpuRenderer/EngineWgpu.cpp
+        symbol: EngineWgpu::LogObjectStats
+        verified_commit: null
+    test_ids: [water-sim-skip-ab, takistan-perf-budget200k, dayz-chernarus-audit]
+    benchmark_artifacts: []
+    evidence_hash: 1ba60d02021c8193f985cca2e18468e51ad0553184110d374f4ed2e9423c5f85
+    decision_record: docs/roadmap/decisions/RND-033-cross-layer-frame-profile-objects-are-not-the-bottleneck-20260815.md
+    known_failures:
+      - >-
+        Every timing in this record was taken on a shared machine where concurrent agents
+        killed each other's processes, rebuilt a shared dist\ mid-flight, and contended for
+        the GPU. Comparisons whose two arms came from one binary hold; absolute numbers may
+        not. The water A/B and the object-budget A/B are both single-binary comparisons.
+      - >-
+        A false finding this produced, recorded so it is not rediscovered: "near-field
+        terrain renders white/untextured" was reported independently by two agents as a
+        pre-existing defect and is a build artifact. Same scene, clean binary: 0.0%
+        pure-white pixels, mean RGB (210,204,162). Contaminated binary: 65.3% pure-white,
+        mean RGB (222,222,211). It also appeared in the native CWA control.
+      - >-
+        Retracted: an early Stratis LOD sample reading lod0=2335 lod1=111 with the rest zero
+        is not reproducible. Every steady sample shows a spread, e.g. [8,358,800,1967,526,372,0,0].
+      - >-
+        Not re-verified on a clean binary: the water win's absolute numbers, and the report
+        that trees vanish from Takistan's main view at budget 200000 while still casting
+        shadows.
+      - >-
+        RETRACTED, and the reason matters more than the number. An earlier revision of the
+        decision record claimed a per-model corpus census -- "340 Stratis models / 513
+        Takistan, 4.14 and 5.20 graphical LODs per placement, on the same 1..N resolution
+        scale the .xob path writes". That census was never run; the figures were written up as
+        though a subagent had reported them when it had returned nothing. The conclusion they
+        were cited for (native ladders are healthy) is unaffected, because the runtime LOD
+        histograms carry it on their own. Per-model native LOD counts, and whether native ODOL
+        resolutions share the .xob scale, are OPEN ITEMS. The only measured native-ladder
+        evidence is two models via `model inspect`, recorded in RND-032.
+    fallback: >-
+      The only behavioural change is the water-simulation gate, which is reversible at
+      runtime via WGR_WATER_SIM_ALWAYS=1 without a rebuild; that lever is also what makes
+      the A/B single-binary. Everything else in this record is measurement and diagnosis
+      with no code change.
+    reviewer: null
+    reviewer_method: >-
+      Not reviewed by the owner. What was done instead: per-world captures at
+      WGR_OBJECT_STREAM_MAX_OBJECTS=200000 with --capture-metrics, poses chosen from a
+      measured 200 m object-density histogram rather than guessed; a single-binary A/B for
+      the water gate showing 7.603 -> 6.032 ms cheapest steady frame with all six water-sim
+      timer regions reading -1 in the skip arm; and a DayZ census closing 2,971,218 of
+      2,971,218 placements with zero refused creates. Not checked: any absolute timing on a
+      clean binary, and any owner-visible frame.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/RND-033-cross-layer-frame-profile-objects-are-not-the-bottleneck-20260815.md
+      - docs/roadmap/decisions/RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md
+      - engine/WgpuRenderer/rust/src/water/mod.rs
+  - id: MAT-047
+    overlay: PREVIEW0-EXEC-001
+    is_example: false
+    title: PAA written without a FLAG tagg disables alpha cutout globally
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: PARTIAL
+    outcome: null
+    owner: null
+    branch: codex/wgpu-performance-modernisation
+    baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/Poseidon/Graphics/Textures/PAAEncoder.cpp
+        symbol: PAAEncoder::WritePAA
+        verified_commit: null
+      - file: engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
+        symbol: PacPalette::Load
+        verified_commit: null
+    test_ids: [paa-encoder-flag-tagg, reforger-netfence-cutout-ab]
+    benchmark_artifacts: []
+    evidence_hash: 6978c13732055fd86a4fab59a4e8a588199ea2aded20712691b8575a96fe1657
+    decision_record: docs/roadmap/decisions/MAT-047-paa-without-a-flag-tagg-disables-alpha-cutout-globally-20260815.md
+    known_failures:
+      - >-
+        Three gaps remain and are the reason this is PARTIAL, not VALIDATED.
+        (1) GlobalMapsUVTransform is ignored by XobCommand: NetFence_Wire.emat declares
+        TilingU 24 TilingV 24, and without it the net cutout is magnified 24x and resolves
+        as thick ribbons rather than chain-link; 1,208 of 10,312 .emat declare it.
+        (2) TextureBaker::Write (XobCommand.cpp ~758) overwrites the albedo's own alpha with
+        255 whenever the material names no OpacityMap, so only 24 of 309 baked _MLOD atlases
+        carry alpha and distant fences stay solid cards.
+        (3) Nearly every .emat resolves no BaseColour, no normal map and no specular map; the
+        face texture carries everything.
+      - >-
+        The installed asset tree was modified to make the fix visible without re-exporting:
+        140 .paa under the game's reforger\everon\textures had the 16-byte tagg inserted
+        losslessly. Originals are at C:\Users\mail\AppData\Local\Temp\rf\tex-noflag-backup.
+        Re-running the converter with the fixed encoder produces identical files, so this is
+        recoverable either way, but the deployed tree is not a pristine converter output.
+    fallback: >-
+      The change is converter-side only; PoseidonGame needed no modification. Reverting
+      PAAEncoder.cpp restores the previous output byte-for-byte, and the installed tree can be
+      restored from the named backup.
+    reviewer: null
+    reviewer_method: >-
+      Not reviewed by the owner. What was done instead: a corpus census giving the denominator
+      (140 of 714 textures carry real alpha, all DXT5 with 0% partial; 424 of 1132 models use
+      one; 373,332 of 8,197,099 LOD0 faces), a before/after capture at 3.8 m from
+      netfence_01_4m showing 53.3% of viewport pixels changed and mean luma 170.3 -> 129.1, and
+      two byte-level encoder tests with all 16 [PAAEncoder] cases passing. Four competing
+      hypotheses were eliminated by ablation rather than argument: PAA pixel data (cross-checked
+      against BI's ImageToPAA), LOD0 UV density, the specular constant
+      (WGR_MATERIAL_SPEC_UNMAPPED=0) and the GPU-driven path (WGR_GPU_DRIVEN=0).
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/MAT-047-paa-without-a-flag-tagg-disables-alpha-cutout-globally-20260815.md
+      - engine/Poseidon/Graphics/Textures/PAAEncoder.cpp
+      - engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
+  - id: CLD-021
+    overlay: PREVIEW0-EXEC-001
+    is_example: false
+    title: Cloud ground shadows ended in a hard line at the map half-extent
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: PARTIAL
+    outcome: null
+    owner: null
+    branch: codex/wgpu-performance-modernisation
+    baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: engine/WgpuRenderer/rust/src/sky/mod.rs
+        symbol: select_cloud_shadow_span
+        verified_commit: null
+      - file: engine/WgpuRenderer/rust/src/shaders/frame.wgsl
+        symbol: cloud_sun_shadow
+        verified_commit: null
+      - file: engine/WgpuRenderer/rust/src/godrays.wgsl
+        symbol: cloud_visibility
+        verified_commit: null
+    test_ids: [cloud-shadow-range-tests, cloud-shadow-edge-ab]
+    benchmark_artifacts: []
+    evidence_hash: 1e386363dfe008cb65063a91e5e051f3508d2365ac568c008bf6eb8fbcb9ef47
+    decision_record: docs/roadmap/decisions/CLD-021-cloud-shadow-map-ended-in-a-hard-line-at-2048-m-20260815.md
+    known_failures:
+      - >-
+        Wind coupling is NOT verified in pixels, and the reason blocks other work too: the
+        capture harness's mission hint dialog pauses the world, so the sky is frozen between
+        frames 600 and 2400 (sky mean |diff| 0.15). No wind code was touched -- the offset
+        lives in cloud_world, upstream of everything changed -- but "shadows still move with
+        the wind and do not swim" remains unchecked. Any wind-related visual verification,
+        vegetation sway included, needs the hint dismissed or a mission without it.
+      - >-
+        Range is bought with resolution, deliberately: the dispatch is unchanged (512^2, 12
+        march steps, 1 MB RGBA8), so metres-per-texel goes from 8 m on foot to 32 m at
+        --vd 5000. Acceptable because the loss only applies to shadows kilometres away and
+        half dissolved in fog, but it is a real quality trade and not a free win.
+      - >-
+        The A/B was built on a shared checkout carrying other agents' in-flight EngineWgpu.cpp
+        and water/mod.rs edits. Identical on both arms, so the comparison holds; absolute
+        numbers inherit that caveat.
+    fallback: >-
+      The span selection clamps to the previous constant at its floor, so a short draw distance
+      reproduces the old 4096 m behaviour exactly; the edge fade only ever mixes toward fully
+      lit, so it cannot introduce the dark band the original hard return exists to prevent.
+    reviewer: null
+    reviewer_method: >-
+      Not reviewed by the owner. What was done instead: the fault was localised numerically
+      rather than by eye -- a 69.7-luminance step across rows 440-500 with steepest slope
+      -3.0 lum/row at row 462, corresponding to exactly 2048 m, the map half-extent -- and
+      confirmed by temporarily emitting the transmittance term as greyscale (since reverted;
+      terrain.wgsl is byte-identical to HEAD), which showed a one-texel-wide boundary between
+      shadow and pure 1.0. Cost was measured by interleaved A/B on GPU frame total only, n=8
+      per arm with no other PoseidonGame running: median 10.732 -> 10.807 ms, min 10.410 ->
+      10.314. Seven new unit tests pin the span selection and snap invariants.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/CLD-021-cloud-shadow-map-ended-in-a-hard-line-at-2048-m-20260815.md
+      - engine/WgpuRenderer/rust/src/sky/mod.rs
+      - engine/WgpuRenderer/rust/src/shaders/frame.wgsl
+      - engine/WgpuRenderer/rust/src/godrays.wgsl
+  - id: RND-034
+    overlay: PREVIEW0-EXEC-001
+    is_example: false
+    title: Capture sub-rect was the cinema border, not a window-sizing regression
+    class: RUNTIME_INFRA
+    obligation: OPTIONAL
+    execution_mode: IMPLEMENT
+    scheduling_state: OPEN
+    status: PARTIAL
+    outcome: null
+    owner: null
+    branch: codex/wgpu-performance-modernisation
+    baseline_commit: 513430ae392f60dfa3375ad1cba600bbbc082a39
+    verification_commit: null
+    milestone: 0
+    milestone_role: NON_BLOCKING
+    depends_on: []
+    blocked_by: []
+    blocks: []
+    implementation_commits: []
+    production_call_sites:
+      - file: apps/cwr/Game/GameApplication.cpp
+        symbol: ApplyTestWorldFreeFly
+        verified_commit: null
+      - file: engine/Poseidon/Graphics/Shared/SdlWindow.cpp
+        symbol: CreateGameWindow
+        verified_commit: null
+      - file: engine/Poseidon/World/Scene/Object.cpp
+        symbol: DrawWidescreenPillarbox
+        verified_commit: null
+    test_ids: [freefly-cinema-border-ab, window-clamp-warning]
+    benchmark_artifacts: []
+    evidence_hash: 78bd36ac03f6a67c112adeab54426aea5b121b5356e014cdac20759811409010
+    decision_record: docs/roadmap/decisions/RND-034-the-capture-sub-rect-was-the-cinema-border-not-a-sizing-bug-20260815.md
+    known_failures:
+      - >-
+        Every per-pixel measurement taken through --test-world-freefly at 16:9 before this fix
+        was against 57% of the frame (76% at 4:3), including the LOD and performance captures
+        under C:\Users\mail\AppData\Local\Temp\rf\cap\. GPU timings are UNAFFECTED -- the 3D
+        scene rendered at full surface size and the bars are overlay quads composited after --
+        so GPU frame total and the region breakdowns stand. Pixel-ratio statistics whose crop
+        overlapped a bar need re-taking.
+      - >-
+        A published reading of "800x462 at (0,69), the normal 4:3 letterbox" was not an aspect
+        letterbox at all; it was 71 px of cinema bar, the same defect.
+      - >-
+        This record exists because a wrong diagnosis was escalated as a release blocker. The
+        claim was a DPI / window-sizing regression introduced between aa24c32 and 4b33b5e.
+        Every premise was false: the engine's surface size is correct, the screenshot is sized
+        from the live surface config (a 2560x1440 request yields a 1920x1080 PNG), and the
+        build stamp used for the A/B is a git commit on a dirty worktree, so it does not
+        identify a binary at all -- two DLLs of different sizes report the same id.
+      - >-
+        The row/column mean-gradient detector used to find the sub-rect mislabels flat sky as
+        not-rendered and a lake shore as a 240 px pillarbox. Use the corrected detector
+        (a bar's outer band is flatter than the picture inside it) for any framing measurement.
+    fallback: >-
+      Both changes are additive and narrow: the cinema-border suppression applies only to the
+      --test-world-freefly developer camera and follows the existing Zeus precedent in
+      DebugOverlay.cpp, and the SdlWindow change only adds warnings, altering no sizing
+      behaviour. Clamp-and-report was chosen over an offscreen render path deliberately, since
+      1920x1080 was granted exactly and the lost 42% was overlay quads rather than missing
+      pixels.
+    reviewer: null
+    reviewer_method: >-
+      Not reviewed by the owner. What was done instead: an A/B on the identical
+      wgpu_renderer.dll (md5 verified) with the exe as the only variable, across four
+      resolutions, taking the drawn-world rect from 76%/57%/57%/57% to 100% in every case; a
+      control showing that without --test-world-freefly both the frozen 9d846ce pair and the
+      current dist pair already filled 100% of the framebuffer at all four sizes; and
+      arithmetic agreement between AspectRatio::LateralPillarboxWidth and the measured offsets
+      (0, 160, 240). Not checked: whether any earlier pixel-ratio statistic changes once
+      re-taken without the bars.
+    supersedes: []
+    evidence:
+      - docs/roadmap/decisions/RND-034-the-capture-sub-rect-was-the-cinema-border-not-a-sizing-bug-20260815.md
+      - apps/cwr/Game/GameApplication.cpp
+      - engine/Poseidon/Graphics/Shared/SdlWindow.cpp
