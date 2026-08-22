@@ -2,6 +2,7 @@
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
+#include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/World/Effects/BuildingInterior.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp>
 #include <Poseidon/World/Entities/Vehicles/House.hpp>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 
 namespace Poseidon
 {
@@ -26,6 +28,15 @@ namespace
 // fogged, tintable, sorted. Rain streaks must not z-write -- they are thin
 // sprites crossing everything at high speed.
 constexpr int kRainSpecials = ClampU | ClampV | NoZWrite | IsAlpha | IsAlphaFog | NoShadow | IsColored;
+
+// Same env-hook discipline as POSEIDON_TEST_SMOKE: a self-run smoke must be
+// able to turn particle rain on over a clear day and get a log trail, without
+// anyone opening the dev panel.
+bool RainTestHook()
+{
+    const char* value = std::getenv("POSEIDON_TEST_RAIN");
+    return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
 
 } // namespace
 
@@ -41,7 +52,31 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
     return current + (target - current) * alpha;
 }
 
-RainSystem::RainSystem() = default;
+int RainTrailBeadCount(float horizontalSpeed, float totalSpeed)
+{
+    // horizontalSpeed / totalSpeed is the tangent of the lean angle off
+    // vertical: 0 is calm rain, 1 would be falling at 45 degrees. Below ~4.6
+    // degrees one axis-aligned sprite reads fine; past ~19 degrees two cannot
+    // carry the length the streak now has, so a third joins.
+    const float leanRatio = std::max(horizontalSpeed, 0.0f) / std::max(totalSpeed, 0.001f);
+    if (leanRatio < 0.08f)
+    {
+        return 1;
+    }
+    return leanRatio < 0.35f ? 2 : 3;
+}
+
+RainSystem::RainSystem()
+{
+    if (RainTestHook())
+    {
+        // Both layers over a forced-max density: the A/B pair a rain smoke
+        // wants, independent of the mission's weather state.
+        _mode = RainBoth;
+        _params.densityOverride = 1.0f;
+        _legacyDensityOverride = 1.0f;
+    }
+}
 
 float RainSystem::RandUnit()
 {
@@ -226,6 +261,29 @@ void RainSystem::Simulate(float deltaT)
                     break;
                 }
             }
+
+            // Companion sky probe. The voxel sweep above only knows buildings
+            // whose type yielded a usable interior; RefreshOcclusion drops the
+            // rest, so without this pass a house with no fire geometry, a
+            // bridge deck, a rock overhang or a tree canopy would rain through.
+            // One staggered upward fire-geometry ray per drop -- the same query
+            // Sheltered mode is built on -- answers "is any surface over this
+            // point at all" for every such roof at once, and the jittered reset
+            // keeps the drops from probing in lockstep bursts.
+            if (!killed)
+            {
+                drop.occlusionTimer -= deltaT;
+                if (drop.occlusionTimer <= 0.0f)
+                {
+                    drop.occlusionTimer = _params.occlusionCadence * (0.75f + 0.5f * RandUnit());
+                    ++_stats.occlusionTests;
+                    if (query.IsSheltered(nextPosition, 8.0f))
+                    {
+                        ++_stats.probeKills;
+                        killed = true;
+                    }
+                }
+            }
             if (killed)
             {
                 _drops[i] = _drops.back();
@@ -319,10 +377,11 @@ void RainSystem::Draw()
 
     // Drops: a short chain of overlapping sprites along the true velocity.
     // DrawDecal itself is axis-aligned, which made the old streaks look vertical
-    // even while their centres moved downwind. Three beads make direction and
-    // wind speed legible without adding a rotated-decal API to every backend.
-    // Calm rain retains the original single submission; only visibly slanted
-    // drops pay for a second bead.
+    // even while their centres moved downwind. Beads scale continuously with
+    // the lean angle (RainTrailBeadCount): calm rain keeps the single original
+    // submission, moderate wind draws two, strong wind three, so direction and
+    // wind speed stay legible without adding a rotated-decal API to every
+    // backend.
     for (const Drop& drop : _drops)
     {
         if (drop.indoor)
@@ -336,7 +395,7 @@ void RainSystem::Draw()
         const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
         const float speed = std::max(velocity.Size(), 0.001f);
         const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
-        const int trailBeads = horizontalSpeed > 0.25f ? 2 : 1;
+        const int trailBeads = RainTrailBeadCount(horizontalSpeed, speed);
         const Vector3 trailStep = trailBeads > 1 ? velocity * (-_params.streakLength / speed) : VZero;
         bool submitted = false;
         for (int bead = 0; bead < trailBeads; ++bead)
@@ -446,6 +505,25 @@ void RainSystem::UpdateAndDraw()
     _stats.liveDrops = static_cast<int>(_drops.size());
     _stats.liveSplashes = static_cast<int>(_splashes.size());
     _stats.lastUpdateUs = std::chrono::duration<double, std::micro>(now - begin).count();
+
+    // Opt-in once-per-second trail for POSEIDON_TEST_RAIN, same shape as the
+    // SmokeVolume one: alive versus drawn catches projection rejection, the
+    // kill split says which occlusion path did the work.
+    static const bool verbose = RainTestHook();
+    if (verbose && Glob.time > _nextDiagTime)
+    {
+        _nextDiagTime = Glob.time + 1.0f;
+        const WindSample* wind = GWind.IsActive() ? &GWind.Sample() : nullptr;
+        LOG_INFO(World,
+                 "RainVolume: drops={} drawn={} decals={} spawned={} roof={} indoor={} probe={} ground={} "
+                 "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us",
+                 _stats.liveDrops, _stats.drawnDrops, _stats.streakDecals, _stats.spawned, _stats.roofKills,
+                 _stats.indoorKills, _stats.probeKills, _stats.groundHits, _stats.nearbyBuildings,
+                 _stats.occlusionTests, wind ? wind->speed : 0.0f,
+                 wind ? wind->directionRad * (180.0f / 3.14159265f) : 0.0f, _stats.spawnMicroseconds,
+                 _stats.occlusionMicroseconds, _stats.simulateMicroseconds, _stats.drawMicroseconds);
+        ResetStats();
+    }
 }
 
 } // namespace Poseidon

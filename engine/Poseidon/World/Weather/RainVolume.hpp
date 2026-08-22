@@ -36,7 +36,10 @@ enum RainOcclusion
 {
 	RainOcclusionNone,      ///< rain falls through roofs (diagnostic)
 	RainOcclusionSheltered, ///< IsSheltered roof probe per drop, staggered -- the cheap fallback
-	RainOcclusionRooms,     ///< building voxel grid: drops die ON the roofline/walls
+	///< Rooms is the voxel sweep PLUS a staggered sky probe: the sweep only knows
+	///< buildings with usable shell data; the probe catches every other surface
+	///< overhead (no-data houses, bridge decks, rock overhangs, tree canopies).
+	RainOcclusionRooms,
 };
 
 struct RainParams
@@ -73,9 +76,9 @@ struct RainParams
 
 	// -- occlusion --------------------------------------------------------
 	RainOcclusion occlusion = RainOcclusionRooms;
-	/// Probe cadence for the Sheltered mode only. Rooms mode checks every drop
-	/// against the cached voxel grid EVERY frame -- it is one table lookup --
-	/// so it needs no cadence.
+	/// Probe cadence for the Sheltered mode and for the sky probe that
+	/// accompanies Rooms mode (jittered per drop, so probes do not fire in
+	/// lockstep bursts).
 	float occlusionCadence = 0.40f;
 };
 
@@ -85,6 +88,7 @@ struct RainStats
 	int liveSplashes = 0;
 	int indoorKills = 0;      ///< drops that entered a room since ResetStats
 	int roofKills = 0;        ///< drops that hit the shell (roofline/wall) since ResetStats
+	int probeKills = 0;       ///< drops killed by the Rooms-mode sky probe since ResetStats
 	int groundHits = 0;       ///< drops that landed on terrain since ResetStats
 	int spawned = 0;          ///< drops spawned since ResetStats
 	int nearbyBuildings = 0; ///< valid cached interiors considered this frame
@@ -102,6 +106,9 @@ struct RainStats
 /// test without constructing a world or renderer.
 Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse);
 Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responsePerSecond, float deltaT);
+/// How many overlapping sprites render one drop's streak: 1 vertical, more as
+/// the lean from wind steepens. Pure so the look has a focused test.
+int RainTrailBeadCount(float horizontalSpeed, float totalSpeed);
 
 class RainSystem
 {
@@ -170,6 +177,7 @@ private:
 	std::vector<Splash> _splashes;
 	Foundation::Time _lastUpdate;
 	float _spawnAccumulator = 0.0f;
+	Foundation::Time _nextDiagTime; ///< once-per-second stats gate for POSEIDON_TEST_RAIN
 	unsigned _rand = 0x9E3779B9u; ///< private stream; do not touch GRandGen
 	float RandUnit();
 	float RandSymmetric();

@@ -178,6 +178,35 @@ pin particle density to 1, disable splashes, enable Rooms occlusion and clear
 the pool/history. Pure motion regression coverage verifies speed, direction,
 gust relaxation and the zero-response case.
 
+Occlusion + lean follow-up (2026-08-22): Rooms mode had a hole -- `RefreshOcclusion`
+only registers buildings whose type yields a valid interior, so a house with no
+usable fire geometry, a bridge deck, a rock overhang or a tree canopy rained
+straight through while every voxel-covered roof stayed dry. Rooms now pairs the
+voxel sweep with a staggered per-drop sky probe (the same `IsSheltered`
+fire-geometry ray Sheltered mode is built on): any surface overhead kills the
+drop, counted separately as `probeKills` in the Weather tab so the two paths can
+be told apart. The probe resets on a jittered 0.75-1.25x of `occlusionCadence`
+so drops do not fire in lockstep bursts. Separately, streak rendering was
+binary (one bead calm, two above 0.25 m/s horizontal), which under-read strong
+wind; bead count now scales continuously with the lean angle via
+`RainTrailBeadCount` (1 below ~4.6 degrees, 2 to ~19, 3 past it) and carries a
+focused unit test. The legacy screen-space overlay is deliberately untouched:
+particle rain is where these improvements belong.
+
+Installed-game smoke (2026-08-22, `POSEIDON_TEST_RAIN=1`, classic island via a
+staged `.eden` mission whose init.sqs parks the camera over the building
+`nearestBuilding` returns): pool fills to the 1500 cap, drawn tracks live, wind
+sampled continuously (4.6-5.3 m/s gusting around 28-32 deg). With two valid
+interiors under the rain disc (`buildings=2`), all three kill paths fire every
+second -- voxel roof kills 8-11, indoor kills 12-20, sky-probe kills 0-4 --
+while open ground still collects its drops (ground hits ~320/s). Cost at
+1500 drops: gather 2-3 us, simulate 90-100 us, draw 80-85 us; the one-off
+33 ms first-frame gather is `BuildingInterior` building its per-type voxel
+grids, after which it is cached. Two launch traps for the next person: the game
+must start with `-WorkingDirectory <game dir>` or the font check exits(1)
+before any world loads, and a staged test-mission folder must be named
+`<name>.<world>` (e.g. `.eden`) or `RunInitScript` never finds its init.sqs.
+
 Smoke visual audit (2026-08-21): centre containment alone was insufficient for
 3-5 m soft billboards. The old radius clamp activated only after acquiring a
 collision plane, so a puff could overlap a ceiling while its centre was still

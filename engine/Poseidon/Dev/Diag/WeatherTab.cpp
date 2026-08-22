@@ -596,8 +596,8 @@ void DrawRainSection()
     ImGui::SeparatorText("Stats");
     const RainStats& stats = GRain.Stats();
     ImGui::Text("Live drops %d   live splashes %d", stats.liveDrops, stats.liveSplashes);
-    ImGui::Text("Roof kills %d   indoor kills %d   ground hits %d", stats.roofKills, stats.indoorKills,
-                stats.groundHits);
+    ImGui::Text("Roof %d   indoor %d   sky-probe %d   ground %d", stats.roofKills, stats.indoorKills,
+                stats.probeKills, stats.groundHits);
     ImGui::TextDisabled("Spawned %d   update %.0f us", stats.spawned, stats.lastUpdateUs);
     ImGui::TextDisabled("Nearby interiors %d   voxel sweeps this frame %d", stats.nearbyBuildings,
                         stats.occlusionTests);
