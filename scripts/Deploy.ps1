@@ -86,9 +86,14 @@ if (Test-Path -LiteralPath $stampPath)
     {
         $prevCommit = $matches[1]
         & git -C $repoRoot merge-base --is-ancestor $commit $prevCommit 2>$null
-        if ($LASTEXITCODE -eq 0)
+        $isAncestor = ($LASTEXITCODE -eq 0)
+        $behind = [int](& git -C $repoRoot rev-list --count "$commit..$prevCommit" 2>$null)
+        # STRICT ancestor only. `merge-base --is-ancestor X X` is true for a commit and itself,
+        # so redeploying the SAME build -- which is what happens every time you rebuild and push
+        # the same commit again, or pass -PruneStale -- would otherwise be refused as a rollback.
+        # 0 commits behind is not a rollback; it is the normal case.
+        if ($isAncestor -and $behind -gt 0)
         {
-            $behind = (& git -C $repoRoot rev-list --count "$commit..$prevCommit" 2>$null)
             $msg = "This build ($branch $commit) is an ANCESTOR of what is already installed " +
                    "($prevCommit), $behind commits behind. Deploying it would silently REMOVE " +
                    "everything in those commits. Rebase onto the installed branch first, or pass " +

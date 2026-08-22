@@ -725,14 +725,29 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         const bool sameCommit = exeLen > 0 && std::strncmp(exeBuild, dllBuild, exeLen) == 0;
         if (!sameCommit)
         {
-            LOG_ERROR(Graphics,
-                      "Wgpu: BUILD MISMATCH — this executable was built from commit {} but "
-                      "wgpu_renderer.dll was built from {}. They are NOT from the same build. The "
-                      "ABI check passed, so the game will run and look plausible, but whichever "
-                      "binary is older is missing every fix made since. Do not report a rendering "
-                      "regression from this pair: deploy both from one build first "
-                      "(scripts/Deploy.ps1), or check DEPLOYED-FROM.txt in the game folder.",
-                      exeBuild, dllBuild);
+            // WARNING, not ERROR, and worded to name the benign case first -- because the benign
+            // case is the common one. The DLL's id is stamped when CARGO compiles it, and cargo
+            // does not rebuild when only C++ changed, so any C++-only iteration leaves the two
+            // ids legitimately different while the binaries are perfectly matched. Crying wolf on
+            // that would get this line ignored, which costs more than it saves.
+            //
+            // The real ancestry test belongs where git is available: scripts/Deploy.ps1 refuses a
+            // build that is a strict ancestor of what is installed. This line's job is narrower
+            // and still worth having -- to put BOTH ids in every log, so the question "which two
+            // binaries produced this capture?" always has an answer written down.
+            LOG_WARN(Graphics,
+                     "Wgpu: exe and renderer report different build ids — exe {}, wgpu_renderer.dll "
+                     "{}. Expected when only one side was rebuilt (cargo skips the cdylib on a "
+                     "C++-only change). NOT expected if you did not build both: the ABI check "
+                     "passes across a large version gap, so a stale DLL runs and looks plausible "
+                     "while missing every fix since. Before reporting a rendering regression, "
+                     "check DEPLOYED-FROM.txt in the game folder and deploy both from one build "
+                     "with scripts/Deploy.ps1.",
+                     exeBuild, dllBuild);
+        }
+        else
+        {
+            LOG_INFO(Graphics, "Wgpu: exe and renderer build ids agree ({})", exeBuild);
         }
     }
 
