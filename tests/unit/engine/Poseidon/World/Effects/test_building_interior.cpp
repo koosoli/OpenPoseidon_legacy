@@ -69,12 +69,15 @@ TEST_CASE("Rain may cross a shell where a portal opening sits, and only there",
 {
     // Room below, solid shell in the middle, outside air above -- a wall with
     // a door. Without the portal the crossing is fatal; with one centred on
-    // the shell cell, points inside its radius are openings and points far
-    // away are not.
+    // the shell cell, segments through the opening pass and segments beside it
+    // do not. The portal test is point-to-segment distance against a
+    // TIGHTENED radius, so "near the door" is still wall.
     BuildingInterior interior = BuildingInteriorTestAccess::MakeColumn({0, 0, 0xFE, 0xFF, 0xFF});
 
     REQUIRE(interior.ClassifySegmentModel(Vector3(0.125f, 0.875f, 0.125f),
                                           Vector3(0.125f, 0.375f, 0.125f)) == -2);
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(Vector3(0.125f, 0.875f, 0.125f),
+                                                    Vector3(0.125f, 0.375f, 0.125f)));
 
     InteriorPortal door;
     door.centre = Vector3(0.125f, 0.625f, 0.125f);
@@ -82,10 +85,17 @@ TEST_CASE("Rain may cross a shell where a portal opening sits, and only there",
     door.room = 0;
     BuildingInteriorTestAccess::AddPortal(interior, door);
 
-    REQUIRE(interior.PointInPortalModel(Vector3(0.125f, 0.625f, 0.125f)));   // dead centre of the door
-    REQUIRE(interior.PointInPortalModel(Vector3(0.125f, 0.75f, 0.125f)));    // within the radius
-    REQUIRE_FALSE(interior.PointInPortalModel(Vector3(0.125f, 2.5f, 0.125f))); // high above it: still wall
-    REQUIRE_FALSE(interior.PointInPortalModel(Vector3(5.0f, 0.625f, 5.0f)));   // far to the side
+    // Straight through the opening: passes.
+    REQUIRE(interior.SegmentPassesPortalModel(Vector3(0.125f, 0.875f, 0.125f),
+                                              Vector3(0.125f, 0.375f, 0.125f)));
+    // A crossing that only grazes the tightened radius: wall.
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(Vector3(0.125f + 0.85f, 0.875f, 0.125f),
+                                                    Vector3(0.125f + 0.85f, 0.375f, 0.125f)));
+    // Far to the side, or far above the shell: wall.
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(Vector3(5.0f, 0.875f, 5.0f),
+                                                    Vector3(5.0f, 0.375f, 5.0f)));
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(Vector3(0.125f, 3.0f, 0.125f),
+                                                    Vector3(0.125f, 2.0f, 0.125f)));
 }
 
 TEST_CASE("Building interior movement cannot turn a solid wall into an implicit portal",

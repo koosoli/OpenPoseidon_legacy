@@ -166,6 +166,11 @@ private:
 		float velocityZ = 0.0f;
 		float occlusionTimer = 0.0f; ///< s until its next occlusion probe (Sheltered mode)
 		bool indoor = false;      ///< last probe said "under cover" -- not drawn
+		///< True only after the drop passed through a portal opening. Room voxels
+		///< alone must not grant this: gappy fire LODs can flood room labels
+		///< outside the shell, and an outdoor drop trusting them would skip every
+		///< kill and fall straight through the roof.
+		bool legalIndoor = false;
 	};
 	struct Splash
 	{

@@ -216,8 +216,8 @@ void RainSystem::Simulate(float deltaT)
         const Vector3 nextPosition = drop.position + velocity * deltaT;
 
         // -- occlusion ----------------------------------------------------
-        bool nearShell = false;  // some building footprint overlaps this step
-        bool insideRoom = false; // the drop is legally under a roof right now
+        bool nearShell = false;     // some building footprint overlaps this step
+        bool legalIndoor = drop.legalIndoor; // granted only by a portal passage
         if (_params.occlusion == RainOcclusionRooms)
         {
             bool killed = false;
@@ -236,12 +236,12 @@ void RainSystem::Simulate(float deltaT)
                 const Vector3 fromModel = occluder.inv.FastTransform(drop.position);
                 const Vector3 toModel = occluder.inv.FastTransform(nextPosition);
 
-                // A drop that is ALREADY inside entered legally -- through an
-                // opening on an earlier step. Its fate is the floor below, not
-                // the wall it is no longer crossing.
-                if (occluder.interior->ClassifyModel(fromModel) >= 0)
+                // A drop that entered through an opening on an earlier step is
+                // indoors legally: its fate is the floor below, not the wall it
+                // is no longer crossing, and the sky probe must not read its
+                // ceiling as cover to kill it with.
+                if (legalIndoor && occluder.interior->ClassifyModel(fromModel) >= 0)
                 {
-                    insideRoom = true;
                     continue;
                 }
 
@@ -252,22 +252,12 @@ void RainSystem::Simulate(float deltaT)
                 }
 
                 // The segment crossed shell or a room boundary. An opening
-                // forgives it: doors, windows and breaches are exactly where
-                // smoke leaves and rain comes in (the handover's "rain enters
-                // where smoke leaves"). Three samples, because the crossing of
-                // a fast drop can sit anywhere along its step.
-                bool viaOpening = false;
-                for (const float t : {0.25f, 0.5f, 0.75f})
+                // forgives it -- doors, windows and breaches are exactly where
+                // smoke leaves and rain comes in -- but only the exact
+                // point-segment portal test decides, never a voxel label.
+                if (occluder.interior->SegmentPassesPortalModel(fromModel, toModel))
                 {
-                    if (occluder.interior->PointInPortalModel(fromModel + (toModel - fromModel) * t))
-                    {
-                        viaOpening = true;
-                        break;
-                    }
-                }
-                if (viaOpening)
-                {
-                    insideRoom = true;
+                    legalIndoor = true;
                     continue;
                 }
                 if (label >= 0)
@@ -293,7 +283,7 @@ void RainSystem::Simulate(float deltaT)
             // keeps the drops from probing in lockstep bursts. A drop that is
             // legally indoors is skipped: its ceiling is the roof it came
             // through, and the probe would kill it mid-room.
-            if (!killed && !insideRoom)
+            if (!killed && !legalIndoor)
             {
                 drop.occlusionTimer -= deltaT;
                 if (drop.occlusionTimer <= 0.0f)
@@ -332,6 +322,8 @@ void RainSystem::Simulate(float deltaT)
                 }
             }
         }
+
+        drop.legalIndoor = legalIndoor;
 
         // -- fall ---------------------------------------------------------
         drop.position = nextPosition;

@@ -703,7 +703,7 @@ int BuildingInterior::ClassifySegmentModel(Vector3Par from, Vector3Par to) const
     return -1;
 }
 
-bool BuildingInterior::PointInPortalModel(Vector3Par pos) const
+bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to) const
 {
     if (!_valid)
     {
@@ -711,10 +711,22 @@ bool BuildingInterior::PointInPortalModel(Vector3Par pos) const
     }
     // Portals are few and this is only asked when a segment actually crossed
     // the shell or a room boundary, so the linear scan is the right answer.
+    // The radius is deliberately tightened to three quarters: portal centres
+    // sit on the wall plane and inferred openings can be generous, and this
+    // test is what stands between "rain through the door" and "rain through
+    // the wall next to the door".
+    const Vector3 delta = to - from;
+    const float len2 = delta.SquareSize();
     for (int i = 0; i < _portals.Size(); ++i)
     {
         const InteriorPortal& portal = _portals[i];
-        if ((pos - portal.centre).SquareSize() <= Square(portal.radius))
+        float t = 0.5f;
+        if (len2 > 1e-8f)
+        {
+            t = std::clamp((portal.centre - from).DotProduct(delta) / len2, 0.0f, 1.0f);
+        }
+        const Vector3 closest = from + delta * t;
+        if ((closest - portal.centre).SquareSize() <= Square(portal.radius * 0.75f))
         {
             return true;
         }

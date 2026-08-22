@@ -105,9 +105,25 @@ fn interaction_update(@builtin(global_invocation_id) id: vec3<u32>) {
         height = height + (bullet_pulse + explosion_pulse * 0.6 + object_pulse * 0.3) * event.position_radius.w * 0.35;
         foam = max(foam, clamp(bullet * (core * 3.5 + ring * 2.0) + explosion * (core * 5.0 + ring * 3.0) + (core + ring) * event.time_life_foam_mass.z * event.position_radius.w * 0.35, 0.0, 1.0));
     }
+    // Rain strikes: a hashed subset of cells takes a small crater + outward
+    // kick each sim tick, scaled by the live rain density. This is the bullet
+    // splash's shape (a depression the wave equation blooms into a ring) at a
+    // fraction of the scale -- the previous term nudged velocity by +-0.01 on
+    // 4% of cells and was invisible. The strike rate is per tick, so heavier
+    // rain means more cells hit per second, not deeper craters.
     if (params.weather.x > 0.0005 && calmness > 0.025) {
-        let rain = hash2(floor(world * 0.8) + floor(params.misc.y));
-        velocity = velocity + select(0.0, (rain - 0.5) * params.weather.x * 0.02, rain > 0.96);
+        let rain_cell = floor(world * 1.6);
+        let rain_tick = floor(params.misc.y * 30.0);
+        let strike = hash2(rain_cell + vec2<f32>(rain_tick, rain_tick * 0.773));
+        if (strike > 1.0 - params.weather.x * 0.22) {
+            // velocity here is the field's SCALAR state channel, not a vector:
+            // an impulsive kick (signed) plus a small depression is exactly
+            // what the bullet splash injects, and the wave equation blooms
+            // both into expanding rings.
+            let kick = (hash2(rain_cell * 1.71 + vec2<f32>(4.7, 9.3)) - 0.5) * 0.18 * params.weather.x;
+            velocity = velocity + kick;
+            height = height - 0.022 * params.weather.x;
+        }
     }
     let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
     let edge_damp = smoothstep(0.0, 0.045, edge);

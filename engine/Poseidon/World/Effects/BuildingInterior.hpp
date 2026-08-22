@@ -93,11 +93,15 @@ public:
 	/// Returns -1 when the complete segment remains outside the cached interior.
 	int ClassifySegmentModel(Vector3Par from, Vector3Par to) const;
 
-	/// Is a model-space point inside any portal opening (door, window or
-	/// breach)? Rain asks this when its segment crossed the shell or a room
-	/// boundary: a crossing AT an opening is rain coming IN through a door or
-	/// window -- exactly where smoke leaves -- and must be allowed, not killed.
-	bool PointInPortalModel(Vector3Par pos) const;
+	/// Does the model-space segment pass through any portal opening? The test
+	/// is the exact point-to-segment distance against each portal centre,
+	/// against a TIGHTENED radius (three quarters): portals sit on the wall
+	/// plane and some inferred windows/breaches are generous, and a loose test
+	/// forgave crossings metres away from the actual hole -- rain through
+	/// walls. Rain asks this when its segment crossed the shell or a room
+	/// boundary; a crossing AT an opening is rain coming IN through a door or
+	/// window -- exactly where smoke leaves -- and must be allowed.
+	bool SegmentPassesPortalModel(Vector3Par from, Vector3Par to) const;
 
 	/// Conservative distance from a point in `roomId` to the nearest room
 	/// boundary, capped by `maxDistance`. Used to keep the drawn radius of a
