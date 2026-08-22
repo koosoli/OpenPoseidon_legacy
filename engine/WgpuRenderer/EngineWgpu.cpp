@@ -4560,6 +4560,21 @@ struct AdmitTimer
 };
 } // namespace
 
+// Section-material coverage over everything ever baked onto the retained path, so "are the
+// buildings textured?" is answerable as a count with a denominator instead of by eye.
+//
+// These are NOT redundant with MAT-050's `_untexturedRetainedSections`, which counts the same
+// numerator: what is missing there is a DENOMINATOR and a triangle-weighted view. 21 untextured
+// sections out of 30 is a broken world; 21 out of 30,000 is noise, and the per-model UNTEXTURED
+// warning cannot tell you which because it is deduplicated by (model, rvmat) -- deliberately, so
+// the log stays readable, which is exactly what makes it useless as a count.
+//
+// Reported next to the object counts each period.
+static uint64_t g_bakedSections = 0;
+static uint64_t g_bakedSectionsUntextured = 0;
+static uint64_t g_bakedSectionTris = 0;
+static uint64_t g_bakedSectionTrisUntextured = 0;
+
 uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
 {
     if (auto found = _gpuModels.find(shape); found != _gpuModels.end())
@@ -5122,6 +5137,11 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 // Counted unconditionally -- the WARNING is deduped per (model, rvmat), so it
                 // reports first occurrences, and first occurrences are not a denominator.
                 ++_untexturedRetainedSections;
+                // Same event, counted again for the coverage line's numerator -- which,
+                // unlike this member, is reported against a denominator and a triangle
+                // weight. See the g_bakedSection* block above RegisterGpuModel.
+                ++g_bakedSectionsUntextured;
+                g_bakedSectionTrisUntextured += sec.index_count / 3;
                 // Scope guard (MAT-050), the twin of DrawSectionTL's: only a section that
                 // NAMED an RVMAT is corrected by default. `sec2.surfMat` is null exactly when
                 // `rvmat` above degraded to "<none>".
