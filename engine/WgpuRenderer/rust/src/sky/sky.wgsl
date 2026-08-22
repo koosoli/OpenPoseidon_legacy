@@ -786,6 +786,11 @@ struct CloudResult {
 // `bg*trans + inscatter` if it wants a colour. `max_dist` bounds the march at the scene surface (for
 // the depth-aware over-scene composite) — a cloud beyond the terrain along this ray is not marched, a
 // cloud in front of it accumulates and occludes it. `steps`/`light_steps` trade quality for cost.
+// Transmittance at which the deck is called opaque: the march stops, and the accumulated
+// transmittance is rescaled so this value maps to exactly 0 (see the end of march_clouds).
+// Both halves must use the same number or the rescale would clip a range the march still visits.
+const CLOUD_TRANS_CUT: f32 = 0.02;
+
 fn march_clouds(
     pos: vec3<f32>,
     dir: vec3<f32>,
@@ -862,7 +867,7 @@ fn march_clouds(
     var trans = 1.0;
     var t = t0 + dt * jitter;
     for (var i = 0.0; i < n; i = i + 1.0) {
-        if (trans < 0.01) {
+        if (trans < CLOUD_TRANS_CUT) {
             break;
         }
         let p = pos + dir * t;
@@ -904,7 +909,14 @@ fn march_clouds(
     // The far dissolve is folded into the march itself (far_fade on density), so the raw accumulated
     // (inscatter, transmittance) already dissolves toward the distance cap — no post fade needed.
     res.inscatter = col;
-    res.trans = trans;
+    // The early-out above LEFT transmittance at the cut instead of driving it to zero, so a deck
+    // that is opaque to the eye still passed ~1% of whatever was behind it. That is harmless for a
+    // background of ordinary radiance and catastrophic for the sun disc, whose radiance is the solar
+    // irradiance divided by the solar solid angle — about 1.5e4x the surrounding sky. One per cent
+    // of that is still ~150x the sky, i.e. a crisp white disc through solid overcast, which is
+    // exactly what the owner reported. Rescale so the cut IS zero: continuous, monotonic, and
+    // unchanged anywhere near trans = 1.
+    res.trans = max((trans - CLOUD_TRANS_CUT) / (1.0 - CLOUD_TRANS_CUT), 0.0);
     return res;
 }
 
@@ -1318,6 +1330,24 @@ fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
     return tint * (brdf + earthshine) * edge * scale * moon_t;
 }
 
+// ---- Cloud cover over a celestial disc ---------------------------------------
+// The cloud composite that runs after geometry attenuates everything the sky pass drew by the view
+// ray's transmittance, ONCE. For a background of ordinary radiance that is the whole story. The sun
+// and moon discs are not ordinary: the sun's radiance is its irradiance divided by its solid angle,
+// ~1.5e4x the surrounding sky, so even a deck that passes a few per cent leaves a disc that still
+// dominates the frame -- and it stays a SHARP disc, which no amount of cloud in front of it should
+// ever allow. Cloud destroys the coherent disc long before it stops passing light.
+//
+// So the discs are attenuated by the SQUARE of their own ray's cloud transmittance here, on top of
+// the composite's linear pass: cubic overall. A thin veil still lets a bright, hazy sun through; a
+// rain deck does not. Marched at full resolution for the disc pixels only -- the caller gates on
+// being inside a disc, which is a few hundred pixels, so the short march costs nothing measurable.
+fn disc_cloud_cover(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, bg: vec3<f32>) -> f32 {
+    let deck = march_clouds(pos, dir, sun, radiance, bg, 24.0, 2, 0.5, 1e12);
+    let both = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 1e12));
+    return clamp(both.trans, 0.0, 1.0);
+}
+
 @fragment
 fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let dir = normalize(in.ray_dir);
@@ -1340,6 +1370,16 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     if (ground.x <= 0.0) {
         let cos_sun = dot(dir, sun);
         let cos_radius = cos(sky.params.x);
+        // Is this pixel inside EITHER disc? Only then is the short cloud march below worth firing,
+        // and only then does anything in this block cost more than a dot product.
+        let moon_dir = normalize(sky.moon_dir.xyz);
+        let in_moon = sky.moon_params.w >= 0.5 &&
+                      dot(dir, moon_dir) > cos(max(sky.moon_params.x, 1.0e-4));
+        var disc_cover = 1.0;
+        if (cos_sun > cos_radius || in_moon) {
+            let t = disc_cloud_cover(pos, dir, sun, sky.sun_dir.w * sky.params.y, color);
+            disc_cover = t * t;
+        }
         if (cos_sun > cos_radius) {
             let sun_t = sample_transmittance(pos, sun);
             let edge = clamp((cos_sun - cos_radius) / (1.0 - cos_radius), 0.0, 1.0);
@@ -1352,12 +1392,12 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
             // the disc for visibility lowers its radiance so total power stays fixed.
             let solid_angle = 2.0 * PI * (1.0 - cos_radius);
             let disc = (sky.sun_dir.w * sky.params.y) / solid_angle;
-            color = color + disc * sun_t * limb;
+            color = color + disc * sun_t * limb * disc_cover;
         }
         // Moon disc, same gate: only where the view ray misses the planet, and drawn here in
         // fs_sky (not in sky_radiance) so the depth-aware cloud composite that runs after
         // geometry occludes it exactly as it occludes the sun.
-        color = color + moon_disc(dir, pos);
+        color = color + moon_disc(dir, pos) * disc_cover;
     }
 
     // Linear HDR path: hand linear radiance to the tonemap resolve. LDR-direct: no resolve runs,

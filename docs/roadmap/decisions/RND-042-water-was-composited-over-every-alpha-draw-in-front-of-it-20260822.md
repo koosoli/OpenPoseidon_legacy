@@ -68,3 +68,34 @@ Everon, `--test-world-freefly 600 600 25 45 -12`, noon, `POSEIDON_TEST_RAIN=1`:
   hook off: smooth swell, no small-scale structure. The A/B is unambiguous.
 - `docs/roadmap/evidence/rain-water-order-20260822-original-training-capture.png` —
   the pass split does not regress a normal frame.
+
+## Addendum — the sun and moon really were in front of the clouds
+
+Asked to check this, the code reading said no: the sky pass draws the discs, the
+depth-aware cloud composite runs after geometry and blends `One / SrcAlpha` with
+`SrcAlpha = cloud.trans`, so clouds attenuate them. The owner said otherwise, and
+the owner was right. A capture at Everon (600, 600), hour 9, with
+`POSEIDON_TEST_RAIN=1` — which now forces the overcast as well as the density, so
+there is a real deck to test against — shows a **sharp white solar disc through a
+full rain deck** (`sun-overcast-before.png`).
+
+Two causes, both arithmetic.
+
+1. `march_clouds` early-outs at `trans < 0.01` and **returned that value**. So the
+   deck's floor transmittance was 1%, never 0.
+2. The sun disc's radiance is the solar irradiance divided by the solar solid
+   angle — about **1.5e4x** the surrounding sky, which is what makes it read as a
+   disc under HDR + bloom. One per cent of 1.5e4 is still 150x the sky. The deck
+   was attenuating it correctly and it did not matter.
+
+Fixed at both ends. The march rescales its accumulated transmittance so the cut
+maps to exactly zero (continuous, monotonic, unchanged near 1), and the discs are
+additionally attenuated by the SQUARE of their own ray's cloud transmittance —
+cubic once the composite's own linear pass is counted. That is not a fudge: cloud
+destroys the *coherent* disc long before it stops passing light, so a thin veil
+still gives a bright hazy sun while a rain deck gives a diffuse glow and no disc.
+The extra march runs only for pixels inside a disc — a few hundred — so it costs
+nothing measurable.
+
+`sun-overcast-after.png` is the same camera, same weather: a soft brightening
+where the sun is, no disc, and the clear-sky gap at the frame's edge unchanged.

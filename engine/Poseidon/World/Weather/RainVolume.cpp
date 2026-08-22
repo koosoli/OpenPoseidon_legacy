@@ -10,6 +10,7 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
+#include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 
 #include <algorithm>
@@ -602,6 +603,20 @@ void RainSystem::UpdateAndDraw()
         {
             nextForce = Glob.time + 1.0f;
             GLandscape->SetRain(1.0f, 1.0f);
+            // Rain implies cloud. Without this the forced density produced a
+            // downpour out of a clear blue sky, which is not a frame anything
+            // downstream of the weather can be judged against -- cloud shadows,
+            // the sky's own transmittance, sun and moon occlusion all read
+            // overcast, not rain density.
+            //
+            // Through GWorld, NOT Landscape::SetOvercast: World re-applies its
+            // own weather state to the landscape every frame, so a direct
+            // landscape write is silently reverted before the next draw (it
+            // measured as cloudCover=0.23 with the overcast pinned to 1).
+            if (GWorld != nullptr && GWorld->GetOvercast() < 0.99f)
+            {
+                GWorld->SetWeather(1.0f, GWorld->GetFog(), 2.0f);
+            }
         }
     }
 
