@@ -3859,57 +3859,24 @@ impl Renderer {
                 }
             }
 
-            // The rest of the plan's world draws, now that water is down. This is
-            // where Scene::ObjectsDrawn's output lands: the depth-sorted
-            // transparent objects, the cloudlets, the rain streaks. They blend
-            // against the sea instead of being painted over by it. Colour and
-            // depth both LOAD -- the pass writes no new opaque geometry in
-            // practice, but nothing here forbids it either, and loading is what
-            // makes the two sub-passes one logical pass split in the middle.
-            if has_post_water_3d {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some(&format!("{seg_label}_post_water")),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &target,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: seg_depth,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        }),
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed);
-                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
-                    let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
-                    self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
-                }
-                drop(pass);
-            }
-            if time_segment {
-                self.gpu_timers
-                    .end(&mut encoder, TimerRegion::ObjColorSegment);
-                self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
-            }
-
             // Depth-aware over-scene clouds (plan Phase 1): march at LOW RES bounded by the resolved
             // scene depth, then composite over the lit scene (premultiplied blend) so clouds occlude
             // terrain and envelop the camera when flown through — not a sky-only element. World segment
             // only, HDR + coverage>0; after water so it composites over water too.
+            //
+            // AND BEFORE THE TRANSPARENT REPLAY BELOW, which is the same lesson the water pass
+            // taught one layer down. This composite is depth-aware, and alpha-BLENDED draws write no
+            // depth: for a pixel covered by an iron railing standing against the sky, the resolved
+            // depth is the sky, so the march runs the full distance and `dst * trans + inscatter`
+            // paints cloud straight over the railing. The owner caught it on a Nogova pier, where
+            // every fence post above the horizon was eaten by the cloud deck behind it.
+            //
+            // Compositing here instead matches the engine's own order exactly: Landscape::Draw
+            // submits terrain, water and DrawClouds, the queues are flushed, and only then does
+            // Scene::ObjectsDrawn emit the sorted transparents. Clouds are background. The trade is
+            // that a cloud NEARER than a transparent no longer occludes it — which in practice means
+            // flying a cloud between the eye and a fence ten metres away, against every near
+            // transparent in the game being erased by the sky behind it.
             if start == 0
                 && !resolved
                 && sky_drawn
@@ -3953,6 +3920,53 @@ impl Renderer {
                     drop(cpass);
                     encoder.pop_debug_group();
                 }
+            }
+
+            // The rest of the plan's world draws, now that water and clouds are down.
+            // This is where Scene::ObjectsDrawn's output lands: the depth-sorted
+            // transparent objects, the cloudlets, the rain streaks. They blend
+            // against the sea and the sky instead of being painted over by both.
+            // Colour and depth both LOAD -- the pass writes no new opaque geometry
+            // in practice, but nothing here forbids it either, and loading is what
+            // makes the two sub-passes one logical pass split in the middle.
+            if has_post_water_3d {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("{seg_label}_post_water")),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: seg_depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed);
+                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
+                    let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                    self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
+                }
+                drop(pass);
+            }
+            if time_segment {
+                self.gpu_timers
+                    .end(&mut encoder, TimerRegion::ObjColorSegment);
+                self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
             }
 
             // 2D sub-pass: the overlays, over the fogged colour, loading the 3D depth +

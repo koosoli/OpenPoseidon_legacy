@@ -1,0 +1,465 @@
+{
+	"schema_version":	1,
+	"renderer":	"WGPU (Rust / wgpu)",
+	"runtime":	"Wgpu",
+	"gpu_timestamps_available":	true,
+	"gpu_timings_ms":	[{
+			"name":	"Spectrum init",
+			"milliseconds":	-1,
+			"index":	0,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Spectrum evolve",
+			"milliseconds":	0.11468800157308578,
+			"index":	1,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"FFT horizontal",
+			"milliseconds":	0.53145599365234375,
+			"index":	2,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"FFT vertical",
+			"milliseconds":	0.20582400262355804,
+			"index":	3,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"FFT compose",
+			"milliseconds":	0.1157120019197464,
+			"index":	4,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Interaction (inject+propagate)",
+			"milliseconds":	0.0092160003259778,
+			"index":	5,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Foam update",
+			"milliseconds":	0.17305600643157959,
+			"index":	6,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Whitewater",
+			"milliseconds":	-1,
+			"index":	7,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Planar: sky",
+			"milliseconds":	-1,
+			"index":	8,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Planar: terrain",
+			"milliseconds":	-1,
+			"index":	9,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Planar: objects",
+			"milliseconds":	-1,
+			"index":	10,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Planar: clouds",
+			"milliseconds":	-1,
+			"index":	11,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Planar: mips",
+			"milliseconds":	-1,
+			"index":	12,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Water SSR",
+			"milliseconds":	-1,
+			"index":	13,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Water refraction",
+			"milliseconds":	-1,
+			"index":	14,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Water draw",
+			"milliseconds":	0.77414399385452271,
+			"index":	15,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Underwater froxel",
+			"milliseconds":	-1,
+			"index":	16,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Underwater composite",
+			"milliseconds":	-1,
+			"index":	17,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Caustics",
+			"milliseconds":	-1,
+			"index":	18,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Place near (compute)",
+			"milliseconds":	0.0716800019145012,
+			"index":	19,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Place mid (compute)",
+			"milliseconds":	0.15462400019168854,
+			"index":	20,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Place far (compute)",
+			"milliseconds":	0.011264000087976456,
+			"index":	21,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Grass prepass",
+			"milliseconds":	2.0869119167327881,
+			"index":	22,
+			"contained_by":	40,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Grass colour",
+			"milliseconds":	4.2721281051635742,
+			"index":	23,
+			"contained_by":	41,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Grass shadow",
+			"milliseconds":	0.889855980873108,
+			"index":	24,
+			"contained_by":	42,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"GPU frame total",
+			"milliseconds":	26.70591926574707,
+			"index":	25,
+			"contained_by":	25,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Interior sky: cull",
+			"milliseconds":	0.59391999244689941,
+			"index":	26,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Interior sky: depth maps",
+			"milliseconds":	0.14847999811172485,
+			"index":	27,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"AO prep (resolve + mips)",
+			"milliseconds":	0.16383999586105347,
+			"index":	28,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"AO horizon march",
+			"milliseconds":	1.7295360565185547,
+			"index":	29,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"AO bilateral blur",
+			"milliseconds":	1.0055680274963379,
+			"index":	30,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Terrain: depth+normal prepass",
+			"milliseconds":	0.15052799880504608,
+			"index":	31,
+			"contained_by":	40,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Terrain: main colour",
+			"milliseconds":	1.1192320585250854,
+			"index":	32,
+			"contained_by":	41,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Objects: cull (main)",
+			"milliseconds":	0.0860159993171692,
+			"index":	33,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.0032999999821186066
+		}, {
+			"name":	"Objects: cull (shadow cascades)",
+			"milliseconds":	0.32358399033546448,
+			"index":	34,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.010300000198185444
+		}, {
+			"name":	"Objects: Hi-Z + occlusion cull",
+			"milliseconds":	0.42086398601531982,
+			"index":	35,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.010900000110268593
+		}, {
+			"name":	"Objects: prepass solid",
+			"milliseconds":	0.013311999849975109,
+			"index":	36,
+			"contained_by":	40,
+			"container":	false,
+			"cpu_milliseconds":	0.00020000000949949026
+		}, {
+			"name":	"Objects: prepass alpha-test",
+			"milliseconds":	0.014336000196635723,
+			"index":	37,
+			"contained_by":	40,
+			"container":	false,
+			"cpu_milliseconds":	0.00010000000474974513
+		}, {
+			"name":	"Objects: colour solid",
+			"milliseconds":	0.17919999361038208,
+			"index":	38,
+			"contained_by":	41,
+			"container":	false,
+			"cpu_milliseconds":	0.00030000001424923539
+		}, {
+			"name":	"Objects: colour alpha-test",
+			"milliseconds":	0.15462400019168854,
+			"index":	39,
+			"contained_by":	41,
+			"container":	false,
+			"cpu_milliseconds":	0.00010000000474974513
+		}, {
+			"name":	"[container] Prepass pass total",
+			"milliseconds":	2.3459839820861816,
+			"index":	40,
+			"contained_by":	-1,
+			"container":	true,
+			"cpu_milliseconds":	0.024599999189376831
+		}, {
+			"name":	"[container] 3D colour sub-pass",
+			"milliseconds":	9.6706562042236328,
+			"index":	41,
+			"contained_by":	-1,
+			"container":	true,
+			"cpu_milliseconds":	0.045699998736381531
+		}, {
+			"name":	"Shadow cascade 0",
+			"milliseconds":	0.95129597187042236,
+			"index":	42,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.031200001016259193
+		}, {
+			"name":	"Shadow cascade 1",
+			"milliseconds":	0.95539200305938721,
+			"index":	43,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.017799999564886093
+		}, {
+			"name":	"Shadow cascade 2",
+			"milliseconds":	1.31276798248291,
+			"index":	44,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.017599999904632568
+		}, {
+			"name":	"Shadow cascade 3",
+			"milliseconds":	0.94310402870178223,
+			"index":	45,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	0.024599999189376831
+		}, {
+			"name":	"Far tier: cull (compute)",
+			"milliseconds":	-1,
+			"index":	46,
+			"contained_by":	-1,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}, {
+			"name":	"Far tier: proxy draw",
+			"milliseconds":	-1,
+			"index":	47,
+			"contained_by":	41,
+			"container":	false,
+			"cpu_milliseconds":	-1
+		}],
+	"objects":	{
+		"valid":	true,
+		"registered_instances":	98692,
+		"main_instances":	1248,
+		"main_records":	1752,
+		"main_draws":	158,
+		"main_tris":	17643,
+		"color_instances":	285,
+		"color_records":	464,
+		"color_draws":	108,
+		"color_tris":	6478,
+		"color_draws_solid":	71,
+		"color_draws_alpha":	37,
+		"color_tris_solid":	2654,
+		"color_tris_alpha":	3824,
+		"direct_calls":	319,
+		"direct_indirect_calls":	111,
+		"direct_instances":	319,
+		"direct_tris":	15672,
+		"shadow_cascades":	[{
+				"cascade":	0,
+				"instances":	16,
+				"draws":	22,
+				"tris":	1388
+			}, {
+				"cascade":	1,
+				"instances":	105,
+				"draws":	105,
+				"tris":	5646
+			}, {
+				"cascade":	2,
+				"instances":	362,
+				"draws":	152,
+				"tris":	11376
+			}, {
+				"cascade":	3,
+				"instances":	1920,
+				"draws":	196,
+				"tris":	33278
+			}],
+		"main_lod_histogram":	[220, 629, 283, 108, 7, 1, 0, 0]
+	},
+	"grass":	{
+		"near_instances":	28991,
+		"mid_instances":	102155,
+		"far_instances":	0,
+		"near_candidates":	270400,
+		"mid_candidates":	732736,
+		"far_candidates":	147456,
+		"near_vertices":	10436760,
+		"mid_vertices":	11032740,
+		"far_vertices":	0
+	},
+	"cpu_frame_phases_ms":	{
+		"sampled_frames":	11,
+		"avg_fps":	1.6057161092758179,
+		"frame_avg":	622.77508544921875,
+		"frame_p95":	5516.3232421875,
+		"frame_max":	5516.3232421875,
+		"phases":	{
+			"setup":	{
+				"avg":	0.56789088249206543,
+				"p95":	2.94510006904602,
+				"max":	2.94510006904602
+			},
+			"drw:init":	{
+				"avg":	0.014072725549340248,
+				"p95":	0.027899999171495438,
+				"max":	0.027899999171495438
+			},
+			"drw:prep":	{
+				"avg":	0.44879999756813049,
+				"p95":	0.73909997940063477,
+				"max":	0.73909997940063477
+			},
+			"land:gnd":	{
+				"avg":	477.6578369140625,
+				"p95":	5249.76904296875,
+				"max":	5249.76904296875
+			},
+			"land:obj":	{
+				"avg":	3.5730545520782471,
+				"p95":	33.6318016052246,
+				"max":	33.6318016052246
+			},
+			"drw:land":	{
+				"avg":	1.5506000518798828,
+				"p95":	11.194600105285645,
+				"max":	11.194600105285645
+			},
+			"drw:obj":	{
+				"avg":	1.3679817914962769,
+				"p95":	14.958900451660156,
+				"max":	14.958900451660156
+			},
+			"drw:post":	{
+				"avg":	0.0067181815393269062,
+				"p95":	0.060499999672174454,
+				"max":	0.060499999672174454
+			},
+			"hud":	{
+				"avg":	0.817690908908844,
+				"p95":	5.46810007095337,
+				"max":	5.46810007095337
+			},
+			"ai+veh":	{
+				"avg":	2.7705910205841064,
+				"p95":	9.61699962615967,
+				"max":	9.61699962615967
+			},
+			"sound":	{
+				"avg":	0.5266273021697998,
+				"p95":	2.0425000190734863,
+				"max":	2.0425000190734863
+			},
+			"swap":	{
+				"avg":	133.47303771972656,
+				"p95":	988.808349609375,
+				"max":	988.808349609375
+			}
+		}
+	}
+}

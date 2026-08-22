@@ -99,3 +99,30 @@ nothing measurable.
 
 `sun-overcast-after.png` is the same camera, same weather: a soft brightening
 where the sun is, no disc, and the clear-sky gap at the frame's edge unchanged.
+
+## Addendum 2 — and so were the clouds, one layer up
+
+Same bug, same cause, different pass. The owner's repro: a Nogova pier,
+`[4100.15, 3348.03, 7.06] az 253.3 el 5.0`. Every ornamental post of the iron
+railing that stood against the sky was eaten by the cloud deck behind it; the
+posts below the horizon, against the sea and the far shore, were solid.
+
+The cloud composite is depth-aware — `fs_cloud` bounds its march at the resolved
+scene depth so a cloud beyond a hill is not marched and a cloud in front of one
+occludes it. Alpha-BLENDED draws write no depth. So for a pixel covered by the
+railing against the sky, the resolved depth IS the sky, the march runs the full
+distance, and `dst * trans + inscatter` paints cloud straight over the railing.
+
+The composite now runs BEFORE the post-water transparent sub-pass rather than
+after it, which is the engine's own order: `Landscape::Draw` submits terrain,
+water and `DrawClouds`, the queues flush, and only then does
+`Scene::ObjectsDrawn` emit the sorted transparents. Clouds are background.
+
+The trade is explicit: a cloud NEARER than a transparent no longer occludes it.
+In practice that means flying a cloud between the eye and a fence ten metres
+away — against every near transparent in the game being erased by the sky behind
+it. Not a close call.
+
+Evidence: `nogova-pier-after.png` (the owner's camera, railing intact against the
+deck) and `cloud-order-20260822-original-training-capture.png` (a normal frame,
+unregressed — clouds still occlude terrain and the world renders).
