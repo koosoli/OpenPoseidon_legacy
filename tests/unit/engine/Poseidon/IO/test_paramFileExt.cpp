@@ -88,3 +88,42 @@ TEST_CASE("SelectMenuInitWorld falls back to demo world when configured init ter
         REQUIRE(strcmp((const char*)r, "Intro") == 0);
     }
 }
+
+// Regression: proxy model names carrying an addon path (Arma 2 / DayZ / Reforger-era data)
+// were given the OFP model folder as a prefix -- `dz\structures\furniture\beds\postel_panelak1`
+// became `data3d\dz\structures\...`, which resolves to nothing. Proxies are how those houses
+// carry their furniture, so the shell of every building rendered and the inside was empty, with
+// nothing but a FileCache warning to say so. `data3d\` is flat, so a name that already has a
+// subdirectory in it is by construction not a name in that folder.
+TEST_CASE("GetShapeName does not prefix addon-rooted model paths", "[io][paramFileExt]")
+{
+    SECTION("bare OFP model name still gets the model folder and the extension")
+    {
+        RString r = GetShapeName("flag");
+        REQUIRE(strcmp((const char*)r, "data3d\\flag.p3d") == 0);
+    }
+
+    SECTION("bare name that already has the extension keeps it")
+    {
+        RString r = GetShapeName("blok.p3d");
+        REQUIRE(strcmp((const char*)r, "data3d\\blok.p3d") == 0);
+    }
+
+    SECTION("addon path with no leading slash is left rooted where it is")
+    {
+        RString r = GetShapeName("dz\\structures\\furniture\\beds\\postel_panelak1.p3d");
+        REQUIRE(strcmp((const char*)r, "dz\\structures\\furniture\\beds\\postel_panelak1.p3d") == 0);
+    }
+
+    SECTION("forward slashes count as a path just as backslashes do")
+    {
+        RString r = GetShapeName("ca/buildings/misc/bed");
+        REQUIRE(strcmp((const char*)r, "ca/buildings/misc/bed.p3d") == 0);
+    }
+
+    SECTION("a leading slash still means fully qualified, as it always did")
+    {
+        RString r = GetShapeName("\\dz\\structures\\proxy\\tent_table.p3d");
+        REQUIRE(strcmp((const char*)r, "dz\\structures\\proxy\\tent_table.p3d") == 0);
+    }
+}

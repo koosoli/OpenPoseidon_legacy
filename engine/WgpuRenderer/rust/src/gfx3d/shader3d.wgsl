@@ -655,9 +655,25 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     }
     var out_a = base.a;
     if (a2c > 0.5) {
-        out_a = a2c_coverage(cut_a, alpha_ref);
-        if (out_a <= 0.0) {
-            discard;
+        // OPAQUE sections take full coverage and must not reach the coverage sharpener at all.
+        // With alpha_to_coverage_enabled the fragment's alpha IS its sample mask, so any value
+        // below 1 punches holes in solid geometry. An opaque section has alpha_ref 0, and
+        // a2c_coverage(a, 0) is clamp(a / fwidth(a) + 0.5, 0, 1) -- which is 1 for a texture
+        // whose alpha really is 1 everywhere, but is NOT 1 for the many legacy textures that
+        // carry a non-coverage alpha channel.
+        //
+        // gpu_driven.wgsl -- this shader's retained twin, same inputs, same intent -- has the
+        // identical guard. The two draw the same sections depending only on whether a model
+        // registered for GPU-driven rendering, so any divergence between them is a bug by
+        // construction: the same geometry would render differently for a reason that has
+        // nothing to do with how it should look.
+        if (alpha_ref > 0.0) {
+            out_a = a2c_coverage(cut_a, alpha_ref);
+            if (out_a <= 0.0) {
+                discard;
+            }
+        } else {
+            out_a = 1.0;
         }
     } else if (cut_a < alpha_ref) {
         discard;

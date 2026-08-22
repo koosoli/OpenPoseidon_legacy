@@ -8069,6 +8069,41 @@ fn sky_specular_reallocates_the_ambient_and_cannot_add_energy() {
     );
 }
 
+// shader3d.wgsl and gpu_driven.wgsl draw the SAME sections -- which one runs depends only on
+// whether a model registered for GPU-driven rendering -- so a difference between them renders the
+// same geometry two ways for a reason unrelated to how it should look.
+//
+// This pins the one that actually diverged. Under alpha_to_coverage the fragment's alpha IS its
+// sample mask, so an OPAQUE section (alpha_ref 0) must be forced to full coverage and must not
+// reach the sharpener: a2c_coverage(a, 0) is not 1 for the many legacy textures whose alpha
+// channel carries something other than coverage, and the result is holes punched in solid
+// geometry. gpu_driven.wgsl had the guard from the start; shader3d.wgsl did not, and nothing
+// noticed because both compile and both look plausible.
+#[test]
+fn both_object_shaders_force_full_coverage_on_opaque_sections() {
+    for (name, src, aref) in [
+        ("shader3d.wgsl", include_str!("shader3d.wgsl"), "alpha_ref"),
+        (
+            "gpu_driven.wgsl",
+            include_str!("gpu_driven.wgsl"),
+            "sm.alpha_ref",
+        ),
+    ] {
+        let at = src
+            .find("if (a2c > 0.5) {")
+            .unwrap_or_else(|| panic!("{name} has no alpha-to-coverage branch"));
+        let window = &src[at..(at + 2400).min(src.len())];
+        assert!(
+            window.contains(&format!("if ({aref} > 0.0) {{")),
+            "{name} must gate the coverage sharpener on a cutout alpha reference"
+        );
+        assert!(
+            window.contains("out_a = 1.0;"),
+            "{name} must force full coverage on opaque sections; without it              alpha_to_coverage turns a non-coverage alpha channel into holes"
+        );
+    }
+}
+
 // The knobs must reach the GPU and be announced. `relief` is the LAST lane of the camera UBO and
 // the two lanes before it are addressed BACKWARDS from bind_size, so appending it moved both —
 // exactly the kind of edit that silently writes the water animation over the material-debug lane

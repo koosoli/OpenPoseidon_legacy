@@ -165,6 +165,29 @@ RString GetDefaultName(RString baseName, const char* dDir, const char* dExt)
 
 RString GetShapeName(RString baseName)
 {
+    // MODEL paths are the one default-directory case where a name carrying a SUBDIRECTORY must
+    // not be prefixed. `data3d\` is the OFP-era model folder and it is FLAT: every model that
+    // legitimately lives there is `data3d\<name>.p3d`. Later BI games root their model paths at
+    // the addon instead (`dz\structures\furniture\beds\postel_panelak1.p3d`), and those names
+    // reach here from ODOL PROXY records, which -- unlike config `model=` entries -- are not
+    // always written with a leading backslash. Prefixing one produced
+    // `data3d\dz\structures\...`, which resolves to nothing.
+    //
+    // The failure was silent and it is what "the buildings are empty inside" looks like: proxies
+    // are how an Arma 2 / DayZ house carries its furniture, so every bed, chair, cupboard, ladder
+    // and interior sign attached this way vanished while the shell of the building rendered
+    // perfectly. Measured across this repo's captured logs: 318 distinct data3d lookups, of which
+    // the 303 flat ones all resolved and all 15 nested ones were addon paths that all failed.
+    //
+    // Deliberately NOT done in GetDefaultName: the sound path relies on the opposite behaviour
+    // (a mission's `sound/s01r01.ogg` is relative to the mission and must keep its prefix), and
+    // the reasoning above is about the model folder's flatness specifically.
+    const char* name = baseName;
+    if (name && name[0] && name[0] != '\\' && name[0] != '/' &&
+        (strchr(name, '\\') != nullptr || strchr(name, '/') != nullptr))
+    {
+        return GetDefaultName(baseName, "", ".p3d");
+    }
     return GetDefaultName(baseName, "data3d\\", ".p3d");
 }
 RString GetAnimationName(RString baseName)
