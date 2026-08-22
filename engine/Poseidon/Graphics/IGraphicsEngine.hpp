@@ -88,6 +88,20 @@ class IGraphicsEngine
     virtual void DrawDecal(Vector3Par pos, float rhw, float sizeX, float sizeY, PackedColor col, const MipInfo& mip,
                            int specFlags) = 0;
 
+    /// Screen-space textured quad stretched along an explicit screen-space
+    /// direction (dirX, dirY in the same coordinate system as `pos`; length is
+    /// 2*sizeY along it, width 2*sizeX across it). DrawDecal is axis-aligned,
+    /// which is why wind-leaning rain streaks cannot be drawn with it. The
+    /// default DEGRADES to the axis-aligned call rather than doing nothing --
+    /// an inherited-empty body is exactly how the wgpu decal gap of WTR-002
+    /// hid for months behind healthy submission counters.
+    virtual void DrawDecalRotated(Vector3Par pos, float rhw, float sizeX, float sizeY, PackedColor col,
+                                  const MipInfo& mip, int specFlags, float /*dirX*/, float /*dirY*/)
+    {
+        const float m = sizeX > sizeY ? sizeX : sizeY;
+        DrawDecal(pos, rhw, m, m, col, mip, specFlags);
+    }
+
     virtual void Draw2D(const Draw2DPars& pars, const Rect2DAbs& rect, const Rect2DAbs& clip) = 0;
     virtual void DrawPoly(const MipInfo& mip, const Vertex2DAbs* vertices, int nVertices, const Rect2DAbs& clip,
                           int specFlags) = 0;

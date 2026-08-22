@@ -106,9 +106,6 @@ struct RainStats
 /// test without constructing a world or renderer.
 Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse);
 Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responsePerSecond, float deltaT);
-/// How many overlapping sprites render one drop's streak: 1 vertical, more as
-/// the lean from wind steepens. Pure so the look has a focused test.
-int RainTrailBeadCount(float horizontalSpeed, float totalSpeed);
 
 class RainSystem
 {

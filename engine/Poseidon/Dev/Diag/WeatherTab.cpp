@@ -386,6 +386,43 @@ void DrawRainSection()
 {
     ImGui::SeparatorText("Rain");
 
+    // Master switch. One checkbox that produces REAL rain -- forcing the
+    // weather overcast up (rain density follows overcast) and switching the
+    // renderer to particle rain -- instead of asking anyone to reconcile a
+    // weather slider in another section with the mode radio below. Turning it
+    // off restores exactly what was there before.
+    static bool rainForced = false;
+    static float savedOvercast = -1.0f;
+    static RainMode savedMode = RainLegacy;
+    const bool wasOn = rainForced;
+    if (ImGui::Checkbox("Rain ON (forces overcast)", &rainForced))
+    {
+        if (rainForced && !wasOn)
+        {
+            savedOvercast = GWorld != nullptr ? GWorld->GetOvercast() : -1.0f;
+            savedMode = GRain.Mode();
+            GRain.SetMode(RainParticle);
+            if (GWorld != nullptr)
+            {
+                GWorld->SetWeather(0.95f, GWorld->GetFog(), 5.0f);
+            }
+        }
+        else if (!rainForced && wasOn)
+        {
+            GRain.SetMode(savedMode);
+            GRain.ClearParticles();
+            if (GWorld != nullptr && savedOvercast >= 0.0f)
+            {
+                GWorld->SetWeather(savedOvercast, GWorld->GetFog(), 5.0f);
+            }
+        }
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("ON: overcast 0.95 (transition 5 s) + particle rain.\n"
+                          "OFF: restores the overcast and rain mode you had.");
+    }
+
     struct ModeEntry
     {
         const char* label;
@@ -431,7 +468,7 @@ void DrawRainSection()
         bool changed = false;
 
         ImGui::SeparatorText("Field");
-        if (ImGui::SliderInt("Target drops", &params.targetDrops, 100, 6000))
+        if (ImGui::SliderInt("Target drops", &params.targetDrops, 100, 30000))
         {
             changed = true;
         }
@@ -439,7 +476,7 @@ void DrawRainSection()
         {
             ImGui::SetTooltip("Steady-state drop count the spawner aims for.");
         }
-        if (ImGui::SliderInt("Max drops", &params.maxDrops, 500, 8000))
+        if (ImGui::SliderInt("Max drops", &params.maxDrops, 500, 40000))
         {
             changed = true;
         }
@@ -459,6 +496,47 @@ void DrawRainSection()
         {
             ImGui::SetTooltip("-1 follows live weather; 0..1 pins particle spawn density.\n"
                               "Benchmark presets use 1.0 so runs are repeatable.");
+        }
+
+        // One-click intensity presets. The sliders above can do all of this,
+        // but "more rain" should not be a hunt: each preset pins the weather
+        // density to full and sizes the pool for the look its name promises.
+        ImGui::TextDisabled("Intensity:");
+        if (ImGui::Button("Drizzle"))
+        {
+            params.targetDrops = 400;
+            params.maxDrops = 900;
+            params.densityOverride = 1.0f;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Rain"))
+        {
+            params.targetDrops = 1500;
+            params.maxDrops = 3000;
+            params.densityOverride = 1.0f;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Storm"))
+        {
+            params.targetDrops = 3500;
+            params.maxDrops = 5000;
+            params.densityOverride = 1.0f;
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Deluge"))
+        {
+            params.targetDrops = 12000;
+            params.maxDrops = 24000;
+            params.densityOverride = 1.0f;
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Pins particle density to 1 and sizes target/max drops:\n"
+                              "Drizzle 400/900, Rain 1500/3000, Storm 3500/5000, Deluge 12000/24000.");
         }
 
         ImGui::SeparatorText("Motion");

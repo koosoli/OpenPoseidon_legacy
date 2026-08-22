@@ -509,9 +509,12 @@ fn hg(cos_t: f32, g: f32) -> f32 {
 }
 
 // World-anchored sample position (metres) for a planet-centred `p`: camera world xz + the
-// camera-relative ray xz + the CPU-wrapped wind WORLD offset (cloud1.xy, bounded so the scaled
+// camera-relative ray xz MINUS the CPU-wrapped wind WORLD offset (cloud1.xy, bounded so the scaled
 // texture coord stays precise), with .y = altitude above the cloud base (bounded, unlike raw
 // planet-scale p.y). Returns (worldX, altitude, worldZ) — the 3 noise axes.
+// MINUS, not plus: the offset is the AIR's displacement (it grows along the wind), so the lookup
+// coordinate must move against it for a fixed noise feature to translate WITH the wind. Sampling
+// at +offset made every bank crawl upwind -- the field was steady and the sky moved backwards.
 // Deck thickness (m) — the vertical extent of ONE column's cloud profile, which is constant.
 fn cloud_thickness() -> f32 {
     return max(sky.cloud0.w - sky.cloud0.z, 1.0);
@@ -531,7 +534,7 @@ fn cloud_shell_top() -> f32 {
 }
 
 fn cloud_world(p: vec3<f32>) -> vec3<f32> {
-    let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+    let world_xz = sky.cam_pos.xz + p.xz - sky.cloud1.xy;
     let alt = length(p) - (sky.params.z + sky.cloud0.z);
     return vec3<f32>(world_xz.x, alt, world_xz.y);
 }
@@ -1179,9 +1182,10 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
             return res; // no intersection, or the opaque scene is nearer — terrain occludes it
         }
         let p = pos + dir * t;
-        // Same world anchoring and wind offset as the deck (cloud1.xy is CPU-wrapped for precision,
-        // so it must be used as given, not rescaled to fake a different wind speed aloft).
-        let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+        // Same world anchoring and MINUS wind offset as the deck (cloud1.xy is CPU-wrapped for
+        // precision, so it must be used as given, not rescaled to fake a different wind speed
+        // aloft; subtracted so the sheet drifts downwind like the deck does).
+        let world_xz = sky.cam_pos.xz + p.xz - sky.cloud1.xy;
         var d = cirrus_field(world_xz, 0.5, cover, cirrus_warp(world_xz), sh);
         d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
         if (d <= 0.001) {
@@ -1215,7 +1219,7 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     let dt = (t1 - t0) / f32(CIRRUS_STEPS);
     // ONE warp tap for the whole column (see cirrus_warp) — evaluated at the shell midpoint.
     let mid = pos + dir * (t0 + (t1 - t0) * 0.5);
-    let warp = cirrus_warp(sky.cam_pos.xz + mid.xz + sky.cloud1.xy);
+    let warp = cirrus_warp(sky.cam_pos.xz + mid.xz - sky.cloud1.xy);
     let sigma = cirrus_sigma(sh);
     var col = vec3<f32>(0.0);
     var trans = 1.0;
@@ -1225,7 +1229,7 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
         let h = (length(p) - r_bot) / sh.thick;
         let prof = cirrus_profile(h);
         if (prof > 0.0) {
-            let world_xz = sky.cam_pos.xz + p.xz + sky.cloud1.xy;
+            let world_xz = sky.cam_pos.xz + p.xz - sky.cloud1.xy;
             var d = cirrus_field(world_xz, h, cover, warp, sh) * prof;
             d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
             if (d > 0.0005) {

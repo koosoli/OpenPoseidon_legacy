@@ -52,20 +52,6 @@ Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responseP
     return current + (target - current) * alpha;
 }
 
-int RainTrailBeadCount(float horizontalSpeed, float totalSpeed)
-{
-    // horizontalSpeed / totalSpeed is the tangent of the lean angle off
-    // vertical: 0 is calm rain, 1 would be falling at 45 degrees. Below ~4.6
-    // degrees one axis-aligned sprite reads fine; past ~19 degrees two cannot
-    // carry the length the streak now has, so a third joins.
-    const float leanRatio = std::max(horizontalSpeed, 0.0f) / std::max(totalSpeed, 0.001f);
-    if (leanRatio < 0.08f)
-    {
-        return 1;
-    }
-    return leanRatio < 0.35f ? 2 : 3;
-}
-
 RainSystem::RainSystem()
 {
     if (RainTestHook())
@@ -375,58 +361,82 @@ void RainSystem::Draw()
     const float invTop = camera.InvTop();
     const Color tint(_params.red, _params.green, _params.blue, 1.0f);
 
-    // Drops: a short chain of overlapping sprites along the true velocity.
-    // DrawDecal itself is axis-aligned, which made the old streaks look vertical
-    // even while their centres moved downwind. Beads scale continuously with
-    // the lean angle (RainTrailBeadCount): calm rain keeps the single original
-    // submission, moderate wind draws two, strong wind three, so direction and
-    // wind speed stay legible without adding a rotated-decal API to every
-    // backend.
+    // Drops: one rotated textured quad per drop, stretched along the drop's
+    // true on-screen velocity. DrawDecal is axis-aligned -- the original
+    // streaks looked vertical even while their centres moved downwind, and
+    // the bead chains that followed were a workaround for exactly that. The
+    // streak lengthens with the lean so hard wind reads as hard wind.
     for (const Drop& drop : _drops)
     {
         if (drop.indoor)
         {
             continue; // the point of the feature: nothing falls indoors
         }
+        const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
+        const float speed = std::max(velocity.Size(), 0.001f);
+        const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
+        // The streak runs from this drop BACK along its true velocity, and its
+        // length grows with the lean so hard wind reads as hard wind. One
+        // rotated textured quad per drop -- direction on screen is the whole
+        // point, which an axis-aligned decal cannot carry (the bead chains
+        // this replaced were a workaround for exactly that).
+        const float leanRatio = horizontalSpeed / speed;
+        const float streakLength = _params.streakLength * (1.0f + leanRatio);
+        const Vector3 tailWorld = drop.position - velocity * (streakLength / speed);
+
+        Vector3 headView = toView * drop.position;
+        Vector3 tailView = toView * tailWorld;
+        if (headView.Z() < nearest || tailView.Z() < nearest)
+        {
+            continue;
+        }
+        const Vector3 midWorld = (drop.position + tailWorld) * 0.5f;
+        Vector3 midView = toView * midWorld;
+
+        const float invWHead = 1.0f / headView.Z();
+        const float invWTail = 1.0f / tailView.Z();
+        const float invWMid = 1.0f / midView.Z();
+
+        Vector3 headP = toView * drop.position;
+        headP[0] = project(0, 2) + project(0, 0) * headP[0] * invWHead;
+        headP[1] = project(1, 2) + project(1, 1) * headP[1] * invWHead;
+        Vector3 tailP = toView * tailWorld;
+        tailP[0] = project(0, 2) + project(0, 0) * tailP[0] * invWTail;
+        tailP[1] = project(1, 2) + project(1, 1) * tailP[1] * invWTail;
+
+        const float dirX = headP[0] - tailP[0];
+        const float dirY = headP[1] - tailP[1];
+        const float lengthPx = std::sqrt(dirX * dirX + dirY * dirY);
+        if (lengthPx < 0.5f)
+        {
+            continue;
+        }
+
+        // Depth from the midpoint, softened by the same fraction of the
+        // streak DrawDecal's callers use, so the quad still depth-tests
+        // against the world without z-fighting along its own length.
+        const float nearPos = floatMax(midView.Z() - std::min(streakLength * 0.10f, 0.10f), nearest);
+        const float invNearPos = 1.0f / nearPos;
+        Vector3 posp = toView * midWorld;
+        posp[0] = project(0, 2) + project(0, 0) * posp[0] * invWMid;
+        posp[1] = project(1, 2) + project(1, 1) * posp[1] * invWMid;
+        posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
+
+        const float halfWidthPx = std::fabs(project(0, 0)) * _params.streakWidth * invWMid * invLeft * 0.5f;
+        if (halfWidthPx <= 0.0f)
+        {
+            continue;
+        }
+
         const float distance2 = (drop.position - camera.Position()).SquareSize();
         const float fog = GScene->Fog8(distance2) * (1.0f / 255.0f);
         Color colour = tint;
         colour.SetA(_params.opacity * (1.0f - fog));
-        const Vector3 velocity(drop.velocityX, -drop.speed, drop.velocityZ);
-        const float speed = std::max(velocity.Size(), 0.001f);
-        const float horizontalSpeed = std::sqrt(Square(drop.velocityX) + Square(drop.velocityZ));
-        const int trailBeads = RainTrailBeadCount(horizontalSpeed, speed);
-        const Vector3 trailStep = trailBeads > 1 ? velocity * (-_params.streakLength / speed) : VZero;
-        bool submitted = false;
-        for (int bead = 0; bead < trailBeads; ++bead)
-        {
-            const Vector3 beadPosition = drop.position + trailStep * static_cast<float>(bead);
-            Vector3 posp = toView * beadPosition;
-            if (posp.Z() < nearest)
-            {
-                continue;
-            }
-            const float invW = 1.0f / posp[2];
-            posp[0] = project(0, 2) + project(0, 0) * posp[0] * invW;
-            posp[1] = project(1, 2) + project(1, 1) * posp[1] * invW;
-            const float beadLength = trailBeads > 1 ? _params.streakLength * 0.65f : _params.streakLength;
-            const float nearPos = floatMax(posp[2] - std::min(beadLength * 0.10f, 0.10f), nearest);
-            const float invNearPos = 1.0f / nearPos;
-            posp[2] = project(2, 2) + project.Position()[2] * invNearPos;
-            const float sizeX = +project(0, 0) * _params.streakWidth * invW * invLeft * 0.5f;
-            const float sizeY = -project(1, 1) * beadLength * invW * invTop * 0.5f;
-            if (sizeX * sizeY < 0.5f)
-            {
-                continue;
-            }
-            GEngine->DrawDecal(posp, invNearPos, sizeX, sizeY, PackedColor(colour), mip, kRainSpecials);
-            ++_stats.streakDecals;
-            submitted = true;
-        }
-        if (submitted)
-        {
-            ++_stats.drawnDrops;
-        }
+
+        GEngine->DrawDecalRotated(posp, invNearPos, halfWidthPx, lengthPx * 0.5f, PackedColor(colour), mip,
+                                  kRainSpecials, dirX, dirY);
+        ++_stats.streakDecals;
+        ++_stats.drawnDrops;
     }
 
     // Splashes: brief expanding faint discs at the ground.
@@ -514,13 +524,18 @@ void RainSystem::UpdateAndDraw()
     {
         _nextDiagTime = Glob.time + 1.0f;
         const WindSample* wind = GWind.IsActive() ? &GWind.Sample() : nullptr;
+        const float windSpeed = wind ? wind->speed : 0.0f;
+        // The lean the CURRENT drops should be showing, so a smoke log can be
+        // compared against what is on screen without guessing.
+        const float leanDeg =
+            std::atan2(windSpeed * _params.windResponse, std::max(_params.fallSpeed, 0.01f)) * (180.0f / 3.14159265f);
         LOG_INFO(World,
                  "RainVolume: drops={} drawn={} decals={} spawned={} roof={} indoor={} probe={} ground={} "
-                 "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us",
+                 "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg lean={:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us",
                  _stats.liveDrops, _stats.drawnDrops, _stats.streakDecals, _stats.spawned, _stats.roofKills,
                  _stats.indoorKills, _stats.probeKills, _stats.groundHits, _stats.nearbyBuildings,
-                 _stats.occlusionTests, wind ? wind->speed : 0.0f,
-                 wind ? wind->directionRad * (180.0f / 3.14159265f) : 0.0f, _stats.spawnMicroseconds,
+                 _stats.occlusionTests, windSpeed,
+                 wind ? wind->directionRad * (180.0f / 3.14159265f) : 0.0f, leanDeg, _stats.spawnMicroseconds,
                  _stats.occlusionMicroseconds, _stats.simulateMicroseconds, _stats.drawMicroseconds);
         ResetStats();
     }

@@ -207,6 +207,21 @@ must start with `-WorkingDirectory <game dir>` or the font check exits(1)
 before any world loads, and a staged test-mission folder must be named
 `<name>.<world>` (e.g. `.eden`) or `RunInitScript` never finds its init.sqs.
 
+Owner-feedback round (2026-08-22, second pass): three things came out of the
+first owner smoke. (1) CLOUDS DRIFTED UPWIND -- sky.wgsl sampled the cloud
+noise at `world + wind_offset` while the CPU integrates that offset along the
+wind, so every bank crawled against it; flipped to minus in `cloud_world` and
+all three cirrus sites, deck and shadows together so they stay aligned.
+(2) Rain streaks are now ONE ROTATED QUAD per drop along its projected screen
+velocity (`IGraphicsEngine::DrawDecalRotated`, implemented on wgpu; the base
+default degrades to an axis-aligned call rather than a silent nothing), which
+replaces the bead chains entirely -- decals == drops in the stats now. The
+streak lengthens with the lean. (3) Dev tools: a master "Rain ON" checkbox in
+the Weather tab forces overcast 0.95 + particle mode (restoring both on off),
+target/max drop sliders reach 30000/40000, and the intensity presets end at
+Deluge 12000/24000. `POSEIDON_TEST_RAIN` logs the target lean angle next to
+the wind vector.
+
 Smoke visual audit (2026-08-21): centre containment alone was insufficient for
 3-5 m soft billboards. The old radius clamp activated only after acquiring a
 collision plane, so a puff could overlap a ceiling while its centre was still

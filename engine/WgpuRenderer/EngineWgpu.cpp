@@ -7793,6 +7793,77 @@ void EngineWgpu::DrawDecal(Vector3Par screen, float rhw, float sizeX, float size
     AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), WGR_DEPTH_TEST, quad);
 }
 
+// Rotated sibling of DrawDecal: same immediate 2D batch, same depth policy
+// (TESTED against the world, never writing), but the quad's long axis follows
+// an explicit screen-space direction instead of the viewport axes. Rain
+// streaks are the consumer -- their direction on screen IS the wind, and a
+// bead chain only ever approximated it. The bounding box is clipped coarsely
+// (reject, no UV slide): the rain texture is uniform noise, so a partially
+// off-screen streak loses nothing by being dropped whole, unlike a puff whose
+// visible half must keep its texture scale.
+void EngineWgpu::DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
+                                  const MipInfo& mip, int specFlags, float dirX, float dirY)
+{
+    if (!mip.IsOK() || sizeX <= 0.0f || sizeY <= 0.0f)
+    {
+        return;
+    }
+
+    const float dirLen = std::sqrt(dirX * dirX + dirY * dirY);
+    if (dirLen < 1e-4f)
+    {
+        // No usable direction: the axis-aligned sprite is the honest answer.
+        DrawDecal(screen, rhw, sizeX, sizeY, color, mip, specFlags);
+        return;
+    }
+    const float ax = dirX / dirLen; // long axis, along the fall
+    const float ay = dirY / dirLen;
+    const float px = -ay; // perpendicular, across the streak
+    const float py = ax;
+
+    const float w = static_cast<float>(_w);
+    const float h = static_cast<float>(_h);
+    const float extX = std::fabs(ax) * sizeY + std::fabs(px) * sizeX;
+    const float extY = std::fabs(ay) * sizeY + std::fabs(py) * sizeX;
+    if (screen.X() + extX < 0.0f || screen.X() - extX > w || screen.Y() + extY < 0.0f || screen.Y() - extY > h)
+    {
+        return;
+    }
+
+    // Colour / fog split, identical to DrawDecal's contract.
+    TLVertex proto;
+    if (specFlags & IsAlphaFog)
+    {
+        proto.color = color;
+        proto.specular = PackedColor(0xff000000u);
+    }
+    else
+    {
+        proto.specular = PackedColor(0xff000000u - (color & 0xff000000u));
+        proto.color = PackedColor(color | 0xff000000u);
+    }
+    proto.rhw = rhw;
+    proto.pos[2] = screen.Z();
+
+    auto corner = [&](float along, float across, float u, float v)
+    {
+        TLVertex tl = proto;
+        tl.pos[0] = screen.X() + ax * along + px * across;
+        tl.pos[1] = screen.Y() + ay * along + py * across;
+        tl.t0.u = u;
+        tl.t0.v = v;
+        return MakeScreenVertex(tl);
+    };
+
+    const WgrVertex2D v0 = corner(-sizeY, -sizeX, 0.0f, 0.0f);
+    const WgrVertex2D v1 = corner(+sizeY, -sizeX, 1.0f, 0.0f);
+    const WgrVertex2D v2 = corner(+sizeY, +sizeX, 1.0f, 1.0f);
+    const WgrVertex2D v3 = corner(-sizeY, +sizeX, 0.0f, 1.0f);
+    const WgrVertex2D quad[6] = {v0, v1, v2, v0, v2, v3};
+
+    AppendTriangles(ResolveTexture(mip), BlendForSpec(specFlags), SamplerForSpec(specFlags), WGR_DEPTH_TEST, quad);
+}
+
 // 3D line primitive: Object::DrawLines projects the shape, then submits every edge
 // through here (Object.cpp, GEngine->DrawLine). It never goes through DrawSection, so
 // with the inherited EngineDummy body -- which is empty -- the whole world-space

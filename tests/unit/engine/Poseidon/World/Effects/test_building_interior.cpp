@@ -106,15 +106,3 @@ TEST_CASE("Particle rain follows wind speed and direction and relaxes after a gu
     REQUIRE(windIgnored.X() == Catch::Approx(0.0f));
     REQUIRE(windIgnored.Z() == Catch::Approx(0.0f));
 }
-
-TEST_CASE("Particle rain streak bead count scales with the wind lean angle",
-          "[Rain][Weather][Wind]")
-{
-    // leanRatio = horizontal / total speed = tan of the angle off vertical.
-    REQUIRE(RainTrailBeadCount(0.0f, 10.0f) == 1);  // dead vertical
-    REQUIRE(RainTrailBeadCount(0.5f, 10.0f) == 1);  // ~2.9 degrees: one sprite reads fine
-    REQUIRE(RainTrailBeadCount(1.0f, 10.0f) == 2);  // ~5.7 degrees: slant becomes visible
-    REQUIRE(RainTrailBeadCount(3.4f, 10.0f) == 2);  // 0.34 ratio, just under the strong threshold
-    REQUIRE(RainTrailBeadCount(5.0f, 10.0f) == 3);  // ~26.6 degrees: two beads cannot carry it
-    REQUIRE(RainTrailBeadCount(3.0f, 0.0f) == 3);   // degenerate total clamps, no divide by zero
-}

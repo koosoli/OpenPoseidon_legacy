@@ -145,6 +145,12 @@ class EngineWgpu : public EngineDummy
     // all smoke, dust, exhaust and muzzle clouds drew nothing under wgpu.
     void DrawDecal(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color, const MipInfo& mip,
                    int specFlags) override;
+    // Same batch as DrawDecal, but the quad is stretched along an explicit
+    // screen-space direction: rain streaks lean with the wind, which an
+    // axis-aligned sprite cannot show. Depth-tested, non-writing, clipped --
+    // everything DrawDecal does except the rectangle's orientation.
+    void DrawDecalRotated(Vector3Par screen, float rhw, float sizeX, float sizeY, PackedColor color,
+                          const MipInfo& mip, int specFlags, float dirX, float dirY) override;
     // World-space line / point primitives, fed by the same software-T&L mesh as
     // DrawSection above (Object::DrawLines / Object::DrawPoints). Without these the
     // base EngineDummy body is empty, so every world diagnostic line -- ballistics
