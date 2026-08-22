@@ -55,6 +55,32 @@ struct InteriorPortal
 	InteriorPortalKind kind = PortalDoor;
 };
 
+/// Which openings forgive a crossing, and how generously. Rain is the caller
+/// that cares: a portal disc is a rough stand-in for a real hole, and every
+/// metre of slack it is given is a metre of wall that rain falls through.
+/// Doors are AUTHORED (In1..InN in the Paths LOD) and trustworthy; windows and
+/// breaches come from the voxel scan's heuristic and are off by default.
+/// `radiusScale` shrinks every portal disc -- 1 is the inferred radius, and the
+/// smaller it gets the closer to the exact opening a crossing has to be.
+struct InteriorPortalFilter
+{
+	float radiusScale = 0.75f;
+	bool doors = true;
+	bool windows = false;
+	bool breaches = false;
+
+	bool Accepts(InteriorPortalKind kind) const
+	{
+		switch (kind)
+		{
+			case PortalDoor: return doors;
+			case PortalWindow: return windows;
+			case PortalBreach: return breaches;
+		}
+		return false;
+	}
+};
+
 /// Result of one proactive containment step. When `blocked`, `position` is the
 /// last point provably inside the room and `normal` the outward normal of the
 /// boundary that was about to be crossed -- enough for the caller to respond as
@@ -101,7 +127,11 @@ public:
 	/// walls. Rain asks this when its segment crossed the shell or a room
 	/// boundary; a crossing AT an opening is rain coming IN through a door or
 	/// window -- exactly where smoke leaves -- and must be allowed.
-	bool SegmentPassesPortalModel(Vector3Par from, Vector3Par to) const;
+	bool SegmentPassesPortalModel(Vector3Par from, Vector3Par to) const
+	{
+		return SegmentPassesPortalModel(from, to, InteriorPortalFilter{});
+	}
+	bool SegmentPassesPortalModel(Vector3Par from, Vector3Par to, const InteriorPortalFilter &filter) const;
 
 	/// Conservative distance from a point in `roomId` to the nearest room
 	/// boundary, capped by `maxDistance`. Used to keep the drawn radius of a

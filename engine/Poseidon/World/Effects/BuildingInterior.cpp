@@ -703,7 +703,8 @@ int BuildingInterior::ClassifySegmentModel(Vector3Par from, Vector3Par to) const
     return -1;
 }
 
-bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to) const
+bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to,
+                                               const InteriorPortalFilter &filter) const
 {
     if (!_valid)
     {
@@ -711,20 +712,29 @@ bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to) 
     }
     // Portals are few and this is only asked when a segment actually crossed
     // the shell or a room boundary, so the linear scan is the right answer.
-    // Only AUTHORED DOORS forgive a crossing. Windows come from a heuristic
-    // voxel scan whose radii are not yet trustworthy -- an owner smoke showed
-    // streaks raining down inside a room, traced to generous window discs
-    // forgiving whole wall sections -- and a BREACH marks geometry that failed
-    // to close outright. Until the Fire-vs-View window scan replaces the
-    // heuristic (handover phase 3), a door is the only opening rain may
-    // legitimately fall through. The radius is additionally tightened to three
-    // quarters so a crossing beside a door stays a crossing.
+    //
+    // WHICH openings forgive is the caller's call now (InteriorPortalFilter),
+    // because it is a tolerance, not a fact. The default -- authored doors
+    // only, at three quarters of the inferred radius -- is what rain wants:
+    // windows come from a heuristic voxel scan whose radii are not yet
+    // trustworthy (an owner smoke showed streaks raining down inside a room,
+    // traced to generous window discs forgiving whole wall sections) and a
+    // BREACH marks geometry that failed to close outright. Until the
+    // Fire-vs-View window scan replaces the heuristic (handover phase 3), a
+    // door is the only opening rain may legitimately fall through, and the
+    // radius scale is what stands between "rain through the door" and "rain
+    // through the wall next to the door".
+    const float scale = std::max(filter.radiusScale, 0.0f);
+    if (scale <= 0.0f)
+    {
+        return false;
+    }
     const Vector3 delta = to - from;
     const float len2 = delta.SquareSize();
     for (int i = 0; i < _portals.Size(); ++i)
     {
         const InteriorPortal& portal = _portals[i];
-        if (portal.kind != PortalDoor)
+        if (!filter.Accepts(portal.kind))
         {
             continue;
         }
@@ -734,7 +744,7 @@ bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to) 
             t = std::clamp((portal.centre - from).DotProduct(delta) / len2, 0.0f, 1.0f);
         }
         const Vector3 closest = from + delta * t;
-        if ((closest - portal.centre).SquareSize() <= Square(portal.radius * 0.75f))
+        if ((closest - portal.centre).SquareSize() <= Square(portal.radius * scale))
         {
             return true;
         }

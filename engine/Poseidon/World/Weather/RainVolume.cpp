@@ -68,6 +68,24 @@ RainSystem::RainSystem()
     }
 }
 
+Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval, float lookahead)
+{
+    return position + velocity * (std::max(interval, 0.0f) * std::max(lookahead, 1.0f));
+}
+
+float RainSystem::EffectiveDensity() const
+{
+    if (_mode != RainParticle && _mode != RainBoth)
+    {
+        return 0.0f;
+    }
+    if (_params.densityOverride >= 0.0f)
+    {
+        return std::clamp(_params.densityOverride, 0.0f, 1.0f);
+    }
+    return GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f;
+}
+
 float RainSystem::RandUnit()
 {
     // Private xorshift stream, same discipline as SmokeVolume: pulling from
@@ -162,10 +180,9 @@ void RainSystem::Spawn(float deltaT)
     // roughly the fall from spawn height. The cap is a hard stop so lowering
     // the target in the panel cannot build a spawn debt that fires as a burst.
     const float meanLifetime = std::max(_params.spawnHeight / std::max(_params.fallSpeed, 0.5f), 0.1f);
-    const float weatherDensity = _params.densityOverride >= 0.0f
-                                     ? std::clamp(_params.densityOverride, 0.0f, 1.0f)
-                                     : (GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f);
-    const float rate = static_cast<float>(_params.targetDrops) * weatherDensity / meanLifetime;
+    const float rate = static_cast<float>(_params.targetDrops) * EffectiveDensity() / meanLifetime;
+    const ISmokeWorldQuery& query = GSmokeWorldQuery();
+    const bool probeSpawn = _params.probeAtSpawn && _params.occlusion != RainOcclusionNone;
     _spawnAccumulator += rate * deltaT;
     while (_spawnAccumulator >= 1.0f)
     {
@@ -190,6 +207,20 @@ void RainSystem::Spawn(float deltaT)
         }
         drop.occlusionTimer = RandUnit() * _params.occlusionCadence;
         drop.indoor = false;
+
+        // A drop BORN under cover -- under a bridge deck, a balcony, a canopy,
+        // or on an upper storey of a building with no usable interior -- never
+        // crosses a roof on its way down, so no amount of look-ahead can see
+        // one. This upward probe is the only thing that catches it, and it has
+        // to happen here, once, at birth. Costs one ray per spawn (roughly
+        // targetDrops / mean lifetime per second); the Weather tab can switch
+        // it off and the spawn timing row reports what it costs.
+        if (probeSpawn && query.IsSheltered(drop.position, std::max(_params.spawnProbeHeight, 0.0f)))
+        {
+            _stats.spawnKills++;
+            continue;
+        }
+
         _drops.push_back(drop);
         _stats.spawned++;
     }
@@ -199,6 +230,14 @@ void RainSystem::Simulate(float deltaT)
 {
     const ISmokeWorldQuery& query = GSmokeWorldQuery();
     _stats.occlusionTests = 0;
+
+    // The portal tolerance, resolved once: which openings forgive a crossing at
+    // all, and how close to one a crossing has to pass. See RainParams.
+    InteriorPortalFilter filter;
+    filter.radiusScale = std::max(_params.portalRadiusScale, 0.0f);
+    filter.doors = true;
+    filter.windows = _params.portalWindows;
+    filter.breaches = _params.portalBreaches;
 
     float windX = 0.0f, windZ = 0.0f;
     if (GWind.IsActive())
@@ -225,6 +264,11 @@ void RainSystem::Simulate(float deltaT)
         if (_params.occlusion == RainOcclusionRooms)
         {
             bool killed = false;
+            // Where the drop should be seen to break, when we know. A roof that
+            // swallows drops silently reads as rain that stops for no reason;
+            // the same splash the ground gets says "it landed on something".
+            bool splashOnKill = false;
+            Vector3 killPosition = nextPosition;
             const Vector3 midpoint = (drop.position + nextPosition) * 0.5f;
             const float halfStep = drop.position.Distance(nextPosition) * 0.5f;
             for (const Occluder& occluder : _occluders)
@@ -259,7 +303,7 @@ void RainSystem::Simulate(float deltaT)
                 // forgives it -- doors, windows and breaches are exactly where
                 // smoke leaves and rain comes in -- but only the exact
                 // point-segment portal test decides, never a voxel label.
-                if (occluder.interior->SegmentPassesPortalModel(fromModel, toModel))
+                if (!_params.strictIndoor && occluder.interior->SegmentPassesPortalModel(fromModel, toModel, filter))
                 {
                     legalIndoor = true;
                     continue;
@@ -273,36 +317,58 @@ void RainSystem::Simulate(float deltaT)
                 {
                     _stats.roofKills++;
                     killed = true;
+                    splashOnKill = true;
                 }
                 break;
             }
 
-            // Companion sky probe. The voxel sweep above only knows buildings
-            // whose type yielded a usable interior; RefreshOcclusion drops the
-            // rest, so without this pass a house with no fire geometry, a
-            // bridge deck, a rock overhang or a tree canopy would rain through.
-            // One staggered upward fire-geometry ray per drop -- the same query
-            // Sheltered mode is built on -- answers "is any surface over this
-            // point at all" for every such roof at once, and the jittered reset
-            // keeps the drops from probing in lockstep bursts. A drop that is
-            // legally indoors is skipped: its ceiling is the roof it came
-            // through, and the probe would kill it mid-room.
+            // Companion shelter probe. The voxel sweep above only knows
+            // buildings whose type yielded a usable interior; RefreshOcclusion
+            // drops the rest, so without this pass a house with no fire
+            // geometry, a bridge deck, a rock overhang or a tree canopy would
+            // rain through. One staggered fire-geometry ray per drop -- the same
+            // query Sheltered mode is built on -- answers for every such roof at
+            // once, and the jittered reset keeps the drops from probing in
+            // lockstep bursts. A drop that is legally indoors is skipped: its
+            // ceiling is the roof it came through, and the probe would kill it
+            // mid-room.
+            //
+            // The ray now runs FORWARD ALONG THE DROP'S OWN PATH, not upward
+            // from where it already is. The old upward form could only report a
+            // roof the drop had ALREADY gone through, so at the default 0.4 s
+            // cadence and 9 m/s a drop fell up to 3.6 m into the room before
+            // anything killed it -- which is exactly the rain the owner still
+            // saw coming through roofs. Probing the next interval instead costs
+            // the same one ray and kills the drop at the surface, with a splash
+            // on it.
             if (!killed && !legalIndoor)
             {
                 drop.occlusionTimer -= deltaT;
                 if (drop.occlusionTimer <= 0.0f)
                 {
-                    drop.occlusionTimer = _params.occlusionCadence * (0.75f + 0.5f * RandUnit());
+                    drop.occlusionTimer = std::max(_params.occlusionCadence, 0.01f) * (0.75f + 0.5f * RandUnit());
                     ++_stats.occlusionTests;
-                    if (query.IsSheltered(nextPosition, 8.0f))
+                    const Vector3 ahead =
+                        RainProbeTarget(nextPosition, velocity, drop.occlusionTimer, _params.probeLookahead);
+                    Vector3 hit;
+                    if (query.ProbeSegment(drop.position, ahead, hit))
                     {
                         ++_stats.probeKills;
                         killed = true;
+                        splashOnKill = true;
+                        killPosition = hit;
                     }
                 }
             }
             if (killed)
             {
+                if (splashOnKill && _params.splashes && static_cast<int>(_splashes.size()) < 256)
+                {
+                    Splash splash;
+                    splash.position = killPosition;
+                    splash.age = 0.0f;
+                    _splashes.push_back(splash);
+                }
                 _drops[i] = _drops.back();
                 _drops.pop_back();
                 continue;
@@ -317,7 +383,7 @@ void RainSystem::Simulate(float deltaT)
             if (drop.occlusionTimer <= 0.0f)
             {
                 drop.occlusionTimer = _params.occlusionCadence;
-                if (query.IsSheltered(nextPosition, 8.0f))
+                if (query.IsSheltered(nextPosition, std::max(_params.shelterProbeHeight, 0.0f)))
                 {
                     _stats.indoorKills++;
                     _drops[i] = _drops.back();
@@ -586,10 +652,10 @@ void RainSystem::UpdateAndDraw()
         const float leanDeg =
             std::atan2(windSpeed * _params.windResponse, std::max(_params.fallSpeed, 0.01f)) * (180.0f / 3.14159265f);
         LOG_INFO(World,
-                 "RainVolume: drops={} drawn={} decals={} spawned={} roof={} indoor={} probe={} ground={} "
+                 "RainVolume: drops={} drawn={} decals={} spawned={} covered={} roof={} indoor={} probe={} ground={} "
                  "buildings={} sweeps={} wind={:.1f}m/s@{:.0f}deg lean={:.0f}deg spawn={:.0f}us gather={:.0f}us sim={:.0f}us draw={:.0f}us",
-                 _stats.liveDrops, _stats.drawnDrops, _stats.streakDecals, _stats.spawned, _stats.roofKills,
-                 _stats.indoorKills, _stats.probeKills, _stats.groundHits, _stats.nearbyBuildings,
+                 _stats.liveDrops, _stats.drawnDrops, _stats.streakDecals, _stats.spawned, _stats.spawnKills,
+                 _stats.roofKills, _stats.indoorKills, _stats.probeKills, _stats.groundHits, _stats.nearbyBuildings,
                  _stats.occlusionTests, windSpeed,
                  wind ? wind->directionRad * (180.0f / 3.14159265f) : 0.0f, leanDeg, _stats.spawnMicroseconds,
                  _stats.occlusionMicroseconds, _stats.simulateMicroseconds, _stats.drawMicroseconds);

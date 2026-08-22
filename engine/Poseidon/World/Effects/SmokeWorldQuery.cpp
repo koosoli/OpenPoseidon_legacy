@@ -258,6 +258,28 @@ class PoseidonSmokeWorldQuery final : public ISmokeWorldQuery
         return buffer.Size() > 0;
     }
 
+    bool ProbeSegment(Vector3Par from, Vector3Par to, Vector3& hit) const override
+    {
+        if (GLandscape == nullptr)
+        {
+            return false;
+        }
+
+        // The same thin fire-geometry ray IsSheltered fires, aimed along the
+        // caller's own path instead of straight up. CastRay already converts
+        // the deepest hit to world space, so a rain drop that probes its next
+        // few metres of fall learns not just THAT a surface is coming but
+        // where -- which is what lets it splash on the roof it would otherwise
+        // have fallen through.
+        SmokeSurfaceHit contact;
+        if (!CastRay(from, to, contact))
+        {
+            return false;
+        }
+        hit = contact.position;
+        return true;
+    }
+
     bool IndoorRoomAt(Vector3Par pos, int& room) const override
     {
         room = -1;

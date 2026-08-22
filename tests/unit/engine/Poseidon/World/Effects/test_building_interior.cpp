@@ -98,6 +98,58 @@ TEST_CASE("Rain may cross a shell where a portal opening sits, and only there",
                                                     Vector3(0.125f, 2.0f, 0.125f)));
 }
 
+TEST_CASE("The portal filter is what decides how much slack an opening gets",
+          "[BuildingInterior][Rain][Weather][World]")
+{
+    // Same wall-with-an-opening column, but the opening is a WINDOW and a
+    // BREACH in turn -- the two kinds the voxel scan infers rather than reads
+    // from authored data. Rain's default filter refuses both, and the radius
+    // scale is what separates "in through the door" from "in through the wall
+    // beside it": at 0.5 a crossing 0.6 radii out is wall, at 1.0 it is not.
+    BuildingInterior interior = BuildingInteriorTestAccess::MakeColumn({0, 0, 0xFE, 0xFF, 0xFF});
+
+    InteriorPortal opening;
+    opening.centre = Vector3(0.125f, 0.625f, 0.125f);
+    opening.radius = 1.0f;
+    opening.room = 0;
+    opening.kind = PortalWindow;
+    BuildingInteriorTestAccess::AddPortal(interior, opening);
+
+    const Vector3 through(0.125f, 0.875f, 0.125f);
+    const Vector3 into(0.125f, 0.375f, 0.125f);
+
+    // Default filter: authored doors only, so an inferred window forgives nothing.
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(through, into));
+
+    InteriorPortalFilter windows;
+    windows.windows = true;
+    REQUIRE(interior.SegmentPassesPortalModel(through, into, windows));
+
+    // A breach is a separate opt-in from a window.
+    InteriorPortalFilter breaches;
+    breaches.breaches = true;
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(through, into, breaches));
+
+    // The radius scale, on a crossing 0.6 radii to the side of the centre.
+    const Vector3 besideTop(0.125f + 0.6f, 0.875f, 0.125f);
+    const Vector3 besideBottom(0.125f + 0.6f, 0.375f, 0.125f);
+    InteriorPortalFilter loose;
+    loose.windows = true;
+    loose.radiusScale = 1.0f;
+    REQUIRE(interior.SegmentPassesPortalModel(besideTop, besideBottom, loose));
+    InteriorPortalFilter tight;
+    tight.windows = true;
+    tight.radiusScale = 0.5f;
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(besideTop, besideBottom, tight));
+
+    // Scale 0 is "no opening is ever wide enough", which is what the Weather
+    // tab's strict switch means -- and it must not divide by anything.
+    InteriorPortalFilter shut;
+    shut.windows = true;
+    shut.radiusScale = 0.0f;
+    REQUIRE_FALSE(interior.SegmentPassesPortalModel(through, into, shut));
+}
+
 TEST_CASE("Building interior movement cannot turn a solid wall into an implicit portal",
           "[BuildingInterior][Smoke][World]")
 {
@@ -144,4 +196,62 @@ TEST_CASE("Particle rain follows wind speed and direction and relaxes after a gu
     const Vector3 windIgnored = RainTargetVelocity(10.0f, 8.0f, 12.0f, 0.0f);
     REQUIRE(windIgnored.X() == Catch::Approx(0.0f));
     REQUIRE(windIgnored.Z() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("The rain shelter probe reaches at least as far as the drop will fall before its next probe",
+          "[Rain][Weather][World]")
+{
+    // The bug this replaces: the probe asked "is a roof already above me",
+    // which can only be true once the drop is through. At the shipping 0.4 s
+    // cadence and 9 m/s that is 3.6 m of rain inside the room before anything
+    // kills it. The probe now covers the drop's own next interval, so a roof
+    // anywhere in it is seen while the drop is still outside.
+    const Vector3 position(10.0f, 20.0f, -5.0f);
+    const Vector3 velocity(1.5f, -9.0f, 0.0f);
+
+    const Vector3 exact = RainProbeTarget(position, velocity, 0.4f, 1.0f);
+    REQUIRE(position.Y() - exact.Y() == Catch::Approx(3.6f));
+    REQUIRE(exact.X() == Catch::Approx(10.6f));
+
+    // Slack is slack: it may only ever lengthen the probe.
+    const Vector3 slack = RainProbeTarget(position, velocity, 0.4f, 1.35f);
+    REQUIRE(slack.Y() < exact.Y());
+
+    // A lookahead below 1 would leave a gap no probe ever covers -- exactly the
+    // hole the old upward probe was. Clamped, not honoured.
+    const Vector3 clamped = RainProbeTarget(position, velocity, 0.4f, 0.25f);
+    REQUIRE(clamped.Y() == Catch::Approx(exact.Y()));
+    // A degenerate interval degenerates to the drop's own position, not behind it.
+    REQUIRE(RainProbeTarget(position, velocity, -1.0f, 2.0f).Y() == Catch::Approx(position.Y()));
+}
+
+TEST_CASE("The rain density the sea is rained on is the one the drops are falling at",
+          "[Rain][Weather][World]")
+{
+    // WaterWgpu feeds this to the water interaction pass. It used to read
+    // Landscape's own density, which is a slow random walk capped by overcast
+    // and sits far below whatever the particle layer was pinned to -- so the
+    // sea got a tenth of the rain that was visibly falling into it.
+    RainSystem rain;
+    RainParams params = rain.Params();
+    params.densityOverride = 0.75f;
+    rain.SetParams(params);
+
+    rain.SetMode(RainParticle);
+    REQUIRE(rain.EffectiveDensity() == Catch::Approx(0.75f));
+    rain.SetMode(RainBoth);
+    REQUIRE(rain.EffectiveDensity() == Catch::Approx(0.75f));
+
+    // No particle layer, no particle density: the sea falls back to the
+    // weather, which with no landscape loaded is no rain at all.
+    rain.SetMode(RainLegacy);
+    REQUIRE(rain.EffectiveDensity() == Catch::Approx(0.0f));
+    rain.SetMode(RainOff);
+    REQUIRE(rain.EffectiveDensity() == Catch::Approx(0.0f));
+
+    // A negative override means "follow the weather", not "rain backwards".
+    params.densityOverride = -1.0f;
+    rain.SetParams(params);
+    rain.SetMode(RainParticle);
+    REQUIRE(rain.EffectiveDensity() == Catch::Approx(0.0f));
 }

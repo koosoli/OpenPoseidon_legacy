@@ -11,6 +11,7 @@
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/LandscapeShared.hpp>
+#include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/World/World.hpp>
 
@@ -985,14 +986,26 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     _interaction.misc = {0.0f, now, 0.0f, 0.0f};
     // weather.x drives the interaction pass's built-in rain ripple: a hashed
     // velocity pulse per grid cell, which is what rain falling on water is.
-    // It shipped hard-disabled (0.0). Feed it the live weather density -- and
-    // nothing else gates it, because physical rain falls on the sea whether
-    // the streaks are drawn as particles or as the legacy overlay. The
-    // interaction domain already follows the camera, so the ripples appear
-    // only near the player; the field's edge damp fades them out at its rim.
-    const float rainDensity =
+    // It shipped hard-disabled (0.0). Nothing else gates it, because physical
+    // rain falls on the sea whether the streaks are drawn as particles or as
+    // the legacy overlay. The interaction domain already follows the camera, so
+    // the ripples appear only near the player; the field's edge damp fades them
+    // out at its rim.
+    //
+    // The density is the LOUDER of the two rain authorities, not Landscape's
+    // alone. Landscape's own density is a slow random walk capped at
+    // overcast * 1.5 - 1, so a dev preset that pins the particle layer to a
+    // downpour left the sea being rained on at 0.05 -- ripples so faint they
+    // read as no ripples at all, which is exactly what the owner reported.
+    // GRain.EffectiveDensity() is what the drops you can SEE are falling at.
+    const float weatherRain =
         GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f;
-    _interaction.weather = {rainDensity, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), 0.0f, 0.0f};
+    const float rainDensity = std::max(weatherRain, GRain.EffectiveDensity());
+    // weather.z is the look knob (Weather tab, "Ocean ripple gain"): the strike
+    // is a hashed branch in a pass that already runs over the whole field every
+    // frame, so scaling it is free either way.
+    const float rippleGain = std::max(GRain.Params().seaRippleGain, 0.0f);
+    _interaction.weather = {rainDensity, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), rippleGain, 0.0f};
     wgr_water_set_interaction_params(_renderer, &_interaction);
 
     if (eventCount != 0)

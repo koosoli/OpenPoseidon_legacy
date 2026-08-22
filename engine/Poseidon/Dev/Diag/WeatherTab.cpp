@@ -406,11 +406,21 @@ void DrawRainSection()
             {
                 GWorld->SetWeather(0.95f, GWorld->GetFog(), 5.0f);
             }
+            // Overcast ALONE is not rain. Landscape's own rain density is a slow
+            // random walk bounded by overcast * 1.5 - 1 -- at 0.95 overcast that
+            // is a ceiling of 0.425, approached at about 0.01 per second toward a
+            // RANDOM target that is often near zero. Every consumer that is not
+            // the two render layers reads that number: the sea's rain ripples,
+            // visibility, wet surfaces. So a switch that produced a visible
+            // downpour also produced an ocean being rained on at a tenth
+            // strength, or not at all. Force the density too.
+            GRain.SetForceWeatherRain(true);
         }
         else if (!rainForced && wasOn)
         {
             GRain.SetMode(savedMode);
             GRain.ClearParticles();
+            GRain.SetForceWeatherRain(false);
             if (GWorld != nullptr && savedOvercast >= 0.0f)
             {
                 GWorld->SetWeather(savedOvercast, GWorld->GetFog(), 5.0f);
@@ -419,7 +429,9 @@ void DrawRainSection()
     }
     if (ImGui::IsItemHovered())
     {
-        ImGui::SetTooltip("ON: overcast 0.95 (transition 5 s) + particle rain.\n"
+        ImGui::SetTooltip("ON: overcast 0.95 (transition 5 s), particle rain, and the\n"
+                          "weather rain density held at full -- which is what the sea's\n"
+                          "ripples and every other non-render consumer actually read.\n"
                           "OFF: restores the overcast and rain mode you had.");
     }
 
@@ -641,7 +653,94 @@ void DrawRainSection()
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("Seconds between occlusion probes per drop, staggered so\n"
-                              "the whole pool never queries on the same frame.");
+                              "the whole pool never queries on the same frame. This\n"
+                              "also sets how far ahead each probe looks.");
+        }
+        if (ImGui::SliderFloat("Probe lookahead x", &params.probeLookahead, 1.0f, 3.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("The shelter probe casts along the drop's own path, over this\n"
+                              "multiple of the distance it will cover before its next probe.\n"
+                              "1.0 probes exactly the next interval and a gust or a frame\n"
+                              "spike can still carry a drop past a roof; higher stops rain\n"
+                              "slightly further above surfaces but never lets it through.");
+        }
+        if (ImGui::Checkbox("Probe at spawn", &params.probeAtSpawn))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("One upward ray per spawned drop. Catches drops BORN under\n"
+                              "cover -- bridge decks, balconies, canopies, upper storeys of\n"
+                              "buildings with no interior data -- which never cross a roof on\n"
+                              "the way down and so no look-ahead can ever see. Costs a ray\n"
+                              "per spawn; watch the spawn row in the benchmark table.");
+        }
+        if (ImGui::SliderFloat("Spawn probe (m)", &params.spawnProbeHeight, 5.0f, 60.0f, "%.0f"))
+        {
+            changed = true;
+        }
+
+        ImGui::SeparatorText("Openings");
+        ImGui::TextDisabled("How much slack an opening gets before rain may come in.");
+        if (ImGui::Checkbox("Strict: rain never enters", &params.strictIndoor))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("No opening forgives a shell crossing at all. The blunt\n"
+                              "instrument for a building whose portals are simply wrong: no\n"
+                              "rain through the door, and none through the wall either.");
+        }
+        ImGui::BeginDisabled(params.strictIndoor);
+        if (ImGui::SliderFloat("Portal radius x", &params.portalRadiusScale, 0.1f, 1.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Fraction of an opening's inferred radius a crossing has to\n"
+                              "fall within to count as coming IN through it. Portal centres\n"
+                              "sit on the wall plane and the inferred radii are generous, so\n"
+                              "this is what stands between rain through the door and rain\n"
+                              "through the wall beside it. Smaller is stricter.");
+        }
+        if (ImGui::Checkbox("Windows forgive", &params.portalWindows))
+        {
+            changed = true;
+        }
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Breaches forgive", &params.portalBreaches))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Doors are authored (In1..InN in the Paths LOD) and always\n"
+                              "forgive. Windows and breaches come from the heuristic voxel\n"
+                              "scan: a window disc can be metres wider than the hole, and a\n"
+                              "breach is fire geometry that failed to close at all. Both are\n"
+                              "off by default -- turning them on is how rain gets indoors.");
+        }
+        ImGui::EndDisabled();
+
+        ImGui::SeparatorText("Sea");
+        if (ImGui::SliderFloat("Ocean ripple gain", &params.seaRippleGain, 0.0f, 4.0f, "%.2f"))
+        {
+            changed = true;
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Strength of the rain-strike term in the water interaction pass\n"
+                              "-- the dimples and rings rain makes on the sea. It is a hashed\n"
+                              "branch inside a compute pass that already runs over the whole\n"
+                              "field every frame, so this costs nothing either way. 0 turns\n"
+                              "sea ripples off.");
         }
 
         if (changed)
@@ -676,7 +775,8 @@ void DrawRainSection()
     ImGui::Text("Live drops %d   live splashes %d", stats.liveDrops, stats.liveSplashes);
     ImGui::Text("Roof %d   indoor %d   sky-probe %d   ground %d", stats.roofKills, stats.indoorKills,
                 stats.probeKills, stats.groundHits);
-    ImGui::TextDisabled("Spawned %d   update %.0f us", stats.spawned, stats.lastUpdateUs);
+    ImGui::TextDisabled("Spawned %d   born under cover %d   update %.0f us", stats.spawned,
+                        stats.spawnKills, stats.lastUpdateUs);
     ImGui::TextDisabled("Nearby interiors %d   voxel sweeps this frame %d", stats.nearbyBuildings,
                         stats.occlusionTests);
     if (particlesOn && stats.lastUpdateUs > 0.0)

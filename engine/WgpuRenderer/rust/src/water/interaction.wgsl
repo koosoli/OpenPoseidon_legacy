@@ -108,24 +108,53 @@ fn interaction_update(@builtin(global_invocation_id) id: vec3<u32>) {
     // Rain strikes: a hashed subset of cells takes a small crater + outward
     // kick each sim tick, scaled by the live rain density. This is the bullet
     // splash's shape (a depression the wave equation blooms into a ring) at a
-    // fraction of the scale -- the previous term nudged velocity by +-0.01 on
-    // 4% of cells and was invisible. The strike rate is per tick, so heavier
-    // rain means more cells hit per second, not deeper craters.
-    if (params.weather.x > 0.0005 && calmness > 0.025) {
+    // fraction of the scale.
+    //
+    // Two things kept this invisible in practice. First, the density fed here
+    // is the weather's, which random-walks up to a ceiling of overcast * 1.5 - 1
+    // and in a normal storm sits around 0.2-0.4 -- so a term scaled LINEARLY by
+    // it ran at a fifth of what it was tuned for while the drops you could see
+    // fell at full strength. sqrt() is the response curve that fixes that: 0.25
+    // density now reads as half intensity rather than a quarter, and full rain
+    // is unchanged. Second, the tick index is derived from absolute scene time,
+    // which after an hour of play is large enough that sin()-based hashing in
+    // f32 starts losing the low bits that make consecutive ticks differ; the
+    // wrap keeps it in a range where the hash stays a hash.
+    //
+    // weather.z is the Weather tab's gain. The whole term is a hashed branch in
+    // a compute pass that already visits every texel of the field every frame,
+    // so none of this costs measurable time.
+    let rain_density = clamp(params.weather.x, 0.0, 1.0);
+    if (rain_density > 0.0005 && calmness > 0.025) {
+        let rain = sqrt(rain_density) * max(params.weather.z, 0.0);
         let rain_cell = floor(world * 1.6);
-        let rain_tick = floor(params.misc.y * 30.0);
+        let rain_tick = floor(params.misc.y * 30.0 % 8192.0);
         let strike = hash2(rain_cell + vec2<f32>(rain_tick, rain_tick * 0.773));
-        if (strike > 1.0 - params.weather.x * 0.05) {
+        if (strike > 1.0 - rain * 0.08) {
             // velocity here is the field's SCALAR state channel, not a vector:
             // an impulsive kick plus a small depression is exactly what the
             // bullet splash injects, and the wave equation blooms both into
-            // expanding rings. Magnitudes are a fraction of a bullet's (its
-            // pulse peaks near 4.5) but no longer whisper-quiet, and a little
-            // foam marks the strike so it reads at glancing angles.
-            let kick = (hash2(rain_cell * 1.71 + vec2<f32>(4.7, 9.3)) - 0.5) * 1.4 * params.weather.x;
+            // expanding rings. Magnitudes stay a fraction of a bullet's (its
+            // pulse peaks near 4.5).
+            //
+            // AMPLITUDE IS BOUNDED BY THE FOAM PASS, not by taste. foam.wgsl
+            // derives its own foam from this field's height laplacian
+            // (`convergence`) and slope flow, so a deep crater on a 1 m cell
+            // injects foam whether or not the strike asks for any -- measured
+            // on Everon at density 1.0, a -0.08 crater dressed the whole sea in
+            // tan mottling that read as grit, and cutting the strike's OWN foam
+            // term did nothing because that was never the source. Halving the
+            // crater and kick is what actually quiets it. The Weather tab's
+            // gain (weather.z, default 1) scales all of this: dial it up for a
+            // storm sea and the foam comes back with it, which is correct.
+            //
+            // Note the field is 256 texels over a 256 m domain, so one "drop"
+            // here is a metre across. This is rain-driven surface texture at
+            // the resolution the field can represent, not raindrop rings.
+            let kick = (hash2(rain_cell * 1.71 + vec2<f32>(4.7, 9.3)) - 0.5) * 0.7 * rain;
             velocity = velocity + kick;
-            height = height - 0.08 * params.weather.x;
-            foam = max(foam, 0.18 * params.weather.x);
+            height = height - 0.035 * rain;
+            foam = max(foam, 0.04 * rain);
         }
     }
     let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));

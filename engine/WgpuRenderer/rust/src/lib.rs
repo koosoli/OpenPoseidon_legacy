@@ -3586,6 +3586,49 @@ impl Renderer {
                 &depth
             };
 
+            // WATER vs. THE TRANSPARENT SET. The engine draws in a definite order:
+            // Landscape::Draw (which submits the sea) runs to completion and is
+            // flushed BEFORE Scene::ObjectsDrawn, which is where the sorted
+            // transparent objects, the cloudlets and the rain streaks go. The
+            // renderer used to ignore that: it hoisted every Water op out of the
+            // colour sub-pass to a dedicated pass at the END of the segment,
+            // because water samples the opaque depth it also tests against and
+            // therefore needs a READ-ONLY depth attachment the shared sub-pass
+            // cannot give. The side effect was that the sea composited over
+            // everything alpha-blended in front of it -- rain streaks falling
+            // into it, spray, smoke, glass, the alpha halves of trees -- none of
+            // which write depth, so nothing stopped the water covering them.
+            //
+            // So the sub-pass breaks where the op stream says it should: draws
+            // recorded before the last Water op, then water in its own pass, then
+            // the rest in a second colour sub-pass that loads what water left.
+            // The plan's order is preserved exactly; only the pass boundary moved.
+            let water_split = if resolved {
+                None
+            } else {
+                seg_ops
+                    .iter()
+                    .rposition(|o| matches!(o, Plan3dOp::Water(_)))
+                    .map(|i| i + 1)
+            };
+            let (ops_pre_water, ops_post_water) = match water_split {
+                Some(i) => seg_ops.split_at(i),
+                None => (seg_ops, &seg_ops[seg_ops.len()..]),
+            };
+            // Draw2D is replayed by the dedicated 2D sub-pass further down (this
+            // pass runs with want_2d = false), so a tail of nothing but 2D ops is
+            // not worth a render pass of its own.
+            let has_post_water_3d = ops_post_water
+                .iter()
+                .any(|o| !matches!(o, Plan3dOp::Draw2D(_) | Plan3dOp::ClearDepth | Plan3dOp::Resolve));
+            // Hoisted out of the sub-pass block: the container now closes after the
+            // SECOND colour sub-pass, so the transparent replay that moved behind
+            // water is still inside the number that is supposed to account for it.
+            // On a water frame it therefore also spans the water pass, which keeps
+            // its own WaterDraw row -- containers overlap their leaves here by
+            // construction and the C++ reporter never sums the two.
+            let time_segment = start == 0;
+
             // 3D sub-pass: all non-2D draws. Depth/stencil are cleared here only when the
             // prepass didn't already fill them (stencil to 0 so shadow draws EQUAL 0 /
             // INCR darken each pixel once); colour per the load.
@@ -3603,7 +3646,6 @@ impl Renderer {
                 // 0.004 ms for a sub-pass containing 0.4 ms of terrain alone, i.e. a container
                 // smaller than its own contents. Same gate the GPU-driven colour draw uses, so
                 // the container and its leaves always describe the same pass.
-                let time_segment = start == 0;
                 if time_segment {
                     self.gpu_timers.cpu_begin(TimerRegion::ObjColorSegment);
                     self.gpu_timers
@@ -3667,21 +3709,21 @@ impl Renderer {
                             .draw(&mut pass, camera_bind, cam_off, &self.gpu_timers);
                     }
                 }
-                render_ops(self, &mut pass, seg_ops, display_2d, false, prepassed);
+                render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed);
                 // Debug cull-sphere wireframes (ImGui Culling tab) LAST in the sub-pass: their
                 // depth test is Always, but anything drawn after them (terrain in render_ops)
                 // would still overwrite their colour — so they must follow every world draw to
-                // actually show on top.
-                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
+                // actually show on top. When a post-water sub-pass follows, that one is the last
+                // world draw and they belong there instead.
+                if start == 0
+                    && !self.suppress_world_objects
+                    && self.cull_debug_draw
+                    && !has_post_water_3d
+                {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
                 }
                 drop(pass);
-                if time_segment {
-                    self.gpu_timers
-                        .end(&mut encoder, TimerRegion::ObjColorSegment);
-                    self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
-                }
             }
 
             // Dedicated water pass. Water is transparent and reconstructs the seabed by SAMPLING
@@ -3815,6 +3857,53 @@ impl Renderer {
                     encoder.pop_debug_group();
                     self.gpu_timers.end(&mut encoder, TimerRegion::WaterDraw);
                 }
+            }
+
+            // The rest of the plan's world draws, now that water is down. This is
+            // where Scene::ObjectsDrawn's output lands: the depth-sorted
+            // transparent objects, the cloudlets, the rain streaks. They blend
+            // against the sea instead of being painted over by it. Colour and
+            // depth both LOAD -- the pass writes no new opaque geometry in
+            // practice, but nothing here forbids it either, and loading is what
+            // makes the two sub-passes one logical pass split in the middle.
+            if has_post_water_3d {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("{seg_label}_post_water")),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &target,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: seg_depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed);
+                if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
+                    let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+                    self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
+                }
+                drop(pass);
+            }
+            if time_segment {
+                self.gpu_timers
+                    .end(&mut encoder, TimerRegion::ObjColorSegment);
+                self.gpu_timers.cpu_end(TimerRegion::ObjColorSegment);
             }
 
             // Depth-aware over-scene clouds (plan Phase 1): march at LOW RES bounded by the resolved

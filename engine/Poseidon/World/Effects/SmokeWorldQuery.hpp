@@ -85,6 +85,19 @@ class ISmokeWorldQuery
     /// defensible answer, not a bug.
     virtual bool IsSheltered(Vector3Par pos, float probeHeight) const = 0;
 
+    /// Is there geometry ANYWHERE along the segment `from` -> `to`, and where?
+    /// This is IsSheltered's look-ahead sibling: instead of asking "has a roof
+    /// already closed over me", it asks "will this path cross a surface", which
+    /// is the only form of the question that can stop a fast mover BEFORE it is
+    /// through. Rain probes its own next few metres of fall with it and dies at
+    /// the roofline rather than a probe-interval below it. `hit` is the contact
+    /// point when the answer is true. Non-pure (default: nothing in the way) so
+    /// test implementations without geometry keep compiling and keep raining.
+    virtual bool ProbeSegment(Vector3Par from, Vector3Par to, Vector3& hit) const
+    {
+        return false;
+    }
+
     /// Which room of a building is this point in, false when outdoors or no
     /// data. Non-pure (default: no data) so existing and test implementations
     /// keep compiling; only the engine-backed query answers it.

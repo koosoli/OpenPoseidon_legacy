@@ -81,10 +81,51 @@ struct RainParams
 
 	// -- occlusion --------------------------------------------------------
 	RainOcclusion occlusion = RainOcclusionRooms;
-	/// Probe cadence for the Sheltered mode and for the sky probe that
+	/// Probe cadence for the Sheltered mode and for the shelter probe that
 	/// accompanies Rooms mode (jittered per drop, so probes do not fire in
 	/// lockstep bursts).
 	float occlusionCadence = 0.40f;
+
+	// -- occlusion tolerances ---------------------------------------------
+	// Every number below buys tightness with query cost or with rain that
+	// stops short of a surface. The defaults are the strict end of what still
+	// looks right, because the owner's call on the trade is explicit: rain
+	// stopping a little early outdoors beats rain falling inside a house.
+
+	/// The shelter probe LOOKS AHEAD along the drop's own path by this multiple
+	/// of the distance it will cover before its next probe, instead of asking
+	/// "is a roof already above me". That is the whole difference between a
+	/// drop dying AT the roofline and a drop dying a probe-interval below it --
+	/// at 9 m/s and a 0.4 s cadence, 3.6 m of rain inside the room. 1 probes
+	/// exactly the next interval; above 1 is slack for a gust or a frame spike.
+	float probeLookahead = 1.35f;
+	/// Kill a drop at spawn if anything at all is overhead within this many
+	/// metres. Look-ahead cannot see a canopy a drop was BORN under, and this
+	/// is the one probe that catches it. Costs one ray per spawned drop.
+	bool probeAtSpawn = true;
+	float spawnProbeHeight = 30.0f;
+	/// Probe height for the RainOcclusionSheltered fallback mode's upward ray.
+	float shelterProbeHeight = 8.0f;
+
+	/// No opening EVER forgives a shell crossing: rain simply cannot get in.
+	/// The blunt instrument, for when a particular building's portals are wrong
+	/// and no radius is small enough.
+	bool strictIndoor = false;
+	/// Fraction of a portal's inferred radius a crossing has to fall within to
+	/// count as coming in through the opening. Smaller = stricter.
+	float portalRadiusScale = 0.50f;
+	/// Windows and breaches come from the heuristic voxel scan and are off by
+	/// default -- see InteriorPortalFilter.
+	bool portalWindows = false;
+	bool portalBreaches = false;
+
+	// -- sea surface -------------------------------------------------------
+	/// Gain on the wgpu water interaction pass's rain-strike term (WaterWgpu
+	/// packs it into the interaction UBO). The ripples cost nothing extra --
+	/// the strike is a hashed branch inside a compute pass that already runs
+	/// every frame over the whole field -- so this is a look knob, not a
+	/// budget one. 0 turns sea ripples off.
+	float seaRippleGain = 1.0f;
 };
 
 struct RainStats
@@ -96,6 +137,7 @@ struct RainStats
 	int probeKills = 0;       ///< drops killed by the Rooms-mode sky probe since ResetStats
 	int groundHits = 0;       ///< drops that landed on terrain since ResetStats
 	int spawned = 0;          ///< drops spawned since ResetStats
+	int spawnKills = 0;       ///< drops that were born under cover and never fell
 	int nearbyBuildings = 0; ///< valid cached interiors considered this frame
 	int occlusionTests = 0;  ///< cheap voxel segment tests performed this frame
 	int drawnDrops = 0;      ///< visible drops submitted this frame
@@ -111,6 +153,12 @@ struct RainStats
 /// test without constructing a world or renderer.
 Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse);
 Vector3 RainRelaxVelocity(Vector3Par current, Vector3Par target, float responsePerSecond, float deltaT);
+/// Far end of the shelter probe: the drop's own path over `interval` seconds --
+/// the time until its next probe -- scaled by `lookahead`. This is the whole
+/// reason rain no longer falls a probe-interval into a room before dying, so it
+/// is a named function with a test rather than an expression in the loop.
+/// `lookahead` below 1 would leave a gap the probe never covers and is clamped.
+Vector3 RainProbeTarget(Vector3Par position, Vector3Par velocity, float interval, float lookahead);
 
 class RainSystem
 {
@@ -122,6 +170,26 @@ public:
 
 	const RainParams &Params() const { return _params; }
 	void SetParams(const RainParams &params) { _params = params; }
+
+	/// The density the particle layer is ACTUALLY raining at: the dev/benchmark
+	/// override when one is set, the live weather otherwise, and zero when the
+	/// particle layer is not drawing at all.
+	///
+	/// This exists because the two rain layers and the sea disagreed. The panel's
+	/// presets pin `densityOverride` to 1 and produce a downpour, while
+	/// Landscape's own rain density -- which the ocean's ripple term reads -- is
+	/// a slow random walk that tops out near 0.4 under a 0.95 overcast and takes
+	/// the better part of a minute to get anywhere. So the sea was being rained
+	/// on at a tenth of the strength of the rain you could see falling into it.
+	float EffectiveDensity() const;
+
+	/// Drive Landscape's own rain density to full, once a second, for as long as
+	/// this is set. The dev panel's master switch and POSEIDON_TEST_RAIN both use
+	/// it: consumers beyond the two render layers (the sea's ripples, wet-surface
+	/// effects, visibility) read GetRainDensity, not GRain, and an overcast alone
+	/// only random-walks it upward over tens of seconds.
+	bool ForceWeatherRain() const { return _forceWeatherRain; }
+	void SetForceWeatherRain(bool force) { _forceWeatherRain = force; }
 
 	/// Local, unreplicated override for the LEGACY overlay's density, so the old
 	/// rain can be looked at on a clear day without dragging the weather about.
