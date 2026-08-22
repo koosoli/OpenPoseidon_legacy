@@ -715,41 +715,27 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // building one side while iterating is legitimate and common, and blocking it would just get
     // the check disabled. What is not legitimate is doing it WITHOUT KNOWING, and after this line
     // that is no longer possible.
-    if (const char* dllBuild = wgr_build_id(); dllBuild && *dllBuild)
-    {
-        const char* exeBuild = BuildInfo::GitSha;
-        // The DLL stamps a longer hash than the exe's short SHA, so compare on the shorter of the
-        // two. A prefix match is the right test: both are the same commit rendered to different
-        // widths, and requiring equal length would fire on every single boot.
-        const size_t exeLen = std::strlen(exeBuild);
-        const bool sameCommit = exeLen > 0 && std::strncmp(exeBuild, dllBuild, exeLen) == 0;
-        if (!sameCommit)
-        {
-            // WARNING, not ERROR, and worded to name the benign case first -- because the benign
-            // case is the common one. The DLL's id is stamped when CARGO compiles it, and cargo
-            // does not rebuild when only C++ changed, so any C++-only iteration leaves the two
-            // ids legitimately different while the binaries are perfectly matched. Crying wolf on
-            // that would get this line ignored, which costs more than it saves.
-            //
-            // The real ancestry test belongs where git is available: scripts/Deploy.ps1 refuses a
-            // build that is a strict ancestor of what is installed. This line's job is narrower
-            // and still worth having -- to put BOTH ids in every log, so the question "which two
-            // binaries produced this capture?" always has an answer written down.
-            LOG_WARN(Graphics,
-                     "Wgpu: exe and renderer report different build ids — exe {}, wgpu_renderer.dll "
-                     "{}. Expected when only one side was rebuilt (cargo skips the cdylib on a "
-                     "C++-only change). NOT expected if you did not build both: the ABI check "
-                     "passes across a large version gap, so a stale DLL runs and looks plausible "
-                     "while missing every fix since. Before reporting a rendering regression, "
-                     "check DEPLOYED-FROM.txt in the game folder and deploy both from one build "
-                     "with scripts/Deploy.ps1.",
-                     exeBuild, dllBuild);
-        }
-        else
-        {
-            LOG_INFO(Graphics, "Wgpu: exe and renderer build ids agree ({})", exeBuild);
-        }
-    }
+    // PROVENANCE, recorded rather than enforced.
+    //
+    // Both binaries carry a build id and NEITHER is reliably fresh: the DLL's is stamped when
+    // cargo compiles the cdylib, and cargo skips that on a C++-only change; the exe's is stamped
+    // when CMake configures. So "the ids differ" does not mean "the binaries are mismatched", and
+    // a warning built on that comparison would fire on ordinary iteration and be ignored within a
+    // day -- which is worse than not having it, because it would not be believed on the day it
+    // mattered.
+    //
+    // Enforcement therefore lives in scripts/Deploy.ps1, which can run git: it reads
+    // DEPLOYED-FROM.txt and refuses to install a build that is a STRICT ancestor of what is
+    // already there. What belongs here is the thing that has to be true of every log, forever:
+    // that the two ids are written down, so "which two binaries produced this capture?" is always
+    // answerable after the fact.
+    //
+    // This exists because on 2026-08-22 that question had no answer. A DLL 152 commits behind the
+    // installed exe ran for hours; roads stopped going dark at night, textures came apart and
+    // vegetation went white, and all three were investigated as fresh rendering regressions --
+    // with shader ablations run to explain them -- before anyone compared the file dates.
+    LOG_INFO(Graphics, "Wgpu: build provenance — exe {}, wgpu_renderer.dll {} (see DEPLOYED-FROM.txt)",
+             BuildInfo::GitSha, wgr_build_id());
 
     const WgrAbiCheck abiCheck{WGR_ABI_VERSION,
                                sizeof(WgrAbiCheck),
