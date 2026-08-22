@@ -222,6 +222,25 @@ target/max drop sliders reach 30000/40000, and the intensity presets end at
 Deluge 12000/24000. `POSEIDON_TEST_RAIN` logs the target lean angle next to
 the wind vector.
 
+Defaults + portals round (2026-08-22, third pass): particle rain is now the
+SHIPPING DEFAULT (`RainSystem::_mode = RainParticle`; the legacy overlay stays
+one radio away for A/B) -- smoke room containment was already default-on
+(`SmokeParams::contain = true`), so both systems now ship active. Rain also
+learned the portal half of the query: a segment that crosses shell or a room
+boundary is forgiven when the crossing sits inside a door/window/breach radius
+(`BuildingInterior::PointInPortalModel`, three samples along the step), drops
+that are already inside are left alone (the wall they are no longer crossing
+must not kill them, and the sky probe skips them for the same reason), and the
+ground check under a shell lands on `FloorHeightBelow` -- the storey floor
+indoors, bridge decks outdoors -- so a drop that came through a window dies on
+the floor with a splash instead of at the wall. Smoke logs show the flip:
+indoor kills collapsed to ~0, ground hits absorbed them. Ocean ripples: the
+interaction pass's rain term shipped hard-disabled (`weather.x = 0`); it now
+takes the live `GetRainDensity`, and since the interaction domain follows the
+camera the ripples appear only near the player, fading at the field rim.
+Ground splashes were already implemented (Ground section sliders); verified
+firing in the smoke logs.
+
 Smoke visual audit (2026-08-21): centre containment alone was insufficient for
 3-5 m soft billboards. The old radius clamp activated only after acquiring a
 collision plane, so a puff could overlap a ceiling while its centre was still

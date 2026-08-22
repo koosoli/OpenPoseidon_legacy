@@ -380,8 +380,8 @@ void DrawConsumerSection()
 }
 
 /// The particle-rain panel. Same philosophy as the wind override above: every
-/// control here is local, unreplicated and dev-only; a world that never opens
-/// this tab rains exactly as it always did (the shipping default is RainLegacy).
+/// control here is local, unreplicated and dev-only. Particle rain is the
+/// shipping default; the legacy overlay stays one radio away for comparison.
 void DrawRainSection()
 {
     ImGui::SeparatorText("Rain");
@@ -457,8 +457,8 @@ void DrawRainSection()
         ImGui::SameLine();
     }
     ImGui::NewLine();
-    ImGui::TextDisabled("Legacy is the shipping default: a world that never opens this");
-    ImGui::TextDisabled("tab rains exactly as before. Particle density follows weather.");
+    ImGui::TextDisabled("Particle rain is the shipping default; the legacy overlay");
+    ImGui::TextDisabled("stays here for comparison. Density follows weather.");
 
     const bool particlesOn = mode == RainParticle || mode == RainBoth;
     if (particlesOn)

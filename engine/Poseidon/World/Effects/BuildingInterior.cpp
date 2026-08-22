@@ -703,6 +703,25 @@ int BuildingInterior::ClassifySegmentModel(Vector3Par from, Vector3Par to) const
     return -1;
 }
 
+bool BuildingInterior::PointInPortalModel(Vector3Par pos) const
+{
+    if (!_valid)
+    {
+        return false;
+    }
+    // Portals are few and this is only asked when a segment actually crossed
+    // the shell or a room boundary, so the linear scan is the right answer.
+    for (int i = 0; i < _portals.Size(); ++i)
+    {
+        const InteriorPortal& portal = _portals[i];
+        if ((pos - portal.centre).SquareSize() <= Square(portal.radius))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 float BuildingInterior::ClearanceModel(Vector3Par pos, int roomId, float maxDistance) const
 {
     if (!_valid || roomId < 0 || roomId >= _roomCount || RoomOfModel(pos) != roomId || maxDistance <= 0.0f)

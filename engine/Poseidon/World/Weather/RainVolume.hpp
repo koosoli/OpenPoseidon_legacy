@@ -13,15 +13,16 @@ namespace Poseidon
 //
 // The legacy rain is a full-screen scrolling TextureRain overlay (Scene::DrawRain):
 // cheap, but it rains at the same strength indoors, under bridges and in the
-// driver's seat. This is the world-space replacement: a camera-following pool of
-// drop streaks that fall through the wind, die on the ground with an optional
-// splash, and -- the point of the feature -- are killed by the SAME room query
-// the smoke containment built (ISmokeWorldQuery::IndoorRoomAt). One query
-// boundary, two consumers, exactly as the rooms-and-portals handover asked.
+// driver's seat. The world-space replacement is the DEFAULT: a camera-following
+// pool of wind-advected drop streaks that die on the ground with a splash, on
+// any shell, under every overhang, and -- through the SAME room query and
+// portals the smoke containment built -- enter buildings only where smoke can
+// leave them. One query boundary, two consumers, exactly as the
+// rooms-and-portals handover asked.
 //
 // Purely visual and client-local: nothing here is simulated, replicated or
-// serialized. The dev panel's Weather tab owns the only toggles; the default
-// mode is Legacy, so a world that never opens the panel rains exactly as before.
+// serialized. The dev panel's Weather tab owns the toggles, including a master
+// "Rain ON" switch that forces the weather overcast with it.
 // ---------------------------------------------------------------------------
 
 enum RainMode
@@ -148,9 +149,11 @@ private:
 	/// The per-drop path is then a cheap broad phase plus cached voxel sweep.
 	void RefreshOcclusion();
 
-	// Preserve the pre-feature shipping behaviour until particle rain is made a
-	// real graphics option. RainOff used to disable all rain on every fresh run.
-	RainMode _mode = RainLegacy;
+	// The shipping default is particle rain: it follows the wind, dies on
+	// roofs, walls, floors, the sea's skin and under every overhang, and
+	// enters through doors and windows where the legacy overlay could only
+	// rain indoors. RainLegacy remains one radio away for A/B comparison.
+	RainMode _mode = RainParticle;
 	RainParams _params{};
 	RainStats _stats{};
 	float _legacyDensityOverride = -1.0f;

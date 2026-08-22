@@ -216,6 +216,8 @@ void RainSystem::Simulate(float deltaT)
         const Vector3 nextPosition = drop.position + velocity * deltaT;
 
         // -- occlusion ----------------------------------------------------
+        bool nearShell = false;  // some building footprint overlaps this step
+        bool insideRoom = false; // the drop is legally under a roof right now
         if (_params.occlusion == RainOcclusionRooms)
         {
             bool killed = false;
@@ -229,23 +231,56 @@ void RainSystem::Simulate(float deltaT)
                 {
                     continue;
                 }
+                nearShell = true;
                 ++_stats.occlusionTests;
-                const int label = occluder.interior->ClassifySegmentModel(
-                    occluder.inv.FastTransform(drop.position), occluder.inv.FastTransform(nextPosition));
+                const Vector3 fromModel = occluder.inv.FastTransform(drop.position);
+                const Vector3 toModel = occluder.inv.FastTransform(nextPosition);
+
+                // A drop that is ALREADY inside entered legally -- through an
+                // opening on an earlier step. Its fate is the floor below, not
+                // the wall it is no longer crossing.
+                if (occluder.interior->ClassifyModel(fromModel) >= 0)
+                {
+                    insideRoom = true;
+                    continue;
+                }
+
+                const int label = occluder.interior->ClassifySegmentModel(fromModel, toModel);
+                if (label == -1)
+                {
+                    continue; // stayed outside this shell
+                }
+
+                // The segment crossed shell or a room boundary. An opening
+                // forgives it: doors, windows and breaches are exactly where
+                // smoke leaves and rain comes in (the handover's "rain enters
+                // where smoke leaves"). Three samples, because the crossing of
+                // a fast drop can sit anywhere along its step.
+                bool viaOpening = false;
+                for (const float t : {0.25f, 0.5f, 0.75f})
+                {
+                    if (occluder.interior->PointInPortalModel(fromModel + (toModel - fromModel) * t))
+                    {
+                        viaOpening = true;
+                        break;
+                    }
+                }
+                if (viaOpening)
+                {
+                    insideRoom = true;
+                    continue;
+                }
                 if (label >= 0)
                 {
                     _stats.indoorKills++;
                     killed = true;
                 }
-                else if (label == -2)
+                else
                 {
                     _stats.roofKills++;
                     killed = true;
                 }
-                if (killed)
-                {
-                    break;
-                }
+                break;
             }
 
             // Companion sky probe. The voxel sweep above only knows buildings
@@ -255,8 +290,10 @@ void RainSystem::Simulate(float deltaT)
             // One staggered upward fire-geometry ray per drop -- the same query
             // Sheltered mode is built on -- answers "is any surface over this
             // point at all" for every such roof at once, and the jittered reset
-            // keeps the drops from probing in lockstep bursts.
-            if (!killed)
+            // keeps the drops from probing in lockstep bursts. A drop that is
+            // legally indoors is skipped: its ceiling is the roof it came
+            // through, and the probe would kill it mid-room.
+            if (!killed && !insideRoom)
             {
                 drop.occlusionTimer -= deltaT;
                 if (drop.occlusionTimer <= 0.0f)
@@ -299,7 +336,19 @@ void RainSystem::Simulate(float deltaT)
         // -- fall ---------------------------------------------------------
         drop.position = nextPosition;
 
-        const float ground = query.GroundHeight(drop.position.X(), drop.position.Z());
+        float ground = query.GroundHeight(drop.position.X(), drop.position.Z());
+        if (nearShell)
+        {
+            // Under a shell the terrain is not what the drop lands on: the
+            // storey floor is (and outdoors this also catches bridge decks and
+            // other roadway surfaces). Roadway faces exist only inside the
+            // footprint, so drops beside the walls are unaffected.
+            const float floorY = query.FloorHeightBelow(drop.position);
+            if (floorY > ground)
+            {
+                ground = floorY;
+            }
+        }
         if (drop.position.Y() <= ground)
         {
             if (_params.splashes && !drop.indoor && static_cast<int>(_splashes.size()) < 256)

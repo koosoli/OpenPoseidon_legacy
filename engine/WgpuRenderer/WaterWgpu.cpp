@@ -983,7 +983,16 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     _interaction.grid = {256.0f, dt, static_cast<float>(eventCount), reset ? 1.0f : 0.0f};
     _interaction.physics = {12.0f, 1.6f, 0.35f, 1.2f};
     _interaction.misc = {0.0f, now, 0.0f, 0.0f};
-    _interaction.weather = {0.0f, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), 0.0f, 0.0f};
+    // weather.x drives the interaction pass's built-in rain ripple: a hashed
+    // velocity pulse per grid cell, which is what rain falling on water is.
+    // It shipped hard-disabled (0.0). Feed it the live weather density -- and
+    // nothing else gates it, because physical rain falls on the sea whether
+    // the streaks are drawn as particles or as the legacy overlay. The
+    // interaction domain already follows the camera, so the ripples appear
+    // only near the player; the field's edge damp fades them out at its rim.
+    const float rainDensity =
+        GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f;
+    _interaction.weather = {rainDensity, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), 0.0f, 0.0f};
     wgr_water_set_interaction_params(_renderer, &_interaction);
 
     if (eventCount != 0)

@@ -93,6 +93,12 @@ public:
 	/// Returns -1 when the complete segment remains outside the cached interior.
 	int ClassifySegmentModel(Vector3Par from, Vector3Par to) const;
 
+	/// Is a model-space point inside any portal opening (door, window or
+	/// breach)? Rain asks this when its segment crossed the shell or a room
+	/// boundary: a crossing AT an opening is rain coming IN through a door or
+	/// window -- exactly where smoke leaves -- and must be allowed, not killed.
+	bool PointInPortalModel(Vector3Par pos) const;
+
 	/// Conservative distance from a point in `roomId` to the nearest room
 	/// boundary, capped by `maxDistance`. Used to keep the drawn radius of a
 	/// soft smoke billboard inside the room even before its centre touches a
