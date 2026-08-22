@@ -57,10 +57,14 @@ RainSystem::RainSystem()
     if (RainTestHook())
     {
         // Both layers over a forced-max density: the A/B pair a rain smoke
-        // wants, independent of the mission's weather state.
+        // wants, independent of the mission's weather state. The weather rain
+        // density itself is driven up as well, because consumers beyond the
+        // two render layers -- the ocean's rain-ripple term, wet-surface
+        // effects -- read GetRainDensity, not GRain.
         _mode = RainBoth;
         _params.densityOverride = 1.0f;
         _legacyDensityOverride = 1.0f;
+        _forceWeatherRain = true;
     }
 }
 
@@ -522,6 +526,17 @@ void RainSystem::UpdateAndDraw()
     if (GScene == nullptr || GLandscape == nullptr)
     {
         return;
+    }
+
+    if (_forceWeatherRain)
+    {
+        // Once per second is plenty: SetRain ramps density over `time`.
+        static Foundation::Time nextForce;
+        if (Glob.time > nextForce)
+        {
+            nextForce = Glob.time + 1.0f;
+            GLandscape->SetRain(1.0f, 1.0f);
+        }
     }
 
     const auto begin = std::chrono::steady_clock::now();

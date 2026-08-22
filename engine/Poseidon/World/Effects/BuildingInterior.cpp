@@ -711,15 +711,23 @@ bool BuildingInterior::SegmentPassesPortalModel(Vector3Par from, Vector3Par to) 
     }
     // Portals are few and this is only asked when a segment actually crossed
     // the shell or a room boundary, so the linear scan is the right answer.
-    // The radius is deliberately tightened to three quarters: portal centres
-    // sit on the wall plane and inferred openings can be generous, and this
-    // test is what stands between "rain through the door" and "rain through
-    // the wall next to the door".
+    // Only AUTHORED DOORS forgive a crossing. Windows come from a heuristic
+    // voxel scan whose radii are not yet trustworthy -- an owner smoke showed
+    // streaks raining down inside a room, traced to generous window discs
+    // forgiving whole wall sections -- and a BREACH marks geometry that failed
+    // to close outright. Until the Fire-vs-View window scan replaces the
+    // heuristic (handover phase 3), a door is the only opening rain may
+    // legitimately fall through. The radius is additionally tightened to three
+    // quarters so a crossing beside a door stays a crossing.
     const Vector3 delta = to - from;
     const float len2 = delta.SquareSize();
     for (int i = 0; i < _portals.Size(); ++i)
     {
         const InteriorPortal& portal = _portals[i];
+        if (portal.kind != PortalDoor)
+        {
+            continue;
+        }
         float t = 0.5f;
         if (len2 > 1e-8f)
         {

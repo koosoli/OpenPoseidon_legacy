@@ -50,8 +50,8 @@ struct RainParams
 	// Density is the first thing to raise and the last thing you miss; the
 	// previous defaults spent thousands of world queries a second for rain
 	// nobody was counting.
-	int targetDrops = 700;       ///< steady-state drop count the spawner aims for
-	int maxDrops = 1500;         ///< hard cap of the pool
+	int targetDrops = 1800;      ///< steady-state drop count the spawner aims for
+	int maxDrops = 4000;         ///< hard cap of the pool
 	float areaRadius = 20.0f;    ///< radius of the spawn disc around the camera, m
 	float spawnHeight = 18.0f;   ///< drops are born this far above the camera, m
 	float densityOverride = -1.0f; ///< negative follows weather; 0..1 is a dev/benchmark override
@@ -65,10 +65,14 @@ struct RainParams
 	// -- look -------------------------------------------------------------
 	float streakLength = 1.1f;   ///< vertical size of a drop sprite, m
 	float streakWidth = 0.045f;  ///< horizontal size, m
-	float opacity = 0.5f;
-	float red = 0.75f;
-	float green = 0.80f;
-	float blue = 0.90f;
+	///< Daylight-legible defaults: a half-alpha LIGHT sprite vanishes against a
+	///< bright sky -- an owner smoke could not see outdoor rain at all. Falling
+	///< rain reads as slightly DARKER than the background, so the tint sits
+	///< below white and the opacity runs high; the Weather tab can restyle it.
+	float opacity = 1.0f;
+	float red = 0.45f;
+	float green = 0.52f;
+	float blue = 0.62f;
 
 	// -- ground interaction -----------------------------------------------
 	bool splashes = true;        ///< brief expanding sprite where a drop lands
@@ -183,6 +187,7 @@ private:
 	Foundation::Time _lastUpdate;
 	float _spawnAccumulator = 0.0f;
 	Foundation::Time _nextDiagTime; ///< once-per-second stats gate for POSEIDON_TEST_RAIN
+	bool _forceWeatherRain = false; ///< POSEIDON_TEST_RAIN: drive Landscape rain density to full
 	unsigned _rand = 0x9E3779B9u; ///< private stream; do not touch GRandGen
 	float RandUnit();
 	float RandSymmetric();

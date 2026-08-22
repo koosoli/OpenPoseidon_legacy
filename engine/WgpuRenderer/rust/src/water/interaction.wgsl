@@ -115,14 +115,17 @@ fn interaction_update(@builtin(global_invocation_id) id: vec3<u32>) {
         let rain_cell = floor(world * 1.6);
         let rain_tick = floor(params.misc.y * 30.0);
         let strike = hash2(rain_cell + vec2<f32>(rain_tick, rain_tick * 0.773));
-        if (strike > 1.0 - params.weather.x * 0.22) {
+        if (strike > 1.0 - params.weather.x * 0.05) {
             // velocity here is the field's SCALAR state channel, not a vector:
-            // an impulsive kick (signed) plus a small depression is exactly
-            // what the bullet splash injects, and the wave equation blooms
-            // both into expanding rings.
-            let kick = (hash2(rain_cell * 1.71 + vec2<f32>(4.7, 9.3)) - 0.5) * 0.18 * params.weather.x;
+            // an impulsive kick plus a small depression is exactly what the
+            // bullet splash injects, and the wave equation blooms both into
+            // expanding rings. Magnitudes are a fraction of a bullet's (its
+            // pulse peaks near 4.5) but no longer whisper-quiet, and a little
+            // foam marks the strike so it reads at glancing angles.
+            let kick = (hash2(rain_cell * 1.71 + vec2<f32>(4.7, 9.3)) - 0.5) * 1.4 * params.weather.x;
             velocity = velocity + kick;
-            height = height - 0.022 * params.weather.x;
+            height = height - 0.08 * params.weather.x;
+            foam = max(foam, 0.18 * params.weather.x);
         }
     }
     let edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
