@@ -601,6 +601,11 @@ struct SkyUniform {
     // xyz = unit dir TO the sun as seen from the moon (shades the lunar sphere);
     // w = earthshine reflectance floor on the dark side.
     moon_sun: [f32; 4],
+    // Second cloud layer LOOK, written by the RENDERER (there is no C++ lane for it, the same
+    // arrangement as cloud4.w's puffiness): x = AMOUNT (0..1, 0.5 = shipped), y = MATCH toward the
+    // cumulus deck (0..1, 0 = shipped), zw reserved. Both arrive here already eased. See
+    // sky.wgsl's `cirrus` lane and its AMOUNT / MATCH blocks.
+    cirrus: [f32; 4],
 }
 
 // The atmosphere-only fields that determine the LUTs (sun/night/exposure excluded,
@@ -627,13 +632,23 @@ fn lut_key(sky: &WgrSky) -> LutKey {
     ]
 }
 
-/// Cloud sun-transmittance map (CLD-020). One texel per `CLOUD_SHADOW_SPAN / CLOUD_SHADOW_DIM`
-/// metres of world, centred on the camera.
+/// Cloud sun-transmittance map (CLD-020). One texel per `span / CLOUD_SHADOW_DIM` metres of
+/// world, centred on the camera; `span` is chosen per frame by `select_cloud_shadow_span`.
 ///
 /// 512 over 4 km is ~7.8 m per texel. That is coarse for a shadow and exactly right for THIS
 /// shadow: a cloud deck edge is tens of metres of penumbra anyway, so finer texels would cost
-/// march work to resolve detail the phenomenon does not have. 4 km covers the view distance that
-/// matters without the map's edge becoming visible as a lighting seam.
+/// march work to resolve detail the phenomenon does not have.
+///
+/// 4 km was NOT enough range, though, and the claim that it "covers the view distance that
+/// matters" was only true on foot. The map is centred on the camera, so it reached 2048 m; a
+/// pilot with the view distance wound out sees ground several times further than that, and
+/// `cloud_sun_shadow` returns fully lit outside the map. The result was a dead-straight line
+/// across the landscape with everything beyond it in full sun, moving with the camera.
+///
+/// The span is therefore sized from the camera's own draw distance instead of pinned, and the
+/// DIM stays at 512: the march is per texel, so growing the span is free (same dispatch, same
+/// 12 steps per texel, same 1 MB texture) and is paid for in metres per texel rather than in
+/// GPU time. See `select_cloud_shadow_span` for the levels and why they are powers of two.
 const CLOUD_SHADOW_DIM: u32 = 512;
 
 /// Fixed capacity of the smoke -> ground-shadow blob buffer. The froxel bind group is built
@@ -658,7 +673,43 @@ struct SmokeShadowHeader {
     _pad0: f32,
     _pad1: f32,
 }
-const CLOUD_SHADOW_SPAN: f32 = 4096.0;
+/// Shortest span, and the one on-foot play keeps: 4096 m / 512 = 8 m per texel, i.e. exactly
+/// the quality this feature shipped with, for every draw distance up to 2048 m.
+const CLOUD_SHADOW_SPAN_MIN: f32 = 4096.0;
+/// Longest span: 16384 m / 512 = 32 m per texel, covering an 8192 m draw distance. Past that
+/// the map stops growing and `cloud_sun_shadow`'s edge fade takes over, which degrades to
+/// "cloud shadows thin out at extreme range" instead of to a seam.
+const CLOUD_SHADOW_SPAN_MAX: f32 = 16384.0;
+
+/// The span level for a camera that draws ground out to `draw_distance` metres, given the level
+/// currently in use. Free function so it is testable without a `wgpu::Device`; see
+/// `Sky::select_cloud_shadow_span` for the reasoning behind every clause.
+fn cloud_shadow_span_for(current: f32, draw_distance: f32) -> f32 {
+    if !draw_distance.is_finite() || draw_distance <= 0.0 {
+        // No usable far plane this frame (fog off, or a camera that never filled it). Keep the
+        // level we had rather than guessing: the alternative is snapping back to the minimum for
+        // one frame and re-rasterising the whole field for nothing.
+        return current;
+    }
+    let needed = (2.0 * draw_distance).clamp(CLOUD_SHADOW_SPAN_MIN, CLOUD_SHADOW_SPAN_MAX);
+    let mut span = CLOUD_SHADOW_SPAN_MIN;
+    while span < needed && span < CLOUD_SHADOW_SPAN_MAX {
+        span *= 2.0;
+    }
+    if span > current {
+        return span;
+    }
+    if span < current && 2.0 * draw_distance < current * 0.45 {
+        return span;
+    }
+    current
+}
+
+// CLD-021's adaptive span was uncommitted work in the codex checkout and is merged here. The
+// first attempt at this conflict took the base's fixed 4096 m instead, on the theory that the
+// smoke-shadow blob buffer above was sized from the span; it is not -- SMOKE_SHADOW_MAX_BLOBS is
+// a blob COUNT and is independent of how far the map reaches. The two are orthogonal and both
+// are in.
 
 /// Initial second-cloud-layer (cirrus) mode: 0 = off, 1 = flat sheet, 2 = thin-shell volumetric.
 ///
@@ -694,6 +745,23 @@ const CIRRUS_PUFF_DEFAULT: f32 = 0.5;
 /// lumpier than shipped, over the better part of an hour, which is weather rather than animation.
 /// 0 pins it exactly.
 const CIRRUS_PUFF_VAR_DEFAULT: f32 = 0.15;
+/// Cirrus AMOUNT default, matching `Engine::SkySettings`. 0.5 is the middle of the slider AND
+/// exactly the coverage the layer shipped with (sky.wgsl maps it through a middle knot that IS the
+/// old `CIRRUS_COVER`), so the control is opt-in in both directions.
+const CIRRUS_AMOUNT_DEFAULT: f32 = 0.5;
+/// Cirrus MATCH default. 0 = high ice cloud, which is what the layer has always been; the slider
+/// only ever moves it toward the cumulus deck, so the default has to be the bottom of the range
+/// rather than its middle.
+const CIRRUS_MATCH_DEFAULT: f32 = 0.0;
+
+/// Second-layer EDGE SOFTNESS default, matching `Engine::SkySettings`.
+///
+/// Unlike the other second-layer sliders this default is NOT the old look — 0 is. The owner asked
+/// for the upper layer's bigger clouds to read fuzzier than they did, so the shipped value is a
+/// real setting. Kept below the middle of the range because softening is far easier to over-apply
+/// than to under-apply: past about 0.7 the banks start reading as haze rather than as cloud.
+const CIRRUS_SOFT_DEFAULT: f32 = 0.45;
+
 /// Metres of weather drift the C++ side wraps `cloud_evolve.z` at (`kWindWrap` in EngineWgpu.cpp).
 /// The variation waveform is built to be exactly periodic over this distance, so the wrap reseat
 /// — which is a real discontinuity in the drift value — is invisible in the puffiness.
@@ -743,6 +811,39 @@ fn cirrus_puff_target(base: f32, variation: f32, phase_turns: f32, drift_m: f32)
 /// same instant of an hour-long cycle and the control could not be photographed at all. `--dev` is
 /// not available under `--test-type screenshot` / `--benchmark`, so there is no other way in.
 /// Returns None when the variable is absent, so the caller keeps the compiled defaults.
+/// `WGR_CIRRUS_LOOK=<amount>[,<match>]` — startup override for the two Sky-tab look sliders.
+///
+/// Exists for the same reason `WGR_CIRRUS` and `WGR_CIRRUS_PUFF` do: `--benchmark` and
+/// `--test-type screenshot` both run `--no-dev`, so the Sky tab cannot be reached, and without an
+/// env door neither the cost nor the appearance of these two can be captured at all. Prints what
+/// it selected so a benchmark log is self-describing.
+fn cirrus_look_from_env() -> Option<(f32, f32)> {
+    let raw = std::env::var("WGR_CIRRUS_LOOK").ok()?;
+    let mut it = raw.split(',').map(|f| f.trim().parse::<f32>().ok());
+    let amount = it.next().flatten().unwrap_or(CIRRUS_AMOUNT_DEFAULT);
+    let matched = it.next().flatten().unwrap_or(CIRRUS_MATCH_DEFAULT);
+    let v = (amount.clamp(0.0, 1.0), matched.clamp(0.0, 1.0));
+    eprintln!(
+        "[wgr] sky: cirrus amount {} match-deck {} from WGR_CIRRUS_LOOK",
+        v.0, v.1
+    );
+    Some(v)
+}
+
+/// `WGR_CIRRUS_SOFT=<0..1>` — startup override for the second layer's edge softness, for the same
+/// reason the other sky overrides exist: `--benchmark` and `--test-type screenshot` run `--no-dev`,
+/// so the Sky tab cannot be reached and the control could not otherwise be captured at all.
+fn cirrus_soft_from_env() -> Option<f32> {
+    let v = std::env::var("WGR_CIRRUS_SOFT")
+        .ok()?
+        .trim()
+        .parse::<f32>()
+        .ok()?
+        .clamp(0.0, 1.0);
+    eprintln!("[wgr] sky: cirrus edge softness {} from WGR_CIRRUS_SOFT", v);
+    Some(v)
+}
+
 fn cirrus_puff_from_env() -> Option<(f32, f32, f32)> {
     let raw = std::env::var("WGR_CIRRUS_PUFF").ok()?;
     let mut it = raw.split(',').map(|f| f.trim().parse::<f32>().ok());
@@ -804,6 +905,10 @@ pub struct Sky {
     smoke_shadow_blobs: Vec<SmokeShadowBlob>,
     smoke_shadow_strength: f32,
     cloud_shadow_strength: f32,
+    /// World span (metres) of the cloud shadow map's square, chosen per frame from the camera's
+    /// draw distance. Always a power-of-two multiple of `CLOUD_SHADOW_SPAN_MIN`, so every level's
+    /// texel grid is a subset of every finer level's — see `select_cloud_shadow_span`.
+    cloud_shadow_span: f32,
     cloud_shadow_map_params: [f32; 4],
     star_intensity: f32,
     /// Lens-flare gain. 0 disables the effect outright (the shader early-outs).
@@ -823,6 +928,23 @@ pub struct Sky {
     /// The value actually uploaded (cloud4.w): the target eased frame to frame, so no slider can
     /// step the sky's shape. Seeded at the base so the first frame does not fade in from nowhere.
     cirrus_puff_now: f32,
+    /// Cirrus AMOUNT (Sky tab): 0 = a few separated wisps, 0.5 = the shipped coverage, 1 = a
+    /// continuous veil. Coverage first, optical depth a little — see sky.wgsl's AMOUNT block.
+    cirrus_amount: f32,
+    /// Cirrus MATCH (Sky tab): 0 = high ice cloud, 1 = as close to the cumulus deck's altitude,
+    /// feature size, depth, opacity and phase as a shell march gets. See sky.wgsl's MATCH block.
+    cirrus_match: f32,
+    /// The two values actually uploaded (`cirrus.xy`), eased exactly as `cirrus_puff_now` is and
+    /// for the same reason: MATCH moves the layer's ALTITUDE by kilometres, so an un-eased drag
+    /// would teleport a whole cloud deck across the sky rather than sliding it.
+    cirrus_amount_now: f32,
+    cirrus_match_now: f32,
+    /// Second-layer EDGE SOFTNESS (Sky tab): 0 = the layer as it rendered before this existed,
+    /// 1 = big masses carry a deep soft fringe instead of a defined silhouette. Weighted by local
+    /// coverage in the shader, so it reaches the banks and not the isolated wisps.
+    cirrus_soft: f32,
+    /// Eased, for the same reason the others are: this changes every cloud edge on screen at once.
+    cirrus_soft_now: f32,
     // Group(1) of cs_froxel: the terrain sun-shadow mask, rebuilt each frame (the mask
     // texture is Terrain-owned and regenerated) from the lent view + these two.
     froxel_shadow_layout: wgpu::BindGroupLayout,
@@ -1713,6 +1835,8 @@ impl Sky {
         };
         // Read once — it logs, and the three fields must agree with each other.
         let puff_env = cirrus_puff_from_env();
+        let look_env = cirrus_look_from_env();
+        let soft_env = cirrus_soft_from_env();
 
         Self {
             sky_pipeline,
@@ -1770,7 +1894,14 @@ impl Sky {
             cirrus_puff_var: puff_env.map_or(CIRRUS_PUFF_VAR_DEFAULT, |v| v.1),
             cirrus_puff_phase: puff_env.map_or(0.0, |v| v.2),
             cirrus_puff_now: puff_env.map_or(CIRRUS_PUFF_DEFAULT, |v| v.0),
-            cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN, 0.85],
+            cirrus_amount: look_env.map_or(CIRRUS_AMOUNT_DEFAULT, |v| v.0),
+            cirrus_match: look_env.map_or(CIRRUS_MATCH_DEFAULT, |v| v.1),
+            cirrus_amount_now: look_env.map_or(CIRRUS_AMOUNT_DEFAULT, |v| v.0),
+            cirrus_match_now: look_env.map_or(CIRRUS_MATCH_DEFAULT, |v| v.1),
+            cirrus_soft: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
+            cirrus_soft_now: soft_env.unwrap_or(CIRRUS_SOFT_DEFAULT),
+            cloud_shadow_span: CLOUD_SHADOW_SPAN_MIN,
+            cloud_shadow_map_params: [0.0, 0.0, 1.0 / CLOUD_SHADOW_SPAN_MIN, 0.85],
             froxel_view,
             froxel_shadow_layout,
             mask_sampler,
@@ -1784,23 +1915,48 @@ impl Sky {
         }
     }
 
-    /// World mapping for the cloud sun-transmittance map: a square of
-    /// `CLOUD_SHADOW_SPAN` metres centred on the camera, with the min corner SNAPPED to
-    /// the map's own texel grid.
+    /// World mapping for the cloud sun-transmittance map: a square of `cloud_shadow_span`
+    /// metres centred on the camera, with the min corner SNAPPED to the map's own texel grid.
     ///
     /// The snap is the whole trick. An origin that tracks the camera continuously
     /// re-rasterises the same clouds into different texels every frame, and the eye reads
     /// that as the shadows crawling over the ground independently of the wind. Snapping
     /// means a texel keeps covering the same square of world until it leaves the map.
     fn cloud_shadow_mapping(&self, cam_pos: [f32; 4]) -> [f32; 4] {
-        let texel = CLOUD_SHADOW_SPAN / CLOUD_SHADOW_DIM as f32;
+        let span = self.cloud_shadow_span;
+        let texel = span / CLOUD_SHADOW_DIM as f32;
         let snap = |v: f32| (v / texel).floor() * texel;
         [
-            snap(cam_pos[0] - CLOUD_SHADOW_SPAN * 0.5),
-            snap(cam_pos[2] - CLOUD_SHADOW_SPAN * 0.5),
-            1.0 / CLOUD_SHADOW_SPAN,
+            snap(cam_pos[0] - span * 0.5),
+            snap(cam_pos[2] - span * 0.5),
+            1.0 / span,
             self.cloud_shadow_strength,
         ]
+    }
+
+    /// How wide the map's square has to be for a camera that can draw ground `draw_distance`
+    /// metres away.
+    ///
+    /// The map is camera-centred and the ground lookup is straight down (`cloud_sun_shadow`),
+    /// so the requirement is purely horizontal: reach the furthest ground that can exist on
+    /// screen, in every direction. Altitude adds nothing to it — the ground below a climbing
+    /// aircraft stays at the map's centre — which is why this is driven by draw distance and
+    /// not by height, even though flying is where the seam was reported. Flying is simply
+    /// where people wind the view distance out.
+    ///
+    /// **Powers of two, and only powers of two.** `cloud_shadow_mapping` snaps the origin to
+    /// `span / 512`, so doubling the span doubles the texel: every coarser grid line is also a
+    /// finer grid line, and a level change re-rasterises the field ONCE rather than sliding it.
+    /// A span that tracked the draw distance continuously would re-snap to a different grid
+    /// every frame and reintroduce exactly the crawl the snapping exists to prevent.
+    ///
+    /// **Hysteresis on the way down.** The draw distance comes from the scene fog range, which
+    /// the engine widens and narrows with the weather, so it drifts across a level boundary on
+    /// its own. Growing is immediate (a seam is the failure being fixed); shrinking waits until
+    /// the requirement is comfortably inside the smaller level, so a drifting fog range cannot
+    /// flap the map between two rasterisations every few frames.
+    fn select_cloud_shadow_span(&self, draw_distance: f32) -> f32 {
+        cloud_shadow_span_for(self.cloud_shadow_span, draw_distance)
     }
 
     /// Fix this frame's cloud-shadow world square BEFORE anything publishes or samples it.
@@ -1814,9 +1970,30 @@ impl Sky {
     /// entire shadow field translates 8 m and returns on the next frame -- several times a
     /// second in flight, never at a standstill. That is the reported flicker.
     ///
-    /// Call once per frame, from the same camera the sky pass will use.
-    pub fn begin_cloud_shadow_frame(&mut self, cam_pos: [f32; 4]) {
+    /// Call once per frame, from the same camera the sky pass will use. `draw_distance` is that
+    /// camera's furthest drawable ground in metres (0 = unknown, keep the current span).
+    ///
+    /// Returns a line to log when the span LEVEL changed, and nothing otherwise — the level is
+    /// invisible from outside and silently halving the map's resolution is the kind of thing a
+    /// later quality complaint has no way to trace.
+    pub fn begin_cloud_shadow_frame(
+        &mut self,
+        cam_pos: [f32; 4],
+        draw_distance: f32,
+    ) -> Option<String> {
+        let span = self.select_cloud_shadow_span(draw_distance);
+        let changed = span != self.cloud_shadow_span;
+        self.cloud_shadow_span = span;
         self.cloud_shadow_map_params = self.cloud_shadow_mapping(cam_pos);
+        changed.then(|| {
+            format!(
+                "Wgpu: cloud shadow map span {:.0} m ({:.1} m/texel at {}^2) for a {:.0} m draw distance",
+                span,
+                span / CLOUD_SHADOW_DIM as f32,
+                CLOUD_SHADOW_DIM,
+                draw_distance
+            )
+        })
     }
 
     /// The mapping last uploaded, so the frame bind group can publish the same numbers to
@@ -1860,6 +2037,24 @@ impl Sky {
     pub fn set_cirrus_puffiness(&mut self, puffiness: f32, variation: f32) {
         self.cirrus_puff = puffiness.clamp(0.0, 1.0);
         self.cirrus_puff_var = variation.clamp(0.0, 1.0);
+    }
+
+    /// Second-layer LOOK. `amount` 0 = a few wisps .. 0.5 = the shipped coverage .. 1 = a
+    /// continuous veil; `match_deck` 0 = high ice cloud (shipped) .. 1 = as close to the cumulus
+    /// deck below as the shell march gets.
+    ///
+    /// Neither takes effect immediately — `upload` eases toward both, which matters more here than
+    /// it does for puffiness: `match_deck` moves the layer's altitude by kilometres. The env
+    /// override, if present, wins until this is called.
+    pub fn set_cirrus_look(&mut self, amount: f32, match_deck: f32) {
+        self.cirrus_amount = amount.clamp(0.0, 1.0);
+        self.cirrus_match = match_deck.clamp(0.0, 1.0);
+    }
+
+    /// Second-layer EDGE SOFTNESS: 0 = the layer as it rendered before this existed, 1 = the big
+    /// masses carry a deep soft fringe instead of a defined silhouette. Eased in `upload`.
+    pub fn set_cirrus_softness(&mut self, softness: f32) {
+        self.cirrus_soft = softness.clamp(0.0, 1.0);
     }
 
     pub fn cloud_shadow_view(&self) -> &wgpu::TextureView {
@@ -1911,6 +2106,11 @@ impl Sky {
             sky.cloud4[2],
         );
         self.cirrus_puff_now += (target - self.cirrus_puff_now) * CIRRUS_PUFF_EASE;
+        // Same ease, same rate, for the two look sliders. They have no time variation of their own
+        // (they are authored settings, not weather), so the target IS the setting.
+        self.cirrus_amount_now += (self.cirrus_amount - self.cirrus_amount_now) * CIRRUS_PUFF_EASE;
+        self.cirrus_match_now += (self.cirrus_match - self.cirrus_match_now) * CIRRUS_PUFF_EASE;
+        self.cirrus_soft_now += (self.cirrus_soft - self.cirrus_soft_now) * CIRRUS_PUFF_EASE;
         let u = SkyUniform {
             inv_view_proj,
             sun_dir: sky.sun_dir,
@@ -1953,6 +2153,12 @@ impl Sky {
             cloud_shadow: self.cloud_shadow_map_params,
             moon_params: sky.moon_params,
             moon_sun: sky.moon_sun,
+            cirrus: [
+                self.cirrus_amount_now,
+                self.cirrus_match_now,
+                self.cirrus_soft_now,
+                0.0,
+            ],
         };
         queue.write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&u));
         // Terrain sun-shadow mask mapping for cs_froxel's occlusion lookup (own copy so
@@ -2501,11 +2707,11 @@ mod cirrus_puffiness_tests {
             "the shader must read puffiness from the cloud4.w spare lane"
         );
         for used in [
-            "p.x * sh.aspect",       // streak aspect
-            "let wb = sh.fine;",     // octave balance
-            "fibre * sh.erode",      // fibre erosion
-            "-d * sh.density",       // flat-mode optical depth
-            "CIRRUS_ALT - sh.thick", // shell geometry
+            "p.x * sh.aspect",   // streak aspect
+            "let wb = sh.fine;", // octave balance
+            "fibre * sh.erode",  // fibre erosion
+            "-d * sh.density",   // flat-mode optical depth
+            "sh.alt - sh.thick", // shell geometry (sh.alt is CIRRUS_ALT until MATCH moves it)
         ] {
             assert!(src.contains(used), "sky.wgsl must use `{}`", used);
         }
@@ -2521,6 +2727,119 @@ mod cirrus_puffiness_tests {
             src.contains("let sh = cirrus_shape();"),
             "cirrus_layer must hoist the puffiness mixes out of the march"
         );
+    }
+
+    // AMOUNT and MATCH are two more sliders that can silently move a number nothing reads: the
+    // layer still renders cirrus either way, so nothing fails loudly. Assert the same three things
+    // the puffiness tests assert -- that the lane is read, that every derived parameter is used,
+    // and that the neutral setting is bit-for-bit the shipped look.
+    #[test]
+    fn the_look_sliders_reach_the_shader() {
+        let src = include_str!("sky.wgsl");
+        assert!(
+            src.contains("let amount = clamp(sky.cirrus.x, 0.0, 1.0)")
+                && src.contains("let m = clamp(sky.cirrus.y, 0.0, 1.0)"),
+            "the shader must read AMOUNT and MATCH from the cirrus lane"
+        );
+        // EDGE SOFTNESS shares the lane. It must be READ, applied BEFORE the fibre erosion (so
+        // erosion carves the fringe rather than the fringe blurring the erosion), and weighted by
+        // the local coverage -- that weighting is the whole of "the BIGGER ones get fuzzier", and
+        // without it the slider softens isolated wisps into nothing while the banks barely move.
+        assert!(
+            src.contains("sh.soft = clamp(sky.cirrus.z, 0.0, 1.0);")
+                && src.contains(
+                    "let soft = sh.soft * smoothstep(CIRRUS_SOFT_COV_LO, CIRRUS_SOFT_COV_HI, cover);"
+                )
+                && src.contains("d0 = clamp(pow(d0, k) * ((k + 1.0) * 0.5), 0.0, 1.0);"),
+            "the second layer's edge softness must be read, coverage-weighted and mean-restored"
+        );
+        // The mean restoration is what keeps it a SHAPE control: pow() on a roughly uniform [0,1]
+        // drops the mean from 1/2 to 1/(k+1), so (k+1)/2 back is what stops the slider reading as
+        // a brightness control. Same principle PUFFINESS states for its own density coupling.
+        assert_eq!(CIRRUS_SOFT_DEFAULT, 0.45);
+        for used in [
+            // AMOUNT: the coverage threshold the field remaps against, and its density coupling.
+            "sh.cover = cirrus_mix3(CIRRUS_COVER_SPARSE, CIRRUS_COVER, CIRRUS_COVER_FULL, amount)",
+            "CIRRUS_AMOUNT_DENSITY_SPARSE",
+            "let cover = sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x);",
+            // MATCH: altitude, feature scale, isotropy, striation, depth, opacity, step count.
+            "sh.alt = mix(CIRRUS_ALT, matched_alt, m);",
+            "sh.scale = mix(CIRRUS_SCALE,",
+            "sh.aspect = mix(sh.aspect, CIRRUS_ASPECT_MATCHED, m);",
+            "sh.erode = mix(sh.erode, CIRRUS_ERODE_MATCHED, m);",
+            "sh.density = mix(sh.density, CIRRUS_DENSITY_MATCHED, m);",
+            "sh.thick = mix(sh.thick, matched_thick, m);",
+            "sh.step_gain = mix(1.0, CIRRUS_STEPS_MATCH_GAIN, m);",
+            // And the two places MATCH shows up outside the shape block.
+            "let phase = mix(ice_phase, deck_phase, sh.match_deck);",
+            "exp(-sh.density * (1.0 - h) * 0.35), sh.match_deck)",
+            // ...and it must attenuate the SUN term only. Applying it to `lit` (sun + ambient)
+            // pulls the shaded sides toward the direct sun's hue, which at a low sun is olive.
+            "col += trans * (lit_sun * shade + ambient) * (1.0 - seg);",
+            // The field and the warp must both take the LIVE scale, or MATCH shrinks the clouds
+            // in one of them and not the other and the layer smears.
+            "let s = sh.scale;",
+            "cirrus_warp(world_xz, sh.scale)",
+        ] {
+            assert!(src.contains(used), "sky.wgsl must use `{}`", used);
+        }
+        // The march bound must be the live step count, not the constant it starts from.
+        // The step COUNT must come from the ray's own path, not from a constant. A fixed count
+        // makes dt scale with the angle-dependent path length, the step phase then varies smoothly
+        // across the screen, and the aliasing organises into bands parallel to the horizon -- the
+        // reported "parallel strips". The per-pixel jittered start is the second half of the cure:
+        // it scatters whatever undersampling survives into noise instead of letting it line up.
+        assert!(
+            src.contains(
+                "let n = clamp(ceil(path / target_step), CIRRUS_STEPS_MIN, f32(CIRRUS_STEPS_MAX));"
+            ) && src.contains("let dt = path / n;")
+                && src.contains("for (var i: i32 = 0; i < steps; i = i + 1)"),
+            "the shell march must derive its step count from the path length"
+        );
+        assert!(
+            src.contains("t = t0 + dt * mix(0.5, jitter, step(0.0001, jitter));")
+                && src.contains("hash21(in.clip.xy), scene_dist)"),
+            "the shell march must start at a per-pixel jittered offset on the full-res path"
+        );
+        // ...and NOT on the env bake, where a jittered march reads as a checkerboard once the
+        // 256x128 texels are magnified by a water reflection. Same reasoning the deck records.
+        assert!(
+            src.contains("cirrus_layer(pos, dir, sun, radiance, color, 0.0, 1e12)"),
+            "the env bake must march the cirrus shell without jitter"
+        );
+        // The defaults are neutral by construction: AMOUNT's midpoint knot IS the old CIRRUS_COVER
+        // constant, and MATCH's default is the bottom of its range, so `mix(x, _, 0)` is x.
+        assert_eq!(CIRRUS_AMOUNT_DEFAULT, 0.5);
+        assert_eq!(CIRRUS_MATCH_DEFAULT, 0.0);
+    }
+
+    // MATCH must never drop the second layer into the first. The shader clamps the matched
+    // altitude to the deck's top plus a gap, with a floor of its own -- a deck authored absurdly
+    // high (or inverted) must still leave the layer above it, not inside it.
+    #[test]
+    fn the_matched_layer_stays_above_the_deck() {
+        let src = include_str!("sky.wgsl");
+        assert!(
+            src.contains(
+                "let matched_alt = clamp(sky.cloud0.w + CIRRUS_ALT_MATCH_GAP, CIRRUS_ALT_MATCH_MIN, CIRRUS_ALT);"
+            ),
+            "the matched altitude must be clamped to [floor, CIRRUS_ALT] above the deck's top"
+        );
+        // Reproduce the clamp here so the constants themselves are checked, not just the source
+        // line: a positive gap and a floor below the cirrus altitude are what make it total.
+        let alt = 7000.0f32; // CIRRUS_ALT
+        let gap = 1200.0f32; // CIRRUS_ALT_MATCH_GAP
+        let floor = 2500.0f32; // CIRRUS_ALT_MATCH_MIN
+        assert!(gap > 0.0 && floor < alt);
+        for deck_top in [0.0f32, 800.0, 2000.0, 6000.0, 20000.0] {
+            let matched = (deck_top + gap).clamp(floor, alt);
+            assert!(
+                matched > deck_top || deck_top + gap > alt,
+                "deck top {} would put the matched layer at {}",
+                deck_top,
+                matched
+            );
+        }
     }
 
     // The variation rides a clock that JUMPS: the C++ side wraps the weather drift at 100 km, so
@@ -2682,6 +3001,9 @@ mod sky_uniform_layout_tests {
             // has to move together — one without the other is silent garbage in the shader.
             "moon_params",
             "moon_sun",
+            // The second layer's AMOUNT / MATCH sliders. Renderer-written, like cloud4.w — but
+            // unlike it they needed a lane of their own, so this list moves with them.
+            "cirrus",
         ];
         assert_eq!(
             wgsl, rust,
@@ -2692,5 +3014,169 @@ mod sky_uniform_layout_tests {
             std::mem::size_of::<super::SkyUniform>(),
             64 + (rust.len() - 1) * 16
         );
+    }
+}
+
+#[cfg(test)]
+mod cloud_shadow_range_tests {
+    use super::{
+        CLOUD_SHADOW_DIM, CLOUD_SHADOW_SPAN_MAX, CLOUD_SHADOW_SPAN_MIN, cloud_shadow_span_for,
+    };
+
+    // The reported fault: the map spanned a fixed 4096 m centred on the camera, so it reached
+    // 2048 m, and `cloud_sun_shadow` returns fully lit outside it. With the view distance wound
+    // out for flying, the ground past 2048 m was in full sun and the boundary drew a straight
+    // line across the landscape that moved with the camera.
+    //
+    // The requirement, stated as a property rather than as a table: whatever the draw distance,
+    // the map's HALF extent must reach it, up to the cap.
+    #[test]
+    fn the_map_reaches_the_far_plane_at_every_draw_distance() {
+        let mut span = CLOUD_SHADOW_SPAN_MIN;
+        for step in 0..200 {
+            let draw = 50.0 * (step as f32 + 1.0); // 50 m .. 10 km
+            span = cloud_shadow_span_for(span, draw);
+            let reach = span * 0.5;
+            assert!(
+                reach >= draw.min(CLOUD_SHADOW_SPAN_MAX * 0.5),
+                "a {draw} m draw distance needs {draw} m of reach, got {reach} m (span {span})"
+            );
+        }
+    }
+
+    // On foot nothing may change: 4096 m / 512 = 8 m per texel is the quality this feature
+    // shipped with, and it is the level that must survive a normal view distance.
+    #[test]
+    fn short_draw_distances_keep_the_original_span_and_resolution() {
+        for draw in [200.0f32, 900.0, 1200.0, 2048.0] {
+            assert_eq!(
+                cloud_shadow_span_for(CLOUD_SHADOW_SPAN_MIN, draw),
+                CLOUD_SHADOW_SPAN_MIN,
+                "{draw} m fits inside the shipped span; it must not be widened"
+            );
+        }
+        assert_eq!(CLOUD_SHADOW_SPAN_MIN / CLOUD_SHADOW_DIM as f32, 8.0);
+        assert_eq!(CLOUD_SHADOW_SPAN_MAX / CLOUD_SHADOW_DIM as f32, 32.0);
+    }
+
+    // Every level's texel must be a power-of-two multiple of the finest one, or the origin snap
+    // in `cloud_shadow_mapping` lands on a grid that is NOT a subset of the previous level's and
+    // the whole shadow field slides when the level changes. Powers of two are what make a level
+    // change a one-off re-rasterisation instead of a crawl.
+    #[test]
+    fn every_span_level_is_a_power_of_two_multiple_of_the_minimum() {
+        let mut span = CLOUD_SHADOW_SPAN_MIN;
+        for draw in [100.0f32, 3000.0, 5000.0, 40000.0, 5000.0, 100.0] {
+            span = cloud_shadow_span_for(span, draw);
+            let ratio = span / CLOUD_SHADOW_SPAN_MIN;
+            assert!(
+                ratio >= 1.0 && (ratio as u32).is_power_of_two() && ratio.fract() == 0.0,
+                "span {span} is not a power-of-two multiple of {CLOUD_SHADOW_SPAN_MIN}"
+            );
+            assert!(
+                span <= CLOUD_SHADOW_SPAN_MAX,
+                "span {span} exceeded the cap"
+            );
+        }
+    }
+
+    // The snap in `cloud_shadow_mapping` is what stops the shadows crawling over the ground as
+    // the camera moves, and a variable span is the obvious way to break it: re-snapping to a
+    // different grid translates the whole field. Powers of two are the guard — a coarser level's
+    // grid lines are a SUBSET of every finer level's — so a level change re-rasterises at a new
+    // resolution without sliding, and within a level nothing moves at all.
+    //
+    // Asserted on the snap arithmetic itself rather than on the constants, because the constants
+    // could stay powers of two while the origin formula stopped being a floor to the texel.
+    #[test]
+    fn a_coarse_origin_is_still_on_every_finer_levels_grid() {
+        let origin_at = |span: f32, cam: f32| {
+            let texel = span / CLOUD_SHADOW_DIM as f32;
+            ((cam - span * 0.5) / texel).floor() * texel
+        };
+        let mut span = CLOUD_SHADOW_SPAN_MIN;
+        while span <= CLOUD_SHADOW_SPAN_MAX {
+            let fine = CLOUD_SHADOW_SPAN_MIN / CLOUD_SHADOW_DIM as f32;
+            for cam in [0.0f32, 1.0, 4321.5, -777.25, 12800.0] {
+                let o = origin_at(span, cam);
+                assert_eq!(
+                    (o / fine).fract(),
+                    0.0,
+                    "span {span}'s origin {o} is off the {fine} m base grid; a level change \
+                     would translate the whole shadow field"
+                );
+            }
+            span *= 2.0;
+        }
+    }
+
+    // The draw distance is the scene FOG MAX, which the engine widens and narrows with the
+    // weather, so it drifts. Without hysteresis a range sitting on a level boundary would
+    // re-rasterise the field every few frames -- the same visible crawl the snap exists to
+    // prevent, just at a slower rate.
+    #[test]
+    fn a_draw_distance_drifting_across_a_boundary_does_not_flap_the_level() {
+        // 2048 m is the 4096 <-> 8192 boundary. Grow once, then wobble either side of it.
+        let grown = cloud_shadow_span_for(CLOUD_SHADOW_SPAN_MIN, 2100.0);
+        assert_eq!(grown, 8192.0);
+        for draw in [2100.0f32, 2000.0, 2049.0, 1900.0, 2200.0, 1850.0] {
+            assert_eq!(
+                cloud_shadow_span_for(grown, draw),
+                grown,
+                "{draw} m is inside the hysteresis band and must not change the level"
+            );
+        }
+        // A genuine drop -- someone turned the view distance down -- still takes effect.
+        assert_eq!(cloud_shadow_span_for(grown, 900.0), CLOUD_SHADOW_SPAN_MIN);
+    }
+
+    // A camera with no usable fog range (fog off) must not yank the map back to the minimum for
+    // a frame; that would re-rasterise the field for no reason at all.
+    #[test]
+    fn an_unknown_draw_distance_holds_the_current_level() {
+        for bad in [0.0f32, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(cloud_shadow_span_for(8192.0, bad), 8192.0);
+        }
+    }
+
+    // The edge fade is the graceful-degradation half of the fix, and its DIRECTION is the whole
+    // point: mixing toward 1.0 can only ever lighten, so it cannot produce the dark band at the
+    // map's edge that the hard `return 1.0` above it exists to prevent. Pinned in the source
+    // because reversing the mix arguments still compiles, still validates, still renders, and
+    // replaces one rendering fault with a worse one.
+    #[test]
+    fn the_edge_fade_can_only_lighten() {
+        for (name, src, konst) in [
+            (
+                "frame.wgsl",
+                include_str!("../shaders/frame.wgsl"),
+                "CLOUD_SHADOW_EDGE_FADE",
+            ),
+            (
+                "godrays.wgsl",
+                include_str!("../godrays.wgsl"),
+                "CLOUD_MAP_EDGE_FADE",
+            ),
+        ] {
+            assert!(
+                src.contains(&format!("const {konst}: f32 = 0.85;")),
+                "{name} must declare the map-edge fade band"
+            );
+            assert!(
+                src.contains(&format!("smoothstep({konst}, 1.0, edge)")),
+                "{name} must ramp over the OUTER band (edge 1 = the map boundary)"
+            );
+            // mix(1.0, x, keep): keep 0 at the boundary -> fully lit. The reversed form
+            // mix(x, 1.0, keep) would darken toward the edge instead.
+            //
+            // What sits in the middle argument is deliberately not pinned, only its DIRECTION.
+            // godrays.wgsl fades `vis` -- cloud and smoke already combined -- rather than the
+            // cloud term alone: both are channels of the same texel of the same map, so both
+            // leave it at the same boundary and both must ease out there.
+            assert!(
+                src.contains("mix(1.0, shadow, keep)") || src.contains("mix(1.0, vis, keep)"),
+                "{name} must fade TOWARD fully lit, never away from it"
+            );
+        }
     }
 }

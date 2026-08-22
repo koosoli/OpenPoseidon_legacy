@@ -2155,7 +2155,22 @@ impl Renderer {
         // cannot disagree -- makes the frame self-consistent, and Sky::upload now consumes
         // this square rather than deriving another.
         if let Some(cam) = cameras.get(main_scene_cam) {
-            self.sky.begin_cloud_shadow_frame(cam.cam_pos);
+            // CLD-021: how far the map has to reach. fog_start + 1/fog_inv_range is the scene fog
+            // MAX, which the engine also uses as the camera far plane and the terrain-grid cull
+            // distance (see apply_fog in frame.wgsl) -- i.e. the furthest ground that can exist on
+            // screen at all, and therefore exactly the radius the cloud shadow map has to cover.
+            // 0 when this camera has no usable fog range; the sky then keeps its current span.
+            let draw_distance = if cam.params.fog_inv_range > 0.0 {
+                cam.params.fog_start + 1.0 / cam.params.fog_inv_range
+            } else {
+                0.0
+            };
+            let span_change = self
+                .sky
+                .begin_cloud_shadow_frame(cam.cam_pos, draw_distance);
+            if let Some(line) = span_change {
+                self.log.log(log_level::INFO, &line);
+            }
         }
         shadow_mapping.cloud_shadow =
             glam::Vec4::from_array(self.sky.cloud_shadow_mapping_current());

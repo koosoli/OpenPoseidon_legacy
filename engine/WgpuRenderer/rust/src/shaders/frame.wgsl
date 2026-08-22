@@ -500,6 +500,23 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
 // Returns 1 (fully lit) when disabled OR outside the map. That direction is deliberate and worth
 // stating: absence of data must never invent shadow, because a dark band at the map's edge would
 // track the camera and read as a rendering fault rather than as weather.
+// CLD-021. Outside the map the lookup returns fully lit, which is the correct thing to say when
+// there is no data: absence of data must never invent shadow, because a dark band at the map's
+// edge would track the camera and read as a rendering fault rather than as weather.
+//
+// It was still a rendering fault, just the other way up. Stepping from "shadowed" to "fully lit"
+// in one texel drew a dead-straight line across the landscape at the boundary, with everything
+// past it in full sun, and the line moved with the camera. So the shadow now EASES to fully lit
+// over the last CLOUD_SHADOW_EDGE_FADE of the map's half-extent. The direction above is preserved
+// exactly -- the fade only ever mixes TOWARD 1.0, so it cannot darken a point the map says is lit
+// and cannot produce the dark ring the hard return is there to prevent.
+//
+// Second line of defence, not the fix: Sky::select_cloud_shadow_span sizes the map to the
+// camera's draw distance so the boundary normally sits past the far plane where nothing is drawn.
+// This keeps the failure graceful when it cannot -- past the 16 km span cap, or on a camera whose
+// fog range the engine never filled in.
+const CLOUD_SHADOW_EDGE_FADE: f32 = 0.85;
+
 fn cloud_sun_shadow(world_xz: vec2<f32>) -> f32 {
     if (terrain_shadow_map.cloud_shadow.w <= 0.0) {
         return 1.0;
@@ -510,7 +527,13 @@ fn cloud_sun_shadow(world_xz: vec2<f32>) -> f32 {
     }
     // .r cloud x .g smoke: two independent occluders sharing one map.
     let t = textureSampleLevel(cloud_shadow_tex, terrain_shadow_samp, uv, 0.0);
-    return clamp(t.r * t.g, 0.0, 1.0);
+    let shadow = clamp(t.r * t.g, 0.0, 1.0);
+    // Chebyshev distance from the map's centre, normalised: 0 in the middle, 1 on the boundary.
+    // Chebyshev and not Euclidean because the map is a SQUARE -- a radial fade would still leave a
+    // hard step along the four sides beyond the inscribed circle.
+    let edge = max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;
+    let keep = 1.0 - smoothstep(CLOUD_SHADOW_EDGE_FADE, 1.0, edge);
+    return mix(1.0, shadow, keep);
 }
 
 fn terrain_sun_shadow(world_xz: vec2<f32>, world_y: f32) -> f32 {

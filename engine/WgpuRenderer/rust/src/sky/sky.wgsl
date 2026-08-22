@@ -46,6 +46,19 @@ struct Sky {
     moon_params: vec4<f32>,
     // xyz = unit dir TO the sun as seen from the MOON; w = earthshine reflectance floor.
     moon_sun: vec4<f32>,
+    // Second cloud layer LOOK. Written by the RENDERER, not by C++ — same arrangement as
+    // cloud4.w's puffiness, and for the same reason (WgrSkyLook's size is part of the ABI
+    // handshake), except that this one needed a lane of its own because every spare `w` was
+    // already spoken for. Both are eased on the Rust side, so a slider drag cannot step the sky.
+    //   x = AMOUNT (0..1, 0.5 = the shipped look) — how MUCH cirrus there is: coverage first,
+    //       optical depth second. This is the "more or less of it" control that on/off was not.
+    //   y = MATCH  (0..1, 0   = the shipped look) — how far the layer takes on the CUMULUS
+    //       DECK's character instead of high ice cloud's: altitude, feature size, isotropy,
+    //       depth, opacity and phase all move together toward the deck. 1 = a second cumulus
+    //       deck above the first rather than a cirrus veil.
+    //   z = EDGE SOFTNESS (0..1, 0 = the layer exactly as it rendered before this existed).
+    //   w = reserved (0).
+    cirrus: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> sky: Sky;
@@ -925,7 +938,8 @@ fn march_clouds(
 // Two modes, selected by sky.output.w (0 = off, 1 = flat sheet, 2 = thin-shell march):
 //
 //   FLAT       one ray/sphere intersection against a sheet at CIRRUS_ALT, one field evaluation.
-//   VOLUMETRIC CIRRUS_STEPS samples through the shell (500-1400 m, thickening with puffiness).
+//   VOLUMETRIC an adaptive number of samples (CIRRUS_STEPS_MIN..CIRRUS_STEPS_MAX, derived from
+//              the ray's path) through the shell (500-1400 m, thickening with puffiness).
 //              Cirrus is optically thin, so a handful of steps is enough to give it real vertical
 //              extent: the field walks the noise volume's third axis with height, so top and
 //              bottom of the shell are different cloud, and a grazing ray travels kilometres
@@ -933,7 +947,25 @@ fn march_clouds(
 //
 // Either way this is sky pixels only, occluded by terrain via `max_dist`.
 const CIRRUS_ALT: f32 = 7000.0;          // m ASL — shell CENTRE; well clear of the cumulus deck
-const CIRRUS_STEPS: i32 = 6;             // march samples through the shell (thin layer, few steps)
+// MAX march samples through the shell. This is a CAP, not the count: the count is derived from the
+// ray's own path length (see cirrus_layer), exactly as the deck's march does it.
+//
+// It was a fixed 6, and that is what produced the reported PARALLEL STRIPS. With a fixed count, dt
+// scales with the angle-dependent path length — a grazing ray travels thickness/0.15 through the
+// shell, i.e. 6.7x the vertical crossing, so its steps were 6.7x coarser. The step PHASE then
+// varied smoothly across the screen, so the aliasing organised itself into coherent bands running
+// parallel to the horizon rather than into noise. It is the same defect the deck's march already
+// documents and already fixed; the cirrus shell simply never got the fix, because a 900 m veil has
+// little vertical structure to alias and it only became visible once MATCH could deepen the shell.
+const CIRRUS_STEPS_MAX: i32 = 24;
+// Target distance between samples, as a fraction of the shell's own thickness. 1/10 of a 900 m
+// shell is a 90 m step; the field walks CIRRUS_SLICE_H of the noise volume over the full
+// thickness, so ~10 samples resolve its vertical structure. Grazing rays get proportionally MORE
+// samples because their path is longer, which is the entire point.
+const CIRRUS_STEP_FRAC: f32 = 0.10;
+// Floor on the derived count. Straight up through a thin shell the path is short and the formula
+// would ask for 2-3 samples; the vertical profile alone needs more than that to integrate smoothly.
+const CIRRUS_STEPS_MIN: f32 = 8.0;
 // Grazing paths are clamped to shell_thickness/0.15, which matches exactly the
 // clamp(dir.y, 0.15, 1) the flat path uses, so the two modes agree on the horizon rather than
 // disagreeing at the worst angle. At grazing elevations the slant path through a thin shell
@@ -947,6 +979,59 @@ const CIRRUS_PATH_SIN_MIN: f32 = 0.15;
 // upper sky, because one "feature" was 100 km long.
 const CIRRUS_SCALE: f32 = 1.0 / 7000.0;
 const CIRRUS_COVER: f32 = 0.52;          // fraction of the sheet that holds cloud
+// ---- AMOUNT ------------------------------------------------------------------
+// sky.cirrus.x, one 0..1 slider mapped through the shipped value at its midpoint (the same
+// three-knot arrangement PUFFINESS uses below, for the same reason: 0.5 must be bit-for-bit the
+// look the layer shipped with, and the two halves need different reach).
+//
+// It is a QUANTITY control, and quantity aloft is mostly COVERAGE — what fraction of the sheet
+// holds cloud at all — so that is what moves furthest. 0.18 is a handful of separated wisps in an
+// otherwise empty upper sky; 0.90 is a continuous cirrostratus veil with only thin breaks in it.
+//
+// Optical depth follows, but only slightly (0.80 .. 1.00 .. 1.25). That coupling is deliberate and
+// is the opposite of PUFFINESS's, which cancels its own density change to stay a pure shape
+// control: a sky filling with cirrus really does thicken as it fills — that is a warm front — so
+// leaving density flat would make the top of the slider read as "the same thin veil, everywhere",
+// which is not what "more of it" looks like. It stays small so the slider is not a brightness
+// control wearing a coverage hat.
+const CIRRUS_COVER_SPARSE: f32 = 0.18;
+const CIRRUS_COVER_FULL: f32 = 0.90;
+const CIRRUS_AMOUNT_DENSITY_SPARSE: f32 = 0.80;
+const CIRRUS_AMOUNT_DENSITY_FULL: f32 = 1.25;
+
+// ---- MATCH (make the second layer more like the first) -----------------------
+// sky.cirrus.y. 0 = high ice cloud, which is what this layer has always been. 1 = as close to the
+// CUMULUS DECK below as a six-to-fourteen-step shell march can get without becoming a second copy
+// of the deck's own renderer.
+//
+// Six things move together, all of them read from the deck's own live parameters rather than from
+// constants, so "similar" tracks whatever the deck is actually doing this frame:
+//   ALTITUDE  7 km -> just above the deck's top (cloud0.w). Clamped so the layer can never sink
+//             INTO or below the deck: it stays a second layer, which is the whole point of it.
+//   SCALE     ~7 km features -> the deck's own shape scale (cloud1.z), so the two layers agree on
+//             how big a cloud is. Clamped to a sane band because cloud1.z is authored.
+//   ASPECT    the 4:1 shear stretch relaxes to 1:1. Cumulus is not sheared, so it is not striped.
+//   ERODE     fibre striation goes away for the same reason.
+//   DEPTH     the shell thickens toward a fraction of the deck's own bottom-to-top span.
+//   OPACITY   optical depth rises toward CIRRUS_DENSITY_MATCHED — enough to read as solid-ish
+//             cloud rather than a veil, and capped there rather than tracking the deck's own
+//             value, which is tens of optical depths and would just be a white ceiling.
+// The phase function and a cheap vertical self-shading term move with it too, in cirrus_layer.
+const CIRRUS_ALT_MATCH_GAP: f32 = 1200.0;   // m above the deck's top at full match
+const CIRRUS_ALT_MATCH_MIN: f32 = 2500.0;   // m ASL floor, whatever the deck is doing
+const CIRRUS_SCALE_MATCH_MIN: f32 = 1.0 / 20000.0;
+const CIRRUS_SCALE_MATCH_MAX: f32 = 1.0 / 1500.0;
+const CIRRUS_ASPECT_MATCHED: f32 = 1.0;     // isotropic — cells, not streaks
+const CIRRUS_ERODE_MATCHED: f32 = 0.05;
+const CIRRUS_DENSITY_MATCHED: f32 = 8.0;    // optical depth straight up through full density
+const CIRRUS_THICK_MATCH_FRAC: f32 = 0.45;  // of the deck's bottom-to-top span
+const CIRRUS_THICK_MATCH_MIN: f32 = 600.0;
+const CIRRUS_THICK_MATCH_MAX: f32 = 2200.0;
+// Extra sampling density at full match, as a multiplier on the derived count. A matched shell is
+// deeper AND carries far more optical depth, so each step covers more extinction and quantises the
+// transmittance curve more coarsely; the path-derived count already grows with the depth, this
+// tightens the target step on top of it. 1.0 at the default, so the default pays nothing.
+const CIRRUS_STEPS_MATCH_GAIN: f32 = 1.6;
 const CIRRUS_FADE: f32 = 150000.0;       // m — dissolve into haze beyond this slant distance
 // Domain-warp displacement (m, peak-to-peak). See cirrus_warp.
 const CIRRUS_WARP: f32 = 6000.0;
@@ -1014,9 +1099,35 @@ const CIRRUS_DENSITY_PUFF: f32 = 2.35;
 const CIRRUS_THICK_FIBRE: f32 = 500.0;   // m — volumetric shell thickness
 const CIRRUS_THICK_SHIPPED: f32 = 900.0;
 // 1400 rather than more: the grazing-path clamp is thickness/CIRRUS_PATH_SIN_MIN, so a deeper
-// shell also lengthens the worst-case march — and CIRRUS_STEPS does not grow with it, so past
-// this the horizon steps start to show as bands instead of cloud.
+// shell also lengthens the worst-case march. That used to cap the thickness, because the step
+// count was fixed; the count is now derived from the path, so a longer march buys more samples
+// rather than coarser ones.
 const CIRRUS_THICK_PUFF: f32 = 1400.0;
+
+// ---- EDGE SOFTNESS ------------------------------------------------------------
+// sky.cirrus.z. What it changes is the WIDTH of the band over which a cloud in this layer goes
+// from nothing to something.
+//
+// `d0` in cirrus_field is a LINEAR remap of the sheet noise about the coverage threshold, hard-
+// clamped at 0. A linear ramp into a hard clamp is a fairly definite boundary: density reaches
+// useful values within a short distance of the threshold, the march builds opacity quickly, and
+// the cloud gets a crisp silhouette. High cloud does not look like that. Cirrus is ice, its edges
+// sublimate rather than condense, and the bigger the mass the deeper the fringe of thinning
+// crystals around it — which is exactly the "bigger ones should be fuzzier" note.
+//
+// pow(d0, k>1) holds the density down through a much wider band either side of the threshold, so
+// the transmittance falls off over a longer path and the silhouette gains a soft fringe instead of
+// an edge. Applied BEFORE the fibre erosion, so erosion carves the fringe softening just created —
+// which is what keeps "soft" from becoming "blurry".
+//
+// 2.6 rather than more: past roughly 3 the fringe stops reading as cloud and starts reading as
+// haze, and the mean-restoring gain has to work hard enough that the core brightens visibly.
+const CIRRUS_SOFT_POW: f32 = 2.6;
+// The coverage band the effect fades in over. This is what makes it reach the BIG masses and not
+// the isolated wisps: a large cloud in this layer is a place where the coverage field is high,
+// because that is what merges separate streaks into a bank.
+const CIRRUS_SOFT_COV_LO: f32 = 0.20;
+const CIRRUS_SOFT_COV_HI: f32 = 0.65;
 
 // Map the 0..1 slider through the shipped value at its midpoint.
 fn cirrus_mix3(fibre: f32, shipped: f32, puffy: f32, puff: f32) -> f32 {
@@ -1025,13 +1136,32 @@ fn cirrus_mix3(fibre: f32, shipped: f32, puffy: f32, puff: f32) -> f32 {
 }
 
 // The puffiness-derived shape of the layer. Built ONCE per pixel in cirrus_layer and handed to
-// every field evaluation in the march, so the mixes are not repeated CIRRUS_STEPS times.
+// every field evaluation in the march, so the mixes are not repeated once per march step.
 struct CirrusShape {
     aspect: f32,
     fine: f32,
     erode: f32,
     density: f32,
     thick: f32,
+    // AMOUNT/MATCH-derived, and therefore no longer constants: the coverage threshold the field
+    // remaps against, the horizontal noise frequency, the shell's centre altitude, how many
+    // samples the march takes, and the raw match value the phase/shading terms still need.
+    cover: f32,
+    scale: f32,
+    alt: f32,
+    // Sampling-density multiplier from MATCH; the COUNT itself is derived per ray in cirrus_layer
+    // from the path length, so it cannot live here (t0/t1 are not known yet).
+    step_gain: f32,
+    match_deck: f32,
+    // EDGE SOFTNESS, already clamped. The coverage weighting is per-sample, so it stays in
+    // cirrus_field rather than being folded in here.
+    soft: f32,
+}
+
+// The deck's bottom-to-top span, guarded: cloud0.z/.w are authored and an inverted or degenerate
+// pair would otherwise propagate a negative thickness into the march bounds.
+fn cirrus_deck_span() -> f32 {
+    return max(sky.cloud0.w - sky.cloud0.z, 0.0);
 }
 
 fn cirrus_shape() -> CirrusShape {
@@ -1039,6 +1169,8 @@ fn cirrus_shape() -> CirrusShape {
     // there) — the same "ride a spare lane" trick the cirrus mode uses for output.w, and for the
     // same reason: WgrSkyLook's size is part of the ABI handshake and must not grow.
     let puff = clamp(sky.cloud4.w, 0.0, 1.0);
+    let amount = clamp(sky.cirrus.x, 0.0, 1.0);
+    let m = clamp(sky.cirrus.y, 0.0, 1.0);
     var sh: CirrusShape;
     sh.aspect = cirrus_mix3(CIRRUS_ASPECT_FIBRE, CIRRUS_ASPECT_SHIPPED, CIRRUS_ASPECT_PUFF, puff);
     sh.fine = cirrus_mix3(CIRRUS_FINE_FIBRE, CIRRUS_FINE_SHIPPED, CIRRUS_FINE_PUFF, puff);
@@ -1046,6 +1178,31 @@ fn cirrus_shape() -> CirrusShape {
     sh.density = cirrus_mix3(CIRRUS_DENSITY_FIBRE, CIRRUS_DENSITY_SHIPPED,
                              CIRRUS_DENSITY_PUFF, puff);
     sh.thick = cirrus_mix3(CIRRUS_THICK_FIBRE, CIRRUS_THICK_SHIPPED, CIRRUS_THICK_PUFF, puff);
+
+    // AMOUNT. Coverage is the primary axis; density follows a little (see the AMOUNT block).
+    sh.cover = cirrus_mix3(CIRRUS_COVER_SPARSE, CIRRUS_COVER, CIRRUS_COVER_FULL, amount);
+    sh.density = sh.density * cirrus_mix3(CIRRUS_AMOUNT_DENSITY_SPARSE, 1.0,
+                                          CIRRUS_AMOUNT_DENSITY_FULL, amount);
+
+    // MATCH. Every target below is derived from the DECK's live parameters where the deck has an
+    // opinion, so the layer follows the weather rather than a second set of constants.
+    sh.match_deck = m;
+    sh.scale = mix(CIRRUS_SCALE,
+                   clamp(sky.cloud1.z, CIRRUS_SCALE_MATCH_MIN, CIRRUS_SCALE_MATCH_MAX), m);
+    // Never below the deck's top + a gap: a "second layer" that sinks into the first is just a
+    // denser first layer, and the march bounds below assume the shell is clear of the deck.
+    let matched_alt = clamp(sky.cloud0.w + CIRRUS_ALT_MATCH_GAP, CIRRUS_ALT_MATCH_MIN, CIRRUS_ALT);
+    sh.alt = mix(CIRRUS_ALT, matched_alt, m);
+    sh.aspect = mix(sh.aspect, CIRRUS_ASPECT_MATCHED, m);
+    sh.erode = mix(sh.erode, CIRRUS_ERODE_MATCHED, m);
+    sh.density = mix(sh.density, CIRRUS_DENSITY_MATCHED, m);
+    let matched_thick = clamp(cirrus_deck_span() * CIRRUS_THICK_MATCH_FRAC,
+                              CIRRUS_THICK_MATCH_MIN, CIRRUS_THICK_MATCH_MAX);
+    sh.thick = mix(sh.thick, matched_thick, m);
+    sh.soft = clamp(sky.cirrus.z, 0.0, 1.0);
+    // Deeper shell + far more optical depth needs a tighter step; the path-derived count in
+    // cirrus_layer scales by this.
+    sh.step_gain = mix(1.0, CIRRUS_STEPS_MATCH_GAIN, m);
     return sh;
 }
 
@@ -1074,11 +1231,13 @@ fn cirrus_rot(p: vec2<f32>, c: f32, s: f32) -> vec2<f32> {
 // over ~64 km and the marched column spans at most thick/CIRRUS_PATH_SIN_MIN horizontally (3-9 km
 // depending on puffiness), so reusing it across the shell is a slow shear, not a seam, and it
 // saves five taps per pixel.
-fn cirrus_warp(world_xz: vec2<f32>) -> vec2<f32> {
-    let q = cirrus_rot(world_xz * CIRRUS_SCALE * 0.11, 0.87630, 0.48178);
+fn cirrus_warp(world_xz: vec2<f32>, scale: f32) -> vec2<f32> {
+    let q = cirrus_rot(world_xz * scale * 0.11, 0.87630, 0.48178);
     let n = textureSampleLevel(cloud_noise, cloud_samp,
-        vec3<f32>(q.x, 0.17 + sky.cloud4.z * CIRRUS_SCALE * 0.5, q.y), 0.0).rg;
-    return (n - vec2<f32>(0.5, 0.5)) * CIRRUS_WARP;
+        vec3<f32>(q.x, 0.17 + sky.cloud4.z * scale * 0.5, q.y), 0.0).rg;
+    // Warp displacement scales with the feature size, so MATCH (which shrinks features toward the
+    // deck's) does not leave a 6 km warp bending a 2 km cloud into a smear.
+    return (n - vec2<f32>(0.5, 0.5)) * CIRRUS_WARP * (CIRRUS_SCALE / scale);
 }
 
 // Cirrus density fraction [0,1] at a world XZ, at normalised height `h` through the shell.
@@ -1101,7 +1260,7 @@ fn cirrus_warp(world_xz: vec2<f32>) -> vec2<f32> {
 //      tile apart in X/Z now read DIFFERENT slices, so the repeat would have to align in three
 //      axes at once. Free: it is an add on a coordinate the tap already carries.
 fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec2<f32>, sh: CirrusShape) -> f32 {
-    let s = CIRRUS_SCALE;
+    let s = sh.scale;
     let drift = sky.cloud4.z * s;
     let p = world_xz + warp;
     // Slice drift (4). The two weights are irrational multiples of each other so the x and z
@@ -1129,9 +1288,22 @@ fn cirrus_field(world_xz: vec2<f32>, h: f32, cover: f32, warp: vec2<f32>, sh: Ci
     let wa = 1.0 - wb;
     let mixed = a * wa + b * wb;
     let sheet = clamp(0.5 + (mixed - 0.5) * inverseSqrt(wa * wa + wb * wb), 0.0, 1.0);
-    let d0 = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
+    var d0 = clamp((sheet - (1.0 - cover)) / max(cover, 1e-3), 0.0, 1.0);
     if (d0 <= 0.0) {
         return 0.0; // in a gap -> skip the fibre tap (the empty-space fast path, as the deck does)
+    }
+    // EDGE SOFTNESS (see the block above the constants). Weighted by the LOCAL coverage this
+    // sample was remapped against, so the big merged banks soften and isolated wisps stay defined.
+    //
+    // The gain restores the mean. pow() on a roughly uniform [0,1] takes the mean from 1/2 to
+    // 1/(k+1), so without (k+1)/2 back the slider would visibly thin the layer and read as a
+    // brightness control with a shape side-effect — the same trap PUFFINESS documents avoiding.
+    // It is an approximation (the true distribution is not uniform) but it is the right order, and
+    // it keeps the layer's overall opacity roughly still across the range.
+    let soft = sh.soft * smoothstep(CIRRUS_SOFT_COV_LO, CIRRUS_SOFT_COV_HI, cover);
+    if (soft > 0.001) {
+        let k = mix(1.0, CIRRUS_SOFT_POW, soft);
+        d0 = clamp(pow(d0, k) * ((k + 1.0) * 0.5), 0.0, 1.0);
     }
     // Fibre erosion. z ratio 3.301 rather than the old 3.5: 3.5 = 7/2 shares a period with the
     // sheet, 3.301 does not.
@@ -1158,8 +1330,12 @@ fn cirrus_sigma(sh: CirrusShape) -> f32 {
     return sh.density / (sh.thick * CIRRUS_PROFILE_INTEGRAL);
 }
 
+// `jitter` is a per-PIXEL start offset in [0,1), same contract as march_clouds: it breaks the
+// step phase between neighbouring pixels so whatever undersampling survives reads as fine noise
+// instead of coherent bands. Pass 0 from the env bake (see fs_sky_env for why a jittered march is
+// wrong at 256x128).
 fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, bg: vec3<f32>,
-                max_dist: f32) -> CloudResult {
+                jitter: f32, max_dist: f32) -> CloudResult {
     var res: CloudResult;
     res.inscatter = vec3<f32>(0.0);
     res.trans = 1.0;
@@ -1172,23 +1348,34 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
         return res;
     }
     let planet_r = sky.params.z;
-    let cover = CIRRUS_COVER * smoothstep(0.02, 0.35, sky.cloud0.x);
+    // Puffiness/amount/match resolved ONCE for this pixel — the march below reuses it for every
+    // step. Hoisted above `cover` because the coverage threshold now comes out of it (AMOUNT).
+    let sh = cirrus_shape();
+    let cover = sh.cover * smoothstep(0.02, 0.35, sky.cloud0.x);
     let cos_t = dot(dir, sun);
     // Ice: a strong forward lobe (the halo/silver look) over an isotropic floor. Thin enough that
     // self-shadowing is not worth a light march, so no sun-transmittance term through the sheet.
-    let phase = mix(hg(cos_t, 0.75), 1.0 / (4.0 * PI), 0.55);
+    // MATCH slides it toward the DECK's own anisotropy (cloud2.x) with far less isotropic floor,
+    // because the halo/silver look is what ice does and water droplets do not.
+    let ice_phase = mix(hg(cos_t, 0.75), 1.0 / (4.0 * PI), 0.55);
+    let deck_phase = mix(hg(cos_t, clamp(sky.cloud2.x, 0.0, 0.95)), 1.0 / (4.0 * PI), 0.25);
+    let phase = mix(ice_phase, deck_phase, sh.match_deck);
     let sun_col = sample_transmittance(pos, sun) * radiance;
     let luma = dot(bg, vec3<f32>(0.2126, 0.7152, 0.0722));
     let ambient = mix(bg, vec3<f32>(luma), 0.3) * sky.cloud2.z * 0.8;
-    let lit = sun_col * phase + ambient;
+    // Kept SPLIT, not summed, because MATCH's self-shading term below may only attenuate the
+    // SUN. Dimming the sky-ambient fill with it as well darkens the shaded sides toward whatever
+    // hue the direct sun happens to be, which at a low sun turned them olive-brown; a real
+    // cumulus base is blue-grey precisely BECAUSE the sun is what the cloud above has removed and
+    // sky ambient is what is left.
+    let lit_sun = sun_col * phase;
+    let lit = lit_sun + ambient;
     // Fade in off the horizon, where the sheet is hundreds of km away and haze owns the sky.
     let horizon_fade = smoothstep(0.015, 0.07, dir.y);
-    // Puffiness resolved ONCE for this pixel — the march below reuses it for every step.
-    let sh = cirrus_shape();
 
     if (mode < 1.5) {
         // ---- FLAT: one intersection with the sheet at the shell centre, one field evaluation.
-        let hit = ray_sphere(pos, dir, planet_r + CIRRUS_ALT);
+        let hit = ray_sphere(pos, dir, planet_r + sh.alt);
         let t = hit.y;
         if (t <= 0.0 || t >= max_dist) {
             return res; // no intersection, or the opaque scene is nearer — terrain occludes it
@@ -1198,7 +1385,7 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
         // precision, so it must be used as given, not rescaled to fake a different wind speed
         // aloft; subtracted so the sheet drifts downwind like the deck does).
         let world_xz = sky.cam_pos.xz + p.xz - sky.cloud1.xy;
-        var d = cirrus_field(world_xz, 0.5, cover, cirrus_warp(world_xz), sh);
+        var d = cirrus_field(world_xz, 0.5, cover, cirrus_warp(world_xz, sh.scale), sh);
         d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
         if (d <= 0.001) {
             return res;
@@ -1214,8 +1401,8 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     // ---- VOLUMETRIC: march the shell between its bottom and top spheres. The shell GROWS with
     // puffiness (PUFFINESS 4) — vertical development is what the word means — but the step COUNT
     // does not, so a deeper layer costs the same as a shallow one.
-    let r_bot = planet_r + CIRRUS_ALT - sh.thick * 0.5;
-    let r_top = planet_r + CIRRUS_ALT + sh.thick * 0.5;
+    let r_bot = planet_r + sh.alt - sh.thick * 0.5;
+    let r_top = planet_r + sh.alt + sh.thick * 0.5;
     let hb = ray_sphere(pos, dir, r_bot);
     let ht = ray_sphere(pos, dir, r_top);
     if (ht.y <= 0.0) {
@@ -1228,15 +1415,31 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
     if (t1 <= t0) {
         return res;
     }
-    let dt = (t1 - t0) / f32(CIRRUS_STEPS);
+    // Adaptive step COUNT, derived from the ray's own path exactly as the deck's march does it, so
+    // sampling density is roughly constant regardless of shell thickness or view angle. A grazing
+    // ray now gets more samples instead of coarser ones -- which is the whole cure for the bands.
+    let path = t1 - t0;
+    let target_step = max(sh.thick * CIRRUS_STEP_FRAC / sh.step_gain, 1.0);
+    let n = clamp(ceil(path / target_step), CIRRUS_STEPS_MIN, f32(CIRRUS_STEPS_MAX));
+    let steps = i32(n);
+    let dt = path / n;
     // ONE warp tap for the whole column (see cirrus_warp) — evaluated at the shell midpoint.
     let mid = pos + dir * (t0 + (t1 - t0) * 0.5);
-    let warp = cirrus_warp(sky.cam_pos.xz + mid.xz - sky.cloud1.xy);
+    let warp = cirrus_warp(sky.cam_pos.xz + mid.xz - sky.cloud1.xy, sh.scale);
     let sigma = cirrus_sigma(sh);
+    var t = 0.0;
     var col = vec3<f32>(0.0);
     var trans = 1.0;
-    var t = t0 + dt * 0.5;
-    for (var i: i32 = 0; i < CIRRUS_STEPS; i = i + 1) {
+    // Jittered start (see the parameter's note). 0.5 for jitter = 0 keeps the env bake's old
+    // midpoint sampling exactly.
+    t = t0 + dt * mix(0.5, jitter, step(0.0001, jitter));
+    for (var i: i32 = 0; i < steps; i = i + 1) {
+        // A matched layer reaches 8 optical depths, so most rays are opaque long before the last
+        // sample. The deck's march has always bailed on transmittance; the cirrus shell could not
+        // afford to care at 6 steps and now can.
+        if (trans < 0.01) {
+            break;
+        }
         let p = pos + dir * t;
         let h = (length(p) - r_bot) / sh.thick;
         let prof = cirrus_profile(h);
@@ -1246,7 +1449,13 @@ fn cirrus_layer(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, b
             d = d * horizon_fade * (1.0 - smoothstep(CIRRUS_FADE * 0.4, CIRRUS_FADE, t));
             if (d > 0.0005) {
                 let seg = exp(-d * sigma * dt);
-                col += trans * lit * (1.0 - seg);
+                // Cheap vertical self-shading, MATCH only. A veil has no meaningful top-to-bottom
+                // gradient and the layer has never paid for a light march; a cumuliform layer that
+                // is lit uniformly through 8 optical depths reads as glowing fog. Approximating
+                // the overhead column by the density above `h` costs one exp and gives the shape
+                // the eye actually reads as "solid cloud": bright tops, shaded bases.
+                let shade = mix(1.0, exp(-sh.density * (1.0 - h) * 0.35), sh.match_deck);
+                col += trans * (lit_sun * shade + ambient) * (1.0 - seg);
                 trans *= seg;
             }
         }
@@ -1344,7 +1553,11 @@ fn moon_disc(dir: vec3<f32>, pos: vec3<f32>) -> vec3<f32> {
 // being inside a disc, which is a few hundred pixels, so the short march costs nothing measurable.
 fn disc_cloud_cover(pos: vec3<f32>, dir: vec3<f32>, sun: vec3<f32>, radiance: f32, bg: vec3<f32>) -> f32 {
     let deck = march_clouds(pos, dir, sun, radiance, bg, 24.0, 2, 0.5, 1e12);
-    let both = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 1e12));
+    // Fixed midpoint sampling, matching the deck march's own 0.5 above and NOT a per-pixel
+    // hash: this runs only for the few hundred pixels inside a celestial disc, and a
+    // per-pixel jitter there would scatter the disc's attenuation into visible speckle on
+    // the one object in the frame whose smoothness the eye is most sensitive to.
+    let both = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, 0.5, 1e12));
     return clamp(both.trans, 0.0, 1.0);
 }
 
@@ -1438,7 +1651,7 @@ fn fs_sky_env(in: VsOut) -> @location(0) vec4<f32> {
     // the same two-layer sky the camera does. It runs in whatever mode the Sky tab selected, and
     // the env map is only 256x128, so even the volumetric path is a rounding error here; the
     // measured cost of the layer as a whole is dominated by the full-resolution cloud pass.
-    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, color, 1e12));
+    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, color, 0.0, 1e12));
     return vec4<f32>(color * cloud.trans + cloud.inscatter, 1.0);
 }
 
@@ -1476,7 +1689,8 @@ fn fs_cloud(in: VsOut) -> @location(0) vec4<f32> {
     let deck = march_clouds(pos, dir, sun, radiance, bg,
                             CLOUD_STEPS, CLOUD_LIGHT_STEPS, hash21(in.clip.xy), scene_dist);
     // Second layer, behind the deck. Bounded by the same scene distance, so terrain occludes it.
-    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg, scene_dist));
+    let cloud = cloud_over_cirrus(deck, cirrus_layer(pos, dir, sun, radiance, bg,
+                                                     hash21(in.clip.xy), scene_dist));
 
     // ---- Lens flare -----------------------------------------------------------------------
     // Written here rather than as its own pass because this shader already holds everything a
