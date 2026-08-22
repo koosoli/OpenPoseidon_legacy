@@ -1815,10 +1815,8 @@ impl Sky {
                 cache: None,
             })
         };
-        let cloud_composite_pipeline =
-            make_cloud_composite("wgr_cloud_composite", sample_count);
-        let cloud_composite_planar_pipeline =
-            make_cloud_composite("wgr_cloud_composite_planar", 1);
+        let cloud_composite_pipeline = make_cloud_composite("wgr_cloud_composite", sample_count);
+        let cloud_composite_planar_pipeline = make_cloud_composite("wgr_cloud_composite_planar", 1);
         let cloud_composite_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("wgr_cloud_composite_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -2081,7 +2079,11 @@ impl Sky {
                 _pad0: 0.0,
                 _pad1: 0.0,
             };
-            queue.write_buffer(&self.smoke_shadow_header_buf, 0, bytemuck::bytes_of(&header));
+            queue.write_buffer(
+                &self.smoke_shadow_header_buf,
+                0,
+                bytemuck::bytes_of(&header),
+            );
             if !self.smoke_shadow_blobs.is_empty() {
                 queue.write_buffer(
                     &self.smoke_shadow_blob_buf,

@@ -195,9 +195,7 @@ impl TextureRegistry {
             bind_group,
             slot,
             resident_bytes: (0..mip_level_count)
-                .map(|i| {
-                    format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64
-                })
+                .map(|i| format.expected_len((width >> i).max(1), (height >> i).max(1)) as u64)
                 .sum(),
         });
         key.data().as_ffi()

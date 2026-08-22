@@ -545,9 +545,9 @@ impl Default for WgrSkyLook {
 #[derive(Clone, Copy, Default)]
 pub struct WgrSkyRuntime {
     pub sun_dir: WgrVec4,   // xyz = unit dir TO the sun; w = pad
-    pub moon_dir: WgrVec4,  // xyz = unit dir TO the moon; w = illuminated fraction (0 new .. 1 full)
+    pub moon_dir: WgrVec4, // xyz = unit dir TO the moon; w = illuminated fraction (0 new .. 1 full)
     pub fog_color: WgrVec4, // xyz = scene fog colour; w = fog far-range (m)
-    pub misc: WgrVec4,      // x = night factor (0..1), y = camera altitude ASL (m), z/w = pad
+    pub misc: WgrVec4,     // x = night factor (0..1), y = camera altitude ASL (m), z/w = pad
     // Cloud evolution offsets (m, CPU-wrapped like the wind offset): x = shape, y = detail,
     // z = weather/coverage drift, w = pad. Drifting the noise lookup makes clouds form and
     // dissolve in place rather than merely translating with the wind.
@@ -641,9 +641,9 @@ pub struct WgrFoliage {
     pub sway_speed: f32,    // rate multiplier on the trunk oscillation
     pub wind_dir_x: f32,    // unit vector the wind travels TOWARD
     pub wind_dir_z: f32,
-    pub sway_time: f32,      // engine seconds (Glob.time) - a paused sim freezes the canopy
-    pub wind_gust: f32,      // WindSample::gustFraction
-    pub sway_leaf: f32,      // extra flutter on cutout (leaf) sections only
+    pub sway_time: f32, // engine seconds (Glob.time) - a paused sim freezes the canopy
+    pub wind_gust: f32, // WindSample::gustFraction
+    pub sway_leaf: f32, // extra flutter on cutout (leaf) sections only
     pub sway_stiffness: f32, // height exponent (1 = linear lean, 2 = stiff trunk)
 }
 
@@ -3138,7 +3138,10 @@ pub unsafe extern "C" fn wgr_set_smoke_shadow(
     };
     // Same layout; reinterpret rather than copy.
     let as_sky: &[crate::sky::SmokeShadowBlob] = unsafe {
-        std::slice::from_raw_parts(slice.as_ptr() as *const crate::sky::SmokeShadowBlob, slice.len())
+        std::slice::from_raw_parts(
+            slice.as_ptr() as *const crate::sky::SmokeShadowBlob,
+            slice.len(),
+        )
     };
     renderer.set_smoke_shadow(as_sky, strength);
 }
@@ -3196,6 +3199,87 @@ pub unsafe extern "C" fn wgr_set_cirrus_puffiness(
     }
     let renderer = unsafe { &mut *renderer };
     renderer.set_cirrus_puffiness(puffiness, variation);
+}
+
+/// Second cloud layer LOOK — the two controls that decide HOW MUCH of it there is and how much it
+/// resembles the cumulus deck below. Both clamp to 0..1 and both are eased by the renderer, so a
+/// slider drag cannot step the sky.
+///
+/// `amount`: 0 = a handful of separated wisps in an otherwise empty upper sky, 0.5 = exactly the
+/// coverage the layer shipped with, 1 = a continuous cirrostratus veil with only thin breaks.
+/// This is the quantity control that `wgr_set_cirrus_mode`'s on/off was not: coverage moves
+/// furthest, optical depth follows slightly (a sky filling with cirrus does thicken as it fills).
+///
+/// `match_deck`: 0 = high ice cloud, which is what this layer has always been; 1 = as close to the
+/// CUMULUS DECK as a shell march gets — altitude drops to just above the deck's top, feature size
+/// follows the deck's own shape scale, the shear stretch and fibre striation relax to isotropic
+/// cells, the shell deepens, optical depth rises and the ice phase function gives way to the
+/// deck's. Every target is read from the deck's LIVE parameters, so "similar" tracks the weather
+/// rather than a second set of constants. The layer can never sink into or below the deck.
+///
+/// Its own entry point rather than a WgrSkyLook lane, for the reason given on
+/// `wgr_set_cirrus_mode`: that struct's size is part of the ABI handshake. Overridable at startup
+/// with `WGR_CIRRUS_LOOK=<amount>[,<match>]`, which is how a `--no-dev` benchmark or screenshot
+/// capture reaches controls the Sky tab would otherwise own exclusively.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_cirrus_look(
+    renderer: *mut WgrRenderer,
+    amount: f32,
+    match_deck: f32,
+) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_cirrus_look(amount, match_deck);
+}
+
+/// SECOND cloud layer EDGE SOFTNESS. 0 = the layer exactly as it rendered before this existed:
+/// the sheet noise is remapped linearly about the coverage threshold into a hard clamp, so a cloud
+/// reaches useful density within a short distance of its boundary and gets a definite silhouette.
+/// 1 = the density is held down through a much wider band either side of that threshold, so the
+/// transmittance falls off over a longer path and the cloud gains a deep, soft fringe.
+///
+/// Weighted by LOCAL COVERAGE, so it reaches the big merged banks and leaves isolated wisps
+/// defined — "the bigger ones should be fuzzier", which is the request it was written for. The
+/// layer's mean density is restored as the exponent rises, so this stays a shape control rather
+/// than doubling as a brightness one. Clamps to 0..1 and is eased by the renderer.
+///
+/// Overridable at startup with `WGR_CIRRUS_SOFT=<0..1>` for `--no-dev` capture and benchmark runs.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_cirrus_softness(renderer: *mut WgrRenderer, softness: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_cirrus_softness(softness);
+}
+
+/// Fraction of the draw distance at which distance fog reaches FULL. 1.0 is the behaviour from
+/// before this existed: fog saturates only exactly at the far plane, so the terrain grid's edge,
+/// the object cull ring and the map boundary all sit right at the point where it finally closes,
+/// and any of them showing through reads as the world ending. Lower moves full fog inward so
+/// everything past it is uniformly the sky's own airlight.
+///
+/// This is NOT the same control as the falloff exponent (`WgrSkyLook`'s fog falloff): that shapes
+/// how fast the ramp climbs, and lowering it to thicken the far field also thickens the near and
+/// mid field. Clamped to [0.3, 1.0] here and again in the shader.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_fog_far_close(renderer: *mut WgrRenderer, close: f32) {
+    if renderer.is_null() {
+        return;
+    }
+    let renderer = unsafe { &mut *renderer };
+    renderer.set_fog_far_close(close);
 }
 
 /// Volumetric sun shafts (crepuscular rays / god rays), from the dev panel's Sky tab.

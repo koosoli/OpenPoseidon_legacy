@@ -925,7 +925,10 @@ mod tests {
 
         // Full overcast, still no fog: humid air, strong shafts.
         let (overcast, _) = aerosol_sigma(&sky_at_1700(1.0, long_view), 1.0);
-        assert!(overcast > 3.0e-5 && overcast < 4.5e-5, "overcast {overcast:e}");
+        assert!(
+            overcast > 3.0e-5 && overcast < 4.5e-5,
+            "overcast {overcast:e}"
+        );
 
         // Overcast AND fog: the strongest the model goes.
         let (foggy, _) = aerosol_sigma(&sky_at_1700(1.0, 100.0), 1.0);
@@ -989,7 +992,10 @@ mod tests {
     #[test]
     fn the_density_slider_reads_as_a_multiplier_with_the_default_at_five() {
         let shipped = GodRaySettings::default().density_multiplier();
-        assert!((shipped - 5.0).abs() < 1e-4, "default multiplier was {shipped}");
+        assert!(
+            (shipped - 5.0).abs() < 1e-4,
+            "default multiplier was {shipped}"
+        );
         let sky = sky_at_1700(0.42, 6000.0);
         let (base, _) = aerosol_sigma(&sky, 1.0);
         let doubled = GodRaySettings {

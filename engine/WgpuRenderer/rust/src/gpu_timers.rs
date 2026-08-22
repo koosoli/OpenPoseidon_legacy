@@ -81,13 +81,13 @@ pub enum Region {
     // interior sky); everything below exists to name the other ~14.5 ms. Two of these are
     // CONTAINERS (PrepassSegment / ColorSegment) that deliberately overlap the leaves inside
     // them — never sum a container with its leaves, the C++ reporter keeps them apart.
-    ObjCullMain = 33,      // main-view COUNT/EMIT/SCATTER (prepass + occluder set)
-    ObjCullShadow = 34,    // every active cascade's cull dispatch chain
-    ObjCullColor = 35,     // Hi-Z pyramid build + the colour-pass occlusion cull
-    ObjPrepassSolid = 36,  // GPU-driven depth+normal prepass, variant 0 (solid)
-    ObjPrepassAlpha = 37,  // GPU-driven depth+normal prepass, variant 1 (alpha-cutout foliage)
-    ObjColorSolid = 38,    // GPU-driven colour, variant 0 (solid)
-    ObjColorAlpha = 39,    // GPU-driven colour, variant 1 (alpha-cutout foliage)
+    ObjCullMain = 33,       // main-view COUNT/EMIT/SCATTER (prepass + occluder set)
+    ObjCullShadow = 34,     // every active cascade's cull dispatch chain
+    ObjCullColor = 35,      // Hi-Z pyramid build + the colour-pass occlusion cull
+    ObjPrepassSolid = 36,   // GPU-driven depth+normal prepass, variant 0 (solid)
+    ObjPrepassAlpha = 37,   // GPU-driven depth+normal prepass, variant 1 (alpha-cutout foliage)
+    ObjColorSolid = 38,     // GPU-driven colour, variant 0 (solid)
+    ObjColorAlpha = 39,     // GPU-driven colour, variant 1 (alpha-cutout foliage)
     ObjPrepassSegment = 40, // CONTAINER: the whole depth/normal prepass render pass
     ObjColorSegment = 41,   // CONTAINER: the whole 3D colour sub-pass (incl. terrain/grass/direct)
     // Per-cascade shadow rendering. One region per cascade because the standing suspicion was

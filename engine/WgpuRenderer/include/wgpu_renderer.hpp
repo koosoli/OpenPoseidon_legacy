@@ -2039,6 +2039,59 @@ extern "C"
        cycle, which is otherwise an hour long and always sampled at the same instant. */
     WGR_API void wgr_set_cirrus_puffiness(WgrRenderer* renderer, float puffiness, float variation);
 
+    /* Second cloud layer LOOK: how MUCH of it there is, and how much it resembles the main deck.
+
+       `amount` 0 = a handful of separated wisps .. 0.5 = exactly the coverage the layer shipped
+       with .. 1 = a continuous cirrostratus veil. Coverage is what moves furthest; optical depth
+       follows slightly, because a sky filling with cirrus really does thicken as it fills. This
+       is the quantity control that wgr_set_cirrus_mode's on/off was not.
+
+       `matchDeck` 0 = high ice cloud (the layer as it has always been) .. 1 = as close to the
+       CUMULUS DECK below as a shell march gets: the shell descends to just above the deck's top,
+       feature size follows the deck's own shape scale, the shear stretch and fibre striation
+       relax to isotropic cells, the shell deepens, optical depth rises, the ice halo phase gives
+       way to the deck's, and a cheap vertical self-shading term appears so the result reads as
+       solid cloud rather than glowing fog. Every target is read from the deck's LIVE parameters,
+       so "similar" tracks whatever the weather is doing; the layer is clamped so it can never
+       sink into or below the deck, because then it would stop being a second layer.
+
+       Both clamp to 0..1 and both are eased by the renderer (matchDeck moves the layer's altitude
+       by kilometres, so an un-eased drag would teleport a cloud deck across the sky). Same
+       reasoning as wgr_set_cirrus_mode for having its own entry point. Overridable at startup
+       with WGR_CIRRUS_LOOK=<amount>[,<match>], for --no-dev benchmark and capture runs. */
+    WGR_API void wgr_set_cirrus_look(WgrRenderer* renderer, float amount, float matchDeck);
+
+    /* SECOND cloud layer EDGE SOFTNESS (0 .. 1).
+
+       0 = the layer exactly as it rendered before this existed: the sheet noise is remapped
+       linearly about the coverage threshold into a hard clamp, so a cloud reaches useful density
+       within a short distance of its boundary and has a definite silhouette. 1 = density is held
+       down through a much wider band either side of that threshold, so the transmittance falls off
+       over a longer path and the cloud gains a deep, soft fringe. High cloud is ice, and its edges
+       sublimate rather than condense, so a fringe is what it should have.
+
+       WEIGHTED BY LOCAL COVERAGE, so it reaches the big merged banks and leaves isolated wisps
+       defined. The layer's mean density is restored as the exponent rises, so this stays a shape
+       control and does not double as a brightness one.
+
+       Overridable at startup with WGR_CIRRUS_SOFT=<0..1>. */
+    WGR_API void wgr_set_cirrus_softness(WgrRenderer* renderer, float softness);
+
+    /* Fraction of the draw distance at which distance fog reaches FULL (0.3 .. 1.0).
+
+       1.0 is the behaviour from before this existed: the aerial-perspective ramp is pinned to
+       reach 1.0 exactly AT the far plane and nowhere before it. That is also exactly where the
+       terrain grid stops, where Scene::GetObjectDrawDistance puts the object cull ring, and where
+       the map itself ends -- so anything still visible there reads as the world being cut off.
+       Lower values move full fog inward, so everything from there out is uniformly the sky's own
+       airlight and there is no edge left to see.
+
+       NOT the same control as the fog falloff exponent in WgrSkyLook: that shapes how fast the
+       ramp climbs, so lowering it to thicken the far field also thickens the near and mid field.
+       This one only ever adds coverage at the far end, which is why it cannot reintroduce the
+       object pop-in that anchoring the cull to the fog range was there to fix. */
+    WGR_API void wgr_set_fog_far_close(WgrRenderer* renderer, float close);
+
     /* Volumetric sun shafts (crepuscular rays / god rays).
 
        A WORLD-SPACE march, not a screen-space radial blur. Each low-resolution view ray is walked

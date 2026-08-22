@@ -203,6 +203,29 @@ class EngineWgpu : public EngineDummy
         if (_renderer != nullptr)
             wgr_set_cirrus_puffiness(_renderer, puffiness, variation);
     }
+    // Second-layer AMOUNT + how far it matches the deck below. Same shape again (own FFI entry
+    // point, _sky updated so GetSkySettings round-trips and "Reset to defaults" restores it).
+    void SetSkyCirrusLook(float amount, float matchDeck) override
+    {
+        _sky.cirrusAmount = amount;
+        _sky.cirrusMatchDeck = matchDeck;
+        if (_renderer != nullptr)
+            wgr_set_cirrus_look(_renderer, amount, matchDeck);
+    }
+    // How soft the SECOND layer's cloud edges are. Same shape again.
+    void SetSkyCirrusSoftness(float softness) override
+    {
+        _sky.cirrusSoftness = softness;
+        if (_renderer != nullptr)
+            wgr_set_cirrus_softness(_renderer, softness);
+    }
+    // Where the distance fog finishes, as a fraction of the draw distance. Same shape again.
+    void SetFogFarClose(float close) override
+    {
+        _sky.fogFarClose = close;
+        if (_renderer != nullptr)
+            wgr_set_fog_far_close(_renderer, close);
+    }
     // God rays. Same shape again (own FFI entry point, _sky updated so GetSkySettings round-trips
     // and "Reset to defaults" restores it). The renderer clamps every value, so a garbage push
     // cannot make the march expensive.

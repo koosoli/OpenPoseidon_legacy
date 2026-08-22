@@ -1,5 +1,5 @@
-use wgpu::util::DeviceExt;
 use bytemuck::Zeroable;
+use wgpu::util::DeviceExt;
 
 use crate::ffi::{WgrTerrainMaterial, WgrTerrainNode, WgrTerrainParams};
 use crate::gfx3d::{DEPTH_FORMAT, NORMAL_FORMAT};
@@ -395,7 +395,9 @@ impl Terrain {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
-                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<WgrTerrainMaterial>() as u64),
+                        min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<
+                            WgrTerrainMaterial,
+                        >() as u64),
                     },
                     count: None,
                 },
@@ -1337,8 +1339,17 @@ impl Terrain {
         self.rebuild_group2(device);
     }
 
-    pub fn set_materials(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, materials: &[WgrTerrainMaterial]) {
-        let upload = if materials.is_empty() { &[WgrTerrainMaterial::zeroed()][..] } else { materials };
+    pub fn set_materials(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        materials: &[WgrTerrainMaterial],
+    ) {
+        let upload = if materials.is_empty() {
+            &[WgrTerrainMaterial::zeroed()][..]
+        } else {
+            materials
+        };
         self.materials = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("wgr_terrain_materials"),
             contents: bytemuck::cast_slice(upload),

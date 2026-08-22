@@ -124,6 +124,13 @@ struct Frame {
     // action that has nothing to do with it. Read by frame::normal_map_cavity /
     // frame::sky_specular_split, called from shading::shade and terrain's fs_terrain.
     relief: vec4<f32>,
+    // FAR-FOG CLOSURE, the LAST lane (appended by Rust; WgrCamera's C ABI is unchanged).
+    //   x = the fraction of the draw distance at which fog reaches FULL. 1.0 is the behaviour
+    //       from before this lane existed, where fog saturates only exactly at the far plane.
+    //       Lower closes the horizon earlier, which is what hides the edge of the drawn world.
+    //   yzw = reserved (0).
+    // 0 reads as 1.0, so a zero-filled or never-written camera keeps the old ramp exactly.
+    fogfar: vec4<f32>,
 };
 
 // ---------------------------------------------------------------------------
@@ -481,7 +488,26 @@ fn apply_fog(rgb: vec3<f32>, world_pos_rel: vec3<f32>) -> vec3<f32> {
     // mid + fog only at the edge; low (~1) = dense fog throughout, revealing the froxel's
     // volumetric terrain sun-shadowing / god rays. Guarded so a zero-fill can't full-fog.
     let falloff = max(frame.fog_color.w, 0.1);
-    let u = clamp(dist / max_dist, 0.0, 1.0);
+    // WHERE the fog finishes, not just how fast it gets there.
+    //
+    // `falloff` alone cannot solve "the far distance should be denser, to hide the terrain that
+    // has been deleted", because it is a single exponent on a ramp pinned to reach 1.0 exactly AT
+    // max_dist and nowhere before it. Lowering it to thicken the far field also thickens the near
+    // and mid field -- it murks up the whole world to fix the last few hundred metres -- and even
+    // then the horizon itself is only just barely closed.
+    //
+    // The horizon is where things actually disappear: the terrain grid, the object cull ring
+    // (Scene::GetObjectDrawDistance) and the map's own edge all sit at or just inside max_dist,
+    // and any of them showing through means watching the world end. Dividing by `close` moves the
+    // point of FULL fog inward, so everything from there out is uniformly the sky's own airlight
+    // and there is no edge left to see. Near and mid barely move, because pow() keeps them near
+    // zero either way.
+    //
+    // This can only ever ADD cover at the far end, so it cannot reintroduce the object pop-in
+    // that anchoring the cull to max_dist was there to prevent: an object arriving at the cull
+    // edge is now fully fogged with margin rather than exactly at the boundary.
+    let close = select(clamp(frame.fogfar.x, 0.3, 1.0), 1.0, frame.fogfar.x <= 0.0);
+    let u = clamp(dist / (max_dist * close), 0.0, 1.0);
     let amount = pow(u, falloff);
     // Screen uv from a reprojection of the world position (matches cs_froxel's ndc->uv),
     // and distance -> slice with the fill's squared map (w = sqrt(dist / max)).

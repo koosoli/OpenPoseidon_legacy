@@ -396,8 +396,8 @@ mod tests {
         for &(cap, n) in &[
             (0u32, 1u32),
             (1 << 18, 1),
-            (1 << 25, 1 << 26),      // request far larger than a scaled cap
-            (u32::MAX - 4, 8),       // saturates rather than wrapping
+            (1 << 25, 1 << 26), // request far larger than a scaled cap
+            (u32::MAX - 4, 8),  // saturates rather than wrapping
             (u32::MAX, 1),
         ] {
             let grown = grown_cap(cap, n);

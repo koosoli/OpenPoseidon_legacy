@@ -1616,6 +1616,27 @@ class Engine : public IGraphicsEngine
         int lightSamples = 8;                              // light ray march steps
         float horizonHaze = 0.0f;                          // legacy sky->fog-colour horizon blend; 0 now that aerial perspective handles the terrain/sky seam
         float aerialShadow = 1.0f;                          // froxel fog terrain sun-shadowing strength: 0 = off (sun lights fog everywhere), 1 = physical, >1 exaggerated. Pushed via sky.night_horizon.w
+        // EDGE SOFTNESS of the SECOND layer. 0 = the layer as it rendered before this existed:
+        // the sheet noise is remapped linearly about the coverage threshold into a hard clamp, so
+        // a cloud reaches useful density close to its boundary and gets a definite silhouette.
+        // High cloud does not look like that — it is ice, its edges sublimate rather than
+        // condense, and the bigger the mass the deeper the fringe of thinning crystals round it.
+        // 1 holds the density down through a much wider band either side of the threshold, so the
+        // fringe is long and the silhouette soft.
+        // WEIGHTED BY LOCAL COVERAGE, which is what makes it "the BIGGER ones get fuzzier": a
+        // large cloud is where the coverage field is high, so the banks soften and isolated wisps
+        // stay defined. The layer's mean density is restored as it rises, so it is a shape control
+        // and not a brightness one.
+        // Unlike the other second-layer sliders the default here is NOT the old look — 0 is.
+        float cirrusSoftness = 0.45f;
+        // Fraction of the draw distance at which distance fog reaches FULL. 1.0 = the ramp as
+        // it behaved before this existed, saturating only exactly at the far plane -- which is
+        // also exactly where the terrain grid stops, where Scene::GetObjectDrawDistance puts the
+        // object cull ring, and where the map ends, so anything still visible out there reads as
+        // the world being cut off. 0.85 closes the horizon a little inside all three.
+        // This is a DIFFERENT question from fogFalloff below: that shapes how fast the ramp
+        // climbs, so using it to thicken the far field also thickens the near and mid field.
+        float fogFarClose = 0.85f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so
@@ -1734,6 +1755,29 @@ class Engine : public IGraphicsEngine
         // steady, i.e. exactly the look at the chosen puffiness. Small by default: at 0.15 the
         // extremes are a slightly more drawn-out or slightly lumpier version of the shipped look.
         float cirrusPuffVariation = 0.15f;
+        // AMOUNT of the second layer — the "more or less of it" control that the on/off flag above
+        // was not. 0 = a handful of separated wisps in an otherwise empty upper sky, 0.5 = EXACTLY
+        // the coverage the layer shipped with, 1 = a continuous cirrostratus veil with only thin
+        // breaks. Coverage is what moves furthest; the layer's optical depth follows only slightly
+        // (0.8x .. 1.25x), because a sky filling with cirrus really does thicken as it fills — a
+        // warm front — and holding density flat would make the top of the slider read as "the same
+        // thin veil, everywhere". Same three-knot mapping as cirrusPuffiness, so the midpoint is
+        // the shipped constant itself rather than the average of two others.
+        float cirrusAmount = 0.5f;
+        // How much the second layer takes on the FIRST layer's character instead of high ice
+        // cloud's. 0 = cirrus at 7 km, which is what this layer has always been. 1 = as close to
+        // the cumulus deck as a 6-to-14-step shell march gets: it descends to just above the
+        // deck's top, its features shrink to the deck's own shape scale, the 4:1 wind-shear
+        // stretch and the fibre striation relax to isotropic cells, the shell deepens toward a
+        // fraction of the deck's bottom-to-top span, optical depth rises from ~2.8 to 8, the ice
+        // halo phase gives way to the deck's droplet phase, and a cheap vertical self-shading term
+        // appears so it reads as solid cloud rather than glowing fog. Every one of those targets
+        // is read from the deck's LIVE parameters, so "similar" follows the weather rather than a
+        // second set of constants — and the altitude is clamped so the second layer can never sink
+        // into or below the first, because then it would stop being a second layer.
+        // Default 0: this only ever moves the layer AWAY from what it shipped as, so the bottom of
+        // the range is the neutral value, not the middle.
+        float cirrusMatchDeck = 0.0f;
         // CLD-020 cloud shadows: the deck dims the direct sun on terrain, objects, grass and
         // water through a world-anchored transmittance map rebuilt each frame around the camera.
         // 0 = off (every surface reads fully lit, and the compute pass early-outs per texel).
@@ -2369,6 +2413,23 @@ class Engine : public IGraphicsEngine
     };
     // Replace the whole far-proxy set. Called ONCE per world load. Empty releases it.
     virtual void SetFarProxyInstances(const FarProxyInstance* /*data*/, size_t /*count*/) {}
+
+    // SECOND CLOUD LAYER look: how MUCH of it there is (0 wisps .. 0.5 shipped .. 1 full veil) and
+    // how far it resembles the FIRST layer (0 = high ice cloud, 1 = a second cumulus-like deck).
+    // Same reasoning as SetSkyCirrus above — SkySettings carries both so they round-trip through
+    // Get/SetSkySettings and "Reset to defaults", and this is a separate entry point so no
+    // ABI-checked struct grows. APPENDED at the class end (vtable-slot note above).
+    virtual void SetSkyCirrusLook(float /*amount*/, float /*matchDeck*/) {}
+
+    // Fraction of the draw distance at which distance fog reaches FULL (see SkySettings::
+    // fogFarClose). Same reasoning as SetSkyCirrus above for being its own entry point rather
+    // than a lane in an ABI-checked struct. APPENDED at the class end (vtable-slot note above).
+    virtual void SetFogFarClose(float /*close*/) {}
+
+    // SECOND cloud layer EDGE SOFTNESS (see SkySettings::cirrusSoftness). Same reasoning as
+    // SetSkyCirrus above for being its own entry point rather than a lane in an ABI-checked
+    // struct. APPENDED at the class end (vtable-slot note above).
+    virtual void SetSkyCirrusSoftness(float /*softness*/) {}
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

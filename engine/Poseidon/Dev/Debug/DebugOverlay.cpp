@@ -4857,6 +4857,16 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Aerial sun shadow", &s.aerialShadow, 0.0f, 4.0f, "%.2f");
     Dev::PanelTooltip("Terrain occlusion of the froxel fog: 0 = off (sun lights the haze everywhere, for A/B), "
                       "1 = physical, >1 exaggerated to make the shadowed fog / god-ray shafts obvious");
+    changed |= Dev::SliderFloat("Fog closes at", &s.fogFarClose, 0.3f, 1.0f, "%.2f");
+    Dev::PanelTooltip("WHERE the fog finishes, as a fraction of the draw distance.\n"
+                      "1.00 = fog reaches full only exactly at the far plane -- which is also exactly where "
+                      "the terrain grid stops, where the object cull ring sits, and where the map ends. "
+                      "Anything still visible out there reads as the world being cut off.\n"
+                      "Lower closes the horizon INSIDE all three, so everything past it is uniformly "
+                      "sky-coloured airlight and there is no edge left to see.\n"
+                      "Different question from the falloff below: that shapes how fast the ramp climbs, so "
+                      "using it to thicken the far distance also thickens the near and mid field. This one "
+                      "only ever adds cover at the far end.");
     changed |= Dev::SliderFloat("Fog falloff", &s.fogFalloff, 0.5f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     Dev::PanelTooltip("Aerial fog distance ramp exponent. High (default 3) = clear near/mid, fog only near the "
                       "draw edge. Low (~1) = dense fog throughout the view, which makes the volumetric terrain "
@@ -4959,7 +4969,37 @@ void DrawSkyTab()
                       "the sim does, and speeds up with the Evolve slider. A full cycle is the better "
                       "part of an hour at Evolve 8, so this is weather, not animation.\n"
                       "Neither slider can pop: the renderer eases toward the value they imply.");
-    Dev::PanelHelp("  capture/benchmark override: WGR_CIRRUS_PUFF=<puff>[,<variation>[,<phase turns>]]");
+    changed |= Dev::SliderFloat("Amount", &s.cirrusAmount, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How MUCH second layer there is -- the control the on/off checkbox above was not.\n"
+                      "0 = a handful of separated wisps in an otherwise empty upper sky.\n"
+                      "0.5 = exactly the coverage this layer shipped with.\n"
+                      "1 = a continuous cirrostratus veil with only thin breaks in it.\n"
+                      "Coverage moves furthest; optical depth follows only a little (0.8x .. 1.25x), "
+                      "because a sky filling with cirrus really does thicken as it fills. It still "
+                      "multiplies the deck's own coverage, so clear weather stays clear at any setting.");
+    changed |= Dev::SliderFloat("Match main layer", &s.cirrusMatchDeck, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How far this layer takes on the FIRST layer's character instead of high ice cloud's.\n"
+                      "0 = cirrus at 7 km, which is what it has always been.\n"
+                      "1 = as close to the cumulus deck as a shell march gets: it descends to ~1.2 km above "
+                      "the deck's top, features shrink to the deck's own shape scale, the 4:1 wind-shear "
+                      "stretch and the fibre striation relax to isotropic cells, the shell deepens, optical "
+                      "depth rises, the ice-halo phase gives way to the deck's, and a vertical self-shading "
+                      "term appears so it reads as solid cloud rather than glowing fog.\n"
+                      "Every target is read from the deck's LIVE settings, so it tracks the weather.\n"
+                      "It can never sink into or below the deck. Costs nothing at 0.");
+    changed |= Dev::SliderFloat("Edge softness", &s.cirrusSoftness, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("How definite this layer's cloud edges are.\n"
+                      "0 = the silhouette it has always had: the sheet field is remapped linearly about the "
+                      "coverage threshold into a hard clamp, so a cloud reaches useful density close to its "
+                      "boundary and reads as solid.\n"
+                      "1 = density is held down through a much wider band either side of that threshold, so "
+                      "the cloud fades out over a long path and gains a deep fringe. High cloud is ice and "
+                      "its edges sublimate rather than condense, so a fringe is what it should have.\n"
+                      "Weighted by local coverage, so the BIG merged banks soften and isolated wisps stay "
+                      "defined. Mean density is restored as it rises, so this is a shape control, not a "
+                      "brightness one.");
+    Dev::PanelHelp("  capture/benchmark override: WGR_CIRRUS_PUFF=<puff>[,<variation>[,<phase turns>]], "
+                   "WGR_CIRRUS_LOOK=<amount>[,<match>], WGR_CIRRUS_SOFT=<softness>");
     ImGui::EndDisabled();
 
     Dev::PanelSeparator();
@@ -5088,6 +5128,18 @@ void DrawSkyTab()
         // Same story for the second layer's shape: not a sky-look lane, so it needs its own push,
         // unconditional inside `changed` so "Reset to defaults" restores it too.
         GEngine->SetSkyCirrusPuffiness(s.cirrusPuffiness, s.cirrusPuffVariation);
+        // Amount + match-the-deck + edge softness, and where the distance fog finishes. Own
+        // entry points for the same reason as the two above: the sky look block's size is
+        // part of the renderer's ABI handshake and must not grow.
+        GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
+        GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
+        GEngine->SetFogFarClose(s.fogFarClose);
+        // Amount + match-the-deck. Own entry point for the same reason as the two above: the sky
+        // look block's size is part of the renderer's ABI handshake and must not grow.
+        GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
+        GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
+        // Where the fog finishes. Own entry point for the same reason as the cirrus pushes above.
+        GEngine->SetFogFarClose(s.fogFarClose);
         // God rays: same story again, not a sky-look lane, so its own push. Unconditional inside
         // `changed` so "Reset to defaults" restores it too.
         GEngine->SetGodRays(s.godRays, s.godRayIntensity, s.godRayDensity, s.godRayDistance, s.godRayG,

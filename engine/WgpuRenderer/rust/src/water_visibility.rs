@@ -103,9 +103,11 @@ impl WaterVisibility {
         for slot in &mut self.slots {
             if matches!(slot.state, SlotState::Pending) {
                 let (tx, rx) = mpsc::channel();
-                slot.buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
-                    let _ = tx.send(result);
-                });
+                slot.buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| {
+                        let _ = tx.send(result);
+                    });
                 slot.state = SlotState::InFlight(rx);
             }
         }

@@ -626,6 +626,10 @@ impl CameraGroup {
             // sky-specular gain. The LAST lane — the two write_buffer calls at the end of the
             // camera upload address matdbg and wateranim from `bind_size` backwards, so adding
             // here moves them and both offsets are updated with it.
+            + 16
+            // Far-fog closure (frame.wgsl `fogfar`): the fraction of the draw distance at which
+            // distance fog reaches full. NOW the last lane; the three writes above it are
+            // addressed from bind_size backwards and all three moved with it.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -1991,6 +1995,24 @@ fn normal_resolve_takes_a_single_sample_rather_than_averaging() {
 /// of the SAME binary differing in exactly one term, and a value that can drift mid-run (or
 /// be re-read after a world load) is not that. `WGR_WATER_RIPPLE=0` restores the pre-DZ-005
 /// glassy surface exactly — the shader's whole world-space branch is gated on this being > 0.
+/// Fraction of the draw distance at which distance fog reaches FULL, matching
+/// `Engine::SkySettings::fogFarClose`. See the note where it is used for why the two must agree.
+const FOG_FAR_CLOSE_DEFAULT: f32 = 0.85;
+
+/// `WGR_FOG_CLOSE=<0.3..1.0>` -- startup override, for the same reason the sky ones exist:
+/// `--benchmark` and `--test-type screenshot` run `--no-dev`, so the Sky tab is unreachable and
+/// the control could not otherwise be captured or ablated at all.
+fn fog_far_close_from_env() -> Option<f32> {
+    let v = std::env::var("WGR_FOG_CLOSE")
+        .ok()?
+        .trim()
+        .parse::<f32>()
+        .ok()?
+        .clamp(0.3, 1.0);
+    eprintln!("[wgr] fog: far closure {} from WGR_FOG_CLOSE", v);
+    Some(v)
+}
+
 fn water_ripple_strength_from_env() -> f32 {
     let strength = std::env::var("WGR_WATER_RIPPLE")
         .ok()
@@ -2867,6 +2889,9 @@ pub struct Gfx3d {
     // DZ-005 water surface animation, pushed into frame.wgsl's `wateranim` lane every frame:
     // (time_s, ripple_strength, flow_strength, flow_map_bindless_slot). See `set_water_anim`.
     water_anim: [f32; 4],
+    /// frame.wgsl `fogfar`: x = the fraction of the draw distance at which distance fog reaches
+    /// full, yzw reserved. See `set_fog_far_close`.
+    fog_far: [f32; 4],
     // (proj_xx, proj_yy, near) per camera, cached from `prepare` so the GTAO dispatch uses the
     // SAME projection the prepass rasterised with. Recomputing it at dispatch time from a
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
@@ -3543,6 +3568,16 @@ impl Gfx3d {
             material_debug_view: 0,
             material_debug_flags: 1 << 2, // compose Multi layers, matching the C++ default
             water_anim: [0.0, water_ripple_strength_from_env(), 0.0, 0.0],
+            // MUST equal Engine::SkySettings::fogFarClose. Nothing pushes the sky settings at
+            // startup -- the dev panel's Sky tab is the only caller of SetFogFarClose -- so this
+            // IS the value a release build and every --no-dev run render with. A mismatch means
+            // the shipped game never gets the setting the header says it has.
+            fog_far: [
+                fog_far_close_from_env().unwrap_or(FOG_FAR_CLOSE_DEFAULT),
+                0.0,
+                0.0,
+                0.0,
+            ],
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
             hiz: hiz::HiZ::new(device),
@@ -5354,7 +5389,7 @@ impl Gfx3d {
                 ];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 48,
+                    base + self.cameras.bind_size - 64,
                     bytemuck::cast_slice(&matdbg),
                 );
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
@@ -5362,7 +5397,7 @@ impl Gfx3d {
                 // water params cannot leave the ripple frozen at a stale time.
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 32,
+                    base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&self.water_anim),
                 );
                 // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
@@ -5376,8 +5411,16 @@ impl Gfx3d {
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 16,
+                    base + self.cameras.bind_size - 32,
                     bytemuck::cast_slice(&relief),
+                );
+                // Far-fog closure (frame.wgsl `fogfar`), now the LAST lane. Unconditional for the
+                // same reason as the three above: a camera that skipped it would read whatever
+                // the previous frame left there.
+                queue.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 16,
+                    bytemuck::cast_slice(&self.fog_far),
                 );
             }
         }
@@ -7069,6 +7112,14 @@ impl Gfx3d {
     ///
     /// `flow_slot` is the bindless slot of the world's river flow map (0 = none; Chernarus
     /// ships none at all), and `flow_strength` its `StreamSpeedInfl`.
+    /// Fraction of the draw distance at which distance fog reaches FULL. 1.0 restores the
+    /// behaviour from before this existed (fog saturates only at the far plane); lower closes the
+    /// horizon earlier, hiding the terrain grid's edge and the object cull ring. Clamped in the
+    /// shader as well, so a garbage push cannot black the screen.
+    pub fn set_fog_far_close(&mut self, close: f32) {
+        self.fog_far[0] = close.clamp(0.3, 1.0);
+    }
+
     pub fn set_water_anim(&mut self, time: f32, flow_slot: u32, flow_strength: f32) {
         self.water_anim[0] = time;
         self.water_anim[2] = flow_strength;
@@ -7406,7 +7457,10 @@ impl Gfx3d {
         // because this one impl serves the prepass, the colour pass and the planar reflection,
         // and only the first two are worth four query pairs — the reflection's objects are
         // already covered end-to-end by WGR_GPU_TIMER_PLANAR_OBJECTS.
-        regions: Option<(&crate::gpu_timers::GpuTimers, [crate::gpu_timers::Region; 2])>,
+        regions: Option<(
+            &crate::gpu_timers::GpuTimers,
+            [crate::gpu_timers::Region; 2],
+        )>,
     ) {
         if !self.gpu_driven_enabled {
             return;
@@ -7953,7 +8007,8 @@ fn normal_map_cavity_only_darkens_the_ambient_and_is_inert_on_a_flat_map() {
     //    the sun (which already has N.L and would over-darken) and never as an addition.
     let shading = include_str!("../shaders/shading.wgsl");
     assert!(
-        shading.contains("let cavity = select(normal_map_cavity(geo_normal, nrm), 1.0, is_foliage);"),
+        shading
+            .contains("let cavity = select(normal_map_cavity(geo_normal, nrm), 1.0, is_foliage);"),
         "shade() must derive the cavity from the geometric/mapped normal pair, foliage exempt"
     );
     assert!(
@@ -8119,9 +8174,10 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
     // them alone looks right.
     let src = include_str!("mod.rs");
     for (offset, payload) in [
-        ("bind_size - 48", "cast_slice(&matdbg)"),
-        ("bind_size - 32", "cast_slice(&self.water_anim)"),
-        ("bind_size - 16", "cast_slice(&relief)"),
+        ("bind_size - 64", "cast_slice(&matdbg)"),
+        ("bind_size - 48", "cast_slice(&self.water_anim)"),
+        ("bind_size - 32", "cast_slice(&relief)"),
+        ("bind_size - 16", "cast_slice(&self.fog_far)"),
     ] {
         let at = src
             .find(offset)
@@ -8140,8 +8196,9 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
         .find("    wateranim: vec4<f32>,")
         .expect("wateranim lane");
     let relief_at = frame.find("    relief: vec4<f32>,").expect("relief lane");
+    let fogfar_at = frame.find("    fogfar: vec4<f32>,").expect("fogfar lane");
     assert!(
-        matdbg_at < water_at && water_at < relief_at,
+        matdbg_at < water_at && water_at < relief_at && relief_at < fogfar_at,
         "the WGSL lane order must match the upload offsets"
     );
     // Defaults: both ON, because both are constructed so they cannot brighten anything — the
@@ -8187,11 +8244,20 @@ fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
     );
     // The OnSurface twin writes frag_depth from the SAME height source the vertex conform
     // reads (surface_y_raster), walked along the view ray, on top of the vertex decal bias.
-    let fs_surface = shader.find("fn fs_surface(in: VsOut) -> SurfaceOut {").expect("fs_surface");
-    let depth_fn = shader.find("fn surface_pixel_depth(in: VsOut) -> f32 {").expect("surface_pixel_depth");
-    assert!(fs_surface < depth_fn, "fs_surface must precede its depth helper in the source");
+    let fs_surface = shader
+        .find("fn fs_surface(in: VsOut) -> SurfaceOut {")
+        .expect("fs_surface");
+    let depth_fn = shader
+        .find("fn surface_pixel_depth(in: VsOut) -> f32 {")
+        .expect("surface_pixel_depth");
+    assert!(
+        fs_surface < depth_fn,
+        "fs_surface must precede its depth helper in the source"
+    );
     let depth_body = &shader[depth_fn..];
-    let depth_body = &depth_body[..depth_body.find("\nfn shade_fragment").expect("shade_fragment follows")];
+    let depth_body = &depth_body[..depth_body
+        .find("\nfn shade_fragment")
+        .expect("shade_fragment follows")];
     for needle in [
         "@builtin(frag_depth) depth: f32,",
         "surface_y_raster(p.xz + cam.xz, cam) - cam.y",
@@ -8208,7 +8274,8 @@ fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
     // The pull is ALONG THE RAY toward the camera, not a vertical lift: looking up at a road
     // on a hillside, a vertical lift moves the point AWAY under reversed-Z and the terrain wins.
     assert!(
-        depth_body.contains("let pulled = p * max(seated_dist - lift, 1e-3) / max(seated_dist, 1e-3);"),
+        depth_body
+            .contains("let pulled = p * max(seated_dist - lift, 1e-3) / max(seated_dist, 1e-3);"),
         "the lift must move the seated point toward the camera along its view ray"
     );
     // The vertex path tells the fragment which vertices were pinned; skinned draws never are.
@@ -8231,24 +8298,36 @@ fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
         "prepassed() must keep excluding Offset::Decal, or the prepass depth would disagree"
     );
     // The heightmap group must be visible to the fragment stage, or wgpu rejects the pipeline.
-    let conform_layout = this.find("label: Some(\"wgr_3d_conform_layout\"),").expect("conform layout");
+    let conform_layout = this
+        .find("label: Some(\"wgr_3d_conform_layout\"),")
+        .expect("conform layout");
     let conform_layout = &this[conform_layout..conform_layout + 1200];
     assert_eq!(
-        conform_layout.matches("visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,").count(),
+        conform_layout
+            .matches("visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,")
+            .count(),
         2,
         "both conform bindings (heightmap + params) must be VERTEX_FRAGMENT"
     );
     // The lift constant is published to the shader.
     assert!(
-        this.contains("(\"pixel_lift\", road_pixel_lift() as f64),") && shader.contains("override pixel_lift: f32 = 0.02;"),
+        this.contains("(\"pixel_lift\", road_pixel_lift() as f64),")
+            && shader.contains("override pixel_lift: f32 = 0.02;"),
         "WGR_ROAD_PIXEL_LIFT must reach the pixel_lift override"
     );
     // Default ON; 0 is the vertex-only A/B arm.
     if std::env::var("WGR_ROAD_PIXEL_CONFORM").is_err() {
-        assert!(road_pixel_conform(), "the fix ships on; WGR_ROAD_PIXEL_CONFORM=0 is the A/B arm");
+        assert!(
+            road_pixel_conform(),
+            "the fix ships on; WGR_ROAD_PIXEL_CONFORM=0 is the A/B arm"
+        );
     }
     if std::env::var("WGR_ROAD_PIXEL_LIFT").is_err() {
-        assert_eq!(road_pixel_lift(), 0.02, "a few centimetres, not metres: the owner has seen roads through mountains");
+        assert_eq!(
+            road_pixel_lift(),
+            0.02,
+            "a few centimetres, not metres: the owner has seen roads through mountains"
+        );
     }
     // Announced through the GAME log (queued in Gfx3d::new, drained by render_frame), naming
     // the knob, so a captured screenshot can be matched to its arm. Not stderr.

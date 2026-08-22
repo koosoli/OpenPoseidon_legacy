@@ -1456,6 +1456,18 @@ impl Renderer {
         self.sky.set_cirrus_puffiness(puffiness, variation);
     }
 
+    fn set_cirrus_look(&mut self, amount: f32, match_deck: f32) {
+        self.sky.set_cirrus_look(amount, match_deck);
+    }
+
+    fn set_cirrus_softness(&mut self, softness: f32) {
+        self.sky.set_cirrus_softness(softness);
+    }
+
+    fn set_fog_far_close(&mut self, close: f32) {
+        self.gfx3d.set_fog_far_close(close);
+    }
+
     // Volumetric sun shafts (dev panel, Sky tab). Inert on the LDR-direct path, where the pass
     // does not exist at all.
     fn set_god_rays(&mut self, s: GodRaySettings) {
@@ -3527,7 +3539,8 @@ impl Renderer {
                 // share one encoder-level region rather than reporting two numbers nobody can
                 // act on independently.
                 self.gpu_timers.cpu_begin(TimerRegion::ObjCullColor);
-                self.gpu_timers.begin(&mut encoder, TimerRegion::ObjCullColor);
+                self.gpu_timers
+                    .begin(&mut encoder, TimerRegion::ObjCullColor);
                 self.gfx3d.build_hiz(&self.device, &mut encoder);
                 self.gfx3d.cull_dispatch_color(&mut encoder);
                 self.gpu_timers.end(&mut encoder, TimerRegion::ObjCullColor);
@@ -3633,9 +3646,12 @@ impl Renderer {
             // Draw2D is replayed by the dedicated 2D sub-pass further down (this
             // pass runs with want_2d = false), so a tail of nothing but 2D ops is
             // not worth a render pass of its own.
-            let has_post_water_3d = ops_post_water
-                .iter()
-                .any(|o| !matches!(o, Plan3dOp::Draw2D(_) | Plan3dOp::ClearDepth | Plan3dOp::Resolve));
+            let has_post_water_3d = ops_post_water.iter().any(|o| {
+                !matches!(
+                    o,
+                    Plan3dOp::Draw2D(_) | Plan3dOp::ClearDepth | Plan3dOp::Resolve
+                )
+            });
             // Hoisted out of the sub-pass block: the container now closes after the
             // SECOND colour sub-pass, so the transparent replay that moved behind
             // water is still inside the number that is supposed to account for it.
@@ -3709,8 +3725,12 @@ impl Renderer {
                 // GPU-driven colour has to be present first (else the sky shows through).
                 if start == 0 && !self.suppress_world_objects {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
-                    self.gfx3d
-                        .draw_gpu_driven(&mut pass, &self.textures, cam_off, &self.gpu_timers);
+                    self.gfx3d.draw_gpu_driven(
+                        &mut pass,
+                        &self.textures,
+                        cam_off,
+                        &self.gpu_timers,
+                    );
                     // FAR INSTANCE TIER, immediately after the real objects and before the
                     // CPU-replayed ops. After, because the two overlap in the transition band
                     // and the real geometry should win the depth test on equal terms rather
@@ -3971,7 +3991,14 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                render_ops(self, &mut pass, ops_post_water, display_2d, false, prepassed);
+                render_ops(
+                    self,
+                    &mut pass,
+                    ops_post_water,
+                    display_2d,
+                    false,
+                    prepassed,
+                );
                 if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);
