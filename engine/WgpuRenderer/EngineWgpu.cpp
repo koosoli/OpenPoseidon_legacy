@@ -1,4 +1,5 @@
 #include "EngineWgpu.hpp"
+#include <Poseidon/Core/BuildInfo.hpp>
 #include "TerrainWgpu.hpp"
 #include "WaterWgpu.hpp"
 #include "TextureBankWgpu.hpp"
@@ -695,6 +696,45 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     const WgrLogCallbacks log{&WgrLogThunk, nullptr};
     LOG_INFO(Graphics, "Wgpu: creating renderer {} ({}x{}), crate v{}, build {}", GetRendererName().Data(), _w, _h,
              wgr_version(), wgr_build_id());
+
+    // DO THE TWO BINARIES COME FROM THE SAME COMMIT?
+    //
+    // The ABI check below is necessary and NOT sufficient. It compares a hand-maintained ABI
+    // version and a struct-layout hash, both of which change only when a struct changes -- so a
+    // wgpu_renderer.dll a hundred commits out of date passes it cleanly and simply lacks a
+    // hundred commits of fixes. Several worktrees deploy into one game folder and they all share
+    // this one DLL, so that is not a hypothetical.
+    //
+    // It happened on 2026-08-22: a DLL 152 commits behind the installed exe was copied over a
+    // matched pair. Nothing failed. Roads stopped going dark at night, house textures came apart,
+    // and vegetation went white -- and all three were investigated as fresh rendering regressions,
+    // with shader ablations run to explain them, before anyone compared file dates.
+    //
+    // So this compares the two BUILD IDs directly and says so, loudly, in the game log -- which is
+    // the only channel that survives (the launcher discards stderr). A WARNING and not a refusal:
+    // building one side while iterating is legitimate and common, and blocking it would just get
+    // the check disabled. What is not legitimate is doing it WITHOUT KNOWING, and after this line
+    // that is no longer possible.
+    if (const char* dllBuild = wgr_build_id(); dllBuild && *dllBuild)
+    {
+        const char* exeBuild = BuildInfo::GitSha;
+        // The DLL stamps a longer hash than the exe's short SHA, so compare on the shorter of the
+        // two. A prefix match is the right test: both are the same commit rendered to different
+        // widths, and requiring equal length would fire on every single boot.
+        const size_t exeLen = std::strlen(exeBuild);
+        const bool sameCommit = exeLen > 0 && std::strncmp(exeBuild, dllBuild, exeLen) == 0;
+        if (!sameCommit)
+        {
+            LOG_ERROR(Graphics,
+                      "Wgpu: BUILD MISMATCH — this executable was built from commit {} but "
+                      "wgpu_renderer.dll was built from {}. They are NOT from the same build. The "
+                      "ABI check passed, so the game will run and look plausible, but whichever "
+                      "binary is older is missing every fix made since. Do not report a rendering "
+                      "regression from this pair: deploy both from one build first "
+                      "(scripts/Deploy.ps1), or check DEPLOYED-FROM.txt in the game folder.",
+                      exeBuild, dllBuild);
+        }
+    }
 
     const WgrAbiCheck abiCheck{WGR_ABI_VERSION,
                                sizeof(WgrAbiCheck),
