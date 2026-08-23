@@ -38,6 +38,7 @@ namespace Model
 namespace ShapeAdapter
 {
 
+
 // A tangent basis is defined by geometry and UV0, not by the packed ST values
 // currently captured from the narrow ODOL-73 reader.  Generate it here, after
 // source vertices have been split at normal/UV seams, so a normal map receives
@@ -102,6 +103,30 @@ static std::vector<std::array<float, 3>> buildTangents(const Mesh& mesh,
     }
 
     return tangents;
+}
+
+
+ProxyModelName normalizeProxyModelName(const std::string& selectionName)
+{
+    constexpr const char* proxyPrefix = "proxy:";
+    constexpr size_t proxyPrefixLen = 6;
+
+    std::string modelName = selectionName;
+    if (modelName.rfind(proxyPrefix, 0) == 0)
+    {
+        modelName.erase(0, proxyPrefixLen);
+    }
+
+    int id = -1;
+    size_t dot = modelName.find('.');
+    if (dot != std::string::npos)
+    {
+        std::string idText = modelName.substr(dot + 1);
+        modelName.erase(dot);
+        id = atoi(idText.c_str());
+    }
+
+    return {modelName, id};
 }
 
 static int convertFaceFlagsToSpecial(FaceFlags flags)
@@ -1062,7 +1087,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 for (size_t pi = 0; pi < lodLevel.mesh.proxies.size(); pi++)
                 {
                     const auto& proxy = lodLevel.mesh.proxies[pi];
-                    RString modelName(proxy.name.c_str());
+                    ProxyModelName proxyName = normalizeProxyModelName(proxy.name);
+                    RString modelName(proxyName.modelName.c_str());
 
                     Ref<ProxyObject> po = new ProxyObject;
                     if (GReplaceProxies)
@@ -1078,8 +1104,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     if (!po->obj)
                         continue;
 
-                    po->name = proxy.name.c_str();
-                    po->id = proxy.id;
+                    po->name = modelName;
+                    po->id = proxy.id >= 0 ? proxy.id : proxyName.id;
                     po->selection = static_cast<int>(proxy.selectionIndex);
 
                     const auto& m = proxy.transform.m;

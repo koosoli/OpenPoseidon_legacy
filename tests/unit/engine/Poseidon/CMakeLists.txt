@@ -162,6 +162,7 @@ set(POSEIDON_TEST_SOURCES
     Graphics/test_ubo_restore_guards.cpp
     Graphics/test_shader_named_outputs.cpp
     Graphics/test_jpg_import.cpp
+    Graphics/test_custom_face_texture_cache.cpp
     Graphics/test_window_metrics.cpp
     Graphics/test_window_placement.cpp
 )

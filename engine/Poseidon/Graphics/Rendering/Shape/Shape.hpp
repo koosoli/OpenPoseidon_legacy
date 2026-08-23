@@ -79,8 +79,16 @@ class Selection
 	void SerializeBin(SerializeBinStream &f);
 };
 
-
 } // namespace Poseidon
+
+namespace Poseidon::Foundation
+{
+template <>
+struct ModernTraits<::Poseidon::Selection> : LegacyMovableTraits<::Poseidon::Selection>
+{
+};
+} // namespace Poseidon::Foundation
+
 #include <Poseidon/Foundation/Containers/StreamArray.hpp>
 namespace Poseidon
 {
@@ -116,6 +124,7 @@ class NamedSelection: public Selection
 	RStringB _name;
 	Selection _faces;
 	mutable FaceSelection _faceSel;
+	mutable bool _faceSelReady;
 	// note: section is face-based
 
 	protected:
@@ -154,6 +163,18 @@ class NamedSelection: public Selection
 	void SerializeBin(SerializeBinStream &f);
 };
 
+} // namespace Poseidon
+
+namespace Poseidon::Foundation
+{
+template <>
+struct ModernTraits<::Poseidon::NamedSelection> : LegacyMovableTraits<::Poseidon::NamedSelection>
+{
+};
+} // namespace Poseidon::Foundation
+
+namespace Poseidon
+{
 
 // named propetry - generic string value
 
