@@ -36,9 +36,78 @@ void NamedProperty::SerializeBin(SerializeBinStream& f)
     f.Transfer(_value);
 }
 
+// ODOL v7 stores every vertex index as a fixed 16-bit value on the wire, and
+// always will: it is BI's shipped on-disk format for the original game's
+// models, not a cache we own and may re-version at will.
+//
+// `VertexIndex` is a RUNTIME type and is free to be wider than that.
+// TransferBinaryArray() ties the two together, because its stride is
+// `sizeof(*data.Data())` -- so widening the typedef silently changed how many
+// bytes this reader consumed from a file whose layout had not moved, the stream
+// desynchronised at the FIRST such array and everything after it (including the
+// whole face table) was read from misaligned data. Every model in the shipped
+// game then rendered as melted geometry with its textures smeared across it,
+// while instance and section COUNTS stayed identical, because the same
+// instances still drew.
+//
+// Transfer the wire as 16-bit explicitly and widen on the way in. Same bytes at
+// any typedef width.
+template <class ArrayType>
+static void TransferVertexIndexArray16(SerializeBinStream& f, ArrayType& data)
+{
+    static_assert(sizeof(short) == 2, "ODOL v7 vertex indices are two bytes on the wire");
+    if (f.IsLoading())
+    {
+        const int size = f.LoadInt();
+        // Same shape of guard as TransferBinaryArray: the payload is compressed so
+        // the count may exceed the remaining bytes, but a count whose buffer would
+        // be an absurd allocation is malformed regardless.
+        if (size < 0 || static_cast<long long>(size) * 2 > (256LL << 20))
+        {
+            f.SetError(SerializeBinStream::EFileStructure);
+            return;
+        }
+        AutoArray<short> wire;
+        wire.Realloc(size);
+        wire.Resize(size);
+        f.TransferBinaryCompressed(wire.Data(), size * 2);
+        data.Realloc(size);
+        data.Resize(size);
+        for (int i = 0; i < size; i++)
+        {
+            data[i] = static_cast<VertexIndex>(wire[i]);
+        }
+    }
+    else
+    {
+        const int size = data.Size();
+        f.SaveInt(size);
+        AutoArray<short> wire;
+        wire.Realloc(size);
+        wire.Resize(size);
+        for (int i = 0; i < size; i++)
+        {
+            // long long, not VertexIndex: the range test below must not become a
+            // tautology (and a warning) when the typedef is itself 16-bit.
+            const long long v = static_cast<long long>(data[i]);
+            // ODOL v7 cannot express an index past the signed 16-bit range. Nothing
+            // in the original corpus comes near it; imported content that does must
+            // not be written back into this format silently truncated.
+            if (v > 32767 || v < -32768)
+            {
+                LOG_ERROR(Graphics, "ODOL v7 save: vertex index {} does not fit the 16-bit wire format", (int)v);
+                f.SetError(SerializeBinStream::EFileStructure);
+                return;
+            }
+            wire[i] = static_cast<short>(v);
+        }
+        f.TransferBinaryCompressed(wire.Data(), size * 2);
+    }
+}
+
 void Selection::SerializeBin(SerializeBinStream& f)
 {
-    f.TransferBinaryArray(_sel);
+    TransferVertexIndexArray16(f, _sel);
     f.TransferBinaryArray(_weights);
 }
 
@@ -179,8 +248,11 @@ void Shape::SerializeBin(SerializeBinStream& f)
     }
 
     // f.TransferBinaryArray(_areaOTex); // are associated with texture
-    f.TransferBinaryArray(_pointToVertex); // are associated with texture
-    f.TransferBinaryArray(_vertexToPoint); // are associated with texture
+    // 16-bit on the wire whatever VertexIndex is -- see TransferVertexIndexArray16.
+    // These two come BEFORE the face table, so a stride mismatch here melts the
+    // entire rest of the LOD, not just the maps themselves.
+    TransferVertexIndexArray16(f, _pointToVertex);
+    TransferVertexIndexArray16(f, _vertexToPoint);
 
     int spec = 0;
     if (f.IsLoading())

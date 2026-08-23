@@ -274,6 +274,7 @@ list(APPEND POSEIDON_TEST_SOURCES
 
     # Rendering tests (batch-06)
     Graphics/Rendering/test_shape.cpp
+    Graphics/Rendering/test_odol_v7_wire_format.cpp
     Graphics/Rendering/test_shape_section_inheritance.cpp
     Graphics/Rendering/test_render_flags.cpp
     Graphics/Rendering/test_render_pass_descriptor.cpp

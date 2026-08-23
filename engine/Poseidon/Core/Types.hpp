@@ -262,7 +262,24 @@ using Poseidon::RadioMessage;
 using Poseidon::Speaker;
 
 // enums
-typedef short VertexIndex; // better memory usage
+//
+// Index of a vertex within one LOD's vertex table, in the packed face stream
+// (Poly.hpp) and everywhere downstream of it.
+//
+// This was `short`, commented "better memory usage", and for OFP-era content it
+// was: no original model comes near 32767 points in one LOD. Imported
+// later-generation content does. On Reforger's Everon, 30 of the 771 models in
+// one frame have a LOD 0 past the signed 16-bit ceiling -- church_01 at 168,926
+// vertices, house_village_e_1l03t at 84,689 -- and ShapeAdapter's only recourse
+// was to REJECT every face indexing above the limit. That is 140,041 faces of the
+// church and 44,154 of the house dropped: buildings that render as a roof with no
+// walls, which is exactly what it looked like.
+//
+// 32-bit costs one packed face stream at double stride (PolyVerticesSize scales
+// off sizeof, so nothing else had to change) and buys the whole corpus. The GPU
+// side never wanted 16 bits at all: the wgpu geometry pool has always been
+// Uint32 and merely widened on upload, and GL33 now uploads GL_UNSIGNED_INT.
+typedef int32_t VertexIndex;
 
 typedef unsigned int ClipFlags;
 enum

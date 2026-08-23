@@ -383,14 +383,24 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         const LODLevel& lodLevel = model.lodLevels[i];
         const Mesh& mesh = lodLevel.mesh;
         const int sourceVertexCount = static_cast<int>(mesh.vertices.size());
-        // The legacy runtime face stream stores VertexIndex as a signed 16-bit
-        // value. Newer ODOLs can contain a larger source vertex table, and a
-        // blind cast turns indices above 32767 negative before RecalculateAreas
-        // dereferences them. Keep the representable prefix and reject only
-        // faces that cannot be expressed by this runtime. This is preferable
-        // to crashing an entire streamed world on first sight of one model.
-        constexpr int maxRuntimeVertices = static_cast<int>(std::numeric_limits<VertexIndex>::max()) + 1;
-        const int vertexCount = std::min(sourceVertexCount, maxRuntimeVertices);
+        // The runtime face stream stores vertex references as VertexIndex, and a
+        // blind cast of anything past that type's range turns an index negative
+        // before RecalculateAreas dereferences it. Keep the representable prefix
+        // and reject only faces that cannot be expressed, which is preferable to
+        // crashing an entire streamed world on first sight of one model.
+        //
+        // VertexIndex was `short`, so this ceiling was 32768 and imported
+        // later-generation buildings sat well above it -- see Core/Types.hpp for
+        // the measurement and what it looked like on screen. At 32 bits no model
+        // in any supported corpus comes close, and the clamp is a guard rather
+        // than a working limit.
+        //
+        // Computed in 64-bit on purpose: `numeric_limits<VertexIndex>::max() + 1`
+        // is fine for a 16-bit type and OVERFLOWS for a 32-bit one, which would
+        // make the count negative and reject every face in the world.
+        constexpr int64_t maxRuntimeVertices = static_cast<int64_t>(std::numeric_limits<VertexIndex>::max()) + 1;
+        const int vertexCount =
+            static_cast<int>(std::min<int64_t>(static_cast<int64_t>(sourceVertexCount), maxRuntimeVertices));
         int triangleCount = static_cast<int>(mesh.triangles.size());
         int quadCount = static_cast<int>(mesh.quads.size());
         bool isODOL = (model.sourceFormat == "ODOL");
@@ -749,6 +759,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             int totalFaces = static_cast<int>(faceRefs.size());
 
             constexpr int kFilePolyPropsSize = 8; // sizeof(PolyProperties) on x86
+            constexpr int kFileVertexIndexSize = 2; // ODOL stores indices as 16-bit
 
             std::vector<int> secEndFile(nSections);
             for (int s = 0; s < nSections; ++s)
@@ -796,7 +807,9 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                         curSec++;
                     facesPerSection[curSec]++;
                     int nVerts = faceRefs[f].isQuad ? 4 : 3;
-                    fileBytePos += kFilePolyPropsSize + static_cast<int>(sizeof(VertexIndex)) * (1 + nVerts);
+                    // 2, not sizeof(VertexIndex): this walks the FILE's byte layout,
+                    // where a vertex index is two bytes whatever the runtime type is.
+                    fileBytePos += kFilePolyPropsSize + kFileVertexIndexSize * (1 + nVerts);
                     ++faceStreamPos;
                 }
             }
