@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-23 (afternoon)
 **Trunk:** `feat/consolidated` @ `7883272b`, pushed to `safety`
-**Installed:** binaries `3433e4f7`; Reforger tree + world from the `rf8` export
+**Installed:** binaries `5595e278` + the `b175a60a` revert; Reforger tree + world from the `rf8` export
 **Previous:** [HANDOVER-20260823-reforger-finish.md](HANDOVER-20260823-reforger-finish.md) — its
 headline diagnosis was wrong, see below.
 
@@ -132,7 +132,46 @@ previous session reported it absent after checking only `D:\SteamLibrary`.
 
 ---
 
-## THE NEXT THING: correctly-lit rock blows out
+## THE NEXT THING: the 32-bit VertexIndex corrupts every OFP model
+
+**Reverted in `b175a60a`. The direction is right; the change is not finished.**
+
+Widening `VertexIndex` from `short` to `int32_t` fixes imported buildings that render as a roof
+with no walls, and **corrupts every model in the shipped game**: OFP house and menu textures, the
+player's weapon, tree cutouts. Reproduced from captures on disk — same pose, same hook, the
+widening the only difference. Roofs float as flat planes, walls vanish, buildings melt.
+
+Ruled out already, so do not spend time there again:
+
+- **Not the UV path.** `BuildVertices` indexes UVs with plain `int` via `src.UV(i)`; `VertexIndex`
+  never touches them.
+- **Not `Poly`'s stride.** `PolyVerticesSize` is computed from `sizeof` throughout, and no call
+  site hardcodes 2.
+- **Not GL33's element type.** Moved to `GL_UNSIGNED_INT` in step, with a `static_assert` tying it
+  to the typedef.
+- **Not the wgpu index slice.** Widened on both sides of the FFI; the geometry pool was always
+  `Uint32` and merely widened on upload.
+- **Not `_pointToVertex` / `_vertexToPoint` in the MLOD loader** — those are `int32_t` locals.
+
+Something else still assumes two bytes. Candidates not yet examined: `Selection::_sel`
+(`Buffer<VertexIndex>`, commented "short is enough"), `Shape.hpp:131`'s
+`const VertexIndex* faces`, the ODOL readers' `int32_t` arrays landing in
+`AutoArray<VertexIndex>`, and anything reading the packed face stream by byte offset.
+
+**Verify with a PICTURE, not with counts.** When this first landed I declared OFP unaffected on
+`registered=98684`, `main inst=5648` and a byte-identical LOD histogram. Those are identical
+because the same INSTANCES draw — the geometry inside them is corrupt. The reproduction pose is
+`--test-world-freefly 5760 3490 90 120 -22` on OFP Everon, `POSEIDON_TEST_RAIN=1`, compared
+against `rain-village.png`.
+
+**What the revert costs, and it is real:** Reforger LODs over 32,767 vertices truncate again.
+`church_01` loses 140,041 faces of 168,926; `house_village_e_1l03t` 44,154; 30 of 771 models in
+one frame. Those buildings are back to a roof with no walls. Confined to imported content, where
+the alternative corrupts the shipped game.
+
+---
+
+## AND THEN: correctly-lit rock blows out
 
 Now that `--fix-orientation` lights rock correctly for the first time, it is **83% blown past
 245** on the foreground boulder at `--test-world-freefly 3800 7960 4 40 -5`; whole frame 18.6%
