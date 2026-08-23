@@ -1,7 +1,7 @@
 # RFG-003 — The MatPBRMulti blend shader already exists. The exporter never gives it anything to blend.
 
 **Date:** 2026-08-23
-**Status:** root-caused and measured; the fix is an exporter change plus a re-export
+**Status:** FIXED in `b5d85209` (converter + translation); corpus lands with the re-export
 **Follows:** [RFG-002](RFG-002-lod0-uses-a-shared-tile-while-the-object-bake-sits-beside-it-20260823.md)
 
 ## The shader is not missing
@@ -66,6 +66,41 @@ what the owner sees as a flat cream church at close range (RFG-002).
 Cost: exporter work, then a full re-export of the model tree (~1,248 models, ~45 min) and the
 ~6 GB robocopy into the game folder. Nothing lands for the owner until that re-export runs — see
 CLAUDE.md rule 0b.
+
+## Done, and the three things the plan did not anticipate
+
+The converter change landed as scoped -- mask, `BCR_2..4` and `NMO_2..4` deployed, all-or-nothing
+per material, `--no-material-layers` as the A/B. Three things had to be fixed with it, none of which
+was visible from reading:
+
+1. **The mask must be UNCOMPRESSED.** Its R, G and B are three independent weights; DXT1 encodes a
+   4x4 block as two endpoint colours and interpolates between them, which forces the channels onto
+   one line in colour space. Baked DXT1, church_01's mask came back as flat blocks of pure green,
+   red and blue. Now ARGB8888 at 512 -- it is a low-frequency weight map, the detail comes from the
+   tiles it selects between.
+
+2. **The layer numbering was off by one, in the translation.** `BCR_1` was bound to `LayerColour1`,
+   so the mask's red channel weighted the base tile against itself and layer 4 was never bound at
+   all. Enfusion's mask weights layers **2, 3 and 4** and layer 1 takes the remainder -- which is
+   also why layer 1 alone has no `Enabled_1`. Base is now `BCRMap` else `BCR_1`; `LayerColour1..3`
+   are `BCR_2..4`. `UVTransform_N` was never read either, so every layer sampled at the section's
+   raw uv.
+
+3. **The mask goes on uv0, not uv1 -- step 5 of the plan was wrong.** `UVSrcGlobalMaps "UV set 2"`
+   numbers channels in the SOURCE `.xob`, and the converter does not preserve that numbering: it
+   writes the object's own unwrap as `#UVSet#` 0, which is where the exported mask lives. Settled by
+   `WGR_MATERIAL_MASK_UV1`, added for exactly this: `=1` draws broad diagonal ribbons across
+   church_01's walls and roof, `=0` gives clean walls with the authored detail. The knob stays,
+   because the RVMAT Multi corpora (Arma 2/3) genuinely do put their mask on `tex1` and
+   `MaterialMaskUsesUv1` still answers from the material when the override is unset.
+
+Measured on church_01: 8 of 8 MatPBRMulti materials deploy whole (46 tiles, 22 layer normals) and
+the engine reports `composed 4 layers (3 layer normals)` for each. Before and after at the owner's
+pose: `evidence/rfg-church-lod0-flat-near-20260823.png` and
+`evidence/rfg-church-layer-blend-20260823.png`.
+
+**Still wrong:** the roof keeps a moire swirl where its layer tiles blend at 0.7 tiling. A narrower
+question than the one this answers, and not claimed as fixed.
 
 ## What this also explains
 
