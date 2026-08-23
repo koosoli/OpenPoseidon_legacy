@@ -1,5 +1,6 @@
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 
@@ -162,8 +163,9 @@ class Reader
                 // it is what tells an importer whether `coords` Y is absolute or an
                 // offset above the terrain. See EbinPlacement::hasFlags for the
                 // measurement that establishes this.
-                if (decl.name == "Flags" && _current)
-                    _current->hasFlags = true;
+                if (decl.name == "Flags")
+                    if (EbinPlacement* current = Current())
+                        current->hasFlags = true;
                 return Skip(8);
             case 0x05: // interned GUID as a value
                 return Skip(2);
@@ -172,8 +174,9 @@ class Reader
                 if (!_c.Has(4))
                     return Refuse("f32 truncated");
                 const float value = _c.F32();
-                if (decl.name == "scale" && _current)
-                    _current->scale = value;
+                if (decl.name == "scale")
+                    if (EbinPlacement* current = Current())
+                        current->scale = value;
                 return true;
             }
             case 0x07: // f32[2]
@@ -186,20 +189,20 @@ class Reader
                 v[0] = _c.F32();
                 v[1] = _c.F32();
                 v[2] = _c.F32();
-                if (_current)
+                if (EbinPlacement* current = Current())
                 {
                     if (decl.name == "coords")
                     {
-                        _current->position[0] = v[0];
-                        _current->position[1] = v[1];
-                        _current->position[2] = v[2];
-                        _current->hasPosition = true;
+                        current->position[0] = v[0];
+                        current->position[1] = v[1];
+                        current->position[2] = v[2];
+                        current->hasPosition = true;
                     }
                     else if (decl.name == "angles")
                     {
-                        _current->angles[0] = v[0];
-                        _current->angles[1] = v[1];
-                        _current->angles[2] = v[2];
+                        current->angles[0] = v[0];
+                        current->angles[1] = v[1];
+                        current->angles[2] = v[2];
                     }
                 }
                 return true;
@@ -271,10 +274,37 @@ class Reader
             placement.className = decl.name.empty() ? inherited.name : decl.name;
             placement.prefabGuid = decl.Prefab().empty() ? inherited.Prefab() : decl.Prefab();
 
-            EbinPlacement* outer = _current;
+            // A nested entity's transform is LOCAL to the entity that contains it,
+            // so the enclosing one is captured BY VALUE here and composed onto the
+            // child below. Reading a child's `coords` as world coordinates is what
+            // stranded 4,186 of Everon's placements -- 671 of them within 30 m of
+            // the map ORIGIN, including 128 houses and the church at 5153/3989 that
+            // came out at (0, -114.2, 0). It is only 0.34% of the world, and it is
+            // the 0.34% a player notices, because whole buildings go missing rather
+            // than shifting slightly.
+            //
+            // Safe to read the parent here: measured over Everon, all 4,186 nested
+            // children have their parent's `coords` record already consumed by the
+            // time their block opens, so no second pass is needed.
+            const size_t outerIndex = _currentIndex;
+            bool parentPositioned = false;
+            float parentPos[3] = {0.0f, 0.0f, 0.0f};
+            float parentYawDeg = 0.0f;
+            float parentScale = 1.0f;
+            if (outerIndex != kNoPlacement)
+            {
+                const EbinPlacement& parent = _world.placements[outerIndex];
+                parentPositioned = parent.hasPosition;
+                parentPos[0] = parent.position[0];
+                parentPos[1] = parent.position[1];
+                parentPos[2] = parent.position[2];
+                parentYawDeg = parent.angles[1];
+                parentScale = parent.scale;
+            }
+
             _world.placements.push_back(placement);
             const size_t index = _world.placements.size() - 1;
-            _current = &_world.placements[index];
+            _currentIndex = index;
 
             Declaration pass;
             pass.name = placement.className;
@@ -282,9 +312,31 @@ class Reader
             const bool ok = Records(end, pass, depth + 1);
 
             // push_back may have reallocated, so the entry is addressed by index.
+            if (parentPositioned && _world.placements[index].hasPosition)
+            {
+                EbinPlacement& child = _world.placements[index];
+                // Yaw about Y, matching the basis the .wrp writer builds from the
+                // same angle: world = x*aside + y*up + z*dir with aside=(c,0,-s)
+                // and dir=(s,0,c). Getting the sign wrong here does not fail
+                // loudly -- it scatters children in a ring around their parent.
+                const float yaw = parentYawDeg * 0.01745329252f;
+                const float c = std::cos(yaw);
+                const float s = std::sin(yaw);
+                const float lx = child.position[0] * parentScale;
+                const float ly = child.position[1] * parentScale;
+                const float lz = child.position[2] * parentScale;
+                child.position[0] = parentPos[0] + c * lx + s * lz;
+                child.position[1] = parentPos[1] + ly;
+                child.position[2] = parentPos[2] - s * lx + c * lz;
+                child.angles[1] += parentYawDeg;
+                child.scale *= parentScale;
+            }
             if (!_world.placements[index].hasPosition)
                 _world.placements.erase(_world.placements.begin() + static_cast<ptrdiff_t>(index));
-            _current = outer;
+            // Restoring an INDEX, not a pointer: the push_back above may have
+            // reallocated the vector. `outerIndex` is always < index because the
+            // parent was pushed first, so the erase cannot have moved it.
+            _currentIndex = outerIndex;
             return ok;
         }
         if (first == 0x0D || first == 0x43 || first == 0x44 || first == 0x45 || first == 0x0E)
@@ -313,7 +365,20 @@ class Reader
 
     Cursor _c;
     EbinWorld& _world;
-    EbinPlacement* _current = nullptr;
+    //! Index of the entity currently being read, or kNoPlacement outside one.
+    //!
+    //! An INDEX and not a pointer: `_world.placements` is a vector that grows while
+    //! the walk recurses, so any pointer into it dies at the next push_back. The
+    //! child-entity path already addressed its own entry by index for that reason;
+    //! the enclosing entity was still being restored through a raw pointer that the
+    //! same reallocation could dangle.
+    static constexpr size_t kNoPlacement = static_cast<size_t>(-1);
+    size_t _currentIndex = kNoPlacement;
+
+    EbinPlacement* Current()
+    {
+        return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex];
+    }
 };
 
 } // namespace

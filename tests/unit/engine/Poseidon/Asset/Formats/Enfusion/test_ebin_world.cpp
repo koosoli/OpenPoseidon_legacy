@@ -12,6 +12,7 @@
 // what buried Everon's houses a median 29 m underground while its vegetation, rocks
 // and walls all looked correct.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 
@@ -70,6 +71,15 @@ struct EbinBuilder
     void Coords(std::vector<uint8_t>& out, float x, float y, float z)
     {
         Ident(out, "coords");
+        out.push_back(0x08);
+        F32(out, x);
+        F32(out, y);
+        F32(out, z);
+    }
+    //! `angles <f32[3]>` -- index 1 is yaw, in degrees.
+    void Angles(std::vector<uint8_t>& out, float x, float y, float z)
+    {
+        Ident(out, "angles");
         out.push_back(0x08);
         F32(out, x);
         F32(out, y);
@@ -221,4 +231,83 @@ TEST_CASE("A different two-word property does not count as Flags", "[enfusion][e
     REQUIRE(world.consumed == bytes.size());
     REQUIRE(world.placements.size() == 1);
     CHECK_FALSE(world.placements[0].hasFlags);
+}
+
+TEST_CASE("A nested entity's transform is local to the entity containing it", "[enfusion][ebin]")
+{
+    // Read as world coordinates, a child's `coords` strands it wherever its local
+    // offset happens to point -- which for a child at the origin of its parent is
+    // the MAP origin. On Everon that put 671 objects within 30 m of (0,0),
+    // including 128 houses and a church at (0, -114.2, 0).
+    //
+    // Parent at (100, 10, 200) rotated 90 degrees about Y, child 5 m along local +X.
+    // The .wrp writer builds its basis as aside=(c,0,-s), dir=(s,0,c), so a local
+    // +X offset under a +90 degree yaw comes out along world +Z. Asserting the axis
+    // and not just the distance is the point: a sign error here still puts the
+    // child 5 m from its parent, just in the wrong place, and no count would move.
+    EbinBuilder builder;
+
+    std::vector<uint8_t> child;
+    builder.Coords(child, 5.0f, 0.0f, 0.0f);
+
+    std::vector<uint8_t> parent;
+    builder.Coords(parent, 100.0f, 10.0f, 200.0f);
+    builder.Angles(parent, 0.0f, 90.0f, 0.0f);
+    builder.Ident(parent, "Tree");
+    EbinBuilder::Block(parent, EbinBuilder::Entity(child));
+
+    builder.Ident(builder.records, "SCR_DestructibleBuildingEntity");
+    EbinBuilder::Block(builder.records, EbinBuilder::Entity(parent));
+
+    const std::vector<uint8_t> bytes = builder.Finish();
+    const EbinWorld world = ReadEbin(bytes.data(), bytes.size());
+
+    INFO(world.error);
+    REQUIRE(world.valid());
+    REQUIRE(world.consumed == bytes.size());
+    REQUIRE(world.placements.size() == 2);
+
+    const EbinPlacement& outer = world.placements[0];
+    const EbinPlacement& inner = world.placements[1];
+    REQUIRE(outer.className == "SCR_DestructibleBuildingEntity");
+    REQUIRE(inner.className == "Tree");
+
+    // The parent is top-level and must NOT move.
+    CHECK(outer.position[0] == Catch::Approx(100.0f));
+    CHECK(outer.position[1] == Catch::Approx(10.0f));
+    CHECK(outer.position[2] == Catch::Approx(200.0f));
+
+    CHECK(inner.position[0] == Catch::Approx(100.0f).margin(1e-3));
+    CHECK(inner.position[1] == Catch::Approx(10.0f).margin(1e-3));
+    CHECK(inner.position[2] == Catch::Approx(195.0f).margin(1e-3));
+    CHECK(inner.angles[1] == Catch::Approx(90.0f));
+}
+
+TEST_CASE("A top-level entity is not composed onto anything", "[enfusion][ebin]")
+{
+    // The negative case. Composition must apply ONLY to an entity nested inside
+    // another entity: 1,226,183 of Everon's 1,230,897 placements are top-level and
+    // already in world coordinates, so a rule that caught them too would move the
+    // entire island rather than the 0.34% that needed it.
+    EbinBuilder builder;
+
+    std::vector<uint8_t> first;
+    builder.Coords(first, 100.0f, 10.0f, 200.0f);
+    std::vector<uint8_t> second;
+    builder.Coords(second, 7.0f, 1.0f, 9.0f);
+
+    builder.Ident(builder.records, "Tree");
+    EbinBuilder::Block(builder.records, EbinBuilder::Entity(first));
+    builder.Ident(builder.records, "Tree");
+    EbinBuilder::Block(builder.records, EbinBuilder::Entity(second));
+
+    const std::vector<uint8_t> bytes = builder.Finish();
+    const EbinWorld world = ReadEbin(bytes.data(), bytes.size());
+
+    INFO(world.error);
+    REQUIRE(world.valid());
+    REQUIRE(world.placements.size() == 2);
+    CHECK(world.placements[1].position[0] == Catch::Approx(7.0f));
+    CHECK(world.placements[1].position[1] == Catch::Approx(1.0f));
+    CHECK(world.placements[1].position[2] == Catch::Approx(9.0f));
 }
