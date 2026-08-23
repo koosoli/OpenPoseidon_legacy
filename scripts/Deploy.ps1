@@ -77,6 +77,30 @@ foreach ($name in $payload)
 $stampPath = Join-Path $GameDir 'DEPLOYED-FROM.txt'
 $branch = (& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null)
 $commit = (& git -C $repoRoot rev-parse --short HEAD 2>$null)
+
+# The other half of the staleness problem, and the one the DEPLOYED-FROM check cannot
+# see: this build may be current against the GAME FOLDER and still be behind what
+# another agent has already published. Deploying it does not lose their commits, but it
+# does mean the binary in the folder is not the branch anyone is working from -- and the
+# next capture gets attributed to the wrong commit.
+#
+# A warning, not a refusal: deploying a local build to test it is legitimate and common.
+# What is not legitimate is doing it WITHOUT KNOWING, which is the same principle as the
+# provenance line further down.
+$upstream = (& git -C $repoRoot rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null)
+if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream))
+{
+    & git -C $repoRoot fetch --quiet ($upstream -split '/')[0] $branch 2>$null
+    $behind = (& git -C $repoRoot rev-list --count "HEAD..$upstream" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and [int]$behind -gt 0)
+    {
+        Write-Warning "This build is $behind commit(s) behind $upstream. Deploying it installs a binary that is NOT the published branch. Rebase first unless you are deliberately testing a local change: git pull --rebase $(($upstream -split '/')[0]) $branch"
+    }
+}
+else
+{
+    Write-Warning "'$branch' tracks no remote, so nothing can tell you whether it is behind. Run scripts\Use-RepoHooks.ps1."
+}
 if (Test-Path -LiteralPath $stampPath)
 {
     $prev = (Get-Content -LiteralPath $stampPath -TotalCount 1)
