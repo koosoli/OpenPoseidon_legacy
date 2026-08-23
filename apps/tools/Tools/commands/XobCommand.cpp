@@ -916,6 +916,9 @@ struct TextureStats
     size_t filesWithAlpha = 0; //!< of those, the ones carrying a cutout mask
     size_t baseLayerOnly = 0;  //!< MatPBRMulti materials approximated by a shared tile
     size_t layerTinted = 0;    //!< of those, the ones whose tile was rescaled to Color_N
+    //!< of those, the ones whose layer weights came from the MaskMap rather than
+    //!< from assuming every present layer covers the object equally
+    size_t layerMaskWeighted = 0;
     size_t bytesWritten = 0;
     size_t materialsWithNormal = 0;         //!< materials that resolved a normal map
     size_t normalsWritten = 0;              //!< distinct normal `.paa` files on disk
@@ -1036,16 +1039,109 @@ class TextureBaker
         bool tinted = false;
         if (bcr.empty())
         {
-            for (int layer = 1; layer <= 4 && bcr.empty(); ++layer)
+            // WHICH layer, and in what proportion. Taking the first non-empty
+            // `BCR_N` and its `Color_N` is what this did, and on any object whose
+            // first-listed layer is not its dominant one it renders the whole thing
+            // in a minority colour. WaterTower_01 is the case that exposed it: its
+            // layers are 2 (`Color_2` 0.031 0.133 0.191, a near-black blue), 3 and 4
+            // (0.381 and 0.402 grey). First-wins painted a concrete-and-steel tower
+            // in the near-black blue, and it read as an untextured object.
+            //
+            // The proportions are in the `MaskMap`, and its channels are a partition
+            // of unity over the layers: measured on WaterTower_02's global mask the
+            // means are R 0.127, G 0.299, B 0.238, summing to 0.664 with the
+            // remainder belonging to the base layer. So R, G and B weight layers 2,
+            // 3 and 4, and layer 1 takes what is left.
+            //
+            // Weighting the tower's own colours that way gives roughly 0.32 0.34
+            // 0.35 -- light grey with a faint blue cast, which is what the object is.
+            float weight[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f}; // 1-based
+            bool haveMask = false;
+            const std::string maskPath = emat.TextureOf("MaskMap");
+            if (!maskPath.empty())
             {
-                const std::string key = "BCR_" + std::to_string(layer);
-                bcr = emat.TextureOf(key);
-                if (bcr.empty())
+                Poseidon::Image mask;
+                if (LoadEdds(_paks, maskPath, mask))
+                {
+                    const std::vector<uint8_t>& texels = mask.data();
+                    const size_t count = texels.size() / 4;
+                    if (count != 0)
+                    {
+                        double sum[3] = {0.0, 0.0, 0.0};
+                        for (size_t t = 0; t < count; ++t)
+                            for (int c = 0; c < 3; ++c)
+                                sum[c] += texels[t * 4 + static_cast<size_t>(c)];
+                        double covered = 0.0;
+                        for (int c = 0; c < 3; ++c)
+                        {
+                            const double mean = sum[c] / (255.0 * static_cast<double>(count));
+                            weight[c + 2] = static_cast<float>(mean);
+                            covered += mean;
+                        }
+                        weight[1] = static_cast<float>(covered < 1.0 ? 1.0 - covered : 0.0);
+                        haveMask = true;
+                        _stats.layerMaskWeighted++;
+                    }
+                    else
+                    {
+                        Unbound("MaskMap decodes to no texels");
+                    }
+                }
+                else
+                {
+                    Unbound("MaskMap .edds does not decode");
+                }
+            }
+
+            // A layer counts only if it exists AND is not switched off. Without a
+            // usable mask every present layer weighs the same: still a guess, but an
+            // unbiased one, where first-wins is biased by file order.
+            float total = 0.0f;
+            float blended[3] = {0.0f, 0.0f, 0.0f};
+            std::string dominantTile;
+            float dominantWeight = -1.0f;
+            for (int layer = 1; layer <= 4; ++layer)
+            {
+                const std::string tile = emat.TextureOf("BCR_" + std::to_string(layer));
+                if (tile.empty())
                     continue;
+                float enabled = 1.0f;
+                emat.FloatOf("Enabled_" + std::to_string(layer), enabled);
+                if (enabled == 0.0f)
+                    continue;
+                float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                if (!emat.Vec4Of("Color_" + std::to_string(layer), colour))
+                    continue;
+                const float w = haveMask ? weight[layer] : 1.0f;
+                if (w > dominantWeight)
+                {
+                    dominantWeight = w;
+                    dominantTile = tile;
+                }
+                for (int c = 0; c < 3; ++c)
+                    blended[c] += colour[c] * w;
+                total += w;
+            }
+
+            if (!dominantTile.empty() && total > 1e-4f)
+            {
+                bcr = dominantTile;
+                for (int c = 0; c < 3; ++c)
+                    tint[c] = blended[c] / total;
+                tinted = true;
                 _stats.baseLayerOnly++;
-                tinted = emat.Vec4Of("Color_" + std::to_string(layer), tint);
-                if (tinted)
-                    _stats.layerTinted++;
+                _stats.layerTinted++;
+            }
+            else
+            {
+                // No layer carried a colour. Fall back to the old behaviour rather
+                // than refusing: a tile in the wrong colour still beats nothing.
+                for (int layer = 1; layer <= 4 && bcr.empty(); ++layer)
+                {
+                    bcr = emat.TextureOf("BCR_" + std::to_string(layer));
+                    if (!bcr.empty())
+                        _stats.baseLayerOnly++;
+                }
             }
         }
         if (bcr.empty())
@@ -1337,8 +1433,19 @@ class TextureBaker
         // Rescale the shared tile to the layer's own colour -- see the note at the call
         // site. Per channel, so a grey tile can become olive; a channel whose mean is
         // zero is left alone rather than multiplied by infinity.
+        //
+        // `Color_N` is LINEAR and the tile's texels are sRGB-ENCODED, so the target has
+        // to be encoded before the two are compared. Matching them raw makes every
+        // tinted material about a stop and a half too dark: WaterTower_01's blend of
+        // 0.19 linear was written as a 0.19 sRGB mean, i.e. 0.03 linear, and the tower
+        // rendered as a flat black sphere. That the values are linear is what the
+        // corpus says -- Color_3 0.381 and Color_4 0.402 are its steel and concrete,
+        // which are light grey (sRGB ~0.65) and not the near-black those figures would
+        // be if read as sRGB.
         if (tint)
         {
+            const auto LinearToSrgb = [](double v)
+            { return v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055; };
             const size_t texels = pixels.size() / 4;
             for (int c = 0; c < 3; ++c)
             {
@@ -1348,7 +1455,8 @@ class TextureBaker
                 const double mean = sum / (255.0 * static_cast<double>(texels));
                 if (!(mean > 1e-3))
                     continue;
-                const double gain = tint[c] / mean;
+                const double target = LinearToSrgb(std::clamp<double>(tint[c], 0.0, 1.0));
+                const double gain = target / mean;
                 for (size_t t = 0; t < texels; ++t)
                     pixels[t * 4 + static_cast<size_t>(c)] = static_cast<uint8_t>(
                         std::clamp(pixels[t * 4 + static_cast<size_t>(c)] * gain + 0.5, 0.0, 255.0));
@@ -2294,7 +2402,8 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
     if (stats.baseLayerOnly)
         std::cout << "            " << stats.baseLayerOnly
                   << " MatPBRMulti materials bound one shared library tile instead of a blend, " << stats.layerTinted
-                  << " of them rescaled to the layer's Color_N.\n";
+                  << " of them rescaled to the layers' blended Color_N;\n            " << stats.layerMaskWeighted
+                  << " took their layer weights from the MaskMap (the rest weigh every present layer equally).\n";
     if (stats.normalsWritten || stats.rvmatsWritten)
     {
         std::cout << "Normals:    " << stats.materialsWithNormal << " / " << stats.materialsSeen
