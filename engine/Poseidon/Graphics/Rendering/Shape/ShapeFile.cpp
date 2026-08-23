@@ -241,7 +241,20 @@ void Shape::SerializeBin(SerializeBinStream& f)
             f.SaveInt(face.Special());
             f.SaveShort(_textures.Find(face.GetTexture()));
             f.SaveChar(face.N());
-            f.Save(face.GetVertexList(), face.N() * sizeof(VertexIndex));
+            // Each index as a SHORT, one at a time, because the loader above reads
+            // them with LoadShort() -- a fixed two bytes. Writing
+            // `face.N() * sizeof(VertexIndex)` matched that only while VertexIndex
+            // happened to be 16-bit. When it was widened to 32, save emitted four
+            // bytes per index against a loader still consuming two, every face after
+            // the first was read from misaligned data, and every model in the game
+            // rendered as melted geometry with its texture smeared across it.
+            //
+            // The WIRE FORMAT stays 16-bit. It is a cache of shapes the engine has
+            // already loaded, so widening it would invalidate every existing file for
+            // no gain; content that genuinely needs more than 32767 vertices in one
+            // LOD needs a version bump here, not a silent stride change.
+            for (int i = 0; i < face.N(); i++)
+                f.SaveShort(static_cast<short>(face.GetVertex(i)));
         }
     }
 
