@@ -538,6 +538,44 @@ bool TextureNameLooksLikeGlass(const char* name)
     return false;
 }
 
+// Does the policy above also cover a texture whose PAA carries a FLAG tagg?
+//
+// It used to run only when the alpha channel was implied by the FORMAT, i.e. when the file
+// carried no tagg. That exemption reads the tagg as "blend this surface", and it is not: the
+// tagg says the texture HAS AN ALPHA CHANNEL. EngineWgpu's own draw-mode override says the same
+// thing in the same words ("Backend::IsAlpha means `this face's texture has an alpha channel`,
+// not `blend this face`"), and MAT-049 -- helicopters translucent on WGPU, solid on GL33, 951 of
+// 4,184 CWA textures classifying BLEND -- is the population that exemption leaves behind. So is
+// the owner's rifle going see-through against the sky.
+//
+// The tagg keeps the job it is authoritative for. The demotion target is
+// `pctClear >= 2 ? Cutout : Opaque`, so a tagged CUTOUT still lands on Cutout and MAT-047's
+// finding (a tagg-less DXT5 cutout classifies Opaque and draws its transparent texels solid) is
+// untouched. What changes is only whether a tagged, demonstrably-solid body is allowed to blend.
+//
+// DEFAULT OFF, and the reason is the limit of the evidence rather than a doubt about the idea.
+// The three thresholds were measured over textures with NO tagg; applying them to the tagged
+// population borrows margins established somewhere else. Measured with it on, OFP Everon village:
+// 30 demotions, every one a solid object -- roads (asfaltka, silnice), doors (vrata_l/p,
+// branka_green, dvere_domovni), fences (planky2000), the ladder rungs (zebrik_sprusel), pallets,
+// signs (ukazatel_smer), the church clock face (kostel2_cifernik), the bell, the medic cross,
+// the hangar louvres -- with mid% between 2.1 and 15.4 against a threshold of 25, and not one
+// glass, canopy, cockpit or pruzor texture in the set. That is encouraging and it is not the
+// helicopter corpus MAT-049 is actually about. `WGR_ALPHA_POLICY_TAGGED=1` is the A/B; validate
+// it against aircraft canopies before making it the default.
+//
+// NOTE it is NOT what fixed the owner's see-through rifle -- the M16's textures classify Opaque
+// and this policy never touches them. See MaterialIsFullyOpaque in EngineWgpu.cpp for that.
+static bool FormatAlphaPolicyCoversTagged()
+{
+    static const bool covers = []
+    {
+        const char* value = std::getenv("WGR_ALPHA_POLICY_TAGGED");
+        return value && std::strcmp(value, "0") != 0;
+    }();
+    return covers;
+}
+
 void ApplyFormatAlphaPolicy(AlphaStats& stats, const char* name)
 {
     if (stats.kind != AlphaStats::Blend || CockpitForceAlphaLegacyEnabled())
@@ -559,9 +597,9 @@ void ApplyFormatAlphaPolicy(AlphaStats& stats, const char* name)
     if (AlphaShapeTraceEnabled())
     {
         LOG_INFO(Graphics,
-                 "Wgpu format-alpha: {} clear={:.1f}% partial={:.1f}% mid={:.1f}% mean={} {} -> {} (no FLAG tagg)",
-                 name ? name : "<unnamed>", stats.pctClear, stats.pctPartial, stats.pctMid, stats.aMean,
-                 AlphaKindName(before), AlphaKindName(stats.kind));
+                 "Wgpu format-alpha: {} clear={:.1f}% partial={:.1f}% mid={:.1f}% opaque={:.1f}% mean={} {} -> {}",
+                 name ? name : "<unnamed>", stats.pctClear, stats.pctPartial, stats.pctMid, stats.pctOpaque,
+                 stats.aMean, AlphaKindName(before), AlphaKindName(stats.kind));
     }
 }
 
@@ -1019,7 +1057,7 @@ AlphaStats::Kind TextureWgpu::GetAlphaClass()
                 }
                 // Both scan paths have run the histogram and the shape guard; the last word
                 // on a FORMAT-implied alpha channel is whether the pixels look like glass.
-                if (_alphaForcedByFormat)
+                if (_alphaForcedByFormat || FormatAlphaPolicyCoversTagged())
                 {
                     ApplyFormatAlphaPolicy(_alphaStats, Name());
                 }
