@@ -113,8 +113,32 @@ TEST_CASE("GL33 texture flush keeps world cleanup semantics", "[Graphics][Custom
     CHECK(body.find("No-op") == std::string::npos);
 }
 
-// NOTE (backport): upstream CWR-CE also asserts here that NetworkClient::OnMessage
-// restores the remote player id before SetFace on NMTCopyUnitInfo.  That belongs to
-// upstream 076b173c "Restore identity-driven custom media", a multiplayer-identity
-// change deliberately not backported with the rendering fixes, so the case is omitted
-// rather than left failing.  Re-add it if 076b173c is ever taken.
+TEST_CASE("Copied network unit info preserves player id before custom face assignment", "[Network][CustomFace]")
+{
+    const std::filesystem::path source = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" /
+                                         "Network" / "NetworkClientOnMessage.cpp";
+    const std::string body = ExtractFunctionBody(ReadTextFile(source), "void NetworkClient::OnMessage");
+    const size_t copyCase = body.find("case NMTCopyUnitInfo:");
+    REQUIRE(copyCase != std::string::npos);
+    const size_t remotePlayer = body.find("SetRemotePlayer(copy._from->GetRemotePlayer())", copyCase);
+    const size_t setFace = body.find("SetFace(info._face, info._name)", copyCase);
+
+    REQUIRE(remotePlayer != std::string::npos);
+    REQUIRE(setFace != std::string::npos);
+    CHECK(remotePlayer < setFace);
+}
+
+TEST_CASE("Created network units assign custom faces with the transferred player id", "[Network][CustomFace]")
+{
+    const std::filesystem::path source =
+        std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "engine" / "Poseidon" / "AI" / "AIUnit.cpp";
+    const std::string body = ExtractFunctionBody(ReadTextFile(source), "TMError AIUnit::TransferMsg");
+    const size_t createCase = body.find("case NMCCreate:");
+    REQUIRE(createCase != std::string::npos);
+    const size_t transferPlayerId = body.find("IdxTransfer(indices->playerId, playerId)", createCase);
+    const size_t setFace = body.find("SetFace(info._face, PlayerIdentityKey{info._name, playerId})", createCase);
+
+    REQUIRE(transferPlayerId != std::string::npos);
+    REQUIRE(setFace != std::string::npos);
+    CHECK(transferPlayerId < setFace);
+}

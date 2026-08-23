@@ -322,6 +322,9 @@ class QFBank
 
 extern RString GFileBankPrefix;
 
+// Resolve a base-relative path to an enabled mod's copy of the same file, "" if none.
+std::string ResolveModOverride(const char* relPath);
+
 } // namespace Poseidon
 
 using ::Poseidon::BankList;

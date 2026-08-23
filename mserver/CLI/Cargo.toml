@@ -16,6 +16,7 @@ clap = { version = "4", features = ["derive", "env"] }
 papa-bear-archive = { path = "../Archive" }
 papa-bear-client = { path = "../Client" }
 serde_json = "1"
+sha2 = "0.10"
 # native-tls so HTTPS honours the OS trust store (openssl on Linux, schannel on
 # Windows) — unlike rustls' bundled Mozilla roots, this trusts internal CAs that
 # are installed system-wide. -k/--insecure flips on danger_accept_invalid_certs.
@@ -24,6 +25,7 @@ ureq = { version = "2", default-features = false, features = ["native-tls", "jso
 # zstdmt: multi-threaded compression so large mods (rcwc is 11 GB) pack in minutes, not ~30.
 zstd = { version = "0.13", features = ["zstdmt"] }
 tempfile = "3"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile = "3"

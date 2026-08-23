@@ -17,6 +17,9 @@
 #else
 #include <unistd.h>
 #include <limits.h>
+#if __APPLE__
+#include <mach-o/dyld.h>
+#endif
 
 using Poseidon::GetLanguage;
 using Poseidon::LocalizeString;
@@ -40,7 +43,12 @@ static RString GetExeDir()
         GetModuleFileNameA(nullptr, p, MAX_PATH);
         char* slash = strrchr(p, '\\');
 #else
+#if __APPLE__
+        uint32_t n = sizeof(p) - 1;
+        _NSGetExecutablePath(p, &n);
+#else
         ssize_t n = readlink("/proc/self/exe", p, sizeof(p) - 1);
+#endif
         if (n > 0)
             p[n] = '\0';
         else
@@ -136,6 +144,26 @@ TEST_CASE("Stringtable encoding - ASCII content unaffected by codepage", "[strin
     // Pure ASCII passes through every codepage unchanged
     RString plain = Poseidon::LocalizeString("STR_ASCII");
     REQUIRE(std::string(plain.Data()) == "plain");
+}
+
+TEST_CASE("Stringtable encoding - empty translation uses English", "[stringtable][encoding][fallback]")
+{
+    namespace fs = std::filesystem;
+
+    const fs::path path = fs::temp_directory_path() / "ofpr_stringtable_empty_translation.csv";
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "LANGUAGE,English,Czech\n";
+        out << "STR_FALLBACK,caf\xE9,\n";
+    }
+
+    Poseidon::ClearStringtable();
+    GLanguage = "Czech";
+    Poseidon::LoadStringtable("global", path.string().c_str(), 0, true);
+
+    REQUIRE(std::string(Poseidon::LocalizeString("STR_FALLBACK").Data()) == "caf\xC3\xA9");
+
+    fs::remove(path);
 }
 
 // CP1250 (Central European) -- Czech, Polish

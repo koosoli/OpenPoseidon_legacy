@@ -253,13 +253,42 @@ static std::vector<std::string> ResolveStringtableLoadList(const char* filename)
     return files;
 }
 
+static void MergeSurplusLegacyCsvCells(std::vector<std::string>& row, int expectedColumns, int mergeColumn)
+{
+    if (expectedColumns <= 0 || mergeColumn < 0 || mergeColumn >= expectedColumns ||
+        static_cast<int>(row.size()) <= expectedColumns)
+    {
+        return;
+    }
+
+    const int cellsToMerge = static_cast<int>(row.size()) - expectedColumns + 1;
+    if (mergeColumn + cellsToMerge > static_cast<int>(row.size()))
+    {
+        return;
+    }
+
+    std::string merged = row[mergeColumn];
+    for (int i = 1; i < cellsToMerge; i++)
+    {
+        merged += ",";
+        merged += row[mergeColumn + i];
+    }
+
+    row[mergeColumn] = std::move(merged);
+    row.erase(row.begin() + mergeColumn + 1, row.begin() + mergeColumn + cellsToMerge);
+}
+
 void StringTableDynamic::Load(const char* filename, std::set<std::string>& appliedInBatch)
 {
     QIFStreamB f;
     f.AutoOpen(filename);
     bool fileIsUtf8 = HasUtf8CsvSuffix(filename);
     int column = -1;
+    int englishColumn = -1;
+    int headerColumns = 0;
+    int legacyCommaColumn = -1;
     Poseidon::Codepage columnCp = Poseidon::Codepage::CP1252;
+    Poseidon::Codepage englishColumnCp = Poseidon::Codepage::CP1252;
     std::set<std::string> seenNames;
     while (true)
     {
@@ -276,13 +305,23 @@ void StringTableDynamic::Load(const char* filename, std::set<std::string>& appli
 
         if (!row.empty() && stricmp(row[0].c_str(), "LANGUAGE") == 0)
         {
+            headerColumns = static_cast<int>(row.size());
             for (int c = 1; c < static_cast<int>(row.size()); c++)
             {
+                if (!fileIsUtf8 && legacyCommaColumn < 0 && stricmp(row[c].c_str(), "French") == 0)
+                {
+                    legacyCommaColumn = c;
+                }
+                if (stricmp(row[c].c_str(), "English") == 0)
+                {
+                    englishColumn = c - 1;
+                    englishColumnCp =
+                        fileIsUtf8 ? Poseidon::Codepage::Utf8 : Poseidon::CodepageForLanguage(row[c].c_str());
+                }
                 if (stricmp(row[c].c_str(), (const char*)GLanguage) == 0)
                 {
                     column = c - 1; // column index into value columns (0-based after key)
                     columnCp = fileIsUtf8 ? Poseidon::Codepage::Utf8 : Poseidon::CodepageForLanguage(row[c].c_str());
-                    break;
                 }
             }
             break;
@@ -291,8 +330,9 @@ void StringTableDynamic::Load(const char* filename, std::set<std::string>& appli
     if (column < 0)
     {
         RptF("Unsupported language %s in %s", (const char*)GLanguage, filename);
-        column = 0;
-        columnCp = fileIsUtf8 ? Poseidon::Codepage::Utf8 : Poseidon::Codepage::CP1252;
+        column = englishColumn >= 0 ? englishColumn : 0;
+        columnCp =
+            englishColumn >= 0 ? englishColumnCp : (fileIsUtf8 ? Poseidon::Codepage::Utf8 : Poseidon::Codepage::CP1252);
     }
 
     while (!f.eof())
@@ -301,6 +341,10 @@ void StringTableDynamic::Load(const char* filename, std::set<std::string>& appli
         if (!Poseidon::Asset::Formats::CsvReadRow(f, row) || row.empty())
         {
             continue;
+        }
+        if (!fileIsUtf8)
+        {
+            MergeSurplusLegacyCsvCells(row, headerColumns, legacyCommaColumn);
         }
 
         const std::string& name = row[0];
@@ -318,9 +362,15 @@ void StringTableDynamic::Load(const char* filename, std::set<std::string>& appli
 
         // column is 0-based index into value columns (row[1], row[2], ...)
         int valueIdx = column + 1;
+        Poseidon::Codepage valueCp = columnCp;
+        if ((valueIdx >= static_cast<int>(row.size()) || row[valueIdx].empty()) && englishColumn >= 0)
+        {
+            valueIdx = englishColumn + 1;
+            valueCp = englishColumnCp;
+        }
         if (valueIdx < static_cast<int>(row.size()) && !row[valueIdx].empty())
         {
-            std::string value = Poseidon::DecodeLegacyTextToUtf8(row[valueIdx], columnCp);
+            std::string value = Poseidon::DecodeLegacyTextToUtf8(row[valueIdx], valueCp);
             Add(RString(name.c_str()), RString(value.c_str()), fileIsUtf8, appliedInBatch);
         }
     }
@@ -651,6 +701,8 @@ RString LookupStringtableCsv(RString csvPath, const char* key)
     const bool fileIsUtf8 = HasUtf8CsvSuffix(resolved);
     int column = -1;
     int englishColumn = -1;
+    int headerColumns = 0;
+    int legacyCommaColumn = -1;
     Poseidon::Codepage columnCp = Poseidon::Codepage::CP1252;
     Poseidon::Codepage englishCp = Poseidon::Codepage::CP1252;
     while (true)
@@ -666,8 +718,13 @@ RString LookupStringtableCsv(RString csvPath, const char* key)
         }
         if (!row.empty() && stricmp(row[0].c_str(), "LANGUAGE") == 0)
         {
+            headerColumns = static_cast<int>(row.size());
             for (int c = 1; c < static_cast<int>(row.size()); c++)
             {
+                if (!fileIsUtf8 && legacyCommaColumn < 0 && stricmp(row[c].c_str(), "French") == 0)
+                {
+                    legacyCommaColumn = c;
+                }
                 if (column < 0 && stricmp(row[c].c_str(), (const char*)GLanguage) == 0)
                 {
                     column = c - 1;
@@ -692,6 +749,10 @@ RString LookupStringtableCsv(RString csvPath, const char* key)
         if (!Poseidon::Asset::Formats::CsvReadRow(f, row) || row.empty())
         {
             continue;
+        }
+        if (!fileIsUtf8)
+        {
+            MergeSurplusLegacyCsvCells(row, headerColumns, legacyCommaColumn);
         }
         if (stricmp(row[0].c_str(), key) != 0)
         {

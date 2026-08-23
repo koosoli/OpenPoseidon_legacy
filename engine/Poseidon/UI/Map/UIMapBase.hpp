@@ -163,6 +163,8 @@ public:
 	Poseidon::Foundation::UITime _moveStart;
 	Poseidon::Foundation::UITime _moveLast;
 	Poseidon::Foundation::UITime _edgeScrollLast;
+	Poseidon::Foundation::UITime _zoomStart;
+	Poseidon::Foundation::UITime _zoomLast;
 	unsigned _moveKey;
 	unsigned _mouseKey;
 

@@ -54,6 +54,12 @@ That community project continues Bohemia Interactive's official source release o
 the original Poseidon engine. This fork builds on the work of all of those
 projects and the Operation Flashpoint / Arma community that has kept the game
 alive for more than two decades.
+### Step-by-step Guides
+
+There are installation/build guides for [Linux](docs/build/linux.md) and
+[Windows](docs/build/win.md).
+
+### Development Builds
 
 ## Support the project
 
@@ -73,6 +79,16 @@ Use the GitHub Sponsors or Buy Me a Coffee buttons above to support the project.
 - [vcpkg](https://vcpkg.io/)
 
 On Windows:
+On Windows, run the following commands:
+
+```
+winget install Ccache.Ccache Kitware.CMake LLVM.LLVM Ninja-build.Ninja PolarGoose.ClangFormat
+winget install Microsoft.VisualStudio.BuildTools --custom '"--add Microsoft.VisualStudio.Workload.VCTools;includeRecommended"'
+```
+
+Then follow the instructions for [setting up
+vcpkg](https://learn.microsoft.com/en-us/vcpkg/get_started/get-started?pivots=shell-powershell)
+to get the required software.
 
 ```powershell
 winget install Kitware.CMake LLVM.LLVM Ninja-build.Ninja
@@ -89,6 +105,13 @@ from a Developer PowerShell, or add the SDK's bin directory yourself:
 ```powershell
 $env:PATH = "C:\Program Files (x86)\Windows Kits\10\bin\<sdk-version>\x64;" + $env:PATH
 ```
+On macOS, use the matching `macos-arm64-clang-rwdi` or `macos-x64-clang-rwdi` preset.
+
+### Testing
+
+Copy game binaries from `dist/` into the [Steam](https://store.steampowered.com/app/65790/Arma_Cold_War_Assault_Remastered/)
+or [GOG](https://www.gog.com/en/game/arma_cold_war_assault) game's Remastered folder,
+or the [Steam demo folder](https://store.steampowered.com/app/4819000/Arma_Cold_War_Assault_Remastered_Demo/), and start.
 
 An existing `build/` directory hides this, because the cache already recorded
 `mt.exe` — so the failure only shows up on a fresh clone.
@@ -99,6 +122,16 @@ An existing `build/` directory hides this, because the cache already recorded
 cmake --preset win-x64-clang-rwdi
 cmake --build build/win-x64-clang-rwdi --target PoseidonGame
 ```
+- [Apps](apps/README.md) - executable targets
+- [Engine](engine/README.md) - engine libraries and Rust Trident tooling
+- [Master server tools](mserver/README.md) - Rust service and CLI crates
+- [Tests](tests/README.md) - test source trees; CI currently compiles them only
+- `cmake/` - presets, toolchains, vcpkg triplets, and overlay ports
+- `docs/` - auxiliary documentation
+- `docker/` - container support for service and runtime environments
+- `packages/` - ignored local game data staging area
+- `resources/` - application icon resources
+- `thirdparty/` - vendored third-party headers and sources
 
 For Linux, use the matching `linux-x64-clang-rwdi` preset.
 
@@ -139,3 +172,24 @@ repository and are distributed under the
 
 See [CREDITS.md](CREDITS.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for more information.
+The compiled binaries need game data to run. You can obtain the **free demo game
+data** or the paid full game on Steam or GOG:
+
+- *Arma: Cold War Assault Remastered* demo on Steam: <https://store.steampowered.com/app/4819000>
+- *Arma: Cold War Assault Remastered* full game on Steam: <https://store.steampowered.com/app/65790>
+- *Arma: Cold War Assault Remastered* full game on GOG: <https://www.gog.com/en/game/arma_cold_war_assault>
+
+The full game data ships with the retail game. Whatever you do with assets is
+governed by the APL-SA linked above; whatever you do with this source is governed by
+the GPL with additional terms per Section 7 in [`LICENSE`](LICENSE).
+
+
+## Contributing
+
+This is the community continuation of the official source release. Pull requests,
+bug reports, ports, tooling improvements, documentation updates, and development
+ideas are welcome here.
+
+Please use issues for bugs and proposals, and open pull requests for source,
+build, test, or documentation changes. See [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for contribution guidelines.

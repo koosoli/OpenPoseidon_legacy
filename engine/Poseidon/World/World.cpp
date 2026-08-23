@@ -410,15 +410,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
             }
         }
 
-        if (input.GetActionToDo(UAChat, true, false))
-        {
-            CreateChat();
-        }
-
-        if (!_voiceChat && input.GetActionToDo(UAVoiceOverNet, true, false))
-        {
-            CreateVoiceChat();
-        }
+        HandleVoiceChatShortcuts();
     }
 
     if (_chat || _voiceChat || _channelChanged >= Glob.uiTime - 3.0f)
@@ -1847,5 +1839,30 @@ void World::Simulate(float deltaT, bool& enableDraw)
     )
     {
         GetSensorList()->SmartUpdateAll();
+    }
+}
+
+void World::HandleVoiceChatShortcuts()
+{
+    if (GetNetworkManager().GetGameState() < NGSCreate ||
+        !Poseidon::ShouldHandleMultiplayerChatShortcut(_chat != nullptr))
+    {
+        return;
+    }
+
+    auto& input = InputSubsystem::Instance();
+    if (input.GetActionToDo(UAChat, true, false))
+    {
+        CreateChat();
+    }
+
+    if (!_voiceChat && input.GetAction(UAVoiceOverNetPushToTalk, false) > 0)
+    {
+        CreateVoiceChat(true);
+    }
+
+    if (!_voiceChat && input.GetActionToDo(UAVoiceOverNet, true, false))
+    {
+        CreateVoiceChat();
     }
 }

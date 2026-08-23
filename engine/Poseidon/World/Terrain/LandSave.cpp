@@ -8,6 +8,7 @@
 #include <Poseidon/IO/FileServer.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
+#include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp> // GEngine (GPU-driven retained-scene drop on cell unload)
 #include <Poseidon/World/Scene/ObjectClasses.hpp>
@@ -1027,7 +1028,7 @@ static std::string GetSubdivCachePath(const char* wrpName, int targetSubdivLog)
 bool Landscape::LoadSubdivCache(int targetSubdivLog)
 {
     std::string path = GetSubdivCachePath(_name, targetSubdivLog);
-    FILE* f = fopen(path.c_str(), "rb");
+    FILE* f = OpenFileUtf8(path.c_str(), "rb");
     if (!f)
         return false;
 
@@ -1082,7 +1083,7 @@ bool Landscape::LoadSubdivCache(int targetSubdivLog)
 void Landscape::SaveSubdivCache(int targetSubdivLog)
 {
     std::string path = GetSubdivCachePath(_name, targetSubdivLog);
-    FILE* f = fopen(path.c_str(), "wb");
+    FILE* f = OpenFileUtf8(path.c_str(), "wb");
     if (!f)
     {
         LOG_WARN(Core, "LOAD: SubdivCache save failed: {}", path);

@@ -2,6 +2,7 @@
 
 #include <Poseidon/Network/NetworkImplComponent.hpp>
 #include <Poseidon/Network/IpBan.hpp>
+#include <Poseidon/Network/NetworkJIPQueue.hpp>
 #include <Poseidon/Network/NetworkServerAuth.hpp>
 
 #include <atomic>
@@ -188,6 +189,9 @@ struct NetworkPlayerInfo
 
     // Player is joining into a game already in progress (JIP)
     bool jip;
+
+    // Player is waiting for the current mission to finish
+    bool waitingForMission;
 
     // Questions asked
     AutoArray<IntegrityQuestionInfo> integrityQuestions;
@@ -463,14 +467,7 @@ class NetworkServer : public NetworkComponent
     // map persons to units
     AutoArray<PersonUnitPair> _mapPersonUnit;
 
-    // JIP: messages queued for late-joining players (publicVariable, etc.)
-    struct JIPInitMessage
-    {
-        NetworkMessageType type;
-        Ref<NetworkMessage> msg;
-        RString key; // deduplication key (variable name for publicVariable)
-    };
-    AutoArray<JIPInitMessage> _jipMessages;
+    AutoArray<Poseidon::NetworkJIPMessage> _jipMessages;
     Poseidon::RemoteExecPolicyMode _remoteExecPolicyMode = Poseidon::RemoteExecPolicyMode::DenyClient;
     AutoArray<RString> _remoteExecAllowedNames;
 
@@ -593,6 +590,16 @@ class NetworkServer : public NetworkComponent
     void ChatToAllPlayers(RString message);
     // Number of dynamic (runtime) ban entries — id + IP. Used by tests.
     int GetBanCount() const { return _banListLocal.Size() + _banListIPLocal.Size(); }
+    // First runtime id-ban entry as a decimal string, or "" when none. Used by tests
+    // to drive #unban with the exact id the server recorded.
+    RString GetFirstBanId() const
+    {
+        if (_banListLocal.Size() <= 0)
+            return RString();
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(_banListLocal[0]));
+        return RString(buf);
+    }
 
     // Return if session was created
     bool IsValid() const { return _server != nullptr; }
@@ -630,6 +637,7 @@ class NetworkServer : public NetworkComponent
     void OnSimulate() override;
     void OnSendComplete(DWORD msgID, bool ok);
     void OnSendStarted(DWORD msgID, const NetworkMessageQueueItem& item);
+    void OnRawMagicMessage(int from, int magic, const char* buffer, int bufferSize);
     void OnCreatePlayer(int player, bool botClient, const char* name);
     bool OnCreateVoicePlayer(int player);
     void OnMessage(int from, NetworkMessage* msg, NetworkMessageType type) override;
@@ -694,6 +702,7 @@ class NetworkServer : public NetworkComponent
 
     // Send mission pbo file to clients
     void SendMissionFile();
+    void SendMissionFileTo(int player);
 
     // Check if all internal structures are in correct state
     bool CheckIntegrity() const;
@@ -771,6 +780,7 @@ class NetworkServer : public NetworkComponent
 
     // Send complete world state to a JIP player (5-pass ordered object sync)
     void SendWorldState(int dpnid);
+    bool ReplayPlayerWorldState(NetworkPlayerInfo& info);
 
     // Set game state of given player
     void SetPlayerState(int dpid, NetworkGameState state);
