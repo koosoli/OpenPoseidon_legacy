@@ -2422,8 +2422,10 @@ void PakCommand::Setup(CLI::App& app)
         cmd->add_option("--mask-size", maskSize,
                         "Selector mask edge in texels (default 2048; 4096 DXT3 does not round-trip)");
         cmd->add_option("--placements", placements,
-                        "Object placement manifest: tab-separated virtualPath, x, y, z, yawDeg, scale. "
-                        "y is absolute world elevation.");
+                        "Object placement manifest: tab-separated virtualPath, x, y, z, yawDeg, scale "
+                        "and an optional seventh field. y is absolute world elevation unless that field "
+                        "is 1, in which case it is an offset above the terrain and is resolved here. A "
+                        "six-field manifest reads as entirely absolute, which is what it meant.");
         cmd->callback(
             []() {
                 std::exit(ExportWorld(root, world, output, landRange, terrainRange, materials, assetDir,
