@@ -102,6 +102,26 @@ pose: `evidence/rfg-church-lod0-flat-near-20260823.png` and
 **Still wrong:** the roof keeps a moire swirl where its layer tiles blend at 0.7 tiling. A narrower
 question than the one this answers, and not claimed as fixed.
 
+## The corpus, re-exported
+
+Full re-export, 1,248 / 1,248 models converted and round-tripped:
+
+```
+911 MatPBRMulti materials deployed with their MASK and layer tiles
+    (4,688 tiles, 2,259 layer normals) -- the runtime blends these per fragment.
+  3 masked materials name NO tile above the base (flat colour overlays; the collapse is exact).
+  7 still bound one shared library tile instead of a blend.
+1,785 .emat deployed; 3,991 .paa, 3,078 MB.
+```
+
+911 of the 921 that carry a mask. In one view at the owner's near pose the engine reports 351
+materials composing layers. Deployed to the game folder at `ed4aa2f2`;
+`evidence/rfg-full-reexport-near-20260823.png`.
+
+Note the texture set grew (3,078 MB written against ~2,000 before), which is why the residency
+work in the same commit range matters: the old texture LRU compared textures+geometry against the
+whole VRAM budget and evicted every candidate every frame on a world it could never satisfy.
+
 ## What this also explains
 
 The engine's per-material log line `Wgpu material: normal map NONE ... family=MatPBRMulti (no
