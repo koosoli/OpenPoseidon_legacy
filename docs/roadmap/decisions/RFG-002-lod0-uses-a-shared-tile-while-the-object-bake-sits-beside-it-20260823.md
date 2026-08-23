@@ -51,7 +51,37 @@ Evidence, same church, same hour, camera distance the only difference:
 - `evidence/rfg-church-baked-albedo-far-20260823.png` — from 200 m. Red-brown ceramic roof, yellow
   walls, window and trim detail.
 
-## The fix that is available without writing a blend shader
+## The shortcut does NOT work — measured, not assumed
+
+The obvious cheap fix is to bind the object's own bake at LOD 0 instead of the shared tile: same
+texture the lower LODs already use, no new shader. **It is wrong.** Repointing all three exterior
+`.emat` files at `church_01_ext_mlod_yellow_v2_bcr.paa` and re-capturing the reported pose gives
+`evidence/rfg-church-mlodbake-uv-mismatch-20260823.png`: a brown church covered in chaotic diagonal
+streaks and garbled atlas patches.
+
+So **LOD 0 and the MLOD LODs do not share a UV layout.** The bake is in the low-LOD's own unwrap;
+LOD 0's UV set 1 is the `MaskMap` layout, which is a different unwrap of the same building. The
+premise that "MaskMap is in the object's own UV layout" is true and still does not make the two
+interchangeable — two object-space unwraps are not the same unwrap.
+
+(Done against the owner's install with the originals backed up, and restored byte-identical
+afterwards.)
+
+## What is actually left
+
+The `MatPBRMulti` blend shader, and nothing shorter. Sample `MaskMap` in the object's UV, use its
+channels to weight the `Layer*` tiles under their own `UVTransform_N`, tint each by `Color_N`. That
+is the feature the converter's tile substitution is standing in for, it is 4,191 files / the
+commonest class in the corpus, and this visible regression goes away with it.
+
+Two smaller things that fall out of the same reading and are worth doing regardless:
+
+- The substituted tile is sampled in the wrong frame anyway: the material says
+  `UVSrcGlobalMaps "UV set 2"` and the converted MLOD carries one UV set.
+- `MaskMap` is bound (`MaterialSlot::Mask`) and nothing samples it, so the one texture that IS in
+  LOD 0's own UV layout is the one going unused.
+
+## Superseded: the fix that looked available without writing a blend shader
 
 Prefer the object's own bake. When a `MatPBRMulti` material has no `BCRMap` of its own and a sibling
 `*_MLOD*_bcr` **does** exist for the same object, bind that instead of a `_shareddata` layer tile.
