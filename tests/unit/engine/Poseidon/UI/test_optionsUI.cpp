@@ -218,6 +218,8 @@ TEST_CASE("Options screen selection follows the resource the data set actually d
     // Remaster data: resource-extra.cpp has been merged in and the shell is available.
     res.AddClass("RscOptionsShell");
     CHECK(res.FindEntry("RscOptionsShell") != nullptr);
+}
+
 TEST_CASE("Continue save selection creates a readable copy", "[optionsUI][savegame]")
 {
     TempOptionsDir dir;
