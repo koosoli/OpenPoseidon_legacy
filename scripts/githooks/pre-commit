@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# Refuse a commit made on top of a branch that is BEHIND its remote.
+#
+# The failure this exists to stop: several agents and worktrees share this
+# repository. One starts from a commit another has already moved past, works for
+# an hour, and commits. The branches have now diverged and the work has to be
+# merged by hand -- which is where a change gets dropped, because the two sides
+# touch the same files for different reasons.
+#
+# Local-only and instant: it compares against the remote-tracking ref the last
+# fetch left behind, and never touches the network. Being out of date is therefore
+# still possible; that is what the staleness note is for, and what pre-push closes.
+#
+# Escape hatch, deliberately awkward to type: SKIP_BRANCH_GUARD=1 git commit ...
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+[ "$branch" = "HEAD" ] && exit 0   # detached: rebasing, bisecting, cherry-picking
+
+if [ -n "$SKIP_BRANCH_GUARD" ]; then
+    echo "pre-commit: branch guard SKIPPED by SKIP_BRANCH_GUARD." >&2
+    exit 0
+fi
+
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+if [ -z "$upstream" ]; then
+    echo "pre-commit: '$branch' tracks no remote branch, so nothing can tell you" >&2
+    echo "            when someone else has moved it on. Set one:" >&2
+    echo "              git branch --set-upstream-to=safety/$branch $branch" >&2
+    echo "            Committing anyway." >&2
+    exit 0
+fi
+
+behind=$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)
+if [ "${behind:-0}" -gt 0 ]; then
+    echo "" >&2
+    echo "pre-commit REFUSED: '$branch' is $behind commit(s) behind $upstream." >&2
+    echo "" >&2
+    echo "  Committing now creates a divergence that has to be merged by hand." >&2
+    echo "  Rebase onto what is already published first:" >&2
+    echo "" >&2
+    echo "      git pull --rebase safety $branch" >&2
+    echo "" >&2
+    echo "  Then re-run the commit. Your staged changes are untouched." >&2
+    echo "" >&2
+    exit 1
+fi
+
+# behind=0 proves nothing if the remote-tracking ref is itself old.
+if [ -f "$(git rev-parse --git-dir)/FETCH_HEAD" ]; then
+    now=$(date +%s)
+    when=$(date -r "$(git rev-parse --git-dir)/FETCH_HEAD" +%s 2>/dev/null || echo "$now")
+    age=$(( (now - when) / 60 ))
+    if [ "$age" -gt 30 ]; then
+        echo "pre-commit: last fetch was ${age} min ago, so 'not behind' is only as" >&2
+        echo "            fresh as that. Consider: git fetch safety" >&2
+    fi
+fi
+exit 0

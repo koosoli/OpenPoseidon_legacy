@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# The networked half of the branch guard. pre-commit compares against whatever
+# the last fetch left behind; this one asks the remote, because a push is already
+# paying for the round trip.
+#
+# Git rejects a non-fast-forward push on its own, but its "fetch first" message
+# reads like a formality, and by then the divergent commits already exist and
+# someone has to merge them. This refuses BEFORE the push and says what to run.
+#
+# SKIP_BRANCH_GUARD=1 bypasses, as for pre-commit.
+
+remote="$1"
+[ -n "$SKIP_BRANCH_GUARD" ] && { echo "pre-push: branch guard SKIPPED." >&2; exit 0; }
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+[ "$branch" = "HEAD" ] && exit 0
+
+git fetch --quiet "$remote" "$branch" 2>/dev/null || exit 0   # new branch, or offline
+
+behind=$(git rev-list --count HEAD..FETCH_HEAD 2>/dev/null || echo 0)
+if [ "${behind:-0}" -gt 0 ]; then
+    ahead=$(git rev-list --count FETCH_HEAD..HEAD 2>/dev/null || echo 0)
+    echo "" >&2
+    echo "pre-push REFUSED: $remote/$branch has $behind commit(s) you do not have," >&2
+    echo "                  and you have $ahead it does not. The branches have diverged." >&2
+    echo "" >&2
+    echo "      git pull --rebase $remote $branch" >&2
+    echo "" >&2
+    echo "  then push again. Rebase, not merge: a merge here buries whose change was whose." >&2
+    echo "" >&2
+    exit 1
+fi
+exit 0
