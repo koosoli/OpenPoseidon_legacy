@@ -359,6 +359,7 @@ class EngineWgpu : public EngineDummy
         {
             case MaterialDebugSettings::View::BaseColorOnly: view = 1; break;
             case MaterialDebugSettings::View::NormalMap: view = 2; break;
+            case MaterialDebugSettings::View::LightingOnly: view = 3; break;
             default: view = 0; break; // every other view stays on the per-draw path
         }
         uint32_t flags = 0;

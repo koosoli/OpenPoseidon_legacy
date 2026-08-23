@@ -938,6 +938,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
             _materialDebug.view = MaterialDebugSettings::View::FullMaterial;
         else if (std::strcmp(view, "normalviz") == 0)
             _materialDebug.view = MaterialDebugSettings::View::NormalMap;
+        else if (std::strcmp(view, "lit") == 0)
+            _materialDebug.view = MaterialDebugSettings::View::LightingOnly;
         LOG_INFO(Graphics, "Wgpu: material debug view={}", view);
     }
     if (const char* disableNormal = std::getenv("WGR_MATERIAL_DISABLE_NORMAL"))

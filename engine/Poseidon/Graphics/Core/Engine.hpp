@@ -961,7 +961,14 @@ class Engine : public IGraphicsEngine
     // state is shared by Dev Tools and automation; it never mutates imported data.
     struct MaterialDebugSettings
     {
-        enum class View : int { FullMaterial = 0, BaseColorOnly, NormalMap, AmbientShadow, SpecularGloss, UvSource };
+        // LightingOnly is appended, never inserted: the value is uploaded as an int to the
+        // shaders and renumbering it would silently repoint every other view.
+        enum class View : int { FullMaterial = 0, BaseColorOnly, NormalMap, AmbientShadow, SpecularGloss, UvSource,
+                                // Shade with a WHITE albedo: the output IS the lighting multiplier the
+                                // surface is being handed. Pairs with BaseColorOnly -- between them,
+                                // albedo and lighting are separated, which is the one measurement that
+                                // says whether an over-bright surface is a texture or a light.
+                                LightingOnly };
         View view = View::FullMaterial;
         bool disableNormalMap = false;
         // Diagnostic only: compare the two tangent-space Y conventions under

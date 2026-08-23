@@ -830,6 +830,14 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     if (dbg_view == 2u) {
         return vec4<f32>(normal_ts_dbg * 0.5 + vec3<f32>(0.5), out_a);
     }
+    // View 3 (LightingOnly): shade with a WHITE albedo, so the output is the lighting
+    // multiplier this surface is handed rather than albedo x lighting. Read beside view 1
+    // (BaseColorOnly) it separates the two factors of an over-bright surface, which is the
+    // measurement that decides whether to go to the texture or to the light. Everything else
+    // about the fragment -- normal, shadow, AO, fog, specular -- is untouched.
+    if (dbg_view == 3u) {
+        base = vec4<f32>(1.0, 1.0, 1.0, base.a);
+    }
     let rgb = shade(
         // `geometric_normal` rides along beside the shading normal so the directional sky
         // ambient can recover how far the normal map turned this pixel; see shade()'s
