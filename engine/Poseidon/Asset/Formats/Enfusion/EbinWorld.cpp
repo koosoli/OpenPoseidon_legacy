@@ -375,10 +375,7 @@ class Reader
     static constexpr size_t kNoPlacement = static_cast<size_t>(-1);
     size_t _currentIndex = kNoPlacement;
 
-    EbinPlacement* Current()
-    {
-        return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex];
-    }
+    EbinPlacement* Current() { return _currentIndex == kNoPlacement ? nullptr : &_world.placements[_currentIndex]; }
 };
 
 } // namespace
