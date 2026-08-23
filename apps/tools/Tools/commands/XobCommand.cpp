@@ -1096,10 +1096,21 @@ class TextureBaker
             // A layer counts only if it exists AND is not switched off. Without a
             // usable mask every present layer weighs the same: still a guess, but an
             // unbiased one, where first-wins is biased by file order.
+            // WHICH TILE and WHAT COLOUR are two different questions, and answering
+            // both from the mask is wrong. The mask weights OVERLAY layers -- mud,
+            // dirt, rust, weathering -- over a BASE layer; it is not a partition
+            // among equals. Picking the heaviest-weighted layer's tile therefore
+            // swaps the surface's material for its weathering: it turned the
+            // church's ceramic roof tiles into painted metal plates, its brick
+            // walls into clean plaster, and its castle stone into rusted metal.
+            //
+            // So the TILE stays the base layer, the lowest present index, which is
+            // what supplies the surface's actual grain. Only the COLOUR is
+            // mask-weighted across the layers, which is the part the mask really
+            // does describe.
             float total = 0.0f;
             float blended[3] = {0.0f, 0.0f, 0.0f};
-            std::string dominantTile;
-            float dominantWeight = -1.0f;
+            std::string baseTile;
             for (int layer = 1; layer <= 4; ++layer)
             {
                 const std::string tile = emat.TextureOf("BCR_" + std::to_string(layer));
@@ -1109,23 +1120,20 @@ class TextureBaker
                 emat.FloatOf("Enabled_" + std::to_string(layer), enabled);
                 if (enabled == 0.0f)
                     continue;
+                if (baseTile.empty())
+                    baseTile = tile;
                 float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
                 if (!emat.Vec4Of("Color_" + std::to_string(layer), colour))
                     continue;
                 const float w = haveMask ? weight[layer] : 1.0f;
-                if (w > dominantWeight)
-                {
-                    dominantWeight = w;
-                    dominantTile = tile;
-                }
                 for (int c = 0; c < 3; ++c)
                     blended[c] += colour[c] * w;
                 total += w;
             }
 
-            if (!dominantTile.empty() && total > 1e-4f)
+            if (!baseTile.empty() && total > 1e-4f)
             {
-                bcr = dominantTile;
+                bcr = baseTile;
                 for (int c = 0; c < 3; ++c)
                     tint[c] = blended[c] / total;
                 tinted = true;
