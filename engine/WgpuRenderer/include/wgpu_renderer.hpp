@@ -1712,7 +1712,7 @@ extern "C"
 
     /* Create a static mesh from interleaved vertices + 16-bit triangle-list
      * indices; returns a non-zero handle, or 0 on failure. */
-    WGR_API WgrMesh wgr_mesh_create(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts, WgrSlice<uint32_t> indices);
+    WGR_API WgrMesh wgr_mesh_create(WgrRenderer* renderer, WgrSlice<WgrMeshVertex> verts, WgrSlice<uint16_t> indices);
 
     /* Re-upload vertex data for an existing mesh (dynamic / animated shapes).
      * The topology (indices) is unchanged; the vertex count must not exceed the

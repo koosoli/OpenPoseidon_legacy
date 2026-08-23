@@ -274,17 +274,15 @@ impl GeometryPool {
         }
     }
 
-    // Suballocate one mesh and upload it. Indices are Uint32 end to end (0-based and
-    // mesh-local). They used to arrive as u16 and be widened here, which capped a LOD
-    // at 65535 vertices for no reason the GPU cared about -- the pool buffer has always
-    // been Uint32. Grows the backing buffer(s) if a load exhausts them. Returns None for
-    // an empty mesh (mesh_create's 0-handle case).
+    // Suballocate one mesh and upload it. Indices are widened u16 -> Uint32 (values
+    // unchanged; still 0-based mesh-local). Grows the backing buffer(s) if a load
+    // exhausts them. Returns None for an empty mesh (mesh_create's 0-handle case).
     pub fn alloc(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         verts: &[WgrMeshVertex],
-        indices: &[u32],
+        indices: &[u16],
     ) -> Option<MeshAlloc> {
         if verts.is_empty() || indices.is_empty() {
             return None;
@@ -296,10 +294,11 @@ impl GeometryPool {
             vbase as u64 * VERT_SIZE,
             bytemuck::cast_slice(verts),
         );
+        let widened: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         queue.write_buffer(
             &self.ibuf,
             ibase as u64 * INDEX_SIZE,
-            bytemuck::cast_slice(indices),
+            bytemuck::cast_slice(&widened),
         );
         Some(MeshAlloc { vbase, ibase })
     }

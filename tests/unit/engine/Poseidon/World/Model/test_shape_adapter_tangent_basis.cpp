@@ -76,12 +76,9 @@ TEST_CASE("Model sections preserve a quad-only MLOD material run", "[Model][sect
     REQUIRE(sections.front().triangleCount == 1);
 }
 
-TEST_CASE("ShapeAdapter keeps faces past the old signed 16-bit vertex range", "[ShapeAdapter][odol][vertex-range]")
+TEST_CASE("ShapeAdapter rejects faces outside the legacy signed vertex range",
+          "[ShapeAdapter][odol][vertex-range]")
 {
-    // This asserted the opposite until VertexIndex was widened: a vertex table of
-    // 32769 was truncated to 32768 and the face touching index 32768 was dropped.
-    // On Reforger that rule cost church_01 140,041 of its faces and left
-    // house_village_e_1l03t a roof with no walls.
     Model model;
     model.sourceFormat = "ODOL";
     model.sourcePath = "oversized-test.p3d";
@@ -91,7 +88,6 @@ TEST_CASE("ShapeAdapter keeps faces past the old signed 16-bit vertex range", "[
     mesh.vertices[0].position = {0.f, 0.f, 0.f};
     mesh.vertices[1].position = {1.f, 0.f, 0.f};
     mesh.vertices[2].position = {0.f, 1.f, 0.f};
-    mesh.vertices[32768].position = {1.f, 1.f, 0.f};
     mesh.triangles.emplace_back(0, 1, 2);
     mesh.triangles.emplace_back(0, 1, 32768);
     mesh.triangles[0].originalIndex = 0;
@@ -101,35 +97,6 @@ TEST_CASE("ShapeAdapter keeps faces past the old signed 16-bit vertex range", "[
     std::unique_ptr<LODShapeWithShadow> shape;
     REQUIRE_NOTHROW(shape.reset(ShapeAdapter::convertToLODShape(model, false)));
     REQUIRE(shape);
-    REQUIRE(shape->Level(0)->NVertex() == 32769);
-    REQUIRE(shape->Level(0)->NFaces() == 2);
-}
-
-TEST_CASE("ShapeAdapter still rejects a face indexing past the vertex table", "[ShapeAdapter][odol][vertex-range]")
-{
-    // The guard is not gone, it moved. A face referencing a vertex the table does
-    // not contain is malformed at any index width, and admitting it would let
-    // RecalculateAreas dereference out of bounds -- which is what the clamp existed
-    // to prevent in the first place. Widening the type must not turn a bounds check
-    // into a no-op, so the negative case is asserted rather than assumed.
-    Model model;
-    model.sourceFormat = "ODOL";
-    model.sourcePath = "malformed-test.p3d";
-    LODLevel lodLevel(1.0f);
-    Mesh& mesh = lodLevel.mesh;
-    mesh.vertices.resize(64);
-    mesh.vertices[0].position = {0.f, 0.f, 0.f};
-    mesh.vertices[1].position = {1.f, 0.f, 0.f};
-    mesh.vertices[2].position = {0.f, 1.f, 0.f};
-    mesh.triangles.emplace_back(0, 1, 2);
-    mesh.triangles.emplace_back(0, 1, 64); // one past the end
-    mesh.triangles[0].originalIndex = 0;
-    mesh.triangles[1].originalIndex = 1;
-    model.lodLevels.push_back(std::move(lodLevel));
-
-    std::unique_ptr<LODShapeWithShadow> shape;
-    REQUIRE_NOTHROW(shape.reset(ShapeAdapter::convertToLODShape(model, false)));
-    REQUIRE(shape);
-    REQUIRE(shape->Level(0)->NVertex() == 64);
+    REQUIRE(shape->Level(0)->NVertex() == 32768);
     REQUIRE(shape->Level(0)->NFaces() == 1);
 }

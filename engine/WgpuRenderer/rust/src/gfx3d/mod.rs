@@ -4029,9 +4029,9 @@ impl Gfx3d {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         verts: &[WgrMeshVertex],
-        indices: &[u32],
+        indices: &[u16],
     ) -> u64 {
-        // Suballocate into the shared geometry pool (Uint32 indices throughout).
+        // Suballocate into the shared geometry pool (indices widened u16 -> Uint32).
         // Returns None (=> the 0 handle) for an empty mesh, matching the old behaviour.
         let gen_before = self.pool.generation();
         let Some(alloc) = self.pool.alloc(device, queue, verts, indices) else {
