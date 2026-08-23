@@ -765,6 +765,31 @@ struct TextureOptions
     //! difference between `family=` and `family=MatPBRTreeCrown`. `--no-material-emat`
     //! is the A/B.
     bool emats = true;
+    //! Deploy `MatPBRMulti`'s MASK and its `BCR_2..4` / `NMO_2..4` layer tiles too, so
+    //! the runtime blends the layers itself instead of receiving one collapsed tile.
+    //!
+    //! The runtime blend has been complete for a while (`gpu_driven.wgsl`: one mask
+    //! sample, RGB weighting three tiles at their own UV transforms, remainder to the
+    //! base, renormalised on over-paint, same weights reused for the normals) and it
+    //! never ran, because 0 of the 1,793 deployed materials named a `MaskMap` or a
+    //! `BCR_N` -- this converter had already collapsed them. Against 4,044 and 3,905
+    //! in Reforger's own 10,312. `MatPBRMulti` is 51% of the deployed corpus.
+    //!
+    //! `--no-material-layers` restores the collapse, which is the A/B and the fallback
+    //! for a material whose mask or tiles do not decode.
+    bool layers = true;
+    //! Longest edge for a layer MASK, and the format is uncompressed on purpose.
+    //!
+    //! A mask's R, G and B are three INDEPENDENT weights. DXT1 encodes a 4x4 block as
+    //! two endpoint colours and interpolates between them, so it forces the three
+    //! channels onto one line in colour space -- which is exactly the correlation a mask
+    //! does not have. Baked as DXT1 the church's mask came back as flat blocks of pure
+    //! green, red and blue and the blend drew broad diagonal bands across the roof and
+    //! walls. Uncompressed ARGB8888 keeps the channels apart.
+    //!
+    //! 512 because it is a low-frequency weight map, not detail: the detail comes from
+    //! the tiles it selects between. Uncompressed at 1024 would cost ~5.6 MB per object.
+    int maxMaskSize = 512;
 };
 
 //! Which two channels of a decoded normal texture carry X and Y.
@@ -916,6 +941,12 @@ struct TextureStats
     size_t filesWithAlpha = 0; //!< of those, the ones carrying a cutout mask
     size_t baseLayerOnly = 0;  //!< MatPBRMulti materials approximated by a shared tile
     size_t layerTinted = 0;    //!< of those, the ones whose tile was rescaled to Color_N
+    size_t layerSetsWritten = 0;    //!< MatPBRMulti materials deployed WHOLE: mask + layer tiles
+    size_t layerTilesWritten = 0;   //!< tiles and layer normals written for those (mask excluded)
+    size_t layerNormalsWritten = 0; //!< of those, the per-layer NMO_N maps
+    size_t layerSetsColourOnly = 0; //!< masked materials whose upper layers name no tile at all
+    size_t layerSetsTileFailed = 0; //!< masked materials where a layer tile refused to bake
+    size_t layerSetsMaskFailed = 0; //!< ... or where the mask itself refused to bake
     //!< of those, the ones whose layer weights came from the MaskMap rather than
     //!< from assuming every present layer covers the object equally
     size_t layerMaskWeighted = 0;
@@ -952,6 +983,12 @@ struct BakedMaterial
     std::string normalPaa; //!< DXT5nm, reachable only through the rvmat below
     std::string rvmatPath; //!< a Super `.rvmat` naming the normal, "" when none was written
     std::string ematPath;  //!< the deployed `.emat`, "" when none was written
+    //! (source key -> deployed `.paa`) for every texture beyond the albedo and the
+    //! object's own normal: `MaskMap` and the `BCR_N` / `NMO_N` layer tiles. Written
+    //! back into the `.emat` under the SOURCE's own key names, so the deployed file
+    //! reads exactly like the file it came from and the engine's translation needs no
+    //! converter-specific spelling.
+    std::vector<std::pair<std::string, std::string>> extraTextures;
     //! What the MLOD MATERIAL field should say. The `.emat` when there is one -- it
     //! names the albedo AND the normal and keeps every non-texture key -- else the
     //! `.rvmat`, else "" so the caller keeps the source path, which at least says
@@ -1037,6 +1074,9 @@ class TextureBaker
         std::string bcr = emat.TextureOf("BCRMap");
         float tint[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         bool tinted = false;
+        //! The mask and the layer tiles, when the full set could be deployed. Empty
+        //! means the collapsed approximation below stands.
+        std::vector<std::pair<std::string, std::string>> multi;
         if (bcr.empty())
         {
             // WHICH layer, and in what proportion. Taking the first non-empty
@@ -1140,6 +1180,17 @@ class TextureBaker
                 _stats.baseLayerOnly++;
                 _stats.layerTinted++;
             }
+            // The real thing, when the mask and the layers can both be deployed: keep
+            // every enabled layer above the base as its own tile and send the mask with
+            // them, so the runtime blends per fragment instead of receiving one tile in
+            // an averaged colour. The base then carries its OWN `Color_N` rather than the
+            // mask-weighted average -- the average exists only to stand in for a blend
+            // that is not happening, and applying it as well as the blend would tint the
+            // base twice.
+            //
+            // Deliberately all-or-nothing: a mask with no layers weights nothing, and
+            // layers with no mask have no weights. Either way the collapse above stands,
+            // which is why it is computed first and only overwritten on success.
             else
             {
                 // No layer carried a colour. Fall back to the old behaviour rather
@@ -1151,6 +1202,8 @@ class TextureBaker
                         _stats.baseLayerOnly++;
                 }
             }
+            if (_options.layers && haveMask && !bcr.empty())
+                multi = BuildLayerSet(emat, maskPath, bcr, tint, tinted);
         }
         if (bcr.empty())
         {
@@ -1220,6 +1273,7 @@ class TextureBaker
         // The `.emat` itself, deployed. Written whenever an albedo was baked -- a
         // material with nothing bindable in it would only be an empty file the engine
         // opens, translates, and reports as binding nothing.
+        baked.extraTextures = std::move(multi);
         if (_options.emats && !baked.colourPaa.empty())
             baked.ematPath =
                 WriteEmat(ematPath, emat, baked, _imageHasAlpha.count(LowerCopy(baked.colourPaa)) != 0, nmoKey);
@@ -1403,7 +1457,7 @@ class TextureBaker
         std::error_code ec;
         std::filesystem::create_directories(target.parent_path(), ec);
         const Poseidon::Asset::Material::EmatMaterial deployed = Poseidon::Asset::Material::MakeDeployedEmat(
-            resolved, baked.colourPaa, opacityFolded, normalKey, baked.normalPaa);
+            resolved, baked.colourPaa, opacityFolded, normalKey, baked.normalPaa, baked.extraTextures);
         std::ofstream file(target, std::ios::trunc | std::ios::binary);
         if (!file)
         {
@@ -1425,7 +1479,139 @@ class TextureBaker
         return virtualPath;
     }
 
-    std::string Write(const std::string& bcrPath, const std::string& opacityPath, const float* tint)
+    //! `MatPBRMulti`, deployed whole: the mask plus every enabled layer above the base,
+    //! each tile carrying its OWN `Color_N`.
+    //!
+    //! Returns (source key -> deployed `.paa`) pairs, and rewrites the base tile's colour
+    //! on success. Empty on any failure, which leaves the caller's collapsed
+    //! approximation exactly as it was -- there is no half-blended state, because a mask
+    //! whose layers are missing weights nothing and layers with no mask have no weights.
+    //!
+    //! Layer numbering, which is the part that is easy to get wrong: the mask's R, G and
+    //! B weight layers 2, 3 and 4 and layer 1 takes the remainder (measured on
+    //! WaterTower_02: channel means 0.127 / 0.299 / 0.238, summing to 0.664). So layer 1
+    //! is the BASE and only 2..4 go out as layer tiles -- there are exactly three engine
+    //! layer slots and that is not a coincidence. A material whose lowest enabled layer
+    //! is not 1 has that one as its base, and its own tile is skipped below rather than
+    //! being sent twice.
+    //!
+    //! The mask goes through `Write` untinted and with no opacity map: its channels are
+    //! data, not colour, and `Write` leaves them alone in that configuration (the alpha
+    //! it forces to 255 is unread).
+    std::vector<std::pair<std::string, std::string>> BuildLayerSet(
+        const Poseidon::Asset::Material::EmatMaterial& emat, const std::string& maskPath, const std::string& baseTile,
+        float baseTint[4], bool& baseTinted)
+    {
+        int baseLayer = 0;
+        std::vector<std::pair<std::string, std::string>> out;
+        for (int layer = 1; layer <= 4; ++layer)
+        {
+            const std::string key = "BCR_" + std::to_string(layer);
+            const std::string tile = emat.TextureOf(key);
+            if (tile.empty())
+                continue;
+            float enabled = 1.0f;
+            emat.FloatOf("Enabled_" + std::to_string(layer), enabled);
+            if (enabled == 0.0f)
+                continue;
+            float colour[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            const bool hasColour = emat.Vec4Of("Color_" + std::to_string(layer), colour);
+            if (baseLayer == 0 && tile == baseTile)
+            {
+                // The base, identified by BEING the tile the caller already chose rather
+                // than by its index: the caller skips a layer with no `Color_N` while this
+                // loop does not, so "the first enabled layer" is not always the same layer
+                // in both. Matching on the tile makes them agree by construction.
+                //
+                // All that changes for it is the tint: its own `Color_N` instead of the
+                // mask-weighted average, because the average exists only to stand in for a
+                // blend that is now actually happening.
+                baseLayer = layer;
+                if (hasColour)
+                {
+                    for (int c = 0; c < 3; ++c)
+                        baseTint[c] = colour[c];
+                    baseTinted = true;
+                }
+                continue;
+            }
+            const std::string paa = BakeTile(tile, hasColour ? colour : nullptr);
+            if (paa.empty())
+            {
+                // One tile that will not bake takes the whole set down, so say which:
+                // a silent fall back to the collapse is indistinguishable from a
+                // material that never had layers.
+                std::cerr << "  layer tile did not bake: " << tile << " (" << key << ")" << std::endl;
+                _stats.layerSetsTileFailed++;
+                return {};
+            }
+            out.emplace_back(key, paa);
+            // The layer's own normal, at the layer's own transform. Refused as an OBJECT
+            // normal map (they are one-metre tiles in a tiled frame) and correct as a
+            // LAYER normal, which is sampled at exactly that frame.
+            const std::string nmoKey = "NMO_" + std::to_string(layer);
+            const std::string nmo = emat.TextureOf(nmoKey);
+            if (_options.normals && !nmo.empty())
+            {
+                const auto seen = _byNormal.find(LowerCopy(nmo));
+                const std::string normalPaa =
+                    seen != _byNormal.end() ? seen->second : _byNormal.emplace(LowerCopy(nmo), WriteNormal(nmo)).first->second;
+                if (!normalPaa.empty())
+                {
+                    out.emplace_back(nmoKey, normalPaa);
+                    _stats.layerNormalsWritten++;
+                }
+            }
+        }
+        if (out.empty())
+        {
+            // Named, because "the blend did not happen" has two very different causes and
+            // only one of them is a converter bug. A material can carry a mask, four
+            // Color_N and four Enabled_N and still name no tile above the base -- its
+            // upper layers are flat colour overlays (mud, dirt) rather than surfaces --
+            // and for those the collapse is not an approximation, it is the whole
+            // material. Counting them keeps that population out of the defect column.
+            _stats.layerSetsColourOnly++;
+            return {}; // nothing above the base: a mask with nothing to weight
+        }
+        const std::string maskPaa = BakeTile(maskPath, nullptr, /*isMask=*/true);
+        if (maskPaa.empty())
+        {
+            // The tiles baked and the mask did not, which leaves weights with nothing to
+            // weight -- so the whole set goes back to the collapse rather than blending
+            // by an implied uniform mask, which is not what the material says.
+            std::cerr << "  layer MASK did not bake: " << maskPath << std::endl;
+            _stats.layerSetsMaskFailed++;
+            return {};
+        }
+        out.emplace_back("MaskMap", maskPaa);
+        _stats.layerSetsWritten++;
+        // The caller counted this as a collapse before it knew better; it is not one.
+        if (_stats.baseLayerOnly)
+            _stats.baseLayerOnly--;
+        _stats.layerTilesWritten += out.size() - 1;
+        return out;
+    }
+
+    //! One tile through the shared albedo path and the shared cache, so a library tile
+    //! used by fifty objects at the same tint is written once.
+    std::string BakeTile(const std::string& path, const float* tint, bool isMask = false)
+    {
+        std::string key = LowerCopy(path) + (isMask ? "|mask" : "|");
+        if (tint)
+        {
+            char suffix[64];
+            std::snprintf(suffix, sizeof(suffix), "|%.4f,%.4f,%.4f", tint[0], tint[1], tint[2]);
+            key += suffix;
+        }
+        const auto cached = _byImage.find(key);
+        if (cached != _byImage.end())
+            return cached->second;
+        return _byImage.emplace(key, Write(path, "", tint, isMask)).first->second;
+    }
+
+    std::string Write(const std::string& bcrPath, const std::string& opacityPath, const float* tint,
+                      bool isMask = false)
     {
         Poseidon::Image albedo;
         if (!LoadEdds(_paks, bcrPath, albedo))
@@ -1520,8 +1706,8 @@ class TextureBaker
                 pixels[at] = 255;
         }
 
-        while ((width > _options.maxSize || height > _options.maxSize) && width % 2 == 0 && height % 2 == 0 &&
-               width > 4 && height > 4)
+        const int sizeCap = isMask ? _options.maxMaskSize : _options.maxSize;
+        while ((width > sizeCap || height > sizeCap) && width % 2 == 0 && height % 2 == 0 && width > 4 && height > 4)
             HalveRGBA(pixels, width, height);
 
         // Binary, and only after the downscale: `ClassifyAlpha` calls anything with
@@ -1539,7 +1725,10 @@ class TextureBaker
         const std::filesystem::path target = OnDiskPathFor(_outputRoot, virtualPath);
         std::error_code ec;
         std::filesystem::create_directories(target.parent_path(), ec);
-        const Poseidon::PixelFormat format = hasAlpha ? Poseidon::PixelFormat::DXT5 : Poseidon::PixelFormat::DXT1;
+        // Uncompressed for a mask -- see maxMaskSize for why a block-compressed mask is
+        // not a slightly worse mask but a different image.
+        const Poseidon::PixelFormat format =
+            isMask ? Poseidon::PixelFormat::ARGB8888 : (hasAlpha ? Poseidon::PixelFormat::DXT5 : Poseidon::PixelFormat::DXT1);
         if (!Poseidon::PAAEncoder::WritePAA(target.string(),
                                             Poseidon::Image::FromRGBA(width, height, std::move(pixels)), format))
         {
@@ -2407,6 +2596,15 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
               << static_cast<double>(stats.bytesWritten) / 1e6 << " MB.\n";
     std::cout << "            " << partsTextured << " / " << partsTotal
               << " written parts name a texture; the rest will draw UNTEXTURED.\n";
+    if (stats.layerSetsWritten)
+        std::cout << "            " << stats.layerSetsWritten
+                  << " MatPBRMulti materials deployed with their MASK and layer tiles (" << stats.layerTilesWritten
+                  << " tiles, " << stats.layerNormalsWritten
+                  << " layer normals) -- the runtime blends these per fragment.\n";
+    if (stats.layerSetsColourOnly)
+        std::cout << "            " << stats.layerSetsColourOnly
+                  << " masked MatPBRMulti materials name NO tile above the base -- their upper layers are flat\n"
+                     "            colour overlays, so one tile IS the material and the collapse below is exact.\n";
     if (stats.baseLayerOnly)
         std::cout << "            " << stats.baseLayerOnly
                   << " MatPBRMulti materials bound one shared library tile instead of a blend, " << stats.layerTinted
@@ -2992,6 +3190,9 @@ void XobCommand::Setup(CLI::App& app)
                       "Also bake NMOMap to a DXT5nm .paa; the deployed .emat (default) or --material-rvmat names it.");
         cmd->add_flag("--material-rvmat", options.textures.rvmats,
                       "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->add_flag("--material-layers,!--no-material-layers", options.textures.layers,
+                      "Deploy MatPBRMulti's mask and BCR_2..4 / NMO_2..4 layer tiles so the runtime blends "
+                      "them per fragment (default ON; --no-material-layers collapses to one tile, the A/B)");
         cmd->add_flag("--material-emat,!--no-material-emat", options.textures.emats,
                       "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
                       "material slot (default ON; --no-material-emat is the A/B)");
@@ -3041,6 +3242,9 @@ void XobCommand::Setup(CLI::App& app)
                       "Also bake NMOMap to a DXT5nm .paa; the deployed .emat (default) or --material-rvmat names it.");
         cmd->add_flag("--material-rvmat", options.convert.textures.rvmats,
                       "Write a Super .rvmat per material naming the baked normal, and name IT in the material slot");
+        cmd->add_flag("--material-layers,!--no-material-layers", options.convert.textures.layers,
+                      "Deploy MatPBRMulti's mask and BCR_2..4 / NMO_2..4 layer tiles so the runtime blends "
+                      "them per fragment (default ON; --no-material-layers collapses to one tile, the A/B)");
         cmd->add_flag("--material-emat,!--no-material-emat", options.convert.textures.emats,
                       "Deploy each material as a resolved .emat under the texture prefix and name IT in the "
                       "material slot (default ON; --no-material-emat is the A/B)");

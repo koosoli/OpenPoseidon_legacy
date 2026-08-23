@@ -4255,6 +4255,17 @@ bool EngineWgpu::ResolveMaterialLayers(const ShapeSection& section, WgrModelMate
 // mechanism on every Multi material in Arma 2/3 and DayZ.
 bool EngineWgpu::MaterialMaskUsesUv1(const ShapeSection& section)
 {
+    // A/B, because "the mask is in the wrong frame" and "the second UV set is not what
+    // the mask wants" produce the same streaked surface and only one of them is fixed by
+    // exporting the channel. WGR_MATERIAL_MASK_UV1=0 pins every mask to uv0, =1 pins it
+    // to uv1; unset keeps the material's own answer.
+    static const int forced = []
+    {
+        const char* v = std::getenv("WGR_MATERIAL_MASK_UV1");
+        return v ? (std::strcmp(v, "0") == 0 ? 0 : 1) : -1;
+    }();
+    if (forced >= 0)
+        return forced == 1;
     if (!section.surfMat)
         return false;
     const char* materialPath = section.surfMat->GetName().Data();

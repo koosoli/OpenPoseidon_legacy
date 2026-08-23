@@ -243,6 +243,58 @@ inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)
 }
 
 // Fills a slot from a named `.emat` texture key, if the key names one.
+// An `.emat` UV transform, e.g. `UVTransform_2 MatUVTransform "{GUID}" TilingU 1.3 TilingV 1.3`.
+//
+// Enfusion spells the transform as named scalars after a class token, where Real Virtuality
+// spells it as three basis rows. Only the diagonal and the offset survive the trip, which is
+// all `ResolveMaterialLayers` reads (`aside[0]`, `up[1]`, `pos[0]`, `pos[1]`) and all any
+// observed Multi material carries. Rotation is deliberately dropped rather than approximated:
+// the engine's layer_uv lane is a scale/offset pair with nowhere to put it, and a rotation
+// folded into a scale is worse than an unrotated tile.
+//
+// Without this every layer samples at the section's raw UV, which collapses a 1.3x brick and a
+// 0.7x roof tile onto one frame -- the scale difference IS what the surface reads as.
+inline bool EmatUvTransform(const EmatMaterial& emat, const std::string& key, RvUvTransform& out)
+{
+    const EmatProperty* property = emat.Find(key);
+    if (!property)
+        return false;
+    bool any = false;
+    for (size_t i = 0; i + 1 < property->values.size(); ++i)
+    {
+        const EmatValue& name = property->values[i];
+        const EmatValue& value = property->values[i + 1];
+        if (name.isNumber || !value.isNumber)
+            continue;
+        if (EmatMaterial::NameMatches(name.text, "TilingU"))
+            out.aside[0] = static_cast<float>(value.number), any = true;
+        else if (EmatMaterial::NameMatches(name.text, "TilingV"))
+            out.up[1] = static_cast<float>(value.number), any = true;
+        else if (EmatMaterial::NameMatches(name.text, "OffsetU"))
+            out.pos[0] = static_cast<float>(value.number), any = true;
+        else if (EmatMaterial::NameMatches(name.text, "OffsetV"))
+            out.pos[1] = static_cast<float>(value.number), any = true;
+    }
+    out.present = out.present || any;
+    return any;
+}
+
+// Attach a UV transform, and/or a uvSource, to a slot the material already bound.
+inline void SetEmatSlotUv(TranslatedMaterial& material, MaterialSlot slot, const EmatMaterial& emat,
+                          const std::string& transformKey, const char* uvSource)
+{
+    for (TranslatedSlot& entry : material.slots)
+    {
+        if (entry.slot != slot)
+            continue;
+        if (!transformKey.empty())
+            EmatUvTransform(emat, transformKey, entry.uvTransform);
+        if (uvSource && *uvSource)
+            entry.uvSource = uvSource;
+        return;
+    }
+}
+
 inline bool AddEmatSlot(TranslatedMaterial& material, const EmatMaterial& emat, const char* key, MaterialSlot slot)
 {
     const std::string path = emat.TextureOf(key);
@@ -319,16 +371,50 @@ inline TranslatedMaterial TranslateEmat(const EmatMaterial& emat, const std::str
     // than none, it is a normal map that lights every surface wrongly. The layer maps
     // land in the Layer* slots, where the scale that makes them meaningful is recorded
     // beside them and nothing samples them until a shader exists that can blend them.
-    AddFirstEmatSlot(out, emat, {"BCRMap", "AlbedoMap"}, MaterialSlot::BaseColour);
+    // Enfusion numbers its layers 1..4 and the engine has a BASE plus three further
+    // layers, so the two line up only one way -- and it is NOT the obvious one.
+    //
+    // The mask's channels weight layers 2, 3 and 4, and layer 1 takes whatever they
+    // leave. Measured on WaterTower_02's global mask: channel means R 0.127, G 0.299,
+    // B 0.238, summing to 0.664 with the remainder belonging to layer 1. So layer 1 is
+    // the BASE -- which is also why it alone has no `Enabled_1` -- and `BCR_2..4` are
+    // the three the mask paints on top.
+    //
+    // Binding `BCR_1` to LayerColour1 (as this did) shifts every layer down by one: the
+    // mask's red channel then weights the base tile against itself and layer 4 is never
+    // bound at all. `ResolveMaterialLayers` maps LayerColour1..3 onto the shader's
+    // layer_slot[0..2], which the shader weights by mask .r/.g/.b in that order, so the
+    // whole chain is fixed by numbering it correctly here.
+    if (!AddFirstEmatSlot(out, emat, {"BCRMap", "AlbedoMap"}, MaterialSlot::BaseColour))
+        AddEmatSlot(out, emat, "BCR_1", MaterialSlot::BaseColour);
     AddFirstEmatSlot(out, emat, {"NMOMap", "GlobalNMOMap", "NTCMap", "NormalMap"}, MaterialSlot::NormalMap);
     AddEmatSlot(out, emat, "MaskMap", MaterialSlot::Mask);
-    AddEmatSlot(out, emat, "BCR_1", MaterialSlot::LayerColour1);
-    AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour2);
-    AddEmatSlot(out, emat, "BCR_3", MaterialSlot::LayerColour3);
-    AddEmatSlot(out, emat, "NMO_1", MaterialSlot::LayerNormal1);
-    AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal2);
-    AddEmatSlot(out, emat, "NMO_3", MaterialSlot::LayerNormal3);
+    AddEmatSlot(out, emat, "BCR_2", MaterialSlot::LayerColour1);
+    AddEmatSlot(out, emat, "BCR_3", MaterialSlot::LayerColour2);
+    AddEmatSlot(out, emat, "BCR_4", MaterialSlot::LayerColour3);
+    AddEmatSlot(out, emat, "NMO_2", MaterialSlot::LayerNormal1);
+    AddEmatSlot(out, emat, "NMO_3", MaterialSlot::LayerNormal2);
+    AddEmatSlot(out, emat, "NMO_4", MaterialSlot::LayerNormal3);
     AddEmatSlot(out, emat, "EnvironmentMap", MaterialSlot::Environment);
+
+    // Each layer at its own scale. Without this every layer samples at the section's raw
+    // UV, which collapses a 1.3x brick and a 0.7x roof tile onto one frame -- the scale
+    // difference IS what the surface reads as.
+    SetEmatSlotUv(out, MaterialSlot::BaseColour, emat, "UVTransform_1", nullptr);
+    SetEmatSlotUv(out, MaterialSlot::LayerColour1, emat, "UVTransform_2", nullptr);
+    SetEmatSlotUv(out, MaterialSlot::LayerColour2, emat, "UVTransform_3", nullptr);
+    SetEmatSlotUv(out, MaterialSlot::LayerColour3, emat, "UVTransform_4", nullptr);
+    // And the mask on the section's OWN uv -- uvSource left unset, deliberately.
+    //
+    // These materials say `UVSrcGlobalMaps "UV set 2"`, and reading that as the engine's
+    // `tex1` is wrong. It numbers channels in the SOURCE `.xob`, and the converter does
+    // not preserve that numbering: it writes the object's primary unwrap as `#UVSet#` 0,
+    // which is the unwrap the mask is authored in. Measured on church_01 at
+    // 5168.77 3929.13 39.12 az 19.1 el -15.1 -- `WGR_MATERIAL_MASK_UV1=1` draws broad
+    // diagonal ribbons across the walls and roof; `=0` gives clean walls with the
+    // authored detail. The A/B knob stays because the RVMAT Multi corpora (Arma 2/3)
+    // genuinely do put the mask on tex1, and `MaterialMaskUsesUv1` still answers from
+    // the material for those.
 
     // `GlobalMCRMap` (2,041 files) is NOT bound, and the omission is the point. The
     // slots this engine has are the ones whose channel layout was measured -- see
@@ -448,7 +534,17 @@ inline bool IsEmatVegetationFamily(std::string_view family)
 //
 // The result carries no parent: `resolved` must already be inheritance-resolved.
 inline EmatMaterial MakeDeployedEmat(const EmatMaterial& resolved, const std::string& colourPaa, bool opacityFolded,
-                                     const std::string& normalKey, const std::string& normalPaa)
+                                     const std::string& normalKey, const std::string& normalPaa,
+                                     // Every OTHER texture key the converter managed to deploy, as
+                                     // (source key -> deployed .paa). This is how MaskMap and the
+                                     // BCR_N / NMO_N layer tiles survive the trip: without them the
+                                     // deployed file keeps the layer PARAMETERS (Enabled_N, Color_N,
+                                     // UVTransform_N) and none of the images they describe, and the
+                                     // runtime's blend -- which is complete -- has nothing to blend.
+                                     // Measured before this existed: 0 of 1,793 deployed materials
+                                     // named a MaskMap or a BCR_N, against 4,044 and 3,905 in the
+                                     // source corpus. Empty restores the old collapse exactly.
+                                     const std::vector<std::pair<std::string, std::string>>& extraTextures = {})
 {
     EmatMaterial out;
     out.className = resolved.className;
@@ -497,9 +593,25 @@ inline EmatMaterial MakeDeployedEmat(const EmatMaterial& resolved, const std::st
             out.properties.push_back(std::move(normal));
             continue;
         }
+        bool deployedExtra = false;
+        for (const auto& [key, paa] : extraTextures)
+        {
+            if (paa.empty() || !EmatMaterial::NameMatches(property.name, key))
+                continue;
+            EmatProperty kept;
+            kept.name = property.name;
+            kept.values.push_back(textureValue(paa, guid));
+            out.properties.push_back(std::move(kept));
+            deployedExtra = true;
+            break;
+        }
+        if (deployedExtra)
+            continue;
         if (EmatMaterial::NameMatches(property.name, "OpacityMap"))
             droppedOpacity = true;
-        // OpacityMap, MaskMap, BCR_N, NMO_N, WorldColorizeMap, ... -- not deployed.
+        // OpacityMap, WorldColorizeMap, ... -- and any layer map the converter could not
+        // bake -- still not deployed. A key naming a file that is not there is worse than
+        // a key that is absent: the engine opens it, fails, and reports a bound material.
     }
     if (!wroteColour && !colourPaa.empty())
     {

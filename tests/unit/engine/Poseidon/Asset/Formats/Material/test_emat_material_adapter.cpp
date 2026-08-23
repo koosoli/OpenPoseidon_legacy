@@ -8,6 +8,7 @@
 //   Wgpu material: normal map bound for dz\water_bliss\ponds\data\enoch_pond.rvmat
 //                  family=CalmWater ( dz\water_bliss\ponds\data\enoch_pond_nohq.edds)
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
@@ -282,14 +283,33 @@ TEST_CASE("EMAT adapter: MatPBRMulti's layer tiles never reach the object's slot
     REQUIRE(layerNormal != nullptr);
     REQUIRE(layerNormal->texture.path.canonical().find("st_metalpaint_coated_1m_nmo.edds") != std::string::npos);
 
-    // The same argument applies to BCR_1: this material has no albedo of its own.
-    REQUIRE(material.Find(MaterialSlot::BaseColour) == nullptr);
-    REQUIRE(material.Find(MaterialSlot::LayerColour1) != nullptr);
+    // `BCR_1` IS the base, and leaving BaseColour empty was the bug: Enfusion's mask
+    // weights layers 2, 3 and 4 and layer 1 takes the remainder (measured on
+    // WaterTower_02's global mask -- channel means 0.127 / 0.299 / 0.238, summing to
+    // 0.664). That is also why layer 1 alone has no `Enabled_1`. Binding BCR_1 to
+    // LayerColour1 shifted every layer down one, so the mask's red channel weighted the
+    // base against itself and layer 4 was never bound at all.
+    const TranslatedSlot* base = material.Find(MaterialSlot::BaseColour);
+    REQUIRE(base != nullptr);
+    REQUIRE(base->texture.path.canonical().find("st_metalpaint_coated_02_1m_bcr.edds") != std::string::npos);
+    const TranslatedSlot* layer1 = material.Find(MaterialSlot::LayerColour1);
+    REQUIRE(layer1 != nullptr);
 
-    // The blend control is recorded even though nothing samples it yet.
+    // Each layer at its own scale. Without the transform a 4.9x tile and a 1x tile
+    // collapse onto one frame, and that scale difference is what the surface reads as.
+    REQUIRE(layer1->uvTransform.present);
+    REQUIRE(layer1->uvTransform.aside[0] == Catch::Approx(4.9f));
+    REQUIRE(layer1->uvTransform.up[1] == Catch::Approx(4.0f));
+
+    // The blend control, and the frame it is sampled in. `uvSource` is deliberately
+    // EMPTY: `UVSrcGlobalMaps "UV set 2"` numbers channels in the SOURCE .xob, which the
+    // converter does not preserve -- it writes the object's own unwrap as set 0, and that
+    // is where the exported mask lives. Reading it as the engine's `tex1` drew broad
+    // diagonal ribbons across church_01's walls and roof.
     const TranslatedSlot* mask = material.Find(MaterialSlot::Mask);
     REQUIRE(mask != nullptr);
     REQUIRE(mask->texture.path.canonical().find("jerrycan_01_global_mask.edds") != std::string::npos);
+    REQUIRE(mask->uvSource.empty());
 }
 
 TEST_CASE("EMAT adapter: the vegetation families' NTCMap is a normal", "[asset][material][emat][arf]")
