@@ -1303,8 +1303,25 @@ float AlphaRefFromDesc(const render::RenderPassDescriptor& desc)
 bool MaterialIsFullyOpaque(const TLMaterial& material)
 {
     constexpr float kOpaque = 1.0f - 1.0f / 255.0f;
-    return material.diffuse.A() >= kOpaque && material.ambient.A() >= kOpaque && material.emmisive.A() >= kOpaque &&
-           material.forcedDiffuse.A() >= kOpaque;
+    // `forcedDiffuse` is deliberately NOT tested, and testing it was the bug.
+    //
+    // It is an ADDITIVE lighting term, not an opacity: Real Virtuality's own default is
+    // `forcedDiffuse[]={0,0,0,0}` (see MakeSuperRvmatText, which writes exactly that beside
+    // `ambient`/`diffuse` of {1,1,1,1}). So alpha 0 is the ORDINARY value for it, and requiring
+    // alpha 1 made this guard answer "not opaque" for essentially every stock material -- which
+    // means the override it protects, the one that stops a solid surface being soft-blended
+    // against the framebuffer, almost never fired.
+    //
+    // Measured on the OFP M16 in the player's hands, which is where the owner reported it: four
+    // sections, all four with an Opaque-classified texture and dif/amb/emi alpha 1.000. The two
+    // that draw ALPHA-BLENDED have forcedDiffuse.A()=0.000; the two that draw opaque have 1.000.
+    // Nothing else differs. Pointed at the sky the blended pair let it through, which is the
+    // see-through rifle.
+    //
+    // The case the guard exists to protect is untouched: a genuine fade is driven by the
+    // DIFFUSE/AMBIENT alpha (ObjectColor, setObjectTexture), and those are still required to be
+    // opaque here, so material-driven translucency keeps its blend.
+    return material.diffuse.A() >= kOpaque && material.ambient.A() >= kOpaque && material.emmisive.A() >= kOpaque;
 }
 
 // Pack an engine PackedColor into the FFI's 0xAARRGGBB WgrRgba8.
@@ -3236,8 +3253,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 static std::unordered_set<std::string> loggedLegacyDrawModes;
                 if (loggedLegacyDrawModes.insert(name).second)
                     LOG_INFO(Graphics,
-                             "Legacy texture draw trace: path={} vegetation={} alphaClass={} alphaRef={:.2f} blend={}",
-                             name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend));
+                             "Legacy texture draw trace: path={} vegetation={} alphaClass={} alphaRef={:.2f} blend={} "
+                             // The four alphas MaterialIsFullyOpaque tests, because a surface that
+                             // reaches AlphaBlend over an Opaque-classified texture was refused by
+                             // exactly this guard and the line could not say which of them did it.
+                             "matA=dif{:.3f}/amb{:.3f}/emi{:.3f}/forced{:.3f} fullyOpaque={}",
+                             name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend),
+                             _curMaterial.diffuse.A(), _curMaterial.ambient.A(), _curMaterial.emmisive.A(),
+                             _curMaterial.forcedDiffuse.A(), MaterialIsFullyOpaque(_curMaterial) ? 1 : 0);
             }
         }
     }
