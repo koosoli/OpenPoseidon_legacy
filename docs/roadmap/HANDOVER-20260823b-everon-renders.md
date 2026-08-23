@@ -132,42 +132,86 @@ previous session reported it absent after checking only `D:\SteamLibrary`.
 
 ---
 
-## THE NEXT THING: the 32-bit VertexIndex corrupts every OFP model
+## THE NEXT THING: finish the 32-bit VertexIndex without corrupting OFP
 
-**Reverted in `b175a60a`. The direction is right; the change is not finished.**
+**Reverted in `b175a60a`; the tree is back to `typedef short VertexIndex`. The direction is
+right, the change is unfinished, and the missing piece is NOT yet known.**
 
-Widening `VertexIndex` from `short` to `int32_t` fixes imported buildings that render as a roof
-with no walls, and **corrupts every model in the shipped game**: OFP house and menu textures, the
-player's weapon, tree cutouts. Reproduced from captures on disk — same pose, same hook, the
-widening the only difference. Roofs float as flat planes, walls vanish, buildings melt.
+### What it buys and what it breaks
 
-Ruled out already, so do not spend time there again:
+Widening fixes imported buildings that render as a roof with no walls — 30 of 771 models in one
+frame lose LOD 0 geometry at 16 bits, `church_01` 140,041 faces of 168,926 vertices,
+`house_village_e_1l03t` 44,154. It also **corrupts every model in the shipped game**: OFP house
+and menu textures, the player's weapon, tree cutouts. Roofs float as flat planes, walls vanish,
+buildings melt, textures smear.
 
-- **Not the UV path.** `BuildVertices` indexes UVs with plain `int` via `src.UV(i)`; `VertexIndex`
+Evidence committed so it outlives the session scratchpad:
+
+- `evidence/vertexindex-ofp-good-20260823.png` — 16-bit, intact
+- `evidence/vertexindex-ofp-broken-20260823.png` — 32-bit, same pose, same hook
+
+### Reproduce it in two steps
+
+```powershell
+# 1. flip Core/Types.hpp:265 to  typedef int32_t VertexIndex;  (git revert b175a60a)
+.\scripts\Build.ps1 ; .\scripts\Deploy.ps1
+# 2. capture OFP Everon and compare against the committed "good" image
+<cap>.ps1 -Tag probe -World none -X 5760 -Z 3490 -Y 90 -Az 120 -El -22 -Hour 12 `
+          -Delay 900 -LogLevel info -ExtraEnv "POSEIDON_TEST_RAIN=1"
+```
+
+### VERIFY WITH A PICTURE. This is the whole lesson.
+
+When the widening first landed I checked OFP and reported it unaffected, on the strength of
+`registered=98684`, `main inst=5648` and a byte-identical LOD histogram. **Every one of those
+numbers is identical in the broken build**, because the same INSTANCES draw — it is the geometry
+inside them that is scrambled. I never opened the image. A count is not a readback.
+
+### Ruled out — do not re-walk these
+
+- **The UV path.** `BuildVertices` indexes UVs with plain `int` via `src.UV(i)`; `VertexIndex`
   never touches them.
-- **Not `Poly`'s stride.** `PolyVerticesSize` is computed from `sizeof` throughout, and no call
-  site hardcodes 2.
-- **Not GL33's element type.** Moved to `GL_UNSIGNED_INT` in step, with a `static_assert` tying it
+- **`Poly`'s stride.** `PolyVerticesSize` derives from `sizeof` throughout; no call site
+  hardcodes 2; `Duplicate` strides via `ItemSize()`.
+- **GL33's element type.** Moved to `GL_UNSIGNED_INT` in step, with a `static_assert` binding it
   to the typedef.
-- **Not the wgpu index slice.** Widened on both sides of the FFI; the geometry pool was always
+- **The wgpu index slice.** Widened on both sides of the FFI; the geometry pool was always
   `Uint32` and merely widened on upload.
-- **Not `_pointToVertex` / `_vertexToPoint` in the MLOD loader** — those are `int32_t` locals.
+- **`_pointToVertex` / `_vertexToPoint` in `MLODLoader`** — `int32_t` locals, unaffected.
+- **`ShapeFile.cpp`'s save/load asymmetry.** REAL and now fixed (`26ee0001`): save wrote
+  `face.N() * sizeof(VertexIndex)` while load read a hardcoded `LoadShort()`. They agreed only
+  while the typedef was 16-bit. **Fixing it did not fix the corruption** — widening with it in
+  place still melts OFP. Worth knowing, because it looks exactly like the culprit.
 
-Something else still assumes two bytes. Candidates not yet examined: `Selection::_sel`
-(`Buffer<VertexIndex>`, commented "short is enough"), `Shape.hpp:131`'s
-`const VertexIndex* faces`, the ODOL readers' `int32_t` arrays landing in
-`AutoArray<VertexIndex>`, and anything reading the packed face stream by byte offset.
+### The audit list, not yet examined
 
-**Verify with a PICTURE, not with counts.** When this first landed I declared OFP unaffected on
-`registered=98684`, `main inst=5648` and a byte-identical LOD histogram. Those are identical
-because the same INSTANCES draw — the geometry inside them is corrupt. The reproduction pose is
-`--test-world-freefly 5760 3490 90 120 -22` on OFP Everon, `POSEIDON_TEST_RAIN=1`, compared
-against `rain-village.png`.
+Every remaining `VertexIndex` site outside the ODOL readers. Something here assumes two bytes:
 
-**What the revert costs, and it is real:** Reforger LODs over 32,767 vertices truncate again.
-`church_01` loses 140,041 faces of 168,926; `house_village_e_1l03t` 44,154; 30 of 771 models in
-one frame. Those buildings are back to a roof with no walls. Confined to imported content, where
-the alternative corrupts the shipped game.
+```
+Graphics/Rendering/Draw/ClipDraw.cpp        375-376, 442-443, 687-688, 752-753
+Graphics/Rendering/Primitives/Edges.cpp     29
+Graphics/Rendering/Primitives/Poly.cpp      288-289
+Graphics/Rendering/Primitives/Vertex.cpp    150      Vertex.hpp 269
+Graphics/Rendering/Shape/Shape.cpp          581, 1387
+Graphics/Rendering/Shape/Shape.hpp          34,37,48,58,66 (Selection::_sel, "short is enough")
+                                            131 (const VertexIndex* faces), 326-327
+Graphics/Core/Engine.hpp 490 · IGraphicsEngine.hpp 86 · Dummy/EngineDummy.cpp 212
+```
+
+`ClipDraw.cpp` is the strongest untested lead: it is the clipping path, it manipulates vertex
+index lists directly, and clipping is exactly what would scramble geometry while leaving instance
+and section counts untouched.
+
+### Suggested approach
+
+Consider whether the typedef needs to widen at all. The alternative is to keep 16-bit indices and
+**split an over-large LOD into chunks**, each with its own sub-32768 vertex table and remapped
+indices — the runtime already has a per-section concept (`MeshSection`, `begVertex`/`endVertex`
+are already `int`). That confines the change to the adapter instead of reaching into every
+consumer of the type, and it leaves the shape cache format alone.
+
+Whichever way: **add a regression test with a real OFP model** that survives a save/load round
+trip and compares face indices, so this cannot pass on counts alone again.
 
 ---
 
