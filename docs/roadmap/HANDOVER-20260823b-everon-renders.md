@@ -1,7 +1,7 @@
-# Handover — Everon renders; the next thing is why correctly-lit rock blows out
+# Handover — Everon renders; finish the VertexIndex widening without breaking OFP
 
 **Date:** 2026-08-23 (afternoon)
-**Trunk:** `feat/consolidated` @ `7883272b`, pushed to `safety`
+**Trunk:** `feat/consolidated`, pushed to `safety`. Read `git log e12efc7c..` for the session.
 **Installed:** binaries `5595e278` + the `b175a60a` revert; Reforger tree + world from the `rf8` export
 **Previous:** [HANDOVER-20260823-reforger-finish.md](HANDOVER-20260823-reforger-finish.md) — its
 headline diagnosis was wrong, see below.
