@@ -240,6 +240,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Textures/test_block_compression.cpp
     Asset/Formats/Enfusion/test_pak_archive.cpp
     Asset/Formats/Enfusion/test_ebin_world.cpp
+    Asset/Formats/Enfusion/test_resource_database.cpp
     Asset/Formats/Enfusion/test_xob_model.cpp
     Asset/Formats/Enfusion/test_xob_collision.cpp
     Foundation/Algorithms/test_lzo1x.cpp

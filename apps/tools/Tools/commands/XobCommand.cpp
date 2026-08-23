@@ -2,6 +2,7 @@
 
 #include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobCollision.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobCollisionGeometry.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobModel.hpp>
@@ -408,8 +409,15 @@ struct ResourceMap
 {
     std::unordered_map<std::string, std::string> byReference;
     std::unordered_map<std::string, std::string> byOwnId;
+    //! From `resourceDatabase.rdb`, the addon's own GUID index. Authoritative and
+    //! complete where the two scanned tiers are opportunistic, so it is consulted
+    //! LAST only because the scanned spellings are the ones the rest of the
+    //! pipeline has always used; anything they miss lands here.
+    std::unordered_map<std::string, std::string> byDatabase;
     size_t filesScanned = 0;
     size_t filesUnreadable = 0;
+    size_t databasesRead = 0;
+    size_t databasesRefused = 0;
 
     const std::string* Find(const std::string& guid) const
     {
@@ -419,11 +427,54 @@ struct ResourceMap
         const auto own = byOwnId.find(guid);
         if (own != byOwnId.end())
             return &own->second;
+        const auto db = byDatabase.find(guid);
+        if (db != byDatabase.end())
+            return &db->second;
         return nullptr;
     }
 
-    size_t Size() const { return byReference.size() + byOwnId.size(); }
+    size_t Size() const { return byReference.size() + byOwnId.size() + byDatabase.size(); }
 };
+
+//! Loads every `resourceDatabase.rdb` under `root` into `map.byDatabase`.
+//!
+//! They sit loose beside each addon's `.pak`, not inside it, so this walks the
+//! filesystem rather than the PakSet. A database that does not close is REFUSED
+//! whole: a partial walk of this format yields plausible paths for the wrong
+//! GUIDs, which is worse than the gap it would fill.
+void LoadResourceDatabases(const std::string& root, ResourceMap& map)
+{
+    std::error_code ec;
+    if (!std::filesystem::exists(root, ec))
+        return;
+    if (!std::filesystem::is_directory(root, ec))
+        return;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(
+             root, std::filesystem::directory_options::skip_permission_denied, ec))
+    {
+        if (ec)
+            break;
+        if (!entry.is_regular_file(ec))
+            continue;
+        if (LowerCopy(entry.path().filename().string()) != "resourcedatabase.rdb")
+            continue;
+        std::ifstream file(entry.path(), std::ios::binary);
+        if (!file)
+            continue;
+        std::vector<uint8_t> blob((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const ResourceDatabase db = ReadResourceDatabase(blob.data(), blob.size());
+        if (!db.closes())
+        {
+            map.databasesRefused++;
+            std::cout << "  refused " << entry.path().string() << ": "
+                      << (db.error.empty() ? "walk did not consume the file exactly" : db.error) << "\n";
+            continue;
+        }
+        map.databasesRead++;
+        for (const auto& [guid, path] : db.byGuid)
+            map.byDatabase.emplace(guid, path);
+    }
+}
 
 //! Extensions whose contents are Enfusion's brace syntax rather than a binary blob.
 bool IsTextResource(const std::string& lowerPath)
@@ -568,6 +619,11 @@ void SaveResourceMapCache(const std::string& path, const ResourceMap& map)
         file << "R\t" << guid << '\t' << value << '\n';
     for (const auto& [guid, value] : map.byOwnId)
         file << "S\t" << guid << '\t' << value << '\n';
+    // The database tier is cached too. A cache written without it silently
+    // reintroduces the 562 unresolved prefabs on the next run, and that run would
+    // look identical to a correct one.
+    for (const auto& [guid, value] : map.byDatabase)
+        file << "D\t" << guid << '\t' << value << '\n';
 }
 
 // ---------------------------------------------------------------------------
@@ -1597,8 +1653,7 @@ float VisualLodResolution(size_t rank, float base)
 //! `sourcePath` is the `.xob`'s own path in the pak; it decides fact 8's `map` property
 //! and nothing else. Empty disables the property (a caller with no path has no class).
 bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options, TextureBaker* baker,
-                const std::string& sourcePath, Fmt::MLOD::WriteModel& out, ConvertStats& stats,
-                std::string& error)
+                const std::string& sourcePath, Fmt::MLOD::WriteModel& out, ConvertStats& stats, std::string& error)
 {
     const XobHeader header = ReadXobHeader(bytes.data(), bytes.size());
     if (!header.valid())
@@ -2518,12 +2573,22 @@ int Export(const ExportOptions& options)
     {
         std::cout << "Scanning text resources for {GUID}path references...\n";
         resources = BuildResourceMap(paks);
+        // The addon's own index, which is complete where the scan is opportunistic.
+        LoadResourceDatabases(options.root, resources);
         if (!options.resmapCache.empty())
             SaveResourceMapCache(options.resmapCache, resources);
     }
     std::cout << "Resources:  " << resources.byReference.size() << " GUIDs from references + "
-              << resources.byOwnId.size() << " from .et ID lines = " << resources.Size()
-              << (fromCache ? "  (cache)" : "") << "\n";
+              << resources.byOwnId.size() << " from .et ID lines + " << resources.byDatabase.size()
+              << " from resourceDatabase.rdb = " << resources.Size() << (fromCache ? "  (cache)" : "") << "\n";
+    // Silence here would look exactly like success: the scanned tiers alone still
+    // resolve 99% of placements, and the 1% they miss is whole buildings.
+    if (!fromCache && resources.databasesRead == 0)
+        std::cout << "            NO resourceDatabase.rdb found under " << options.root
+                  << " -- prefabs that no text file happens to name will not resolve\n";
+    if (resources.databasesRefused != 0)
+        std::cout << "            " << resources.databasesRefused
+                  << " database(s) REFUSED for not closing; their GUIDs are absent\n";
 
     // --- which prefabs matter --------------------------------------------
     std::unordered_map<std::string, size_t> byPrefab;
