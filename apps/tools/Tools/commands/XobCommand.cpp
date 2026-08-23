@@ -2421,6 +2421,32 @@ int Convert(const std::string& root, const std::string& filter, const std::strin
 // Subcommand: export
 // ---------------------------------------------------------------------------
 
+//! How near zero a stored Y has to be before a flagless placement is read as an
+//! offset above the terrain rather than an absolute elevation.
+//!
+//! The guard is not decoration. `GenericEntity` is flagless 99.9% of the time and
+//! its Y IS absolute -- 81.5% of its 25,860 Everon placements already sit within
+//! 0.5 m of the terrain, median Y 35.98. Treating those as offsets would raise
+//! every one of them by its own ground height. The flagless placements that are
+//! genuinely relative have a median stored Y of exactly 0.00, so a 2 m window
+//! separates the two populations without touching the middle of either.
+constexpr float kTerrainRelativeYLimit = 2.0f;
+
+//! True when the placement's `coords` Y is an offset above the terrain surface.
+//!
+//! Enfusion resolves these at load; an importer that takes the number literally
+//! buries the object. On Everon the rule moves 293,397 of 1,228,065 placements
+//! (23.9%) and takes the share sitting within 0.5 m of the terrain from 72.8% to
+//! 92.6%. See EbinPlacement::hasFlags for the measurement behind the flag itself.
+//!
+//! It is a rule about the data, not a proof: 2.4% of the world is still more than
+//! 2 m off terrain afterwards, and the ~62,000 flagless placements with |Y| >= 2
+//! are left absolute because nothing measured says otherwise.
+inline bool IsTerrainRelative(const EbinPlacement& placement)
+{
+    return !placement.hasFlags && std::fabs(placement.position[1]) < kTerrainRelativeYLimit;
+}
+
 struct ExportOptions
 {
     std::string root;
@@ -2673,7 +2699,7 @@ int Export(const ExportOptions& options)
                               ? 1
                               : (eligible + options.maxPlacements - 1) / options.maxPlacements;
 
-    size_t emitted = 0, unresolved = 0, noTransform = 0, seen = 0;
+    size_t emitted = 0, unresolved = 0, noTransform = 0, seen = 0, terrainRelative = 0;
     std::map<std::string, size_t> perModel;
     for (const EbinPlacement& placement : world.placements)
     {
@@ -2693,13 +2719,21 @@ int Export(const ExportOptions& options)
         // position[1] is up and angles[1] is yaw, both stated by EbinWorld.hpp and
         // both left in source order here: renaming an axis in the manifest is how a
         // consumer ends up guessing which convention it is in.
+        //
+        // The seventh field says whether that Y is absolute (0) or an offset above
+        // the terrain (1). It is written as a column rather than resolved here
+        // because this command reads models and has no heightfield; `pak export`
+        // does, and resolves it. A six-field manifest still reads, as absolute.
+        const bool relative = IsTerrainRelative(placement);
         char line[512];
-        std::snprintf(line, sizeof(line), "%s\t%.4f\t%.4f\t%.4f\t%.3f\t%.5f", model->second.c_str(),
+        std::snprintf(line, sizeof(line), "%s\t%.4f\t%.4f\t%.4f\t%.3f\t%.5f\t%d", model->second.c_str(),
                       placement.position[0], placement.position[1], placement.position[2], placement.angles[1],
-                      placement.scale);
+                      placement.scale, relative ? 1 : 0);
         manifest << line << '\n';
         perModel[model->second]++;
         emitted++;
+        if (relative)
+            terrainRelative++;
     }
     manifest.close();
 
@@ -2716,6 +2750,12 @@ int Export(const ExportOptions& options)
               << " eligible (cap " << options.maxPlacements << ").\n";
     std::cout << "            " << unresolved << " skipped: prefab resolves to no converted model; " << noTransform
               << " skipped: no transform.\n";
+    std::cout << "            " << terrainRelative << " of " << emitted << " carry no Flags and |Y| < "
+              << std::setprecision(1) << kTerrainRelativeYLimit
+              << " m, so their Y is an offset above the terrain that `pak export` resolves.\n";
+    if (emitted != 0 && terrainRelative == 0)
+        std::cout << "            (none of them -- every placement is absolute. On Everon this is 23.9%, so a zero"
+                     " here on a Reforger world means the Flags property is not reaching the reader.)\n";
     std::cout << "Per model:\n";
     for (const auto& [path, count] : perModel)
         std::cout << "  " << std::left << std::setw(94) << path << " " << count << "\n";

@@ -158,6 +158,12 @@ class Reader
             case 0x01: // i32
                 return Skip(4);
             case 0x02: // two u32 -- EIGHT bytes; four was the census's decisive error
+                // Only its PRESENCE is kept, and only on the entity that declares it:
+                // it is what tells an importer whether `coords` Y is absolute or an
+                // offset above the terrain. See EbinPlacement::hasFlags for the
+                // measurement that establishes this.
+                if (decl.name == "Flags" && _current)
+                    _current->hasFlags = true;
                 return Skip(8);
             case 0x05: // interned GUID as a value
                 return Skip(2);

@@ -1565,20 +1565,28 @@ namespace Placements
 struct Item
 {
     int32_t modelIndex = 0;
-    float x = 0.0f, y = 0.0f, z = 0.0f; //!< y is ABSOLUTE world elevation, not a terrain offset
+    float x = 0.0f, y = 0.0f, z = 0.0f; //!< y is ABSOLUTE world elevation once Resolve has run
     float yawDeg = 0.0f;
     float scale = 1.0f;
+    //! The manifest said this Y is an offset above the terrain. Cleared by
+    //! ResolveTerrainRelative, which is the only thing that may make it false.
+    bool terrainRelative = false;
 };
 
 struct Set
 {
     std::vector<std::string> models; //!< virtual .p3d paths, the OPRW model table
     std::vector<Item> items;
-    size_t skipped = 0; //!< lines rejected as malformed or out of the world
+    size_t skipped = 0;         //!< lines rejected as malformed or out of the world
+    size_t terrainRelative = 0; //!< lines whose seventh field asked for a terrain offset
     std::string error;
 };
 
-//! Tab-separated: `virtualPath, x, y, z, yawDeg, scale`, one placement per line.
+//! Tab-separated: `virtualPath, x, y, z, yawDeg, scale [, terrainRelative]`, one
+//! placement per line.
+//!
+//! The seventh field is optional and defaults to 0. A manifest written before it
+//! existed therefore reads as entirely absolute, which is what it meant.
 //!
 //! Placements outside the world are dropped rather than clamped. A model index
 //! outside the model table aborts the whole world parse in the reader
@@ -1622,6 +1630,7 @@ inline Set Read(const std::string& path, float worldExtent)
         item.z = std::strtof(field[3].c_str(), nullptr);
         item.yawDeg = std::strtof(field[4].c_str(), nullptr);
         item.scale = std::strtof(field[5].c_str(), nullptr);
+        item.terrainRelative = field.size() >= 7 && std::strtol(field[6].c_str(), nullptr, 10) != 0;
         if (!(item.scale > 0.0f) || !std::isfinite(item.x) || !std::isfinite(item.y) || !std::isfinite(item.z) ||
             item.x < 0.0f || item.x > worldExtent || item.z < 0.0f || item.z > worldExtent)
         {
@@ -1639,9 +1648,57 @@ inline Set Read(const std::string& path, float worldExtent)
         {
             item.modelIndex = found->second;
         }
+        if (item.terrainRelative)
+            ++set.terrainRelative;
         set.items.push_back(item);
     }
     return set;
+}
+
+//! Turns every terrain-relative Y into an absolute elevation. Returns how many it
+//! moved, and by how much on average -- a caller that prints zero moved on a
+//! Reforger world is looking at a manifest without the seventh field.
+//!
+//! Bilinear rather than nearest. The grid is 2 m on Everon and its houses are wider
+//! than that, so a nearest sample leaves a building visibly stepped into any slope
+//! it stands on. This is the same surface the runtime reads back out of the `.wrp`,
+//! so a resolved placement sits ON the ground rather than near it.
+inline size_t ResolveTerrainRelative(Set& set, const AssembledTerrain& terrain, double& meanRise)
+{
+    const TerrainDescriptor& descriptor = terrain.descriptor;
+    const float cellSize = descriptor.cellSize;
+    if (!(cellSize > 0.0f) || descriptor.gridWidth < 2 || descriptor.gridHeight < 2)
+        return 0;
+    const uint32_t lastX = descriptor.gridWidth - 1;
+    const uint32_t lastZ = descriptor.gridHeight - 1;
+
+    size_t moved = 0;
+    double total = 0.0;
+    for (Item& item : set.items)
+    {
+        if (!item.terrainRelative)
+            continue;
+        const float gx = std::clamp(item.x / cellSize, 0.0f, static_cast<float>(lastX));
+        const float gz = std::clamp(item.z / cellSize, 0.0f, static_cast<float>(lastZ));
+        const auto x0 = static_cast<uint32_t>(gx);
+        const auto z0 = static_cast<uint32_t>(gz);
+        const uint32_t x1 = x0 < lastX ? x0 + 1 : x0;
+        const uint32_t z1 = z0 < lastZ ? z0 + 1 : z0;
+        const float fx = gx - static_cast<float>(x0);
+        const float fz = gz - static_cast<float>(z0);
+        const float h00 = terrain.HeightAt(x0, z0);
+        const float h10 = terrain.HeightAt(x1, z0);
+        const float h01 = terrain.HeightAt(x0, z1);
+        const float h11 = terrain.HeightAt(x1, z1);
+        const float height = (h00 * (1.0f - fx) + h10 * fx) * (1.0f - fz) + (h01 * (1.0f - fx) + h11 * fx) * fz;
+
+        item.y += height;
+        item.terrainRelative = false;
+        total += height;
+        ++moved;
+    }
+    meanRise = moved != 0 ? total / static_cast<double>(moved) : 0.0;
+    return moved;
 }
 
 } // namespace Placements
@@ -2205,6 +2262,16 @@ int ExportWorld(const std::string& root, const std::string& world, const std::st
         }
         std::cout << "Placements:  " << placements.items.size() << " objects over " << placements.models.size()
                   << " models, " << placements.skipped << " skipped\n";
+        // Before the object table is written, and only here: this is the one point
+        // in the pipeline that holds both the placements and a heightfield.
+        double meanRise = 0.0;
+        const size_t resolved = Placements::ResolveTerrainRelative(placements, terrain, meanRise);
+        std::cout << "             " << resolved << " of " << placements.items.size()
+                  << " had a terrain-relative Y, raised by " << std::fixed << std::setprecision(2) << meanRise
+                  << " m on average\n";
+        if (placements.terrainRelative != 0 && resolved != placements.terrainRelative)
+            std::cerr << "Warning: " << placements.terrainRelative - resolved
+                      << " terrain-relative placements were left absolute -- the heightfield refused to sample\n";
         if (placements.items.empty())
         {
             std::cerr << "Error: the placement manifest yielded no usable objects\n";

@@ -78,6 +78,25 @@ struct EbinPlacement
     float angles[3] = {0.0f, 0.0f, 0.0f};   //!< degrees; index 1 is YAW
     float scale = 1.0f;
     bool hasPosition = false;
+    //! The entity block carried a `Flags` property of its own.
+    //!
+    //! It is recorded because it is the only field in the file that separates an
+    //! ABSOLUTE `coords` Y from one stored as an offset above the terrain. Measured
+    //! over Everon's 1,228,065 in-bounds placements against the assembled
+    //! heightfield:
+    //!
+    //!   Flags present  872,185  96.3% sit within 0.5 m of the terrain, median Y 54.99
+    //!   Flags absent   355,880  15.4%                                 median Y  0.00
+    //!
+    //! `Tree` alone splits 97.9% / 7.4% on the same test, so this is not a property
+    //! of one entity class. `SCR_DestructibleBuildingEntity` is 93% flagless, which
+    //! is why taking every Y as absolute buries Everon's houses a median 29 m under
+    //! the ground while its vegetation, rocks, walls and props all look correct.
+    //!
+    //! The reader states the fact and nothing more; the rule that turns it into a
+    //! height lives with the exporter that has a terrain to resolve against
+    //! (`IsTerrainRelative` in XobCommand.cpp).
+    bool hasFlags = false;
 };
 
 struct EbinWorld
