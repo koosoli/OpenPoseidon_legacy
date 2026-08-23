@@ -671,6 +671,17 @@ class EngineWgpu : public EngineDummy
     std::list<const LODShapeWithShadow*> _gpuModelParked; // front = oldest
     std::unordered_map<const LODShapeWithShadow*, std::list<const LODShapeWithShadow*>::iterator> _gpuModelParkedIndex;
     void DestroyGpuModel(const LODShapeWithShadow* shape); // meshes + every shape-keyed map entry
+    //! Drop every registered model whose baked bindless slots no longer match the textures
+    //! they were baked from, so the next admit rebuilds them. Returns how many went.
+    //!
+    //! `wgr_model_register` bakes a material's slot index permanently. A texture evicted by
+    //! TextureBankWgpu::TrimResidency therefore leaves its models on the white fallback FOREVER
+    //! -- re-uploading gives the texture a NEW slot the baked material never learns, and worse,
+    //! hands the old slot to some other upload, so the model can come back wearing a stranger's
+    //! texture. The parked path has always revalidated handles for exactly this reason; a LIVE
+    //! model had no such check, which is the difference between a surface that recovers and one
+    //! that is white until the world reloads.
+    uint32_t InvalidateStaleGpuModels();
     uint32_t DestroyGpuModelMeshes(const LODShapeWithShadow* shape); // just the pool meshes
     void UnparkGpuModel(const LODShapeWithShadow* shape);  // no-op if not parked
     void OnShapeDestroyed(const LODShape* shape);

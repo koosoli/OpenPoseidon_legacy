@@ -1924,7 +1924,14 @@ void EngineWgpu::NextFrame()
         LogObjectPerfRow();
         LogDrawSectionStats();
         if (_wbank)
+        {
             _wbank->TrimResidency();
+            // Immediately after the trim and before the next frame's admits, which is the only
+            // window where dropping a live registration is safe: this frame is already recorded.
+            if (const uint32_t stale = InvalidateStaleGpuModels())
+                LOG_INFO(Graphics, "Wgpu model residency: {} models re-registering after a texture eviction",
+                         stale);
+        }
         if (std::getenv("WGR_RESIDENCY_TRACE") &&
             (++_residencyTraceFrame == 30 || (_residencyTraceFrame % 120) == 0))
         {
@@ -5495,6 +5502,35 @@ void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
     if (std::getenv("WGR_MODEL_RESIDENCY_TRACE") && (releasedMeshes || evictedTextures))
         LOG_INFO(Graphics, "Wgpu model residency release: model={} meshes={} textures={}", shape->Name(),
                  releasedMeshes, evictedTextures);
+}
+
+uint32_t EngineWgpu::InvalidateStaleGpuModels()
+{
+    // Same staleness test the parked path uses, applied to every registration: the handles
+    // baked into the model must still be the ones the textures hold.
+    std::vector<const LODShapeWithShadow*> stale;
+    for (const auto& [shape, handles] : _gpuModelTextureHandles)
+    {
+        const auto textures = _gpuModelTextures.find(shape);
+        if (textures == _gpuModelTextures.end() || textures->second.size() != handles.size())
+        {
+            stale.push_back(shape);
+            continue;
+        }
+        for (size_t i = 0; i < handles.size(); i++)
+        {
+            TextureWgpu* texture = textures->second[i];
+            if (!texture || texture->GpuHandle() != handles[i])
+            {
+                stale.push_back(shape);
+                break;
+            }
+        }
+    }
+    // Collected first: DestroyGpuModel erases from the very maps being walked.
+    for (const LODShapeWithShadow* shape : stale)
+        DestroyGpuModel(shape);
+    return static_cast<uint32_t>(stale.size());
 }
 
 uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
