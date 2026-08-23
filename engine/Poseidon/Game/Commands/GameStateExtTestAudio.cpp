@@ -51,6 +51,7 @@ namespace Poseidon
 } // namespace Poseidon
 
 using namespace Poseidon::Dev;
+#include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Dev/Debug/DebugCheats.hpp>
 #include <Poseidon/Dev/Debug/DebugCommands.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
@@ -142,6 +143,7 @@ GameValue TriSetRenderScale(const GameState*, GameValuePar);
 GameValue TriSetMsaa(const GameState*, GameValuePar);
 GameValue TriPerfStats(const GameState*, GameValuePar);
 GameValue TriSetVsync(const GameState*, GameValuePar);
+GameValue TriTextInputActive(const GameState*);
 GameValue TriPerfDumpShapes(const GameState*, GameValuePar);
 GameValue TriPerfReset(const GameState*, GameValuePar);
 GameValue TriShadowSetDarkness(const GameState*, GameValuePar);
@@ -427,6 +429,12 @@ GameValue TriGetSwapInterval(const GameState* /*state*/)
     if (!GEngine)
         return GameValue((float)1);
     return GameValue((float)GEngine->GetSwapInterval());
+}
+
+/// triGetFpsCap -> int (the cap RenderFrame paces to, 0 when unlimited).
+GameValue TriGetFpsCap(const GameState* /*state*/)
+{
+    return GameValue((float)Poseidon::gUserFpsCap);
 }
 
 /// triGetObjectLodBias -> float (Scene's current LOD bias).
@@ -2210,6 +2218,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewFunction(GameFunction(GameString, "triCheatMapTeleport", TriCheatMapTeleport, GameBool));
     GGameState.NewNularOp(GameNular(GameScalar, "triViewDistance", TriViewDistance));
     GGameState.NewNularOp(GameNular(GameScalar, "triFps", TriFps));
+    GGameState.NewNularOp(GameNular(GameScalar, "triTextInputActive", TriTextInputActive));
     GGameState.NewNularOp(GameNular(GameScalar, "triMemoryMB", TriMemoryMB));
     GGameState.NewFunction(GameFunction(GameString, "triConsoleRun", TriConsoleRun, GameString));
     GGameState.NewFunction(
@@ -2357,6 +2366,7 @@ INIT_MODULE(GameStateExtTest, 3)
     GGameState.NewNularOp(GameNular(GameString, "triListMonitors", TriListMonitors));
     // Graphics screen probes
     GGameState.NewNularOp(GameNular(GameScalar, "triGetSwapInterval", TriGetSwapInterval));
+    GGameState.NewNularOp(GameNular(GameScalar, "triGetFpsCap", TriGetFpsCap));
     GGameState.NewNularOp(GameNular(GameScalar, "triGetObjectLodBias", TriGetObjectLodBias));
     GGameState.NewNularOp(GameNular(GameScalar, "triGetTerrainGrid", TriGetTerrainGrid));
     GGameState.NewNularOp(GameNular(GameScalar, "triGetViewDistance", TriGetViewDistance));

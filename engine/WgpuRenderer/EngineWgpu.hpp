@@ -78,6 +78,10 @@ class EngineWgpu : public EngineDummy
     int Width() const override;
     int Height() const override;
 
+    void StartTextInput() override;
+    void StopTextInput() override;
+    bool IsTextInputActive() const override;
+
     bool SetSwapInterval(int interval) override;
     int GetSwapInterval() const override { return _swapInterval; }
 

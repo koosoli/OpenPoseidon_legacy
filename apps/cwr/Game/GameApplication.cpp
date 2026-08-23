@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Platform/FPUSetup.hpp>
 #include <Poseidon/Foundation/Platform/PoseidonInit.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
+#include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Foundation/Platform/GamePaths.hpp>
 #include <Poseidon/Audio/AudioFactory.hpp>
@@ -70,7 +71,8 @@ using namespace Poseidon;
 namespace Poseidon
 {
 void CreateClient(RString, int, RString);
-}
+RString GetUserParams();
+} // namespace Poseidon
 
 namespace Poseidon
 {
@@ -417,6 +419,12 @@ void ApplyAspectPolicy(DisplayConfig& cfg)
 
     const int w = GEngine->Width();
     const int h = GEngine->Height();
+    UserConfig& userConfig = USER_CONFIG;
+    if (Poseidon::Presentation::ConfigureUserFov(userConfig, w, h))
+    {
+        const RString userPath = Poseidon::GetUserParams();
+        userConfig.SaveToFile(userPath);
+    }
     const AspectRatio::Settings settings = Poseidon::Presentation::Apply(w, h);
 
     // Diagnostic — full resolved policy so log inspection makes
@@ -565,21 +573,26 @@ void ConfigureWgpuUltraEnvironment()
 void LoadAndApplyGraphicsConfig()
 {
     const std::string path = GraphicsConfigPath();
+    const int refreshHz = GEngine ? GEngine->RefreshRate() : 0;
     GraphicsConfig cfg;
     if (!cfg.Load(path))
     {
-        // First boot: pick a tier from system RAM and stamp the
-        // four tier rows from that preset's bundle.  Per-user
-        // knobs (vsync / fpsCap / brightness / gamma) keep their
-        // class-default values.
+        // First boot autodetects from hardware.  vsync / brightness / gamma
+        // keep their class-default values.
         cfg.LoadDefaults();
         const int ramMB = SDL_GetSystemRAM();
         cfg.qualityPreset = GraphicsConfig::PickPresetFromRam(ramMB);
         cfg.ApplyPresetToTiers(cfg.qualityPreset);
+        cfg.fpsCap = GraphicsConfig::FpsCapForRefreshRate(refreshHz);
         cfg.Save(path);
-        LOG_INFO(Graphics, "LoadGraphicsConfig: autodetected preset={} (RAM={} MB), wrote '{}'", (int)cfg.qualityPreset,
-                 ramMB, path);
+        LOG_INFO(Graphics,
+                 "LoadGraphicsConfig: autodetected preset={} (RAM={} MB) fpsCap={} (display {} Hz), wrote '{}'",
+                 (int)cfg.qualityPreset, ramMB, cfg.fpsCap, refreshHz, path);
     }
+
+    if (cfg.Migrate(refreshHz) && cfg.Save(path))
+        LOG_INFO(Graphics, "LoadGraphicsConfig: migrated '{}' to version {} (fpsCap={}, display {} Hz)", path,
+                 GraphicsConfig::kVersion, cfg.fpsCap, refreshHz);
 
     LiveGraphicsEnv env;
     if (cfg.Normalize(env))

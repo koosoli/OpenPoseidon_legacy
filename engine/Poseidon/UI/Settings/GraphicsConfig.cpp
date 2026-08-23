@@ -85,6 +85,39 @@ void GraphicsConfig::LoadDefaults()
     *this = GraphicsConfig{};
 }
 
+int GraphicsConfig::FpsCapForRefreshRate(int refreshHz)
+{
+    // Above any common refresh rate: with no display to pace to, this only has
+    // to stop runaway submission.
+    constexpr int kUnknownRefreshCap = 144;
+    constexpr std::array kAllowed{30, 60, 90, 120, 144, 240};
+
+    if (refreshHz <= 0)
+        return kUnknownRefreshCap;
+    for (int allowed : kAllowed)
+        if (allowed >= refreshHz)
+            return allowed;
+    return kAllowed.back();
+}
+
+bool GraphicsConfig::Migrate(int refreshHz)
+{
+    if (version >= kVersion)
+        return false;
+
+    // 1.0 is the pre-v1 stamped default; any other value was chosen and stays.
+    if (version < 1 && gamma == 1.0f)
+        gamma = 1.2f;
+
+    // A cap of 0 below v2 is indistinguishable from the old default, so it is
+    // taken as never set.  From v2 on it is the user's Unlimited and survives.
+    if (fpsCap == 0)
+        fpsCap = FpsCapForRefreshRate(refreshHz);
+
+    version = kVersion;
+    return true;
+}
+
 GraphicsConfig::Preset GraphicsConfig::PickPresetFromRam(int ramMB)
 {
     // Bucket boundaries in MB: 4 GB, 8 GB, 16 GB.  ramMB == 0 (unknown)
@@ -137,7 +170,7 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
     }
 
     // Tier rows.  Off allowed only for Shadow + Particles.
-    if (!IsValidTier(terrainDetail, /*allowOff=*/false))
+    if (terrainDetail != TierExtreme && !IsValidTier(terrainDetail, /*allowOff=*/false))
     {
         terrainDetail = TierUltra;
         changed = true;
@@ -201,6 +234,10 @@ bool GraphicsConfig::Load(const std::string& path)
     ParamFile cfg;
     cfg.Parse(RString(path.c_str()));
 
+    version = 0;
+    if (auto* e = cfg.FindEntry("version"))
+        version = (int)*e;
+
     if (auto* e = cfg.FindEntry("qualityPreset"))
         qualityPreset = static_cast<Preset>((int)*e);
     if (auto* e = cfg.FindEntry("terrainDetail"))
@@ -221,6 +258,8 @@ bool GraphicsConfig::Load(const std::string& path)
         renderScale = (float)*e;
     if (auto* e = cfg.FindEntry("msaaSamples"))
         msaaSamples = (int)*e;
+    if (auto* e = cfg.FindEntry("multitexturing"))
+        multitexturing = (int)*e != 0;
     if (auto* e = cfg.FindEntry("brightness"))
         brightness = (float)*e;
     if (auto* e = cfg.FindEntry("gamma"))
@@ -247,8 +286,10 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("alphaToCoverage", alphaToCoverage ? 1 : 0);
     cfg.Add("renderScale", renderScale);
     cfg.Add("msaaSamples", msaaSamples);
+    cfg.Add("multitexturing", multitexturing ? 1 : 0);
     cfg.Add("brightness", brightness);
     cfg.Add("gamma", gamma);
+    cfg.Add("version", version);
 
     cfg.Save(RString(path.c_str()));
     return std::filesystem::exists(path, ec);
