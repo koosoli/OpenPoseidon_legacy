@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <string>
 
 namespace Poseidon
 {
@@ -39,6 +40,29 @@ bool RainTestHook()
     return value != nullptr && value[0] != '\0' && value[0] != '0';
 }
 
+// Which layers the hook turns on. `1` stays RainBoth so every existing capture
+// recipe keeps meaning what it meant.
+//
+// `particle` is what an INDOOR check needs, and the distinction is not cosmetic.
+// The legacy overlay is a full-screen scroll with no notion of shelter: under
+// RainBoth it draws streaks over an interior wall no matter what the volumetric
+// layer decided, so a capture taken inside a building cannot tell "rain comes
+// through the roof" from "the A/B layer is on". Only the shipping default,
+// RainParticle, answers that question, and before this the hook could not select
+// it.
+RainMode RainTestMode()
+{
+    const char* value = std::getenv("POSEIDON_TEST_RAIN");
+    if (value == nullptr)
+        return RainBoth;
+    const std::string text(value);
+    if (text == "particle")
+        return RainParticle;
+    if (text == "legacy")
+        return RainLegacy;
+    return RainBoth;
+}
+
 } // namespace
 
 Vector3 RainTargetVelocity(float fallSpeed, float windX, float windZ, float windResponse)
@@ -57,12 +81,12 @@ RainSystem::RainSystem()
 {
     if (RainTestHook())
     {
-        // Both layers over a forced-max density: the A/B pair a rain smoke
-        // wants, independent of the mission's weather state. The weather rain
-        // density itself is driven up as well, because consumers beyond the
-        // two render layers -- the ocean's rain-ripple term, wet-surface
-        // effects -- read GetRainDensity, not GRain.
-        _mode = RainBoth;
+        // Forced-max density over whichever layers were asked for: RainBoth by
+        // default, which is the A/B pair a rain smoke wants, independent of the
+        // mission's weather state. The weather rain density itself is driven up
+        // as well, because consumers beyond the two render layers -- the ocean's
+        // rain-ripple term, wet-surface effects -- read GetRainDensity, not GRain.
+        _mode = RainTestMode();
         _params.densityOverride = 1.0f;
         _legacyDensityOverride = 1.0f;
         _forceWeatherRain = true;
