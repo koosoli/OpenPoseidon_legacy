@@ -1,4 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
+
+#include <type_traits>
 #include <catch2/catch_approx.hpp>
 
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -985,11 +987,22 @@ TEST_CASE("VFormatSet: spec flags map to correct format", "[GL33][VertexBuffer]"
     }
 }
 
-// VertexIndex type tests — must be 16-bit for GL_UNSIGNED_SHORT
+// VertexIndex type tests — the IBO is sized by this typedef and drawn with a
+// matching GL element type, so the two must never drift apart.
 
-TEST_CASE("VertexIndex: is 16-bit (2 bytes)", "[GL33][VertexBuffer]")
+TEST_CASE("VertexIndex: is 32-bit, matching GL_UNSIGNED_INT", "[GL33][VertexBuffer]")
 {
-    REQUIRE(sizeof(VertexIndex) == 2);
+    // This asserted 2 bytes and GL_UNSIGNED_SHORT until imported later-generation
+    // buildings ran past a signed 16-bit index and ShapeAdapter had to drop every
+    // face above it -- 140,041 faces of Reforger's church_01 alone. Both moved to
+    // 32-bit together (Core/Types.hpp, EngineGL33_VertexBuffer.cpp).
+    //
+    // The test is kept, not deleted: EngineGL33_VertexBuffer allocates the IBO as
+    // `indices * sizeof(VertexIndex)` and then names an element type separately, so
+    // a narrowing here with no matching change there draws garbage rather than
+    // failing to build.
+    REQUIRE(sizeof(VertexIndex) == 4);
+    REQUIRE(std::is_signed_v<VertexIndex>);
 }
 
 // ConvertMatrix tests — used in PrepareMeshTLImpl

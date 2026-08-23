@@ -268,18 +268,24 @@ void EngineGL33::EmitDraw(const Poseidon::render::frame::Draw& d)
     UploadVSWorldMatrix(reinterpret_cast<const float*>(&d.world));
     FlushPSConstants();
 
+    // The IBO is allocated as `indices * sizeof(VertexIndex)` and filled by
+    // BuildIndices, so the element type below must track that typedef. It read
+    // GL_UNSIGNED_SHORT against a `short` VertexIndex; both moved to 32-bit
+    // together (see Core/Types.hpp) and they have to stay in step.
+    static_assert(sizeof(VertexIndex) == sizeof(uint32_t),
+                  "GL33 draws these indices as GL_UNSIGNED_INT; keep the two in step");
     const std::intptr_t offsetBytes = Poseidon::render::frame::ComputeIndexByteOffset(d.indexBegin, sizeof(VertexIndex));
     if (_instCount > 1)
     {
         // Instanced run: the WorldInstances UBO already holds the matrices;
         // the per-draw upload above wrote slot 0 (= matrices[0]) again,
         // which is harmless. gl_InstanceID selects the rest.
-        glDrawElementsInstanced(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(offsetBytes),
+        glDrawElementsInstanced(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_INT, reinterpret_cast<void*>(offsetBytes),
                                 _instCount);
     }
     else
     {
-        glDrawElements(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(offsetBytes));
+        glDrawElements(GL_TRIANGLES, d.indexCount, GL_UNSIGNED_INT, reinterpret_cast<void*>(offsetBytes));
     }
     ++Poseidon::gPerfDrawCalls;
 }

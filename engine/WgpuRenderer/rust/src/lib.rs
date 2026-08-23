@@ -4272,7 +4272,7 @@ impl Renderer {
         self.textures.destroy(handle);
     }
 
-    fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u16]) -> u64 {
+    fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
         self.gfx3d
             .mesh_create(&self.device, &self.queue, verts, indices)
     }

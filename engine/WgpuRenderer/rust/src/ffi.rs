@@ -1839,7 +1839,7 @@ pub unsafe extern "C" fn wgr_texture_destroy(renderer: *mut WgrRenderer, id: u64
 pub unsafe extern "C" fn wgr_mesh_create(
     renderer: *mut WgrRenderer,
     verts: WgrSlice<WgrMeshVertex>,
-    indices: WgrSlice<u16>,
+    indices: WgrSlice<u32>,
 ) -> u64 {
     if renderer.is_null() {
         return 0;

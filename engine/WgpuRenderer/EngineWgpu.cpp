@@ -2124,7 +2124,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     render::mesh::BuildIndices(src, indices.data());
 
     const uint64_t mesh = wgr_mesh_create(
-        _renderer, AsMeshVerts(verts), WgrSlice<uint16_t>{reinterpret_cast<const uint16_t*>(indices.data()), U32(ni)});
+        _renderer, AsMeshVerts(verts), WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
 
     if (!mesh)
     {
@@ -4923,19 +4923,24 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 }
             }
         }
-        // VertexIndex is `short` (Core/Types.hpp) and wgr_mesh_create takes a uint16_t index
-        // slice, so a LOD with more than 65535 vertices silently wraps: BuildIndices truncates
-        // and the mesh then draws triangles between unrelated vertices -- one model's indices
-        // against its own far-away geometry, i.e. exactly the stretched-sheet failure. There is
-        // no bounds check anywhere on this path. Measured headroom on Takistan: the largest
-        // visual LOD in the world's 513 models is a_mosque_big_hq_ep1 at 30,503 points, so this
-        // cannot fire on this world -- but it is unguarded, and it is silent when it does.
-        if (nv > 65535)
+        // Both halves of this are 32-bit now: VertexIndex (Core/Types.hpp) and the
+        // wgr_mesh_create index slice. The pool buffer was always Uint32 and merely
+        // widened on upload, so the old uint16_t FFI slice was a ceiling nothing on
+        // the GPU side asked for -- it capped a LOD at 65535 vertices and, above
+        // that, BuildIndices truncated and the mesh drew triangles between unrelated
+        // vertices (the stretched-sheet failure).
+        //
+        // The guard stays, at the type's real limit, because the failure mode above
+        // is silent and a future narrowing must not reintroduce it quietly.
+        static_assert(sizeof(VertexIndex) == sizeof(uint32_t),
+                      "wgr_mesh_create takes a u32 index slice; keep VertexIndex in step");
+        constexpr int64_t kMaxMeshVertices = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
+        if (static_cast<int64_t>(nv) > kMaxMeshVertices)
         {
             LOG_ERROR(Graphics,
-                      "ANOMALY GpuModel 16-bit index overflow: name={} lod={} vertices={} (ceiling 65535) -- "
+                      "ANOMALY GpuModel index overflow: name={} lod={} vertices={} (ceiling {}) -- "
                       "indices wrap; refusing the retained path for this shape",
-                      shape->Name(), level, nv);
+                      shape->Name(), level, nv, kMaxMeshVertices);
             eligible = false;
             break;
         }
@@ -4948,7 +4953,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         {
             AdmitTimer createTimer(&render::GObjectAdmitProfile.meshCreateMs);
             mesh = wgr_mesh_create(_renderer, AsMeshVerts(verts),
-                                   WgrSlice<uint16_t>{reinterpret_cast<const uint16_t*>(indices.data()), U32(ni)});
+                                   WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
         }
         if (!mesh)
         {
