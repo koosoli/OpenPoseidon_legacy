@@ -147,3 +147,22 @@ Set-Content -LiteralPath $stampPath -Value $stampLine -Encoding utf8
 Write-Host "Stamped: $stampLine"
 
 Write-Host "`nDone. Launch: $(Join-Path $GameDir 'PoseidonGame.exe')" -ForegroundColor Green
+
+# ColdWarAssault.exe is the RETAIL binary and this script deliberately never touches it, so it
+# only ever gets older. It also sits in the same folder, sorts first alphabetically, and is the
+# name anyone who has played the game reaches for -- and it launches and runs, just as whatever
+# build it happens to be. On 2026-08-23 that cost a debugging round: a fix was reported as not
+# working, from a binary a day and several fixes behind the one just installed.
+#
+# Named here rather than deleted: it is the retail game's own file and removing it is not this
+# script's business.
+$retail = Join-Path $GameDir 'ColdWarAssault.exe'
+if (Test-Path -LiteralPath $retail)
+{
+    $retailAge = [int]((Get-Date) - (Get-Item -LiteralPath $retail).LastWriteTime).TotalHours
+    if ($retailAge -gt 1)
+    {
+        Write-Host ("  NOTE: ColdWarAssault.exe in the same folder is {0} h older and is NOT this build. " -f $retailAge) -ForegroundColor Yellow -NoNewline
+        Write-Host "Launching it tests nothing you just deployed." -ForegroundColor Yellow
+    }
+}
