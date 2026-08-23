@@ -132,10 +132,40 @@ previous session reported it absent after checking only `D:\SteamLibrary`.
 
 ---
 
-## THE NEXT THING: finish the 32-bit VertexIndex without corrupting OFP
+## ~~THE NEXT THING: finish the 32-bit VertexIndex without corrupting OFP~~ — DONE in `802fecb6`
 
-**Reverted in `b175a60a`; the tree is back to `typedef short VertexIndex`. The direction is
-right, the change is unfinished, and the missing piece is NOT yet known.**
+> **RESOLVED 2026-08-23 15:14.** The missing piece was in `ShapeFile.cpp`, one function below
+> the save/load asymmetry fixed in `26ee0001`, and this section's audit list did not contain it.
+>
+> `Shape::SerializeBin` **is** the ODOL v7 reader — `LODShape::Load` tries `LoadOptimized` first
+> for every `.p3d`, and that is the `'ODOL'`/7 path. Three of the arrays it moves are
+> `VertexIndex`-typed and went through `TransferBinaryArray`, whose stride is
+> `sizeof(*data.Data())`: `Selection::_sel`, `Shape::_pointToVertex`, `Shape::_vertexToPoint`.
+> ODOL v7 stores all three as **u16** — `tests/fixtures/p3d/generate_animated_morph_odol.py`
+> lays the bytes out. Widening the typedef changed how many bytes the reader consumed from a
+> file whose layout had not moved; the point/vertex maps sit BEFORE the face table, so the
+> stream desynchronised there and every byte of geometry after it was misaligned. Reading the
+> committed fixture with the old code returns `pointToVertex[0] == 65536` — two 16-bit entries
+> swallowed as one 32-bit.
+>
+> Second-order version of the same fault: `TransferBinaryCompressed` switches to LZW at 1024
+> **bytes**, so widening also flipped arrays of 512..1023 elements from raw to compressed on the
+> read side alone.
+>
+> Fixed by pinning those three to 16 bits on the wire and widening on the way in
+> (`TransferVertexIndexArray16`). `ShapeAdapter`'s ODOL section walk had the same leak in
+> miniature and is now a named constant, 2. Verified with a picture at the pose below:
+> `evidence/vertexindex-ofp-fixed-32bit-20260823.png` (intact) against
+> `evidence/vertexindex-ofp-broken-20260823.png`, and the Reforger side at
+> `evidence/vertexindex-reforger-village-32bit-20260823.png`. Deployed as `802fecb6`.
+>
+> The regression test is `tests/unit/.../Graphics/Rendering/test_odol_v7_wire_format.cpp`. It
+> reads the BYTES of a committed ODOL v7 file, because a save/load round trip does **not** catch
+> this — both halves move together and stay self-consistent. Note
+> `tests/unit/.../BinaryFormats/test_p3d_mlod_to_odol_conversion.cpp`, which does round-trip
+> ODOL, is `#ifdef _M_IX86` and has never run on this target.
+
+*Everything below is the state before that fix, kept for the reasoning.*
 
 ### What it buys and what it breaks
 
