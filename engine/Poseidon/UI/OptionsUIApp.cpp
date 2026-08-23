@@ -2093,11 +2093,17 @@ void DisplayModDownload::ApplyView()
 
     // Hold the localized labels in locals so the view's const char* fields stay valid
     // for the BuildDownloadDialogView call.
-    RString lblComplete = LocalizeString("STR_DISP_MODS_DL_COMPLETE");
-    RString lblCancelled = LocalizeString("STR_DISP_MODS_DL_CANCELLED");
-    RString lblStarting = LocalizeString("STR_DISP_MODS_DL_STARTING");
-    RString lblFailed = LocalizeString("STR_DISP_MODS_DL_FAILED");
+    //
+    // WithFallback, not bare LocalizeString: these keys ship in the stringtable, and
+    // an install whose data predates them (every retail/Demo install that has not
+    // been refreshed) resolves them to the empty string.  Assigning that over
+    // DownloadDialogLabels' English defaults leaves the dialog with NO status line
+    // at all -- the download reads 100%/100% and never says it finished.
     DownloadDialogLabels labels;
+    RString lblComplete = LocalizeStringWithFallback("STR_DISP_MODS_DL_COMPLETE", labels.complete);
+    RString lblCancelled = LocalizeStringWithFallback("STR_DISP_MODS_DL_CANCELLED", labels.cancelled);
+    RString lblStarting = LocalizeStringWithFallback("STR_DISP_MODS_DL_STARTING", labels.starting);
+    RString lblFailed = LocalizeStringWithFallback("STR_DISP_MODS_DL_FAILED", labels.failed);
     labels.complete = lblComplete;
     labels.cancelled = lblCancelled;
     labels.starting = lblStarting;
@@ -2105,7 +2111,7 @@ void DisplayModDownload::ApplyView()
     DownloadDialogView v = BuildDownloadDialogView(s, (const char*)_unitNoun, labels);
     if (s.postProcessing)
     {
-        const RString unpacking = LocalizeString("STR_DISP_MODS_DL_UNPACKING");
+        const RString unpacking = LocalizeStringWithFallback("STR_DISP_MODS_DL_UNPACKING", "Unpacking");
         v.statusLine = FormatAnimatedActivity((const char*)unpacking, Foundation::GlobalTickCount());
     }
     SetNotebookText(IDC_MODS_DL_CURRENT_LABEL, v.currentLine.c_str());
