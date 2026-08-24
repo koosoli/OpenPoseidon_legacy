@@ -491,8 +491,13 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
 // Max primary steps (the actual count is adaptive: derived from the ray's path length through the
 // shell so sampling density stays constant with thickness/angle, then clamped to this). Each step is
 // one cheap texture tap now, so a higher cap is affordable and needed for thick/grazing views.
-const CLOUD_STEPS: f32 = 128.0;
-const CLOUD_LIGHT_STEPS: i32 = 4;
+// `override`, not `const`: these are the two knobs that decide what the cloud march costs,
+// and it is the single most expensive thing in the frame (7.97 ms of a 34.17 ms GPU frame on
+// perf_abel @1920x1080, plus 0.93 for the composite). Pipeline-overridable so the cost can be
+// measured and traded without a shader edit; both are only ever passed as values, never used
+// in a const-expression, so an override is legal here.
+override CLOUD_STEPS: f32 = 128.0;
+override CLOUD_LIGHT_STEPS: i32 = 4;
 // Volumetric march distance cap (m) along the view ray, measured from the shell entry. Grazing / in-
 // deck rays otherwise traverse tens of km of shell, which at the fixed step cap undersamples the
 // vertical structure into a bright band across the horizon (worst where cloud masses overlap). Bounding

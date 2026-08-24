@@ -1697,6 +1697,26 @@ impl Sky {
                     count: None,
                 }],
             });
+        // WGR_CLOUD_STEPS / WGR_CLOUD_LIGHT_STEPS: primary and light-march sample caps for the
+        // volumetric cloud pass. Defaults are the shader's own 128 / 4, so unset changes nothing.
+        // These exist because the pass measured 7.97 ms -- 23% of the GPU frame, the largest
+        // single item in the renderer, and until now ungated by anything: no tier, no env var.
+        // Clamped rather than trusted: 0 primary steps is a divide-by-zero shaped question in
+        // the march and a negative light count is an infinite loop.
+        let cloud_steps = std::env::var("WGR_CLOUD_STEPS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(128.0)
+            .clamp(8.0, 256.0);
+        let cloud_light_steps = std::env::var("WGR_CLOUD_LIGHT_STEPS")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(4.0)
+            .clamp(1.0, 16.0);
+        let cloud_overrides: [(&str, f64); 2] = [
+            ("CLOUD_STEPS", cloud_steps),
+            ("CLOUD_LIGHT_STEPS", cloud_light_steps),
+        ];
         let cloud_pipeline = {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("wgr_cloud"),
@@ -1723,7 +1743,10 @@ impl Sky {
                         blend: None,
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &cloud_overrides,
+                        ..Default::default()
+                    },
                 }),
                 multiview_mask: None,
                 cache: None,
