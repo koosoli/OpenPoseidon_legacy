@@ -19,6 +19,16 @@ within a phase is the frame time.
     S = static, measured
     M = moving, measured
 
+WHAT THIS CANNOT ANSWER
+-----------------------
+Log timestamps are whole milliseconds, which at 38 fps is 4% of a frame.  A frame period
+that is not near a whole number of ms is reported as an alternating pair of integers --
+a perfectly steady 26.5 ms frame reads as 26, 27, 26, 27 -- so this trace CANNOT be used
+to decide whether the engine does more work on alternate frames.  It looks exactly like
+the real defect.  The report warns when the mean lands near a half-millisecond; settling
+the question needs sub-millisecond per-frame times, which FrameProfiler keeps as floats
+and does not currently export.
+
 THE FRAME COUNTER IS WHY THIS CAN BE BELIEVED.  A script loop that ticks once per frame
 is an assumption, and the failure is silent in the flattering direction: if the loop ran
 twice per frame the deltas would be half a frame each and the report would invent a
@@ -330,6 +340,38 @@ def report(path: Path, args) -> int:
               f"throughput {s['fps_throughput']:.1f} -> {m['fps_throughput']:.1f} fps | "
               f"p99 {s['p99_ms']:.1f} -> {m['p99_ms']:.1f} ms | "
               f"worst {s['worst_ms']:.1f} -> {m['worst_ms']:.1f} ms")
+
+    # THE TRACE HAS 1 MS RESOLUTION, AND THAT IS A QUARTER OF A FRAME AT 40 FPS.
+    #
+    # Frame times here are differences between engine LOG TIMESTAMPS, which are stamped
+    # in whole milliseconds.  A frame period that is not close to a whole number of
+    # milliseconds is therefore reported as an ALTERNATING pair of integers: a rock-steady
+    # 26.5 ms frame comes out as 26, 27, 26, 27, ... forever.
+    #
+    # That matters because it is indistinguishable, in this data, from the real defect
+    # people report as "every second frame does more work".  Measured on perf_abel,
+    # static camera: consecutive frame deltas flipped across the median 69% of the time
+    # (50% is random) with a lag-1 autocorrelation of -0.47, which reads exactly like a
+    # strict every-other-frame alternation -- and the 2-, 4- and 8-frame spans all gave a
+    # per-frame time of 26.50 ms with the flip rate collapsing to 48.7% (random).  It was
+    # rounding, not the engine.  Turning vsync off changed nothing, which is what ruled
+    # out the other obvious explanation.
+    #
+    # So: warn whenever the median lands near a half-millisecond, and NEVER conclude
+    # alternation from 1 ms data.  To settle it you need sub-millisecond per-frame times
+    # (FrameProfiler keeps them as floats; only avg/p95/max are currently exported).
+    for phase in ordered_phases:
+        # The MEAN, not the median: the median of a set of whole-millisecond deltas is
+        # itself a whole number by construction, so it can never show the half-millisecond
+        # that causes this. A mean sitting near x.5 is the signature.
+        mean = summaries[phase]["mean_ms"]
+        frac = abs(mean - round(mean))
+        if summaries[phase]["frames"] >= 30 and frac > 0.15:
+            run.notes.append(
+                f"phase {phase}: mean frame time {mean:.2f} ms sits {frac:.2f} ms from a whole "
+                f"millisecond, and this trace only HAS whole milliseconds. Consecutive frames "
+                f"will appear to alternate between two integers whether or not the engine "
+                f"alternates. Do NOT read an every-other-frame pattern out of this data.")
 
     for phase in ordered_phases:
         exact, counted = run.coverage.get(phase, (0, 0))
