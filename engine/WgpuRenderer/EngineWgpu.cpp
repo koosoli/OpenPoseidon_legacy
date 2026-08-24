@@ -1917,6 +1917,67 @@ void EngineWgpu::NextFrame()
             frame.shadow.count = U32(_smCascades.count);
             frame.shadow.omni_count = U32(_smCascades.omniCount);
             frame.shadow.resolution = U32(_smCascadeRes);
+            // Which cascades can actually receive grass-shadow fragments.
+            //
+            // Grass::draw_shadow submits the near-ring blades into whatever pass it is handed,
+            // so with 4 cascades the blades are transformed four times -- and the far cascades
+            // then clip every one of them away, because the near ring stops at `radius` metres
+            // and their depth range starts past it. Measured on perf_abel @1920x1080, the four
+            // cascades cost 4.443 ms with grass and 0.121 ms without; the cost is flat in
+            // shadow-map resolution (2048 vs 512) and in caster triangles (1.4k vs 89k) but
+            // linear in cascade count, which is what wasted vertex work looks like.
+            //
+            // CONSERVATIVE: a bit is cleared only where the cascade provably cannot receive a
+            // fragment -- a frustum tier whose NEAR distance is already past the reach. Omni
+            // tiers are camera-centred spheres covering 0..radius, so they always keep grass.
+            // Anything uncertain keeps its bit, so this cannot change what is drawn.
+            uint32_t grassMask = 0xFu;
+            float reachLogged = 0.0f;
+            if (_grass.enabled && _grass.castShadows)
+            {
+                // The mid ring casts only on the photo-tuft path; otherwise the near ring is
+                // the whole of the grass shadow caster set.
+                float reach = _grassPhotoTuftActive ? std::max(_grass.radius, _grass.midRadius)
+                                                    : _grass.radius;
+                // SUN-ANGLE MARGIN. A blade standing at the edge of the ring casts a shadow that
+                // lands FURTHER than the ring, and at a low sun it lands much further: the
+                // horizontal run is height / tan(elevation), which at 5 degrees is ~11x the blade
+                // height. Cutting the cascade at the ring radius alone would drop those shadows at
+                // dawn and dusk while looking perfect at noon -- the worst kind of regression,
+                // because it is invisible in every screenshot taken at midday.
+                //
+                // sunDir is normalised, so |y| is sin(elevation) and sqrt(1-y^2) is cos.
+                const float sy = std::fabs(_smCascades.sunDir.y);
+                const float horiz = std::sqrt(std::max(0.0f, 1.0f - sy * sy));
+                // Below this the sun is at the horizon, shadows are effectively infinite and the
+                // terrain shadow pass has taken over anyway; keep every cascade rather than guess.
+                constexpr float kMinSin = 0.02f;
+                const float bladeH = std::max(_grass.height, 0.1f);
+                reach += (sy > kMinSin) ? std::min(bladeH * horiz / sy, 200.0f) : 1e9f;
+                reachLogged = reach;
+                float nearDist = 0.0f;
+                for (int c = 0; c < _smCascades.count && c < 4; c++)
+                {
+                    const bool omni = c < _smCascades.omniCount || _smCascades.omniRadius[c] > 0.0f;
+                    if (!omni && nearDist >= reach)
+                        grassMask &= ~(1u << c);
+                    nearDist = _smCascades.splitViewDist[c];
+                }
+            }
+            else
+            {
+                grassMask = 0u; // grass casts nothing at all; save the submissions outright
+            }
+            frame.shadow.grass_cascade_mask = grassMask;
+            {
+                static uint32_t lastMask = 0xFFFFFFFFu;
+                if (grassMask != lastMask)
+                {
+                    lastMask = grassMask;
+                    LOG_INFO(Graphics, "Wgpu grass shadow cascades: mask=0x{:X} (reach {:.1f} m, {} cascades)",
+                             grassMask, reachLogged, _smCascades.count);
+                }
+            }
             for (int c = 0; c < _smCascades.count && c < 4; c++)
             {
                 std::memcpy(frame.shadow.light_vp[c].m, _smCascades.camRelVP[c].m.data(),
@@ -7026,6 +7087,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     const bool mapClutter = clutterSource == 0 && haveMapAtlas;
     const bool photoTuft = mapClutter || clutterSource == 2;
     params.use_photo_tuft = photoTuft ? 1.0f : 0.0f;
+    _grassPhotoTuftActive = photoTuft;
     // Announce through the game log, on transition. A silent auto-enable is indistinguishable
     // from a broken one: the previous capture pair moved 229 pixels and could not tell whether
     // the cards looked the same or the flag never arrived.

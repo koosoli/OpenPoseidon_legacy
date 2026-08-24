@@ -875,7 +875,9 @@ pub struct WgrShadowPass {
     pub count: u32, // cascade count (1..4); 0 = no shadow pass this frame
     pub omni_count: u32,
     pub resolution: u32, // depth-map side length per cascade
-    pub _pad: u32,
+    /// Bit i set = cascade i can receive grass-shadow fragments. See the C header for why;
+    /// 0xF reproduces the old unconditional behaviour.
+    pub grass_cascade_mask: u32,
     pub light_vp: [WgrMat4; 4], // camera-relative light view-projections (0..1 NDC z)
     // Camera world position: casters are camera-relative, so the depth shader adds
     // this back to reconstruct absolute world xz for surface_y (terrain conform).

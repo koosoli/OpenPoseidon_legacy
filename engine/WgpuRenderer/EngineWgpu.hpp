@@ -791,6 +791,10 @@ class EngineWgpu : public EngineDummy
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
     GrassSettings _grass;
+    // Whether the photo-tuft path is live. It decides how far grass casts shadows: the mid ring
+    // is submitted to the shadow pass ONLY on that path (Grass::draw_shadow), so without it the
+    // reach is the near ring's radius. Read when building frame.shadow.grass_cascade_mask.
+    bool _grassPhotoTuftActive = false;
     // A circular history of terrain contacts.  Kept in engine space so foot
     // and vehicle trails persist even though grass placement is camera-relative.
     std::array<WgrGrassTrack, WGR_GRASS_TRACK_COUNT> _grassTracks{};

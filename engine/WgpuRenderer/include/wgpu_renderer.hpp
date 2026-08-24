@@ -760,7 +760,17 @@ struct WgrShadowPass
     uint32_t count; // cascade count (1..4); 0 = no shadow pass this frame
     uint32_t omni_count;
     uint32_t resolution; // depth-map side length per cascade
-    uint32_t _pad;
+    /* Bit i set = cascade i can receive grass-shadow fragments, so the grass blades are worth
+     * submitting into it. Grass casts from the NEAR ring only (the mid ring casts solely on the
+     * photo-tuft path), so a cascade whose NEAR plane already lies beyond the grass reach cannot
+     * receive a single grass fragment -- yet the blades were being transformed for it anyway.
+     * Measured on perf_abel @1920x1080: four cascades cost 4.443 ms with grass and 0.121 ms
+     * without, and the cost is flat in shadow-map resolution and in caster triangle count but
+     * linear in cascade COUNT. That is vertex-bound instancing being clipped away.
+     * Conservative by construction: a bit is cleared only when the cascade is a frustum tier
+     * whose near distance is provably past the reach. 0xF (all set) reproduces the old
+     * behaviour exactly. Occupies what was a pad word, so the ABI is unchanged. */
+    uint32_t grass_cascade_mask;
     WgrMat4 light_vp[4]; // camera-relative light view-projections (0..1 NDC z)
     // Camera world position: casters are camera-relative, so the depth shader adds
     // this back to reconstruct absolute world xz for surface_y (terrain conform).

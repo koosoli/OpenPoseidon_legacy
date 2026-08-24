@@ -4857,6 +4857,20 @@ impl Gfx3d {
             .as_ref()
             .zip(self.shadow_caster_bind.as_ref());
 
+        // Which cascades get grass blades. C++ derives the mask from the cascade split
+        // distances and the grass reach (see the note at the draw_shadow call below);
+        // WGR_GRASS_SHADOW_CASCADES caps it further for A/B work only.
+        let grass_mask = pass.grass_cascade_mask;
+        let grass_shadow_cascades: usize = {
+            static ONCE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+            *ONCE.get_or_init(|| {
+                std::env::var("WGR_GRASS_SHADOW_CASCADES")
+                    .ok()
+                    .and_then(|v| v.parse::<usize>().ok())
+                    .unwrap_or(MAX_CASCADES as usize)
+                    .min(MAX_CASCADES as usize)
+            })
+        };
         for c in 0..count.min(target.layers) as usize {
             // PERF-005: one region PER CASCADE. Shadows were the largest single unattributed
             // suspect and a single "shadows" number cannot tell you which cascade to shrink —
@@ -4962,7 +4976,23 @@ impl Gfx3d {
             // GPU-driven retained set casts into this cascade (no-op when GPU-driven is off,
             // or when the cascade has no survivors). Drawn last into the same depth attachment.
             self.draw_gpu_driven_shadow(&mut rp, textures, pass_ubo_off, c);
-            grass.draw_shadow(&mut rp, pass_bind, pass_ubo_off, timers);
+            // GRASS SHADOWS ARE THE ENTIRE SHADOW COST, AND MOST OF IT IS SPENT OFF-SCREEN.
+            //
+            // draw_shadow has no cascade awareness: it submits the near-ring blade instances
+            // into whichever pass it is handed, so with 4 cascades it runs 4 times. Measured on
+            // perf_abel @1920x1080, grass Ultra vs Off, the four cascades cost 4.443 ms vs
+            // 0.121 -- objects are 0.12 ms of it and grass is the rest. The cost is flat in
+            // shadow-map resolution (2048 vs 512: no change) and flat in caster triangle count
+            // (1.4k vs 89k: no change) but linear in cascade COUNT, which is what vertex-bound
+            // instancing looks like: the blades are transformed for every cascade and then
+            // clipped away by the ones whose depth range the near ring never reaches.
+            //
+            // WGR_GRASS_SHADOW_CASCADES caps how many cascades receive them. Default 4 keeps
+            // today's behaviour exactly; the point of the knob is to measure what the far
+            // cascades actually contribute before changing what anyone sees.
+            if c < grass_shadow_cascades && (grass_mask & (1u32 << c)) != 0 {
+                grass.draw_shadow(&mut rp, pass_bind, pass_ubo_off, timers);
+            }
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
             // is alive is a validation error, not a slightly wrong number.
             drop(rp);
