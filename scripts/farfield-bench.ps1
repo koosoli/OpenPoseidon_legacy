@@ -135,6 +135,12 @@ param(
     # Per-repeat watchdog.  0 = auto.
     [int]$TimeoutSeconds = 0,
 
+    # Run windowed. MISSION MODE ONLY MATTERS HERE: without it the run goes FULLSCREEN at the
+    # display's native resolution and --width/--height are ignored, so -Width/-Height are a
+    # request the run silently declines. Off by default so the proven fullscreen invocation
+    # stays the default; pass it whenever the resolution is part of what you are measuring.
+    [switch]$Windowed,
+
     # Proceed even though another game process is already resident (marks repeats contended).
     [switch]$AllowConcurrent,
 
@@ -366,7 +372,7 @@ try {
         $argumentParts = @()
         if (-not $timedMode) { $argumentParts += '--check' }
         $argumentParts += "--render=$Backend"
-        if ($timedMode) { $argumentParts += '--window' }
+        if ($timedMode -or $Windowed) { $argumentParts += '--window' }
         if ($width -gt 0) { $argumentParts += "--width=$width" }
         if ($height -gt 0) { $argumentParts += "--height=$height" }
         $argumentParts += '--test-mission'
@@ -449,6 +455,38 @@ try {
         }
         if (-not (Test-Path -LiteralPath $pngPath)) { $problems += "no screenshot at $pngPath" }
 
+        # WHAT RESOLUTION DID THIS ACTUALLY RENDER AT? A GPU millisecond means nothing without
+        # it, and -Width/-Height are a REQUEST that mission mode does not honour: `--window` is
+        # only added in timed/world mode, so a mission-mode run goes fullscreen at the display's
+        # native resolution and `--width=` is ignored. A whole session's figures were quoted as
+        # "1920x1080" while every capture was 3441x1440 -- 2.4x the pixels -- and nothing in the
+        # output said so. The screenshot knows; read it rather than trusting the flag.
+        #
+        # Parsed from the PNG IHDR (bytes 16..23, big-endian) instead of System.Drawing so this
+        # needs no GDI+ assembly on a headless box.
+        $captureWidth = 0
+        $captureHeight = 0
+        if (Test-Path -LiteralPath $pngPath) {
+            try {
+                $header = [byte[]]::new(24)
+                $fs = [IO.File]::OpenRead($pngPath)
+                try { $null = $fs.Read($header, 0, 24) } finally { $fs.Dispose() }
+                $captureWidth = [int]$header[16] * 16777216 + [int]$header[17] * 65536 + [int]$header[18] * 256 + [int]$header[19]
+                $captureHeight = [int]$header[20] * 16777216 + [int]$header[21] * 65536 + [int]$header[22] * 256 + [int]$header[23]
+            } catch {
+                $captureWidth = 0
+                $captureHeight = 0
+            }
+            if ($Width -gt 0 -and $Height -gt 0 -and $captureWidth -gt 0 -and
+                ($captureWidth -ne $Width -or $captureHeight -ne $Height)) {
+                $problems += ("requested {0}x{1} but the capture is {2}x{3} ({4:N1}x the pixels). " -f
+                    $Width, $Height, $captureWidth, $captureHeight,
+                    (($captureWidth * $captureHeight) / [double]($Width * $Height))) +
+                    'Mission mode renders fullscreen at the display resolution and ignores --width; ' +
+                    'every GPU figure from this run belongs to the capture resolution, not the requested one.'
+            }
+        }
+
         $frameTotal = $null
         $attributed = $null
         $metrics = $null
@@ -525,6 +563,9 @@ try {
             # Which binaries produced these numbers. Without this a metrics JSON is an
             # orphan: it cannot be attributed to a commit after the fact.
             deployed_from    = $deployedFrom
+            # The resolution the frame was actually rendered at, read back from the PNG.
+            capture_width    = $captureWidth
+            capture_height   = $captureHeight
             status           = $status
             contended        = $contended
             timed_out        = $timedOut
