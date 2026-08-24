@@ -117,6 +117,16 @@ pub enum Region {
     // begin/end per frame -- so their cost is DERIVED: OpsPreWater - TerrainColor - GrassColor.
     OpsPreWater = 50,  // CONTAINER: opaque replay (terrain + grass + CPU-replayed direct)
     OpsPostWater = 51, // CONTAINER: the depth-sorted transparent replay
+    // --- The post chain and the UI. After the colour sub-pass was attributed, 2.85 ms of a
+    // 23.08 ms frame at 1920x1080 -- 12.3% -- still belonged to no region: everything between
+    // the last world draw and present. These six name it. Every one is OUTERMOST: they run
+    // after the colour sub-pass closes, not inside it.
+    HdrResolve = 52,     // MSAA -> single-sample resolve of the HDR scene target
+    GodRays = 53,        // volumetric sun shafts, marched before bloom so they bloom
+    Bloom = 54,          // bright-pass + the blur pyramid
+    ExposureAdapt = 55,  // luminance reduction + the eased 1x1 exposure scale
+    TonemapResolve = 56, // the tonemap curve into the display-referred target
+    Ui2d = 57,           // the 2D/UI segment drawn over the tonemapped frame
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -129,7 +139,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 52;
+pub const REGION_COUNT: usize = 58;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.

@@ -6364,6 +6364,12 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Sky: cloud composite",            // WGR_GPU_TIMER_CLOUD_COMPOSITE
         "[container] ops pre-water",       // WGR_GPU_TIMER_OPS_PRE_WATER (incl. terrain + grass)
         "[container] ops post-water",      // WGR_GPU_TIMER_OPS_POST_WATER (transparents)
+        "Post: HDR MSAA resolve",          // WGR_GPU_TIMER_HDR_RESOLVE
+        "Post: god rays",                  // WGR_GPU_TIMER_GOD_RAYS
+        "Post: bloom",                     // WGR_GPU_TIMER_BLOOM
+        "Post: exposure adapt",            // WGR_GPU_TIMER_EXPOSURE_ADAPT
+        "Post: tonemap",                   // WGR_GPU_TIMER_TONEMAP_RESOLVE
+        "UI / 2D",                         // WGR_GPU_TIMER_UI_2D
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }

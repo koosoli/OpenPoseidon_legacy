@@ -2332,7 +2332,15 @@ class Engine : public IGraphicsEngine
         kCloudGpuRegionComposite = 49,
         kOpsGpuRegionPreWater = 50,
         kOpsGpuRegionPostWater = 51,
-        kGpuRegionEnd = 52,
+        // POST CHAIN + UI. 2.85 ms of a 23.08 ms frame at 1920x1080 (12.3%) belonged to no
+        // region once the colour sub-pass was attributed. All outermost.
+        kPostGpuRegionHdrResolve = 52,
+        kPostGpuRegionGodRays = 53,
+        kPostGpuRegionBloom = 54,
+        kPostGpuRegionExposure = 55,
+        kPostGpuRegionTonemap = 56,
+        kPostGpuRegionUi2d = 57,
+        kGpuRegionEnd = 58,
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

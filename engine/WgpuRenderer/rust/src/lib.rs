@@ -1636,6 +1636,7 @@ impl Renderer {
         if let (Some((_, msaa_view)), Some((_, resolve_view))) =
             (self.hdr.as_ref(), self.hdr_resolve.as_ref())
         {
+            self.gpu_timers.begin(encoder, TimerRegion::HdrResolve);
             encoder.push_debug_group("wgr_hdr_resolve");
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wgr_hdr_resolve"),
@@ -1655,6 +1656,7 @@ impl Renderer {
             });
             drop(pass);
             encoder.pop_debug_group();
+            self.gpu_timers.end(encoder, TimerRegion::HdrResolve);
         }
         // Volumetric sun shafts, added to the LINEAR HDR scene here: after the MSAA resolve (so
         // the blend costs one sample per pixel, not `sample_count`) and before bloom / eye
@@ -1662,7 +1664,9 @@ impl Renderer {
         // every other light in the frame. Skipped underwater — the submerged look has its own
         // compositor and its own shafts, and every occluder this pass reads is above the surface.
         if underwater_time.is_none() {
+            self.gpu_timers.begin(encoder, TimerRegion::GodRays);
             self.render_god_rays(encoder, source);
+            self.gpu_timers.end(encoder, TimerRegion::GodRays);
         }
         let post_source = if underwater_time.is_some() {
             // The compositor reads a single-sample reversed-Z depth target, including
@@ -1733,7 +1737,9 @@ impl Renderer {
                     self.tonemap_params.bloom_knee,
                     1.0,
                 );
+                self.gpu_timers.begin(encoder, TimerRegion::Bloom);
                 bloom.render(encoder);
+                self.gpu_timers.end(encoder, TimerRegion::Bloom);
             }
         }
         // Eye adaptation: reduce the scene to average luminance and ease the exposure
@@ -1741,8 +1747,11 @@ impl Renderer {
         // when disabled it just eases to 1.0 — the reduction is a few cheap passes.
         if let Some(exposure) = self.exposure.as_ref() {
             exposure.upload_params(&self.queue, &self.exposure_params);
+            self.gpu_timers.begin(encoder, TimerRegion::ExposureAdapt);
             exposure.render(encoder);
+            self.gpu_timers.end(encoder, TimerRegion::ExposureAdapt);
         }
+        self.gpu_timers.begin(encoder, TimerRegion::TonemapResolve);
         encoder.push_debug_group("wgr_tonemap");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_tonemap"),
@@ -1763,6 +1772,7 @@ impl Renderer {
         self.tonemap.as_ref().expect("tonemap").render(&mut pass);
         drop(pass);
         encoder.pop_debug_group();
+        self.gpu_timers.end(encoder, TimerRegion::TonemapResolve);
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -4072,7 +4082,13 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
+                // Encoder-level, not in-pass: this 2D segment can be entered more than once
+                // per frame and an in-pass bracket would hand the slot to whichever ran last.
+                // Bracketing the whole pass keeps the region meaning "the 2D work in this
+                // frame" rather than "the last 2D sub-pass".
+                self.gpu_timers.begin_pass(&mut pass, TimerRegion::Ui2d);
                 render_ops(self, &mut pass, seg_ops, display_2d, true, false);
+                self.gpu_timers.end_pass(&mut pass, TimerRegion::Ui2d);
                 drop(pass);
                 // The 2D sub-pass attaches depth Load/Store, so a depth-tested 2D draw can write
                 // it. That is after this segment's water/cloud resolves, so mark them stale.

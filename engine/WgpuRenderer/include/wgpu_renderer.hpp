@@ -1292,7 +1292,16 @@ enum WgrGpuTimerRegion : uint32_t
      * so read them as OPS_PRE_WATER - TERRAIN_COLOR - GRASS_COLOR. */
     WGR_GPU_TIMER_OPS_PRE_WATER = 50,
     WGR_GPU_TIMER_OPS_POST_WATER = 51,
-    WGR_GPU_TIMER_REGION_COUNT = 52,
+    /* The post chain and the UI -- everything between the last world draw and present. It was
+     * 2.85 ms of a 23.08 ms frame at 1920x1080 (12.3%) with no region at all. All OUTERMOST:
+     * these run after the colour sub-pass closes, not inside it. */
+    WGR_GPU_TIMER_HDR_RESOLVE = 52,
+    WGR_GPU_TIMER_GOD_RAYS = 53,
+    WGR_GPU_TIMER_BLOOM = 54,
+    WGR_GPU_TIMER_EXPOSURE_ADAPT = 55,
+    WGR_GPU_TIMER_TONEMAP_RESOLVE = 56,
+    WGR_GPU_TIMER_UI_2D = 57,
+    WGR_GPU_TIMER_REGION_COUNT = 58,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
