@@ -238,7 +238,7 @@ function Test-JsonProperty {
 # Resolve inputs
 # ----------------------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $GameDir)) { throw "Game directory not found: $GameDir" }
-$gameExe = Join-Path $GameDir 'openposeidon.exe'
+$gameExe = Join-Path $GameDir 'OpenPoseidon.exe'
 if (-not (Test-Path -LiteralPath $gameExe)) {
     throw "Game executable not found: $gameExe`n  Deploy first: .\scripts\Deploy.ps1"
 }
@@ -422,7 +422,7 @@ try {
 
         Write-Output ""
         Write-Output "--- $Label repeat $repeat/$Repeats ---"
-        Write-Verbose "openposeidon.exe $argumentString"
+        Write-Verbose "OpenPoseidon.exe $argumentString"
 
         $startedAt = Get-Date
         $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `

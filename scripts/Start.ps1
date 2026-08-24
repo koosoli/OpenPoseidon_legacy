@@ -43,8 +43,8 @@ else
 # dist suffix is the preset's last segment (rwdi/dbg/rel).
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $suffix   = ($Preset -split '-')[-1]
-# The shipped client is openposeidon.exe; the other two apps keep their Poseidon* names.
-$exeName  = @{ Game = 'openposeidon.exe'; GameDemo = 'PoseidonGameDemo.exe'; Server = 'PoseidonServer.exe' }[$App]
+# The shipped client is OpenPoseidon.exe; the other two apps keep their Poseidon* names.
+$exeName  = @{ Game = 'OpenPoseidon.exe'; GameDemo = 'PoseidonGameDemo.exe'; Server = 'PoseidonServer.exe' }[$App]
 $exe      = Join-Path $repoRoot "dist\x64-win-$suffix\$exeName"
 if (-not (Test-Path $exe)) { throw "Not built: $exe`n  Build first: .\scripts\Build.ps1 -Preset $Preset" }
 

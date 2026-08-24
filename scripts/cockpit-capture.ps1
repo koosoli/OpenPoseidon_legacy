@@ -163,7 +163,7 @@ for ($i = 1; $i -lt $CaptureSeconds.Count; $i++) {
 }
 
 if (-not (Test-Path -LiteralPath $GameDir)) { throw "Game directory not found: $GameDir" }
-$gameExe = Join-Path $GameDir 'openposeidon.exe'
+$gameExe = Join-Path $GameDir 'OpenPoseidon.exe'
 if (-not (Test-Path -LiteralPath $gameExe)) {
     throw "Game executable not found: $gameExe`n  Deploy first: .\scripts\Deploy.ps1"
 }
@@ -434,7 +434,7 @@ $exitCode = -1
 $timedOut = $false
 $elapsed = 0.0
 try {
-    Write-Verbose "openposeidon.exe $argumentString"
+    Write-Verbose "OpenPoseidon.exe $argumentString"
     $startedAt = Get-Date
     $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru

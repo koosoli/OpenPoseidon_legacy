@@ -178,7 +178,7 @@ void WriteLauncher(const std::string& gameDir, const std::string& name)
     out << "@echo off\r\n"
            "setlocal\r\n"
         << "pushd \"" << gameDir << "\"\r\n"
-        << "start \"Arma CWA - " << name << "\" \"" << (fs::path(gameDir) / "openposeidon.exe").string()
+        << "start \"Arma CWA - " << name << "\" \"" << (fs::path(gameDir) / "OpenPoseidon.exe").string()
         << "\" --mods-dir \"" << ProfilesRoot(gameDir).string() << "\" --mod \"@" << name
         << "\" %*\r\n"
            "popd\r\n";

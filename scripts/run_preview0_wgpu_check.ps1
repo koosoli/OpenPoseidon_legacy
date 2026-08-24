@@ -14,12 +14,12 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildRoot = Join-Path $repoRoot $BuildDir
 $gameDir = 'D:\SteamLibrary\steamapps\common\ARMA Cold War Assault'
-$sourceExe = Join-Path $buildRoot 'apps\cwr\Game\openposeidon.exe'
+$sourceExe = Join-Path $buildRoot 'apps\cwr\Game\OpenPoseidon.exe'
 $sourceDll = Join-Path $buildRoot 'engine\WgpuRenderer\wgpu_renderer.dll'
 # NEVER write ColdWarAssault.exe. That is the RETAIL binary's name; copying our build onto
 # it is how a Poseidon build ends up wearing the retail name in a folder several worktrees
 # share, and it is indistinguishable afterwards from the real thing.
-$targetExe = Join-Path $gameDir 'openposeidon.exe'
+$targetExe = Join-Path $gameDir 'OpenPoseidon.exe'
 $targetDll = Join-Path $gameDir 'wgpu_renderer.dll'
 $fullLogPath = if ([IO.Path]::IsPathRooted($LogPath)) { $LogPath } else { Join-Path $repoRoot $LogPath }
 
@@ -30,7 +30,7 @@ if (-not $SkipBuild) {
 foreach ($path in @($sourceExe, $sourceDll)) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Missing required path: $path" }
 }
-if (Get-Process -Name 'openposeidon','ColdWarAssault','PoseidonGame' -ErrorAction SilentlyContinue) {
+if (Get-Process -Name 'OpenPoseidon','ColdWarAssault','PoseidonGame' -ErrorAction SilentlyContinue) {
     throw 'The game is running; close it before replacing its executable and renderer DLL.'
 }
 

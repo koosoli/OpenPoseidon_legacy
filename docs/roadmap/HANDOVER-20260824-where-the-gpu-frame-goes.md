@@ -44,7 +44,7 @@ Everything the renderer records is now inside a bracket — 44 regions reporting
 | depth+normal prepass | 1.71 | pays for itself; also required by AO |
 | GTAO | 1.06 | |
 | culling (main + shadow + Hi-Z) | 0.64 | cheap |
-| interior sky visibility | 0.57 | runs on an open field with no interiors |
+| interior sky visibility | 0.57 | runs on an open field, but see below — **not reclaimable** |
 | post chain (all of it) | 0.63 | god rays .307, HDR resolve .101, bloom .101, tonemap .062, exposure .061, UI .002 |
 
 ### The CPU is not the bottleneck and has not been for a while
@@ -135,7 +135,7 @@ Every one of these produced a wrong answer that looked right.
 
 1. **The harness benchmarked a different binary than Deploy wrote.** `farfield-bench.ps1`
    launched `ColdWarAssault.exe`; `Deploy.ps1` wrote `PoseidonGame.exe`. Fixed by renaming to
-   one name, `openposeidon.exe` (`7eb66103`). Benchmarks now refuse an unstamped install and
+   one name, `OpenPoseidon.exe` (`7eb66103`). Benchmarks now refuse an unstamped install and
    record the deployed commit in `run-NN.meta.json`.
 
 2. **`-Width/-Height` was a request mission mode declined.** `--window` was only added in world
@@ -196,8 +196,11 @@ trace from the reporter's own machine.
 1. **~1.6 ms of inter-pass overhead** across ~30 passes. Structural — merging compute chains.
 2. **The 15.07 ms floor** is the real ceiling. Shadows were its largest item and are now halved;
    next largest are water FFT (~1.1), culling (0.64), interior sky (0.57).
-3. **Interior sky visibility runs outdoors** — 0.57 ms/frame computing sky occlusion for
-   interiors, in a field with no buildings in view.
+3. ~~Interior sky visibility runs outdoors~~ — **measured and rejected.** It looked like 0.57 ms
+   of pure waste on a field with no buildings. Three repeats each, 1920x1080: `WGR_SKY_VIS=0`
+   medians 21.868 ms against 21.346 with it ON, i.e. turning it off is not faster. The regions
+   report the time but it is not additive to the frame. Not a lever; do not spend the day on it
+   as I nearly did.
 4. **Anti-aliasing and Supersampling rows are inert on wgpu** (trap 5). They now persist a value
    nothing reads.
 5. **Never visually confirmed**: the Grass Detail row rendering in Options and surviving a

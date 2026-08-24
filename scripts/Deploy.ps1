@@ -2,13 +2,13 @@
 .SYNOPSIS
     Copy the built game binaries into the retail Arma: Cold War Assault install.
 .DESCRIPTION
-    Deploys exactly two files: openposeidon.exe and wgpu_renderer.dll. Both, always
+    Deploys exactly two files: OpenPoseidon.exe and wgpu_renderer.dll. Both, always
     - copying only one of them gives an instant "Entry Point Not Found" on launch,
     because the exe and the cdylib share a hand-written C ABI that changes between
     builds. That failure mode is why this is a script and not a Copy-Item you type.
 
     Nothing else is written, and no ColdWarAssault.exe is produced or touched:
-    openposeidon.exe is the only binary this project ships. There is deliberately ONE
+    OpenPoseidon.exe is the only binary this project ships. There is deliberately ONE
     name. The folder is shared by several worktrees, and every mismatched-pair incident
     so far started with a second exe in it wearing a name someone recognised.
 
@@ -53,7 +53,23 @@ $distDir  = Join-Path $repoRoot "dist\x64-win-$suffix"
 # The two files that must move together. Order is deliberate: the DLL lands first, so
 # a half-finished deploy leaves the OLD exe against the NEW dll (which fails loudly at
 # startup) rather than a new exe against an old dll (which can fail much later).
-$payload = @('wgpu_renderer.dll', 'openposeidon.exe')
+$payload = @('wgpu_renderer.dll', 'OpenPoseidon.exe')
+
+# NTFS is case-INSENSITIVE but case-PRESERVING: copying `OpenPoseidon.exe` over a file already
+# called `openposeidon.exe` overwrites the bytes and keeps the OLD name on disk. The rename to
+# capitals would then be invisible in the game folder forever, and the only symptom is a
+# lower-case name nobody can explain. Delete a differently-cased match first so the new casing
+# actually lands.
+foreach ($name in $payload)
+{
+    $existing = Get-ChildItem -LiteralPath $GameDir -Filter $name -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -cne $name }
+    foreach ($stale in $existing)
+    {
+        Remove-Item -LiteralPath $stale.FullName -Force
+        Write-Host ("  ~ {0} -> {1} (case corrected)" -f $stale.Name, $name)
+    }
+}
 
 foreach ($name in $payload)
 {
@@ -150,7 +166,7 @@ if ($PruneStale)
         if (Test-Path -LiteralPath $stale)
         {
             Remove-Item -LiteralPath $stale -Force
-            Write-Host "  - $name (legacy name, superseded by openposeidon.exe)"
+            Write-Host "  - $name (legacy name, superseded by OpenPoseidon.exe)"
         }
     }
 }
@@ -172,7 +188,7 @@ $stampLine = "{0} {1} {2} deploy-ps1" -f $branch, $commit, (Get-Date -Format 'yy
 Set-Content -LiteralPath $stampPath -Value $stampLine -Encoding utf8
 Write-Host "Stamped: $stampLine"
 
-Write-Host "`nDone. Launch: $(Join-Path $GameDir 'openposeidon.exe')" -ForegroundColor Green
+Write-Host "`nDone. Launch: $(Join-Path $GameDir 'OpenPoseidon.exe')" -ForegroundColor Green
 
 # ColdWarAssault.exe is the RETAIL binary and this script deliberately never touches it, so it
 # only ever gets older. It also sits in the same folder, sorts first alphabetically, and is the

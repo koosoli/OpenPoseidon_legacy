@@ -24,7 +24,7 @@
       ledger invalid          The capability matrix and manifest are derived from
                               the ledgers; publishing them while they fail their
                               own validator publishes claims nothing checked.
-      missing binary          Both openposeidon.exe and wgpu_renderer.dll, or the
+      missing binary          Both OpenPoseidon.exe and wgpu_renderer.dll, or the
                               package produces Entry Point Not Found on launch.
 
 .PARAMETER Commit
@@ -202,16 +202,16 @@ else
 
 Step 'Locating staged binaries'
 $distRoot = Join-Path $repoRoot 'dist'
-$exe = Get-ChildItem -Path $distRoot -Filter 'openposeidon.exe' -Recurse -ErrorAction SilentlyContinue |
+$exe = Get-ChildItem -Path $distRoot -Filter 'OpenPoseidon.exe' -Recurse -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $dll = Get-ChildItem -Path $distRoot -Filter 'wgpu_renderer.dll' -Recurse -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-if (-not $exe) { Fail 'openposeidon.exe not found under dist/. Build first, or drop -SkipBuild.' }
+if (-not $exe) { Fail 'OpenPoseidon.exe not found under dist/. Build first, or drop -SkipBuild.' }
 if (-not $dll)
 {
     Fail @'
-wgpu_renderer.dll not found under dist/, but openposeidon.exe is.
+wgpu_renderer.dll not found under dist/, but OpenPoseidon.exe is.
 
 These two are one unit. A package containing only the executable fails at launch
 with Entry Point Not Found and no other diagnostic, so this is refused rather
@@ -238,7 +238,7 @@ if ($exe.DirectoryName -ne $dll.DirectoryName)
 
 Step 'Verifying staged binaries match the build tree by content'
 $buildTree = Join-Path $repoRoot "build\$Preset\apps\cwr\Game"
-foreach ($pair in @(@($exe, 'openposeidon.exe'), @($dll, 'wgpu_renderer.dll')))
+foreach ($pair in @(@($exe, 'OpenPoseidon.exe'), @($dll, 'wgpu_renderer.dll')))
 {
     $staged, $name = $pair[0], $pair[1]
     $built = Join-Path $buildTree $name
