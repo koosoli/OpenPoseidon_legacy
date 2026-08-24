@@ -9,6 +9,13 @@
 using namespace Poseidon;
 namespace
 {
+// ROW INDICES ARE POSITIONS, AND POSITIONS MOVE.  GraphicsProvider's kRow*
+// enum is private to GraphicsPage, so these tests address rows by raw index
+// and every insertion into the middle of the list shifts the tail.  Current
+// order: 0 preset, 1 terrain, 2 objectLod, 3 shadow, 4 particles, 5 grass,
+// 6 vsync, 7 fpsCap, 8 brightness, 9 gamma, 10 advanced(header),
+// 11 antiAliasing, 12 supersampling, 13 multitexturing.  If a row is added,
+// the failures here are index drift, not behaviour -- renumber, do not delete.
 class TestableGraphicsPage : public GraphicsPage
 {
   public:
@@ -65,12 +72,12 @@ TEST_CASE("GraphicsPage brightness and gamma rows show values, not percentages",
     auto& p = page.Provider();
 
     // Rows 7/8 are Brightness/Gamma; an unmounted page holds the cfg defaults.
-    REQUIRE(p.SliderValueText(7) != nullptr);
-    CHECK(std::string(p.SliderValueText(7)) == "1.6");
     REQUIRE(p.SliderValueText(8) != nullptr);
-    CHECK(std::string(p.SliderValueText(8)) == "1.2");
+    CHECK(std::string(p.SliderValueText(8)) == "1.6");
+    REQUIRE(p.SliderValueText(9) != nullptr);
+    CHECK(std::string(p.SliderValueText(9)) == "1.2");
 
-    CHECK(p.SliderValueText(5) == nullptr);
+    CHECK(p.SliderValueText(6) == nullptr);
 }
 
 TEST_CASE("GraphicsPage fps-cap index mapping falls back to unlimited for unknown values", "[UI][GraphicsPage]")
@@ -119,13 +126,13 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    CHECK(p.RowValue(10) == 0);
     CHECK(p.RowValue(11) == 0);
+    CHECK(p.RowValue(12) == 0);
 
-    p.SetRowValue(10, 2);
-    CHECK(p.RowValue(10) == 2);
-    p.SetRowValue(11, 4);
-    CHECK(p.RowValue(11) == 4);
+    p.SetRowValue(11, 2);
+    CHECK(p.RowValue(11) == 2);
+    p.SetRowValue(12, 4);
+    CHECK(p.RowValue(12) == 4);
 }
 
 TEST_CASE("GraphicsPage offers the manual terrain tier last", "[UI][GraphicsPage]")
@@ -150,13 +157,13 @@ TEST_CASE("GraphicsPage multitexturing row is a boolean defaulting to on", "[UI]
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    CHECK(p.RowKind(12) == OptionsScrollList::KindBoolean);
-    CHECK(p.RowValue(12) == 1);
+    CHECK(p.RowKind(13) == OptionsScrollList::KindBoolean);
+    CHECK(p.RowValue(13) == 1);
 
-    p.SetRowValue(12, 0);
-    CHECK(p.RowValue(12) == 0);
-    p.SetRowValue(12, 1);
-    CHECK(p.RowValue(12) == 1);
+    p.SetRowValue(13, 0);
+    CHECK(p.RowValue(13) == 0);
+    p.SetRowValue(13, 1);
+    CHECK(p.RowValue(13) == 1);
 }
 
 // A focusable divider would strand keyboard nav on a row with no value to change.
@@ -165,6 +172,6 @@ TEST_CASE("GraphicsPage advanced divider is an unfocusable header", "[UI][Graphi
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
-    CHECK(p.RowKind(9) == OptionsScrollList::KindHeader);
-    CHECK_FALSE(OptionsScrollList::CanRowReceiveFocus(p.RowKind(9)));
+    CHECK(p.RowKind(10) == OptionsScrollList::KindHeader);
+    CHECK_FALSE(OptionsScrollList::CanRowReceiveFocus(p.RowKind(10)));
 }

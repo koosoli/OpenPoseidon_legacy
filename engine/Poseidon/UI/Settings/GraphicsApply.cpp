@@ -69,6 +69,55 @@ int VsyncToInterval(GraphicsConfig::VsyncMode v)
     }
     return 1;
 }
+// Grass / ground clutter tier -> the renderer's GrassSettings.
+//
+// Grass is the single largest item in the GPU frame: measured on perf_abel at
+// 1920x1080 on the wgpu backend, turning it off took the GPU frame from 33.40 ms
+// to 23.85 ms -- 9.55 ms, 28.6%. For comparison the next lever down, GTAO, is
+// 2.22 ms. Until this row existed the only way to spend that budget elsewhere was
+// an undocumented WGR_GRASS environment variable.
+//
+// Only the three fields that drive COST are touched -- enabled, density and the
+// detail radius -- plus shadow casting at the bottom tier. Everything else in
+// GrassSettings is authored look (saturation, colour variation, species mix, dry
+// patches, wind); a tier that reset those would change what the world looks like
+// rather than how much it costs, and would also stamp on the dev panel's Grass tab.
+// Hence read-modify-write through GetGrassSettings rather than a fresh struct.
+//
+// Ultra reproduces the historical shipped values exactly (see GrassSettings'
+// in-class initialisers), so an install that never opens this row is unchanged.
+void ApplyGrassTier(GraphicsConfig::Tier tier, Engine::GrassSettings& g)
+{
+    switch (tier)
+    {
+        case GraphicsConfig::TierOff:
+            g.enabled = false;
+            return;
+        case GraphicsConfig::TierLow:
+            g.enabled = true;
+            g.density = 0.35f;
+            g.radius = 15.0f;
+            g.castShadows = false;
+            return;
+        case GraphicsConfig::TierMedium:
+            g.enabled = true;
+            g.density = 0.60f;
+            g.radius = 25.0f;
+            return;
+        case GraphicsConfig::TierHigh:
+            g.enabled = true;
+            g.density = 0.85f;
+            g.radius = 33.0f;
+            return;
+        case GraphicsConfig::TierUltra:
+        case GraphicsConfig::TierExtreme:
+        default:
+            g.enabled = true;
+            g.density = 1.0f;
+            g.radius = 41.0f;
+            return;
+    }
+}
 } // namespace
 
 void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
@@ -86,6 +135,12 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         // Particles tier — Off → cloudlets off; Low/High → on.  Low vs
         // High is UI-only until the cloudlet system grows tiered density.
         GScene->SetCloudlets(cfg.particlesQuality != GraphicsConfig::TierOff);
+    }
+    if (GEngine)
+    {
+        Engine::GrassSettings grass = GEngine->GetGrassSettings();
+        ApplyGrassTier(cfg.grassQuality, grass);
+        GEngine->SetGrassSettings(grass);
     }
     if (GEngine)
     {

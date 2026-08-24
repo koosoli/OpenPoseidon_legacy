@@ -103,6 +103,69 @@ TEST_CASE("GraphicsConfig: a v1 gamma of 1.0 is the user's own", "[Settings][Gra
     CHECK(c.version == GraphicsConfig::kVersion);
 }
 
+TEST_CASE("GraphicsConfig: a pre-v3 file carries forward the forced Ultra bundle", "[Settings][GraphicsConfig]")
+{
+    // Until v3, LoadAndApplyGraphicsConfig overwrote the tier rows with the Ultra
+    // bundle on every boot, so a pre-v3 file's tier values were never what the player
+    // saw.  Migration stamps what they DID see, so honouring the file from v3 on is
+    // not a silent downgrade.
+    GraphicsConfig c;
+    c.version = 2;
+    c.terrainDetail = GraphicsConfig::TierLow;
+    c.objectLod = GraphicsConfig::TierLow;
+    c.grassQuality = GraphicsConfig::TierOff;
+    c.msaaSamples = 0;
+
+    REQUIRE(c.Migrate(60));
+    CHECK(c.version == GraphicsConfig::kVersion);
+    CHECK(c.terrainDetail == GraphicsConfig::TierUltra);
+    CHECK(c.objectLod == GraphicsConfig::TierUltra);
+    CHECK(c.grassQuality == GraphicsConfig::TierUltra);
+    CHECK(c.msaaSamples == 4);
+}
+
+TEST_CASE("GraphicsConfig: a v3 file keeps the tiers it was saved with", "[Settings][GraphicsConfig]")
+{
+    // The whole point of v3: from here on the Graphics page is authoritative.
+    GraphicsConfig c;
+    c.version = GraphicsConfig::kVersion;
+    c.grassQuality = GraphicsConfig::TierOff;
+    c.terrainDetail = GraphicsConfig::TierMedium;
+
+    CHECK_FALSE(c.Migrate(60));
+    CHECK(c.grassQuality == GraphicsConfig::TierOff);
+    CHECK(c.terrainDetail == GraphicsConfig::TierMedium);
+}
+
+TEST_CASE("GraphicsConfig: a v2 Unlimited FPS cap survives the v3 bump", "[Settings][GraphicsConfig]")
+{
+    // fpsCap == 0 means "never set" only below v2.  The rule was unguarded while
+    // kVersion was 2 (unreachable for a v2 file); bumping to 3 made it reachable, and
+    // unguarded it would convert every deliberate Unlimited into a cap.
+    GraphicsConfig c;
+    c.version = 2;
+    c.fpsCap = 0;
+
+    REQUIRE(c.Migrate(60));
+    CHECK(c.fpsCap == 0);
+}
+
+TEST_CASE("GraphicsConfig: a grass tier round-trips through the file", "[Settings][GraphicsConfig]")
+{
+    const std::string path = (std::filesystem::temp_directory_path() / "poseidon_grass_cfg.cfg").string();
+    std::filesystem::remove(path);
+
+    GraphicsConfig saved;
+    saved.grassQuality = GraphicsConfig::TierLow;
+    REQUIRE(saved.Save(path));
+
+    GraphicsConfig loaded;
+    REQUIRE(loaded.Load(path));
+    CHECK(loaded.grassQuality == GraphicsConfig::TierLow);
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("GraphicsConfig: the FPS cap rounds up to an allowed rate", "[Settings][GraphicsConfig]")
 {
     CHECK(GraphicsConfig::FpsCapForRefreshRate(30) == 30);

@@ -62,15 +62,19 @@ private:
 			kRowObjectLod      = 2,
 			kRowShadow         = 3,
 			kRowParticles      = 4,
-			kRowVsync          = 5,
-			kRowFpsCap         = 6,
-			kRowBrightness     = 7,
-			kRowGamma          = 8,
-			kRowAdvanced       = 9,
-			kRowAntiAliasing   = 10,
-			kRowSupersampling  = 11,
-			kRowMultitexturing = 12,
-			kRowCount          = 13,
+			// Grass sits with the other quality tiers, immediately after Particles,
+			// because it is the most expensive of them by a wide margin (28.6% of the
+			// GPU frame at Ultra) and a player hunting for frames should meet it early.
+			kRowGrass          = 5,
+			kRowVsync          = 6,
+			kRowFpsCap         = 7,
+			kRowBrightness     = 8,
+			kRowGamma          = 9,
+			kRowAdvanced       = 10,
+			kRowAntiAliasing   = 11,
+			kRowSupersampling  = 12,
+			kRowMultitexturing = 13,
+			kRowCount          = 14,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }
@@ -103,6 +107,10 @@ private:
 	std::array<const char*, 4>      m_shadowCStrs{};
 	std::array<std::string, 3>      m_particlesLabels;
 	std::array<const char*, 3>      m_particlesCStrs{};
+	// Off / Low / Medium / High / Ultra — the only tier row that offers both Off
+	// and the full five steps.
+	std::array<std::string, 5>      m_grassLabels;
+	std::array<const char*, 5>      m_grassCStrs{};
 	std::array<std::string, 4>      m_msaaLabels;
 	std::array<const char*, 4>      m_msaaCStrs{};
 	std::array<std::string, 5>      m_renderScaleLabels;

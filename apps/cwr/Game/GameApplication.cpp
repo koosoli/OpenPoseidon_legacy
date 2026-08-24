@@ -599,20 +599,26 @@ void LoadAndApplyGraphicsConfig()
     if (cfg.Normalize(env))
         LOG_INFO(Graphics, "LoadGraphicsConfig: normalized invalid fields (not persisted)");
 
-    // The in-game Graphics page is currently unavailable. Keep its established Ultra
-    // bundle active at every boot while leaving per-user display knobs untouched.
-    cfg.qualityPreset = GraphicsConfig::PresetUltra;
-    cfg.ApplyPresetToTiers(cfg.qualityPreset);
-    cfg.msaaSamples = 4;
-    cfg.alphaToCoverage = true;
-    cfg.renderScale = 1.0f;
+    // The saved config is applied as saved.
+    //
+    // This used to force the Ultra bundle + MSAA 4x + renderScale 1.0 here on EVERY
+    // boot, which made every quality row inert: the Graphics page wrote a value, the
+    // next launch discarded it, and the first-boot PickPresetFromRam autodetect was
+    // written to disk and then overridden three lines later in this same function.
+    // The comment justifying it ("the in-game Graphics page is currently unavailable")
+    // had outlived the condition -- GraphicsPage is mounted, tested, and reachable.
+    //
+    // Nobody's picture changes: GraphicsConfig::Migrate stamps that exact bundle into
+    // any file below v3, so an existing install carries forward what it was already
+    // being shown and starts honouring the file from the next change onward.
     ApplyGraphicsConfigToEngine(cfg);
 
     LOG_DEBUG(Graphics,
               "LoadGraphicsConfig: preset={} terrain={} objectLod={} shadow={} particles={} "
-              "vsync={} fpsCap={} brightness={} gamma={}",
+              "grass={} vsync={} fpsCap={} brightness={} gamma={}",
               (int)cfg.qualityPreset, (int)cfg.terrainDetail, (int)cfg.objectLod, (int)cfg.shadowQuality,
-              (int)cfg.particlesQuality, (int)cfg.vsync, cfg.fpsCap, cfg.brightness, cfg.gamma);
+              (int)cfg.particlesQuality, (int)cfg.grassQuality, (int)cfg.vsync, cfg.fpsCap, cfg.brightness,
+              cfg.gamma);
 }
 } // namespace
 

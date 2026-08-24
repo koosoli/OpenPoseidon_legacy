@@ -21,17 +21,23 @@ struct TierBundle
     GraphicsConfig::Tier objectLod;
     GraphicsConfig::Tier shadow;
     GraphicsConfig::Tier particles;
+    GraphicsConfig::Tier grass;
 };
 constexpr TierBundle kTierBundles[4] = {
-    // Low
-    {GraphicsConfig::TierLow, GraphicsConfig::TierLow, GraphicsConfig::TierOff, GraphicsConfig::TierOff},
+    // Low — grass Off. It is 28.6% of the GPU frame at Ultra, so it is the
+    // first thing a Low preset should stop paying for.
+    {GraphicsConfig::TierLow, GraphicsConfig::TierLow, GraphicsConfig::TierOff, GraphicsConfig::TierOff,
+     GraphicsConfig::TierOff},
     // Medium
-    {GraphicsConfig::TierMedium, GraphicsConfig::TierMedium, GraphicsConfig::TierLow, GraphicsConfig::TierLow},
+    {GraphicsConfig::TierMedium, GraphicsConfig::TierMedium, GraphicsConfig::TierLow, GraphicsConfig::TierLow,
+     GraphicsConfig::TierLow},
     // High
-    {GraphicsConfig::TierHigh, GraphicsConfig::TierHigh, GraphicsConfig::TierMedium, GraphicsConfig::TierLow},
+    {GraphicsConfig::TierHigh, GraphicsConfig::TierHigh, GraphicsConfig::TierMedium, GraphicsConfig::TierLow,
+     GraphicsConfig::TierHigh},
     // Ultra — Shadow caps at High because the "Ultra shadow" tier
     // needs a shadow-distance bias hook that doesn't exist yet.
-    {GraphicsConfig::TierUltra, GraphicsConfig::TierUltra, GraphicsConfig::TierHigh, GraphicsConfig::TierHigh},
+    {GraphicsConfig::TierUltra, GraphicsConfig::TierUltra, GraphicsConfig::TierHigh, GraphicsConfig::TierHigh,
+     GraphicsConfig::TierUltra},
 };
 
 bool IsValidTier(int v, bool allowOff)
@@ -109,9 +115,28 @@ bool GraphicsConfig::Migrate(int refreshHz)
         gamma = 1.2f;
 
     // A cap of 0 below v2 is indistinguishable from the old default, so it is
-    // taken as never set.  From v2 on it is the user's Unlimited and survives.
-    if (fpsCap == 0)
+    // taken as never set.  From v2 on it is the user's Unlimited and survives --
+    // which is why this is guarded by the version and not just by the value. It was
+    // unguarded while kVersion was 2, where `version >= kVersion` above made it
+    // unreachable for a v2 file; the v3 bump below made it reachable again and it
+    // would have silently converted every deliberate "Unlimited" into a cap.
+    if (version < 2 && fpsCap == 0)
         fpsCap = FpsCapForRefreshRate(refreshHz);
+
+    // v3: the tier rows became live.  Until now LoadAndApplyGraphicsConfig overwrote
+    // them with the Ultra bundle on EVERY boot, so whatever a pre-v3 file says, what
+    // the player has actually been looking at is Ultra -- including on first boot,
+    // where the RAM autodetect was written to disk and then overridden in the same
+    // function.  Stamping the bundle here preserves the picture they have today; from
+    // v3 on the file is honoured, so the Options page and the autodetect both work.
+    if (version < 3)
+    {
+        ApplyPresetToTiers(PresetUltra);
+        qualityPreset = PresetUltra;
+        msaaSamples = 4;
+        alphaToCoverage = true;
+        renderScale = 1.0f;
+    }
 
     version = kVersion;
     return true;
@@ -141,6 +166,7 @@ void GraphicsConfig::ApplyPresetToTiers(Preset preset)
     objectLod = b.objectLod;
     shadowQuality = b.shadow;
     particlesQuality = b.particles;
+    grassQuality = b.grass;
 }
 
 GraphicsConfig::Preset GraphicsConfig::DerivePresetFromTiers() const
@@ -149,7 +175,7 @@ GraphicsConfig::Preset GraphicsConfig::DerivePresetFromTiers() const
     {
         const TierBundle& b = kTierBundles[p];
         if (terrainDetail == b.terrain && objectLod == b.objectLod && shadowQuality == b.shadow &&
-            particlesQuality == b.particles)
+            particlesQuality == b.particles && grassQuality == b.grass)
             return static_cast<Preset>(p);
     }
     return PresetCustom;
@@ -187,6 +213,13 @@ bool GraphicsConfig::Normalize(const Environment& /*env*/)
     if (!IsValidTier(particlesQuality, /*allowOff=*/true))
     {
         particlesQuality = TierHigh;
+        changed = true;
+    }
+    // Off is allowed: no grass at all is a legitimate choice, and on a weak GPU
+    // it is worth 28.6% of the frame.
+    if (!IsValidTier(grassQuality, /*allowOff=*/true))
+    {
+        grassQuality = TierUltra;
         changed = true;
     }
 
@@ -248,6 +281,8 @@ bool GraphicsConfig::Load(const std::string& path)
         shadowQuality = static_cast<Tier>((int)*e);
     if (auto* e = cfg.FindEntry("particlesQuality"))
         particlesQuality = static_cast<Tier>((int)*e);
+    if (auto* e = cfg.FindEntry("grassQuality"))
+        grassQuality = static_cast<Tier>((int)*e);
     if (auto* e = cfg.FindEntry("vsync"))
         vsync = static_cast<VsyncMode>((int)*e);
     if (auto* e = cfg.FindEntry("fpsCap"))
@@ -276,6 +311,7 @@ bool GraphicsConfig::Save(const std::string& path) const
     cfg.Add("objectLod", static_cast<int>(objectLod));
     cfg.Add("shadowQuality", static_cast<int>(shadowQuality));
     cfg.Add("particlesQuality", static_cast<int>(particlesQuality));
+    cfg.Add("grassQuality", static_cast<int>(grassQuality));
     cfg.Add("vsync", static_cast<int>(vsync));
     cfg.Add("fpsCap", fpsCap);
     cfg.Add("alphaToCoverage", alphaToCoverage ? 1 : 0);

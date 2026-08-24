@@ -70,6 +70,16 @@ public:
 	Tier      shadowQuality    = TierHigh;      // High caps Shadow tier; "Ultra shadow" needs
 	                                             // shadow-distance bias hook that doesn't exist yet
 	Tier      particlesQuality = TierHigh;
+	// Grass / ground clutter.  Ultra is the historical shipped behaviour (the
+	// renderer's "ultra dense" default: full density, 41 m detail ring), kept as
+	// the top of the ladder so an existing install renders exactly as before.
+	//
+	// This row exists because grass was measured at 9.55 ms of a 33.40 ms GPU
+	// frame -- 28.6% -- on perf_abel at 1920x1080, and until now there was no way
+	// to spend that anywhere else: no options row, no persisted field, only the
+	// undocumented WGR_GRASS* environment variables.  It is the largest single
+	// lever in the renderer and it was the one the player could not reach.
+	Tier      grassQuality     = TierUltra;
 	VsyncMode vsync            = VsyncOn;
 	int       fpsCap           = 0;             // 0 = Unlimited; valid: 0/30/60/90/120/144/240
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
@@ -86,7 +96,7 @@ public:
 
 	// Schema version of the persisted file.  Load resets this to 0 first, so a
 	// file written before versioning reads back as 0 and Migrate can act on it.
-	static constexpr int kVersion = 2;
+	static constexpr int kVersion = 3;
 	int       version          = kVersion;
 
 	// Bring a loaded config up to kVersion.  Returns true when the caller needs

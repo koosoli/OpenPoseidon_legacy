@@ -38,6 +38,9 @@ const GraphicsRowText kRows[] = {
      "Whether dynamic objects and vehicles cast shadows."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_PARTICLES", "STR_DISP_MAIN_OPT_GRAPHICS_PARTICLES_DESC", "Particles & Volumetrics",
      "Cloudlets smoke dust and muzzle flashes."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_GRASS", "STR_DISP_MAIN_OPT_GRAPHICS_GRASS_DESC", "Grass Detail",
+     "Density and draw distance of ground clutter. The most expensive single setting: Off is worth about a quarter of "
+     "the GPU frame. Lower it first if the frame rate is short."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_VSYNC", "STR_DISP_MAIN_OPT_GRAPHICS_VSYNC_DESC", "VSync",
      "Synchronise frame presentation to the monitor refresh. Adaptive falls back to On when the GPU cannot keep up."},
     {"STR_DISP_MAIN_OPT_GRAPHICS_FPS_CAP", "STR_DISP_MAIN_OPT_GRAPHICS_FPS_CAP_DESC", "FPS Cap",
@@ -209,6 +212,11 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
             return {532, m_page->m_shadowCStrs.data(), 4};
         case kRowParticles:
             return {542, m_page->m_particlesCStrs.data(), 3};
+        case kRowGrass:
+            // 632: a fresh control id. The others step by 10 from 502 in row order, but
+            // they are identities rather than positions, so appending one keeps every
+            // existing row's id stable instead of renumbering the tail.
+            return {632, m_page->m_grassCStrs.data(), 5};
         case kRowVsync:
             return {552, m_page->m_vsyncCStrs.data(), 3};
         case kRowFpsCap:
@@ -256,6 +264,9 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
         case kRowShadow:
             // TierOff (0) → 0; TierLow..High (1..3) → 1..3.
             return (int)c.shadowQuality;
+        case kRowGrass:
+            // TierOff (0) -> 0; TierLow..TierUltra (1..4) -> 1..4.
+            return (int)c.grassQuality;
         case kRowParticles:
         {
             // Off (0) → 0; Low (1) → 1; High (3) → 2.
@@ -361,6 +372,14 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
                     break;
             }
             break;
+        case kRowGrass:
+            // Index 0..4 -> TierOff..TierUltra, one to one.
+            if (v >= 0 && v < 5)
+            {
+                c.grassQuality = static_cast<GraphicsConfig::Tier>(v);
+                tierTouched = true;
+            }
+            break;
         case kRowAntiAliasing:
             c.msaaSamples = GraphicsPage::MsaaIndexToSamples(v);
             break;
@@ -457,6 +476,14 @@ void GraphicsPage::RefreshLocalizedChoices()
     m_particlesLabels[2] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_HIGH");
     for (size_t i = 0; i < m_particlesLabels.size(); ++i)
         m_particlesCStrs[i] = m_particlesLabels[i].c_str();
+
+    m_grassLabels[0] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
+    m_grassLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_LOW");
+    m_grassLabels[2] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_MEDIUM");
+    m_grassLabels[3] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_HIGH");
+    m_grassLabels[4] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_ULTRA");
+    for (size_t i = 0; i < m_grassLabels.size(); ++i)
+        m_grassCStrs[i] = m_grassLabels[i].c_str();
 
     m_msaaLabels[0] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
     m_msaaLabels[1] = "2x";
