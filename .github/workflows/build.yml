@@ -205,7 +205,7 @@ jobs:
       - name: Write Preview-0 WGPU manifest
         run: >
           python scripts/write_preview0_manifest.py
-          --exe "${{ env.CWR_DIST_DIR }}/PoseidonGame.exe"
+          --exe "${{ env.CWR_DIST_DIR }}/openposeidon.exe"
           --dll "${{ env.CWR_BUILD_DIR }}/engine/WgpuRenderer/wgpu_renderer.dll"
           --cmake-cache "${{ env.CWR_BUILD_DIR }}/CMakeCache.txt"
           --out "${{ env.CWR_BUILD_DIR }}/preview0-manifest.json"
@@ -215,7 +215,7 @@ jobs:
         with:
           name: ${{ env.CWR_ARTIFACT_PREFIX }}-Game-${{ steps.build_metadata.outputs.sha_short }}
           path: |
-            ${{ env.CWR_DIST_DIR }}/PoseidonGame.exe
+            ${{ env.CWR_DIST_DIR }}/openposeidon.exe
             ${{ env.CWR_DIST_DIR }}/OpenAL32.dll
             ${{ env.CWR_DIST_DIR }}/OpenAL-Soft.LICENSE.txt
           if-no-files-found: error
@@ -225,7 +225,7 @@ jobs:
         with:
           name: Preview0-WGPU-${{ steps.build_metadata.outputs.sha_short }}
           path: |
-            ${{ env.CWR_DIST_DIR }}/PoseidonGame.exe
+            ${{ env.CWR_DIST_DIR }}/openposeidon.exe
             ${{ env.CWR_BUILD_DIR }}/engine/WgpuRenderer/wgpu_renderer.dll
             ${{ env.CWR_BUILD_DIR }}/preview0-manifest.json
             docs/roadmap/evidence

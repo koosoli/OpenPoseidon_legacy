@@ -98,8 +98,13 @@ if(MSVC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND CMAKE_CXX_COMPILER_FRONTEN
     )
 endif()
 
+# The shipped client is openposeidon.exe. The CMake TARGET stays PoseidonGame so every
+# script, preset and CI job that builds it by target name keeps working; only the file on
+# disk is renamed. One name, deliberately: this folder is shared by several worktrees, and
+# an earlier attempt was parked because it ADDED a second name rather than replacing the
+# first, which widened the mismatched-pair ambiguity instead of closing it.
 set_target_properties(PoseidonGame PROPERTIES
-    OUTPUT_NAME "PoseidonGame"
+    OUTPUT_NAME "openposeidon"
 )
 
 include(${CMAKE_SOURCE_DIR}/cmake/DistCopy.cmake)

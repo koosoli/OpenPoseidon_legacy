@@ -7,8 +7,8 @@
 // library or an unreferenced static archive, where the export could be stripped.
 //
 // Verify after a Windows build with:
-//   llvm-readobj --coff-exports build/<preset>/.../PoseidonGame.exe
-//   dumpbin /exports PoseidonGame.exe
+//   llvm-readobj --coff-exports build/<preset>/.../openposeidon.exe
+//   dumpbin /exports openposeidon.exe
 // Both names must appear; Tetris links with /OPT:REF /OPT:ICF, so check it too.
 #ifdef _WIN32
 #include <cstdint>

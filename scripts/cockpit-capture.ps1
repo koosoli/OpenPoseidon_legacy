@@ -163,8 +163,27 @@ for ($i = 1; $i -lt $CaptureSeconds.Count; $i++) {
 }
 
 if (-not (Test-Path -LiteralPath $GameDir)) { throw "Game directory not found: $GameDir" }
-$gameExe = Join-Path $GameDir 'ColdWarAssault.exe'
-if (-not (Test-Path -LiteralPath $gameExe)) { throw "Game executable not found: $gameExe" }
+$gameExe = Join-Path $GameDir 'openposeidon.exe'
+if (-not (Test-Path -LiteralPath $gameExe)) {
+    throw "Game executable not found: $gameExe`n  Deploy first: .\scripts\Deploy.ps1"
+}
+# A number nobody can attribute to a commit is not a measurement. The ABI handshake will
+# NOT catch a version skew - it only trips on a struct-layout change, so a DLL many commits
+# from the exe loads perfectly cleanly and simply lacks those commits.
+#
+# File mtimes cannot answer this: Copy-Item preserves the source timestamp, so an
+# incremental deploy that did not need to rebuild the DLL legitimately leaves it hours
+# older than the exe. DEPLOYED-FROM.txt is the authority - Deploy.ps1 stamps it with the
+# branch and commit of the pair it just wrote, and it is the ONLY record of what these two
+# files actually are. Refuse to benchmark an unstamped install, and put the commit in the
+# run metadata so the numbers carry it.
+$stampPath = Join-Path $GameDir 'DEPLOYED-FROM.txt'
+if (-not (Test-Path -LiteralPath $stampPath)) {
+    throw "$GameDir has no DEPLOYED-FROM.txt, so there is no record of which commit these binaries are. Deploy with .\scripts\Deploy.ps1 (which stamps it) before benchmarking."
+}
+$deployedFrom = (Get-Content -LiteralPath $stampPath -TotalCount 1).Trim()
+Write-Host "Measuring: $deployedFrom" -ForegroundColor Cyan
+
 if ($Backend -eq 'wgpu') {
     $rendererDll = Join-Path $GameDir 'wgpu_renderer.dll'
     if (-not (Test-Path -LiteralPath $rendererDll)) {
@@ -415,7 +434,7 @@ $exitCode = -1
 $timedOut = $false
 $elapsed = 0.0
 try {
-    Write-Verbose "ColdWarAssault.exe $argumentString"
+    Write-Verbose "openposeidon.exe $argumentString"
     $startedAt = Get-Date
     $process = Start-Process -FilePath $gameExe -ArgumentList $argumentString -WorkingDirectory $GameDir `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru

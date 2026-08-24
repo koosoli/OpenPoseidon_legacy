@@ -2,13 +2,15 @@
 .SYNOPSIS
     Copy the built game binaries into the retail Arma: Cold War Assault install.
 .DESCRIPTION
-    Deploys exactly two files: PoseidonGame.exe and wgpu_renderer.dll. Both, always
+    Deploys exactly two files: openposeidon.exe and wgpu_renderer.dll. Both, always
     - copying only one of them gives an instant "Entry Point Not Found" on launch,
     because the exe and the cdylib share a hand-written C ABI that changes between
     builds. That failure mode is why this is a script and not a Copy-Item you type.
 
-    Nothing else is written, and no ColdWarAssault.exe / PoseidonGame.exe is produced
-    or touched: PoseidonGame.exe is the only binary this project ships.
+    Nothing else is written, and no ColdWarAssault.exe is produced or touched:
+    openposeidon.exe is the only binary this project ships. There is deliberately ONE
+    name. The folder is shared by several worktrees, and every mismatched-pair incident
+    so far started with a second exe in it wearing a name someone recognised.
 
     Run Install.ps1 once per game install first (it copies BIN, fonts, dtaExt and the
     logo PBO out of the Demo); skipping it degrades silently into a dead Options menu.
@@ -17,7 +19,7 @@
 .PARAMETER GameDir
     Target install. Defaults to the retail install found via the Steam registry.
 .PARAMETER PruneStale
-    Also delete openposeidon.exe and its PDB, left behind by the parked rename.
+    Also delete the legacy PoseidonGame.exe and its PDB, left behind by the old name.
     Off by default - the retail ColdWarAssault.exe is never touched either way.
 .EXAMPLE
     .\scripts\Deploy.ps1
@@ -51,7 +53,7 @@ $distDir  = Join-Path $repoRoot "dist\x64-win-$suffix"
 # The two files that must move together. Order is deliberate: the DLL lands first, so
 # a half-finished deploy leaves the OLD exe against the NEW dll (which fails loudly at
 # startup) rather than a new exe against an old dll (which can fail much later).
-$payload = @('wgpu_renderer.dll', 'PoseidonGame.exe')
+$payload = @('wgpu_renderer.dll', 'openposeidon.exe')
 
 foreach ($name in $payload)
 {
@@ -142,13 +144,13 @@ foreach ($name in $payload)
 
 if ($PruneStale)
 {
-    foreach ($name in @('openposeidon.exe', 'openposeidon.pdb'))
+    foreach ($name in @('PoseidonGame.exe', 'PoseidonGame.pdb'))
     {
         $stale = Join-Path $GameDir $name
         if (Test-Path -LiteralPath $stale)
         {
             Remove-Item -LiteralPath $stale -Force
-            Write-Host "  - $name (stale, pre-rename)"
+            Write-Host "  - $name (legacy name, superseded by openposeidon.exe)"
         }
     }
 }
@@ -156,10 +158,10 @@ else
 {
     # Warn rather than delete: an old PoseidonGame.exe next to a new wgpu_renderer.dll
     # is exactly the ABI mismatch above, and someone's desktop shortcut may point at it.
-    $stale = Join-Path $GameDir 'openposeidon.exe'
+    $stale = Join-Path $GameDir 'PoseidonGame.exe'
     if (Test-Path -LiteralPath $stale)
     {
-        Write-Warning "openposeidon.exe is still in the game folder. It came from the parked rename and is NOT matched to this wgpu_renderer.dll; launching it is the mismatched-pair failure. Re-run with -PruneStale to remove it."
+        Write-Warning "PoseidonGame.exe is still in the game folder. That is the OLD name for this client, it is NOT matched to the wgpu_renderer.dll just deployed, and launching it is the mismatched-pair failure. Re-run with -PruneStale to remove it."
     }
 }
 
@@ -170,7 +172,7 @@ $stampLine = "{0} {1} {2} deploy-ps1" -f $branch, $commit, (Get-Date -Format 'yy
 Set-Content -LiteralPath $stampPath -Value $stampLine -Encoding utf8
 Write-Host "Stamped: $stampLine"
 
-Write-Host "`nDone. Launch: $(Join-Path $GameDir 'PoseidonGame.exe')" -ForegroundColor Green
+Write-Host "`nDone. Launch: $(Join-Path $GameDir 'openposeidon.exe')" -ForegroundColor Green
 
 # ColdWarAssault.exe is the RETAIL binary and this script deliberately never touches it, so it
 # only ever gets older. It also sits in the same folder, sorts first alphabetically, and is the

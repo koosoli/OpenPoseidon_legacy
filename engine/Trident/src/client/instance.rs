@@ -345,10 +345,12 @@ pub fn find_game_binary(game_dir: &Path, named: Option<&str>) -> Result<PathBuf>
         }
     }
 
-    let defaults: [&str; 2] = if cfg!(windows) {
-        ["PoseidonGame.exe", "OFPR.exe"]
+    // Search order, not a deploy target: the shipped client is `openposeidon`, but
+    // `PoseidonGame` stays in the list so an install made before the rename still resolves.
+    let defaults: [&str; 3] = if cfg!(windows) {
+        ["openposeidon.exe", "PoseidonGame.exe", "OFPR.exe"]
     } else {
-        ["PoseidonGame", "OFPR"]
+        ["openposeidon", "PoseidonGame", "OFPR"]
     };
     for name in &defaults {
         if let Some(found) = locate(&with_ext(name)) {

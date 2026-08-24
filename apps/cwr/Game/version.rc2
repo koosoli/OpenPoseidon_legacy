@@ -38,7 +38,7 @@ BEGIN
             VALUE "FileVersion", STRFILEVER
             VALUE "InternalName", INTERNALNAME
             VALUE "LegalTrademarks", "\0"
-            VALUE "OriginalFilename", "CWA-CE.exe\0"
+            VALUE "OriginalFilename", "openposeidon.exe\0"
             VALUE "PrivateBuild", "\0"
             VALUE "ProductName", PRODUCTNAME
             VALUE "ProductVersion", STRPRODUCTVER
