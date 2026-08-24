@@ -6360,6 +6360,10 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Shadow cascade 3",                // WGR_GPU_TIMER_SHADOW_CASCADE_3
         "Far tier: cull (compute)",        // WGR_GPU_TIMER_FAR_CULL (sweeps every placement)
         "Far tier: proxy draw",            // WGR_GPU_TIMER_FAR_DRAW (needs in-pass timestamps)
+        "Sky: cloud march",                // WGR_GPU_TIMER_CLOUD_MARCH
+        "Sky: cloud composite",            // WGR_GPU_TIMER_CLOUD_COMPOSITE
+        "[container] ops pre-water",       // WGR_GPU_TIMER_OPS_PRE_WATER (incl. terrain + grass)
+        "[container] ops post-water",      // WGR_GPU_TIMER_OPS_POST_WATER (transparents)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }

@@ -2323,7 +2323,16 @@ class Engine : public IGraphicsEngine
         kFarGpuRegionCull = 46,
         kFarGpuRegionDraw = 47,
         kFarGpuRegionEnd = 48,
-        kGpuRegionEnd = 48,
+        // COLOUR SUB-PASS ATTRIBUTION. The container measured 12.824 ms on perf_abel @1920x1080
+        // with every leaf inside it summing to 3.777 -- 9.05 ms, 70% of the pass, named by
+        // nothing. These four name it: the cloud march and its composite, and the two replay
+        // containers. CPU-replayed direct draws are DERIVED (pre-water minus terrain minus
+        // grass) because Plan3dOp::Draw3D is per-draw and a region is one bracket per frame.
+        kCloudGpuRegionMarch = 48,
+        kCloudGpuRegionComposite = 49,
+        kOpsGpuRegionPreWater = 50,
+        kOpsGpuRegionPostWater = 51,
+        kGpuRegionEnd = 52,
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,
@@ -2331,6 +2340,16 @@ class Engine : public IGraphicsEngine
         kGrassGpuRegionPrepass = 22,
         kNoGpuRegion = -1,
     };
+
+    // Whether a region DELIBERATELY overlaps regions inside it, so a reader knows its
+    // milliseconds are an envelope and not an addend. Was an `i >= begin && i < end` range
+    // test at the one call site, which silently stopped being true the moment a container was
+    // added outside that contiguous block - as the two ops containers are.
+    static constexpr bool IsGpuTimerContainer(int region)
+    {
+        return (region >= kObjectGpuContainerBegin && region < kObjectGpuContainerEnd) ||
+               region == kOpsGpuRegionPreWater || region == kOpsGpuRegionPostWater;
+    }
 
     // PERF-005 - region nesting, and the ONLY correct way to total the timing array.
     //
@@ -2355,8 +2374,12 @@ class Engine : public IGraphicsEngine
             return kObjectGpuContainerBegin;
         // Inside the 3D colour sub-pass. The far tier draws there too, immediately after the
         // GPU-driven objects; its CULL is a standalone compute pass and stays outermost.
+        // Clouds and the two replay containers are inside it as well; a container may itself
+        // be contained, and all the sum rule needs is that neither is outermost.
         if (region == kTerrainGpuRegionColor || region == kGrassGpuRegionColor ||
-            region == kFarGpuRegionDraw ||
+            region == kFarGpuRegionDraw || region == kCloudGpuRegionMarch ||
+            region == kCloudGpuRegionComposite || region == kOpsGpuRegionPreWater ||
+            region == kOpsGpuRegionPostWater ||
             (region >= kObjectGpuRegionBegin + 5 && region <= kObjectGpuRegionBegin + 6))
             return kObjectGpuContainerBegin + 1;
         // Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so its

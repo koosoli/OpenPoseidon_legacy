@@ -3744,7 +3744,22 @@ impl Renderer {
                             .draw(&mut pass, camera_bind, cam_off, &self.gpu_timers);
                     }
                 }
+                // CONTAINER: this replay also draws terrain and grass, which have their own
+                // regions. Its point is the CPU-replayed direct draws, which cannot have one
+                // (Plan3dOp::Draw3D is per-draw), so they read as this minus those two.
+                //
+                // Gated on `time_segment` for the reason spelled out at the segment container
+                // above: this block runs once per plan segment and an ungated bracket lets the
+                // LAST one -- the post-Resolve UI segment -- win the single query slot. Left
+                // ungated it reported 0.000 ms for a replay containing 3.8 ms of grass.
+                if time_segment {
+                    self.gpu_timers
+                        .begin_pass(&mut pass, TimerRegion::OpsPreWater);
+                }
                 render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed);
+                if time_segment {
+                    self.gpu_timers.end_pass(&mut pass, TimerRegion::OpsPreWater);
+                }
                 // Debug cull-sphere wireframes (ImGui Culling tab) LAST in the sub-pass: their
                 // depth test is Always, but anything drawn after them (terrain in render_ops)
                 // would still overwrite their colour — so they must follow every world draw to
@@ -3927,6 +3942,10 @@ impl Renderer {
                 // march in the post chain can reuse it rather than recording its own.
                 self.frame_depth_final_resolved = true;
                 if let Some(depth_view) = self.gfx3d.water_depth_view().cloned() {
+                    // Encoder-level brackets: render_cloud records its own passes, and the
+                    // composite below opens one here. Both were unmeasured and both sit inside
+                    // the colour sub-pass whose 9 ms gap this is chasing.
+                    self.gpu_timers.begin(&mut encoder, TimerRegion::CloudMarch);
                     self.sky.render_cloud(
                         &self.device,
                         &mut encoder,
@@ -3934,6 +3953,9 @@ impl Renderer {
                         self.config.width,
                         self.config.height,
                     );
+                    self.gpu_timers.end(&mut encoder, TimerRegion::CloudMarch);
+                    self.gpu_timers
+                        .begin(&mut encoder, TimerRegion::CloudComposite);
                     encoder.push_debug_group("wgr_cloud_composite");
                     let mut cpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_cloud_composite"),
@@ -3954,6 +3976,8 @@ impl Renderer {
                     self.sky.composite_cloud(&mut cpass);
                     drop(cpass);
                     encoder.pop_debug_group();
+                    self.gpu_timers
+                        .end(&mut encoder, TimerRegion::CloudComposite);
                 }
             }
 
@@ -3991,6 +4015,10 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
+                if time_segment {
+                    self.gpu_timers
+                        .begin_pass(&mut pass, TimerRegion::OpsPostWater);
+                }
                 render_ops(
                     self,
                     &mut pass,
@@ -3999,6 +4027,10 @@ impl Renderer {
                     false,
                     prepassed,
                 );
+                if time_segment {
+                    self.gpu_timers
+                        .end_pass(&mut pass, TimerRegion::OpsPostWater);
+                }
                 if start == 0 && !self.suppress_world_objects && self.cull_debug_draw {
                     let cam_off = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
                     self.gfx3d.draw_cull_spheres(&mut pass, cam_off);

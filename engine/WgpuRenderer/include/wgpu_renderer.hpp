@@ -1282,7 +1282,17 @@ enum WgrGpuTimerRegion : uint32_t
      * sweep scales with the world's placement count, the draw with what survived sub-pixel. */
     WGR_GPU_TIMER_FAR_CULL = 46,
     WGR_GPU_TIMER_FAR_DRAW = 47,
-    WGR_GPU_TIMER_REGION_COUNT = 48,
+    /* Attributing the 3D colour sub-pass. It measured 12.824 ms on perf_abel @1920x1080 while
+     * every leaf inside it summed to 3.777, leaving 9.05 ms - 70% of the pass - named by
+     * nothing. The unbracketed work was the cloud march, its composite, and the two replays. */
+    WGR_GPU_TIMER_CLOUD_MARCH = 48,
+    WGR_GPU_TIMER_CLOUD_COMPOSITE = 49,
+    /* CONTAINERS. OpsPreWater also encloses terrain + grass. The CPU-replayed direct draws get
+     * no region of their own (Plan3dOp::Draw3D is per-draw; a region is one bracket per frame),
+     * so read them as OPS_PRE_WATER - TERRAIN_COLOR - GRASS_COLOR. */
+    WGR_GPU_TIMER_OPS_PRE_WATER = 50,
+    WGR_GPU_TIMER_OPS_POST_WATER = 51,
+    WGR_GPU_TIMER_REGION_COUNT = 52,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -1321,6 +1331,13 @@ constexpr uint32_t WgrGpuTimerContainedBy(uint32_t region)
         /* The far tier draws inside the same colour sub-pass, immediately after the GPU-driven
          * objects. Its CULL is outermost (a standalone compute pass) and is not listed here. */
         case WGR_GPU_TIMER_FAR_DRAW:
+        /* Clouds march and composite inside the colour sub-pass, after water. The two replay
+         * containers are also inside it -- a container may itself be contained; what matters
+         * for the sum rule is only that neither is outermost. */
+        case WGR_GPU_TIMER_CLOUD_MARCH:
+        case WGR_GPU_TIMER_CLOUD_COMPOSITE:
+        case WGR_GPU_TIMER_OPS_PRE_WATER:
+        case WGR_GPU_TIMER_OPS_POST_WATER:
             return WGR_GPU_TIMER_OBJ_COLOR_SEGMENT;
         /* Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so
          * its one region is already inside the per-cascade brackets. Attributed to cascade 0

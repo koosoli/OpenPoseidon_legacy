@@ -104,6 +104,19 @@ pub enum Region {
     // with whatever survived sub-pixel rejection.
     FarCull = 46,
     FarDraw = 47,
+    // --- Attributing the 3D colour sub-pass. It measured 12.824 ms on perf_abel @1920x1080
+    // while every leaf inside it summed to 3.777 (grass 3.400, terrain 0.242, objects solid
+    // 0.090, objects alpha 0.045): 9.05 ms, 70% of the pass, belonged to no region at all.
+    // What was unbracketed in there was the cloud march + its composite, and the two
+    // CPU-replayed op replays. Hence these four.
+    CloudMarch = 48,     // depth-aware over-scene cloud march (low-res)
+    CloudComposite = 49, // upsample + composite of the cloud buffer
+    // CONTAINERS, like the segment pair above: the pre-water replay also encloses terrain and
+    // grass, which have their own regions. The CPU-replayed direct draws have no region of
+    // their own and cannot get one -- Plan3dOp::Draw3D is per-draw and a region is one
+    // begin/end per frame -- so their cost is DERIVED: OpsPreWater - TerrainColor - GrassColor.
+    OpsPreWater = 50,  // CONTAINER: opaque replay (terrain + grass + CPU-replayed direct)
+    OpsPostWater = 51, // CONTAINER: the depth-sorted transparent replay
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -116,7 +129,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 48;
+pub const REGION_COUNT: usize = 52;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.

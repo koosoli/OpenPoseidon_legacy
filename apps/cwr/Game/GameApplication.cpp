@@ -126,8 +126,7 @@ bool WriteCaptureMetrics(const std::string& path)
         // elsewhere because the only readers of this file are scripts:
         //     frame total ~= sum of rows where contained_by == -1
         cJSON_AddNumberToObject(region, "contained_by", (double)Engine::GpuTimerContainedBy(i));
-        cJSON_AddBoolToObject(region, "container",
-                              i >= Engine::kObjectGpuContainerBegin && i < Engine::kObjectGpuContainerEnd);
+        cJSON_AddBoolToObject(region, "container", Engine::IsGpuTimerContainer(i));
         if (i < cpuCount)
             cJSON_AddNumberToObject(region, "cpu_milliseconds", cpuMs[i]);
         cJSON_AddItemToArray(regions, region);
