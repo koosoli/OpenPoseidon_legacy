@@ -440,6 +440,40 @@ GameValue TriPerfStats(const GameState* /*state*/, GameValuePar /*arg*/)
     return GameValue(buf);
 }
 
+/// triPerfSeries — the frame-profiler ring as a PER-FRAME series of total frame times
+/// in milliseconds, oldest first, at the profiler's own float resolution.
+///
+/// This exists because the only per-frame frame-time data anyone could get was the
+/// difference between two engine LOG TIMESTAMPS, which are whole milliseconds -- about
+/// 4% of a frame at 38 fps.  At that resolution a perfectly steady 26.5 ms frame reads
+/// as 26, 27, 26, 27 forever, which is indistinguishable from the "every second frame
+/// does more work" defect people actually report.  Chasing that report on perf_abel
+/// produced a 69% median-flip rate and a lag-1 autocorrelation of -0.47 -- textbook
+/// alternation, and pure rounding.  triPerfStats cannot settle it either: avg/p95/max
+/// over a 256-frame ring say nothing about the ORDER of the frames.
+///
+/// The series is logged as well as returned, because the analysis tooling reads logs.
+GameValue TriPerfSeries(const GameState* /*state*/, GameValuePar /*arg*/)
+{
+    Dev::FrameProfiler& perf = Dev::GFrameProfiler();
+    const int n = perf.FrameCount();
+    if (n == 0)
+        return GameValue("FAIL:no_frames");
+
+    std::string out;
+    out.reserve(static_cast<size_t>(n) * 8 + 16);
+    char num[32];
+    // Frame(0) is the NEWEST, so walk the ring backwards to emit oldest-first: the
+    // order is the entire point of this command.
+    for (int i = n - 1; i >= 0; --i)
+    {
+        snprintf(num, sizeof(num), "%s%.3f", out.empty() ? "" : ",", perf.Frame(i).totalMs);
+        out += num;
+    }
+    LOG_INFO(Core, "[tri] triPerfSeries n={} ms={}", n, out);
+    return GameValue(out.c_str());
+}
+
 /// triPerfReset — clear the frame-profiler ring (start a fresh measurement window).
 GameValue TriPerfReset(const GameState* /*state*/, GameValuePar /*arg*/)
 {

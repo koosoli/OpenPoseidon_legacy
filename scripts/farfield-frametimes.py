@@ -19,15 +19,22 @@ within a phase is the frame time.
     S = static, measured
     M = moving, measured
 
-WHAT THIS CANNOT ANSWER
------------------------
+WHAT THE FT LINES CANNOT ANSWER
+-------------------------------
 Log timestamps are whole milliseconds, which at 38 fps is 4% of a frame.  A frame period
 that is not near a whole number of ms is reported as an alternating pair of integers --
-a perfectly steady 26.5 ms frame reads as 26, 27, 26, 27 -- so this trace CANNOT be used
-to decide whether the engine does more work on alternate frames.  It looks exactly like
-the real defect.  The report warns when the mean lands near a half-millisecond; settling
-the question needs sub-millisecond per-frame times, which FrameProfiler keeps as floats
-and does not currently export.
+a perfectly steady 26.5 ms frame reads as 26, 27, 26, 27 -- so the FT deltas CANNOT
+decide whether the engine does more work on alternate frames.  The report warns when the
+mean lands near a half-millisecond.
+
+`triPerfSeries` closes that gap: it dumps FrameProfiler's own float-millisecond ring
+(256 frames) at each phase end, and the "per-frame series" section below reports the
+flip rate and lag-1 autocorrelation from THAT.  Measured on perf_abel there is a real
+oscillation (flip 63.6%, r = -0.409 static; 61.7%, -0.397 moving) with an amplitude
+around 1.6-1.8 ms, ~6% of the frame.  It is NOT locked to frame parity -- even-index and
+odd-index means differ by 0.04 ms -- so it is a free-running beat rather than "extra work
+every second frame", which is what a CPU waiting on a GPU looks like (`swap` is 96.6% of
+the CPU frame on this scene).
 
 THE FRAME COUNTER IS WHY THIS CAN BE BELIEVED.  A script loop that ticks once per frame
 is an assumption, and the failure is silent in the flattering direction: if the loop ran
@@ -70,6 +77,11 @@ from pathlib import Path
 STAMP = re.compile(r"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]")
 FT = re.compile(r'"FT ([A-Z]) ([-0-9.eE]+)(?: ([-0-9.eE]+))?"')
 MARK = re.compile(r'"(FFCAM [^"]*)"')
+# FrameProfiler's own float-millisecond ring, emitted by triPerfSeries at each phase end.
+# This is the ONLY sub-millisecond per-frame data the engine exposes, and the only thing
+# that can decide whether frames alternate -- see the "WHAT THIS CANNOT ANSWER" note above.
+PERF_SERIES = re.compile(r"triPerfSeries n=(\d+) ms=([0-9.,]+)")
+
 RESIDENCY = re.compile(
     r"Modern object residency: centre=\((-?\d+), (-?\d+)\) window=(\d+) cells "
     r"requested=(\d+) resident=(\d+) created=(\d+) released=(\d+)(?: refused=(\d+))?")
@@ -128,6 +140,8 @@ class Run:
         self.intervals: dict[str, list[tuple[float, float, float, int]]] = {}
         self.coverage: dict[str, tuple[int, int]] = {}
         self.mission_span: dict[str, float] = {}
+        # triPerfSeries dumps, in the order they were logged: static then moving.
+        self.series: list[list[float]] = []
         self.notes: list[str] = []
 
 
@@ -153,6 +167,11 @@ def read_log(path: Path) -> Run:
             mark = MARK.search(line)
             if mark:
                 run.marks.append(f"{stamp.group(1)}  {mark.group(1)}")
+                continue
+
+            ser = PERF_SERIES.search(line)
+            if ser:
+                run.series.append([float(v) for v in ser.group(2).split(",") if v])
                 continue
 
             hit = FT.search(line)
@@ -350,16 +369,48 @@ def report(path: Path, args) -> int:
     #
     # That matters because it is indistinguishable, in this data, from the real defect
     # people report as "every second frame does more work".  Measured on perf_abel,
-    # static camera: consecutive frame deltas flipped across the median 69% of the time
-    # (50% is random) with a lag-1 autocorrelation of -0.47, which reads exactly like a
-    # strict every-other-frame alternation -- and the 2-, 4- and 8-frame spans all gave a
-    # per-frame time of 26.50 ms with the flip rate collapsing to 48.7% (random).  It was
-    # rounding, not the engine.  Turning vsync off changed nothing, which is what ruled
-    # out the other obvious explanation.
+    # static camera, the 1 ms trace gave a 69% median-flip rate and a lag-1
+    # autocorrelation of -0.47, which reads exactly like a strict alternation.
     #
-    # So: warn whenever the median lands near a half-millisecond, and NEVER conclude
-    # alternation from 1 ms data.  To settle it you need sub-millisecond per-frame times
-    # (FrameProfiler keeps them as floats; only avg/p95/max are currently exported).
+    # DO NOT conclude EITHER WAY from this data.  Rounding inflates the signal, and the
+    # first pass at this comment concluded -- wrongly -- that rounding was ALL of it.
+    # triPerfSeries (FrameProfiler's float ring) later showed a genuine oscillation
+    # underneath: flip 63.6%, lag-1 r = -0.409 on the same scene.  The 1 ms trace cannot
+    # separate the two, which is the whole point of the warning below; the per-frame
+    # series section further down is what settles it.
+    # The alternation question, answered from float data instead of guessed at from
+    # whole milliseconds. A strict every-other-frame pattern shows up as a HIGH flip rate
+    # AND a strongly negative lag-1 autocorrelation AND a per-frame time that stays put
+    # when you measure it over 2- and 4-frame spans. Rounding produces the first two on
+    # its own, which is why all three are printed.
+    if run.series:
+        print()
+        print("  --- per-frame series (triPerfSeries, FrameProfiler float ms) " + "-" * 17)
+        labels = [PHASE_NAMES.get(p, p) for p in ordered_phases if p in ("S", "M")]
+        for idx, series in enumerate(run.series):
+            name = labels[idx] if idx < len(labels) else f"series {idx}"
+            if len(series) < 8:
+                print(f"  {name:<8} only {len(series)} frames — too few to judge")
+                continue
+            ordered = sorted(series)
+            mean = sum(series) / len(series)
+            median = percentile(ordered, 50)
+            signs = [1 if v > median else (-1 if v < median else 0) for v in series]
+            pairs = [(a, b) for a, b in zip(signs, signs[1:]) if a and b]
+            flips = sum(1 for a, b in pairs if a != b)
+            var = sum((v - mean) ** 2 for v in series)
+            lag1 = (sum((series[i] - mean) * (series[i + 1] - mean)
+                        for i in range(len(series) - 1)) / var) if var else 0.0
+            flip_pct = 100.0 * flips / len(pairs) if pairs else float("nan")
+            print(f"  {name:<8} n={len(series):<4} median {median:6.2f} ms  "
+                  f"p99 {percentile(ordered, 99):6.2f}  worst {ordered[-1]:6.2f}  "
+                  f"flip {flip_pct:5.1f}%  lag-1 r {lag1:+.3f}")
+            # A real alternation needs both, and 50% flip is what independent noise gives.
+            if flip_pct > 60.0 and lag1 < -0.25:
+                print(f"           ^ ALTERNATING: consecutive frames differ systematically. "
+                      f"This is float data, so it is not a rounding artefact.")
+        print("  flip 50% + r near 0 = independent frame-to-frame noise, i.e. no alternation.")
+
     for phase in ordered_phases:
         # The MEAN, not the median: the median of a set of whole-millisecond deltas is
         # itself a whole number by construction, so it can never show the half-millisecond

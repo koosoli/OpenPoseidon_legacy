@@ -54,6 +54,14 @@
     triPerfReset is called at each phase boundary and triPerfStats at each phase end, so
     the log also carries an engine-side CPU phase breakdown per phase.
 
+    triPerfSeries is called at each phase end too, and it is the one that can answer
+    "does the engine alternate work between frames?".  The FT lines above are differences
+    between LOG TIMESTAMPS, which are whole milliseconds -- roughly 4% of a frame at
+    38 fps -- so a steady 26.5 ms frame reads as 26, 27, 26, 27 and looks exactly like a
+    strict every-other-frame alternation.  triPerfSeries dumps FrameProfiler's own
+    float-millisecond ring (the last 256 frames of the phase) in order, so the question
+    is decidable rather than an artefact of the trace's resolution.
+
 .PARAMETER Speed
     Metres per second of horizontal translation along -Azimuth.  0 gives a second static
     phase, which is the control that proves the moving phase's cost is the MOTION and not
@@ -281,6 +289,7 @@ logInfo format ["FT S %1 %2", _time, triFrameCount]
 ~0.001
 ? _time < _statend : goto "stat"
 _s = triPerfStats 0
+_q = triPerfSeries 0
 logInfo format ["FFCAM staticend t=%1 pos=%2", _time, getPos _cam]
 _r = triPerfReset 0
 
@@ -298,6 +307,7 @@ logInfo format ["FT M %1 %2", _time, triFrameCount]
 ~0.001
 ? _time < _moveend : goto "mov"
 _s = triPerfStats 0
+_q = triPerfSeries 0
 logInfo format ["FFCAM moveend t=%1 pos=%2 waypoints=%3", _time, getPos _cam, _wpn]
 logInfo "FFCAM done"
 exit
