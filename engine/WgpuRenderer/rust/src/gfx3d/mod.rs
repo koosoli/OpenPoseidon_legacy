@@ -4858,18 +4858,24 @@ impl Gfx3d {
             .zip(self.shadow_caster_bind.as_ref());
 
         // Which cascades get grass blades. C++ derives the mask from the cascade split
-        // distances and the grass reach (see the note at the draw_shadow call below);
-        // WGR_GRASS_SHADOW_CASCADES caps it further for A/B work only.
-        let grass_mask = pass.grass_cascade_mask;
-        let grass_shadow_cascades: usize = {
-            static ONCE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-            *ONCE.get_or_init(|| {
+        // distances and the grass reach (see the note at the draw_shadow call below).
+        //
+        // WGR_GRASS_SHADOW_CASCADES OVERRIDES the mask rather than intersecting it, so
+        // `=4` restores the old unconditional behaviour exactly and the optimisation can be
+        // A/B'd on one binary. Intersecting would have made the "off" arm impossible to
+        // express, which is how a change ends up shipped with no measured before-and-after.
+        let grass_mask: u32 = {
+            static ONCE: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+            let forced = *ONCE.get_or_init(|| {
                 std::env::var("WGR_GRASS_SHADOW_CASCADES")
                     .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or(MAX_CASCADES as usize)
-                    .min(MAX_CASCADES as usize)
-            })
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .map(|n| {
+                        let n = n.min(MAX_CASCADES);
+                        if n == 0 { 0 } else { (1u32 << n) - 1 }
+                    })
+            });
+            forced.unwrap_or(pass.grass_cascade_mask)
         };
         for c in 0..count.min(target.layers) as usize {
             // PERF-005: one region PER CASCADE. Shadows were the largest single unattributed
@@ -4990,7 +4996,7 @@ impl Gfx3d {
             // WGR_GRASS_SHADOW_CASCADES caps how many cascades receive them. Default 4 keeps
             // today's behaviour exactly; the point of the knob is to measure what the far
             // cascades actually contribute before changing what anyone sees.
-            if c < grass_shadow_cascades && (grass_mask & (1u32 << c)) != 0 {
+            if (grass_mask & (1u32 << c)) != 0 {
                 grass.draw_shadow(&mut rp, pass_bind, pass_ubo_off, timers);
             }
             // The pass must CLOSE before the encoder-level end timestamp — writing it while `rp`
