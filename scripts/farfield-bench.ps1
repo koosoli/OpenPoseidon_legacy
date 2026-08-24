@@ -111,7 +111,22 @@ param(
     [int]$Height = 0,
 
     # MISSION MODE only.  Gameplay frames to render before capturing.
-    [int]$ScreenshotDelay = 10,
+    #
+    # 900, not 10.  The profiler ring is 256 frames and the capture reports THAT ring, so
+    # the delay has to clear mission load AND asset streaming AND still leave 256 settled
+    # frames behind it, or the numbers describe the loading screen.
+    #
+    # Measured on perf_abel at 1920x1080, same binary, same scene, delay 10 vs delay 900:
+    #
+    #            sampled frames   avg fps   land:gnd avg   swap avg
+    #   delay 10       11            1.1       530 ms       370 ms
+    #   delay 900     256           25.9      0.55 ms      37.3 ms
+    #
+    # A thousandfold difference in the dominant phase. At 10 the capture is streaming
+    # fill-in; land:gnd peaks at 5.8 SECONDS. Every conclusion drawn from a mission-mode
+    # capture at the old default was drawn from the load, and nothing in the output said so
+    # -- `sampled_frames` was the only tell and it is not printed.
+    [int]$ScreenshotDelay = 900,
 
     # WORLD MODE trigger, in seconds of wall clock.  Negative = auto (0 for a stock
     # mission, 25 for a substituted world, which is past the 10-20 s streaming window).
@@ -484,6 +499,18 @@ try {
             if ($Backend -eq 'wgpu' -and (Test-JsonProperty -Object $metrics -Name 'renderer') -and
                 $metrics.renderer -notlike '*WGPU*') {
                 $problems += "renderer is '$($metrics.renderer)' but wgpu was requested"
+            }
+            # The profiler ring is 256 frames. A capture that sampled far fewer did not reach
+            # steady state - it caught mission load, where land:gnd alone runs into SECONDS
+            # and the whole breakdown describes streaming rather than gameplay. That capture
+            # looks completely normal otherwise: valid JSON, populated GPU regions, a
+            # plausible frame total. sampled_frames is the only tell, so test it here rather
+            # than trusting whoever reads the JSON to notice.
+            if (Test-JsonProperty -Object $metrics -Name 'cpu_frame_phases_ms') {
+                $sampled = $metrics.cpu_frame_phases_ms.sampled_frames
+                if ($sampled -lt 200) {
+                    $problems += "capture sampled only $sampled frames (ring holds 256), so it measures mission load, not gameplay. Raise -ScreenshotDelay."
+                }
             }
         }
 

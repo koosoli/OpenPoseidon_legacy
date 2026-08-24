@@ -24,6 +24,12 @@
 using namespace Poseidon::Dev;
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Foundation/Common/Win.h>
+#ifdef _WIN32
+// timeBeginPeriod/timeEndPeriod. WIN32_LEAN_AND_MEAN is defined project-wide
+// (top-level CMakeLists.txt), so <windows.h> does NOT pull in <mmsystem.h> and
+// these have to be asked for by name.
+    #include <timeapi.h>
+#endif
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/Font.hpp>
 
@@ -44,6 +50,65 @@ namespace Poseidon
 // used by the debug "limit FPS" cheat.  Read by the frame-pacer at the
 // bottom of RenderFrame.
 int gUserFpsCap = 0;
+
+// Sleep out the remainder of a frame so the loop averages `targetFps`.
+//
+// The arithmetic used to be `1000 / targetFps` in INTEGER milliseconds, which
+// truncates, and truncation on a frame period is a large error: a 144 cap became
+// 1000/144 = 6 ms = 166.7 fps (+16%), 90 became 11 ms = 90.9, and 60 became 16 ms
+// = 62.5. Every cap in the allowed set except 30 and 240 ran fast, so a player who
+// capped to their refresh rate to steady the frame time got a cap ABOVE it and kept
+// the tearing they were trying to remove.
+//
+// Carrying the fractional millisecond forward fixes the average without needing a
+// sub-millisecond clock: 144 fps alternates 7/7/7/6 ms and averages 6.944.
+static void PaceToFps(int targetFps, DWORD frameStartMs)
+{
+    if (targetFps <= 0)
+        return;
+
+    const double periodMs = 1000.0 / static_cast<double>(targetFps);
+    static double carryMs = 0.0;
+    static int lastTarget = 0;
+    if (targetFps != lastTarget)
+    {
+        lastTarget = targetFps;
+        carryMs = 0.0;
+    }
+
+    const double budgetMs = periodMs + carryMs;
+    const int wholeMs = static_cast<int>(budgetMs);
+    carryMs = budgetMs - static_cast<double>(wholeMs);
+
+    const int elapsedMs = static_cast<int>(Poseidon::Foundation::GlobalTickCount() - frameStartMs);
+    const int sleepMs = wholeMs - elapsedMs;
+    if (sleepMs > 0)
+        Sleep(sleepMs);
+}
+
+// Sleep() honours the process timer resolution, which on Windows defaults to
+// ~15.6 ms. A frame pacer built on it therefore overshoots its target by up to a
+// full tick and does so unevenly -- which is visible as exactly the symptom a cap
+// is meant to cure. winmm is already linked; ask for 1 ms while a cap is active and
+// give it back when it is not, so an uncapped session keeps the default (raising it
+// costs battery on a laptop and there is nothing to gain when nothing sleeps).
+static void SetFrameCapTimerResolution(bool wanted)
+{
+#ifdef _WIN32
+    static bool granted = false;
+    if (wanted == granted)
+        return;
+    if (wanted)
+        granted = (timeBeginPeriod(1) == TIMERR_NOERROR);
+    else
+    {
+        timeEndPeriod(1);
+        granted = false;
+    }
+#else
+    (void)wanted;
+#endif
+}
 
 // Idle heartbeat used by blocking waits (progress screen, debug window,
 // triWaitFrames). Tickles the watchdog and pumps OS events so the window
@@ -114,27 +179,22 @@ void RenderFrame(float deltaT, bool enableDraw)
 #else
         const int maxFps = 50;
 #endif
-        const int minMsPerFrame = 1000 / maxFps;
-
-        int durationMs = Poseidon::Foundation::GlobalTickCount() - startTime;
-        int sleepMillis = minMsPerFrame - durationMs;
-        if (sleepMillis > 0)
-        {
-            Sleep(sleepMillis);
-        }
+        SetFrameCapTimerResolution(true);
+        PaceToFps(maxFps, startTime);
     }
     else if (gUserFpsCap > 0)
     {
         // User-driven FPS cap from the Graphics screen — same sleep-
         // to-target shape as the unfocused / debug-limit branches
         // above, but applied during normal gameplay rendering.  Soft
-        // cap (sleep-based) — cheap to implement, accurate to within
-        // OS scheduler granularity (~1 ms on Win10+).
-        const int minMsPerFrame = 1000 / gUserFpsCap;
-        int durationMs = Poseidon::Foundation::GlobalTickCount() - startTime;
-        int sleepMillis = minMsPerFrame - durationMs;
-        if (sleepMillis > 0)
-            Sleep(sleepMillis);
+        // cap (sleep-based): accurate to the OS scheduler granularity,
+        // which is why the branch asks for 1 ms resolution first.
+        SetFrameCapTimerResolution(true);
+        PaceToFps(gUserFpsCap, startTime);
+    }
+    else
+    {
+        SetFrameCapTimerResolution(false);
     }
 }
 
