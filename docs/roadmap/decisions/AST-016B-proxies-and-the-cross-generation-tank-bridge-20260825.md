@@ -80,3 +80,27 @@ and "fully animated" for every post-A1 vehicle.
 - The foreign PBO's own `config.bin` must be stripped from data PBOs even when
   it sits below the bank root (defence in depth; the root-only parse rule is
   an implementation detail).
+
+## Addendum — Reforger BTR-70 (same day)
+
+The scout's "hours" estimate held: `xob convert` on
+`Assets/Vehicles/Wheeled/BTR70/BTR70_body.xob` -> MLOD p3d -> `pbo pack
+--prefix 'reforger\btr70'` -> `class CWR_BTR70_RF: Truck5t` (turretless wheeled
+parent, since the body-only conversion has no selections or memory points) ->
+boots, boards, drives in `btrtest.abel`. Mod folder `@cwr_btr70_rf`, separate
+from the ODOL bridge mod.
+
+Two measured findings for the next conversion:
+
+1. **Pass the addons `data` DIRECTORY to `xob convert`, never a single pak.**
+   Vehicle materials reference shared detail tiles in OTHER paks
+   (`Assets/_SharedData/Metal/ST_*_BCR.edds` etc.); against one pak, 10 of 17
+   materials fail with "BCRMap .edds does not decode" (a not-found conflated
+   with a decode failure) and the vehicle renders white. Against the
+   directory: 12/17 resolve, 26 paa baked, 41/47 parts textured.
+2. **Baked vehicle albedo reads near-black in the classic renderer.** The
+   converter's own note names the suspect: Reforger's BCR alpha channel is
+   ROUGHNESS, folded into the baked `_ca` alpha -- which the classic pipeline
+   interprets as transparency/cutout. PBR->classic albedo conversion for
+   vehicles is an open tuning task (world models did not hit it this hard;
+   their materials are MatPBRBasic with sane alpha).
