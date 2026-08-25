@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <cctype>
 #include <map>
+#include <unordered_map>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -228,6 +230,13 @@ class ODOLLoader
             lod.sourceWinding = Poseidon::Model::DescribeWinding(lod.basis.winding, lod.basis.windingConfidence);
             lod.uvSetCount     = static_cast<int32_t>(source.lods[i].rest.uvSetCount);
             lod.mesh           = convertOdol73Mesh(source.lods[i]);
+            // AST-016/017 stage 2: give the 2001 animation machinery its named
+            // selections back. From ODOL 48 onward BI moved skinning out of the
+            // selections into per-vertex bone references; the selection NAMES
+            // survive with zero vertices, and everything OFP animates -- turret
+            // rotation, wheel spin, the static/blur rotor swap -- resolves
+            // bone -> named selection -> vertices and finds nothing.
+            synthesizeBoneSelections(source.directory.bones, source.lods[i], lod.mesh, sourcePath, i);
             model.lodLevels.push_back(std::move(lod));
         }
 
@@ -323,6 +332,153 @@ class ODOLLoader
                 if (property.name == "viewgeometry" && std::atoi(property.value.c_str()) > 0)
                     model.geometryViewIdx = model.geometryIdx;
             }
+        }
+    }
+
+    // AST-016/017 stage 2: fill EMPTY bone-named selections from the LOD's
+    // per-vertex bone references, so `Skeleton::Prepare`, `AnimationWithCenter`
+    // and the rotor static/blur swap work on ODOL 48+ exactly as they do on
+    // OFP and Arma 1 models, whose selections still carry vertices.
+    //
+    // Layout of one reference (measured on the A2 T-72 and the AST-016/017
+    // fixtures): `count` pairs of (subSkeletonBoneIndex:u8, weight:u8) in
+    // `data`, at most four. The index is into the LOD's sub-skeleton, remapped
+    // to the model skeleton through `subSkeletonsToSkeleton` when that table is
+    // present. Because the byte ORDER of the pair is the classic silent-failure
+    // spot (an index read as a weight still "works"), the layout is VALIDATED
+    // per LOD before use: every index byte must land inside the remap table (or
+    // the bone table when there is no remap). If the pairs fail validation both
+    // ways round, the LOD is left untouched and a log line says so -- a frozen
+    // rotor names itself; a rotor glued to the hull by garbage indices does not.
+    //
+    // Only selections that are EMPTY and whose name matches a skeleton bone are
+    // filled -- populated selections (OFP, A1, and A2's sectional lists) are
+    // never modified, so this cannot perturb anything that already works.
+    // Dominant influence only: vehicle parts are rigid, and OFP's own
+    // animations treat membership as binary; weight 255 keeps ShapeAdapter's
+    // linear scale honest.
+    static void synthesizeBoneSelections(const std::vector<P3D::Odol73Bone>& bones, const P3D::Odol73StaticLod& source,
+                                         Mesh& mesh, const std::string& sourcePath, size_t lodIndex)
+    {
+        const auto& refs  = source.rest.vertexBoneRefs;
+        const auto& remap = source.header.subSkeletonsToSkeleton;
+        if (bones.empty() || refs.empty())
+            return;
+
+        // Does any empty selection even name a bone? (cheap out for the
+        // majority of world props)
+        auto lowered = [](std::string s) {
+            for (char& c : s)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            return s;
+        };
+        std::unordered_map<std::string, uint32_t> boneByName;
+        for (size_t b = 0; b < bones.size(); ++b)
+            boneByName.emplace(lowered(bones[b].name), static_cast<uint32_t>(b));
+
+        bool wanted = false;
+        for (const auto& sel : mesh.selections)
+            if (sel.vertexIndices.empty() && boneByName.count(lowered(sel.name)))
+            {
+                wanted = true;
+                break;
+            }
+        if (!wanted)
+            return;
+
+        // Validate the (index, weight) byte order on this LOD's actual data.
+        const uint32_t indexLimit =
+            remap.empty() ? static_cast<uint32_t>(bones.size()) : static_cast<uint32_t>(remap.size());
+        auto validCount = [&](bool indexFirst) {
+            size_t valid = 0, total = 0;
+            for (const auto& r : refs)
+            {
+                const int pairs = std::min<int>(r.count, 4);
+                for (int p = 0; p < pairs; ++p)
+                {
+                    const uint8_t index = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)];
+                    ++total;
+                    if (index < indexLimit)
+                        ++valid;
+                }
+            }
+            return total == 0 ? 0.0 : static_cast<double>(valid) / static_cast<double>(total);
+        };
+        const double indexFirstScore  = validCount(true);
+        const double weightFirstScore = validCount(false);
+        if (indexFirstScore < 0.999 && weightFirstScore < 0.999)
+        {
+            LOG_WARN(Graphics,
+                     "Bone-selection synthesis skipped for {} lod {}: reference bytes fit neither layout "
+                     "({:.3f} / {:.3f} valid vs limit {})",
+                     sourcePath, lodIndex, indexFirstScore, weightFirstScore, indexLimit);
+            return;
+        }
+        const bool indexFirst = indexFirstScore >= weightFirstScore;
+
+        // Dominant model-skeleton bone per vertex.
+        const size_t vertexCount = std::min(refs.size(), mesh.vertices.size());
+        std::vector<int32_t> dominantBone(mesh.vertices.size(), -1);
+        size_t influenced = 0;
+        for (size_t v = 0; v < vertexCount; ++v)
+        {
+            const auto& r = refs[v];
+            const int pairs = std::min<int>(r.count, 4);
+            int bestWeight = -1;
+            uint32_t bestBone = 0;
+            for (int p = 0; p < pairs; ++p)
+            {
+                const uint8_t index  = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)];
+                const uint8_t weight = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 1 : 0)];
+                if (index >= indexLimit)
+                    continue;
+                const uint32_t modelBone = remap.empty() ? index : static_cast<uint32_t>(remap[index]);
+                if (modelBone >= bones.size())
+                    continue;
+                if (static_cast<int>(weight) > bestWeight)
+                {
+                    bestWeight = weight;
+                    bestBone   = modelBone;
+                }
+            }
+            if (bestWeight >= 0)
+            {
+                dominantBone[v] = static_cast<int32_t>(bestBone);
+                ++influenced;
+            }
+        }
+        if (influenced == 0)
+            return;
+
+        // Bucket vertices per bone, then fill exactly the empty bone-named
+        // selections.
+        std::unordered_map<uint32_t, std::vector<uint32_t>> verticesByBone;
+        for (size_t v = 0; v < dominantBone.size(); ++v)
+            if (dominantBone[v] >= 0)
+                verticesByBone[static_cast<uint32_t>(dominantBone[v])].push_back(static_cast<uint32_t>(v));
+
+        size_t filled = 0;
+        for (auto& sel : mesh.selections)
+        {
+            if (!sel.vertexIndices.empty())
+                continue;
+            const auto bone = boneByName.find(lowered(sel.name));
+            if (bone == boneByName.end())
+                continue;
+            const auto bucket = verticesByBone.find(bone->second);
+            if (bucket == verticesByBone.end())
+                continue;
+            sel.vertexIndices = bucket->second;
+            sel.vertexWeights.assign(sel.vertexIndices.size(), 255);
+            ++filled;
+        }
+        if (filled > 0)
+        {
+            LOG_INFO(Graphics,
+                     "Bone-selection synthesis: {} lod {} filled {} selections from {} influenced vertices "
+                     "({}-first pairs, {} bones, remap {})",
+                     sourcePath, lodIndex, filled, influenced, indexFirst ? "index" : "weight", bones.size(),
+                     remap.empty() ? "identity" : "sub-skeleton");
         }
     }
 
