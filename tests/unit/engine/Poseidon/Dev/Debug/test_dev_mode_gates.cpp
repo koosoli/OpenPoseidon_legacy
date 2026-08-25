@@ -117,7 +117,9 @@ TEST_CASE("Release builds reject --dev before help or option registration", "[de
     const size_t releaseGuard = parseBody.find("BuildInfo::ReleaseBuild && ContainsCliArg(normalizedArgs, \"--dev\")");
     const size_t helpMode = parseBody.find("DetectHelpMode(normalizedArgs)");
     const size_t devBuildGuard = parseBody.find("if (!BuildInfo::ReleaseBuild)");
-    const size_t devRegistration = parseBody.find("\"--dev\"", devBuildGuard);
+    // Upstream reshaped the flag to a paired form ("--dev,!--no-dev", on by default in
+    // non-release builds); match the registration itself, not an exact quoted literal.
+    const size_t devRegistration = parseBody.find("\"--dev,!--no-dev\"", devBuildGuard);
     REQUIRE(releaseGuard != std::string::npos);
     REQUIRE(helpMode != std::string::npos);
     REQUIRE(devBuildGuard != std::string::npos);
