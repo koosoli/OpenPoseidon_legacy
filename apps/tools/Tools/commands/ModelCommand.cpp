@@ -422,9 +422,22 @@ void PrintOdolSelections(const std::string& path, bool proxiesOnly)
                 if (offsets[face] >= static_cast<uint32_t>(sec.faceLower) &&
                     offsets[face] < static_cast<uint32_t>(sec.faceUpper))
                     ++secFaces;
+            // MAT-046: the section's CommonFaceFlags, so "is this marker hidden
+            // in the file?" is a measurement rather than an inference. 0x10000000
+            // is IsHiddenProxy, 0x01000000 IsHidden; both are what ODOLLoader
+            // masks through to Section::hints. A reader that drops the word
+            // reports 0x00000000 on every section, which is the tell.
+            constexpr uint32_t kIsHidden = 0x01000000u;
+            constexpr uint32_t kIsHiddenProxy = 0x10000000u;
             std::cout << "    section " << std::setw(3) << si << " bytes [" << sec.faceLower << "," << sec.faceUpper
                       << ") faces " << std::setw(5) << secFaces << " texture " << std::setw(4) << sec.textureIndex
-                      << " material " << sec.materialIndex << "\n";
+                      << " material " << sec.materialIndex << " flags 0x" << std::hex << std::setw(8)
+                      << std::setfill('0') << sec.commonFaceFlags << std::dec << std::setfill(' ');
+            if (sec.commonFaceFlags & kIsHiddenProxy)
+                std::cout << " HIDDEN-PROXY";
+            if (sec.commonFaceFlags & kIsHidden)
+                std::cout << " HIDDEN";
+            std::cout << "\n";
         }
         for (const auto& proxy : lod.header.proxies)
             std::cout << "    proxy   " << std::left << std::setw(50) << proxy.model.substr(0, 50) << std::right

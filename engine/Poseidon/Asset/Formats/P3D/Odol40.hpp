@@ -340,7 +340,12 @@ inline std::vector<Odol73StaticSection> ReadOdol40StaticSections(BinaryReader& r
         section.boneCount = reader.read<int32_t>();
         (void)reader.read<uint32_t>(); // common point flags
         section.textureIndex = reader.read<int16_t>();
-        (void)reader.read<uint32_t>();
+        // MAT-046: CommonFaceFlags, same slot and width as revision 73
+        // (`Odol73.hpp:918`). Kept rather than discarded -- 0x10000000 is
+        // IsHiddenProxy, and dropping this word is why proxy marker triangles
+        // draw as spikes on Arma 1 models. ODOLLoader masks it to the two
+        // hidden bits before it becomes Section::hints.
+        section.commonFaceFlags = reader.read<uint32_t>();
         section.materialIndex = reader.read<int32_t>();
         if (section.materialIndex == -1)
             (void)ReadBoundedAsciiz(reader, "section material");
