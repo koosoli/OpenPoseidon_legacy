@@ -3277,7 +3277,9 @@ void DrawGrassTab()
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Blade shading (procedural blades and mid ribbons only -- cards ignore these)");
-    Dev::PanelHelp("Every default here is the look before these existed; nothing moves until a slider does.");
+    Dev::PanelHelp("Defaults are the DEFINED look (self shadow 0.55, contrast 1.30, hue 0.15, root 0.78); the "
+                   "legacy flat wash is 0 / 1.00 / 0 / 0.70, reachable in one go with WGR_GRASS_CONTRAST=0. "
+                   "These sliders override that env default live.");
     changed |= Dev::SliderFloat("Blade self shadow", &grass.bladeSelfShadow, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("Blade-on-blade shadowing, the cheap way: occlusion toward the root of a tuft (the base of "
                    "a blade sees ~40%% of the sky a tip does at full strength) plus a sample of the cascade "

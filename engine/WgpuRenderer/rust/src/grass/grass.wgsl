@@ -1384,8 +1384,10 @@ fn blade_self_shadow() -> f32 { return clamp(grass.blade_look.x, 0.0, 1.0); }
 // multiplier 0..1); both are identity at strength 0.
 fn blade_self_shadow_terms(world_rel: vec3<f32>, normal: vec3<f32>, height_t: f32) -> vec2<f32> {
     let strength = blade_self_shadow();
-    // Root occlusion: at full strength the base sees ~40% of the light a tip does.
-    let tuft_ao = mix(1.0 - 0.60 * strength, 1.0, smoothstep(0.0, 0.70, height_t));
+    // Root occlusion: at full strength the base sees ~35% of the light a tip
+    // does, and the occlusion reaches most of the way up the blade -- neighbours
+    // in a closed field stand shoulder-height, not knee-height.
+    let tuft_ao = mix(1.0 - 0.65 * strength, 1.0, smoothstep(0.0, 0.85, height_t));
     // Derivatives outside the branch: they must come from uniform control flow.
     let dwx = dpdx(world_rel);
     let dwy = dpdy(world_rel);
@@ -1429,7 +1431,12 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // which is what buys shape variety without more geometry. It costs the early-Z
     // the solid path enjoys, so it is a toggle and not the default -- measure
     // before switching it on for good.
-    let textured = blade.rgb * variation * gust_highlight;
+    // The atlas carries its own species gradient, but it is authored shallow --
+    // multiplied straight in, the near field lost the root ramp entirely and
+    // read as one pale wash (the owner's "grass looks flat"). Re-apply 75% of
+    // the procedural root shade on top, so the Blade root shade slider governs
+    // the textured near field too instead of going inert inside 35 m.
+    let textured = blade.rgb * variation * gust_highlight * mix(1.0, root, 0.75);
     // shape_mix.w scales the photo texture globally on top of the distance fade
     // already in blade_uv.w, so the detail can be dialled back without deleting
     // the atlas and falling all the way to procedural.

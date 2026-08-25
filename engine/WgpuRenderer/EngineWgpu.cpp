@@ -804,6 +804,26 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         });
 
     _wbank = new TextureBankWgpu(_renderer);
+
+    // Procedural-blade definition strength, WGR_GRASS_CONTRAST. One number scales
+    // the whole blade-look group away from the legacy flat wash: 0 is the exact
+    // pre-2026-08 look (no self shadow, contrast 1, no hue drift, root 0.70), 1 is
+    // the shipped GrassSettings defaults, and up to 2 doubles the deviation. It is
+    // read once here as the session's DEFAULT; the Grass-tab sliders edit the same
+    // fields afterwards and win, which is the house env-then-slider contract.
+    if (const char* contrastEnv = std::getenv("WGR_GRASS_CONTRAST"))
+    {
+        const float s = std::clamp(std::strtof(contrastEnv, nullptr), 0.0f, 2.0f);
+        const GrassSettings stock; // shipped defaults = strength 1
+        _grass.bladeSelfShadow = stock.bladeSelfShadow * s;
+        _grass.bladeContrast = 1.0f + (stock.bladeContrast - 1.0f) * s;
+        _grass.bladeHueVariation = stock.bladeHueVariation * s;
+        _grass.bladeRootShade = 0.70f + (stock.bladeRootShade - 0.70f) * s;
+        LOG_INFO(Graphics,
+                 "Wgpu grass blade definition: WGR_GRASS_CONTRAST={:.2f} -> selfShadow {:.2f}, contrast {:.2f}, "
+                 "hueVariation {:.2f}, rootShade {:.2f}",
+                 s, _grass.bladeSelfShadow, _grass.bladeContrast, _grass.bladeHueVariation, _grass.bladeRootShade);
+    }
     SetGrassSettings(_grass);
 
     // This backend conforms terrain-clipped geometry (vegetation, roads' visuals) on

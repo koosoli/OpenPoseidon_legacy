@@ -1287,19 +1287,23 @@ class Engine : public IGraphicsEngine
         // the trap it laid the first time. Renderer still consumes metres.
         float photoCardDensity = 1.0f;
         // PROCEDURAL BLADE LOOK (near blades + mid ribbons; cards and the far
-        // proxy ignore these). Every default reproduces the pre-existing look, so
-        // nothing changes until a slider is moved.
+        // proxy ignore these). The defaults are ON: the pre-existing all-stock
+        // values (0 / 1.0 / 0 / 0.70) rendered the field as a pale uniform wash
+        // with no per-blade definition -- the owner's "grass looks flat" report.
+        // WGR_GRASS_CONTRAST scales the whole group as one definition strength
+        // (0 = the exact legacy flat look, 1 = these defaults; see
+        // EngineWgpu's constructor), and each slider still overrides live.
         // Blade-on-blade self shadow: root occlusion inside a tuft plus a sample
         // of the cascade the near grass itself writes (needs castShadows for the
         // cascade half). 0 = off.
-        float bladeSelfShadow = 0.0f;
+        float bladeSelfShadow = 0.55f;
         // Contrast about the palette's own mid-tone. 1.0 = untouched.
-        float bladeContrast = 1.0f;
+        float bladeContrast = 1.30f;
         // Per-patch hue drift (warm straw <-> cool blue-green) on top of the
         // luminance-only colourVariation. 0 = none.
-        float bladeHueVariation = 0.0f;
+        float bladeHueVariation = 0.15f;
         // Root-to-tip darkening. 0.70 = the long-standing mix(0.30, 1.0, t*t).
-        float bladeRootShade = 0.70f;
+        float bladeRootShade = 0.78f;
         // CATCH-ALL WORLDS: a world whose terrain arrives as ONE material (a
         // converted Enfusion world such as Reforger's Everon) has no per-surface
         // clutter classification, so the whole map is grass and the stock
@@ -1382,7 +1386,11 @@ class Engine : public IGraphicsEngine
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
         float clumping = 0.35f;
-        float colorVariation = 0.35f;
+        // Raised 0.35 -> 0.50 with the blade-definition pass: per-blade tone
+        // spread is what breaks the uniform wash (each blade +-11% about its
+        // neighbours instead of +-7%). The "Colour variation" slider still
+        // covers 0..1.
+        float colorVariation = 0.50f;
         float transmission = 0.10f;
         // These are deliberately grass-only controls: terrain and other
         // world geometry retain the renderer's regular shadow/fog settings.
