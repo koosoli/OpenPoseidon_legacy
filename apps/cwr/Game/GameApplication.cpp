@@ -1578,8 +1578,16 @@ void GameApplication::RunMainLoop()
                         // looks identical to a rendering failure.
                         for (int level = 0; level < levels; ++level)
                         {
-                            LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {}", level,
-                                     shape->Resolution(level), shape->Level(level)->NFaces());
+                            // AST-016B: the proxy count is the LOD's, after
+                            // conversion and after NewProxyObject actually
+                            // resolved a shape -- so this reports proxies the
+                            // engine can draw, not proxies the file declared.
+                            // Those differ, and only this side of the gap is
+                            // worth reporting: a crew member whose model is in
+                            // an unmounted PBO silently contributes nothing.
+                            LOG_INFO(Core, "--test-model:   lod {} resolution {} faces {} proxies {}", level,
+                                     shape->Resolution(level), shape->Level(level)->NFaces(),
+                                     shape->Level(level)->NProxies());
                             // The P3D may be drawable even if its companion assets
                             // are absent. List the loader's resolved references here
                             // so a white fallback is not later presented as a material

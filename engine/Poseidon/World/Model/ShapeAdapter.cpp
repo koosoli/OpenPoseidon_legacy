@@ -1090,6 +1090,23 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     ProxyModelName proxyName = normalizeProxyModelName(proxy.name);
                     RString modelName(proxyName.modelName.c_str());
 
+                    // AST-016B: probe before constructing. On OFP data every
+                    // proxy shape ships, but the rev-40+ ODOL conversion now
+                    // forwards proxy records whose models this install may not
+                    // carry (Arma 1's crew placeholders under ca\temp\proxies\
+                    // are not files anywhere -- the retail game resolves them
+                    // another way). Letting Shapes.New discover the absence
+                    // raises WarningMessage, and one warning is all it takes:
+                    // InitVehicles fails the whole mission on the error latch
+                    // (GetMaxError() >= EMError). An absent proxy model must
+                    // degrade to an absent proxy, not a refused mission.
+                    if (!QIFStreamB::FileExist(GetShapeName(modelName)))
+                    {
+                        LOG_INFO(Graphics, "Proxy model absent, skipped: {} (from {})",
+                                 (const char*)modelName, proxy.name);
+                        continue;
+                    }
+
                     Ref<ProxyObject> po = new ProxyObject;
                     if (GReplaceProxies)
                     {

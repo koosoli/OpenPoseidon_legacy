@@ -530,6 +530,47 @@ class ODOLLoader
             mesh.selections.push_back(std::move(selection));
         }
 
+        // AST-016B: proxies, for every revision that lands here (40, 48, 49, 50,
+        // 52, 54, 73). The readers have always parsed the LOD header's proxy
+        // array in full -- model path, transform, sequence id, named-selection
+        // and bone indices -- and this conversion then dropped it on the floor,
+        // so a crew member, a weapon or a muzzle flash reached the engine on the
+        // ODOL v7 path only. `convertProxies` below is the v7 twin of this loop.
+        //
+        // The transform needs no reinterpretation between the two: BIS stores
+        // `Matrix4x3` as `Vector3 rows[4]` = [aside, up, dir, pos]
+        // (`BISStructures.hpp:33`), and the IR's `Matrix4x3::Set` takes the same
+        // basis-then-translation order that ShapeAdapter reads back out as
+        // SetDirectionAside / SetDirectionUp / SetDirection / SetPosition. The
+        // rows are copied straight out of the file by every one of these readers
+        // (e.g. `Odol40.hpp:243`), so the only change here is transposing the
+        // translation out of row 3 into the fourth column.
+        //
+        // `name` carries the raw model path (`\ca\temp\proxies\t72\driver`).
+        // ShapeAdapter's normalizeProxyModelName strips an optional `proxy:`
+        // prefix and an optional `.NN` suffix, so a bare path is accepted as-is
+        // and the sequence id is supplied separately through `id` -- which is
+        // what the engine prefers anyway (`proxy.id >= 0 ? proxy.id : name.id`).
+        mesh.proxies.reserve(source.header.proxies.size());
+        for (const auto& p : source.header.proxies)
+        {
+            // A proxy with no model names nothing to instantiate; NewProxyObject
+            // would be handed an empty shape name.
+            if (p.model.empty())
+                continue;
+            Proxy proxy;
+            proxy.name           = p.model;
+            proxy.selectionIndex = static_cast<uint32_t>(p.namedSelectionIndex >= 0 ? p.namedSelectionIndex : 0);
+            proxy.id             = p.sequenceId;
+            proxy.transform.Set(p.transform.rows[0].x, p.transform.rows[0].y, p.transform.rows[0].z,
+                                p.transform.rows[3].x,
+                                p.transform.rows[1].x, p.transform.rows[1].y, p.transform.rows[1].z,
+                                p.transform.rows[3].y,
+                                p.transform.rows[2].x, p.transform.rows[2].y, p.transform.rows[2].z,
+                                p.transform.rows[3].z);
+            mesh.proxies.push_back(std::move(proxy));
+        }
+
         mesh.properties.reserve(source.namedProperties.size());
         for (const auto& property : source.namedProperties)
             mesh.properties.emplace_back(property.first, property.second);

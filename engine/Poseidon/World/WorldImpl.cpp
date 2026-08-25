@@ -2517,6 +2517,16 @@ void World::StartIntro()
                     if (!StartAutoTest())
                     {
                         LOG_ERROR(Core, "StartAutoTest could not boot '{}'", LoadFile);
+                        // The usual cause is InitVehicles' error latch
+                        // (GetMaxError() >= EMError), and the message behind it
+                        // lives only in WarningText -- WarningMessageLevel
+                        // stores it and shows a dialog, but never logs it, so a
+                        // headless run failed with no reason on record. Say it.
+                        if (GetMaxError() >= Poseidon::Foundation::EMError)
+                        {
+                            LOG_ERROR(Core, "StartAutoTest error latch: {}",
+                                      (const char*)GetMaxErrorMessage());
+                        }
                         if (AppConfig::Instance().IsMissionSmokeCheck())
                         {
                             LOG_ERROR(Core, "Mission smoke check failed: StartAutoTest could not boot '{}'", LoadFile);

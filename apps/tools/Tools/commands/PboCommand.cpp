@@ -255,11 +255,16 @@ void PboCommand::Setup(CLI::App& app)
     auto* packCmd = pbo->add_subcommand("pack", "Create a PBO archive from a directory");
     static std::string packSrc;
     static std::string packOut;
+    static std::string packPrefix;
     static bool compress = false;
     packCmd->add_option("source", packSrc, "Source directory")->required();
     packCmd->add_option("output", packOut, "Output PBO file path")->required();
     packCmd->add_flag("--compress,-c", compress, "Enable LZSS compression");
-    packCmd->callback([]() { std::exit(Pack(packSrc, packOut, compress)); });
+    packCmd->add_option("--prefix", packPrefix,
+                        "Declared mount prefix (header property), e.g. \"ca\\tracked\". The engine mounts a prefixed "
+                        "bank at that virtual path instead of the bank's file name, which is how a model's internal "
+                        "\\ca\\...\\ texture references resolve.");
+    packCmd->callback([]() { std::exit(Pack(packSrc, packOut, compress, packPrefix)); });
 }
 
 int PboCommand::List(const std::string& pboPath, bool verbose)
@@ -456,7 +461,8 @@ int PboCommand::Extract(const std::string& pboPath, const std::string& outputDir
     return 0;
 }
 
-int PboCommand::Pack(const std::string& srcDir, const std::string& outputPbo, bool compress)
+int PboCommand::Pack(const std::string& srcDir, const std::string& outputPbo, bool compress,
+                     const std::string& prefix)
 {
     struct stat st;
     if (stat(srcDir.c_str(), &st) != 0 || !(st.st_mode & S_IFDIR))
@@ -470,10 +476,28 @@ int PboCommand::Pack(const std::string& srcDir, const std::string& outputPbo, bo
     std::cout << "Packing " << srcDir << " -> " << outputPbo;
     if (compress)
         std::cout << " (compressed)";
+    if (!prefix.empty())
+        std::cout << " (prefix " << prefix << ")";
     std::cout << std::endl;
 
+    // AST-016A: the same header property the retail Arma banks carry (the A1
+    // tracked.pbo declares `prefix=ca\tracked`), and the one the engine's bank
+    // loader mounts by. FileBankManager::Create has always taken a property
+    // table; nothing passed one.
+    Poseidon::QFProperty prefixProperty;
+    const Poseidon::QFProperty* properties = nullptr;
+    int nProperties = 0;
+    if (!prefix.empty())
+    {
+        prefixProperty.name  = "prefix";
+        prefixProperty.value = prefix.c_str();
+        properties  = &prefixProperty;
+        nProperties = 1;
+    }
+
     FileBankManager mgr;
-    LSError result = mgr.Create(outputPbo.c_str(), srcDir.c_str(), compress);
+    LSError result = mgr.Create(outputPbo.c_str(), srcDir.c_str(), compress, true, nullptr, Poseidon::DefFileBankNoCompress,
+                                properties, nProperties);
     if (result != LSOK)
     {
         std::cerr << "Error: Failed to create PBO" << std::endl;
