@@ -670,6 +670,11 @@ class World
 
 	CameraType GetCameraType() const {return _camType;}
 	CameraType GetCameraTypeWanted() const {return _camTypeMain;}
+	//! The Numpad-Enter person-view toggle (internal <-> external), callable
+	//! without the key: the dev panel's Zeus tab offers it as a button, because
+	//! the default binding is unreachable on a keyboard with no numpad and the
+	//! difficulty gate in SetCamera still applies either way.
+	void TogglePersonView();
 	
 	Scene *GetScene() {return &_scene;}
 	Engine *GetEngine() const {return _engine;}

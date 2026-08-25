@@ -1242,6 +1242,20 @@ void DrawZeusTab()
         else
             Dev::PanelTooltip("Enables the Numpad-Enter person-view toggle even on a profile that forbids it.\n"
                               "Session-only: your saved Options difficulty is not touched.");
+
+        // The toggle itself, for keyboards with no numpad (owner request: the
+        // default Person-view binding is Numpad Enter and unrebindable from
+        // here). Same code path as the key -- World::TogglePersonView -- so the
+        // difficulty gate above still decides whether external view sticks.
+        ImGui::BeginDisabled(!worldAvailable);
+        if (Dev::Button("Toggle third person now"))
+            Defer([] {
+                if (GWorld)
+                    GWorld->TogglePersonView();
+            });
+        ImGui::EndDisabled();
+        Dev::PanelTooltip("Exactly what Numpad Enter does. If the checkbox above is off (or the server\n"
+                          "forbids it), the camera snaps back to first person -- the gate wins, as with the key.");
     }
 
     ImGui::Spacing();

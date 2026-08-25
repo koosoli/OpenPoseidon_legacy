@@ -123,6 +123,41 @@ void World::UpdateInputContext()
     InputSubsystem::Instance().SetContext(ResolveInputContext());
 }
 
+void World::TogglePersonView()
+{
+    // Body moved verbatim from the UAPersonView key handler in Simulate, so the
+    // dev-panel button and the key share one behaviour. The difficulty gate is
+    // NOT checked here -- SetCamera already forces the camera back to
+    // CamInternal every frame when the active profile disables DT3rdPersonView,
+    // so an ungated toggle cannot bypass it; it just changes what the gate is
+    // applied to, exactly as the key does.
+    if (_cameraExternal)
+    {
+        if (_camTypeMain == CamExternal && !_showMap)
+        {
+            _cameraExternal = false;
+            _camTypeMain = CamInternal;
+        }
+        else
+        {
+            _camTypeMain = CamExternal;
+        }
+    }
+    else
+    {
+        if (_camTypeMain == CamInternal && !_showMap)
+        {
+            _cameraExternal = true;
+            _camTypeMain = CamExternal;
+        }
+        else
+        {
+            _camTypeMain = CamInternal;
+        }
+    }
+    _showMap = false;
+}
+
 void World::Simulate(float deltaT, bool& enableDraw)
 {
     // Frame-phase profiler — feeds the dev panel Perf tab and triPerfStats.
@@ -461,31 +496,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             if (input.GetActionToDo(UAPersonView))
             {
-                if (_cameraExternal)
-                {
-                    if (_camTypeMain == CamExternal && !_showMap)
-                    {
-                        _cameraExternal = false;
-                        _camTypeMain = CamInternal;
-                    }
-                    else
-                    {
-                        _camTypeMain = CamExternal;
-                    }
-                }
-                else
-                {
-                    if (_camTypeMain == CamInternal && !_showMap)
-                    {
-                        _cameraExternal = true;
-                        _camTypeMain = CamExternal;
-                    }
-                    else
-                    {
-                        _camTypeMain = CamInternal;
-                    }
-                }
-                _showMap = false;
+                TogglePersonView();
             }
             if (input.GetActionToDo(UAOptics))
             {
