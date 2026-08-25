@@ -2487,6 +2487,16 @@ void Scene::DrawObjectsAndShadowsPass2()
             render::GBlendSectionDepthReadOnly = blendDepthReadOnly;
             GSectionFilter = SectionClassFilter::BlendOnly;
             GPass1Stats.p2AlphaDrawn.fetch_add(1, std::memory_order_relaxed);
+            // MAT-051 diagnostic (temporary): name each object the blend-revisit
+            // pass actually draws, so a glass-owning shape that never appears
+            // here names the gap.
+            if (const char* trace = std::getenv("WGR_BLEND_PASS_TRACE"); trace && *trace == '1')
+            {
+                static std::unordered_set<std::string> logged;
+                const char* nm = shape ? shape->Name() : nullptr;
+                if (nm && logged.size() < 40 && logged.insert(std::string(nm)).second)
+                    LOG_WARN(Graphics, "Blend revisit: {} lod={} passNum={}", nm, oi->drawLOD, oi->passNum);
+            }
             DrawSortObject(oi);
             if (blendDepthReadOnly)
             {

@@ -3364,8 +3364,40 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
             d.flags |= level << WGR_DRAW3D_ZBIAS_SHIFT;
         }
     }
+    // MAT-051: classic glass gets the sky-reflection sheen. An OFP/A1/A3
+    // canopy pane is an alpha-BLENDED section whose texture is almost entirely
+    // PARTIAL alpha (uh60_skla_ca: 99% partial, mean 29/255) over a fully
+    // opaque material — an ~11% tint that composites into invisibility against
+    // sky, which is the owner's "cockpit is transparent" on every bridged
+    // helicopter. GL33 reads because its path lights the pane with a specular
+    // sheen; here the same job is done by the existing DZ-003 reflective term
+    // (Schlick at ENV_F0), which is also what glass physically is: a
+    // sky-mirror. The key is the alpha HISTOGRAM, not the class alone:
+    //   - pctClear < 5   excludes light flares and halos (mostly clear texels),
+    //   - pctPartial > 80 demands genuine continuous translucency,
+    //   - aMean < 128    excludes decals that are mostly solid with soft seams,
+    //   - MaterialIsFullyOpaque keeps material-driven fades (real translucency
+    //     effects) out — the same guard the opaque-head fix above uses.
+    // DZ-003's warning about env-SLOT keying (157 ordinary Super materials
+    // name an env map) does not apply: no material slot is consulted at all.
+    // WGR_GLASS_SHEEN=0 restores the old look for an A/B in the same binary.
+    bool glassSheen = false;
+    {
+        static const bool sheenEnabled = []
+        {
+            const char* v = std::getenv("WGR_GLASS_SHEEN");
+            return !(v && std::strcmp(v, "0") == 0);
+        }();
+        if (sheenEnabled && !reflectiveMaterial && texture && tex != 0 &&
+            alphaClass == Poseidon::AlphaStats::Blend && blend == render::BlendMode::AlphaBlend &&
+            MaterialIsFullyOpaque(_curMaterial))
+        {
+            const Poseidon::AlphaStats& st = texture->AlphaStatsView();
+            glassSheen = st.pctClear < 5.0 && st.pctPartial > 80.0 && st.aMean < 128;
+        }
+    }
     // DZ-003, resolved above (see reflectiveMaterial).
-    if (reflectiveMaterial)
+    if (reflectiveMaterial || glassSheen)
     {
         d.flags |= WGR_DRAW3D_REFLECTIVE;
     }
@@ -5440,6 +5472,15 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     // Cache coverage so SceneObjectCreated can tag each instance and GpuDrivenCoverage can tell
     // the scene loop whether to suppress the whole CPU draw or only the GPU-owned sections.
     _gpuModelCoverage[shape] = (hasProxies || hasComplement) ? GpuDrawCoverage::Partial : GpuDrawCoverage::Full;
+    // MAT-051 diagnostic (temporary): WGR_COVERAGE_TRACE=1 prints each shape's
+    // classification with its complement inputs, so a glass-owning vehicle
+    // stamped Full names itself instead of silently losing its canopy.
+    if (const char* trace = std::getenv("WGR_COVERAGE_TRACE"); trace && *trace == '1')
+    {
+        LOG_WARN(Graphics, "GpuModel coverage: {} -> {} (hasProxies={} hasComplement={} lods={} sections={})",
+                 shape->Name(), (hasProxies || hasComplement) ? "Partial" : "Full", hasProxies ? 1 : 0,
+                 hasComplement ? 1 : 0, lods.size(), sections.size());
+    }
     // §12d-full: remember complement-bearing shapes so a proxies-only Partial can be upgraded to
     // Full once its proxies are all GPU-driven, but a complement-bearing one never is.
     if (hasComplement)
