@@ -5694,28 +5694,54 @@ tickets:
     obligation: REQUIRED
     execution_mode: INVESTIGATE
     review_model: AUTOMATED_EVIDENCE
-    scheduling_state: OPEN
-    status: RESEARCHED
-    outcome: null
+    scheduling_state: DONE
+    status: INTEGRATED
+    outcome: >-
+      Landed 2026-08-25 in aa4c4c75, two lines. `Odol40.hpp` and `Odol49.hpp` now
+      store the section's CommonFaceFlags word instead of discarding it, in the
+      same slot revision 73 has used since fb6c676. Nothing downstream changed:
+      the mask, the hints copy and all six skips were already correct and were
+      only ever handed zero. Covers revision 40 via `ReadOdol40StaticSections`
+      and revisions 48/49/50/52/54, which all share `ReadOdolA2StaticModel`.
+      Measured after: A1 T-72 (rev 40) sections 0-2, the three marker sections
+      carrying its six proxies, read `0x1000c000`; A2 T-72 (rev 48) reads
+      `0x10002000`; and this record's own fixture `house_k_1_ep1.p3d` (rev 49)
+      reads `0x10002000` at LOD 0, where the investigation measured `0x0`.
+      Also added the flag word plus a HIDDEN-PROXY/HIDDEN tag to
+      `PoseidonTools model selections`, since the value had no observability at
+      all -- a reader that drops the word is indistinguishable from a file that
+      never set it. Deployed to the game folder the same day.
     owner: null
-    branch: dayz-compat-layer
+    branch: feat/consolidated
     baseline_commit: 361949c
-    verification_commit: null
+    verification_commit: aa4c4c75
     milestone: 2C
     milestone_role: NON_BLOCKING_VALIDATION
     depends_on: [WLD-016, AST-012D]
     blocked_by: []
     blocks: []
-    implementation_commits: []
-    production_call_sites: []
+    implementation_commits: [aa4c4c75]
+    production_call_sites:
+      - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp (ReadOdol40StaticSections)
+      - engine/Poseidon/Asset/Formats/P3D/Odol49.hpp (ReadOdolA2StaticSections)
     test_ids: [mat-046-takistan-proxy-section-census]
     benchmark_artifacts: []
-    evidence_hash: 5eb86b5efd9cfa2ff3bfcac8b2f682a107ad136e9b8ccfb5afe5b728d66978cd
+    evidence_hash: 021f49e6cbb122775e993857168b751b5914d78ee3c31d40fe087f0345b30eaf
     decision_record: docs/roadmap/decisions/MAT-046-a2-a1-readers-drop-the-hidden-proxy-flag-20260814.md
     capability_claims:
       - capability: HIDDEN_PROXY_FLAG_A2_A1
-        status: UNSUPPORTED
+        status: VALIDATED
         denominator: >-
+          FIXED in aa4c4c75 (2026-08-25); the paragraph below is the pre-fix
+          measurement, kept because it is the denominator the fix is judged
+          against. Post-fix witnesses, all via `model selections`, which now
+          prints the flag word: A1 T-72 rev 40 sections 0-2 `0x1000c000`
+          HIDDEN-PROXY; A2 T-72 rev 48 sections 1-3 `0x10002000`; rev-49
+          `house_k_1_ep1.p3d` LOD 0 `0x10002000` against the `0x0` recorded
+          below. The 6,030-section Takistan sweep has NOT been re-run post-fix;
+          the three fixtures above are single models, and the corpus number
+          remains the pre-fix one until someone re-runs `census.py`.
+          Pre-fix measurement follows.
           `Odol49.hpp:205` and `Odol40.hpp:332` read the section's CommonFaceFlags
           word as `(void)reader.read<uint32_t>()`. That word sits between
           `textureIndex` and `materialIndex` and carries `0x10000000`, IsHiddenProxy.

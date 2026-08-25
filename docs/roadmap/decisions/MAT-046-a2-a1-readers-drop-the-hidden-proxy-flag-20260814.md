@@ -299,3 +299,58 @@ Session scratchpad (ephemeral — copy before relying on it):
 - `tak-objects.txt`, `tak-village.txt`, `tak-model-counts.txt` — placement tables
   from `PoseidonTools terrain objects` (the `--near 2780 862 300` dump is the
   capture's village: 49 models, 995 placements).
+
+---
+
+## Resolution — 2026-08-25, commit `aa4c4c75`
+
+Landed as diagnosed, two lines, eleven days after this record was written. The
+prompt was the owner noticing the symptom on an **Arma 1 T-72** — thin triangles
+radiating off the hull in a wireframe dump — and observing that the same thing
+shows on the Arma 2 map. It does, and for this exact reason.
+
+**The change.** `ReadOdol40StaticSections` (`Odol40.hpp`) and
+`ReadOdolA2StaticSections` (`Odol49.hpp`) now assign the CommonFaceFlags word to
+`section.commonFaceFlags` instead of `(void)`-discarding it, in the same slot
+between `textureIndex` and `materialIndex` that revision 73 has read since
+`fb6c676`. Nothing downstream was touched, because — as this record established —
+nothing downstream was wrong.
+
+**Coverage.** Revision 40 through `Odol40`; revisions 48, 49, 50, 52 and 54
+through `Odol49`, which all funnel into `ReadOdolA2StaticModel`. That is every
+generation between OFP and Arma 3: Arma 1, Arma 2, Operation Arrowhead, and DayZ.
+
+**Post-fix witnesses.**
+
+| fixture | rev | sections | flag word |
+|---|---|---|---|
+| A1 `t72.p3d` (`packages/a1-compat/addons/tracked.pbo`) | 40 | 0, 1, 2 — the three `texture -1 material -1` sections carrying its 6 proxies | `0x1000c000` HIDDEN-PROXY |
+| A2 `t72.p3d` (`ALDP_A2_PBOs_…part3/tracked.pbo`) | 48 | 1, 2, 3 | `0x10002000` HIDDEN-PROXY |
+| `ca\structures_e\housek\house_k_1_ep1.p3d` | 49 | LOD 0 section 0 | `0x10002000` — the row in the table above recorded `0x0` here |
+
+The house is this record's own named fixture, which makes it the direct
+before/after: same file, same section, `0x0` on 2026-08-14 and `0x10002000` now.
+
+**Observability, which was the reason this stayed invisible.** No tool printed
+the flag word, so a reader that drops it looks exactly like a file that never set
+it — and that is precisely how two earlier attempts went hunting in named
+selections instead. `PoseidonTools model selections` now prints
+`flags 0x########` per section plus a `HIDDEN-PROXY` / `HIDDEN` tag.
+
+**Not a witness:** `PoseidonTools model render` still draws marker triangles. The
+debug wireframe does not consult section hints, so it shows spikes before and
+after. Judging this fix by that render is a false negative; use `model selections`
+or an in-engine capture.
+
+**Not re-measured.** The 6,030-section, 513-model Takistan sweep above has *not*
+been re-run post-fix. The corpus figure stays the pre-fix one. What the fix is
+expected to change there — 119 marker sections on drawable LODs, 41 of them on
+LOD 0 — is a prediction from the file bytes this record already measured, not a
+new measurement. Re-running `census.py` would close it.
+
+**Verification.** Full suite 4319/4320. The single failure,
+`Release builds reject --dev before help or option registration`, is pre-existing
+and unrelated: it asserts on the *source text* of `AppConfig.cpp`, which this
+change does not touch and which last moved in the upstream merge `4f7d22c3`.
+Built and deployed via `scripts\Deploy.ps1`; game folder stamped
+`feat/consolidated aa4c4c75`.
