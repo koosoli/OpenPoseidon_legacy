@@ -47,7 +47,21 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
     // Partial alpha → genuine blend (must be drawn back-to-front, no depth-write).
     // Otherwise fully-transparent holes → alpha-test cutout. Otherwise opaque.
     // Both Cutout and Opaque occlude (write depth); the holes are handled by the test.
-    if (s.pctPartial >= partialThreshold)
+    //
+    // MAT-051 refinement: a SOLID surface with soft seams is not translucent.
+    // Stock CWA ships AI88 panelling whose alpha is almost everywhere 255 with a
+    // sprinkle of anti-aliased fringe -- cobra_palubka_bl/br measure 9.9%/13.5%
+    // partial at MEAN 235/229 with zero clear texels. The plain partial>=2% rule
+    // sent those to Blend, and a Blend section is dropped from the opaque pass;
+    // in the camera vehicle's cockpit queue nothing revisits it, so the Cobra's
+    // side panels simply did not draw and the pilot saw grass through the
+    // airframe. The same rule is what makes M60/M16 detail parts see-through
+    // against the sky. Genuine translucency is nothing like this shape:
+    // canopy glass measures mean 29-75 with 99-100% partial. So: no clear
+    // texels to speak of AND a high mean means the partial texels are seams on
+    // a solid -- classify Opaque and keep the depth write. The seams lose
+    // their softness; the panel keeps existing.
+    if (s.pctPartial >= partialThreshold && !(s.pctClear < clearThreshold && s.aMean >= 200))
         s.kind = AlphaStats::Blend;
     else if (s.pctClear >= clearThreshold)
         s.kind = AlphaStats::Cutout;

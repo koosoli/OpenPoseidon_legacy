@@ -1221,6 +1221,41 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
     {
         return transf;
     }
+    // AST-016B follow-up (owner: "cockpit view of Arma 1/2/3 helis is far from
+    // the pilot position"): a bridged vehicle's crew proxies are Arma-era
+    // placeholders (\ca\temp\proxies\..., \a3\data_f\proxies\...) that exist
+    // neither as files nor as CfgNonAIVehicles classes, so no ManProxy is ever
+    // Present() and the identity fallback put the interior camera at the MODEL
+    // ORIGIN. The models themselves say where the pilot's eyes belong:
+    // Arma 2/3 author a `driverview` memory point for exactly this, and the
+    // OFP-era convention is a `pilot` point. Stock content never reaches this
+    // code -- its crew proxies resolve -- so this is purely the degraded path
+    // getting a sane answer instead of the hull's centre.
+    if (LODShapeWithShadow* shape = GetShape())
+    {
+        Vector3 eye = shape->MemoryPoint("driverview");
+        if (eye.SquareSize() < 0.01f)
+        {
+            eye = shape->MemoryPoint("pilot");
+        }
+        if (eye.SquareSize() < 0.01f)
+        {
+            const int vp = shape->FindLevel(VIEW_PILOT);
+            if (vp >= 0)
+            {
+                if (Shape* pilotLod = shape->LevelOpaque(vp))
+                {
+                    eye = pilotLod->NamedPosition("pilot");
+                }
+            }
+        }
+        if (eye.SquareSize() >= 0.01f)
+        {
+            Matrix4 m = MIdentity;
+            m.SetPosition(eye);
+            return m;
+        }
+    }
     return MIdentity;
 }
 
