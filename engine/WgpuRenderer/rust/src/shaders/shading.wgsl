@@ -181,7 +181,23 @@ fn shade(
     // visibility the "is there a roof over me" term that neither of the other two can see (one
     // knows only the heightfield, the other reaches ~2 m and cannot see off-screen geometry).
     // Each returns 1 when its own feature is off.
-    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_ao(frag_coord)
+    // GTAO reads a dense canopy as a cave: leaf cards hand the horizon march an
+    // occluder in every direction, so the interior of every tree collapsed to
+    // near-black (owner report 2026-08-25; A/B on the Abel oak: WGR_GTAO=0
+    // restores the GL33 reference's canopy, so GTAO is the whole mechanism).
+    // A leaf card is not a wall -- most of what the march counts as occlusion
+    // around a leaf is other leaves, which transmit and scatter light; the
+    // foliage translucency path directly below this exists for exactly that
+    // reason. So on foliage the term is applied at reduced weight rather than
+    // exempted: contact darkening where canopy meets trunk and ground
+    // survives, the cave reading does not. 0.35 leaves the darkest canopy
+    // interior at ~0.65 ambient, which matches the GL33 capture's character at
+    // the same pose. Same is_foliage gate as the cavity exemption below.
+    var gtao_t = gtao_ao(frag_coord);
+    if (is_foliage) {
+        gtao_t = mix(1.0, gtao_t, 0.35);
+    }
+    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t
         * interior_sky_ao(world_abs, nrm) * clamp(baked_sky_vis, 0.0, 1.0);
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
