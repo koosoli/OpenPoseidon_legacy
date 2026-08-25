@@ -1100,7 +1100,24 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     // InitVehicles fails the whole mission on the error latch
                     // (GetMaxError() >= EMError). An absent proxy model must
                     // degrade to an absent proxy, not a refused mission.
-                    if (!QIFStreamB::FileExist(GetShapeName(modelName)))
+                    //
+                    // Owner report 2026-08-26 ("even in original OFP assets I
+                    // spawn far behind the cockpit"): the first version of this
+                    // probe checked ONLY the file, but a classic crew proxy is
+                    // a bare name ("uh60pilot") whose model is supplied by its
+                    // CfgNonAIVehicles class ("Proxyuh60pilot") -- there is no
+                    // file of that name and never was. The probe silently
+                    // dropped 102 stock cockpit-crew proxies per mission, the
+                    // driver ManProxy was never Present(), GetProxyCamera
+                    // returned false, and every interior camera fell back to
+                    // the MODEL ORIGIN -- metres behind the seat on aircraft.
+                    // So: a proxy whose config class exists is NEVER skipped;
+                    // the file probe is the fallback for config-less paths
+                    // (the Arma-era \ca\temp\... placeholders this probe was
+                    // written for, which have neither class nor file).
+                    const bool proxyHasConfigClass =
+                        (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr;
+                    if (!proxyHasConfigClass && !QIFStreamB::FileExist(GetShapeName(modelName)))
                     {
                         LOG_INFO(Graphics, "Proxy model absent, skipped: {} (from {})",
                                  (const char*)modelName, proxy.name);

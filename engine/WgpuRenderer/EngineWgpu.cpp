@@ -3401,6 +3401,15 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         d.flags |= WGR_DRAW3D_REFLECTIVE;
     }
+    // MAT-051 second half (owner: "cockpit is still transparent" from the pilot
+    // seat): the sheen is Fresnel-weighted, so it vanishes at normal incidence
+    // -- exactly the inside view. The GLASS bit floors the pane's output alpha
+    // in the shader so it keeps a minimum head-on presence. Glass only; water
+    // (reflectiveMaterial) keeps its own alpha untouched.
+    if (glassSheen)
+    {
+        d.flags |= WGR_DRAW3D_GLASS;
+    }
     d.camera = _currentCamera;
     d.palette_slot = _currentPaletteSlot;
 

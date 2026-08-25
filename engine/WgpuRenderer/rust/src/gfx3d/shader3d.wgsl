@@ -57,6 +57,11 @@ const MATFLAG_INVERT_NORMAL_Y: u32 = 1u;
 const MATFLAG_REFLECTIVE: u32 = 2u;
 // WGR_DRAW3D_NIGHT_EMITTER: a recognised light fixture, exempt from the emissive_night fade.
 const MATFLAG_NIGHT_EMITTER: u32 = 4u;
+// MAT-051 (WGR_DRAW3D_GLASS): classic glass pane. Output alpha is floored so the pane still
+// reads at normal incidence, where Fresnel gives ~F0 and an OFP-era 11%-alpha texture would
+// otherwise vanish from the pilot seat. 0.18 is the retail tint's own average (46/255).
+const MATFLAG_GLASS: u32 = 8u;
+const GLASS_MIN_ALPHA: f32 = 0.18;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -790,7 +795,13 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         && !matdbg_flag(MATDBG_DISABLE_FRESNEL_ENV)) {
         out_rgb = env_reflection(out_rgb, shading_normal, in.world_pos, in.fog);
     }
-    return vec4<f32>(out_rgb, out_a);
+    // MAT-051: a glass pane keeps a minimum presence head-on. Applied AFTER the
+    // reflection so the floor composites the reflected colour, not the bare albedo.
+    var out_a2 = out_a;
+    if ((material_flags(material) & MATFLAG_GLASS) != 0u) {
+        out_a2 = max(out_a2, GLASS_MIN_ALPHA);
+    }
+    return vec4<f32>(out_rgb, out_a2);
 }
 
 // Depth + normal prepass fragment (docs/depth-prepass-plan.md). Reuses vs_main/

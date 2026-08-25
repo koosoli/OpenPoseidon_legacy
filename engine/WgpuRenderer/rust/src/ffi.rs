@@ -262,6 +262,9 @@ pub const WGR_MODEL_SECTION_NIGHT_EMITTER: u32 = 2;
 // WgrModelSection::flags bit 2: Multi's mask stage is authored on uvSource "tex1".
 pub const WGR_MODEL_SECTION_MASK_UV1: u32 = 4;
 pub const WGR_DRAW3D_NIGHT_EMITTER: u32 = 4;
+// WgrDraw3D::flags bit 3 (MAT-051): classic GLASS -- alpha-blended pane whose texture is
+// continuous partial alpha. The shader floors output alpha so the pane reads head-on.
+pub const WGR_DRAW3D_GLASS: u32 = 8;
 
 // Per-section shading, parallel to a model's sections (one per section). The raw material is
 // folded with the frame sun in the GPU-driven fragment shader (matching the per-draw path);

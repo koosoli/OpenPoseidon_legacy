@@ -247,7 +247,14 @@ enum WgrDraw3DFlags : uint32_t
      * ships 2.6, Arma 3 tree crowns 1.0) and the shader fades it out with the sun, or the
      * whole forest self-illuminates at midnight. Same meaning as
      * WGR_MODEL_SECTION_NIGHT_EMITTER on the retained path. */
-    WGR_DRAW3D_NIGHT_EMITTER = 4
+    WGR_DRAW3D_NIGHT_EMITTER = 4,
+
+    /* MAT-051: this alpha-blended draw is classic GLASS (continuous-partial-alpha texture
+     * over a fully opaque material -- a canopy pane, a periscope). The fragment shader
+     * floors its output alpha so the pane still reads at normal incidence, where the
+     * Fresnel sky term (WGR_DRAW3D_REFLECTIVE, set alongside) goes to ~F0 and an OFP-era
+     * 11%-alpha pane would otherwise vanish from the inside view. */
+    WGR_DRAW3D_GLASS = 8
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned
