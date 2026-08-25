@@ -1761,7 +1761,7 @@ class Engine : public IGraphicsEngine
         // convecting. Total opacity is held roughly constant across the range, so it reads as a
         // shape control and not a brightness one. 0.5 = EXACTLY the shipped look (every endpoint
         // pair in sky.wgsl is symmetric about the previous hard-coded constant).
-        float cirrusPuffiness = 0.5f;
+        float cirrusPuffiness = 1.0f;
         // How far the layer wanders from that on its own, as a fraction of the slider — so a
         // still day is sometimes flatter and sometimes lumpier without anyone touching it.
         // Driven from the world's weather-drift clock (the same one the cumulus shapes evolve
@@ -1769,7 +1769,7 @@ class Engine : public IGraphicsEngine
         // full cycle is the better part of an hour at the default evolution speed. 0 = perfectly
         // steady, i.e. exactly the look at the chosen puffiness. Small by default: at 0.15 the
         // extremes are a slightly more drawn-out or slightly lumpier version of the shipped look.
-        float cirrusPuffVariation = 0.15f;
+        float cirrusPuffVariation = 1.0f;
         // AMOUNT of the second layer — the "more or less of it" control that the on/off flag above
         // was not. 0 = a handful of separated wisps in an otherwise empty upper sky, 0.5 = EXACTLY
         // the coverage the layer shipped with, 1 = a continuous cirrostratus veil with only thin
@@ -1792,7 +1792,7 @@ class Engine : public IGraphicsEngine
         // into or below the first, because then it would stop being a second layer.
         // Default 0: this only ever moves the layer AWAY from what it shipped as, so the bottom of
         // the range is the neutral value, not the middle.
-        float cirrusMatchDeck = 0.0f;
+        float cirrusMatchDeck = 1.0f;
         // CLD-020 cloud shadows: the deck dims the direct sun on terrain, objects, grass and
         // water through a world-anchored transmittance map rebuilt each frame around the camera.
         // 0 = off (every surface reads fully lit, and the compute pass early-outs per texel).

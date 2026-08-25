@@ -739,20 +739,21 @@ fn cirrus_mode_from_env() -> f32 {
 /// 0.5 is the middle of the slider AND exactly the look the layer shipped with: sky.wgsl maps the
 /// slider through a middle knot that IS the old constant (see `cirrus_mix3`), so the control is
 /// opt-in tuning in both directions rather than a new look imposed on everyone.
-const CIRRUS_PUFF_DEFAULT: f32 = 0.5;
+const CIRRUS_PUFF_DEFAULT: f32 = 1.0;
 /// How far the layer is allowed to wander from that on its own, as a fraction of the full slider.
-/// Deliberately small: at 0.15 the extremes are cirrus that is slightly more drawn-out or slightly
-/// lumpier than shipped, over the better part of an hour, which is weather rather than animation.
-/// 0 pins it exactly.
-const CIRRUS_PUFF_VAR_DEFAULT: f32 = 0.15;
+/// Owner-tuned 2026-08-26 (with PUFF and MATCH below): full wander, so over the better part of an
+/// hour the layer ranges the whole fibrous-to-lumpy span. 0 pins it exactly; the old shipped
+/// default was 0.15.
+const CIRRUS_PUFF_VAR_DEFAULT: f32 = 1.0;
 /// Cirrus AMOUNT default, matching `Engine::SkySettings`. 0.5 is the middle of the slider AND
 /// exactly the coverage the layer shipped with (sky.wgsl maps it through a middle knot that IS the
 /// old `CIRRUS_COVER`), so the control is opt-in in both directions.
 const CIRRUS_AMOUNT_DEFAULT: f32 = 0.5;
-/// Cirrus MATCH default. 0 = high ice cloud, which is what the layer has always been; the slider
-/// only ever moves it toward the cumulus deck, so the default has to be the bottom of the range
-/// rather than its middle.
-const CIRRUS_MATCH_DEFAULT: f32 = 0.0;
+/// Cirrus MATCH default. 0 = high ice cloud, which is what the layer shipped as; 1 moves it as
+/// close to the cumulus deck as the shell march gets. Owner-tuned 2026-08-26 to 1: the second
+/// layer reads as more of the main deck's weather rather than a separate ice sheet. Costs the
+/// deeper march (see the volumetric note above); measured on the devtest sky before defaulting.
+const CIRRUS_MATCH_DEFAULT: f32 = 1.0;
 
 /// Second-layer EDGE SOFTNESS default, matching `Engine::SkySettings`.
 ///
