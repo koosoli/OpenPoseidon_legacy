@@ -33,6 +33,7 @@
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Input/ControlsCategory.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Input/UserAction.hpp>
@@ -1214,6 +1215,34 @@ void DrawZeusTab()
     ImGui::EndDisabled();
     if (Dev::PanelItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("WASD moves, Q/Z changes altitude, and the mouse looks around.\nKeypad +/- changes zoom.");
+
+    ImGui::Spacing();
+    Dev::PanelHeading("Player camera");
+    Dev::PanelSeparator();
+    {
+        // Third person (the Numpad-Enter "Person view" toggle) is not a
+        // keybinding problem when it does nothing -- World.cpp forces the
+        // camera back to CamInternal whenever the active difficulty profile
+        // disables DT3rdPersonView. This flips that flag on the ACTIVE profile
+        // (cadet or veteran, whichever the player runs), in memory only:
+        // nothing here calls SaveToFile, so the player's UserInfo.cfg keeps
+        // whatever they chose in Options. A Zeus takeover gives things back.
+        UserConfig& uc = USER_CONFIG;
+        const bool serverOwned = uc.HasServerDifficulty();
+        ImGui::BeginDisabled(serverOwned);
+        bool thirdPerson = uc.IsEnabled(DT3rdPersonView);
+        if (Dev::Checkbox("Allow third person view", &thirdPerson))
+        {
+            bool* flags = uc.easyMode ? uc.cadetDifficulty : uc.veteranDifficulty;
+            flags[DT3rdPersonView] = thirdPerson;
+        }
+        ImGui::EndDisabled();
+        if (serverOwned)
+            Dev::PanelTooltip("The server's difficulty override is active; third person is the server's call.");
+        else
+            Dev::PanelTooltip("Enables the Numpad-Enter person-view toggle even on a profile that forbids it.\n"
+                              "Session-only: your saved Options difficulty is not touched.");
+    }
 
     ImGui::Spacing();
     Dev::PanelHeading("Go to coordinates");
