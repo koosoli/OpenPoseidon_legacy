@@ -641,6 +641,27 @@ void Animation::Transform(LODShape* shape, const Matrix4& trans, int level) cons
         lShape->SetPos(posI).SetFastTransform(trans, lShape->OrigPos(posI));
         lShape->SetNorm(posI).SetRotate(trans, lShape->OrigNorm(posI));
     }
+    // AST-016 diagnostic (temporary): a bridged tank's turret VANISHES the
+    // first time this runs on it, on both renderers. Name the moment: if this
+    // transform just moved any vertex outside a sane model radius, say which
+    // selection and how far. Once per selection per level.
+    if (sel.Size() > 0)
+    {
+        const int firstI = sel[0];
+        const float mag = lShape->Pos(firstI).SquareSize();
+        if (!(mag < 1.0e6f))
+        {
+            static int reported = 0;
+            if (reported < 16)
+            {
+                ++reported;
+                const Vector3 p = lShape->Pos(firstI);
+                LOG_WARN(Graphics, "Animation::Transform blew up selection '{}' on {}: first vert -> {} {} {} (orig {} {} {})",
+                         (const char*)sel.Name(), (const char*)shape->GetName(), p.X(), p.Y(), p.Z(),
+                         lShape->OrigPos(firstI).X(), lShape->OrigPos(firstI).Y(), lShape->OrigPos(firstI).Z());
+            }
+        }
+    }
     lShape->InvalidateNormals();
     lShape->InvalidateBuffer();
 }
@@ -899,6 +920,30 @@ void AnimationSection::Hide(LODShape* shape, int level) const
     PoseidonAssert(lShape);
     const NamedSelection& sel = lShape->NamedSel(_selection[level]);
     const FaceSelection& faces = sel.FaceOffsets(lShape);
+    // AST-016 diagnostic (temporary): a bridged tank's turret vanishes only
+    // when the vehicle simulates, and vertex displacement is ruled out --
+    // hiding is the remaining mechanism. Say WHAT gets hidden.
+    {
+        static int reported = 0;
+        if (reported < 24 && (faces.Size() > 0 || sel.NSections() > 0))
+        {
+            ++reported;
+            char secBuf[128];
+            int n = 0;
+            for (int i = 0; i < sel.NSections() && n < 100; i++)
+                n += snprintf(secBuf + n, sizeof(secBuf) - n, "%d,", sel.GetSection(i));
+            secBuf[n] = 0;
+            char faceBuf[128];
+            n = 0;
+            for (int i = 0; i < faces.Size() && n < 100; i++)
+                n += snprintf(faceBuf + n, sizeof(faceBuf) - n, "%d,", faces[i]);
+            faceBuf[n] = 0;
+            LOG_WARN(Graphics,
+                     "AnimationSection::Hide '{}' on {} level {}: {} faces [{}], {} sections [{}] (of {} lod sections)",
+                     (const char*)sel.Name(), (const char*)shape->GetName(), level, faces.Size(), faceBuf,
+                     sel.NSections(), secBuf, lShape->NSections());
+        }
+    }
     for (int i = 0; i < faces.Size(); i++)
     {
         Poly& face = lShape->Face(faces[i]);

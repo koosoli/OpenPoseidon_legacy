@@ -300,6 +300,14 @@ void TurretType::InitShape(const ParamEntry& cfg, LODShape* shape)
     _neutralXRot = atan2(_dir.Y(), _dir.SizeXZ());
     _neutralYRot = 0;
 
+    // AST-016 diagnostic (temporary): on the bridged tanks the turret orbits
+    // out of the hull the moment it slews, and the A2 rotors orbit a wrong
+    // pivot -- both are what a mis-resolved rotation centre produces. Print
+    // the centre this turret will actually rotate around.
+    LOG_WARN(Graphics, "TurretType::InitShape {}: turretAxis '{}' -> {} {} {}, gunAxis '{}' -> {} {} {}, gunBeg '{}' pos {} {} {}",
+             (const char*)shape->GetName(), (const char*)turretAxis, _yAxis.X(), _yAxis.Y(), _yAxis.Z(),
+             (const char*)gunAxis, _xAxis.X(), _xAxis.Y(), _xAxis.Z(), (const char*)gunBeg, _pos.X(), _pos.Y(), _pos.Z());
+
     RString bodyName = cfg >> "body";
     RString gunName = cfg >> "gun";
 
@@ -366,11 +374,55 @@ void Turret::Animate(const TurretType& type, const Object* obj, int level)
     LODShape* lShape = obj->GetShape();
     Shape* shape = lShape->Level(level);
 
+    // AST-016 diagnostic (temporary): WGR_SKIP_TURRET_ANIM=1 skips the two
+    // Transform calls, bisecting "the vanish happens inside Transform's side
+    // effects" from "the vanish is outside animation entirely".
+    static const bool skipTurretAnim = [] {
+        const char* v = std::getenv("WGR_SKIP_TURRET_ANIM");
+        return v && *v == '1';
+    }();
+    if (skipTurretAnim)
+    {
+        return;
+    }
+
     if (bodySel >= 0 && shape->NamedSel(bodySel).Size() > 0)
     {
         Matrix4 mat = MIdentity;
         obj->AnimateMatrix(mat, level, bodySel);
         type._body.Transform(lShape, mat, level);
+        // AST-016 diagnostic (temporary): the bridged tanks' turret is invisible
+        // whenever the vehicle simulates, with displacement and section-hiding
+        // both measured innocent. Print the ground truth of the first turret
+        // animation: matrix translation, selection size, and where the first
+        // vertex landed.
+        {
+            static int reported = 0;
+            if (reported < 8 && level == 0)
+            {
+                ++reported;
+                const NamedSelection& bs = shape->NamedSel(bodySel);
+                int degenerate = 0, zero = 0, sane = 0;
+                float minY = 1e9f, maxY = -1e9f;
+                for (int vi = 0; vi < bs.Size(); ++vi)
+                {
+                    const Vector3 p = shape->Pos(bs[vi]);
+                    const float m = p.SquareSize();
+                    if (!(m >= 0.0f) || m > 1.0e4f)
+                        ++degenerate;
+                    else if (m < 1.0e-8f)
+                        ++zero;
+                    else
+                        ++sane;
+                    minY = std::min(minY, p.Y());
+                    maxY = std::max(maxY, p.Y());
+                }
+                LOG_WARN(Graphics,
+                         "Turret::Animate {} level {}: sel '{}' {} verts -> sane {} zero {} degenerate {}, Y [{} .. {}], mat pos {} {} {}",
+                         (const char*)lShape->GetName(), level, (const char*)bs.Name(), bs.Size(), sane, zero,
+                         degenerate, minY, maxY, mat.Position().X(), mat.Position().Y(), mat.Position().Z());
+            }
+        }
     }
     if (gunSel >= 0 && shape->NamedSel(gunSel).Size() > 0)
     {

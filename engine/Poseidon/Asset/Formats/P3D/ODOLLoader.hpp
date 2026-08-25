@@ -416,11 +416,60 @@ class ODOLLoader
         }
         const bool indexFirst = indexFirstScore >= weightFirstScore;
 
-        // Dominant model-skeleton bone per vertex.
-        const size_t vertexCount = std::min(refs.size(), mesh.vertices.size());
-        std::vector<int32_t> dominantBone(mesh.vertices.size(), -1);
+        // The second classic silent failure: BI stores the index byte
+        // PREMULTIPLIED BY TWO in this record (the runtime's own accessor
+        // halves it). A premultiplied byte still passes the bounds check for
+        // every bone in the lower half of the table and lands each vertex on
+        // the WRONG bone -- which is not a frozen turret but a turret that
+        // rotates into the hull, exactly what the first live test produced.
+        // Measured, not assumed: if essentially every index byte is even AND
+        // the halved maximum still addresses the table, the bytes are
+        // premultiplied. A genuine unmultiplied ID stream goes odd within a
+        // handful of vertices (bone 1 exists on every rig this size).
+        size_t evenCount = 0, totalCount = 0;
+        uint32_t maxIndexByte = 0;
+        for (const auto& r : refs)
+        {
+            const int pairs = std::min<int>(r.count, 4);
+            for (int p = 0; p < pairs; ++p)
+            {
+                const uint8_t index = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)];
+                ++totalCount;
+                if ((index & 1u) == 0)
+                    ++evenCount;
+                maxIndexByte = std::max<uint32_t>(maxIndexByte, index);
+            }
+        }
+        const bool premultiplied = totalCount > 0 &&
+                                   static_cast<double>(evenCount) / static_cast<double>(totalCount) >= 0.999 &&
+                                   (maxIndexByte / 2) < indexLimit;
+        const uint32_t indexShift = premultiplied ? 1u : 0u;
+
+        // Dominant model-skeleton bone -- computed per REFERENCE RECORD, then
+        // spread to vertices. The records are parallel to the LOD's POINTS,
+        // not its vertices: on the A2 T-72's LOD 0 there are 13,104 references
+        // against 15,165 vertices, and treating them as per-vertex assigned a
+        // third of the turret to bones belonging to whatever geometry happened
+        // to share the truncated index range -- the turret rotated into the
+        // hull and vanished on the first live test. `vertexToPoint` (parsed by
+        // every one of these readers) is the bridge: each vertex takes its
+        // point's dominant bone. When the map is absent or sized wrong the
+        // records are treated as per-vertex, which is exact whenever the two
+        // counts agree.
+        // Chosen by MEASURED SIZE, not by field name: the map that has one
+        // entry per VERTEX is the vertex->record bridge, whichever of the two
+        // arrays it is (the first live test proved trusting the names is how a
+        // turret disappears).
+        const std::vector<int32_t>* vertexMap = nullptr;
+        if (source.vertexToPoint.size() == mesh.vertices.size())
+            vertexMap = &source.vertexToPoint;
+        else if (source.pointToVertex.size() == mesh.vertices.size())
+            vertexMap = &source.pointToVertex;
+        const auto& vertexToPoint = vertexMap ? *vertexMap : source.vertexToPoint;
+        const bool  perPoint = vertexMap != nullptr && refs.size() != mesh.vertices.size();
+        std::vector<int32_t> dominantByRecord(refs.size(), -1);
         size_t influenced = 0;
-        for (size_t v = 0; v < vertexCount; ++v)
+        for (size_t v = 0; v < refs.size(); ++v)
         {
             const auto& r = refs[v];
             const int pairs = std::min<int>(r.count, 4);
@@ -428,7 +477,8 @@ class ODOLLoader
             uint32_t bestBone = 0;
             for (int p = 0; p < pairs; ++p)
             {
-                const uint8_t index  = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)];
+                const uint32_t index =
+                    static_cast<uint32_t>(r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 0 : 1)]) >> indexShift;
                 const uint8_t weight = r.data[static_cast<size_t>(p) * 2 + (indexFirst ? 1 : 0)];
                 if (index >= indexLimit)
                     continue;
@@ -443,15 +493,29 @@ class ODOLLoader
             }
             if (bestWeight >= 0)
             {
-                dominantBone[v] = static_cast<int32_t>(bestBone);
+                dominantByRecord[v] = static_cast<int32_t>(bestBone);
                 ++influenced;
             }
         }
         if (influenced == 0)
             return;
 
-        // Bucket vertices per bone, then fill exactly the empty bone-named
-        // selections.
+        // Spread record bones to vertices, then bucket per bone and fill
+        // exactly the empty bone-named selections.
+        std::vector<int32_t> dominantBone(mesh.vertices.size(), -1);
+        for (size_t v = 0; v < mesh.vertices.size(); ++v)
+        {
+            size_t record = v;
+            if (perPoint)
+            {
+                const int32_t point = vertexToPoint[v];
+                if (point < 0)
+                    continue;
+                record = static_cast<size_t>(point);
+            }
+            if (record < dominantByRecord.size())
+                dominantBone[v] = dominantByRecord[record];
+        }
         std::unordered_map<uint32_t, std::vector<uint32_t>> verticesByBone;
         for (size_t v = 0; v < dominantBone.size(); ++v)
             if (dominantBone[v] >= 0)
@@ -476,9 +540,10 @@ class ODOLLoader
         {
             LOG_INFO(Graphics,
                      "Bone-selection synthesis: {} lod {} filled {} selections from {} influenced vertices "
-                     "({}-first pairs, {} bones, remap {})",
-                     sourcePath, lodIndex, filled, influenced, indexFirst ? "index" : "weight", bones.size(),
-                     remap.empty() ? "identity" : "sub-skeleton");
+                     "({}-first pairs{}, {} bones, remap {}, records {})",
+                     sourcePath, lodIndex, filled, influenced, indexFirst ? "index" : "weight",
+                     premultiplied ? " premultiplied" : "", bones.size(),
+                     remap.empty() ? "identity" : "sub-skeleton", perPoint ? "per-point" : "per-vertex");
         }
     }
 
