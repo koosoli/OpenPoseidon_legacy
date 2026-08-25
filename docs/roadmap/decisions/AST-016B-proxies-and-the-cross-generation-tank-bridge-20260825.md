@@ -104,3 +104,42 @@ Two measured findings for the next conversion:
    interprets as transparency/cutout. PBR->classic albedo conversion for
    vehicles is an open tuning task (world models did not hit it this hard;
    their materials are MatPBRBasic with sane alpha).
+
+## Addendum 2 — why the Reforger vehicles were near-black (2026-08-26)
+
+The suspect named above (BCR roughness alpha read as opacity) was measured and
+ACQUITTED. The mechanism was untextured overlay shells drawn opaque on top of
+the body.
+
+Measured, in order:
+
+1. **Alpha is clean.** Every baked body tile classifies OPAQUE (alpha min=max=255);
+   the only `_ca` cutouts are glass, grilles and one resolved decal — all
+   legitimately alpha-tested. The `Write` path already forces alpha to 255 when
+   the material names no OpacityMap.
+2. **The albedo values are in range.** The tinted base tile bakes to mean sRGB
+   (63, 61, 46) — statistically the same as stock CWA olive armour
+   (`bmp2_vez_back.pac` mean (64, 63, 44), `bmp2_top.pac` (91, 91, 68)). No
+   linear->sRGB transfer is missing; `LinearToSrgb` on the `Color_N` targets
+   already lands where 2001 artists painted.
+3. **The black was a decal shell.** The capture log names it:
+   `BTR_70_base_Decals_01.emat`, section 1, **20,139 indices** (6,713 triangles
+   wrapping the whole hull), "draws UNTEXTURED ... no face texture and the RVMAT
+   bound no albedo" — plus `interior_Decals_01` (8,847) and `Decals_03`.
+   `MatPBRDecal` is Enfusion's alpha-blended overlay family; its albedo lives in
+   keys the baker does not resolve, so the shell drew opaque fallback grey over
+   the olive body. Measured hull pixels: (44, 48, 46) — neutral GREY, not
+   shaded olive, which is what said "different material on top".
+
+Fix (XobCommand.cpp): a material that resolves NO albedo and is `MatPBRDecal`
+family — or a `*WaterErase*` utility surface, Enfusion's invisible water
+suppressor — has its parts dropped whole (`BakedMaterial::hideFaces`). A decal
+whose albedo DOES resolve (BTR `Decals_02`) still bakes and alpha-tests.
+Texture output is byte-identical before/after (verified `cmp` on shared tiles
+and the global mask), so deployed worlds are untouched.
+
+After: BTR-70 212,003 tri (9,772 dropped), UH-1H 148,410 tri (2 decal
+materials dropped). Capture `btrtest.abel`: sunlit plates mean (84, 84, 76) —
+olive-green; the shade side keeps the olive hue (48, 52, 43, B < G) instead of
+neutral grey. Not black, not white. Shade-side brightness is the classic
+renderer's ambient term, a separate (and stock-consistent) matter.

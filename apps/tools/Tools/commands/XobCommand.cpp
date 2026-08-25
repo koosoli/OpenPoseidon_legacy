@@ -956,6 +956,7 @@ struct TextureStats
     size_t rvmatsWritten = 0;               //!< distinct `.rvmat` files on disk
     size_t ematsWritten = 0;                //!< distinct deployed `.emat` files on disk
     size_t ematsCutout = 0;                 //!< of those, the ones that say they are alpha-tested
+    size_t materialsHidden = 0;             //!< unresolvable decal/water-erase materials whose faces are dropped
     std::map<std::string, size_t> packings; //!< detected NMO packing -> distinct textures
     //! Whether the BCR's alpha channel varies. Recorded, NOT bound: Enfusion is
     //! understood to pack roughness there, and an SMDI-shaped specular map could be
@@ -994,6 +995,15 @@ struct BakedMaterial
     //! `.rvmat`, else "" so the caller keeps the source path, which at least says
     //! which material was meant.
     const std::string& MaterialField() const { return !ematPath.empty() ? ematPath : rvmatPath; }
+    //! Do not write this material's faces at all. Set for a material that bound no
+    //! albedo AND whose family says its faces must not draw opaque: `MatPBRDecal` is an
+    //! alpha-blended overlay shell duplicating the surface underneath (the BTR-70's
+    //! `Decals_01` is 6,713 triangles wrapping the whole hull), and a `*WaterErase*`
+    //! material is Enfusion's invisible water-suppression surface. Left in, such a
+    //! section draws UNTEXTURED and OPAQUE over the real surface -- measured on the
+    //! BTR-70, whose olive body read near-black because its own decal shell was drawn
+    //! on top of it in fallback grey.
+    bool hideFaces = false;
 };
 
 class TextureBaker
@@ -1208,7 +1218,24 @@ class TextureBaker
         if (bcr.empty())
         {
             Unbound("material names no BCRMap and no BCR_N layer");
-            return {};
+            // No albedo will ever bind. For most families the section keeps drawing the
+            // way it did before -- untextured, but real geometry. Two families must NOT
+            // do that, because their faces are overlays that only exist to draw ON TOP
+            // of the surface beneath them (see BakedMaterial::hideFaces): drawn opaque
+            // in fallback grey they replace the surface instead of decorating it.
+            BakedMaterial unresolved;
+            const bool decalFamily = Poseidon::Asset::Material::EmatMaterial::NameMatches(emat.className, "MatPBRDecal");
+            const bool waterErase = LowerCopy(ematPath).find("watererase") != std::string::npos ||
+                                    LowerCopy(emat.className).find("watererase") != std::string::npos;
+            if (decalFamily || waterErase)
+            {
+                unresolved.hideFaces = true;
+                _stats.materialsHidden++;
+                std::cerr << "  hiding faces of " << ematPath << " (family " << emat.className
+                          << ", no albedo resolved: " << (decalFamily ? "overlay decal shell" : "water-erase surface")
+                          << ")" << std::endl;
+            }
+            return unresolved;
         }
         const std::string opacity = emat.TextureOf("OpacityMap");
 
@@ -1909,6 +1936,7 @@ struct ConvertStats
     size_t materials = 0;
     size_t partsTextured = 0;     //!< parts whose material resolved to a written `.paa`
     size_t partsWithMaterial = 0; //!< parts naming a DEPLOYED material file rather than the pak path
+    size_t partsHidden = 0;       //!< parts dropped whole: unresolvable decal shells / water-erase surfaces
     size_t crossAlongNormal = 0;  //!< triangles whose edge cross agrees with the stored normals
     //! Fact 6's absolute check, over LOD0 only: does the WRITTEN normal point away from
     //! the LOD's point-cloud centroid? Meaningful per model only for a closed convex
@@ -2039,6 +2067,23 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
                 return false;
             }
 
+            // The material first, because it can say the whole part must not draw
+            // (BakedMaterial::hideFaces) -- and then its points must not be written
+            // either, or they would sit in the file referenced by nothing.
+            std::string materialSource;
+            if (part.materialIndex < header.materials.size())
+                materialSource = header.materials[part.materialIndex].path;
+            const BakedMaterial* bakedPart = nullptr;
+            if (baker && !materialSource.empty())
+            {
+                bakedPart = &baker->For(materialSource);
+                if (bakedPart->hideFaces)
+                {
+                    stats.partsHidden++;
+                    continue;
+                }
+            }
+
             // Only referenced source vertices become points. Every point must be
             // referenced for the round-trip check below to be an identity.
             std::vector<int32_t> remap(part.positions.size(), -1);
@@ -2076,22 +2121,18 @@ bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& options
                 }
             }
 
-            std::string materialSource;
-            if (part.materialIndex < header.materials.size())
-                materialSource = header.materials[part.materialIndex].path;
             std::string texturePath;
             std::string materialPath = materialSource;
-            if (baker && !materialSource.empty())
+            if (bakedPart != nullptr)
             {
-                const BakedMaterial& baked = baker->For(materialSource);
-                texturePath = baked.colourPaa;
+                texturePath = bakedPart->colourPaa;
                 // Only when a file was actually written. Naming a material file that
                 // does not exist is strictly worse than naming the source `.emat`:
                 // both fail to open, but the second at least says which material it
                 // meant.
-                if (!baked.MaterialField().empty())
+                if (!bakedPart->MaterialField().empty())
                 {
-                    materialPath = baked.MaterialField();
+                    materialPath = bakedPart->MaterialField();
                     stats.partsWithMaterial++;
                 }
             }
@@ -2626,6 +2667,10 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
     if (stats.ematsWritten)
         std::cout << "Materials:  " << stats.ematsWritten << " .emat deployed under the texture prefix ("
                   << stats.ematsCutout << " alpha-tested); sections name them instead of the pak path.\n";
+    if (stats.materialsHidden)
+        std::cout << "            " << stats.materialsHidden
+                  << " unresolvable overlay materials (decal shells / water-erase) had their faces DROPPED --\n"
+                     "            drawn untextured they sit opaque on top of the surface they decorate.\n";
     if (stats.bcrAlphaVaries || stats.bcrAlphaFlat)
         std::cout << "            BCR alpha varies in " << stats.bcrAlphaVaries << " of "
                   << (stats.bcrAlphaVaries + stats.bcrAlphaFlat)
