@@ -79,7 +79,7 @@ capture → pixel judge → exit 0/1/125. Validated endpoints first.
   every kill comparison — killing draws changes average luminance and the
   exposure re-brightens everything, polluting every delta.
 
-## MAT-052 turned out to be THREE stacked mechanisms
+## MAT-052 turned out to be FOUR stacked mechanisms
 
 One symptom, three causes, each masking the next. Fixing one and re-testing
 was the only way through; no single theory explained all the evidence because
@@ -105,6 +105,24 @@ no single mechanism produced it.
    ambient and turned every INSTRUMENT FACE black within the hour — dial
    materials carry no ambient of their own and live off the sky term. Damp
    the term; do not switch branches.
+4. **Compensating classifier rules sealing the instruments** (the blank
+   Mi-17/AH-1 panels): TWO stacked alpha-classification "fixes"
+   (`5deb8f65`'s no-clear-high-mean⇒Opaque rule in ClassifyAlpha, and the
+   MAT-049 format-alpha demotion in ApplyFormatAlphaPolicy) each existed to
+   patch "cockpit/helicopter surfaces translucent" — symptoms whose REAL
+   causes were mechanisms 1 and 2 above. With the real causes fixed, the
+   patches' only remaining effect was harm: the AH-1/Mi-17 instrument COVER
+   GLASS shares its AI88 texture with the solid side panels (alpha 255 on
+   panels, partial on lids), and forcing the texture Opaque sealed every
+   gauge under a dark lid — dials intact underneath (`WGR_KILL_TEX` on the
+   four palubka quarters made them appear, pixel-matching GL33). Both rules
+   reverted; per-pixel blend is the authored semantics. LESSON: when a fix
+   compensates for a symptom rather than a mechanism, it becomes a landmine
+   the moment the mechanism is truly fixed — and reverting ONE compensator
+   proves nothing while a second still stands (the first revert "didn't
+   work" only because ApplyFormatAlphaPolicy re-demoted; grep for EVERY
+   site that can produce the same verdict before concluding).
+
 
 ## The instrument that finally separated layers: paint-and-read-a-channel
 
@@ -116,6 +134,15 @@ light added ON TOP by a later pass — its amount is the overlay's contribution,
 separated from the surface in one capture. (Beam pixel: 255,195,255 → a
 ~195-bright overlay = the god-ray pass. Dash: 255,0,255 → bare fragment.)
 Restrict the probe to opaque fragments or a full-screen glass pane drowns it.
+
+## Known-good reference build for the transparency symptom
+
+**`93e66bd2` (2026-08-26) renders cockpits SOLID** — owner-verified in play on
+stock T72 and UH-60. If "transparent cockpit" ever returns, bisect against
+this build: here it works. The build AFTER it also restores the Mi-17/AH-1
+instrument panels (mechanism 4 below). Known regression remaining: the
+bridged A1/A2/A3 vehicles still have the POV too far aft (crew-proxy
+camera, separate ticket).
 
 ## Standing constraints for cockpit work
 

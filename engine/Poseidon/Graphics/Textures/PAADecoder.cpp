@@ -48,20 +48,19 @@ AlphaStats ClassifyAlpha(const uint8_t* rgba, size_t pixelCount, double partialT
     // Otherwise fully-transparent holes → alpha-test cutout. Otherwise opaque.
     // Both Cutout and Opaque occlude (write depth); the holes are handled by the test.
     //
-    // MAT-051 refinement: a SOLID surface with soft seams is not translucent.
-    // Stock CWA ships AI88 panelling whose alpha is almost everywhere 255 with a
-    // sprinkle of anti-aliased fringe -- cobra_palubka_bl/br measure 9.9%/13.5%
-    // partial at MEAN 235/229 with zero clear texels. The plain partial>=2% rule
-    // sent those to Blend, and a Blend section is dropped from the opaque pass;
-    // in the camera vehicle's cockpit queue nothing revisits it, so the Cobra's
-    // side panels simply did not draw and the pilot saw grass through the
-    // airframe. The same rule is what makes M60/M16 detail parts see-through
-    // against the sky. Genuine translucency is nothing like this shape:
-    // canopy glass measures mean 29-75 with 99-100% partial. So: no clear
-    // texels to speak of AND a high mean means the partial texels are seams on
-    // a solid -- classify Opaque and keep the depth write. The seams lose
-    // their softness; the panel keeps existing.
-    if (s.pctPartial >= partialThreshold && !(s.pctClear < clearThreshold && s.aMean >= 200))
+    // MAT-052 postscript, REVERTING the MAT-051 "solid panel" exception. That rule
+    // (no clear texels + mean >= 200 => Opaque) was added because the Cobra's side
+    // panels (cobra_palubka_bl/br, 9.9%/13.5% partial at mean 235/229) "did not
+    // draw" when classified Blend -- but the real reason they were invisible was
+    // the cockpit near-clipping fixed in 7e9693c4, misattributed. The SAME
+    // textures also carry the instrument COVER GLASS on partial-alpha regions,
+    // and forcing the whole texture Opaque turned every gauge lid into a solid
+    // dark cover: the AH-1 and Mi-17 flew with blank instrument panels while the
+    // dials sat intact underneath (measured: WGR_KILL_TEX on the four palubka
+    // quarters makes the dials appear, pixel-matching GL33). Per-pixel blend is
+    // the authored semantics -- alpha-255 regions render solid panels, partial
+    // regions render glass -- so the plain rule is the correct one.
+    if (s.pctPartial >= partialThreshold)
         s.kind = AlphaStats::Blend;
     else if (s.pctClear >= clearThreshold)
         s.kind = AlphaStats::Cutout;

@@ -495,10 +495,21 @@ std::atomic<uint64_t> GFormatAlphaDemotions{0}; // Blend -> Cutout/Opaque (forma
 
 bool CockpitForceAlphaLegacyEnabled()
 {
+    // Default ON since MAT-052 (2026-08-26): the demotion below existed to fix
+    // "cockpit bodies translucent on WGPU" -- which turned out to be the cockpit
+    // near-clipping (7e9693c4) and the god-ray stale-depth composite (93e66bd2),
+    // both misattributed to alpha routing. With those fixed, the demotion's only
+    // measured effect was to turn authored per-region alpha OPAQUE: the AH-1 and
+    // Mi-17 instrument COVER GLASS shares its AI88 texture with the solid side
+    // panels (alpha 255 on the panels, partial on the lids), and forcing the
+    // texture Opaque sealed every gauge under a dark lid while the dials sat
+    // intact underneath. Exterior line-up measured unchanged with the policy off
+    // (diff = grass sway only). WGR_COCKPIT_FORCEALPHA_LEGACY=0 re-enables the
+    // demotion for the A/B.
     static const bool enabled = []
     {
         const char* v = std::getenv("WGR_COCKPIT_FORCEALPHA_LEGACY");
-        return v && v[0] != '0';
+        return !v || v[0] != '0';
     }();
     return enabled;
 }
