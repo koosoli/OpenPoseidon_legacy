@@ -1161,10 +1161,15 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                             std::string leaf(base);
                             for (char& c : leaf)
                                 c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                            // "out" excluded: a tank ships both `driver` and
+                            // `driverout` (the turn-out seat), and `find("driver")`
+                            // matches both -- storing the out seat here put a
+                            // buttoned-up driver's camera at the hatch head position.
                             if (leaf.rfind("view", 0) != 0 &&
                                 (leaf.find("pilot") != std::string::npos ||
                                  leaf.find("driver") != std::string::npos) &&
-                                leaf.find("codriver") == std::string::npos)
+                                leaf.find("codriver") == std::string::npos &&
+                                leaf.find("out") == std::string::npos)
                             {
                                 const auto& pm = proxy.transform.m;
                                 bridgedSeatCandidates.push_back(

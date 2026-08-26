@@ -1274,7 +1274,15 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
         // was never opened before shipping and the owner found it in the grass.
         // Verify the PICTURE, not the numbers, before changing this.
         const Vector3 eyeOffset(0.0f, 1.1f, 0.15f);
+        // LAST RESORT, both of them. The two derived sources below (marker triangle,
+        // seat registry) originally ran BEFORE the authored anchors above and
+        // overwrote them -- which regressed every bridged TANK: the A3 T-100 keeps
+        // BI's Czech memory points including a correct `driverview`, and this code
+        // replaced that working answer with a derivation validated only on three
+        // helicopters. An authored anchor always wins; these only fill a vacuum.
+        const bool haveAuthoredAnchor = eye.SquareSize() >= 0.01f;
         Vector3 eyeFromMarker = VZero;
+        if (!haveAuthoredAnchor)
         {
             const int vp = shape->FindLevel(VIEW_PILOT);
             Shape* pilotLod = vp >= 0 ? shape->LevelOpaque(vp) : nullptr;
@@ -1289,8 +1297,17 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
                         continue;
                     }
                     // pilot for aircraft, driver for ground vehicles; never the
-                    // gunner/cargo markers.
+                    // gunner/cargo markers -- and never the TURN-OUT variant.
+                    // `strstr(nm,"driver")` also matches "driverout"/"t72driverout",
+                    // so a buttoned-up driver could take the head-out-of-hatch seat
+                    // (or the reverse, by section order). This path models one seat
+                    // and has no notion of IsDriverHidden(), so the out markers must
+                    // stay out of it entirely.
                     if (!strstr(nm, "pilot") && !strstr(nm, "driver"))
+                    {
+                        continue;
+                    }
+                    if (strstr(nm, "out"))
                     {
                         continue;
                     }
@@ -1330,7 +1347,7 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
         // Second half of MAT-053, for the generations whose view-LOD marker
         // selections are EMPTY (rev 48+ ships the names with zero vertices):
         // the seat the adapter remembered from the skipped proxy RECORD.
-        if (eyeFromMarker.SquareSize() < 0.01f)
+        if (!haveAuthoredAnchor && eyeFromMarker.SquareSize() < 0.01f)
         {
             float seat[3];
             if (Model::ShapeAdapter::GetBridgedPilotSeat(shape, seat))

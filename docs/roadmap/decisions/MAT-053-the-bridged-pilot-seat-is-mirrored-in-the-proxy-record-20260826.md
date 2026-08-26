@@ -81,3 +81,29 @@ the resolved path would.
 - **Stock content is untouched**: its crew proxies resolve, so none of this
   code runs. Regression-checked on the stock UH-60 (pilottest) — pixel values
   unchanged.
+
+## Postscript: this path is NOT helicopter-specific (2026-08-26, same day)
+
+The first version ran the two derived sources BEFORE the authored memory
+anchors and overwrote them. That regressed every bridged TANK -- the owner
+reported the A1/A2 T-72 and the A3 T-100 driver AND turn-out views broken.
+
+Two faults, both from validating on three helicopters and shipping for
+everything that reaches the degraded path:
+
+1. **It preempted `driverview`.** BI kept the Czech memory points through
+   Arma 3 (see 128fe072), so the bridged tanks all carry a correct
+   `driverview` -- measured after the fix: T-72 A1 eye -0.00,-0.61,0.43 and
+   T-100 A3 eye 0.01,-0.75,0.44, both from `driverview`. The derived seat was
+   replacing a working authored answer. Both derived sources are now gated on
+   `haveAuthoredAnchor`: an authored anchor always wins, these only fill a
+   vacuum.
+2. **`strstr(nm,"driver")` also matches `driverout`.** A tank ships both the
+   buttoned-up and the turn-out seat; either could be picked by section order.
+   This path models ONE seat and has no notion of `IsDriverHidden()`, so
+   markers and records containing "out" are now excluded outright at both the
+   consume site and the registry populate site.
+
+RULE for anyone extending this: the fallback fires for ANY vehicle whose crew
+proxies fail to resolve, which is every bridged vehicle of every class -- not
+just the aircraft it was measured on. Check a tank before shipping.
