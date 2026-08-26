@@ -32,7 +32,9 @@
 #include <Poseidon/UI/Missions/MissionsModule.hpp>
 #include <Poseidon/UI/Campaigns/CampaignsModule.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
+#include <Poseidon/Asset/Probes/AssetInfo.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
+#include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/IO/Streams/QStream.hpp>
@@ -318,6 +320,96 @@ std::filesystem::path BuildIsolatedMissionStageRoot()
     return tempRoot / suffix;
 }
 
+bool IsSafePboRelativePath(const std::filesystem::path& path)
+{
+    if (path.empty() || path.is_absolute() || path.has_root_name() || path.has_root_directory())
+        return false;
+
+    for (const auto& component : path)
+    {
+        if (component == "..")
+            return false;
+    }
+    return true;
+}
+
+bool ExtractMissionPbo(const std::filesystem::path& pboPath, const std::filesystem::path& destination)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto archive = Poseidon::InspectPbo(pboPath.string());
+    if (!archive.valid)
+    {
+        LOG_ERROR(Core, "Test mission PBO '{}' cannot be inspected", pboPath.string());
+        return false;
+    }
+
+    fs::path bankPath = pboPath;
+    bankPath.replace_extension();
+    QFBank bank;
+    if (!bank.open(RString(bankPath.string().c_str())))
+    {
+        LOG_ERROR(Core, "Test mission PBO '{}' cannot be opened", pboPath.string());
+        return false;
+    }
+    bank.Lock();
+    const auto unlock = [&bank]() { bank.Unlock(); };
+    if (bank.error())
+    {
+        LOG_ERROR(Core, "Test mission PBO '{}' cannot be loaded", pboPath.string());
+        unlock();
+        return false;
+    }
+
+    for (const auto& entry : archive.entries)
+    {
+        const fs::path relative = fs::path(entry.name).lexically_normal();
+        if (!IsSafePboRelativePath(relative))
+        {
+            LOG_ERROR(Core, "Test mission PBO '{}' has unsafe entry '{}'", pboPath.string(), entry.name);
+            unlock();
+            return false;
+        }
+
+        const Ref<IFileBuffer> data = bank.Read(entry.name.c_str());
+        if (!data)
+        {
+            LOG_ERROR(Core, "Test mission PBO '{}' cannot read entry '{}'", pboPath.string(), entry.name);
+            unlock();
+            return false;
+        }
+
+        const fs::path output = destination / relative;
+        fs::create_directories(output.parent_path(), ec);
+        if (ec)
+        {
+            LOG_ERROR(Core, "Test mission PBO '{}' cannot create staging directory '{}'", pboPath.string(),
+                      output.parent_path().string());
+            unlock();
+            return false;
+        }
+
+        std::ofstream stream(output, std::ios::binary | std::ios::trunc);
+        if (!stream)
+        {
+            LOG_ERROR(Core, "Test mission PBO '{}' cannot write staged entry '{}'", pboPath.string(), output.string());
+            unlock();
+            return false;
+        }
+        stream.write(static_cast<const char*>(data->GetData()), static_cast<std::streamsize>(data->GetSize()));
+        if (!stream)
+        {
+            LOG_ERROR(Core, "Test mission PBO '{}' failed while writing staged entry '{}'", pboPath.string(),
+                      output.string());
+            unlock();
+            return false;
+        }
+    }
+
+    unlock();
+    return fs::exists(destination / "mission.sqm", ec) && !ec;
+}
+
 // Copy the --test-mission input into isolated temp storage and return the staged
 // path for ResolveMissionFile. On any failure returns the input unchanged so the
 // caller's resolve step reports the error rather than this masking it.
@@ -333,8 +425,14 @@ std::string StageTestMissionForGame(const std::string& testMission)
     fs::path missionsDir = stageRoot / GameDirs::Missions;
     fs::create_directories(missionsDir, ec);
 
-    const fs::path dest = missionsDir / srcPath.filename();
-    if (fs::is_directory(srcPath, ec))
+    const bool isPbo = srcPath.extension() == ".pbo" || srcPath.extension() == ".PBO";
+    const fs::path dest = missionsDir / (isPbo ? srcPath.stem() : srcPath.filename());
+    if (isPbo)
+    {
+        if (!ExtractMissionPbo(srcPath, dest))
+            return testMission;
+    }
+    else if (fs::is_directory(srcPath, ec))
         fs::copy(srcPath, dest, fs::copy_options::overwrite_existing | fs::copy_options::recursive, ec);
     else
         fs::copy_file(srcPath, dest, fs::copy_options::overwrite_existing, ec);
