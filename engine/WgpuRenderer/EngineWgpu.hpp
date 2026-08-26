@@ -116,6 +116,9 @@ class EngineWgpu : public EngineDummy
     bool UsesGpuSkinning() const override { return true; }
     VertexBuffer* CreateVertexBuffer(const Shape& src, VBType type) override;
     void UpdateFrameCamera() override;
+    // MAT-052: honour mid-frame clip-range changes (the cockpit's zSpace bracket);
+    // see the definition for the full story.
+    void UpdateProjection() override;
     void PrepareMeshTL(const LightList& lights, const Matrix4& modelToWorld, const render::LegacySpec& spec) override;
     void BeginMeshTL(const Shape& sMesh, int spec, bool dynamic) override;
     void EndMeshTL(const Shape& sMesh) override;

@@ -3370,6 +3370,49 @@ impl Renderer {
             }
         };
 
+        // MAT-052 diagnostic (temporary): WGR_PLAN_TRACE=1 prints one compact line per
+        // frame describing the plan's segment structure -- op kinds in order, run-length
+        // collapsed -- because every theory about WHERE the cockpit draws execute relative
+        // to the cloud composite has died on assumption. Print the fact instead.
+        {
+            static PLAN_TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            let on = *PLAN_TRACE.get_or_init(|| {
+                std::env::var("WGR_PLAN_TRACE").map(|v| v != "0").unwrap_or(false)
+            });
+            static PRINTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let interesting = ops
+                .iter()
+                .any(|o| matches!(o, Plan3dOp::ClearDepth | Plan3dOp::Water(_)));
+            if on && interesting && PRINTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 5 {
+                let mut desc = String::new();
+                let mut last = "";
+                let mut run = 0usize;
+                for op in ops.iter() {
+                    let k = match op {
+                        Plan3dOp::ClearDepth => "CLEARDEPTH",
+                        Plan3dOp::Draw2D(_) => "2d",
+                        Plan3dOp::Terrain(_) => "terr",
+                        Plan3dOp::Water(_) => "WATER",
+                        Plan3dOp::Grass(_) => "grass",
+                        Plan3dOp::Draw3D { .. } => "3d",
+                        Plan3dOp::Resolve => "RESOLVE",
+                    };
+                    if k == last {
+                        run += 1;
+                    } else {
+                        if run > 0 {
+                            desc.push_str(&format!("{last}x{run} "));
+                        }
+                        last = k;
+                        run = 1;
+                    }
+                }
+                if run > 0 {
+                    desc.push_str(&format!("{last}x{run}"));
+                }
+                eprintln!("[wgr] PLAN: {desc}");
+            }
+        }
         loop {
             let end = ops[start..]
                 .iter()

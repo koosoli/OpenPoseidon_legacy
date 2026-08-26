@@ -348,9 +348,46 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
             int secMaterial = -1;
             TexMaterial* secSurfMat = nullptr;
 
+            // MAT-052 diagnostic (temporary): WGR_SECTION_SKIP_TRACE=<substring> names, once
+            // per shape, every section of a matching shape with its texture, flags and the
+            // reason it was skipped -- because a section that is never submitted is invisible
+            // to every draw-side trace, and that gap is exactly where this bug lived.
+            static const char* sectionTraceMatch = std::getenv("WGR_SECTION_SKIP_TRACE");
+            const bool sectionTrace = [&]() -> bool
+            {
+                if (!sectionTraceMatch || !*sectionTraceMatch)
+                    return false;
+                // Shape has no back-pointer to its LODShape, so match on the sections'
+                // own texture names: any section whose texture path contains the token
+                // marks the whole shape for one dump.
+                bool match = false;
+                for (int si = 0; si < NSections() && !match; si++)
+                {
+                    const Texture* t = GetSection(si).properties.GetTexture();
+                    match = t && t->Name() && strstr(t->Name(), sectionTraceMatch);
+                }
+                if (!match)
+                    return false;
+                static std::unordered_set<const void*> tracedOnce;
+                return tracedOnce.insert(this).second;
+            }();
             for (int i = 0; i < NSections(); i++)
             {
                 const ShapeSection& sec = GetSection(i);
+                if (sectionTrace)
+                {
+                    const Texture* t = sec.properties.GetTexture();
+                    const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
+                    const bool gpuOwned =
+                        GSkipGpuOwnedSections && render::IsGpuOwnedSectionSpec(sec.properties.Special());
+                    const bool filtered = GSectionFilter != SectionClassFilter::All &&
+                                          ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
+                    LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
+                             static_cast<const void*>(this), i, t ? t->Name() : "<none>",
+                             unsigned(sec.properties.Special()),
+                             hid ? "SKIP-HIDDEN " : "", gpuOwned ? "SKIP-GPUOWNED " : "",
+                             filtered ? "SKIP-FILTER " : "");
+                }
                 if (sec.properties.Special() & (IsHidden | IsHiddenProxy))
                 {
                     continue;

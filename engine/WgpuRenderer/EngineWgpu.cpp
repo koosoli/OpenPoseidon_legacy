@@ -2538,6 +2538,30 @@ void EngineWgpu::UpdateFrameCamera()
     PushSceneCamera();
 }
 
+// MAT-052 -- THE transparent cockpit. Transport::Draw brackets every interior
+// (zSpace) draw with SetClipRange(0.01, 50) + UpdateProjection() so the canopy
+// frame -- which hugs the pilot's head, well inside the world near plane -- is
+// not near-clipped. GL33 implements this hook (EngineGL33_Mesh.cpp); wgpu
+// inherited the base no-op, so the cockpit's projection never reached the GPU
+// and every polygon nearer than the world near plane was clipped away: canopy
+// beams, pillars, roof, on every helicopter of every generation, base game
+// included. The dashboard (~0.5 m) and the canopy glass survive, which is what
+// made this read as "the cockpit is transparent" rather than "geometry is
+// missing" -- through the missing beams you see glass tint over sky, terrain,
+// and the volumetric cloud deck.
+//
+// A new camera entry with the CURRENT projection is exactly what the multi-
+// camera plumbing already does for HUD and weapon views; the epilogue's second
+// UpdateProjection (clip range restored) pushes the world projection back for
+// anything drawn after. Found by bisect (good 34c44ac5, first-bad aa24c32b)
+// plus a section-level trace proving all 60 cockpit sections were SUBMITTED
+// with sane state -- the fragments died in clipping, one stage no draw-level
+// door can reach.
+void EngineWgpu::UpdateProjection()
+{
+    PushSceneCamera();
+}
+
 void EngineWgpu::PrepareMeshTL(const LightList& /*lights*/, const Matrix4& modelToWorld,
                                const render::LegacySpec& /*spec*/)
 {
@@ -3324,47 +3348,6 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.sampler = U32(SamplerForSpec(effectiveSpec));
     d.depth = DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
-    // WGR_FORCE_OPAQUE_TEX=<comma-separated substrings>: force every draw whose texture
-    // path contains one of them to the opaque route. Diagnostic only, and the one thing
-    // the trace above could not answer -- it names every texture that BLENDS, but not
-    // which of them covers the pixel you are looking at. Forcing one at a time and
-    // watching what turns solid identifies the surface in a single run, and answers "would
-    // opaque routing even be right here?" at the same time. Never set in normal play.
-    {
-        static const std::string forceOpaque = []
-        {
-            const char* v = std::getenv("WGR_FORCE_OPAQUE_TEX");
-            return std::string(v ? v : "");
-        }();
-        if (!forceOpaque.empty())
-        {
-            if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
-            {
-                const char* name = t->Name();
-                if (name && *name)
-                {
-                    std::string lower(name);
-                    for (char& c : lower)
-                        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                    size_t from = 0;
-                    while (from <= forceOpaque.size())
-                    {
-                        const size_t to = forceOpaque.find(',', from);
-                        const std::string token = forceOpaque.substr(from, to - from);
-                        if (!token.empty() && lower.find(token) != std::string::npos)
-                        {
-                            d.blend = BlendFromDesc(render::BlendMode::Opaque);
-                            d.alpha_ref = 0.0f;
-                            break;
-                        }
-                        if (to == std::string::npos)
-                            break;
-                        from = to + 1;
-                    }
-                }
-            }
-        }
-    }
     if (LegacyTextureTraceEnabled())
     {
         if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
@@ -3375,12 +3358,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 static std::unordered_set<std::string> loggedLegacyDrawModes;
                 if (loggedLegacyDrawModes.insert(name).second)
                     LOG_INFO(Graphics,
-                             "Legacy texture draw trace: path={} vegetation={} alphaClass={} alphaRef={:.2f} blend={} "
+                             "Legacy texture draw trace: path={} vegetation={} alphaClass={} alphaRef={:.2f} blend={} depth={} cam={} cmd={} "
                              // The four alphas MaterialIsFullyOpaque tests, because a surface that
                              // reaches AlphaBlend over an Opaque-classified texture was refused by
                              // exactly this guard and the line could not say which of them did it.
                              "matA=dif{:.3f}/amb{:.3f}/emi{:.3f}/forced{:.3f} fullyOpaque={}",
-                             name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend),
+                             name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend), int(d.depth), _currentCamera, _cmds.size(),
                              _curMaterial.diffuse.A(), _curMaterial.ambient.A(), _curMaterial.emmisive.A(),
                              _curMaterial.forcedDiffuse.A(), MaterialIsFullyOpaque(_curMaterial) ? 1 : 0);
             }
@@ -3524,6 +3507,49 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // shader receives tree vs bush so it can use the matching radial-crown normal. This rides the
     // otherwise unused .w lane; fs_main treats any positive value as vegetation.
     d.mat_sun_ambient.w = GCurrentFoliageKind;
+
+    // WGR_KILL_TEX=<comma-separated substrings>: DROP every draw whose texture path
+    // contains one of them. Diagnostic only, and the decisive one: whatever vanishes
+    // from the frame is what this path was drawing there -- a question no additive
+    // trace can answer, because the trace names every texture in the frame without
+    // saying where any of them landed. Binary-search a texture list against a
+    // screenshot and the surface identifies itself in a handful of runs; a surface
+    // that does NOT change under this door was never drawn by this path at all,
+    // which is the observation that cracked MAT-052 after five shading theories
+    // died. Never set in normal play.
+    {
+        static const std::string tintTex = []
+        {
+            const char* v = std::getenv("WGR_KILL_TEX");
+            return std::string(v ? v : "");
+        }();
+        if (!tintTex.empty())
+        {
+            if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
+            {
+                const char* name = t->Name();
+                if (name && *name)
+                {
+                    std::string lower(name);
+                    for (char& c : lower)
+                        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                    size_t from = 0;
+                    while (from <= tintTex.size())
+                    {
+                        const size_t to = tintTex.find(',', from);
+                        const std::string token = tintTex.substr(from, to - from);
+                        if (!token.empty() && lower.find(token) != std::string::npos)
+                        {
+                            return;
+                        }
+                        if (to == std::string::npos)
+                            break;
+                        from = to + 1;
+                    }
+                }
+            }
+        }
+    }
 
     _draws3d.push_back(d);
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
