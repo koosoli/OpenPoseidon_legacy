@@ -1,3 +1,4 @@
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -16,6 +17,7 @@
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <unordered_set>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Math/Math3DP.hpp>
 #include <Poseidon/Foundation/Math/MathOpt.hpp>
@@ -1233,9 +1235,11 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
     // getting a sane answer instead of the hull's centre.
     if (LODShapeWithShadow* shape = GetShape())
     {
+        const char* anchor = "driverview";
         Vector3 eye = shape->MemoryPoint("driverview");
         if (eye.SquareSize() < 0.01f)
         {
+            anchor = "pilot";
             eye = shape->MemoryPoint("pilot");
         }
         if (eye.SquareSize() < 0.01f)
@@ -1245,8 +1249,112 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
             {
                 if (Shape* pilotLod = shape->LevelOpaque(vp))
                 {
+                    anchor = "viewlod-pilot";
                     eye = pilotLod->NamedPosition("pilot");
                 }
+            }
+        }
+        // MAT-053 (owner: "height and axes are right, just 1-2 m too far behind
+        // the cockpit"): the crew PROXY MARKER in the interior LOD is the one
+        // authored statement of where the pilot actually sits that survives
+        // binarisation with correct coordinates -- the marker triangle's vertices
+        // are recentred with the rest of the geometry, unlike the IR proxy
+        // transform (which measured ~2 m off on every generation and put the
+        // first recovery attempt's camera in the grass). Same derivation as the
+        // v7 loader's convertProxies: the two closest corners of the triangle
+        // are the origin edge; seat = that corner, eye = seat + the standard
+        // seated eye offset. Preferred over the memory anchors above, which the
+        // owner measured as aft of the seat.
+        // The seated eye offset above a seat marker, taken from the ENGINE's own
+        // answer rather than a tuned constant: GetProxyCamera composes exactly this
+        // vector onto the crew proxy for stock vehicles, so the degraded path lands
+        // where the resolved path would. Falls back to a seated-average when there
+        // is no focused person (dedicated server, replay).
+        Vector3 eyeOffset(0.32f, 1.34f, 0.16f);
+        if (AIUnit* focus = GWorld ? GWorld->FocusOn() : nullptr)
+        {
+            if (Person* p = focus->GetPerson())
+            {
+                const Vector3 pp = p->GetPilotPosition(camType);
+                if (pp.SquareSize() > 0.01f)
+                {
+                    eyeOffset = pp;
+                }
+            }
+        }
+        Vector3 eyeFromMarker = VZero;
+        {
+            const int vp = shape->FindLevel(VIEW_PILOT);
+            Shape* pilotLod = vp >= 0 ? shape->LevelOpaque(vp) : nullptr;
+            if (pilotLod)
+            {
+                for (int si = 0; si < pilotLod->NNamedSel(); si++)
+                {
+                    const NamedSelection& sel = pilotLod->NamedSel(si);
+                    const char* nm = sel.Name();
+                    if (!nm || strncmp(nm, "proxy:", 6) != 0)
+                    {
+                        continue;
+                    }
+                    // pilot for aircraft, driver for ground vehicles; never the
+                    // gunner/cargo markers.
+                    if (!strstr(nm, "pilot") && !strstr(nm, "driver"))
+                    {
+                        continue;
+                    }
+                    if (sel.Size() < 3)
+                    {
+                        continue;
+                    }
+                    const Vector3 a = pilotLod->Pos(sel[0]);
+                    const Vector3 b = pilotLod->Pos(sel[1]);
+                    const Vector3 c = pilotLod->Pos(sel[2]);
+                    const float ab = a.Distance2(b), ac = a.Distance2(c), bc = b.Distance2(c);
+                    // BIS convention: the two CLOSEST corners straddle the origin;
+                    // of those, the corner shared with the longest edge is p0.
+                    Vector3 seat;
+                    if (ab <= ac && ab <= bc)
+                    {
+                        seat = (ac >= bc) ? a : b;
+                    }
+                    else if (ac <= ab && ac <= bc)
+                    {
+                        seat = (ab >= bc) ? a : c;
+                    }
+                    else
+                    {
+                        seat = (ab >= ac) ? b : c;
+                    }
+                    // Seated eye above the seat marker: the same offset the crew
+                    // path applies through GetPilotPosition (~1.1 m up, slightly
+                    // forward of the seat back).
+                    anchor = nm;
+                    eyeFromMarker = seat + eyeOffset;
+                    eye = eyeFromMarker;
+                    break;
+                }
+            }
+        }
+        // Second half of MAT-053, for the generations whose view-LOD marker
+        // selections are EMPTY (rev 48+ ships the names with zero vertices):
+        // the seat the adapter remembered from the skipped proxy RECORD.
+        if (eyeFromMarker.SquareSize() < 0.01f)
+        {
+            float seat[3];
+            if (Model::ShapeAdapter::GetBridgedPilotSeat(shape, seat))
+            {
+                anchor = "bridged-seat-registry";
+                eye = Vector3(seat[0], seat[1], seat[2]) + eyeOffset;
+            }
+        }
+        static const bool camTrace = std::getenv("WGR_PROXYCAM_TRACE") != nullptr;
+        if (camTrace && eye.SquareSize() >= 0.01f)
+        {
+            static std::unordered_set<const void*> logged;
+            if (logged.insert(static_cast<const void*>(Type())).second)
+            {
+                LOG_WARN(Graphics, "INSIDECAM {}: anchor '{}' eye {:.2f},{:.2f},{:.2f}",
+                         (const char*)Type()->GetName(), anchor, eye.X(), eye.Y(), eye.Z());
             }
         }
         if (eye.SquareSize() >= 0.01f)
@@ -2684,6 +2792,32 @@ bool Transport::GetProxyCamera(Matrix4& transf, CameraType camType) const
     transf.SetPosition(transf.FastTransform(manShape->BoundingCenter()));
     transf.SetPosition(transf.FastTransform(pos));
     AnimateMatrix(transf, level, proxy->selection);
+    // MAT-053 diagnostic (temporary): the bridged-vehicle interior camera comes through
+    // recovered crew proxies whose transform maths was wrong once already (the first
+    // recovery put the A1 UH-60's camera in the grass). One line per vehicle type says
+    // where the eye actually landed, in model space, next to the raw seat transform --
+    // so the next wrong guess dies in a capture instead of a play-test.
+    {
+        static const bool camTrace = std::getenv("WGR_PROXYCAM_TRACE") != nullptr;
+        if (camTrace)
+        {
+            static std::unordered_set<const void*> logged;
+            if (logged.insert(static_cast<const void*>(Type())).second)
+            {
+                const Vector3 p0 = proxy->transform.Position();
+                const Vector3 pe = transf.Position();
+                const Vector3 dir = transf.Direction();
+                const Vector3 up = transf.DirectionUp();
+                LOG_WARN(Graphics,
+                         "PROXYCAM {}: seat {:.2f},{:.2f},{:.2f} -> eye {:.2f},{:.2f},{:.2f} dir {:.2f},{:.2f},{:.2f} "
+                         "up {:.2f},{:.2f},{:.2f} lod {} sel {} manBC {:.2f},{:.2f},{:.2f} pilotPos {:.2f},{:.2f},{:.2f}",
+                         (const char*)Type()->GetName(), p0.X(), p0.Y(), p0.Z(), pe.X(), pe.Y(), pe.Z(), dir.X(),
+                         dir.Y(), dir.Z(), up.X(), up.Y(), up.Z(), level, proxy->selection,
+                         manShape->BoundingCenter().X(), manShape->BoundingCenter().Y(),
+                         manShape->BoundingCenter().Z(), pos.X(), pos.Y(), pos.Z());
+            }
+        }
+    }
     return true;
 }
 
