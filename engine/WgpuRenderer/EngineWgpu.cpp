@@ -3324,6 +3324,47 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.sampler = U32(SamplerForSpec(effectiveSpec));
     d.depth = DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
+    // WGR_FORCE_OPAQUE_TEX=<comma-separated substrings>: force every draw whose texture
+    // path contains one of them to the opaque route. Diagnostic only, and the one thing
+    // the trace above could not answer -- it names every texture that BLENDS, but not
+    // which of them covers the pixel you are looking at. Forcing one at a time and
+    // watching what turns solid identifies the surface in a single run, and answers "would
+    // opaque routing even be right here?" at the same time. Never set in normal play.
+    {
+        static const std::string forceOpaque = []
+        {
+            const char* v = std::getenv("WGR_FORCE_OPAQUE_TEX");
+            return std::string(v ? v : "");
+        }();
+        if (!forceOpaque.empty())
+        {
+            if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
+            {
+                const char* name = t->Name();
+                if (name && *name)
+                {
+                    std::string lower(name);
+                    for (char& c : lower)
+                        c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                    size_t from = 0;
+                    while (from <= forceOpaque.size())
+                    {
+                        const size_t to = forceOpaque.find(',', from);
+                        const std::string token = forceOpaque.substr(from, to - from);
+                        if (!token.empty() && lower.find(token) != std::string::npos)
+                        {
+                            d.blend = BlendFromDesc(render::BlendMode::Opaque);
+                            d.alpha_ref = 0.0f;
+                            break;
+                        }
+                        if (to == std::string::npos)
+                            break;
+                        from = to + 1;
+                    }
+                }
+            }
+        }
+    }
     if (LegacyTextureTraceEnabled())
     {
         if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())

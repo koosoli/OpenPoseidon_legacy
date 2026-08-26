@@ -3889,7 +3889,17 @@ impl Gfx3d {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Back),
+                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+                // Diagnostic only: a single-sided face whose winding the loader got
+                // backwards is INVISIBLE, and from inside a cockpit that reads as a
+                // transparent airframe rather than as missing geometry. One run with
+                // this set separates "not drawn because culled" from every other
+                // reason a surface can fail to appear.
+                cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                    None
+                } else {
+                    Some(wgpu::Face::Back)
+                },
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -3989,7 +3999,17 @@ impl Gfx3d {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Back),
+                // WGR_NO_CULL=1 disables backface culling on the object pipelines.
+                // Diagnostic only: a single-sided face whose winding the loader got
+                // backwards is INVISIBLE, and from inside a cockpit that reads as a
+                // transparent airframe rather than as missing geometry. One run with
+                // this set separates "not drawn because culled" from every other
+                // reason a surface can fail to appear.
+                cull_mode: if std::env::var("WGR_NO_CULL").map(|v| v != "0").unwrap_or(false) {
+                    None
+                } else {
+                    Some(wgpu::Face::Back)
+                },
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
