@@ -1356,6 +1356,49 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
                 eye = Vector3(seat[0], seat[1], seat[2]) + eyeOffset;
             }
         }
+        // TURNED OUT: head above the hatch, not in the seat. Every anchor this
+        // function can reach -- `driverview`, a seat marker, the proxy record --
+        // states ONE position, the buttoned-up one, so a turned-out crewman got the
+        // in-hull eye and sat too low in his own hatch (owner, A3 T-100). Stock
+        // content does not need this: it resolves a SEPARATE `...driverout` crew
+        // proxy and never reaches here.
+        //
+        // The hidden test mirrors InsideLOD's exactly, including the
+        // `_hideProxyInCombat` clause -- which is what keeps aircraft out of it:
+        // a helicopter forces hidden = true, so a pilot is never "turned out" and
+        // the bridged helicopter cameras are untouched.
+        //
+        // The lift is a CONSTANT and it is TUNED, not derived: no authored
+        // out-position survives on these models, and the owner measured the T-100
+        // as needing about half a metre. Documented as such so nobody mistakes it
+        // for a measurement.
+        if (eye.SquareSize() >= 0.01f && Type()->_hideProxyInCombat)
+        {
+            AIUnit* unit = GWorld ? GWorld->FocusOn() : nullptr;
+            Person* player = unit ? unit->GetPerson() : nullptr;
+            bool turnedOut = false;
+            if (player)
+            {
+                if (player == Commander())
+                {
+                    turnedOut = !IsCommanderHidden();
+                }
+                else if (player == Driver())
+                {
+                    turnedOut = !IsDriverHidden();
+                }
+                else if (player == Gunner())
+                {
+                    turnedOut = !IsGunnerHidden();
+                }
+            }
+            if (turnedOut)
+            {
+                constexpr float kTurnOutLift = 0.5f;
+                eye = eye + Vector3(0, kTurnOutLift, 0);
+                anchor = "turned-out";
+            }
+        }
         static const bool camTrace = std::getenv("WGR_PROXYCAM_TRACE") != nullptr;
         if (camTrace && eye.SquareSize() >= 0.01f)
         {
