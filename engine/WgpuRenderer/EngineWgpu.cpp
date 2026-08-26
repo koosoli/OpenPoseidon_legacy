@@ -3362,10 +3362,15 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                              // The four alphas MaterialIsFullyOpaque tests, because a surface that
                              // reaches AlphaBlend over an Opaque-classified texture was refused by
                              // exactly this guard and the line could not say which of them did it.
-                             "matA=dif{:.3f}/amb{:.3f}/emi{:.3f}/forced{:.3f} fullyOpaque={}",
+                             "matA=dif{:.3f}/amb{:.3f}/emi{:.3f}/forced{:.3f} fullyOpaque={} "
+                             "ambRGB={:.2f},{:.2f},{:.2f} fdRGB={:.2f},{:.2f},{:.2f} emiRGB={:.2f},{:.2f},{:.2f}",
                              name, GCurrentIsVegetation, int(alphaClass), d.alpha_ref, int(d.blend), int(d.depth), _currentCamera, _cmds.size(),
                              _curMaterial.diffuse.A(), _curMaterial.ambient.A(), _curMaterial.emmisive.A(),
-                             _curMaterial.forcedDiffuse.A(), MaterialIsFullyOpaque(_curMaterial) ? 1 : 0);
+                             _curMaterial.forcedDiffuse.A(), MaterialIsFullyOpaque(_curMaterial) ? 1 : 0,
+                             _curMaterial.ambient.R(), _curMaterial.ambient.G(), _curMaterial.ambient.B(),
+                             _curMaterial.forcedDiffuse.R(), _curMaterial.forcedDiffuse.G(),
+                             _curMaterial.forcedDiffuse.B(), _curMaterial.emmisive.R(), _curMaterial.emmisive.G(),
+                             _curMaterial.emmisive.B());
             }
         }
     }
@@ -3433,6 +3438,15 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     if (glassSheen)
     {
         d.flags |= WGR_DRAW3D_GLASS;
+    }
+    // MAT-052 second half: the engine already scopes first-person interior draws with
+    // PassKindHint::Cockpit (the camera vehicle's inside LOD in DrawSortObject, the
+    // soldier's hands/weapon in SoldierOldSimProxy). Carry that scope to the shader so
+    // the interior takes the flat scene ambient instead of the outdoor sky dome --
+    // see WGR_DRAW3D_COCKPIT in wgpu_renderer.hpp for the full story.
+    if (GetPassKindHint() == render::PassKindHint::Cockpit)
+    {
+        d.flags |= WGR_DRAW3D_COCKPIT;
     }
     d.camera = _currentCamera;
     d.palette_slot = _currentPaletteSlot;

@@ -62,6 +62,12 @@ const MATFLAG_NIGHT_EMITTER: u32 = 4u;
 // otherwise vanish from the pilot seat. 0.18 is the retail tint's own average (46/255).
 const MATFLAG_GLASS: u32 = 8u;
 const GLASS_MIN_ALPHA: f32 = 0.18;
+// MAT-052 second half (WGR_DRAW3D_COCKPIT): a first-person cockpit draw. shade() takes the
+// FLAT scene ambient for these instead of the sky-dome irradiance -- an interior plate lit
+// by the full outdoor sky washes to near-sky brightness and reads as a TRANSPARENT cockpit
+// against the sky (fine against dark terrain), which is exactly the owner's report on the
+// stock T72 and UH-60 alike.
+const MATFLAG_COCKPIT: u32 = 16u;
 
 fn material_flags(m: Material) -> u32 {
     return u32(m.normal_map.w + 0.5);
@@ -778,7 +784,8 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         base.rgb, m, shading_normal, geometric_normal, in.world_pos, in.fog, dwx, dwy, linear,
         // The per-draw path has no retained model id, so no baked volume applies.
         1.0, vec3<f32>(0.0), foliage_shadow_ao,
-        veg_cutout, translucent > 0.5, veg_cutout, in.clip.xy,
+        veg_cutout, translucent > 0.5, veg_cutout,
+        (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
     );
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective. Every other draw takes the branch not-taken and is bit-identical to

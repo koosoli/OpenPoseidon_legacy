@@ -5614,7 +5614,9 @@ impl Gfx3d {
                                         d.flags & crate::ffi::WGR_DRAW3D_NIGHT_EMITTER != 0,
                                     ) << 2)
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_GLASS != 0)
-                                        << 3)) as f32,
+                                        << 3)
+                                    | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_COCKPIT != 0)
+                                        << 4)) as f32,
                             ],
                         })
                     }));

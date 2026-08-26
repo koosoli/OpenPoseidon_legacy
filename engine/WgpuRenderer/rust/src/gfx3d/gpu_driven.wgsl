@@ -849,7 +849,8 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         baked_sky_direction(in.model_id, in.model_pos,
             mat3x3<f32>(in.model_rot0, in.model_rot1, in.model_rot2)),
         foliage_shadow_ao,
-        veg_cutout, false, veg_cutout, in.clip.xy,
+        // Retained objects are never the first-person cockpit (is_cockpit = false).
+        veg_cutout, false, veg_cutout, false, in.clip.xy,
     );
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective (DayZ's CalmWater family). Every other section takes the branch

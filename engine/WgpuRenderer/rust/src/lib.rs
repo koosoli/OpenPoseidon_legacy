@@ -3440,6 +3440,16 @@ impl Renderer {
             // far-resolve from an earlier segment is now stale. Cleared HERE rather than after the
             // passes so an early `continue`/`break` cannot leave a stale resolve marked current.
             self.far_depth_resolve_current = false;
+            // ...and so is the frame-final claim. The cloud block sets it with the comment "all
+            // 3D depth is written by now", which is TRUE for the world segment and FALSE for the
+            // frame: the post-ClearDepth cockpit segment rewrites depth after it. The god-ray
+            // march trusted the stale claim, read SKY depth at every canopy-frame pixel, and
+            // additively painted full-length sun shafts over the airframe -- the owner's
+            // "cockpit is transparent, but only where the sky is behind it; looking down it is
+            // fine", on the stock T72 and UH-60 alike (MAT-052, third and final mechanism).
+            // Clearing it here makes the god-ray pass re-resolve AFTER the last depth writer, so
+            // the shafts stop at the cockpit like they stop at everything else.
+            self.frame_depth_final_resolved = false;
 
             // Depth+normal prepass over the FIRST (world) depth segment only
             // (docs/depth-prepass-plan.md, decision 5): start == 0 marks it. The prepass

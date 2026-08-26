@@ -254,7 +254,16 @@ enum WgrDraw3DFlags : uint32_t
      * floors its output alpha so the pane still reads at normal incidence, where the
      * Fresnel sky term (WGR_DRAW3D_REFLECTIVE, set alongside) goes to ~F0 and an OFP-era
      * 11%-alpha pane would otherwise vanish from the inside view. */
-    WGR_DRAW3D_GLASS = 8
+    WGR_DRAW3D_GLASS = 8,
+    /* MAT-052 second half: this draw is part of the first-person cockpit (the engine's
+     * PassKindHint::Cockpit scope -- the camera vehicle's interior LOD and the soldier's
+     * hands/weapon). The lit shader takes the FLAT scene ambient for these instead of the
+     * sky-dome irradiance: a cockpit interior is enclosed by the vehicle body, and the
+     * outdoor sky term washed every interior plate to near-sky brightness -- which against
+     * the sky reads as a transparent cockpit (T72 interior: fine looking down at terrain,
+     * "transparent" against sky; UH-60 canopy beams likewise). GL33's fixed-function look
+     * for the same surfaces IS the flat scene ambient, so this matches it. */
+    WGR_DRAW3D_COCKPIT = 16
 };
 
 /* Matrices per palette block (the engine's own bone-palette cap). Each skinned

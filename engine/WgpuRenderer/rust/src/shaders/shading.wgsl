@@ -103,6 +103,14 @@ fn shade(
     // cards don't split into a lit/near-black pair at harsh sun angles. Knobs ride in
     // frame.foliage / frame.foliageb / frame.foliagec. See docs/foliage-translucency-plan.md.
     is_foliage: bool,
+    // First-person cockpit draw (MAT-052 second half): take the LEGACY flat scene ambient
+    // instead of the sky-dome irradiance. A cockpit interior is enclosed by the vehicle
+    // body, which none of the ambient occluders can see (sky-vis is terrain-keyed, GTAO
+    // reaches ~2 m and the roof is off-screen, the interior volumes are baked for
+    // buildings only), so the outdoor sky term washed every interior plate to near-sky
+    // brightness -- which against the sky reads as a TRANSPARENT cockpit. GL33's
+    // fixed-function look for the same surfaces IS the flat scene ambient.
+    is_cockpit: bool,
     // @builtin(position).xy of the calling fragment — the screen pixel this shade() is for.
     // Only the screen-space AO needs it; it is passed rather than derived because shade() is
     // shared by the per-draw and GPU-driven fragment shaders and neither has a global to read.
@@ -157,8 +165,19 @@ fn shade(
     if (is_foliage && dot(nrm, world_pos) > 0.0) {
         nrm = -nrm;
     }
+    // Cockpit interiors are single-sided geometry authored for the OUTSIDE: the roof and
+    // canopy frames carry exterior (up-facing) normals, so seen from the pilot seat the
+    // sun's N.L lights their BACK side -- full noon sun through the roof, the second half
+    // of the washed-out interior (the first half was the sky-dome ambient, handled by
+    // is_cockpit above). The seen side of a cockpit surface is by definition the interior
+    // side, so face the normal at the viewer, same test as the foliage flip: world_pos is
+    // camera-relative, so dot(nrm, world_pos) > 0 means the normal points away.
+    if (is_cockpit && dot(nrm, world_pos) > 0.0) {
+        nrm = -nrm;
+    }
     let ndotl = max(dot(nrm, -frame.sun_dir_world.xyz), 0.0);
     let sky_lit = frame.sun_diffuse.w > 0.5;
+
     // CSM shadow (near contact). Folded into the sun removal on the sky-lit path, kept as a
     // final multiply on the legacy path — exactly as the original fs_main did.
     let csm_s = shadow_strength(world_pos, nrm, fog, dwx, dwy);
@@ -325,6 +344,20 @@ fn shade(
         // diffuse dome (the direct sun sheen + any glint still sit on top).
         if (is_translucent) {
             ambient *= 0.2;
+        }
+        // MAT-052 second half -- cockpit interiors: keep only a fraction of the sky wash.
+        // The interior is enclosed by the vehicle body, which no ambient occluder can see
+        // (sky-vis is terrain-keyed, GTAO reaches ~2 m with the roof off-screen, interior
+        // volumes are baked for buildings), so the full outdoor sky washed every interior
+        // plate to near-sky brightness -- which against the sky reads as a TRANSPARENT
+        // cockpit (owner: T72 and UH-60 alike, "fine looking down, transparent against
+        // sky"). A DAMPED sky term rather than a branch switch: the first attempt routed
+        // cockpit draws to the legacy flat ambient and turned every instrument face black
+        // within the hour (dial materials carry no ambient of their own and live off this
+        // term). 0.18 puts the UH-60 roof plate near the GL33 reference at noon while the
+        // gauge faces keep their sky share.
+        if (is_cockpit && !is_translucent) {
+            ambient *= 0.18;
         }
         if (is_foliage) {
             // Emulated leaf subsurface scattering: even out the hard lit/dark split on low-poly
