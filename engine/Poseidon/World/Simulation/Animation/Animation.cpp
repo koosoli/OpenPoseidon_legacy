@@ -13,6 +13,7 @@
 #include <Poseidon/Foundation/Common/Filenames.hpp>
 #include <stdio.h>
 #include <string.h>
+#include <cfloat>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
@@ -999,6 +1000,7 @@ void AnimationWithCenter::Init(LODShape* shape, const char* name, const char* al
         {
             continue;
         }
+        bool haveCenter = false;
         if (center)
         {
             // explicit center
@@ -1010,6 +1012,7 @@ void AnimationWithCenter::Init(LODShape* shape, const char* name, const char* al
                 if (sel.Size() > 0)
                 {
                     _center[i] = lShape->CalculateCenter(lShape->NamedSel(centerSel));
+                    haveCenter = true;
                 }
             }
             else
@@ -1018,15 +1021,33 @@ void AnimationWithCenter::Init(LODShape* shape, const char* name, const char* al
                 if (mCenter.SquareSize() >= 0.1)
                 {
                     _center[i] = mCenter;
+                    haveCenter = true;
                 }
             }
         }
-        else
+        // No explicit centre, or an explicit one this model does not define.
+        // The second case is not an OFP case at all: from Arma 2 onward the
+        // axis selections ("velka osa", "osa leveho kola", ...) are gone --
+        // the pivot lives in the model.cfg skeleton, which binarised ODOL does
+        // not carry -- so the lookup above fails on every bridged vehicle and
+        // leaves the centre at the MODEL ORIGIN. A main rotor pivoting about
+        // the fuselage origin is the owner's "A2 heli rotor spinning wrong".
+        // The animated selection's own geometric centre is the right answer
+        // for every rotationally symmetric part (rotors, wheels, propellers),
+        // and for a hinged part it is at worst nearer the hinge than the
+        // origin is. OFP and Arma 1 models define their axes, so they take the
+        // branch above and are bit-identical.
+        if (!haveCenter)
         {
             const Selection& sel = lShape->NamedSel(_selection[i]);
             if (sel.Size() > 0)
             {
                 _center[i] = lShape->CalculateCenter(sel);
+                if (center)
+                {
+                    LOG_DEBUG(Graphics, "Animation centre '{}' absent on lod {}: using selection centroid {:.3f},{:.3f},{:.3f} of {} verts",
+                              center, i, _center[i].X(), _center[i].Y(), _center[i].Z(), sel.Size());
+                }
             }
         }
     }
@@ -1055,6 +1076,76 @@ AnimationRotation::AnimationRotation() = default;
 
 const char* LevelName(float resolution);
 
+// Recover a rotation centre and axis for a part whose axis selection the model
+// does not define. From Arma 2 onward BI moved every pivot ("velka osa", "mala
+// osa", "osa leveho kola", ...) out of the memory LOD and into the model.cfg
+// skeleton, which a binarised ODOL does not carry -- so on every bridged
+// vehicle this lookup fails and the 2001 code falls back to origin + VUp. The
+// owner sees that as the Mi-35's main rotor sweeping a circle through the
+// fuselage, and its tail rotor spinning in the horizontal plane.
+//
+// Both are recoverable from the animated geometry itself, and MEASURED rather
+// than assumed: the centre is the selection's geometric centre, and the axis
+// is its THINNEST bounding-box dimension. Every part this fallback can reach
+// is a disc -- main rotor, tail rotor, road wheel, propeller -- and a disc's
+// spin axis is by definition the direction it has almost no extent in. A
+// horizontal main rotor is thin in Y and gets VUp; a tail rotor is thin in X
+// and gets VAside, which is the case the old blanket VUp got backwards.
+static bool GuessRotationFromSelection(const Shape* lShape, const Selection& sel, Vector3& center,
+                                       Vector3& direction)
+{
+    if (sel.Size() < 3)
+    {
+        return false;
+    }
+    Vector3 mn = lShape->Pos(sel[0]);
+    Vector3 mx = mn;
+    Vector3 sum(VZero);
+    for (int i = 0; i < sel.Size(); i++)
+    {
+        Vector3Val p = lShape->Pos(sel[i]);
+        sum += p;
+        for (int a = 0; a < 3; a++)
+        {
+            if (p[a] < mn[a])
+            {
+                mn[a] = p[a];
+            }
+            if (p[a] > mx[a])
+            {
+                mx[a] = p[a];
+            }
+        }
+    }
+    const Vector3 size = mx - mn;
+    int thin = 0;
+    for (int a = 1; a < 3; a++)
+    {
+        if (size[a] < size[thin])
+        {
+            thin = a;
+        }
+    }
+    // A part with no clearly thinnest dimension is not a disc; guessing an
+    // axis for it would be worse than the caller's own default.
+    float second = FLT_MAX;
+    for (int a = 0; a < 3; a++)
+    {
+        if (a != thin && size[a] < second)
+        {
+            second = size[a];
+        }
+    }
+    if (!(size[thin] < second * 0.5f))
+    {
+        return false;
+    }
+    center = sum * (1.0f / float(sel.Size()));
+    direction = VZero;
+    direction[thin] = 1.0f;
+    return true;
+}
+
 void AnimationRotation::Init(LODShape* shape, const char* name, const char* altName, const char* axis,
                              const char* altAxis, bool inMemory)
 {
@@ -1072,6 +1163,16 @@ void AnimationRotation::Init(LODShape* shape, const char* name, const char* altN
         // PoseidonAssert( index>=0 );
         if (index < 0)
         {
+            Shape* aShape = shape->Level(i);
+            if (aShape && GuessRotationFromSelection(aShape, aShape->NamedSel(_selection[i]), _center[i],
+                                                     _direction[i]))
+            {
+                LOG_DEBUG(Graphics, "{}:{} sel {}: axis {} absent, recovered {:.3f},{:.3f},{:.3f} about {:.3f},{:.3f},{:.3f}",
+                          (const char*)shape->GetName(), LevelName(shape->Resolution(i)), name, axis,
+                          _direction[i].X(), _direction[i].Y(), _direction[i].Z(), _center[i].X(), _center[i].Y(),
+                          _center[i].Z());
+                continue;
+            }
             RptF("Missing axis in model %s:%s, sel %s, axis %s", (const char*)shape->GetName(),
                  LevelName(shape->Resolution(i)), name, axis);
             _center[i] = VZero;

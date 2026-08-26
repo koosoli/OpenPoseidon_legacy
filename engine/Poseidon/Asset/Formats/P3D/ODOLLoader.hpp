@@ -521,7 +521,24 @@ class ODOLLoader
             if (dominantBone[v] >= 0)
                 verticesByBone[static_cast<uint32_t>(dominantBone[v])].push_back(static_cast<uint32_t>(v));
 
-        size_t filled = 0;
+        // A bone-named selection takes its bone's vertices AND EVERY
+        // DESCENDANT BONE'S. This is the difference between a rotor and a bare
+        // hub. OFP's "velka vrtule" was one flat selection holding everything
+        // that turns with the main rotor; Arma 2 kept the name but factored
+        // the part into a subtree, and on the Mi-35 that subtree is
+        //     velka vrtule dive -> velka vrtule -> {rotordive, rotor static dive}
+        // with the blade geometry on the CHILDREN. Filling the selection from
+        // bone 1 alone spins the hub and leaves the blades standing still,
+        // which is exactly what the owner reported as "A2 heli rotor spinning
+        // wrong" -- and the same shape of bug waits on every nested part
+        // (otocvez -> otochlaven -> gatling_1, gear_1_1 -> _damper -> _stabil),
+        // where OFP's selection likewise covered the whole chain. The closure
+        // walks DOWN only: "velka vrtule" must not pick up its parent's dive.
+        std::unordered_map<std::string, std::vector<uint32_t>> childrenOf;
+        for (size_t b = 0; b < bones.size(); ++b)
+            childrenOf[lowered(bones[b].parent)].push_back(static_cast<uint32_t>(b));
+
+        size_t filled = 0, byDescent = 0;
         for (auto& sel : mesh.selections)
         {
             if (!sel.vertexIndices.empty())
@@ -529,19 +546,46 @@ class ODOLLoader
             const auto bone = boneByName.find(lowered(sel.name));
             if (bone == boneByName.end())
                 continue;
-            const auto bucket = verticesByBone.find(bone->second);
-            if (bucket == verticesByBone.end())
+
+            std::vector<uint32_t> stack{bone->second};
+            std::vector<bool> visited(bones.size(), false);
+            std::vector<uint32_t> verts;
+            size_t descendants = 0;
+            while (!stack.empty())
+            {
+                const uint32_t b = stack.back();
+                stack.pop_back();
+                if (b >= bones.size() || visited[b])
+                    continue;
+                visited[b] = true;
+                const auto bucket = verticesByBone.find(b);
+                if (bucket != verticesByBone.end())
+                    verts.insert(verts.end(), bucket->second.begin(), bucket->second.end());
+                const auto kids = childrenOf.find(lowered(bones[b].name));
+                if (kids != childrenOf.end())
+                    for (uint32_t kid : kids->second)
+                        if (kid < bones.size() && !visited[kid])
+                        {
+                            stack.push_back(kid);
+                            ++descendants;
+                        }
+            }
+            if (verts.empty())
                 continue;
-            sel.vertexIndices = bucket->second;
+            std::sort(verts.begin(), verts.end());
+            verts.erase(std::unique(verts.begin(), verts.end()), verts.end());
+            sel.vertexIndices = std::move(verts);
             sel.vertexWeights.assign(sel.vertexIndices.size(), 255);
             ++filled;
+            if (descendants > 0)
+                ++byDescent;
         }
         if (filled > 0)
         {
             LOG_INFO(Graphics,
-                     "Bone-selection synthesis: {} lod {} filled {} selections from {} influenced vertices "
-                     "({}-first pairs{}, {} bones, remap {}, records {})",
-                     sourcePath, lodIndex, filled, influenced, indexFirst ? "index" : "weight",
+                     "Bone-selection synthesis: {} lod {} filled {} selections ({} with descendants) from {} "
+                     "influenced vertices ({}-first pairs{}, {} bones, remap {}, records {})",
+                     sourcePath, lodIndex, filled, byDescent, influenced, indexFirst ? "index" : "weight",
                      premultiplied ? " premultiplied" : "", bones.size(),
                      remap.empty() ? "identity" : "sub-skeleton", perPoint ? "per-point" : "per-vertex");
         }

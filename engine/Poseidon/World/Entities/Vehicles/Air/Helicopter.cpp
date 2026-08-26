@@ -113,18 +113,81 @@ void HelicopterType::InitShape()
     _scopeLevel = 2;
     base::InitShape();
 
+    // The alt-name slot carries the Arma 3 spelling of each rotor selection.
+    // A2 kept the Czech names (the Mi-35 resolves on the first name alone);
+    // A3 renamed them wholesale, which is why a bridged MH-9's rotors sat
+    // still -- not one of these six lookups found anything. Measured on
+    // heli_light_01_f.p3d: "main rotor static", "main rotor blur", "tail
+    // rotor", "tail rotor static", "tail rotor blur" all present. There is
+    // deliberately NO alias for "velka vrtule" itself: A3 has no single
+    // main-rotor selection, only five per-blade PROXIES (bladem01..05), so
+    // its still blades cannot turn until proxy animation exists. The blur
+    // disc is what shows at flight RPM, and that now swaps correctly.
     _rotorH.Init(_shape, "velka vrtule", nullptr, "velka osa");
-    _rotorV.Init(_shape, "mala vrtule", nullptr, "mala osa");
-    _hRotorStill.Init(_shape, "velka vrtule staticka", nullptr);
-    _hRotorMove.Init(_shape, "velka vrtule blur", nullptr);
-    _vRotorStill.Init(_shape, "mala vrtule staticka", nullptr);
-    _vRotorMove.Init(_shape, "mala vrtule blur", nullptr);
+    _rotorV.Init(_shape, "mala vrtule", "tail rotor", "mala osa");
+    _hRotorStill.Init(_shape, "velka vrtule staticka", "main rotor static");
+    _hRotorMove.Init(_shape, "velka vrtule blur", "main rotor blur");
+    _vRotorStill.Init(_shape, "mala vrtule staticka", "tail rotor static");
+    _vRotorMove.Init(_shape, "mala vrtule blur", "tail rotor blur");
     _missileLPos = _shape->MemoryPoint("L strela");
     _missileRPos = _shape->MemoryPoint("P strela");
     _rocketLPos = _shape->MemoryPoint("L raketa");
     _rocketRPos = _shape->MemoryPoint("P raketa");
     _mainRotorDiveAxis = _shape->MemoryPoint("predni osa naklonu");
     _backRotorDiveAxis = _shape->MemoryPoint("zadni osa naklonu");
+
+    // The disc-tilt pivots, recovered when the model does not name them. Every
+    // helicopter tilts its rotor disc by `neutralMainRotorDive` even standing
+    // still, and Animate() rotates the whole rotor selection about this point
+    // -- so a zero here is not "no tilt", it is "tilt about the MODEL ORIGIN",
+    // which swings a rotor sitting metres forward and up right out of place.
+    // Measured on the line-up: the A1 UH-60 names it (-0.13, 0.77, 1.78, i.e.
+    // its hub); the A2 Mi-35 and the A3 MH-9 name nothing, because from Arma 2
+    // on the tilt is a model.cfg bone and the memory point is gone. That is
+    // the owner's "A2 heli rotor spinning wrong". The rotor's own rotation
+    // centre is the same point the UH-60 spells out (hub Z 1.76 vs 1.78), so
+    // use it -- and leave models that DO name the point exactly as they were.
+    if (_mainRotorDiveAxis.SquareSize() < 1e-6f)
+    {
+        _mainRotorDiveAxis = _rotorH.Center();
+    }
+    if (_backRotorDiveAxis.SquareSize() < 1e-6f)
+    {
+        _backRotorDiveAxis = _rotorV.Center();
+    }
+    // One line per helicopter type saying which of the six rotor lookups
+    // actually resolved, and where the main rotor ended up pivoting. Every
+    // cross-generation rotor bug so far has been one of these six coming back
+    // empty on a model whose blades are plainly there, and until this line
+    // existed the only way to tell was to fly the thing.
+    {
+        auto levels = [this](const Animation& a) {
+            int n = 0;
+            for (int i = 0; i < _shape->NLevels(); i++)
+                if (a.GetSelection(i) >= 0)
+                    ++n;
+            return n;
+        };
+        // Vertex count on the highest-detail LOD that resolved. A main rotor
+        // reading back a couple of dozen vertices is a bare hub, not a rotor.
+        auto verts = [this](const Animation& a) {
+            for (int i = 0; i < _shape->NLevels(); i++)
+                if (a.GetSelection(i) >= 0)
+                    return _shape->Level(i)->NamedSel(a.GetSelection(i)).Size();
+            return 0;
+        };
+        const Vector3 hc = _rotorH.Center(), hd = _rotorH.Direction();
+        const Vector3 vc = _rotorV.Center(), vd = _rotorV.Direction();
+        LOG_DEBUG(Graphics,
+                  "Rotors on {}: main {}/{} lods, {} verts, about {:.2f},{:.2f},{:.2f} axis {:.2f},{:.2f},{:.2f} | "
+                  "tail {}/{} lods, {} verts, about {:.2f},{:.2f},{:.2f} axis {:.2f},{:.2f},{:.2f} | "
+                  "still/blur main {}/{} tail {}/{} | dive axes main {:.2f},{:.2f},{:.2f} tail {:.2f},{:.2f},{:.2f}",
+                  (const char*)_shape->GetName(), levels(_rotorH), _shape->NLevels(), verts(_rotorH), hc.X(), hc.Y(),
+                  hc.Z(), hd.X(), hd.Y(), hd.Z(), levels(_rotorV), _shape->NLevels(), verts(_rotorV), vc.X(), vc.Y(),
+                  vc.Z(), vd.X(), vd.Y(), vd.Z(), levels(_hRotorStill), levels(_hRotorMove), levels(_vRotorStill),
+                  levels(_vRotorMove), _mainRotorDiveAxis.X(), _mainRotorDiveAxis.Y(), _mainRotorDiveAxis.Z(),
+                  _backRotorDiveAxis.X(), _backRotorDiveAxis.Y(), _backRotorDiveAxis.Z());
+    }
 
     _altRadarIndicator.Init(_shape, par >> "IndicatorAltRadar");
     _altBaroIndicator.Init(_shape, par >> "IndicatorAltBaro");
@@ -217,7 +280,7 @@ void HelicopterType::InitShape()
     DEF_HIT(_shape, _hullHit, "trup", nullptr, GetArmor() * (float)(par >> "armorHull"));
     DEF_HIT(_shape, _engineHit, "motor", nullptr, GetArmor() * (float)(par >> "armorEngine"));
     DEF_HIT(_shape, _avionicsHit, "elektronika", nullptr, GetArmor() * (float)(par >> "armorAvionics"));
-    DEF_HIT(_shape, _rotorVHit, "mala vrtule", nullptr, GetArmor() * (float)(par >> "armorVRotor"));
+    DEF_HIT(_shape, _rotorVHit, "mala vrtule", "tail rotor", GetArmor() * (float)(par >> "armorVRotor"));
     DEF_HIT(_shape, _rotorHHit, "velka vrtule", nullptr, GetArmor() * (float)(par >> "armorHRotor"));
     DEF_HIT(_shape, _missiles, "munice", nullptr, GetArmor() * (float)(par >> "armorMissiles"));
 

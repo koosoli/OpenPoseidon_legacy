@@ -382,6 +382,55 @@ bool LoadOdolStatic(const std::string& path, Poseidon::Asset::Formats::P3D::Odol
 // This prints the evidence rather than the conclusion -- for each selection, how
 // many of its entries are valid FACE INDICES and how many are valid FACE-STREAM
 // BYTE OFFSETS -- so the answer is read off real files, per revision.
+// The model's skeleton, parent-first, with each bone's child count. From ODOL
+// 48 on, this is where a rotor or a turret actually lives: the OFP-era flat
+// named selection survives with the PARENT bone's vertices only, so a rotor
+// whose blades hang off child bones animates as a bare hub. Seeing the tree is
+// the difference between "the selection is empty" and "the selection is the
+// wrong third of the part".
+static void PrintOdolBones(const std::string& path)
+{
+    Poseidon::Asset::Formats::P3D::Odol73StaticModel model;
+    Poseidon::Asset::Formats::P3D::OdolRevisionInfo revision;
+    std::string error;
+    if (!LoadOdolStatic(path, model, revision, error))
+    {
+        std::cerr << "Error: " << path << ": " << error << "\n";
+        std::exit(1);
+    }
+    const auto& bones = model.directory.bones;
+    std::cout << "Model:    " << path << "\n";
+    std::cout << "Revision: " << revision.version << " (" << revision.generation << ")\n";
+    std::cout << "Bones:    " << bones.size() << "\n\n";
+
+    auto lowered = [](std::string v) {
+        for (char& c : v)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return v;
+    };
+    std::map<std::string, std::vector<size_t>> childrenOf;
+    for (size_t i = 0; i < bones.size(); ++i)
+        childrenOf[lowered(bones[i].parent)].push_back(i);
+
+    std::function<void(const std::string&, int)> emit = [&](const std::string& parent, int depth) {
+        auto it = childrenOf.find(parent);
+        if (it == childrenOf.end())
+            return;
+        for (size_t index : it->second)
+        {
+            const auto kids = childrenOf.find(lowered(bones[index].name));
+            const size_t nKids = kids == childrenOf.end() ? 0 : kids->second.size();
+            std::cout << std::string(static_cast<size_t>(depth) * 2 + 2, ' ') << "[" << index << "] "
+                      << bones[index].name;
+            if (nKids > 0)
+                std::cout << "  (" << nKids << " children)";
+            std::cout << "\n";
+            emit(lowered(bones[index].name), depth + 1);
+        }
+    };
+    emit("", 0);
+}
+
 void PrintOdolSelections(const std::string& path, bool proxiesOnly)
 {
     Poseidon::Asset::Formats::P3D::Odol73StaticModel model;
@@ -496,10 +545,15 @@ static void setupModelSelections(CLI::App& model)
     auto* cmd = model.add_subcommand("selections", "Report a binarised model's named selections and their unit");
     cmd->add_option("input", inputFile, "P3D file")->required()->check(CLI::ExistingFile);
     cmd->add_flag("--proxies", proxiesOnly, "Only list proxy: selections");
+    static bool bonesOnly = false;
+    cmd->add_flag("--bones", bonesOnly, "Print the skeleton tree (parent -> children) instead of selections");
     cmd->callback(
         []()
         {
-            PrintOdolSelections(inputFile, proxiesOnly);
+            if (bonesOnly)
+                PrintOdolBones(inputFile);
+            else
+                PrintOdolSelections(inputFile, proxiesOnly);
             std::exit(0);
         });
 }
