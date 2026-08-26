@@ -1,6 +1,3 @@
-#include <mutex>
-#include <unordered_map>
-#include <unordered_set>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 
@@ -9,7 +6,6 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
-#include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <vector>
 #include <array>
 #include <algorithm>
@@ -109,28 +105,6 @@ static std::vector<std::array<float, 3>> buildTangents(const Mesh& mesh,
     return tangents;
 }
 
-
-// MAT-053 seat registry (see the header). Guarded: convertToLODShape runs on loader
-// threads.
-namespace
-{
-std::mutex GBridgedSeatMutex;
-std::unordered_map<const void*, ::Vector3> GBridgedSeats;
-} // namespace
-
-bool GetBridgedPilotSeat(const LODShapeWithShadow* shape, float out[3])
-{
-    std::lock_guard<std::mutex> lock(GBridgedSeatMutex);
-    const auto found = GBridgedSeats.find(static_cast<const void*>(shape));
-    if (found == GBridgedSeats.end())
-    {
-        return false;
-    }
-    out[0] = found->second.X();
-    out[1] = found->second.Y();
-    out[2] = found->second.Z();
-    return true;
-}
 
 ProxyModelName normalizeProxyModelName(const std::string& selectionName)
 {
@@ -1100,10 +1074,6 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_paths = model.pathsIdx;
         shape->_hitpoints = model.hitpointsIdx;
 
-        // MAT-053: candidate pilot/driver seats from SKIPPED crew proxies, one per
-        // lod they appear on; resolved to a single seat after the loop, when the
-        // shape's resolutions exist and FindSpecLevel can name the interior LOD.
-        std::vector<std::pair<int, ::Vector3>> bridgedSeatCandidates;
         // Proxies must be created before OptimizeShapes (Shape::SerializeBin order)
         {
             for (int li = 0; li < lodCount; li++)
@@ -1149,28 +1119,6 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                         (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr;
                     if (!proxyHasConfigClass && !QIFStreamB::FileExist(GetShapeName(modelName)))
                     {
-                        // MAT-053: before dropping a PILOT/DRIVER seat, remember where it
-                        // was (first one wins -- proxy sequence 1 is the pilot). The name
-                        // test mirrors CfgCrew's own vocabulary; "view_*" anchors are not
-                        // seats.
-                        {
-                            const char* base = modelName;
-                            for (const char* q = modelName; *q; q++)
-                                if (*q == '\\' || *q == '/')
-                                    base = q + 1;
-                            std::string leaf(base);
-                            for (char& c : leaf)
-                                c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                            if (leaf.rfind("view", 0) != 0 &&
-                                (leaf.find("pilot") != std::string::npos ||
-                                 leaf.find("driver") != std::string::npos) &&
-                                leaf.find("codriver") == std::string::npos)
-                            {
-                                const auto& pm = proxy.transform.m;
-                                bridgedSeatCandidates.push_back(
-                                    {li, ::Vector3(-pm[0][3], pm[1][3], -pm[2][3])});
-                            }
-                        }
                         LOG_INFO(Graphics, "Proxy model absent, skipped: {} (from {})",
                                  (const char*)modelName, proxy.name);
                         continue;
@@ -1210,32 +1158,6 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     lod->_proxy.Add(po);
                 }
             }
-        }
-
-        // MAT-053 resolution: pick the seat from the VIEW-PILOT (else VIEW-GUNNER) LOD
-        // when one carries it -- on every bridged model measured, the graphical-LOD
-        // records disagree with the view-LOD record by a 180-degree turn about Y (A1
-        // UH-60 lod0 seat -0.65,-1.51,-4.57 vs view-lod +0.65,-1.51,+4.57), and the
-        // view-LOD one is the one that put the camera in the cockpit.
-        if (!bridgedSeatCandidates.empty())
-        {
-            const int vp = shape->FindSpecLevel(VIEW_PILOT);
-            const int vg = shape->FindSpecLevel(VIEW_GUNNER);
-            const ::Vector3* chosen = &bridgedSeatCandidates.front().second;
-            for (const auto& cand : bridgedSeatCandidates)
-            {
-                if (cand.first == vp)
-                {
-                    chosen = &cand.second;
-                    break;
-                }
-                if (cand.first == vg)
-                {
-                    chosen = &cand.second;
-                }
-            }
-            std::lock_guard<std::mutex> lock(GBridgedSeatMutex);
-            GBridgedSeats[static_cast<const void*>(shape)] = *chosen;
         }
 
         // Oxygen creates sections before marking proxy faces hidden, so section hints
