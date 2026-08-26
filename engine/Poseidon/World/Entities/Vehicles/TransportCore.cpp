@@ -1265,23 +1265,15 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
         // are the origin edge; seat = that corner, eye = seat + the standard
         // seated eye offset. Preferred over the memory anchors above, which the
         // owner measured as aft of the seat.
-        // The seated eye offset above a seat marker, taken from the ENGINE's own
-        // answer rather than a tuned constant: GetProxyCamera composes exactly this
-        // vector onto the crew proxy for stock vehicles, so the degraded path lands
-        // where the resolved path would. Falls back to a seated-average when there
-        // is no focused person (dedicated server, replay).
-        Vector3 eyeOffset(0.32f, 1.34f, 0.16f);
-        if (AIUnit* focus = GWorld ? GWorld->FocusOn() : nullptr)
-        {
-            if (Person* p = focus->GetPerson())
-            {
-                const Vector3 pp = p->GetPilotPosition(camType);
-                if (pp.SquareSize() > 0.01f)
-                {
-                    eyeOffset = pp;
-                }
-            }
-        }
+        // The seated eye offset above a seat marker. A CONSTANT, deliberately, and
+        // not Person::GetPilotPosition(): that vector (0.32, 1.34, 0.16) is composed
+        // in the crew PROXY's frame by GetProxyCamera, and reusing it here -- where
+        // there is no proxy and the seat is in model space -- shifts the eye 32 cm
+        // sideways and 24 cm up out of the seat. The captures that put the A1 and A2
+        // pilots in their cockpits used this constant; the GetPilotPosition variant
+        // was never opened before shipping and the owner found it in the grass.
+        // Verify the PICTURE, not the numbers, before changing this.
+        const Vector3 eyeOffset(0.0f, 1.1f, 0.15f);
         Vector3 eyeFromMarker = VZero;
         {
             const int vp = shape->FindLevel(VIEW_PILOT);

@@ -1219,8 +1219,14 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         // view-LOD one is the one that put the camera in the cockpit.
         if (!bridgedSeatCandidates.empty())
         {
+            // Preference order among the interior LODs. VIEW_CARGO is in the list
+            // because an Arma 3 helicopter need not have a VIEW_PILOT LOD at all --
+            // the MH-9 ships 1200 (cargo) for the whole cabin and no 1100, so
+            // without this the seat came from whichever graphical LOD happened to
+            // be first.
             const int vp = shape->FindSpecLevel(VIEW_PILOT);
             const int vg = shape->FindSpecLevel(VIEW_GUNNER);
+            const int vc = shape->FindSpecLevel(VIEW_CARGO);
             const ::Vector3* chosen = &bridgedSeatCandidates.front().second;
             for (const auto& cand : bridgedSeatCandidates)
             {
@@ -1229,7 +1235,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     chosen = &cand.second;
                     break;
                 }
-                if (cand.first == vg)
+                if (cand.first == vg || cand.first == vc)
                 {
                     chosen = &cand.second;
                 }
