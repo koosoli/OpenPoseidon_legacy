@@ -49,7 +49,38 @@ correct BC↔Cd normalisation makes two independent (function, BC) pairs land on
 trajectory. They diverge at 600 m, which is exactly where they should — G1 mis-describes a
 boat-tail once it is well transonic.
 
-## Consequence for `../cwa-airfriction.cpp` — those values are PROVISIONAL
+## Independent verification against a second implementation, 2026-08-27
+
+The cross-validation above shows our two tables agree with *each other*. That still leaves the
+possibility that both tables, or the constant in front of them, were transcribed wrong in the same
+direction. So they were checked against an outside implementation:
+[gehtsoft-usa/BallisticCalculator1](https://github.com/gehtsoft-usa/BallisticCalculator1), a
+JBM/McCoy-derived ballistic calculator (the same lineage as the RedOakArms web calculator).
+
+**Tables.** `G1.txt` / `G7.txt` and the copies embedded in `Ballistics.cpp` were diffed row for row
+against that library's `G1DragTable.cs` and `G7DragTable.cs`. G1: 79 rows in both, G7: 84 rows in
+both. No missing row, no extra row, no Cd differing by more than 1e-6. They are the same
+tabulation.
+
+**The retardation constant.** That library works in imperial units and folds every constant into
+`PIR = (pi/8) * (rho0/144) = 2.08551e-4`, giving `retardation[fps/s] = PIR * Cd * v_fps^2 / BC`.
+Converting that to SI (x 0.3048 / 0.09290304) and comparing with our `rho * pi / (8 * BC_SI)`:
+
+```
+ours                6.842230e-04
+reference, in SI    6.842224e-04
+```
+
+Six significant figures. Two independently derived normalisations, one written from the physics and
+one inherited from JBM, land on the same number -- which is the check that the BC convention itself
+is right, not merely self-consistent. `test_ballistics.cpp` pins this so it cannot drift.
+
+**What the reference has and we do not.** Air density, temperature and altitude; a speed of sound
+that follows temperature; spin drift and Coriolis. Ours are sea-level ICAO constants and no spin
+effects. Those are deliberate omissions for a game, documented at `Ballistics::SpeedOfSound`, not
+disagreements about the drag model.
+
+## Consequence for `../cwa-airfriction.cpp` — resolved for small arms
 
 The constant-k values in that file were fitted to a retained-velocity figure of **700 m/s at
 300 m** for M855, taken from recollection rather than a source. The cross-validated drag-function
@@ -63,4 +94,9 @@ with its published BC and reading the anchor off the result, instead of off a re
 card. That was not done here because it needs trustworthy per-cartridge BCs, and inventing those
 would repeat the mistake at one remove.
 
-**Nothing in the engine consumes these tables yet.** The flight law is still constant-Cd.
+**Resolved 2026-08-27 for the four small-arms classes.** They now declare `dragModel` and a
+published `ballisticCoefficient`, so they fly on these tables rather than on a constant, and their
+`airFriction` fallbacks were re-derived by fitting the constant law to the drag-function trajectory
+instead of to a remembered range card. The seven autocannon/tank/HEAT classes keep constant drag
+and unsourced anchors, and are labelled as such -- G1 and G7 do not describe those projectiles, so
+the fix for them is published retained-velocity data, not a borrowed BC.

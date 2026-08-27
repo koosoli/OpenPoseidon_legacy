@@ -570,3 +570,174 @@ TEST_CASE("G1 and G7 with their published coefficients agree on the same bullet"
     REQUIRE(old.reached);
     CHECK(g7.time > old.time);
 }
+
+// =================================================================================================
+// EXTERNAL REFERENCE
+//
+// Everything above this line checks the solver against the engine, against a hand-written second
+// integration, or against itself. That can only catch inconsistency -- it cannot catch a model
+// that is coherently wrong, which is precisely the failure the first pass of the airFriction data
+// had: self-consistent, fitted to a remembered anchor, and systematically too flat.
+//
+// So these cases pin our numbers to an OUTSIDE implementation: gehtsoft-usa/BallisticCalculator1,
+// a JBM/McCoy-derived ballistic calculator, checked 2026-08-27. Two things were compared and are
+// held here:
+//
+//   * its retardation constant, which it inherits from JBM in imperial units, against ours,
+//     derived independently from the physics in SI; and
+//   * trajectories it and we produce for the same cartridge with the same published coefficient.
+//
+// docs/ballistics/drag-functions/SOURCE.md has the full comparison and the unit conversion.
+// =================================================================================================
+
+namespace
+{
+/// The reference calculator's drag normalisation, converted to SI.
+///
+/// It folds its constants into `PIR = (pi/8) * (rho0/144) = 2.08551e-4` and computes
+/// `retardation[fps/s] = PIR * Cd * v_fps^2 / BC` with BC in lb/in^2. Converting to metres:
+/// `* 0.3048` for the acceleration and `/ 0.09290304` for v^2, giving 6.842224e-4. Ours is
+/// `rho * pi / (8 * BC_SI)` with BC_SI = BC * 703.06958, i.e. 6.842230e-4 -- the same number, from
+/// a different starting point and a different unit system.
+constexpr float ReferencePirSI = 2.08551e-04f * 0.3048f / 0.09290304f;
+
+B::ShellParams WithDragFunction(B::DragModel model, float bcLbIn2)
+{
+    B::ShellParams p;
+    p.airFriction = B::DefaultAirFriction;
+    p.coefGravity = 1.0f;
+    p.initTime = 0.0f;
+    p.timeToLive = 10.0f;
+    p.dragModel = model;
+    p.ballisticCoefficient = bcLbIn2 * B::BallisticCoefficientToSI;
+    return p;
+}
+
+B::ShellParams WithConstant(float airFriction)
+{
+    B::ShellParams p;
+    p.airFriction = airFriction;
+    p.coefGravity = 1.0f;
+    p.initTime = 0.0f;
+    p.timeToLive = 10.0f;
+    return p;
+}
+} // namespace
+
+TEST_CASE("The retardation constant matches an independent implementation", "[ballistics][bal-010][reference]")
+{
+    // A ballistic coefficient is only meaningful against the constant it is divided by, so this is
+    // the most load-bearing number in the file: get it wrong and every published BC in the world
+    // describes a different bullet than the one that flies. Two derivations, six figures.
+    const float bcSI = 1.0f * B::BallisticCoefficientToSI; // BC of 1 lb/in^2, so k == the constant
+
+    for (const B::DragModel model : {B::DragModel::G1, B::DragModel::G7})
+    {
+        for (const float mach : {0.5f, 1.0f, 1.5f, 2.0f, 3.0f})
+        {
+            const float cd = B::StandardDragCoefficient(model, mach);
+            const float ours = B::DragRetardation(model, B::DefaultAirFriction, bcSI, mach * B::SpeedOfSound);
+            CHECK(ours == Approx(-ReferencePirSI * cd).epsilon(1e-4));
+        }
+    }
+
+    // And the atmosphere those constants describe is sea-level ICAO, which is what the reference
+    // normalises to as well: its rho0 is 0.076474 lb/ft^3 = 1.2250 kg/m^3.
+    CHECK(B::AirDensity == Approx(1.225f));
+    CHECK(B::SpeedOfSound == Approx(340.3f).epsilon(1e-3));
+}
+
+TEST_CASE("Drag-function trajectories match the external reference model", "[ballistics][bal-010][reference]")
+{
+    // Drop and flight time at 300 m and 600 m for the four cartridges the shipped overlay
+    // (docs/ballistics/cwa-airfriction.cpp) puts on a drag function, each with its published
+    // coefficient. Expected values come from the reference model integrated finely; the tolerance
+    // is 2 %, far wider than the difference between its integrator and ours (well under 1 %) and
+    // far tighter than any error that would matter -- a broken normalisation moves these by tens of
+    // per cent, and the first-pass constant fit missed the 600 m drop by 14 %.
+    struct Case
+    {
+        const char* name;
+        B::DragModel model;
+        float bc;
+        float muzzle;
+        float drop300;
+        float time300;
+        float drop600;
+        float time600;
+    };
+    const Case cases[] = {
+        // 5.56x45 M855, and the same bullet described by the other table -- both must land here.
+        {"M855 G7", B::DragModel::G7, 0.151f, 940.0f, 0.6435f, 0.3860f, 3.5896f, 0.9757f},
+        {"M855 G1", B::DragModel::G1, 0.304f, 940.0f, 0.6432f, 0.3857f, 3.5634f, 0.9680f},
+        {"7.62x51 M80", B::DragModel::G1, 0.397f, 810.0f, 0.8222f, 0.4310f, 4.2155f, 1.0266f},
+        {"7.62x54R ball", B::DragModel::G1, 0.426f, 830.0f, 0.7695f, 0.4153f, 3.8535f, 0.9740f},
+        {"12.7x99 M2", B::DragModel::G1, 0.670f, 890.0f, 0.6204f, 0.3665f, 2.8184f, 0.8029f},
+    };
+
+    const Vector3 start(0, 0, 0);
+    for (const Case& c : cases)
+    {
+        INFO(c.name);
+        const B::ShellParams shell = WithDragFunction(c.model, c.bc);
+        const Vector3 velocity(0, 0, c.muzzle);
+
+        const B::Impact at300 = B::SimulateAtDistance(shell, start, velocity, 300.0f);
+        const B::Impact at600 = B::SimulateAtDistance(shell, start, velocity, 600.0f);
+        REQUIRE(at300.reached);
+        REQUIRE(at600.reached);
+
+        CHECK(-at300.position[1] == Approx(c.drop300).epsilon(0.02));
+        CHECK(at300.time == Approx(c.time300).epsilon(0.02));
+        CHECK(-at600.position[1] == Approx(c.drop600).epsilon(0.02));
+        CHECK(at600.time == Approx(c.time600).epsilon(0.02));
+    }
+}
+
+TEST_CASE("The shipped constant fallbacks track their drag functions", "[ballistics][bal-010][reference]")
+{
+    // Every drag-function class in the overlay also carries an airFriction, for a build that
+    // ignores dragModel. Those constants are least-squares fits to the drag-function trajectory
+    // over 0-600 m, and this is what stops them being re-fitted to a guess again: each must stay
+    // close to the function it stands in for, and each must be markedly draggier than the
+    // first-pass value it replaced.
+    struct Case
+    {
+        const char* name;
+        B::DragModel model;
+        float bc;
+        float muzzle;
+        float fallback;
+        float firstPass;
+    };
+    const Case cases[] = {
+        {"BulletSingle 5.56", B::DragModel::G7, 0.151f, 940.0f, -0.001328f, -0.000983f},
+        {"BulletSniper 7.62x51", B::DragModel::G1, 0.397f, 810.0f, -0.001039f, -0.000600f},
+        {"Bullet7_6 7.62x54R", B::DragModel::G1, 0.426f, 830.0f, -0.000954f, -0.000616f},
+        {"Bullet12_7 12.7x99", B::DragModel::G1, 0.670f, 890.0f, -0.000570f, -0.000314f},
+    };
+
+    const Vector3 start(0, 0, 0);
+    for (const Case& c : cases)
+    {
+        INFO(c.name);
+        const Vector3 velocity(0, 0, c.muzzle);
+
+        const B::Impact fn = B::SimulateAtDistance(WithDragFunction(c.model, c.bc), start, velocity, 300.0f);
+        const B::Impact fallback = B::SimulateAtDistance(WithConstant(c.fallback), start, velocity, 300.0f);
+        const B::Impact firstPass = B::SimulateAtDistance(WithConstant(c.firstPass), start, velocity, 300.0f);
+        REQUIRE(fn.reached);
+        REQUIRE(fallback.reached);
+        REQUIRE(firstPass.reached);
+
+        // Within 5 % of the real model at 300 m. A constant law cannot do better than that across
+        // the whole band -- it has no transonic rise to give -- which is why it is the fallback.
+        CHECK(-fallback.position[1] == Approx(-fn.position[1]).epsilon(0.05));
+
+        // The first-pass value was too flat, by more than the fit error above. If a change ever
+        // makes these two swap places, the anchor has drifted back towards a guess.
+        CHECK(-firstPass.position[1] < -fn.position[1]);
+        CHECK(-fallback.position[1] > -firstPass.position[1]);
+        CHECK(c.fallback < c.firstPass); // more negative == more drag
+    }
+}
