@@ -4950,17 +4950,6 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     bool hasProxies = false;
     bool hasComplement = false;
 
-    // The Riviera hotel bakes its Venetian blinds and glass into opaque facade sections rather
-    // than naming a separate alpha window material. Its retained GPU mesh currently loses those
-    // sections, while direct WGPU rendering is correct (Sara 8249.15, 9021.16, 20.32). Keep
-    // this demonstrated model family on the direct path until its retained-section omission is
-    // fixed at the source.
-    if (ContainsNoCase(shape->Name(), "hotel_riviera"))
-    {
-        LOG_INFO(Graphics, "GpuModel window fallback: model={} reason=riviera-opaque-facade", shape->Name());
-        eligible = false;
-    }
-
     for (int level = 0; level < shape->NLevels() && eligible; level++)
     {
         if (!shape->IsNormalLevel(level)) // skip special (>=900) non-graphical levels
@@ -4993,14 +4982,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             {
                 continue;
             }
-            // A1 Sara's `oknoin01` is a binary-alpha window fill. The direct WGPU draw
-            // correctly retains its blinds and interior detail, whereas the retained path
-            // drops that fill and leaves an empty opening (reproduced at Sara 8249.15,
-            // 9021.16, 20.32). Keep the WHOLE house on the direct path: partial suppression
-            // is spec-based, so retaining its opaque walls while trying to CPU-draw just this
-            // opaque-spec cutout would suppress the very section we need to preserve.
+            // A1 window sections are not consistently classified: `hotel_oknoa_ca.paa`, for
+            // example, contains the hotel's glass and Venetian blinds but does not enter the
+            // Cutout bucket. The retained path currently drops that entire section. A named
+            // window texture/material is therefore sufficient to keep the WHOLE model on the
+            // proven direct path; partial suppression is spec-based and would otherwise hide
+            // the direct window draw behind retained opaque walls.
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture()); texture &&
-                texture->GetAlphaClass() == Poseidon::AlphaStats::Cutout &&
                 (MaterialIsWindow(shSec.surfMat) || ContainsNoCase(texture->Name(), "okn") ||
                  ContainsNoCase(texture->Name(), "window")))
             {
