@@ -4989,7 +4989,9 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // is spec-based, so retaining its opaque walls while trying to CPU-draw just this
             // opaque-spec cutout would suppress the very section we need to preserve.
             if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture()); texture &&
-                texture->GetAlphaClass() == Poseidon::AlphaStats::Cutout && MaterialIsWindow(shSec.surfMat))
+                texture->GetAlphaClass() == Poseidon::AlphaStats::Cutout &&
+                (MaterialIsWindow(shSec.surfMat) || ContainsNoCase(texture->Name(), "okn") ||
+                 ContainsNoCase(texture->Name(), "window")))
             {
                 static std::unordered_set<std::string> loggedWindowFallback;
                 if (loggedWindowFallback.insert(std::string(shape->Name() ? shape->Name() : "?")).second)
