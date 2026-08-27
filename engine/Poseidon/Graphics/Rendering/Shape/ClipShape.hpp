@@ -41,6 +41,18 @@ struct ShapeSectionInfo
 	}
 };
 
+// Does the wgpu RETAINED path refuse to own this section on grounds its SPEC does not carry?
+//
+// render::IsGpuOwnedSectionSpec reads the spec bits; ClassifyGpuSection reads the spec AND the
+// texture's alpha histogram, and declines anything the histogram calls Blend. A section whose
+// spec is plain opaque over a translucent texture therefore falls between them: declined by the
+// GPU, skipped by the CPU as "GPU-owned", drawn by neither. Every caller that asks "is this the
+// GPU's?" must subtract this, or it loses geometry (Shape::Draw's skip) or mis-classifies the
+// object's coverage as Full and never calls the CPU draw at all (RegisterGpuModel).
+//
+// Defined in ShapeDraw.cpp beside SectionIsBlend, which is the routing rule it has to agree with.
+bool SectionRetainedRefuses(const ShapeSectionInfo &sec);
+
 struct ShapeSection: public ShapeSectionInfo
 {
 	Offset beg,end; // beg,end in PolyPlainArray of Shape

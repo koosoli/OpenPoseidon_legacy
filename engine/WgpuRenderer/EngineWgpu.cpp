@@ -5195,7 +5195,13 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
                 eligible = false;
                 break;
             }
-            if (render::IsGpuOwnedSectionSpec(shSec.properties.Special()))
+            // SectionRetainedRefuses is the same subtraction Shape::Draw's skip applies, and it
+            // has to be here too: coverage is decided from this test, and a section the GPU
+            // declines on TEXTURE grounds over an opaque SPEC would otherwise leave the object
+            // Full -- which suppresses the CPU draw wholesale, so the complement that was
+            // supposed to repaint it never runs. That is how A1's hotel lost 10,496 triangles
+            // of glass and blinds. See ClipShape.hpp for the full contract.
+            if (render::IsGpuOwnedSectionSpec(shSec.properties.Special()) && !SectionRetainedRefuses(shSec))
             {
                 levelHasOwned = true;
             }

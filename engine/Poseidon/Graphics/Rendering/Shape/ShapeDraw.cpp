@@ -15,6 +15,7 @@
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Edges.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
@@ -164,6 +165,36 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     if (render::IsLegacyPlantCutoutTexture(tex->Name()))
         return false;
     return SectionMaterialAlphaRoute(sec.surfMat) == AuthoredAlphaRoute::Default;
+}
+
+// The complement half of the ownership contract, and the fix for the A1 "windows, blinds and
+// interiors are gone" report (2026-08-27).
+//
+// IsGpuOwnedSectionSpec answers from the section SPEC alone. ClassifyGpuSection answers from
+// the spec AND the texture's alpha histogram, and refuses anything the histogram calls Blend.
+// For a section whose spec is plain opaque but whose texture is a translucent pane, the two
+// disagree in the one direction that loses geometry: the GPU declines it as blend, the CPU
+// skips it as GPU-owned, and NOBODY draws it.
+//
+// That is not a corner case, it is the whole A1 building generation. ODOL section flags are
+// taken verbatim (ShapeAdapter.cpp:712) -- only the MLOD branch derives IsAlpha from the
+// texture -- so `ca\buildings\hotel.p3d` carries flags=0x0 on all 24 LOD-0 sections while
+// hotel_oknoa_ca.paa (10,496 tris of glass and Venetian blinds), hotel_door1_ca.paa and
+// hotel_sign_ca.paa all classify BLEND. Every one of them fell in the hole.
+//
+// So: a section the retained path REFUSES stays the CPU's, whatever its spec bits say.
+//
+// Reforger is deliberately left alone. EngineWgpu's ClassifyGpuSection reads `.emat` materials
+// (EmatUsesLeafCards) and CAN take a Blend-classified section on that strength, while
+// SectionMaterialAlphaRoute cannot parse an .emat at all and calls the same section Blend.
+// Un-skipping there would draw Everon's foliage twice rather than restore a hole. Until both
+// sides read the same file, an .emat section keeps today's behaviour.
+bool SectionRetainedRefuses(const ShapeSectionInfo& sec)
+{
+    if (!SectionIsBlend(sec))
+        return false;
+    const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
+    return !(mat && *mat && Asset::Material::IsEmatPath(mat));
 }
 
 bool Shape::HasBlendSections() const
@@ -383,8 +414,9 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 {
                     const Texture* t = sec.properties.GetTexture();
                     const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
-                    const bool gpuOwned =
-                        GSkipGpuOwnedSections && render::IsGpuOwnedSectionSpec(sec.properties.Special());
+                    const bool gpuOwned = GSkipGpuOwnedSections &&
+                                          render::IsGpuOwnedSectionSpec(sec.properties.Special()) &&
+                                          !SectionRetainedRefuses(sec);
                     const bool filtered = GSectionFilter != SectionClassFilter::All &&
                                           ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
                     LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
@@ -403,7 +435,8 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 // prepass targets, so the CPU repaints only the complement (blend glass,
                 // decals). Same predicate the wgpu backend registered the section with, so
                 // owned sections are dropped exactly once — never double-drawn, never held.
-                if (GSkipGpuOwnedSections && render::IsGpuOwnedSectionSpec(sec.properties.Special()))
+                if (GSkipGpuOwnedSections && render::IsGpuOwnedSectionSpec(sec.properties.Special()) &&
+                    !SectionRetainedRefuses(sec))
                 {
                     continue;
                 }
