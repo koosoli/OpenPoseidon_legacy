@@ -205,6 +205,74 @@ static float EnvFloat(const char* name, float fallback)
     return std::strtof(v, nullptr);
 }
 
+// The terrain's LCA mask is sampled once per land cell for grass placement. On
+// Sahrani those cells are wide enough for a crisp 0-to-1 mask edge to read as a
+// tiled lawn boundary. Keep the map's mask authoritative, but give the first
+// ordinary-ground cell OUTSIDE an authored grass cell a sparse copy of its
+// neighbour. The shader's stable coverage thinning turns that into a short,
+// non-moving fringe rather than a new solid grass tile. Roads, water and hard
+// object cells retain their exact exclusion, and we never fill a second cell.
+//
+// This is deliberately authored-mask-only: legacy worlds do not carry the
+// surface/runs needed to preserve the correct local grass family.
+static size_t FeatherAuthoredGrassEdges(std::vector<uint32_t>& geography, int width, float fraction)
+{
+    if (width < 3 || fraction <= 0.0f || geography.size() != static_cast<size_t>(width) * width)
+    {
+        return 0;
+    }
+
+    constexpr uint32_t HardExclusion = 0x00000c63u; // water, road/track and hard objects; mirrors grass.wgsl
+    const std::vector<uint32_t> source = geography;
+    size_t feathered = 0;
+    for (int z = 1; z + 1 < width; ++z)
+    {
+        for (int x = 1; x + 1 < width; ++x)
+        {
+            const size_t index = static_cast<size_t>(z) * width + x;
+            const uint32_t cell = source[index];
+            if ((cell & GrassAuthoredCell) == 0 || (cell & GrassTextureCell) != 0 ||
+                (cell & HardExclusion) != 0)
+            {
+                continue;
+            }
+
+            uint32_t best = 0;
+            uint32_t bestCoverage = 0;
+            constexpr int dx[] = {-1, 1, 0, 0};
+            constexpr int dz[] = {0, 0, -1, 1};
+            for (int direction = 0; direction < 4; ++direction)
+            {
+                const uint32_t neighbour = source[static_cast<size_t>(z + dz[direction]) * width + x + dx[direction]];
+                if ((neighbour & (GrassAuthoredCell | GrassTextureCell)) !=
+                    (GrassAuthoredCell | GrassTextureCell))
+                {
+                    continue;
+                }
+                const uint32_t coverage = (neighbour & GrassCoverageMask) >> GrassCoverageShift;
+                if (coverage > bestCoverage)
+                {
+                    best = neighbour;
+                    bestCoverage = coverage;
+                }
+            }
+            if (bestCoverage == 0)
+            {
+                continue;
+            }
+
+            const uint32_t coverage = std::max(1u, static_cast<uint32_t>(std::lround(bestCoverage * fraction)));
+            uint32_t feather = cell & ~(GrassTextureCell | GrassCoverageMask | GrassSurfaceMask | GrassRunCountMask);
+            feather |= GrassTextureCell;
+            feather |= (coverage << GrassCoverageShift) & GrassCoverageMask;
+            feather |= best & (GrassSurfaceMask | GrassRunCountMask);
+            geography[index] = feather;
+            ++feathered;
+        }
+    }
+    return feathered;
+}
+
 static bool IsTerrainPageTextureName(const char* name)
 {
     // These are world-tile assets, not general material textures. Restricting
@@ -1827,6 +1895,15 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
         // the previous world's.
         _clutterAtlas.clear();
         _clutterAtlasLayers = 0;
+    }
+    else
+    {
+        const float edgeFraction = std::clamp(EnvFloat("WGR_GRASS_EDGE_FEATHER", 0.22f), 0.0f, 0.50f);
+        const size_t feathered = FeatherAuthoredGrassEdges(geography, n, edgeFraction);
+        LOG_INFO(Graphics,
+                 "Wgpu grass edge feather: {} sparse fringe cells at {:.0f}% of adjacent authored coverage "
+                 "(WGR_GRASS_EDGE_FEATHER)",
+                 feathered, edgeFraction * 100.0f);
     }
 
     // Match grass.wgsl: water, forests, roads/tracks and hard buildings are
