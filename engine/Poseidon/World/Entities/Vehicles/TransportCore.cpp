@@ -1394,28 +1394,8 @@ Matrix4 Transport::InsideCamera(CameraType camType) const
             }
             if (turnedOut)
             {
-                // TUNABLE AT RUNTIME (WGR_TURNOUT_LIFT, metres) because there is
-                // nothing authored to derive it from. The value is not arbitrary:
-                // a turned-out commander sits BEHIND THE GUN, so his eye has to
-                // clear the barrel or the view is a close-up of the mantlet -- which
-                // is what 0.0 and 0.5 both gave on the A3 T-100. 0.7 is the owner's
-                // measurement of where the head sits above the barrel.
-                //
-                // KNOWN LIMITATION, and the reason this needs a lift at all: every
-                // anchor this path can reach is the DRIVER's (`driverview`), and it
-                // is returned whichever seat the player occupies. A turned-out
-                // COMMANDER sits in the turret, higher and further back than the
-                // driver's hatch, so the lift is standing in for a commander/gunner
-                // anchor this path does not have. The real fix is per-seat anchors
-                // (`commanderview`/`gunnerview` where the model carries them), not
-                // a bigger constant.
-                static const float turnOutLift = []
-                {
-                    const char* v = std::getenv("WGR_TURNOUT_LIFT");
-                    const float parsed = v ? static_cast<float>(atof(v)) : 0.7f;
-                    return (parsed >= 0.0f && parsed <= 3.0f) ? parsed : 0.7f;
-                }();
-                eye = eye + Vector3(0, turnOutLift, 0);
+                constexpr float kTurnOutLift = 0.5f;
+                eye = eye + Vector3(0, kTurnOutLift, 0);
                 anchor = "turned-out";
             }
         }
