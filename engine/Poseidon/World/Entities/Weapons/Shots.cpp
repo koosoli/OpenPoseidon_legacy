@@ -20,6 +20,7 @@
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/SpecLods.hpp>
 #include <Poseidon/World/Scene/ObjLine.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 
@@ -630,29 +631,18 @@ DEFINE_CASTING(ShotShell)
 
 ShotShell::ShotShell(EntityAI* parent, const AmmoType* type) : base(parent, type)
 {
-    _initDelay = type->initTime;
+    // The four flight parameters now come from ONE place, shared with the aim predictor
+    // (Ballistics::ShellParamsFor). They used to be assigned here and re-derived by whatever
+    // wanted to predict a trajectory, which is how the AI ended up aiming with a drag-free model
+    // while these rounds flew with drag. Anything that wants to know how a shell flies must ask
+    // the same function this constructor does. `coefGravity` and `timeToLive` are still read from
+    // the ammo config there, exactly as they were here.
+    const Poseidon::Ballistics::ShellParams shell = Poseidon::Ballistics::ShellParamsFor(*type);
+    _initDelay = shell.initTime;
+    _timeToLive = shell.timeToLive;
+    _airFriction = shell.airFriction;
+    _coefGravity = shell.coefGravity;
 
-    _timeToLive = 20.0;
-    _airFriction = -0.0005;
-
-    _coefGravity = 1;
-
-    const ParamEntry& pars = type->GetParamEntry();
-    const ParamEntry* entry = pars.FindEntry("coefGravity");
-    if (entry)
-    {
-        _coefGravity = *entry;
-    }
-
-    // support assigning timeToLive attribute in config
-    // only support edit shell's as in 2.01. Extend this for other simulations if necessary
-    {
-        const ParamEntry* entry = pars.FindEntry("timeToLive");
-        if (entry)
-        {
-            _timeToLive = *entry;
-        }
-    }
     _waterImpactDone = false;
 }
 

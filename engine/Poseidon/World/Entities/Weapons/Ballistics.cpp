@@ -2,9 +2,15 @@
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp> // G_CONST
+#include <Poseidon/World/Entities/Weapons/Weapons.hpp>  // AmmoType
+#include <Poseidon/IO/ParamFile/ParamFile.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <unordered_map>
 
 namespace Poseidon
 {
@@ -176,6 +182,84 @@ Vector3 CompensateAim(const ShellParams& shell, float initSpeed, Vector3Par shoo
         return Vector3(0, 0, 1);
     }
     return dir * (1.0f / len);
+}
+
+ShellParams ShellParamsFor(const AmmoType& type)
+{
+    // Keyed on the type's address: AmmoTypes live for the mission and this is asked per aim
+    // update per unit, so the ParamEntry lookups underneath must not be paid every time.
+    static std::unordered_map<const AmmoType*, ShellParams> cache;
+    static std::mutex cacheMutex;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        const auto found = cache.find(&type);
+        if (found != cache.end())
+        {
+            return found->second;
+        }
+    }
+
+    ShellParams out;
+    // These four lines ARE ShotShell's constructor (Shots.cpp:632-655). If that ever stops
+    // agreeing with this, the predictor is aiming for a projectile the engine does not fire --
+    // which is the exact defect this file exists to remove. ShotShell now reads from here.
+    out.initTime = type.initTime;
+    out.airFriction = -0.0005f; // not config-driven; see ShellParams::airFriction
+    out.coefGravity = 1.0f;
+    out.timeToLive = 20.0f;
+
+    const ParamEntry& pars = type.GetParamEntry();
+    if (const ParamEntry* entry = pars.FindEntry("coefGravity"))
+    {
+        out.coefGravity = *entry;
+    }
+    if (const ParamEntry* entry = pars.FindEntry("timeToLive"))
+    {
+        out.timeToLive = *entry;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex);
+        cache[&type] = out;
+    }
+    return out;
+}
+
+bool DragCorrectAimEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_BALLISTIC_AIM");
+        return !(v && std::strcmp(v, "0") == 0);
+    }();
+    return enabled;
+}
+
+LevelShot SolveLevelShot(const ShellParams& shell, float initSpeed, float distance, float step)
+{
+    LevelShot out;
+    if (initSpeed <= 0.0f || distance <= 0.0f)
+    {
+        return out;
+    }
+
+    // Fire dead level and see where the round is once it has covered `distance`. The drop is how
+    // far below the line of departure it ended up, which is precisely the amount the barrel has
+    // to be raised -- expressed as a distance here, as a slope by the caller that needs one.
+    const Vector3 start(0, 0, 0);
+    const Vector3 velocity(0, 0, initSpeed);
+
+    const Impact hit = SimulateAtDistance(shell, start, velocity, distance, step);
+    if (!hit.reached)
+    {
+        // Cannot reach: leave `valid` false so the caller keeps whatever it would have done.
+        return out;
+    }
+
+    out.drop = -hit.position[1];
+    out.time = hit.time;
+    out.valid = out.drop >= 0.0f;
+    return out;
 }
 
 Vector3 CompensateAimVacuum(float initSpeed, Vector3Par firingPos, Vector3Par targetPos)

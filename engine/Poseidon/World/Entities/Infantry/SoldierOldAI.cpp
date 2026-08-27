@@ -16,6 +16,7 @@
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <Poseidon/Foundation/Types/RemoveLinks.hpp>
 #include <Random/randomGen.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 namespace Poseidon
 {
@@ -391,6 +392,33 @@ bool Man::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
     Vector3 myPos = PositionModelToWorld(GetWeaponPoint(weapon));
 
     float fall = Square(time) * balFactor;
+
+    // Drag-correct drop and flight time for the ordinary bullet case, replacing the vacuum
+    // parabola above. Deliberately narrow:
+    //
+    //  * ONLY AmmoShotBullet. The shell and missile branches above carry hand-tuned fudge factors
+    //    (time *= 1.3 for slow shells, balFactor *= 0.37 and leadFactor 1.4 for missiles) that
+    //    encode more than ballistics -- launcher behaviour, gameplay feel. Replacing those with
+    //    physics is a separate, evidence-backed decision, not a side effect of this one.
+    //  * `dist` here has ALREADY had _aimInaccuracyDist folded in above, so the solve inherits the
+    //    unit's ability-based range error exactly as the old formula did. AI skill is untouched.
+    //  * `time` feeds the target-lead term below, so taking both numbers from one solve keeps
+    //    drop and lead consistent -- with drag, a round is in the air LONGER than v0 suggests, so
+    //    the old code under-led as well as under-elevated.
+    if (Poseidon::Ballistics::DragCorrectAimEnabled() && mode && mode->_ammo &&
+        mode->_ammo->_simulation == AmmoShotBullet && aInfo->_initSpeed > 0.0f)
+    {
+        const Poseidon::Ballistics::ShellParams shell = Poseidon::Ballistics::ShellParamsFor(*mode->_ammo);
+        const Poseidon::Ballistics::LevelShot shot =
+            Poseidon::Ballistics::SolveLevelShot(shell, aInfo->_initSpeed, dist);
+        if (shot.valid)
+        {
+            fall = shot.drop;
+            time = shot.time;
+            saturateMin(time, 4);
+        }
+    }
+
     tgtPos[1] += fall;
 
     const float predTime = 0.2f;
@@ -443,8 +471,36 @@ void Man::AdjustWeapon(int weapon, CameraType camType, float fov, Vector3& camDi
     float distance = Interpolativ(fov, muzzle->_opticsZoomMin, muzzle->_opticsZoomMax, muzzle->_distanceZoomMin,
                                   muzzle->_distanceZoomMax);
 
-    float time = distance * aInfo->_invInitSpeed;
-    float fallPerM = time * aInfo->_invInitSpeed * 0.5f * G_CONST;
+    // The PLAYER's sight zeroing: `distance` is what the sights are set for (derived from zoom),
+    // and the barrel is raised by the round's drop over that distance.
+    //
+    // This used to be a vacuum parabola -- fall = 0.5 * g * (d/v0)^2, expressed per metre -- which
+    // assumes the round still carries its muzzle velocity all the way out. It does not: these
+    // rounds fly with drag (ShotShell::Simulate). So the sights under-elevated, and the further
+    // the zeroing the worse, which is the player half of the same defect the AI had.
+    const WeaponModeType* mode = GetWeaponMode(weapon);
+    float fallPerM = 0.0f;
+    bool solved = false;
+    if (Poseidon::Ballistics::DragCorrectAimEnabled() && mode && mode->_ammo && distance > 0.0f)
+    {
+        const Poseidon::Ballistics::ShellParams shell = Poseidon::Ballistics::ShellParamsFor(*mode->_ammo);
+        const Poseidon::Ballistics::LevelShot shot =
+            Poseidon::Ballistics::SolveLevelShot(shell, aInfo->_initSpeed, distance);
+        if (shot.valid)
+        {
+            // drop/distance is the slope to add to a unit direction's vertical component --
+            // the same quantity the old `fallPerM` was, just measured rather than assumed.
+            fallPerM = shot.drop / distance;
+            solved = true;
+        }
+    }
+    if (!solved)
+    {
+        // No ammo type, unreachable range, or the lever is off: the original closed form.
+        const float time = distance * aInfo->_invInitSpeed;
+        fallPerM = time * aInfo->_invInitSpeed * 0.5f * G_CONST;
+    }
+
     Vector3 relDir = DirectionWorldToModel(camDir);
     relDir[1] += fallPerM;
 

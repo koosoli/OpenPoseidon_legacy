@@ -207,3 +207,51 @@ TEST_CASE("A round that expires before the distance reports that it did not reac
     const B::Impact hit = B::SimulateAtDistance(shell, Vector3(0, 0, 0), Vector3(0, 0, 750.0f), 2000.0f);
     CHECK_FALSE(hit.reached);
 }
+
+TEST_CASE("SolveLevelShot is what the two aiming call sites consume", "[ballistics][aim]")
+{
+    // Man::AdjustWeapon (player sight zeroing) wants drop/distance; Man::CalculateAimWeapon
+    // (infantry AI) wants the absolute drop and the flight time. Both come from this one solve,
+    // which is why they can no longer disagree with each other.
+    const B::ShellParams shell = Rifle();
+    const float v0 = 750.0f;
+
+    SECTION("with drag off it is the vacuum parabola")
+    {
+        B::ShellParams noDrag = shell;
+        noDrag.airFriction = 0.0f;
+
+        const float d = 400.0f;
+        const B::LevelShot shot = B::SolveLevelShot(noDrag, v0, d);
+        REQUIRE(shot.valid);
+
+        const float t = d / v0;
+        CHECK(shot.time == Approx(t).epsilon(0.01));
+        CHECK(shot.drop == Approx(0.5f * G_CONST * t * t).epsilon(0.02));
+    }
+
+    SECTION("with drag the round is slower, so it is in the air longer and falls further")
+    {
+        const float d = 600.0f;
+        const B::LevelShot dragged = B::SolveLevelShot(shell, v0, d);
+        REQUIRE(dragged.valid);
+
+        const float vacuumTime = d / v0;
+        const float vacuumDrop = 0.5f * G_CONST * vacuumTime * vacuumTime;
+
+        // Both directions matter. Longer flight is WHY the drop is larger, and it is also why the
+        // old code under-led moving targets: it scaled lead by the vacuum time.
+        CHECK(dragged.time > vacuumTime);
+        CHECK(dragged.drop > vacuumDrop);
+    }
+
+    SECTION("a range the round cannot reach reports invalid rather than a wrong number")
+    {
+        B::ShellParams shortLived = shell;
+        shortLived.timeToLive = 0.1f;
+        const B::LevelShot shot = B::SolveLevelShot(shortLived, v0, 3000.0f);
+        CHECK_FALSE(shot.valid);
+        // The call sites fall back to their original closed form when this happens, so an
+        // unreachable range must never silently produce drop == 0.
+    }
+}

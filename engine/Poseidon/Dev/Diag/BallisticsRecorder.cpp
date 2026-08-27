@@ -12,13 +12,26 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 
 #include <cmath>
+#include <cstdlib>
 #include <unordered_map>
 #include <vector>
 
 namespace Poseidon::Dev::Ballistics
 {
 
-bool g_enabled = false;
+/// Off unless asked for: recording samples every projectile and retains their tracks, so an
+/// always-on default would make every mission pay for a diagnostic nobody opened.
+///
+/// `POSEIDON_BALLISTICS_RECORD=1` arms it at startup. That exists because the dev panel is the
+/// ONLY way to turn this on today, which means the trajectory view cannot be reached from a
+/// scripted launch at all -- no capture harness, no smoke test, no repro attached to a bug
+/// report. Anything the owner can only see by clicking is something nobody can hand to anyone
+/// else. The tab's checkbox still works exactly as before and overrides this either way.
+bool g_enabled = []
+{
+    const char* v = std::getenv("POSEIDON_BALLISTICS_RECORD");
+    return v != nullptr && v[0] != '\0' && v[0] != '0';
+}();
 
 namespace
 {
