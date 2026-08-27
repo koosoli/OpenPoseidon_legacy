@@ -300,6 +300,40 @@ static size_t FeatherAuthoredGrassEdges(std::vector<uint32_t>& geography, int wi
     return feathered;
 }
 
+// Modern worlds retain every authored placement even while their renderable
+// Objects stream in around the camera. Roads therefore have a stable source
+// before RoadNet/Object lists exist: the original placement rows and model
+// table. Mark their hosting grass cells up front, so streamed `ca\\roads\\...`
+// segments never receive blades. This is intentionally model-family-specific;
+// it does not guess that ordinary hard scenery is a road.
+static size_t ExcludeModernRoadPlacementsFromGrass(const Landscape& land, std::vector<uint32_t>& geography, int width,
+                                                   size_t& roadPlacements)
+{
+    roadPlacements = 0;
+    if (width < 1 || geography.size() != static_cast<size_t>(width) * width || land.GetLandGrid() <= 0.0f)
+        return 0;
+
+    const auto& models = land.ModernObjectModels();
+    const auto& placements = land.ModernObjectPlacements();
+    size_t excluded = 0;
+    const float invGrid = land.GetInvLandGrid();
+    for (const auto& placement : placements)
+    {
+        if (placement.modelIndex >= models.size() || !ContainsNoCase(models[placement.modelIndex].Data(), "ca\\roads\\"))
+            continue;
+        ++roadPlacements;
+        const int x = std::clamp(static_cast<int>(std::floor(placement.rows[9] * invGrid)), 0, width - 1);
+        const int z = std::clamp(static_cast<int>(std::floor(placement.rows[11] * invGrid)), 0, width - 1);
+        uint32_t& cell = geography[static_cast<size_t>(z) * width + x];
+        if ((cell & GrassTextureCell) != 0)
+        {
+            cell &= ~GrassTextureCell;
+            ++excluded;
+        }
+    }
+    return excluded;
+}
+
 static bool IsTerrainPageTextureName(const char* name)
 {
     // These are world-tile assets, not general material textures. Restricting
@@ -1931,6 +1965,14 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
                  "Wgpu grass edge feather: {} sparse fringe cells at {:.0f}% of adjacent authored coverage "
                  "(WGR_GRASS_EDGE_FEATHER)",
                  feathered, edgeFraction * 100.0f);
+    }
+
+    size_t roadPlacements = 0;
+    const size_t roadExcluded = ExcludeModernRoadPlacementsFromGrass(land, geography, n, roadPlacements);
+    if (roadPlacements != 0)
+    {
+        LOG_INFO(Graphics, "Wgpu grass road placements: {} authored road segment(s), {} grass cell(s) excluded",
+                 roadPlacements, roadExcluded);
     }
 
     // Match grass.wgsl: water, forests, roads/tracks and hard buildings are
