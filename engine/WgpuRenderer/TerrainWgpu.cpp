@@ -17,7 +17,6 @@
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
-#include <Poseidon/World/Terrain/Roads.hpp>
 
 #include <algorithm>
 #include <array>
@@ -232,9 +231,36 @@ static size_t FeatherAuthoredGrassEdges(std::vector<uint32_t>& geography, int wi
         {
             const size_t index = static_cast<size_t>(z) * width + x;
             const uint32_t cell = source[index];
-            if ((cell & GrassAuthoredCell) == 0 || (cell & GrassTextureCell) != 0 ||
-                (cell & HardExclusion) != 0)
+            if ((cell & GrassAuthoredCell) == 0 || (cell & HardExclusion) != 0)
             {
+                continue;
+            }
+
+            // Fade the authored field's outermost full-density cell before
+            // adding the sparse exterior fringe below. The two bands retain
+            // the map's grass family but turn a 0/1 mask step into a visible
+            // density ramp: dense field -> thinned edge -> sparse shoulder.
+            if ((cell & GrassTextureCell) != 0)
+            {
+                bool atEdge = false;
+                constexpr int dx[] = {-1, 1, 0, 0};
+                constexpr int dz[] = {0, 0, -1, 1};
+                for (int direction = 0; direction < 4; ++direction)
+                {
+                    const uint32_t neighbour = source[static_cast<size_t>(z + dz[direction]) * width + x + dx[direction]];
+                    if ((neighbour & GrassTextureCell) == 0)
+                    {
+                        atEdge = true;
+                        break;
+                    }
+                }
+                if (atEdge)
+                {
+                    const uint32_t coverage = (cell & GrassCoverageMask) >> GrassCoverageShift;
+                    const uint32_t softened = std::max(1u, static_cast<uint32_t>(std::lround(coverage * 0.68f)));
+                    geography[index] = (cell & ~GrassCoverageMask) | ((softened << GrassCoverageShift) & GrassCoverageMask);
+                    ++feathered;
+                }
                 continue;
             }
 
@@ -272,64 +298,6 @@ static size_t FeatherAuthoredGrassEdges(std::vector<uint32_t>& geography, int wi
         }
     }
     return feathered;
-}
-
-// GeographyInfo's road flag is useful but not complete: some imported worlds
-// place the visible roadway as an object without setting that terrain bit. The
-// grass system works in land-grid cells, so query the already-built road net
-// over each grass-capable cell and withdraw the entire cell if its roadway
-// geometry reaches it. This is intentionally a hard cut (rather than merely
-// lowering density): a single surviving tuft can poke through the asphalt.
-//
-// Five overlapping probes cover the centre and corners of a cell. They are
-// only run for candidate grass cells and only while a road net exists, keeping
-// the one-time terrain upload cost modest on large maps.
-static size_t ExcludeRoadGeometryFromGrass(const Landscape& land, std::vector<uint32_t>& geography, int width)
-{
-    if (GRoadNet.IsNull() || width < 1 || geography.size() != static_cast<size_t>(width) * width)
-    {
-        return 0;
-    }
-
-    const float grid = land.GetLandGrid();
-    if (grid <= 0.0f)
-    {
-        return 0;
-    }
-    constexpr std::array<std::array<float, 2>, 5> Probes = {
-        {{{0.50f, 0.50f}}, {{0.18f, 0.18f}}, {{0.82f, 0.18f}}, {{0.18f, 0.82f}}, {{0.82f, 0.82f}}}};
-    const float probeRadius = grid * 0.20f;
-    size_t excluded = 0;
-    for (int z = 0; z < width; ++z)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            uint32_t& cell = geography[static_cast<size_t>(z) * width + x];
-            if ((cell & GrassTextureCell) == 0)
-            {
-                continue;
-            }
-
-            bool intersectsRoad = false;
-            for (const auto& probe : Probes)
-            {
-                const float worldX = (static_cast<float>(x) + probe[0]) * grid;
-                const float worldZ = (static_cast<float>(z) + probe[1]) * grid;
-                const float worldY = land.GetHeight(z, x);
-                if (GRoadNet->IsOnRoad(Vector3(worldX, worldY, worldZ), probeRadius) != nullptr)
-                {
-                    intersectsRoad = true;
-                    break;
-                }
-            }
-            if (intersectsRoad)
-            {
-                cell &= ~GrassTextureCell;
-                ++excluded;
-            }
-        }
-    }
-    return excluded;
 }
 
 static bool IsTerrainPageTextureName(const char* name)
@@ -445,7 +413,6 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
         UploadGroundTextures(land);
     }
     UploadIndexMap(land);
-    _grassRoadGeometryApplied = false;
     UploadGeography(land);
     UploadJitterMap(land);
     UploadDetailNoise();
@@ -1791,7 +1758,7 @@ bool TerrainWgpu::BakeAuthoredGrassMask(const Landscape& land, std::vector<uint3
     return true;
 }
 
-void TerrainWgpu::UploadGeography(const Landscape& land, bool includeRoadGeometry)
+void TerrainWgpu::UploadGeography(const Landscape& land)
 {
     const int n = land.GetLandRange();
     if (n <= 0)
@@ -1964,14 +1931,6 @@ void TerrainWgpu::UploadGeography(const Landscape& land, bool includeRoadGeometr
                  "Wgpu grass edge feather: {} sparse fringe cells at {:.0f}% of adjacent authored coverage "
                  "(WGR_GRASS_EDGE_FEATHER)",
                  feathered, edgeFraction * 100.0f);
-    }
-
-    if (includeRoadGeometry)
-    {
-        const size_t roadExcluded = ExcludeRoadGeometryFromGrass(land, geography, n);
-        LOG_INFO(Graphics,
-                 "Wgpu grass road geometry: removed {} grass cell(s) that intersect a roadway",
-                 roadExcluded);
     }
 
     // Match grass.wgsl: water, forests, roads/tracks and hard buildings are
@@ -2447,7 +2406,7 @@ void TerrainWgpu::SetGrassSurfaceEnabled(int index, bool enabled)
     _grassSurfaceEnabled[static_cast<size_t>(index)] = enabled;
     if (_uploaded != nullptr)
     {
-        UploadGeography(*_uploaded, _grassRoadGeometryApplied);
+        UploadGeography(*_uploaded);
     }
 }
 
@@ -2634,15 +2593,6 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     const Landscape& land = *GLandscape;
     Camera* camera = scene.GetCamera();
     const bool uploaded = UploadIfNeeded(land);
-    // WorldInit builds RoadNet after the terrain has first reached the renderer.
-    // Wait for that hand-off rather than querying a missing (or previous-world)
-    // net during the initial upload, then replace only the small grass geography
-    // texture. Ground material and terrain geometry remain untouched.
-    if (!_grassRoadGeometryApplied && GRoadNet.NotNull())
-    {
-        UploadGeography(land, true);
-        _grassRoadGeometryApplied = true;
-    }
     if (camera != nullptr)
     {
         GLandscape->UpdateModernObjectResidency(camera->Position());
