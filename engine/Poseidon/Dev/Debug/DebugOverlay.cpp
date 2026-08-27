@@ -45,6 +45,7 @@
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
+#include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
@@ -6069,6 +6070,12 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Ballistics"))
         {
             Poseidon::Dev::DrawBallisticsTab();
+            ImGui::EndTabItem();
+        }
+        // Screenshot controls, kept apart from the diagnostics they have nothing to do with.
+        if (Dev::PanelTabItem("Picture Mode"))
+        {
+            Poseidon::Dev::DrawPictureModeTab();
             ImGui::EndTabItem();
         }
         // Same arrangement: bodies in WeatherTab.cpp / SmokeTab.cpp.

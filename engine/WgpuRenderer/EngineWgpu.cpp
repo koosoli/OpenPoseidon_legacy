@@ -733,6 +733,31 @@ class VertexBufferWgpu : public VertexBuffer
 
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
+    // Picture Mode depth of field can be armed from the environment as well as from the tab.
+    // Same reason the ballistics recorder needed it: a feature reachable only by clicking cannot
+    // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
+    // an unreachable feature is one nobody can show anybody else.
+    //   POSEIDON_DOF=1  POSEIDON_DOF_FOCUS=<m>  POSEIDON_DOF_BLUR=<px>  POSEIDON_DOF_BAND=<m>
+    if (const char* v = std::getenv("POSEIDON_DOF"); v && v[0] && v[0] != '0')
+    {
+        _dof.enabled = true;
+        if (const char* f = std::getenv("POSEIDON_DOF_FOCUS"))
+        {
+            _dof.focusDistance = float(atof(f));
+        }
+        if (const char* b = std::getenv("POSEIDON_DOF_BLUR"))
+        {
+            _dof.maxBlurPixels = float(atof(b));
+        }
+        if (const char* r = std::getenv("POSEIDON_DOF_BAND"))
+        {
+            _dof.focusRange = float(atof(r));
+        }
+        if (const char* d = std::getenv("POSEIDON_DOF_DEBUG"))
+        {
+            _dof.debugView = atoi(d);
+        }
+    }
     // Neutral default material (TLMaterial's ctor only initialises specular), so a
     // draw reaching DrawSectionTL without a preceding SetMaterial lights sanely.
     _curMaterial.emmisive = HBlack;
@@ -7706,6 +7731,37 @@ void EngineWgpu::SetSkySettings(const SkySettings& s)
     PushRenderParams();
 }
 
+namespace
+{
+/// The camera near plane, in metres, for the depth-of-field shader.
+///
+/// Not a look setting and not something the renderer can know on its own: the DoF pass turns
+/// reversed-Z depth into a distance with `near / depth`, and the projection lives on the scene
+/// camera. Read per push rather than cached because a scope, a vehicle interior or a cutscene can
+/// each change it mid-mission, and a stale near plane silently rescales every focus distance.
+float DepthOfFieldNearPlane()
+{
+    if (GLOB_SCENE)
+    {
+        if (const Camera* camera = GLOB_SCENE->GetCamera())
+        {
+            const float n = float(camera->Near());
+            if (n > 1e-4f)
+            {
+                return n;
+            }
+        }
+    }
+    return 0.05f; // the engine's own default, and harmless: it only scales the depth mapping
+}
+} // namespace
+
+void EngineWgpu::SetDepthOfFieldSettings(const DepthOfFieldSettings& s)
+{
+    _dof = s;
+    PushRenderParams();
+}
+
 void EngineWgpu::PushRenderParams()
 {
     if (!_renderer)
@@ -7728,6 +7784,21 @@ void EngineWgpu::PushRenderParams()
         _tonemap.bloomIntensity,
         _tonemap.bloomThreshold,
         _tonemap.bloomKnee,
+    };
+
+    // Picture Mode depth of field. The near plane is not a look setting but has to travel with
+    // the rest: the shader turns reversed-Z depth into metres with `near / depth` and the renderer
+    // has no other access to the projection.
+    p.depth_of_field = {
+        _dof.enabled ? 1u : 0u,
+        _dof.focusDistance,
+        _dof.focusRange,
+        _dof.maxBlurPixels,
+        _dof.backgroundScale,
+        _dof.foregroundScale,
+        _dof.transition,
+        DepthOfFieldNearPlane(),
+        float(_dof.debugView),
     };
 
     p.exposure = {

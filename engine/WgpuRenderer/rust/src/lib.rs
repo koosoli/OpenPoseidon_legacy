@@ -609,12 +609,18 @@ pub struct Renderer {
     dof_target: Option<(wgpu::Texture, wgpu::TextureView)>,
     dof_size: (u32, u32),
     dof_settings: DofSettings,
+    dof_depth_warned: bool,
     underwater_size: (u32, u32),
     // Last logged underwater-compositor engage state, so the transition is reported once
     // rather than every frame. The pass has had two independent triggers and a toggle that
     // did not reach one of them; "is it running right now" needs to be answerable from a log.
     underwater_engaged_logged: Option<bool>,
     post_source_underwater: bool,
+    // Which view the bloom/exposure/tonemap chain is currently BOUND to. The rebind below is
+    // conditional, so anything that swaps the post source has to be part of this state or its
+    // output is written and then silently ignored -- which is exactly what happened when depth of
+    // field was added and only the underwater flag was consulted.
+    post_source_dof: bool,
     // Per-frame inputs for the underwater compositor's per-pixel waterline: camera height above the
     // local water surface (negative = submerged) and the unprojection matrix for view-ray
     // reconstruction. Held on the renderer because the compositor is invoked from three separate
@@ -1276,9 +1282,11 @@ impl Renderer {
             dof_target: None,
             dof_size: (0, 0),
             dof_settings: DofSettings::default(),
+            dof_depth_warned: false,
             underwater_size: (0, 0),
             underwater_engaged_logged: None,
             post_source_underwater: false,
+            post_source_dof: false,
             underwater_view: UnderwaterView {
                 cam_above: -1.0,
                 camera_pos: [0.0; 3],
@@ -1356,6 +1364,22 @@ impl Renderer {
         self.tonemap_params = p.tonemap;
         self.exposure_params = p.exposure;
         self.foliage_params = p.foliage;
+
+        // Picture Mode depth of field. Translated rather than stored raw so the clamping and the
+        // units live in one place (dof.rs), and so the ABI struct can change shape without the
+        // pass caring.
+        let d = &p.depth_of_field;
+        self.dof_settings = DofSettings {
+            enabled: d.enabled != 0,
+            focus_distance: d.focus_distance,
+            focus_range: d.focus_range,
+            max_blur_pixels: d.max_blur_pixels,
+            background_scale: d.background_scale,
+            foreground_scale: d.foreground_scale,
+            transition: d.transition,
+            near_plane: d.near_plane,
+            debug_view: d.debug_view,
+        };
 
         // Write the LOOK half of the sky UBO, leaving the runtime slots set_sky_runtime owns
         // (sun/moon dir + phase, night factor, fog rgb, cam altitude, fog far) intact.
@@ -1710,9 +1734,9 @@ impl Renderer {
         };
         // Depth of field, between the god-ray composite and bloom. Returns `post_source`
         // untouched when Picture Mode has not enabled it.
-        let post_source = self.run_depth_of_field(encoder, &post_source);
+        let (post_source, dof_applied) = self.run_depth_of_field(encoder, &post_source);
         let underwater = underwater_time.is_some();
-        if self.post_source_underwater != underwater {
+        if self.post_source_underwater != underwater || self.post_source_dof != dof_applied {
             let bloom_view = self
                 .bloom
                 .as_ref()
@@ -1736,6 +1760,7 @@ impl Renderer {
                 exposure.set_source(&self.device, &post_source);
             }
             self.post_source_underwater = underwater;
+            self.post_source_dof = dof_applied;
         }
         // Live params from the ImGui Tonemap tab (seeded from WGR_* at startup).
         self.tonemap
@@ -1935,6 +1960,7 @@ impl Renderer {
         self.hdr_size = (width, height);
         // ensure_hdr rebinds every HDR postprocess stage to the normal scene source.
         self.post_source_underwater = false;
+        self.post_source_dof = false;
     }
 
     fn ensure_underwater_target(&mut self, width: u32, height: u32) {
@@ -1998,9 +2024,9 @@ impl Renderer {
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         source: &wgpu::TextureView,
-    ) -> wgpu::TextureView {
+    ) -> (wgpu::TextureView, bool) {
         if !self.dof_settings.enabled {
-            return source.clone();
+            return (source.clone(), false);
         }
         // The gather reads a SINGLE-SAMPLE depth, which under MSAA is the far-reduce resolve --
         // the same one the god rays march. Reusing the frame flag means a frame that runs both
@@ -2010,9 +2036,19 @@ impl Renderer {
             self.frame_depth_final_resolved = true;
         }
         let Some(depth) = self.gfx3d.water_depth_view().cloned() else {
-            return source.clone();
+            // A feature that silently does nothing is the worst kind. Say it once.
+            if !self.dof_depth_warned {
+                self.dof_depth_warned = true;
+                self.log.log(
+                    log_level::WARN,
+                    "depth of field: enabled, but there is no single-sample depth view this frame --                      the pass is skipped and the image is unchanged",
+                );
+            }
+            return (source.clone(), false);
         };
         if self.dof.is_none() {
+            self.log
+                .log(log_level::INFO, "depth of field: pass created and running");
             let format = if self.hdr_enabled {
                 HDR_FORMAT
             } else {
@@ -2022,7 +2058,7 @@ impl Renderer {
         }
         self.ensure_dof_target(self.config.width, self.config.height);
         let Some((_, target)) = self.dof_target.as_ref().map(|(t, v)| (t, v.clone())) else {
-            return source.clone();
+            return (source.clone(), false);
         };
         let settings = self.dof_settings;
         let height = self.config.height;
@@ -2030,7 +2066,7 @@ impl Renderer {
             dof.upload(&self.queue, &settings, height);
             dof.render(&self.device, encoder, source, &depth, &target);
         }
-        target
+        (target, true)
     }
 
     fn ensure_planar_target(&mut self) {

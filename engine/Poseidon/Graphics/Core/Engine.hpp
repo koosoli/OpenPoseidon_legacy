@@ -1578,6 +1578,40 @@ class Engine : public IGraphicsEngine
     // Live tonemap/look parameters for the HDR path (wgpu). Mirrors WgrTonemap; the
     // ImGui Tonemap tab edits these and the backend pushes them to the renderer. The
     // Hable curve is fixed; the per-time-of-day look is exposure + this grade block.
+    /// Picture Mode depth of field. A screenshot aid: OFF by default, and while it is off the
+    /// renderer does not create the pass, the target or the shader, so it costs one bool test per
+    /// frame and nothing else.
+    ///
+    /// Distances are metres and blur is pixels, because those are the units someone composing a
+    /// shot can judge by eye. An f-number and a sensor size would be more photographic and less
+    /// useful -- the game has neither, so they would have to be invented and then explained.
+    struct DepthOfFieldSettings
+    {
+        bool enabled = false;
+        /// Distance the sharp band is centred on.
+        float focusDistance = 12.0f;
+        /// Half-width of the fully sharp band. Everything inside it is untouched.
+        float focusRange = 4.0f;
+        /// Widest circle of confusion, in pixels at 1080p; scaled to the real render height so a
+        /// 4K screenshot is not silently sharper than the same shot at 1080p.
+        float maxBlurPixels = 24.0f;
+        /// Behind and in front of the focal plane, separately. Foreground blur is much more
+        /// intrusive than background blur and wants its own control rather than sharing one.
+        float backgroundScale = 1.0f;
+        float foregroundScale = 0.6f;
+        /// How quickly blur opens up past the sharp band, in 1/metres. Small = long gentle
+        /// falloff, large = a hard cut.
+        float transition = 0.05f;
+        /// Diagnostic: 0 = normal, 1 = paint the circle of confusion, 2 = paint raw view distance.
+        /// There is no way to tell a broken depth mapping from a weak blur by looking at the
+        /// composited image, which is exactly how the first attempt at this pass wasted an hour.
+        int debugView = 0;
+    };
+
+    virtual bool SupportsDepthOfField() const { return false; }
+    virtual DepthOfFieldSettings GetDepthOfFieldSettings() const { return {}; }
+    virtual void SetDepthOfFieldSettings(const DepthOfFieldSettings& /*s*/) {}
+
     struct TonemapSettings
     {
         float exposure = 1.0f;    // linear pre-curve multiplier (main per-ToD lever)

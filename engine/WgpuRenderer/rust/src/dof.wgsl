@@ -14,6 +14,10 @@
 // implementation would do better and costs a great deal more plumbing; for screenshots this is
 // the right trade.
 //
+// The gather is 48 samples on a golden-angle spiral whose start angle is hashed PER PIXEL. The
+// hash is not decoration: with a fixed start angle neighbouring pixels sample the same offsets
+// and a wide blur reads as coherent streaks.
+//
 // Reversed-Z with an infinite far plane, so depth is proportional to 1/distance and view distance
 // is simply `near / depth`. Cleared depth (the sky) is zero, which would divide by zero, so it is
 // treated as maximally distant — the sky belongs at full background blur anyway.
@@ -74,7 +78,7 @@ fn coc_pixels(distance_m: f32) -> f32 {
     return select(-magnitude * scale, magnitude * scale, delta > 0.0);
 }
 
-const SAMPLE_COUNT: i32 = 32;
+const SAMPLE_COUNT: i32 = 48;
 const GOLDEN_ANGLE: f32 = 2.39996323;
 
 // How much foreign light landed on this pixel, normalised. A sharp subject in front of a heavily
@@ -105,7 +109,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // read as banding, and no lookup table.
     var radius = 1.0;
     let radius_step = 1.0 / f32(SAMPLE_COUNT);
-    var angle = 0.0;
+    // Per-pixel start angle. Without it every pixel walks the SAME spiral, the sample positions
+    // line up between neighbours, and a wide blur comes out as coherent streaks rather than
+    // smooth defocus -- clearly visible at 27 px on the first working capture. Rotating each
+    // pixel's disc turns that structure into fine noise, which the eye forgives completely.
+    var angle = fract(sin(dot(in.uv, vec2<f32>(12.9898, 78.233))) * 43758.5453) * 6.28318530718;
 
     // Search radius is the widest CoC this pixel could plausibly receive. Using the centre's own
     // radius alone would miss a very blurred background bleeding onto a sharp subject, so the
@@ -130,6 +138,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         }
     }
 
+    // Debug view (strength.w != 0): paint the circle of confusion instead of the scene. Green is
+    // behind the focal plane, red in front, black is in focus. There is no way to tell a broken
+    // depth mapping from a weak blur by looking at the composited image, so this exists.
+    // Debug view 2 (strength.w > 1.5): raw view distance, 0..200 m as greyscale. Separates "the
+    // depth is wrong" from "the CoC formula is wrong", which the CoC view alone cannot.
+    if (params.strength.w > 1.5) {
+        let z = view_distance(textureLoad(scene_depth, pixel, 0)) / 200.0;
+        return vec4<f32>(clamp(z, 0.0, 1.0), clamp(z, 0.0, 1.0), clamp(z, 0.0, 1.0), 1.0);
+    }
+
+    if (params.strength.w > 0.5) {
+        let n = clamp(centre_radius / max(params.focus.z, 1e-4), 0.0, 1.0);
+        let behind = select(0.0, n, centre_coc > 0.0);
+        let infront = select(0.0, n, centre_coc < 0.0);
+        return vec4<f32>(infront, behind, 0.0, 1.0);
+    }
     let blurred = accum / max(weight, 1e-4);
     // Blend the gathered result in by the centre's own defocus, so a genuinely sharp pixel keeps
     // its own colour and only picks up what actually scattered onto it.

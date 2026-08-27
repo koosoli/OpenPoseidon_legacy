@@ -677,6 +677,22 @@ struct WgrSkyVis
     uint32_t baked;      /* 1 = apply the per-model BAKED volumes (Stage 2) instead of the maps */
 };
 
+/* Picture Mode depth of field. Mirrors the Rust WgrDepthOfField #[repr(C)] and feeds dof.wgsl.
+ * `near_plane` is here despite not being a look setting: the shader turns reversed-Z depth into
+ * metres with `near / depth`, and the renderer has no other access to the projection. */
+struct WgrDepthOfField
+{
+    uint32_t enabled;         /* 0 = the pass does not run at all and costs nothing */
+    float focus_distance;     /* metres */
+    float focus_range;        /* metres, half-width of the fully sharp band */
+    float max_blur_pixels;    /* widest circle of confusion at 1080p, scaled to the real height */
+    float background_scale;   /* blur behind the focal plane */
+    float foreground_scale;   /* blur in front of it -- far more intrusive, hence separate */
+    float transition;         /* 1/metres; how quickly the blur opens past the sharp band */
+    float near_plane;         /* camera near plane, metres */
+    float debug_view;         /* 0 = normal, 1 = circle of confusion, 2 = raw view distance */
+};
+
 /* Every imgui-tweakable render parameter that crosses the FFI as a setter, in one block.
  * Append future look knobs here; do not add new FFI setters. */
 struct WgrRenderParams
@@ -689,6 +705,7 @@ struct WgrRenderParams
     WgrFoliage          foliage;
     WgrGtao             gtao;
     WgrSkyVis           interior_sky;
+    WgrDepthOfField     depth_of_field;
 };
 
 /* Frame-global scalars carried in the camera UBO so the 3D shader can read them
@@ -1698,7 +1715,8 @@ static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must matc
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 496, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDepthOfField) == 36, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrRenderParams) == 532, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");
@@ -2258,6 +2276,7 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrFoliage));
     h = WgrHashSize(h, sizeof(WgrGtao));
     h = WgrHashSize(h, sizeof(WgrSkyVis));
+    h = WgrHashSize(h, sizeof(WgrDepthOfField));
     h = WgrHashSize(h, sizeof(WgrRenderParams));
     h = WgrHashSize(h, sizeof(WgrFrameParams));
     h = WgrHashSize(h, sizeof(WgrCameraShadow));

@@ -174,6 +174,10 @@ class EngineWgpu : public EngineDummy
     // renderer immediately (takes effect next frame). In auto mode the grade is driven
     // from the per-time-of-day presets each frame (UpdateAutoTonemap in NextFrame).
     bool SupportsTonemap() const override { return _hdrEnabled && _renderer != nullptr; }
+    bool SupportsDepthOfField() const override { return true; }
+    DepthOfFieldSettings GetDepthOfFieldSettings() const override { return _dof; }
+    void SetDepthOfFieldSettings(const DepthOfFieldSettings& s) override;
+
     TonemapSettings GetTonemapSettings() const override { return _tonemap; }
     void SetTonemapSettings(const TonemapSettings& s) override;
     bool GetTonemapAuto() const override { return _tonemapAuto; }
@@ -499,6 +503,7 @@ class EngineWgpu : public EngineDummy
     // Auto = drive _tonemap from the per-ToD presets; false = manual override (tab).
     bool _tonemapAuto = true;
     Engine::TonemapSettings _tonemap;
+    Engine::DepthOfFieldSettings _dof;
     Engine::ExposureSettings _exposure;
     // WGR_AUTO_EXPOSURE_TAU, an OVERRIDE of `_exposure.rateTau` and not the source of it.
     // NEGATIVE = the env var was not set, so the authored `rateTau` decides; >= 0 = the env

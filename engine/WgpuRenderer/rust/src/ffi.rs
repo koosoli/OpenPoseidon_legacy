@@ -733,6 +733,42 @@ impl Default for WgrGtao {
 // Every imgui-tweakable render parameter that crosses the FFI as a setter, pushed as one block.
 // Passed by pointer only (never uploaded whole), so #[repr(C)] but not Pod. Append future look
 // knobs here; do not add new FFI setters.
+// Picture Mode depth of field. Rides WgrRenderParams for the reason the comment above that struct
+// gives: knobs go there, not into new FFI setters. Layout matches the C++ `WgrDepthOfField` in
+// wgpu_renderer.hpp and feeds dof.rs's DofSettings -- see dof.wgsl for what the numbers do.
+//
+// `near_plane` is here despite not being a look setting: the shader turns reversed-Z depth into
+// metres with `near / depth`, and the renderer has no other access to the projection.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct WgrDepthOfField {
+    pub enabled: u32,          // 0 = the pass does not run at all and costs nothing
+    pub focus_distance: f32,   // metres
+    pub focus_range: f32,      // metres, half-width of the fully sharp band
+    pub max_blur_pixels: f32,  // widest circle of confusion at 1080p, scaled to the real height
+    pub background_scale: f32, // blur behind the focal plane
+    pub foreground_scale: f32, // blur in front of it -- far more intrusive, hence separate
+    pub transition: f32,       // 1/metres; how quickly the blur opens past the sharp band
+    pub near_plane: f32,       // camera near plane, metres
+    pub debug_view: f32,       // 0 = normal, 1 = circle of confusion, 2 = raw view distance
+}
+
+impl Default for WgrDepthOfField {
+    fn default() -> Self {
+        Self {
+            enabled: 0,
+            focus_distance: 12.0,
+            focus_range: 4.0,
+            max_blur_pixels: 24.0,
+            background_scale: 1.0,
+            foreground_scale: 0.6,
+            transition: 0.05,
+            near_plane: 0.05,
+            debug_view: 0.0,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct WgrRenderParams {
@@ -744,6 +780,7 @@ pub struct WgrRenderParams {
     pub foliage: WgrFoliage,
     pub gtao: WgrGtao,
     pub interior_sky: WgrSkyVis,
+    pub depth_of_field: WgrDepthOfField,
 }
 
 // Interior sky visibility (LIT-020, docs/interior-sky-visibility-plan.md). Distinct from
@@ -1417,7 +1454,8 @@ const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 496);
+const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 36);
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 532);
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);
@@ -1497,6 +1535,7 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrFoliage>());
     h = hash_size(h, sz::<WgrGtao>());
     h = hash_size(h, sz::<WgrSkyVis>());
+    h = hash_size(h, sz::<WgrDepthOfField>());
     h = hash_size(h, sz::<WgrRenderParams>());
     h = hash_size(h, sz::<WgrFrameParams>());
     h = hash_size(h, sz::<WgrCameraShadow>());

@@ -42,6 +42,8 @@ pub struct DofSettings {
     /// metres with `near / depth`, so this is part of the projection. It is pushed with the rest
     /// because the renderer has no other access to it; the engine owns the projection.
     pub near_plane: f32,
+    /// 0 = normal, 1 = paint the circle of confusion, 2 = paint raw view distance.
+    pub debug_view: f32,
 }
 
 impl Default for DofSettings {
@@ -57,6 +59,7 @@ impl Default for DofSettings {
             foreground_scale: 0.6,
             transition: 0.05,
             near_plane: 0.05,
+            debug_view: 0.0,
         }
     }
 }
@@ -190,7 +193,7 @@ impl DepthOfField {
                 settings.background_scale.clamp(0.0, 4.0),
                 settings.foreground_scale.clamp(0.0, 4.0),
                 settings.transition.max(1e-4),
-                0.0,
+                settings.debug_view,
             ],
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
