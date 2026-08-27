@@ -50,6 +50,63 @@ namespace Poseidon
 namespace Ballistics
 {
 
+/// Which drag law a projectile obeys.
+///
+/// BAL-010 asks for a "verified drag / ballistic coefficient model". The honest position is that
+/// there is no single right answer, so this is per-ammo data rather than an engine-wide decision:
+///
+///  * `Constant` -- `Cd` does not vary with speed, i.e. `accel = k * v^2` with a fixed k. This is
+///    what the engine has always done and remains the DEFAULT, so content that says nothing keeps
+///    exactly today's flight. It is also the only sane model for things the standard projectiles
+///    do not resemble at all: APFSDS long rods, HEAT shells, 40 mm grenades.
+///  * `G7` -- boat-tail spitzer standard. Matches 1985 military rifle ball (M855, M80, 7N1,
+///    .50 M33), and a single G7 ballistic coefficient stays near-constant across the velocity
+///    band for those bullets.
+///  * `G1` -- flat-based, blunt-nosed standard. A worse shape match for the same bullets, so one
+///    G1 coefficient drifts with velocity. It is here because far MORE G1 data is published than
+///    G7, and a cartridge with a trustworthy G1 number beats one with a guessed G7 number.
+///
+/// Carrying both is deliberate. Which function fits better is a property of the projectile; which
+/// function has data is a property of the literature. Neither should be settled in code.
+enum class DragModel : uint8_t
+{
+    Constant,
+    G1,
+    G7,
+};
+
+/// Sea-level ICAO standard atmosphere. Both are needed once drag varies with Mach.
+///
+/// These are CONSTANTS because the engine has no air temperature: `World/Weather/` models wind and
+/// rain and nothing thermal. When a temperature model arrives, speed of sound becomes
+/// `20.05 * sqrt(T_kelvin)` and density follows the ideal gas law, and this is where they plug in.
+/// Until then a mission in a Takistan summer and one in a Nogova winter fly identically, which is
+/// worth knowing before anyone reports it as a bug.
+inline constexpr float SpeedOfSound = 340.3f; ///< m/s at 15 C
+inline constexpr float AirDensity = 1.225f;   ///< kg/m^3 at 15 C, 1013.25 hPa
+
+/// Ballistic coefficients are conventionally quoted in lb/in^2. Multiply by this for kg/m^2.
+inline constexpr float BallisticCoefficientToSI = 703.06958f;
+
+/// Standard-projectile drag coefficient at a given Mach number, linearly interpolated between the
+/// tabulated rows and clamped at both ends.
+///
+/// Returns 0 for DragModel::Constant, which has no table -- callers must not reach here for it.
+float StandardDragCoefficient(DragModel model, float mach);
+
+/// The retardation coefficient `k` in `accel = k * v^2`, NEGATIVE.
+///
+/// For `Constant` this is simply `airFriction`. For a drag function it is
+///
+///     k = -(rho * pi * Cd(M)) / (8 * BC)
+///
+/// which follows from `a = rho*v^2*Cd_bullet*A/(2m)` with `Cd_bullet = i*Cd_std` and
+/// `BC = m/(i*d^2)`: the projectile's diameter and mass cancel, leaving only the standard function
+/// and the coefficient. Cross-validated 2026-08-27 -- M855 integrated with G1 at BC 0.304 and with
+/// G7 at BC 0.151 agrees to 0.3 % at 300 m, which only happens if this normalisation is right.
+/// See docs/ballistics/drag-functions/SOURCE.md.
+float DragRetardation(DragModel model, float airFriction, float ballisticCoefficient, float speed);
+
 /// The projectile properties the flight model actually reads.
 struct ShellParams
 {
@@ -64,6 +121,11 @@ struct ShellParams
     float initTime = 0.0f;
     /// `timeToLive` from the ammo's config, else the engine default.
     float timeToLive = 10.0f;
+    /// `dragModel` from the ammo's config: "G1", "G7", or absent for the constant law.
+    DragModel dragModel = DragModel::Constant;
+    /// `ballisticCoefficient` from the ammo's config, converted to kg/m^2. Only consulted when
+    /// `dragModel` is not Constant; zero or negative disables the drag function and falls back.
+    float ballisticCoefficient = 0.0f;
 };
 
 /// The coefficient every round used before `airFriction` became config-driven, and the fallback

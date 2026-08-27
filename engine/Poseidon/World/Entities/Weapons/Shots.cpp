@@ -642,6 +642,8 @@ ShotShell::ShotShell(EntityAI* parent, const AmmoType* type) : base(parent, type
     _timeToLive = shell.timeToLive;
     _airFriction = shell.airFriction;
     _coefGravity = shell.coefGravity;
+    _dragModel = shell.dragModel;
+    _ballisticCoefficient = shell.ballisticCoefficient;
 
     _waterImpactDone = false;
 }
@@ -671,7 +673,13 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
     // Drag on the RELATIVE airflow. Identical to `_speed * (_speed.Size() *
     // _airFriction)` unless the ballistics wind opt-in is on — see ShotAirspeed.
     const Vector3 airspeed = ShotAirspeed(_speed);
-    Vector3 accel = airspeed * (airspeed.Size() * _airFriction);
+    const float airspeedSize = airspeed.Size();
+    // The retardation coefficient. Constant for classic content -- byte-identical to the old
+    // `airspeedSize * _airFriction` -- and Mach-dependent for ammo that declares a drag function.
+    // Shared with the aim predictor so the two cannot describe different projectiles.
+    const float dragK = Poseidon::Ballistics::DragRetardation(_dragModel, _airFriction, _ballisticCoefficient,
+                                                              airspeedSize);
+    Vector3 accel = airspeed * (airspeedSize * dragK);
     accel[1] -= _coefGravity * G_CONST;
 
     _initDelay -= deltaT;

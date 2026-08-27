@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 
 #include <Poseidon/World/Entities/Weapons/Weapons.hpp>
@@ -127,6 +128,10 @@ protected:
 	float _initDelay;
 	
 	float _coefGravity;
+	// Drag law for this round. Constant unless the ammo config declares a drag function; see
+	// Ballistics::DragRetardation, which both this and the aim predictor call.
+	Poseidon::Ballistics::DragModel _dragModel = Poseidon::Ballistics::DragModel::Constant;
+	float _ballisticCoefficient = 0.0f;
 	bool _waterImpactDone;
 
 public:

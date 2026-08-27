@@ -419,3 +419,154 @@ TEST_CASE("The derived per-calibre coefficients order the way physics requires",
     REQUIRE(m118Real.valid);
     CHECK(m118Real.drop > m855Real.drop);
 }
+
+// --- Mach-dependent drag (BAL-010) -----------------------------------------------------------
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <vector>
+
+namespace
+{
+/// Read a drag table back out of docs/ballistics/drag-functions/. Located relative to THIS file,
+/// because the suite has no repo-root helper. Returns empty if the file is not reachable, and the
+/// test skips rather than failing -- a checkout without docs/ is unusual but not broken.
+std::vector<std::pair<float, float>> ReadDragTable(const char* name)
+{
+    std::string here = __FILE__;
+    for (char& c : here)
+    {
+        if (c == '\\')
+        {
+            c = '/';
+        }
+    }
+    // .../tests/unit/engine/Poseidon/World/Weapons/test_ballistics.cpp -> repo root is 7 up.
+    for (int i = 0; i < 7; i++)
+    {
+        const size_t slash = here.find_last_of('/');
+        if (slash == std::string::npos)
+        {
+            return {};
+        }
+        here.resize(slash);
+    }
+    const std::string path = here + "/docs/ballistics/drag-functions/" + name + ".txt";
+
+    std::vector<std::pair<float, float>> rows;
+    if (FILE* f = std::fopen(path.c_str(), "rb"))
+    {
+        char line[256];
+        while (std::fgets(line, sizeof(line), f))
+        {
+            if (line[0] == '#' || line[0] == '\n' || line[0] == '\r')
+            {
+                continue;
+            }
+            float mach = 0.0f;
+            float cd = 0.0f;
+            if (std::sscanf(line, "%f %f", &mach, &cd) == 2)
+            {
+                rows.emplace_back(mach, cd);
+            }
+        }
+        std::fclose(f);
+    }
+    return rows;
+}
+} // namespace
+
+TEST_CASE("The embedded drag tables still match their source files", "[ballistics][bal-010]")
+{
+    // A physics table that has drifted from the source it cites is indistinguishable from one that
+    // was invented. This is the guard against that, and it is the reason the .txt files are kept
+    // in the repo rather than only quoted in a comment.
+    for (const char* name : {"G1", "G7"})
+    {
+        const auto rows = ReadDragTable(name);
+        if (rows.empty())
+        {
+            WARN(std::string("drag table not reachable from __FILE__, skipping: ") + name);
+            continue;
+        }
+        const B::DragModel model = std::strcmp(name, "G1") == 0 ? B::DragModel::G1 : B::DragModel::G7;
+        for (const auto& row : rows)
+        {
+            // Exact tabulated Mach values must return exactly the tabulated Cd.
+            CHECK(B::StandardDragCoefficient(model, row.first) == Approx(row.second).epsilon(1e-5));
+        }
+    }
+}
+
+TEST_CASE("The drag functions have the shape exterior ballistics says they do", "[ballistics][bal-010]")
+{
+    // Not decoration: these are the properties that separate a real drag function from a plausible
+    // curve, and they are what a transcription error would break.
+
+    // Both rise sharply through transonic and peak just past Mach 1 -- that IS the transonic wall.
+    CHECK(B::StandardDragCoefficient(B::DragModel::G7, 1.05f) > B::StandardDragCoefficient(B::DragModel::G7, 0.8f) * 3.0f);
+    CHECK(B::StandardDragCoefficient(B::DragModel::G1, 1.40f) > B::StandardDragCoefficient(B::DragModel::G1, 0.6f) * 3.0f);
+
+    // G7's standard shape is a boat-tail spitzer, so it is far slicker than G1 everywhere.
+    for (float mach : {0.5f, 1.0f, 1.5f, 2.0f, 3.0f})
+    {
+        CHECK(B::StandardDragCoefficient(B::DragModel::G7, mach) < B::StandardDragCoefficient(B::DragModel::G1, mach));
+    }
+
+    // Clamped, not extrapolated, outside the tabulated range.
+    CHECK(B::StandardDragCoefficient(B::DragModel::G7, -1.0f) == Approx(B::StandardDragCoefficient(B::DragModel::G7, 0.0f)));
+    CHECK(B::StandardDragCoefficient(B::DragModel::G7, 99.0f) == Approx(B::StandardDragCoefficient(B::DragModel::G7, 5.0f)));
+}
+
+TEST_CASE("Ammo that declares no drag function flies exactly as before", "[ballistics][bal-010]")
+{
+    // The safety property of the whole change: classic content declares no dragModel, so it must
+    // reach the identical constant law it always used.
+    const float k = -0.0005f;
+    CHECK(B::DragRetardation(B::DragModel::Constant, k, 0.0f, 800.0f) == Approx(k));
+    // A drag function without a coefficient describes nothing and must fall back, not divide by zero.
+    CHECK(B::DragRetardation(B::DragModel::G7, k, 0.0f, 800.0f) == Approx(k));
+    CHECK(B::DragRetardation(B::DragModel::G1, k, -3.0f, 800.0f) == Approx(k));
+}
+
+TEST_CASE("G1 and G7 with their published coefficients agree on the same bullet",
+          "[ballistics][bal-010][regression]")
+{
+    // The cross-validation that established the BC<->Cd normalisation, kept as a test so it cannot
+    // silently break. M855 from 940 m/s: G1 at BC 0.304 and G7 at BC 0.151 are two entirely
+    // different tables and two different coefficients, and they must describe the same flight.
+    // A systematic error in DragRetardation would move both; only a correct normalisation makes
+    // independent pairs land together.
+    auto shellWith = [](B::DragModel model, float bcLbIn2)
+    {
+        B::ShellParams p;
+        p.airFriction = B::DefaultAirFriction;
+        p.coefGravity = 1.0f;
+        p.timeToLive = 10.0f;
+        p.dragModel = model;
+        p.ballisticCoefficient = bcLbIn2 * B::BallisticCoefficientToSI;
+        return p;
+    };
+
+    const Vector3 start(0, 0, 0);
+    const Vector3 velocity(0, 0, 940.0f);
+
+    const B::Impact g1 = B::SimulateAtDistance(shellWith(B::DragModel::G1, 0.304f), start, velocity, 300.0f);
+    const B::Impact g7 = B::SimulateAtDistance(shellWith(B::DragModel::G7, 0.151f), start, velocity, 300.0f);
+    REQUIRE(g1.reached);
+    REQUIRE(g7.reached);
+
+    // Flight time to 300 m within 1 %.
+    CHECK(g1.time == Approx(g7.time).epsilon(0.01));
+
+    // And both must be markedly draggier than the engine's old universal constant, which is the
+    // finding that made the hand-fitted airFriction values provisional.
+    B::ShellParams legacy;
+    legacy.airFriction = B::DefaultAirFriction;
+    legacy.coefGravity = 1.0f;
+    legacy.timeToLive = 10.0f;
+    const B::Impact old = B::SimulateAtDistance(legacy, start, velocity, 300.0f);
+    REQUIRE(old.reached);
+    CHECK(g7.time > old.time);
+}

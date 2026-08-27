@@ -19,6 +19,124 @@ namespace Ballistics
 namespace
 {
 
+// Standard-projectile drag functions, Cd against Mach.
+//
+// US Army Ballistics Research Laboratory (R. L. McCoy), retrieved via JBM Ballistics 2026-08-27.
+// These are VERBATIM copies of docs/ballistics/drag-functions/{G1,G7}.txt -- a unit test reads
+// those files and fails if the two ever disagree, because a physics table that drifts from its
+// source is indistinguishable from one that was made up.
+//
+// Do not thin the transonic rows. They are closely spaced because that is where Cd moves fastest,
+// and a linear interpolation across a wider gap there is exactly where the error would land.
+struct DragRow
+{
+    float mach;
+    float cd;
+};
+
+constexpr DragRow g_dragG1[] = {
+    {0.0000f, 0.2629f}, {0.0500f, 0.2558f}, {0.1000f, 0.2487f}, {0.1500f, 0.2413f},
+    {0.2000f, 0.2344f}, {0.2500f, 0.2278f}, {0.3000f, 0.2214f}, {0.3500f, 0.2155f},
+    {0.4000f, 0.2104f}, {0.4500f, 0.2061f}, {0.5000f, 0.2032f}, {0.5500f, 0.2020f},
+    {0.6000f, 0.2034f}, {0.7000f, 0.2165f}, {0.7250f, 0.2230f}, {0.7500f, 0.2313f},
+    {0.7750f, 0.2417f}, {0.8000f, 0.2546f}, {0.8250f, 0.2706f}, {0.8500f, 0.2901f},
+    {0.8750f, 0.3136f}, {0.9000f, 0.3415f}, {0.9250f, 0.3734f}, {0.9500f, 0.4084f},
+    {0.9750f, 0.4448f}, {1.0000f, 0.4805f}, {1.0250f, 0.5136f}, {1.0500f, 0.5427f},
+    {1.0750f, 0.5677f}, {1.1000f, 0.5883f}, {1.1250f, 0.6053f}, {1.1500f, 0.6191f},
+    {1.2000f, 0.6393f}, {1.2500f, 0.6518f}, {1.3000f, 0.6589f}, {1.3500f, 0.6621f},
+    {1.4000f, 0.6625f}, {1.4500f, 0.6607f}, {1.5000f, 0.6573f}, {1.5500f, 0.6528f},
+    {1.6000f, 0.6474f}, {1.6500f, 0.6413f}, {1.7000f, 0.6347f}, {1.7500f, 0.6280f},
+    {1.8000f, 0.6210f}, {1.8500f, 0.6141f}, {1.9000f, 0.6072f}, {1.9500f, 0.6003f},
+    {2.0000f, 0.5934f}, {2.0500f, 0.5867f}, {2.1000f, 0.5804f}, {2.1500f, 0.5743f},
+    {2.2000f, 0.5685f}, {2.2500f, 0.5630f}, {2.3000f, 0.5577f}, {2.3500f, 0.5527f},
+    {2.4000f, 0.5481f}, {2.4500f, 0.5438f}, {2.5000f, 0.5397f}, {2.6000f, 0.5325f},
+    {2.7000f, 0.5264f}, {2.8000f, 0.5211f}, {2.9000f, 0.5168f}, {3.0000f, 0.5133f},
+    {3.1000f, 0.5105f}, {3.2000f, 0.5084f}, {3.3000f, 0.5067f}, {3.4000f, 0.5054f},
+    {3.5000f, 0.5040f}, {3.6000f, 0.5030f}, {3.7000f, 0.5022f}, {3.8000f, 0.5016f},
+    {3.9000f, 0.5010f}, {4.0000f, 0.5006f}, {4.2000f, 0.4998f}, {4.4000f, 0.4995f},
+    {4.6000f, 0.4992f}, {4.8000f, 0.4990f}, {5.0000f, 0.4988f},
+};
+
+constexpr DragRow g_dragG7[] = {
+    {0.0000f, 0.1198f}, {0.0500f, 0.1197f}, {0.1000f, 0.1196f}, {0.1500f, 0.1194f},
+    {0.2000f, 0.1193f}, {0.2500f, 0.1194f}, {0.3000f, 0.1194f}, {0.3500f, 0.1194f},
+    {0.4000f, 0.1193f}, {0.4500f, 0.1193f}, {0.5000f, 0.1194f}, {0.5500f, 0.1193f},
+    {0.6000f, 0.1194f}, {0.6500f, 0.1197f}, {0.7000f, 0.1202f}, {0.7250f, 0.1207f},
+    {0.7500f, 0.1215f}, {0.7750f, 0.1226f}, {0.8000f, 0.1242f}, {0.8250f, 0.1266f},
+    {0.8500f, 0.1306f}, {0.8750f, 0.1368f}, {0.9000f, 0.1464f}, {0.9250f, 0.1660f},
+    {0.9500f, 0.2054f}, {0.9750f, 0.2993f}, {1.0000f, 0.3803f}, {1.0250f, 0.4015f},
+    {1.0500f, 0.4043f}, {1.0750f, 0.4034f}, {1.1000f, 0.4014f}, {1.1250f, 0.3987f},
+    {1.1500f, 0.3955f}, {1.2000f, 0.3884f}, {1.2500f, 0.3810f}, {1.3000f, 0.3732f},
+    {1.3500f, 0.3657f}, {1.4000f, 0.3580f}, {1.5000f, 0.3440f}, {1.5500f, 0.3376f},
+    {1.6000f, 0.3315f}, {1.6500f, 0.3260f}, {1.7000f, 0.3209f}, {1.7500f, 0.3160f},
+    {1.8000f, 0.3117f}, {1.8500f, 0.3078f}, {1.9000f, 0.3042f}, {1.9500f, 0.3010f},
+    {2.0000f, 0.2980f}, {2.0500f, 0.2951f}, {2.1000f, 0.2922f}, {2.1500f, 0.2892f},
+    {2.2000f, 0.2864f}, {2.2500f, 0.2835f}, {2.3000f, 0.2807f}, {2.3500f, 0.2779f},
+    {2.4000f, 0.2752f}, {2.4500f, 0.2725f}, {2.5000f, 0.2697f}, {2.5500f, 0.2670f},
+    {2.6000f, 0.2643f}, {2.6500f, 0.2615f}, {2.7000f, 0.2588f}, {2.7500f, 0.2561f},
+    {2.8000f, 0.2533f}, {2.8500f, 0.2506f}, {2.9000f, 0.2479f}, {2.9500f, 0.2451f},
+    {3.0000f, 0.2424f}, {3.1000f, 0.2368f}, {3.2000f, 0.2313f}, {3.3000f, 0.2258f},
+    {3.4000f, 0.2205f}, {3.5000f, 0.2154f}, {3.6000f, 0.2106f}, {3.7000f, 0.2060f},
+    {3.8000f, 0.2017f}, {3.9000f, 0.1975f}, {4.0000f, 0.1935f}, {4.2000f, 0.1861f},
+    {4.4000f, 0.1793f}, {4.6000f, 0.1730f}, {4.8000f, 0.1672f}, {5.0000f, 0.1618f},
+};
+
+float InterpolateDrag(const DragRow* table, size_t count, float mach)
+{
+    if (mach <= table[0].mach)
+    {
+        return table[0].cd;
+    }
+    if (mach >= table[count - 1].mach)
+    {
+        return table[count - 1].cd;
+    }
+    // Linear scan. The tables are ~80 rows and this is called once per integration step, so a
+    // binary search would trade a predictable walk for branch misses at no measurable gain.
+    for (size_t i = 1; i < count; i++)
+    {
+        if (mach <= table[i].mach)
+        {
+            const DragRow& a = table[i - 1];
+            const DragRow& b = table[i];
+            const float span = b.mach - a.mach;
+            return span > 1e-6f ? a.cd + (b.cd - a.cd) * ((mach - a.mach) / span) : a.cd;
+        }
+    }
+    return table[count - 1].cd;
+}
+
+} // namespace
+
+float StandardDragCoefficient(DragModel model, float mach)
+{
+    switch (model)
+    {
+        case DragModel::G1:
+            return InterpolateDrag(g_dragG1, sizeof(g_dragG1) / sizeof(g_dragG1[0]), mach);
+        case DragModel::G7:
+            return InterpolateDrag(g_dragG7, sizeof(g_dragG7) / sizeof(g_dragG7[0]), mach);
+        case DragModel::Constant:
+            break;
+    }
+    return 0.0f;
+}
+
+float DragRetardation(DragModel model, float airFriction, float ballisticCoefficient, float speed)
+{
+    // A drag function without a coefficient describes nothing, so fall back rather than divide by
+    // zero and launch the round into orbit. Same for the constant model, which has no table.
+    if (model == DragModel::Constant || ballisticCoefficient <= 0.0f)
+    {
+        return airFriction;
+    }
+    const float cd = StandardDragCoefficient(model, speed / SpeedOfSound);
+    return -(AirDensity * 3.14159265f * cd) / (8.0f * ballisticCoefficient);
+}
+
+namespace
+{
+
 /// One integration step of the SAME scheme as ShotShell::Simulate (Shots.cpp:684-703, :913):
 /// acceleration from the CURRENT speed, position advanced with the CURRENT speed, speed updated
 /// afterwards. Writing it once here is the point of the whole file -- a second, subtly different
@@ -42,7 +160,11 @@ struct Integrator
     /// Returns false once the round has expired.
     bool Advance()
     {
-        Vector3 accel = speed * (speed.Size() * shell.airFriction);
+        const float speedSize = speed.Size();
+        // Same call the flight model makes (ShotShell::Simulate), so a Mach-varying Cd cannot be
+        // switched on for one and not the other.
+        const float k = DragRetardation(shell.dragModel, shell.airFriction, shell.ballisticCoefficient, speedSize);
+        Vector3 accel = speed * (speedSize * k);
         accel[1] -= shell.coefGravity * G_CONST;
 
         // Ours, not the fork's: the delay is decremented and the SAME step still moves if it has
@@ -225,6 +347,44 @@ ShellParams ShellParamsFor(const AmmoType& type)
     // safe: classic CWA data does not define `airFriction` anywhere (measured -- the full 755 KB
     // debinarised BIN\CONFIG.BIN has zero occurrences), so shipped missions are byte-identical
     // until someone supplies values. `docs/ballistics/` carries a derived set and the reasoning.
+    // Optional drag FUNCTION, which supersedes the constant when both a model and a coefficient
+    // are given. Absent -> Constant -> today's flight, unchanged. Ballistic coefficients are
+    // quoted in lb/in^2 by convention, so convert once here rather than at every use.
+    if (const ParamEntry* entry = pars.FindEntry("dragModel"))
+    {
+        const RString name = *entry;
+        if (name.GetLength() > 0)
+        {
+            if (strcmpi(name, "G7") == 0)
+            {
+                out.dragModel = DragModel::G7;
+            }
+            else if (strcmpi(name, "G1") == 0)
+            {
+                out.dragModel = DragModel::G1;
+            }
+            else if (strcmpi(name, "constant") != 0)
+            {
+                LOG_WARN(Physics, "Ammo {}: unknown dragModel '{}' -- using the constant drag law",
+                         (const char*)type.GetName(), (const char*)name);
+            }
+        }
+    }
+    if (const ParamEntry* entry = pars.FindEntry("ballisticCoefficient"))
+    {
+        const float bc = *entry;
+        out.ballisticCoefficient = bc > 0.0f ? bc * BallisticCoefficientToSI : 0.0f;
+    }
+    if (out.dragModel != DragModel::Constant && out.ballisticCoefficient <= 0.0f)
+    {
+        // A drag function with no coefficient describes nothing. Say so once rather than silently
+        // flying the round on the fallback and leaving someone to wonder why their data did not
+        // take effect.
+        LOG_WARN(Physics, "Ammo {}: dragModel is set but ballisticCoefficient is missing or <= 0 -- "
+                          "falling back to the constant drag law",
+                 (const char*)type.GetName());
+    }
+
     if (const ParamEntry* entry = pars.FindEntry("airFriction"))
     {
         const float authored = *entry;
