@@ -361,3 +361,61 @@ TEST_CASE("A rocket fired along the solved direction reaches its target", "[ball
     // And it must actually elevate rather than fire flat, or the solve did nothing.
     CHECK(dir[1] > 0.0f);
 }
+
+TEST_CASE("The derived per-calibre coefficients order the way physics requires",
+          "[ballistics][bal-010]")
+{
+    // The values in docs/ballistics/cwa-airfriction.cpp are the whole point of making airFriction
+    // config-driven: one shared constant made a 5.56 and a .50 decelerate identically.
+    //
+    // The property to pin is the COEFFICIENT ordering, and it must be isolated from muzzle
+    // velocity to mean anything. The first version of this test compared drops at each round's own
+    // v0 and failed -- correctly. A 7.62 at 838 m/s drops MORE at 300 m than a 5.56 at 940 m/s
+    // (0.707 m against 0.610 m) despite being the slicker projectile, simply because it starts
+    // slower and is therefore in the air longer. Absolute drop is not a statement about drag.
+    auto shellWith = [](float k)
+    {
+        B::ShellParams p;
+        p.airFriction = k;
+        p.coefGravity = 1.0f;
+        p.timeToLive = 10.0f;
+        return p;
+    };
+
+    const float range = 300.0f;
+    const float sameV0 = 900.0f; // one muzzle velocity, so only the coefficient varies
+
+    const B::LevelShot m855 = B::SolveLevelShot(shellWith(-0.000983f), sameV0, range);  // 5.56
+    const B::LevelShot m118 = B::SolveLevelShot(shellWith(-0.000600f), sameV0, range);  // 7.62
+    const B::LevelShot m33 = B::SolveLevelShot(shellWith(-0.000314f), sameV0, range);   // 12.7
+    const B::LevelShot sabot = B::SolveLevelShot(shellWith(-0.000141f), sameV0, range); // APFSDS
+
+    REQUIRE(m855.valid);
+    REQUIRE(m118.valid);
+    REQUIRE(m33.valid);
+    REQUIRE(sabot.valid);
+
+    // Less drag => less time to the target => less drop. Strictly monotone across the set.
+    CHECK(sabot.time < m33.time);
+    CHECK(m33.time < m118.time);
+    CHECK(m118.time < m855.time);
+
+    CHECK(sabot.drop < m33.drop);
+    CHECK(m33.drop < m118.drop);
+    CHECK(m118.drop < m855.drop);
+
+    // The old universal constant sat closest to the 7.62 -- which is why it was never obviously
+    // wrong, and was wrong for everything else.
+    const B::LevelShot legacy = B::SolveLevelShot(shellWith(B::DefaultAirFriction), sameV0, range);
+    REQUIRE(legacy.valid);
+    CHECK(std::fabs(legacy.drop - m118.drop) < std::fabs(legacy.drop - m855.drop));
+
+    // And the separate, real fact the failed first version stumbled on: at their OWN muzzle
+    // velocities the drop ordering between 5.56 and 7.62 inverts. Worth keeping, because anyone
+    // sanity-checking these numbers against a range card will meet it.
+    const B::LevelShot m855Real = B::SolveLevelShot(shellWith(-0.000983f), 940.0f, range);
+    const B::LevelShot m118Real = B::SolveLevelShot(shellWith(-0.000600f), 838.0f, range);
+    REQUIRE(m855Real.valid);
+    REQUIRE(m118Real.valid);
+    CHECK(m118Real.drop > m855Real.drop);
+}

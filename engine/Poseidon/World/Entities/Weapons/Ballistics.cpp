@@ -204,7 +204,7 @@ ShellParams ShellParamsFor(const AmmoType& type)
     // agreeing with this, the predictor is aiming for a projectile the engine does not fire --
     // which is the exact defect this file exists to remove. ShotShell now reads from here.
     out.initTime = type.initTime;
-    out.airFriction = -0.0005f; // not config-driven; see ShellParams::airFriction
+    out.airFriction = DefaultAirFriction;
     out.coefGravity = 1.0f;
     out.timeToLive = 20.0f;
 
@@ -216,6 +216,23 @@ ShellParams ShellParamsFor(const AmmoType& type)
     if (const ParamEntry* entry = pars.FindEntry("timeToLive"))
     {
         out.timeToLive = *entry;
+    }
+    // BAL-010's first core item: "verified drag / ballistic coefficient model". Until now every
+    // bullet and shell in the game shared one hardcoded coefficient, so a 5.56 and a .50
+    // decelerated identically and no amount of solver accuracy could make the result realistic.
+    //
+    // A property that is ABSENT keeps the old constant, which is deliberate and is what makes this
+    // safe: classic CWA data does not define `airFriction` anywhere (measured -- the full 755 KB
+    // debinarised BIN\CONFIG.BIN has zero occurrences), so shipped missions are byte-identical
+    // until someone supplies values. `docs/ballistics/` carries a derived set and the reasoning.
+    if (const ParamEntry* entry = pars.FindEntry("airFriction"))
+    {
+        const float authored = *entry;
+        // Sign discipline. The model is `accel = speed * |speed| * airFriction`, so the
+        // coefficient must be NEGATIVE to decelerate. BI-era data writes it negative, but a
+        // hand-authored positive value would accelerate the round without bound and read as a
+        // physics explosion rather than a typo. Take the magnitude and apply the correct sign.
+        out.airFriction = authored > 0.0f ? -authored : authored;
     }
 
     {

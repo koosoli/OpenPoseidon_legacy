@@ -40,8 +40,9 @@
 //    hit better than a human can. With the opt-in off -- the shipping default -- `ShotAirspeed` is
 //    the identity and prediction and flight agree exactly.
 //
-// The missile/rocket half of the fork's set (`SimulateUnguidedMissile*`, `CompensateUnguidedMissile*`,
-// which additionally carry the launcher's up-vector through the thrust phase) is NOT ported yet.
+// The unguided-rocket half is ported too and lives further down (`SimulateUnguidedMissile*`,
+// `CompensateUnguidedMissile`). It is a genuinely different model, not a variation -- see the
+// comment above MissileParams for why a rocket droops less than a shell of the same speed.
 class AmmoType;
 
 namespace Poseidon
@@ -52,10 +53,10 @@ namespace Ballistics
 /// The projectile properties the flight model actually reads.
 struct ShellParams
 {
-    /// Drag coefficient. Negative -- it is a deceleration term. NOT a config property today:
-    /// ShotShell's constructor hardcodes -0.0005 for every bullet and shell in the game, so a
-    /// 5.56 and a .50 currently decelerate identically. That is the gap BAL-010's "verified drag
-    /// / ballistic coefficient model" is about; naming it here is how it stops being invisible.
+    /// Drag coefficient in `accel = speed * |speed| * airFriction`. NEGATIVE -- it decelerates.
+    ///
+    /// Read from the ammo's `airFriction` config property, falling back to DefaultAirFriction
+    /// when the property is absent, which is the case for all classic CWA content.
     float airFriction = 0.0f;
     /// `coefGravity` from the ammo's config. 1 for an ordinary round.
     float coefGravity = 1.0f;
@@ -64,6 +65,16 @@ struct ShellParams
     /// `timeToLive` from the ammo's config, else the engine default.
     float timeToLive = 10.0f;
 };
+
+/// The coefficient every round used before `airFriction` became config-driven, and the fallback
+/// for any ammo that still does not define one.
+///
+/// It is not arbitrary and it is worth knowing why it survived so long: for a v^2 drag law the
+/// speed decays as `v(x) = v0 * exp(k*x)`, so `k = ln(v/v0)/x`. Feeding real 7.62x51 retained
+/// velocity -- 838 m/s at the muzzle, about 700 m/s at 300 m -- gives k = ln(700/838)/300 =
+/// -6.0e-4. The engine's long-standing -5e-4 is a passable 7.62. It is simply wrong for
+/// everything else: the same number makes a 5.56 far too flat and a tank sabot far too draggy.
+inline constexpr float DefaultAirFriction = -0.0005f;
 
 /// The ONE place that says what a given ammo type flies like.
 ///
