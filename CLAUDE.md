@@ -28,7 +28,14 @@
 > 1. **Use the scripts — do not hand-roll build/install/launch.** `scripts/Build.ps1`, `scripts/Install.ps1`, `scripts/Start.ps1` are the supported path (see [Build, install, run](#build-install-run) below). **`Install.ps1` must be run once per game install**: the retail game is missing files the remaster needs, and hand-copying only the two binaries leaves an install that boots but has a *dead Options menu* and missing UI art — a failure with no error message. Run it before assuming anything is a code bug.
 > 1b. **Dual Binary Deployment**: if you do deploy by hand, you MUST copy **BOTH** `OpenPoseidon.exe` AND `wgpu_renderer.dll` to `D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\`. Copying only one binary causes an instant `Entry Point Not Found` crash on launch.
 > 2. **WGSL Shader Rules**: Review [.agents/WGSL_CODING_RULES.md](.agents/WGSL_CODING_RULES.md). No 4-component swizzles on `vec2` (`.xxyy` / `.xyxy`), all variables must be explicitly declared in scope.
-> 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with `cmd /c ".\ColdWarAssault.exe --render wgpu --window --dev --log-file cwr.log"` to read the panic traceback.
+> 3. **Startup Diagnostics**: If the game exits instantly, ALWAYS test with
+>    `cmd /c ".\OpenPoseidon.exe --render wgpu --window --dev --log-file cwr.log"` to read the panic traceback.
+>    **`OpenPoseidon.exe` is the client** — the one `Deploy.ps1` writes and the only one paired with the
+>    `wgpu_renderer.dll` next to it. The game folder also holds `ColdWarAssault.exe` (the retail 2001 binary) and,
+>    on installs that predate the rename, `PoseidonGame.exe`. **Neither is your build.** Launching one tests
+>    nothing you deployed, and against a fresh DLL it is the mismatched-pair failure. `Deploy.ps1 -PruneStale`
+>    removes the stale `PoseidonGame.exe`; never write over the retail name. This line said `ColdWarAssault.exe`
+>    until 2026-08-27, which is how the wrong exe keeps getting launched.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
