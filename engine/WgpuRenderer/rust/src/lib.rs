@@ -1,4 +1,5 @@
 mod bloom;
+mod dof;
 mod exposure;
 mod far;
 mod ffi;
@@ -22,6 +23,7 @@ mod water_visibility;
 use std::sync::{Arc, Mutex};
 
 use crate::bloom::Bloom;
+use crate::dof::{DepthOfField, DofSettings};
 use crate::exposure::Exposure;
 use crate::far::Far;
 use crate::ffi::{
@@ -600,6 +602,13 @@ pub struct Renderer {
     // Scene-wide effect scratch. HDR writes here before the HDR post chain; LDR uses
     // it as the scene target only on submerged frames, then composites to swapchain.
     underwater_target: Option<(wgpu::Texture, wgpu::TextureView)>,
+    // Depth of field: a Picture Mode aid, off unless asked for. The pass, its target and the
+    // settings are all created lazily, so a session that never opens Picture Mode pays nothing
+    // beyond one Option check per frame.
+    dof: Option<DepthOfField>,
+    dof_target: Option<(wgpu::Texture, wgpu::TextureView)>,
+    dof_size: (u32, u32),
+    dof_settings: DofSettings,
     underwater_size: (u32, u32),
     // Last logged underwater-compositor engage state, so the transition is reported once
     // rather than every frame. The pass has had two independent triggers and a toggle that
@@ -1263,6 +1272,10 @@ impl Renderer {
             tonemap,
             underwater,
             underwater_target: None,
+            dof: None,
+            dof_target: None,
+            dof_size: (0, 0),
+            dof_settings: DofSettings::default(),
             underwater_size: (0, 0),
             underwater_engaged_logged: None,
             post_source_underwater: false,
@@ -1695,6 +1708,9 @@ impl Renderer {
         } else {
             source.clone()
         };
+        // Depth of field, between the god-ray composite and bloom. Returns `post_source`
+        // untouched when Picture Mode has not enabled it.
+        let post_source = self.run_depth_of_field(encoder, &post_source);
         let underwater = underwater_time.is_some();
         if self.post_source_underwater != underwater {
             let bloom_view = self
@@ -1946,6 +1962,75 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.underwater_target = Some((texture, view));
         self.underwater_size = (width, height);
+    }
+
+    fn ensure_dof_target(&mut self, width: u32, height: u32) {
+        if self.dof_target.is_some() && self.dof_size == (width, height) {
+            return;
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_dof_target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: if self.hdr_enabled {
+                HDR_FORMAT
+            } else {
+                self.config.format
+            },
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.dof_target = Some((texture, view));
+        self.dof_size = (width, height);
+    }
+
+    /// Runs between the god-ray composite and bloom, so an out-of-focus highlight blooms as a
+    /// disc. Returns the view the rest of the chain should read: unchanged when DoF is off, which
+    /// is the whole of the "costs nothing when unused" claim.
+    fn run_depth_of_field(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+    ) -> wgpu::TextureView {
+        if !self.dof_settings.enabled {
+            return source.clone();
+        }
+        // The gather reads a SINGLE-SAMPLE depth, which under MSAA is the far-reduce resolve --
+        // the same one the god rays march. Reusing the frame flag means a frame that runs both
+        // pays for the resolve once.
+        if !self.frame_depth_final_resolved {
+            self.ensure_far_depth_resolve(encoder);
+            self.frame_depth_final_resolved = true;
+        }
+        let Some(depth) = self.gfx3d.water_depth_view().cloned() else {
+            return source.clone();
+        };
+        if self.dof.is_none() {
+            let format = if self.hdr_enabled {
+                HDR_FORMAT
+            } else {
+                self.config.format
+            };
+            self.dof = Some(DepthOfField::new(&self.device, format));
+        }
+        self.ensure_dof_target(self.config.width, self.config.height);
+        let Some((_, target)) = self.dof_target.as_ref().map(|(t, v)| (t, v.clone())) else {
+            return source.clone();
+        };
+        let settings = self.dof_settings;
+        let height = self.config.height;
+        if let Some(dof) = self.dof.as_ref() {
+            dof.upload(&self.queue, &settings, height);
+            dof.render(&self.device, encoder, source, &depth, &target);
+        }
+        target
     }
 
     fn ensure_planar_target(&mut self) {
