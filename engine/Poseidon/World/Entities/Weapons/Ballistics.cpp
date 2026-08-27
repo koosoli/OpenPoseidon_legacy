@@ -108,6 +108,21 @@ float InterpolateDrag(const DragRow* table, size_t count, float mach)
 
 } // namespace
 
+namespace
+{
+/// Runtime state for the two dev levers. Plain globals, read once per aim solve and written only
+/// from the dev panel or at startup -- a mutex here would cost more than the values are worth and
+/// a torn read of a bool cannot produce a wrong trajectory, only a one-frame-late one.
+bool g_dragCorrectAim = []
+{
+    const char* v = std::getenv("POSEIDON_BALLISTIC_AIM");
+    return !(v && std::strcmp(v, "0") == 0);
+}();
+
+DragModel g_forcedDragModel = DragModel::Constant;
+float g_forcedBallisticCoefficient = 0.0f;
+} // namespace
+
 float StandardDragCoefficient(DragModel model, float mach)
 {
     switch (model)
@@ -312,12 +327,24 @@ ShellParams ShellParamsFor(const AmmoType& type)
     // update per unit, so the ParamEntry lookups underneath must not be paid every time.
     static std::unordered_map<const AmmoType*, ShellParams> cache;
     static std::mutex cacheMutex;
+    // The forced override is applied to the RESULT, never stored, so toggling it in the dev panel
+    // does not poison the cache and switching back restores the authored data exactly.
+    auto withOverride = [](ShellParams p)
+    {
+        if (g_forcedDragModel != DragModel::Constant && g_forcedBallisticCoefficient > 0.0f)
+        {
+            p.dragModel = g_forcedDragModel;
+            p.ballisticCoefficient = g_forcedBallisticCoefficient;
+        }
+        return p;
+    };
+
     {
         std::lock_guard<std::mutex> lock(cacheMutex);
         const auto found = cache.find(&type);
         if (found != cache.end())
         {
-            return found->second;
+            return withOverride(found->second);
         }
     }
 
@@ -399,17 +426,34 @@ ShellParams ShellParamsFor(const AmmoType& type)
         std::lock_guard<std::mutex> lock(cacheMutex);
         cache[&type] = out;
     }
-    return out;
+    return withOverride(out);
 }
 
 bool DragCorrectAimEnabled()
 {
-    static const bool enabled = []
-    {
-        const char* v = std::getenv("POSEIDON_BALLISTIC_AIM");
-        return !(v && std::strcmp(v, "0") == 0);
-    }();
-    return enabled;
+    return g_dragCorrectAim;
+}
+
+void SetDragCorrectAim(bool enabled)
+{
+    g_dragCorrectAim = enabled;
+}
+
+DragModel ForcedDragModel()
+{
+    return g_forcedDragModel;
+}
+
+float ForcedBallisticCoefficient()
+{
+    return g_forcedBallisticCoefficient;
+}
+
+void SetForcedDragModel(DragModel model, float ballisticCoefficientLbIn2)
+{
+    g_forcedDragModel = model;
+    g_forcedBallisticCoefficient =
+        ballisticCoefficientLbIn2 > 0.0f ? ballisticCoefficientLbIn2 * BallisticCoefficientToSI : 0.0f;
 }
 
 LevelShot SolveLevelShot(const ShellParams& shell, float initSpeed, float distance, float step)

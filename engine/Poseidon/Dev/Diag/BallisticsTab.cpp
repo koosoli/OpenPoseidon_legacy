@@ -3,6 +3,7 @@
 // which is what lets the tab be closed with genuinely zero residual cost.
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 
 // The PCH pulls in Logging.hpp, which #defines DebugLog() as a macro and
@@ -101,6 +102,97 @@ void DrawWindSection()
     if (!GWind.IsActive())
     {
         ImGui::TextDisabled("(wind model not ticked yet - no world?)");
+    }
+}
+
+void DrawModelSection()
+{
+    ImGui::SeparatorText("Ballistic model");
+
+    // The A/B the owner asked for. Both levers are live: they change the next solve and the next
+    // round fired, with no restart. Rounds already in the air keep what they were fired with,
+    // which is why a trail drawn before a toggle still shows the old behaviour -- that is useful
+    // for comparison, not a glitch.
+    bool dragAim = ::Poseidon::Ballistics::DragCorrectAimEnabled();
+    if (ImGui::Checkbox("Drag-correct aiming (new)", &dragAim))
+    {
+        ::Poseidon::Ballistics::SetDragCorrectAim(dragAim);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "ON  - the AI and the player's sights solve the REAL trajectory,\n"
+                          "      integrating the same drag the bullet flies under.\n"
+                          "OFF - LEGACY: the drag-free vacuum parabola the engine shipped\n"
+                          "      with, fall = 0.5*g*(d/v0)^2. It assumes the round still\n"
+                          "      carries muzzle velocity all the way out, so sights and AI\n"
+                          "      under-elevate, and the error grows with range.\n"
+                          "\n"
+                          "Covers the player's sight zeroing, infantry AI, and the six\n"
+                          "vehicle AI sites (tank, helicopter, plane, car).\n"
+                          "Also settable with POSEIDON_BALLISTIC_AIM=0.");
+    }
+    ImGui::SameLine();
+    if (dragAim)
+    {
+        ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "NEW");
+    }
+    else
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "LEGACY");
+    }
+
+    // Forced drag function. Without this the Mach-dependent path cannot be reached at all: no
+    // shipped ammo declares dragModel, so there would be nothing to compare against.
+    static int forced = 0; // 0 Constant, 1 G1, 2 G7
+    static float forcedBc = 0.304f;
+    const char* items[] = {"Constant (authored)", "Force G1", "Force G7"};
+
+    ImGui::SetNextItemWidth(200.0f);
+    bool changed = ImGui::Combo("Drag function", &forced, items, 3);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "Constant - each round uses its own config: airFriction, or a\n"
+                          "           dragModel if it declares one. Nothing shipped does yet.\n"
+                          "Force G1/G7 - override EVERY round onto that standard drag\n"
+                          "           function with the coefficient below, so the\n"
+                          "           Mach-dependent model can be seen and felt before\n"
+                          "           per-cartridge coefficients exist.\n"
+                          "\n"
+                          "One coefficient for every round is wrong on purpose. This is a\n"
+                          "comparison tool, not a setting.");
+    }
+    if (forced != 0)
+    {
+        ImGui::SetNextItemWidth(200.0f);
+        changed |= ImGui::SliderFloat("BC (lb/in2)", &forcedBc, 0.02f, 1.00f, "%.3f");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                          "G1 reference points: 9mm 0.147, 7.62x39 0.339, 5.56 M855 0.304,\n"
+                          "7.62 M80 0.393, 7.62 M118 0.494, .50 BMG M33 0.670.\n"
+                          "G7 runs roughly half the G1 number for the same bullet.");
+        }
+    }
+    if (changed)
+    {
+        const ::Poseidon::Ballistics::DragModel model = forced == 1   ? ::Poseidon::Ballistics::DragModel::G1
+                                       : forced == 2 ? ::Poseidon::Ballistics::DragModel::G7
+                                                     : ::Poseidon::Ballistics::DragModel::Constant;
+        ::Poseidon::Ballistics::SetForcedDragModel(model, forced == 0 ? 0.0f : forcedBc);
+    }
+
+    if (forced != 0)
+    {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f),
+                           "OVERRIDE ACTIVE - every round is flying on %s at BC %.3f",
+                           forced == 1 ? "G1" : "G7", forcedBc);
+    }
+    else
+    {
+        ImGui::TextDisabled("Rounds use their authored drag. No shipped ammo declares a");
+        ImGui::TextDisabled("drag function yet, so that means the constant law throughout.");
     }
 }
 
@@ -273,6 +365,7 @@ void DrawBallisticsTab()
         ImGui::TextDisabled("Recording is off - nothing is sampled, drawn or retained.");
         ImGui::Separator();
         DrawPauseSection();
+        DrawModelSection();
         return;
     }
 
@@ -325,6 +418,7 @@ void DrawBallisticsTab()
     }
 
     DrawPauseSection();
+    DrawModelSection();
     DrawWindSection();
     DrawTrackTable();
     DrawSelectedDetail();

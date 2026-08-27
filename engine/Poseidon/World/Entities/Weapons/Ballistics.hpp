@@ -248,9 +248,28 @@ LevelShot SolveLevelShot(const ShellParams& shell, float initSpeed, float distan
 /// that admits it does not know.
 bool SolveAimForAmmo(const AmmoType* ammo, float initSpeed, float distance, float& time, float& fall);
 
-/// Master switch for the drag-correct aiming path, so a single binary can A/B the whole change:
-/// `POSEIDON_BALLISTIC_AIM=0` puts every wired call site back on the vacuum formula. Read once.
+/// Master switch for the drag-correct aiming path, so the whole change can be A/B'd in one
+/// binary. Initialised from `POSEIDON_BALLISTIC_AIM` (0 disables) and settable at runtime from
+/// the dev panel's Ballistics tab -- comparing old against new is worth a great deal more when it
+/// does not need a restart between the two looks.
+///
+/// OFF means every wired site falls back to the drag-free vacuum parabola the engine shipped with
+/// for twenty-five years. That is the legacy behaviour, not a degraded one.
 bool DragCorrectAimEnabled();
+void SetDragCorrectAim(bool enabled);
+
+/// Diagnostic override: force EVERY round onto a drag function, ignoring what its config says.
+///
+/// This exists because the Mach-dependent path is otherwise unreachable: no shipped ammo declares
+/// `dragModel`, so without a way to force one there is no way to see or feel the new model at all
+/// until per-cartridge ballistic coefficients arrive. A single coefficient applied to every round
+/// is of course wrong -- that is the point, it is a comparison tool, not a setting.
+///
+/// `DragModel::Constant` (or a non-positive coefficient) turns it off and returns every round to
+/// its authored data. Rounds already in flight keep the parameters they were fired with.
+DragModel ForcedDragModel();
+float ForcedBallisticCoefficient();
+void SetForcedDragModel(DragModel model, float ballisticCoefficientLbIn2);
 
 // ---------------------------------------------------------------------------------------------
 // UNGUIDED ROCKETS
