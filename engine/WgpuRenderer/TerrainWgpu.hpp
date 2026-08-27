@@ -70,7 +70,7 @@ class TerrainWgpu : public ITerrainRenderer
     void UploadGroundTextures(const Landscape& land, const std::vector<int>* activeMaterials = nullptr);
     void UpdateGroundTexturePages(const Landscape& land, const Camera& camera, bool force);
     void UploadIndexMap(const Landscape& land);
-    void UploadGeography(const Landscape& land);
+    void UploadGeography(const Landscape& land, bool includeRoadGeometry = false);
     // Reads the map's own CfgSurfaces / CfgSurfaceCharacters / clutter out of the
     // Arma-generation `config.bin` files of the archives that own THIS world's
     // terrain textures. Only those archives: merging a whole modern config tree is
@@ -161,6 +161,9 @@ class TerrainWgpu : public ITerrainRenderer
     std::string _grassBladeAtlasWorld;
     std::vector<bool> _grassSurfaceEnabled;
     bool _grassNeedsCompatibilityOverride = false;
+    // Roads are built after the initial terrain upload. Once the RoadNet exists,
+    // re-bake the grass mask exactly once so object-backed roads cannot grow grass.
+    bool _grassRoadGeometryApplied = false;
 
     // The map's own clutter definitions, rebuilt per world. Empty for every OFP
     // world by construction (that generation defines none of these classes) and
