@@ -178,6 +178,16 @@ float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
                : 1.0f;
 }
 
+// BI uses Czech `okno`/`okna` for windows. Keep this spelling-based classification here so the
+// retained-path admission decision and the night-emissive policy cannot slowly diverge.
+bool MaterialIsWindow(const Ref<TexMaterial>& surfMat)
+{
+    if (surfMat.IsNull())
+        return false;
+    const char* path = surfMat->GetName().Data();
+    return ContainsNoCase(path, "okn") || ContainsNoCase(path, "window");
+}
+
 // Is this material's emissive REAL light -- a fixture that should still glow at midnight? Only
 // the fixture families StaticEmitterRadianceTarget already recognises, plus lit windows. Every
 // other `emmisive` in the imported corpora is fixed-function brightness compensation (Arma 2 OA
@@ -191,9 +201,7 @@ bool MaterialEmitsAtNight(const Ref<TexMaterial>& surfMat)
         return false;
     if (StaticEmitterRadianceTarget(surfMat) < 1.0f)
         return true;
-    const char* path = surfMat->GetName().Data();
-    // Lit-window materials (Czech `okno`/`okna` in the BI corpora, `window` in DayZ/Reforger).
-    return ContainsNoCase(path, "okn") || ContainsNoCase(path, "window");
+    return MaterialIsWindow(surfMat);
 }
 
 // Scale that lands a material's emissive at its family's target peak. Materials already at or
@@ -4973,6 +4981,24 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             if (shSec.properties.Special() & (IsHidden | IsHiddenProxy))
             {
                 continue;
+            }
+            // A1 Sara's `oknoin01` is a binary-alpha window fill. The direct WGPU draw
+            // correctly retains its blinds and interior detail, whereas the retained path
+            // drops that fill and leaves an empty opening (reproduced at Sara 8249.15,
+            // 9021.16, 20.32). Keep the WHOLE house on the direct path: partial suppression
+            // is spec-based, so retaining its opaque walls while trying to CPU-draw just this
+            // opaque-spec cutout would suppress the very section we need to preserve.
+            if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture()); texture &&
+                texture->GetAlphaClass() == Poseidon::AlphaStats::Cutout && MaterialIsWindow(shSec.surfMat))
+            {
+                static std::unordered_set<std::string> loggedWindowFallback;
+                if (loggedWindowFallback.insert(std::string(shape->Name() ? shape->Name() : "?")).second)
+                {
+                    LOG_INFO(Graphics, "GpuModel window fallback: model={} lod={} section={} texture={}",
+                             shape->Name(), level, i, texture->Name());
+                }
+                eligible = false;
+                break;
             }
             // TreeAdv leaf cards have antialiased alpha, so their texture histogram is Blend
             // even though the authored family uses alpha-tested foliage. The retained pipeline
