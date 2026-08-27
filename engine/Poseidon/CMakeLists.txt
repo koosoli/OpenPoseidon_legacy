@@ -97,6 +97,7 @@ set(MERGED_SUPPORT_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Foundation/Threads/PoCritical.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Foundation/Threads/PoSemaphore.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Foundation/Threads/PoThread.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Foundation/Threads/WatchDog.cpp
     $<IF:$<PLATFORM_ID:Windows>,${CMAKE_CURRENT_SOURCE_DIR}/IO/Filesystem/platform/DirScanner_win.cpp,${CMAKE_CURRENT_SOURCE_DIR}/IO/Filesystem/platform/DirScanner_posix.cpp>
     $<IF:$<PLATFORM_ID:Windows>,${CMAKE_CURRENT_SOURCE_DIR}/IO/Filesystem/platform/FileOps_win.cpp,${CMAKE_CURRENT_SOURCE_DIR}/IO/Filesystem/platform/FileOps_posix.cpp>
     ${CMAKE_CURRENT_SOURCE_DIR}/Foundation/Enums/EnumNames.cpp
