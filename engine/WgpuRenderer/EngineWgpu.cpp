@@ -4950,6 +4950,17 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     bool hasProxies = false;
     bool hasComplement = false;
 
+    // The Riviera hotel bakes its Venetian blinds and glass into opaque facade sections rather
+    // than naming a separate alpha window material. Its retained GPU mesh currently loses those
+    // sections, while direct WGPU rendering is correct (Sara 8249.15, 9021.16, 20.32). Keep
+    // this demonstrated model family on the direct path until its retained-section omission is
+    // fixed at the source.
+    if (ContainsNoCase(shape->Name(), "hotel_riviera"))
+    {
+        LOG_INFO(Graphics, "GpuModel window fallback: model={} reason=riviera-opaque-facade", shape->Name());
+        eligible = false;
+    }
+
     for (int level = 0; level < shape->NLevels() && eligible; level++)
     {
         if (!shape->IsNormalLevel(level)) // skip special (>=900) non-graphical levels
