@@ -255,3 +255,109 @@ TEST_CASE("SolveLevelShot is what the two aiming call sites consume", "[ballisti
         // unreachable range must never silently produce drop == 0.
     }
 }
+
+namespace
+{
+/// A LAW/RPG-class unguided rocket: slow off the tube, a short hard burn, strong side drag.
+B::MissileParams Rocket()
+{
+    B::MissileParams p;
+    p.initTime = 0.0f;
+    p.thrustTime = 0.4f;
+    p.thrust = 300.0f;
+    p.sideAirFriction = 1.0f;
+    p.timeToLive = 20.0f;
+    return p;
+}
+
+Matrix3 Attitude(Vector3 dir)
+{
+    return Matrix3(MDirection, dir.Normalized(), VUp);
+}
+} // namespace
+
+TEST_CASE("The rocket motor accelerates the round along its own axis", "[ballistics][missile]")
+{
+    const B::MissileParams rocket = Rocket();
+    const Vector3 start(0, 0, 0);
+    const Vector3 dir(0, 0, 1);
+    const float launchSpeed = 45.0f;
+
+    const B::Impact hit = B::SimulateUnguidedMissileAtDistance(rocket, start, Attitude(dir), dir * launchSpeed, 300.0f);
+    REQUIRE(hit.reached);
+
+    // If the round merely coasted at its launch speed it would need 300/45 = 6.7 s. The motor
+    // must have made it appreciably quicker; this is the test that would fail if thrust were
+    // dropped or applied in world space instead of along the body axis.
+    CHECK(hit.time < 4.0f);
+}
+
+TEST_CASE("Killing the motor makes the rocket slower and lower", "[ballistics][missile]")
+{
+    const Vector3 start(0, 0, 0);
+    const Vector3 dir(0, 0, 1);
+    const float launchSpeed = 45.0f;
+
+    B::MissileParams powered = Rocket();
+    B::MissileParams coasting = Rocket();
+    coasting.thrust = 0.0f;
+
+    // 180 m, not 250: an unpowered rocket at 45 m/s does not reach 250 m at all -- it bleeds speed
+    // and expires short. That is the model behaving, not a bug, and it is why the range here is
+    // inside what a coasting round can actually do.
+    const B::Impact a = B::SimulateUnguidedMissileAtDistance(powered, start, Attitude(dir), dir * launchSpeed, 180.0f);
+    const B::Impact b = B::SimulateUnguidedMissileAtDistance(coasting, start, Attitude(dir), dir * launchSpeed, 180.0f);
+    REQUIRE(a.reached);
+    REQUIRE(b.reached);
+
+    CHECK(b.time > a.time);           // longer in the air
+    CHECK(b.position[1] < a.position[1]); // and therefore further below the line of departure
+}
+
+TEST_CASE("A rocket droops far less than a shell of the same speed", "[ballistics][missile]")
+{
+    // The point of having a separate rocket model at all. Its body drag resists vertical motion an
+    // order of magnitude harder than forward motion (the 10x terms in the X/Y polynomial), so
+    // gravity is fought in a way a shell never fights it. Solving a rocket with the shell solver
+    // would over-elevate it badly, and this is the test that pins that difference.
+    const Vector3 start(0, 0, 0);
+    const Vector3 dir(0, 0, 1);
+    const float launchSpeed = 45.0f;
+    const float range = 200.0f;
+
+    B::MissileParams coasting = Rocket();
+    coasting.thrust = 0.0f;
+
+    B::ShellParams asShell;
+    asShell.airFriction = 0.0f; // give the shell the BEST case: no drag at all
+    asShell.coefGravity = 1.0f;
+    asShell.timeToLive = 20.0f;
+
+    const B::Impact rocketHit =
+        B::SimulateUnguidedMissileAtDistance(coasting, start, Attitude(dir), dir * launchSpeed, range);
+    const B::Impact shellHit = B::SimulateAtDistance(asShell, start, dir * launchSpeed, range);
+
+    REQUIRE(rocketHit.reached);
+    REQUIRE(shellHit.reached);
+    CHECK(-rocketHit.position[1] < -shellHit.position[1]);
+}
+
+TEST_CASE("A rocket fired along the solved direction reaches its target", "[ballistics][missile][aim]")
+{
+    const B::MissileParams rocket = Rocket();
+    const float launchSpeed = 45.0f;
+
+    const Vector3 shooter(0, 1.5f, 0);
+    const Vector3 target(0, 1.5f, 250.0f);
+
+    const Vector3 dir =
+        B::CompensateUnguidedMissile(rocket, launchSpeed, VUp, VZero, shooter, target, VZero);
+    REQUIRE(dir.Size() == Approx(1.0f).epsilon(1e-4));
+
+    const B::Approach check = B::SimulateUnguidedMissileAgainstTarget(rocket, shooter, Attitude(dir),
+                                                                     dir * launchSpeed, target, VZero);
+    CHECK(check.error < 1.0f);
+
+    // And it must actually elevate rather than fire flat, or the solve did nothing.
+    CHECK(dir[1] > 0.0f);
+}

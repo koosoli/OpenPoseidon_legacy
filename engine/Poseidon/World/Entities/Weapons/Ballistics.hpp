@@ -99,6 +99,10 @@ inline constexpr float DefaultStep = 1.0f / 500.0f;
 /// where a round is 30 seconds after launch.
 inline constexpr float MaxFlightTime = 10.0f;
 
+/// Rockets fly slower and burn for seconds, so the shell cap is too tight for them. The engine's
+/// own missile timeToLive default is 20 s and the fork used the same bound.
+inline constexpr float MaxMissileFlightTime = 20.0f;
+
 struct Impact
 {
     /// Where the round crossed the requested distance, or where it expired.
@@ -174,6 +178,59 @@ bool SolveAimForAmmo(const AmmoType* ammo, float initSpeed, float distance, floa
 /// Master switch for the drag-correct aiming path, so a single binary can A/B the whole change:
 /// `POSEIDON_BALLISTIC_AIM=0` puts every wired call site back on the vacuum formula. Read once.
 bool DragCorrectAimEnabled();
+
+// ---------------------------------------------------------------------------------------------
+// UNGUIDED ROCKETS
+//
+// A rocket is not a shell with a bigger number. `Missile::Simulate` gives it a launch delay, a
+// thrust phase along its OWN forward axis, and an anisotropic body drag with cubic terms that
+// differ by axis -- sideways motion is punished an order of magnitude harder than forward motion,
+// which is what keeps a fin-stabilised rocket pointing where it was fired. Gravity therefore does
+// not simply bend the path: it is resisted by that side drag, so a rocket droops far less than a
+// shell of the same speed, and a shell solver applied to one is wrong in the direction that
+// matters (it would over-elevate).
+//
+// WHAT THIS IS A SIMPLIFICATION OF, stated so nobody mistakes it for the full model. The engine
+// flies a missile as a RIGID BODY: `Missile::Simulate` also builds torque, lets aerodynamic
+// forces rotate the body toward its velocity, and for a guided missile steers it at a target.
+// This predictor holds the orientation FIXED at the launch attitude and integrates the point
+// mass. That is exactly right for the question an aiming solver asks -- "along which line do I
+// launch an unguided rocket so it arrives" -- and it is exactly wrong for a guided missile, whose
+// flight is decided by its steering, not by its launch direction. Guided weapons must not use it.
+struct MissileParams
+{
+    float initTime = 0.0f;        ///< AmmoType::initTime -- delay before the motor lights.
+    float thrustTime = 0.0f;      ///< AmmoType::thrustTime -- how long the motor burns.
+    float thrust = 0.0f;          ///< AmmoType::thrust -- acceleration along the body's +Z.
+    float sideAirFriction = 1.0f; ///< AmmoType::sideAirFriction -- scales the whole drag tensor.
+    float timeToLive = 20.0f;
+};
+
+/// Companion to ShellParamsFor, and the same rule applies: this is the ONE place that says how a
+/// rocket flies, so the predictor cannot drift away from Missile::Simulate.
+MissileParams MissileParamsFor(const AmmoType& type);
+
+/// Fly an unguided rocket launched from `startPos` with launch attitude `orientation` (its +Z is
+/// the way it points) and initial world velocity `worldSpeed`, until it is `distance` from the
+/// start.
+Impact SimulateUnguidedMissileAtDistance(const MissileParams& missile, Vector3Par startPos,
+                                         const Matrix3& orientation, Vector3Par worldSpeed, float distance,
+                                         float step = DefaultStep);
+
+/// Closest approach of an unguided rocket to a target moving at constant velocity.
+Approach SimulateUnguidedMissileAgainstTarget(const MissileParams& missile, Vector3Par startPos,
+                                              const Matrix3& orientation, Vector3Par worldSpeed,
+                                              Vector3Par targetPos, Vector3Par targetSpeed,
+                                              float step = DefaultStep);
+
+/// The launch direction for an unguided rocket that is to meet `targetPos`.
+///
+/// `worldUp` is needed and is not decoration: the rocket's drag is anisotropic in ITS OWN frame,
+/// so the answer depends on how the launcher is rolled about its aim axis. Pass the firing
+/// platform's up vector; VUp is the right default for infantry and ground vehicles.
+Vector3 CompensateUnguidedMissile(const MissileParams& missile, float initSpeed, Vector3Par worldUp,
+                                  Vector3Par shooterSpeed, Vector3Par firingPos, Vector3Par targetPos,
+                                  Vector3Par targetSpeed, int iterations = 4, float step = DefaultStep);
 
 /// The drag-free closed form the engine uses today, exposed so tests can measure the two against
 /// each other rather than asserting a hand-copied number. Returns a unit direction.

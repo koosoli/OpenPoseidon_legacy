@@ -301,6 +301,218 @@ bool SolveAimForAmmo(const AmmoType* ammo, float initSpeed, float distance, floa
     return true;
 }
 
+MissileParams MissileParamsFor(const AmmoType& type)
+{
+    MissileParams out;
+    out.initTime = type.initTime;
+    out.thrustTime = type.thrustTime;
+    out.thrust = type.thrust;
+    out.sideAirFriction = type.sideAirFriction;
+    out.timeToLive = 20.0f;
+    if (const ParamEntry* entry = type.GetParamEntry().FindEntry("timeToLive"))
+    {
+        out.timeToLive = *entry;
+    }
+    return out;
+}
+
+namespace
+{
+
+/// One step of the rocket flight, held to `Missile::Simulate` (Shots.cpp:1024-1060) term for term.
+///
+/// The body-drag polynomial is the engine's, copied deliberately rather than "cleaned up": the
+/// per-axis constants (5e-4 / x10 / x10 sideways, 1e-5 / x0.01 / x2 forward) are the whole reason
+/// a rocket flies straight, and rounding them would change flight, not just prediction. The
+/// engine divides by ten after scaling by sideAirFriction and multiplies by mass because it feeds
+/// a force into a rigid body; here the same quantity is already an acceleration, so mass cancels
+/// and does not appear.
+struct MissileIntegrator
+{
+    const MissileParams& missile;
+    const Matrix3 orient;
+    float step;
+    Vector3 position;
+    Vector3 modelSpeed;
+    float initTime;
+    float thrustTime;
+    float timeToLive;
+    float time = 0.0f;
+
+    MissileIntegrator(const MissileParams& m, Vector3Par startPos, const Matrix3& o, Vector3Par worldSpeed, float dt)
+        : missile(m), orient(o), step(dt), position(startPos), modelSpeed(ToModel(o, worldSpeed)),
+          initTime(m.initTime), thrustTime(m.thrustTime), timeToLive(std::min(m.timeToLive, MaxMissileFlightTime))
+    {
+    }
+
+    // Matrix3 carries its basis as three named vectors and exposes no Rotate (only Matrix4 does),
+    // so the two transforms are written out. Model space is the engine's: +X aside, +Y up,
+    // +Z forward -- which is why thrust is applied to [2] and gravity has to be resolved onto all
+    // three.
+    static Vector3 ToModel(const Matrix3& o, Vector3Par world)
+    {
+        return Vector3(world.DotProduct(o.DirectionAside()), world.DotProduct(o.DirectionUp()),
+                       world.DotProduct(o.Direction()));
+    }
+    static Vector3 ToWorld(const Matrix3& o, Vector3Par model)
+    {
+        return o.DirectionAside() * model[0] + o.DirectionUp() * model[1] + o.Direction() * model[2];
+    }
+
+    Vector3 WorldSpeed() const { return ToWorld(orient, modelSpeed); }
+
+    bool Advance()
+    {
+        Vector3 friction;
+        friction[0] = modelSpeed[0] * modelSpeed[0] * modelSpeed[0] * 5e-4f +
+                      modelSpeed[0] * std::fabs(modelSpeed[0]) * 10.0f + modelSpeed[0] * 10.0f;
+        friction[1] = modelSpeed[1] * modelSpeed[1] * modelSpeed[1] * 5e-4f +
+                      modelSpeed[1] * std::fabs(modelSpeed[1]) * 10.0f + modelSpeed[1] * 10.0f;
+        friction[2] = modelSpeed[2] * modelSpeed[2] * modelSpeed[2] * 1e-5f +
+                      modelSpeed[2] * std::fabs(modelSpeed[2]) * 0.01f + modelSpeed[2] * 2.0f;
+        friction *= missile.sideAirFriction * 0.1f;
+
+        Vector3 accel(0, 0, 0);
+        if (initTime > 0.0f)
+        {
+            initTime -= step;
+        }
+        else if (thrustTime > 0.0f)
+        {
+            thrustTime -= step;
+            // The engine's own "FIX too strong missile engines": the motor fades over the last
+            // quarter of its burn instead of cutting out. Without it the predicted burnout speed
+            // is higher than the real one and every long shot lands over.
+            float fade = 1.0f;
+            if (missile.thrustTime > 0.0f && 4.0f * thrustTime < missile.thrustTime)
+            {
+                fade = 4.0f * thrustTime / missile.thrustTime;
+            }
+            accel[2] += missile.thrust * fade;
+        }
+
+        // Gravity is a WORLD force felt in the body frame, which is the whole reason the launch
+        // roll matters: it lands on whichever body axes the attitude points at, and those axes
+        // have very different drag.
+        accel += ToModel(orient, Vector3(0.0f, -G_CONST, 0.0f));
+
+        position += WorldSpeed() * step;
+        Friction(modelSpeed, friction, accel, step);
+
+        timeToLive -= step;
+        time += step;
+        return timeToLive >= 0.0f;
+    }
+};
+
+} // namespace
+
+Impact SimulateUnguidedMissileAtDistance(const MissileParams& missile, Vector3Par startPos, const Matrix3& orientation,
+                                         Vector3Par worldSpeed, float distance, float step)
+{
+    Impact out;
+    const float distance2 = distance * distance;
+
+    MissileIntegrator it(missile, startPos, orientation, worldSpeed, step);
+    Vector3 previous = it.position;
+    float previousTime = 0.0f;
+
+    while (true)
+    {
+        previous = it.position;
+        previousTime = it.time;
+        if (!it.Advance())
+        {
+            out.position = it.position;
+            out.time = it.time;
+            out.reached = false;
+            return out;
+        }
+        if ((it.position - startPos).SquareSize() >= distance2)
+        {
+            break;
+        }
+    }
+
+    const float before = (previous - startPos).Size();
+    const float after = (it.position - startPos).Size();
+    const float span = after - before;
+    const float t = span > 1e-6f ? std::clamp((distance - before) / span, 0.0f, 1.0f) : 0.0f;
+
+    out.position = previous + (it.position - previous) * t;
+    out.time = previousTime + (it.time - previousTime) * t;
+    out.reached = true;
+    return out;
+}
+
+Approach SimulateUnguidedMissileAgainstTarget(const MissileParams& missile, Vector3Par startPos,
+                                              const Matrix3& orientation, Vector3Par worldSpeed, Vector3Par targetPos,
+                                              Vector3Par targetSpeed, float step)
+{
+    Approach out;
+    MissileIntegrator it(missile, startPos, orientation, worldSpeed, step);
+
+    float bestError2 = (it.position - targetPos).SquareSize();
+    out.position = it.position;
+
+    while (it.Advance())
+    {
+        const Vector3 targetNow = targetPos + targetSpeed * it.time;
+        const float error2 = (it.position - targetNow).SquareSize();
+        if (error2 < bestError2)
+        {
+            bestError2 = error2;
+            out.position = it.position;
+            out.time = it.time;
+        }
+        else if (error2 > bestError2 * 4.0f)
+        {
+            break;
+        }
+    }
+
+    out.error = std::sqrt(bestError2);
+    return out;
+}
+
+Vector3 CompensateUnguidedMissile(const MissileParams& missile, float initSpeed, Vector3Par worldUp,
+                                  Vector3Par shooterSpeed, Vector3Par firingPos, Vector3Par targetPos,
+                                  Vector3Par targetSpeed, int iterations, float step)
+{
+    const Vector3 toTarget = targetPos - firingPos;
+    if (toTarget.SquareSize() < 1e-6f)
+    {
+        return Vector3(0, 0, 1);
+    }
+
+    Vector3 aimPoint = targetPos;
+    for (int i = 0; i < iterations; i++)
+    {
+        Vector3 dir = aimPoint - firingPos;
+        const float len = dir.Size();
+        if (len < 1e-3f)
+        {
+            break;
+        }
+        dir *= 1.0f / len;
+
+        // The launcher's attitude IS the candidate direction -- an unguided rocket leaves pointing
+        // where it was aimed. The roll about that axis comes from worldUp, and it matters because
+        // the drag tensor is anisotropic in the body frame.
+        const Matrix3 orientation(MDirection, dir, worldUp);
+        const Vector3 velocity = dir * initSpeed + shooterSpeed;
+
+        const Approach hit =
+            SimulateUnguidedMissileAgainstTarget(missile, firingPos, orientation, velocity, targetPos, targetSpeed, step);
+        const Vector3 targetAtImpact = targetPos + targetSpeed * hit.time;
+        aimPoint += targetAtImpact - hit.position;
+    }
+
+    Vector3 dir = aimPoint - firingPos;
+    const float len = dir.Size();
+    return len > 1e-6f ? dir * (1.0f / len) : Vector3(0, 0, 1);
+}
+
 Vector3 CompensateAimVacuum(float initSpeed, Vector3Par firingPos, Vector3Par targetPos)
 {
     Vector3 dir = targetPos - firingPos;
