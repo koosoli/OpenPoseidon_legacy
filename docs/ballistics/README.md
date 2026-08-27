@@ -58,6 +58,18 @@ and why it was wrong for everything else.
 Only base classes need values. CWA's `CfgAmmo` is a clean inheritance tree (`BulletSingleW`,
 `BulletBurstE`, `Bullet7_6G` … all derive), so 11 entries cover all 82 classes.
 
+## These values are PROVISIONAL — read `drag-functions/SOURCE.md` first
+
+They were fitted to a retained-velocity figure of 700 m/s at 300 m for M855, taken from
+recollection rather than a source. A properly sourced drag-function model — the BRL/McCoy G1 and
+G7 tables, now in `drag-functions/`, cross-validated against each other to 0.3 % — says the real
+figure is closer to **643 m/s**.
+
+If that model is right, every coefficient in the table above is systematically **too low in
+drag**, and every round flies flatter than it should. They remain a large improvement on one
+shared constant, and their ordering by calibre is still correct — but the anchors want re-deriving
+from the drag-function model rather than from memory. That is the open item.
+
 ## What these numbers are, and are not
 
 They are **one-point fits to a v² law**, which is not what a real bullet obeys. Real drag
