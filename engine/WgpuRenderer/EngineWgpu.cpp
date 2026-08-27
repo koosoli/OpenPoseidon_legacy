@@ -178,6 +178,67 @@ float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
                : 1.0f;
 }
 
+// A/B levers for the two whole-model retained-path bails added for the A1 window / legacy
+// vegetation work (2026-08-27). Each pushes an ENTIRE model onto the direct WGPU path, which is
+// a much larger change than the section it is aimed at, so both must be switchable inside ONE
+// binary -- `WGR_WINDOW_FALLBACK=0` / `WGR_PLANTS_FALLBACK=0` -- or an A/B costs a rebuild and a
+// redeploy and stops being run. Read once: consulted per model registration, not per draw.
+// OFF by default, and this is the fix for the 2026-08-27 ghost-building report. Measured A/B in
+// one binary at Takistan (5081.64, 6077.97, 147.29 / az 88.5): with the bail ON the whole
+// `mil_barracks_i_ep1` -- walls, roof, soffit -- composites the background through itself; with
+// `WGR_WINDOW_FALLBACK=0` it is solid concrete. Same shape on Stratis.
+//
+// It was not the window heuristic being slightly too wide. It fired on
+// `ca\structures_e\data\windows\windowwire_doors_mil_co.paa`, an OPAQUE texture that is a window
+// only by virtue of its DIRECTORY -- but tightening the match does not help, because the same
+// model also carries `alfa_windows_mil_ca.paa`, a genuine Blend pane that any honest window test
+// must match. There is no predicate over texture name or alpha class that separates the A1 hotel
+// (which needs the bail) from this barracks (which is destroyed by it).
+//
+// The real defect is one level down and is NOT fixed here: the direct WGPU path draws these
+// models translucent at close range while the retained path draws them solid. Established, so
+// the next session does not re-derive it:
+//   * every section of the model reports special=0x0 -> BlendMode::Opaque, DepthMode::Normal
+//     (WGR_SECTION_SKIP_TRACE=alfa_windows_mil), so it is not an IsAlpha spec bit;
+//   * zero UNTEXTURED draws, so it is not the white fallback;
+//   * unchanged by WGR_COCKPIT_BLEND_LEGACY=1, WGR_GLASS_SHEEN=0, WGR_MULTI_LAYER_NORMALS=0
+//     and by WGR_GPU_DRIVEN=0, so it is neither the blend-revisit depth mode, the MAT-051
+//     glass alpha floor, the Multi layer composition, nor GPU-driven bookkeeping;
+//   * the same model renders solid in `--viewer` and solid in-world from 15 m, so it is
+//     close-range / LOD0 specific, not a model or material fault.
+// Until that is understood, no model belongs on the direct path wholesale. Set
+// `WGR_WINDOW_FALLBACK=1` to get the A1 hotel window fills back and the ghost buildings with
+// them.
+static bool WindowSectionFallbackEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_WINDOW_FALLBACK");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return enabled;
+}
+
+// OFF by default: SUPERSEDED, not reverted. The bail existed because A1 `ca\plants\` canopies
+// vanished under retained ownership, and pushing the model to the direct path brought them back
+// -- but see-through, which is the "some tree canopies have become transparent" half of the same
+// 2026-08-27 report. Both symptoms were one cause: those cards are authored alpha-TESTED and the
+// alpha histogram mis-reads their downscaled LODs as translucent, so each LOD landed on a
+// different side of the Blend boundary (render::IsLegacyPlantCutoutTexture carries the measured
+// per-LOD split). Fixing the routing fixes both paths, so nothing needs to leave the retained
+// set: measured at Sahrani (7523.21, 8951.72, 9.21 / az 117.9) with WGR_PLANTS_FALLBACK=0, the
+// canopy is now full AND opaque -- better than either state the bail could produce.
+// `WGR_PLANTS_FALLBACK=1` restores it if a plant family turns up that the routing fix misses.
+static bool LegacyPlantFallbackEnabled()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_PLANTS_FALLBACK");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return enabled;
+}
+
 // BI uses Czech `okno`/`okna` for windows. Keep this spelling-based classification here so the
 // retained-path admission decision and the night-emissive policy cannot slowly diverge.
 bool MaterialIsWindow(const Ref<TexMaterial>& surfMat)
@@ -3319,7 +3380,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         blend = render::BlendMode::Opaque;
         alphaRef = 0.0f;
     }
-    else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout))
+    else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout ||
+                          (texture && render::IsLegacyPlantCutoutTexture(texture->Name()))))
     {
         // A cutout classification means the source has binary transparent texels, irrespective
         // of whether the P3D section remembered to set IsAlpha.  Some legacy sections are
@@ -3704,11 +3766,16 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
         tex = texture->EnsureUploaded();
         alphaClass = texture->GetAlphaClass();
     }
+    // Legacy A1 plants have no authored shader to consult, so the same per-LOD histogram slip
+    // that fooled SectionIsBlend would push half a canopy's LODs out of the retained set.
+    // Treat them as the alpha-tested cards they are, on BOTH paths, or the two disagree and a
+    // section is drawn twice or not at all (see IsGpuOwnedSection).
+    const bool legacyPlantCutout = texture && render::IsLegacyPlantCutoutTexture(texture->Name());
     const bool materialCutout =
         alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialIsCutout(sec.surfMat, texture);
     // Genuine blended surfaces stay on the CPU's back-to-front complement. Only foliage whose
     // authored shader explicitly identifies it as alpha-tested can stay in the retained pass.
-    if (alphaClass == Poseidon::AlphaStats::Blend && !materialCutout)
+    if (alphaClass == Poseidon::AlphaStats::Blend && !materialCutout && !legacyPlantCutout)
     {
         return false;
     }
@@ -3718,7 +3785,7 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     // this override the retained path draws each leaf card's dark background as
     // a solid rectangle, even though the CPU path correctly discards it.
     float alphaRef = AlphaRefFromDesc(desc);
-    if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout))
+    if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout || legacyPlantCutout))
     {
         alphaRef = std::max(alphaRef, 0.5f);
     }
@@ -4955,7 +5022,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     // 8249.15, 9021.16). Direct WGPU draws the same models completely. Preserve visual parity
     // for this legacy family while the retained TreeAdv/card import is still incomplete;
     // later-generation vegetation and the rest of the world remain GPU-driven.
-    if (ContainsNoCase(shape->Name(), "ca\\plants\\"))
+    if (LegacyPlantFallbackEnabled() && ContainsNoCase(shape->Name(), "ca\\plants\\"))
     {
         static std::unordered_set<std::string> loggedLegacyPlantFallback;
         if (loggedLegacyPlantFallback.insert(std::string(shape->Name())).second)
@@ -5001,7 +5068,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // window texture/material is therefore sufficient to keep the WHOLE model on the
             // proven direct path; partial suppression is spec-based and would otherwise hide
             // the direct window draw behind retained opaque walls.
-            if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture()); texture &&
+            if (auto* texture = static_cast<TextureWgpu*>(shSec.properties.GetTexture());
+                WindowSectionFallbackEnabled() && texture &&
                 (MaterialIsWindow(shSec.surfMat) || ContainsNoCase(texture->Name(), "okn") ||
                  ContainsNoCase(texture->Name(), "window")))
             {

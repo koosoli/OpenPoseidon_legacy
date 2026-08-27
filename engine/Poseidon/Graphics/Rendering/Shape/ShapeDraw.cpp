@@ -158,6 +158,11 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     auto* tex = sec.properties.GetTexture();
     if (!tex || tex->GetAlphaClass() != Poseidon::AlphaStats::Blend)
         return false;
+    // Legacy A1 foliage has no RVMAT to speak for it, so the histogram is the only voice in
+    // the room and it mis-hears antialiased downscales as translucency. See
+    // render::IsLegacyPlantCutoutTexture for the measured per-LOD split.
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+        return false;
     return SectionMaterialAlphaRoute(sec.surfMat) == AuthoredAlphaRoute::Default;
 }
 

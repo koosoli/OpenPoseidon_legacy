@@ -3,6 +3,8 @@
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
 #include <Poseidon/Graphics/Rendering/RenderPassDescriptor.hpp>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 
 // `BuildRenderPassDescriptor` is the *single* translation function from typed
 // `LegacySpec` + scene context to the `RenderPassDescriptor` consumed by the
@@ -263,6 +265,58 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
     }
 
     return d;
+}
+
+// Legacy Arma 1 foliage (`ca\plants\`) is authored as ALPHA-TESTED cards, but the alpha
+// histogram cannot see that: the same authored card, downscaled per LOD, straddles the
+// Blend/Cutout boundary. Measured on the shipped A1 plants corpus (2026-08-27,
+// `PoseidonTools model inspect --classify`), where a single plant's four LOD maps split
+// across both classes:
+//
+//   ker_deravej_0_ca BLEND / _1_ca CUTOUT / _2_ca CUTOUT / _3_ca BLEND
+//   trnka_0_ca CUTOUT / _1_ca BLEND / _2_ca BLEND / _3_ca CUTOUT
+//   krovi_begest_0_ca CUTOUT / _1_ca BLEND / _2_ca BLEND / _3_ca CUTOUT
+//
+// A family cannot be translucent at LOD 1 and alpha-tested at LOD 2; the histogram is
+// simply reading antialiased downscale edges. Whichever LOD lands on the Blend side then
+// leaves the opaque pass for the back-to-front pass with NO depth write, and the canopy
+// goes see-through against the sky — the "some tree canopies have become transparent"
+// report on Sahrani. This is the same failure `ShaderFamilyAlphaRoute` (ShapeDraw.cpp)
+// already corrects for A3's TreeAdv families; A1 plants carry no RVMAT at all, so nothing
+// was authoritative for them and the histogram won by default.
+//
+// Deliberately keyed on `\plants\`, which is the A1 prefix. A2/OA and A3 keep their own
+// (`plants2`, `plants_e`, `plants_f`) and are handled by their shader family, so this
+// cannot touch content it was not measured against. `WGR_A1_PLANT_CUTOUT=0` restores the
+// histogram answer for an A/B in the same binary.
+inline bool IsLegacyPlantCutoutTexture(const char* texturePath)
+{
+    if (!texturePath || !*texturePath)
+        return false;
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_A1_PLANT_CUTOUT");
+        return !(v && v[0] == '0' && v[1] == '\0');
+    }();
+    if (!enabled)
+        return false;
+    // Case-insensitive `\plants\` … `_ca.` — no allocation, this runs per section per frame.
+    const size_t n = std::strlen(texturePath);
+    auto lower = [](char c) { return char(c >= 'A' && c <= 'Z' ? c + 32 : c); };
+    bool inPlants = false;
+    for (size_t i = 0; i + 8 <= n && !inPlants; i++)
+    {
+        const char* p = texturePath + i;
+        inPlants = (p[0] == '\\' || p[0] == '/') && lower(p[1]) == 'p' && lower(p[2]) == 'l' &&
+                   lower(p[3]) == 'a' && lower(p[4]) == 'n' && lower(p[5]) == 't' && lower(p[6]) == 's' &&
+                   (p[7] == '\\' || p[7] == '/');
+    }
+    if (!inPlants)
+        return false;
+    const char* dot = std::strrchr(texturePath, '.');
+    const size_t stem = dot ? size_t(dot - texturePath) : n;
+    return stem >= 3 && texturePath[stem - 3] == '_' && lower(texturePath[stem - 2]) == 'c' &&
+           lower(texturePath[stem - 1]) == 'a';
 }
 
 // A shape section is "GPU-owned" on the wgpu GPU-driven retained path when it is plain
