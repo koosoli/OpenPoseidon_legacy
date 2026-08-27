@@ -4950,6 +4950,19 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     bool hasProxies = false;
     bool hasComplement = false;
 
+    // Legacy A1 vegetation under `ca\plants` is present in the object stream, but several
+    // card/branch sections disappear after retained-model ownership (visible around Sara
+    // 8249.15, 9021.16). Direct WGPU draws the same models completely. Preserve visual parity
+    // for this legacy family while the retained TreeAdv/card import is still incomplete;
+    // later-generation vegetation and the rest of the world remain GPU-driven.
+    if (ContainsNoCase(shape->Name(), "ca\\plants\\"))
+    {
+        static std::unordered_set<std::string> loggedLegacyPlantFallback;
+        if (loggedLegacyPlantFallback.insert(std::string(shape->Name())).second)
+            LOG_INFO(Graphics, "GpuModel vegetation fallback: model={} reason=legacy-a1-plants", shape->Name());
+        eligible = false;
+    }
+
     for (int level = 0; level < shape->NLevels() && eligible; level++)
     {
         if (!shape->IsNormalLevel(level)) // skip special (>=900) non-graphical levels
