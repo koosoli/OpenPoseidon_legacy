@@ -1211,7 +1211,14 @@ class Engine : public IGraphicsEngine
         // Local exposure trim for the photographed A3 clump cards only. It
         // deliberately leaves legacy ribbons, procedural mid grass and far LOD
         // untouched so visual tuning cannot change field-wide lighting.
-        float photoTuftBrightness = 1.25f;
+        // 2026-08-27: halved from 1.25 on the owner's call -- the photographed plates were
+        // reading far too bright against CWA/A1 terrain. It is a plain albedo multiplier
+        // (grass.wgsl:1704, `tex.rgb * PHOTO_TONE_CORRECTION * photo_brightness * tone_gain`),
+        // so this darkens the cards and nothing else. The floor of the clamp is 0.5 in BOTH the
+        // Rust mirror and the shader; 0 is deliberately NOT reachable, because a zero multiplier
+        // paints black clumps rather than removing them -- same geometry, same alpha, same
+        // overdraw, same shadow. "No cards" is midPhotoTuft/photoTuftMix, not this.
+        float photoTuftBrightness = 0.625f;
         // 0 keeps the primary photographed clump; 1 assigns all local grass
         // atlases in stable world-space patches.
         float photoTuftMix = 0.0f;

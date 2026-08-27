@@ -603,7 +603,10 @@ impl Grass {
             card_widen: 1.6,
             blade_arch: 1.0,
             clump_renderer: 1.0,
-            photo_tuft_brightness: 1.25,
+            // Halved 2026-08-27 to match Engine.hpp's GrassSettings default; the C++ side
+            // normally overwrites this, so a stale value here only shows up on a path that
+            // never uploads settings -- which is exactly where a silent mismatch hides.
+            photo_tuft_brightness: 0.625,
             photo_tuft_mix: 1.0,
             photo_tuft_patch_size: 18.0,
             photo_contrast: 1.35,
