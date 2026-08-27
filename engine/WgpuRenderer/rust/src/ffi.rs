@@ -751,6 +751,10 @@ pub struct WgrDepthOfField {
     pub transition: f32,       // 1/metres; how quickly the blur opens past the sharp band
     pub near_plane: f32,       // camera near plane, metres
     pub debug_view: f32,       // 0 = normal, 1 = circle of confusion, 2 = raw view distance
+    pub sample_count: f32,     // samples per pixel; the entire cost of the pass
+    pub bokeh_boost: f32,      // how strongly highlights outweigh their neighbours
+    pub bokeh_threshold: f32,  // linear HDR luminance that counts as a highlight
+    pub aperture_blades: f32,  // 0 = round, 5..9 = polygonal iris
 }
 
 impl Default for WgrDepthOfField {
@@ -765,6 +769,10 @@ impl Default for WgrDepthOfField {
             transition: 0.05,
             near_plane: 0.05,
             debug_view: 0.0,
+            sample_count: 48.0,
+            bokeh_boost: 3.0,
+            bokeh_threshold: 0.7,
+            aperture_blades: 0.0,
         }
     }
 }
@@ -1454,8 +1462,8 @@ const _: () = assert!(std::mem::size_of::<WgrSkyVisibility>() == 32);
 const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
-const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 36);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 532);
+const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 548);
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);

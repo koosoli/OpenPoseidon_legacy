@@ -43,6 +43,8 @@ void DrawDepthOfFieldSection()
     Engine::DepthOfFieldSettings dof = GEngine->GetDepthOfFieldSettings();
     bool changed = false;
 
+    ImGui::TextDisabled("Ctrl+click any slider to type an exact value.");
+
     changed |= ImGui::Checkbox("Enable depth of field", &dof.enabled);
     if (ImGui::IsItemHovered())
     {
@@ -75,7 +77,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Max blur (px)", &dof.maxBlurPixels, 0.0f, 64.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Max blur (px)", &dof.maxBlurPixels, 0.0f, 128.0f, "%.0f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Widest circle of confusion, in pixels at 1080p. The value is\n"
@@ -109,6 +111,79 @@ void DrawDepthOfFieldSection()
                           "what gives the tilt-shift / miniature look.");
     }
 
+    ImGui::SeparatorText("Bokeh");
+
+    ImGui::SetNextItemWidth(220.0f);
+    changed |= ImGui::SliderFloat("Highlight boost", &dof.bokehBoost, 0.0f, 12.0f, "%.1f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "0 gives a flat average, and a bright out-of-focus point comes out\n"
+                          "as a faint smear -- its energy divided over the whole disc.\n"
+                          "\n"
+                          "Raising it lets bright samples outweigh their neighbours, so a\n"
+                          "highlight prints as a bright DISC instead. That is what reads as\n"
+                          "photographic bokeh.\n"
+                          "\n"
+                          "It works because this pass runs in linear HDR before the tonemap,\n"
+                          "where a specular still carries a value above 1 rather than having\n"
+                          "been clipped to white. After the tonemap there would be nothing\n"
+                          "left to boost.");
+    }
+
+    ImGui::SetNextItemWidth(220.0f);
+    changed |= ImGui::SliderFloat("Highlight threshold", &dof.bokehThreshold, 0.0f, 4.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "Linear HDR luminance above which a sample counts as a highlight.\n"
+                          "Lower it until the discs appear; raise it if the whole image\n"
+                          "starts to sparkle rather than just the bright spots.");
+    }
+
+    ImGui::SetNextItemWidth(220.0f);
+    changed |= ImGui::SliderFloat("Aperture blades", &dof.apertureBlades, 0.0f, 9.0f, "%.0f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "0 = a perfect circle, as a mirror lens gives.\n"
+                          "5..9 = a polygon, which is what a real iris prints: out of focus a\n"
+                          "point takes the APERTURE shape, not a circle. 6 is the classic\n"
+                          "hexagon.\n"
+                          "\n"
+                          "Below 3 blades the polygon is meaningless and the disc is kept.");
+    }
+
+    ImGui::Separator();
+
+    // Quality. This is the entire cost of the pass, so it is a control and not a constant.
+    static const char* qualityNames[] = {"Low (16)", "Medium (32)", "High (48)", "Ultra (96)"};
+    static const int qualityCounts[] = {16, 32, 48, 96};
+    int qualityIndex = 2;
+    for (int i = 0; i < 4; ++i)
+    {
+        if (dof.sampleCount <= qualityCounts[i])
+        {
+            qualityIndex = i;
+            break;
+        }
+    }
+    ImGui::SetNextItemWidth(220.0f);
+    if (ImGui::Combo("Quality", &qualityIndex, qualityNames, 4))
+    {
+        dof.sampleCount = qualityCounts[qualityIndex];
+        changed = true;
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Samples per pixel, and the entire cost of the effect: each one is a\n"
+                          "colour fetch and a depth fetch. Ultra at 1080p is roughly 200 million\n"
+                          "texture reads a frame -- fine for a paused screenshot, not for playing.\n"
+                          "\n"
+                          "Too few and the sampling spiral shows as noise in smooth gradients\n"
+                          "such as sky. Raise it before you blame the blur.");
+    }
+
     ImGui::Separator();
     // Starting points, not presets to live in: a focus distance only means something for the shot
     // actually being framed. They exist so the first click produces something recognisable rather
@@ -121,6 +196,9 @@ void DrawDepthOfFieldSection()
         dof.backgroundScale = 1.0f;
         dof.foregroundScale = 0.8f;
         dof.transition = 0.12f;
+        dof.sampleCount = 48;
+        dof.bokehBoost = 5.0f;
+        dof.apertureBlades = 6.0f;
         changed = true;
     }
     ImGui::SameLine();
@@ -132,6 +210,7 @@ void DrawDepthOfFieldSection()
         dof.backgroundScale = 0.7f;
         dof.foregroundScale = 1.0f;
         dof.transition = 0.01f;
+        dof.sampleCount = 48;
         changed = true;
     }
     ImGui::SameLine();
@@ -145,6 +224,7 @@ void DrawDepthOfFieldSection()
         dof.backgroundScale = 1.4f;
         dof.foregroundScale = 1.4f;
         dof.transition = 0.20f;
+        dof.sampleCount = 96; // wide discs need the samples or the spiral shows
         changed = true;
     }
     ImGui::SameLine();

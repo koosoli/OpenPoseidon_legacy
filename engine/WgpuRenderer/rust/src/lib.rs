@@ -1379,6 +1379,10 @@ impl Renderer {
             transition: d.transition,
             near_plane: d.near_plane,
             debug_view: d.debug_view,
+            sample_count: d.sample_count,
+            bokeh_boost: d.bokeh_boost,
+            bokeh_threshold: d.bokeh_threshold,
+            aperture_blades: d.aperture_blades,
         };
 
         // Write the LOOK half of the sky UBO, leaving the runtime slots set_sky_runtime owns

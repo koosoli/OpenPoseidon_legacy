@@ -1606,6 +1606,20 @@ class Engine : public IGraphicsEngine
         /// There is no way to tell a broken depth mapping from a weak blur by looking at the
         /// composited image, which is exactly how the first attempt at this pass wasted an hour.
         int debugView = 0;
+        /// Samples per pixel, 4..128. This is the ENTIRE cost of the pass -- each sample is a
+        /// colour fetch and a depth fetch, so 96 samples at 1080p is roughly 200 million texture
+        /// reads a frame. Fine for a paused screenshot, not for playing. Too few and the spiral
+        /// shows as noise in smooth gradients like sky.
+        int sampleCount = 48;
+        /// Bokeh. A flat average turns a bright out-of-focus point into a faint smear -- its
+        /// energy divided over the whole disc. A real lens does the opposite: the point prints as
+        /// a bright disc. Weighting samples above bokehThreshold restores that, and it works only
+        /// because the pass runs in linear HDR before the tonemap, where a specular genuinely
+        /// carries a value above 1 rather than having been clipped to white.
+        float bokehBoost = 3.0f;
+        float bokehThreshold = 0.7f;
+        /// Aperture blades: 0 = a perfect circle, 5..9 = a polygon, as a real iris prints.
+        float apertureBlades = 0.0f;
     };
 
     virtual bool SupportsDepthOfField() const { return false; }

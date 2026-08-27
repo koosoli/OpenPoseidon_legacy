@@ -17,6 +17,7 @@ use wgpu::util::DeviceExt;
 struct Params {
     focus: [f32; 4],
     strength: [f32; 4],
+    quality: [f32; 4],
 }
 
 /// What the Picture Mode tab sets. Metres and pixels, because those are the units a person
@@ -44,6 +45,16 @@ pub struct DofSettings {
     pub near_plane: f32,
     /// 0 = normal, 1 = paint the circle of confusion, 2 = paint raw view distance.
     pub debug_view: f32,
+    /// Samples per pixel. THE cost of this pass -- each is a colour fetch and a depth fetch.
+    /// Low counts show the spiral as noise in smooth gradients; high counts are for stills.
+    pub sample_count: f32,
+    /// Bokeh: how strongly a sample brighter than the threshold outweighs its neighbours.
+    /// 0 gives a flat average, which turns a bright point into a faint smear.
+    pub bokeh_boost: f32,
+    /// Linear HDR luminance above which a sample counts as a highlight.
+    pub bokeh_threshold: f32,
+    /// Aperture blades: 0 = a perfect circle, 5..9 = a polygon, as a real iris prints.
+    pub aperture_blades: f32,
 }
 
 impl Default for DofSettings {
@@ -60,6 +71,10 @@ impl Default for DofSettings {
             transition: 0.05,
             near_plane: 0.05,
             debug_view: 0.0,
+            sample_count: 48.0,
+            bokeh_boost: 3.0,
+            bokeh_threshold: 0.7,
+            aperture_blades: 0.0,
         }
     }
 }
@@ -194,6 +209,12 @@ impl DepthOfField {
                 settings.foreground_scale.clamp(0.0, 4.0),
                 settings.transition.max(1e-4),
                 settings.debug_view,
+            ],
+            quality: [
+                settings.sample_count.clamp(4.0, 128.0),
+                settings.bokeh_boost.clamp(0.0, 20.0),
+                settings.bokeh_threshold.max(0.0),
+                settings.aperture_blades.clamp(0.0, 12.0),
             ],
         };
         queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));

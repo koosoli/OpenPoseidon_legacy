@@ -14,7 +14,7 @@
 // implementation would do better and costs a great deal more plumbing; for screenshots this is
 // the right trade.
 //
-// The gather is 48 samples on a golden-angle spiral whose start angle is hashed PER PIXEL. The
+// The gather walks a golden-angle spiral whose start angle is hashed PER PIXEL. The
 // hash is not decoration: with a fixed start angle neighbouring pixels sample the same offsets
 // and a wide blur reads as coherent streaks.
 //
@@ -27,8 +27,11 @@ struct Params {
     // z = maximum circle of confusion in PIXELS, w = camera near plane (m)
     focus: vec4<f32>,
     // x = background blur scale, y = foreground blur scale,
-    // z = how quickly CoC opens up beyond the sharp band (1/m), w = unused
+    // z = how quickly CoC opens up beyond the sharp band (1/m), w = debug view
     strength: vec4<f32>,
+    // x = samples per pixel, y = bokeh highlight boost, z = highlight threshold,
+    // w = aperture blades (0 = perfectly round, 5..9 = polygonal)
+    quality: vec4<f32>,
 }
 
 @group(0) @binding(0) var scene_colour: texture_2d<f32>;
@@ -78,14 +81,33 @@ fn coc_pixels(distance_m: f32) -> f32 {
     return select(-magnitude * scale, magnitude * scale, delta > 0.0);
 }
 
-const SAMPLE_COUNT: i32 = 48;
 const GOLDEN_ANGLE: f32 = 2.39996323;
 
 // How much foreign light landed on this pixel, normalised. A sharp subject in front of a heavily
 // blurred background has centre_coc == 0 but a large accumulated weight, and this is what lets
 // that background halo appear at all instead of being clipped away.
-fn weight_bleed(weight: f32) -> f32 {
-    return clamp((weight - 1.0) / f32(SAMPLE_COUNT), 0.0, 1.0);
+fn luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+// Radius multiplier for a polygonal aperture at a given angle. A real lens has blades, and out of
+// focus they print the APERTURE shape rather than a circle -- which is why photographic bokeh is
+// often hexagonal. Fewer than 3 blades keeps the perfect disc a mirror lens would give.
+fn aperture_scale(angle: f32, blades: f32) -> f32 {
+    if (blades < 3.0) {
+        return 1.0;
+    }
+    let n = floor(blades);
+    let seg = 6.28318530718 / n;
+    let half_seg = seg * 0.5;
+    // Distance from centre to the polygon edge along this angle. Always <= 1, so the polygon
+    // inscribes the disc instead of exceeding the radius the circle of confusion asked for.
+    let offset = angle - seg * floor(angle / seg) - half_seg;
+    return cos(half_seg) / max(cos(offset), 1e-3);
+}
+
+fn weight_bleed(weight: f32, count: f32) -> f32 {
+    return clamp((weight - 1.0) / max(count, 1.0), 0.0, 1.0);
 }
 
 
@@ -107,8 +129,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Golden-angle spiral: even coverage of the disc at any sample count, no repeating pattern to
     // read as banding, and no lookup table.
+    // Samples per pixel, from the Picture Mode quality control. This is the whole cost of the
+    // pass: every one is a colour fetch and a depth fetch, so 96 samples at 1080p is ~200 million
+    // texture reads a frame. Cheap for a paused screenshot, not for playing.
+    let sample_count = clamp(params.quality.x, 4.0, 128.0);
+    let samples_i = i32(sample_count);
+
     var radius = 1.0;
-    let radius_step = 1.0 / f32(SAMPLE_COUNT);
+    let radius_step = 1.0 / sample_count;
     // Per-pixel start angle. Without it every pixel walks the SAME spiral, the sample positions
     // line up between neighbours, and a wide blur comes out as coherent streaks rather than
     // smooth defocus -- clearly visible at 27 px on the first working capture. Rotating each
@@ -120,11 +148,11 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // search always spans at least the configured maximum when the centre is near-focus.
     let search = max(centre_radius, params.focus.z * 0.5);
 
-    for (var i = 0; i < SAMPLE_COUNT; i = i + 1) {
+    for (var i = 0; i < samples_i; i = i + 1) {
         angle = angle + GOLDEN_ANGLE;
         radius = radius - radius_step;
         let r = sqrt(max(1.0 - radius, 0.0)) * search;
-        let offset = vec2<f32>(cos(angle), sin(angle)) * r;
+        let offset = vec2<f32>(cos(angle), sin(angle)) * (r * aperture_scale(angle, params.quality.w));
         let sample_uv = clamp(in.uv + offset / dims, vec2<f32>(0.0), vec2<f32>(1.0));
         let sample_pixel = clamp(vec2<i32>(sample_uv * dims), vec2<i32>(0), dims_i - vec2<i32>(1));
 
@@ -133,8 +161,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         // from the gather side. Softened over a pixel so the acceptance edge is not aliased.
         let reach = smoothstep(r - 1.0, r + 1.0, abs(sample_coc));
         if (reach > 0.0) {
-            accum = accum + textureSampleLevel(scene_colour, scene_sampler, sample_uv, 0.0).rgb * reach;
-            weight = weight + reach;
+            let c = textureSampleLevel(scene_colour, scene_sampler, sample_uv, 0.0).rgb;
+            // BOKEH. A flat average turns a bright out-of-focus point into a faint smear: its
+            // energy gets divided over the whole disc. A real lens does the opposite -- the point
+            // prints as a bright disc of its own. Weighting each sample by how far it exceeds a
+            // highlight threshold restores that, and it only works because this pass runs in
+            // LINEAR HDR before the tonemap, where a specular or a sun-lit edge genuinely carries
+            // a value above 1 instead of having been clipped to white.
+            let w = reach * (1.0 + params.quality.y * max(luma(c) - params.quality.z, 0.0));
+            accum = accum + c * w;
+            weight = weight + w;
         }
     }
 
@@ -158,6 +194,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     // Blend the gathered result in by the centre's own defocus, so a genuinely sharp pixel keeps
     // its own colour and only picks up what actually scattered onto it.
     let mix_factor = clamp(centre_radius / max(params.focus.z, 1e-4), 0.0, 1.0);
-    let out_rgb = mix(centre_colour.rgb, blurred, max(mix_factor, weight_bleed(weight)));
+    let out_rgb = mix(centre_colour.rgb, blurred, max(mix_factor, weight_bleed(weight, sample_count)));
     return vec4<f32>(out_rgb, centre_colour.a);
 }

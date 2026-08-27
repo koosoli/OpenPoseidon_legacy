@@ -757,6 +757,18 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         {
             _dof.debugView = atoi(d);
         }
+        if (const char* q = std::getenv("POSEIDON_DOF_SAMPLES"))
+        {
+            _dof.sampleCount = atoi(q);
+        }
+        if (const char* k = std::getenv("POSEIDON_DOF_BOKEH"))
+        {
+            _dof.bokehBoost = float(atof(k));
+        }
+        if (const char* k = std::getenv("POSEIDON_DOF_BLADES"))
+        {
+            _dof.apertureBlades = float(atof(k));
+        }
     }
     // Neutral default material (TLMaterial's ctor only initialises specular), so a
     // draw reaching DrawSectionTL without a preceding SetMaterial lights sanely.
@@ -7799,6 +7811,10 @@ void EngineWgpu::PushRenderParams()
         _dof.transition,
         DepthOfFieldNearPlane(),
         float(_dof.debugView),
+        float(_dof.sampleCount),
+        _dof.bokehBoost,
+        _dof.bokehThreshold,
+        _dof.apertureBlades,
     };
 
     p.exposure = {

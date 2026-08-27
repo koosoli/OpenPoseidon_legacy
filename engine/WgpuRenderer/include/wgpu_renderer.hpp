@@ -691,6 +691,10 @@ struct WgrDepthOfField
     float transition;         /* 1/metres; how quickly the blur opens past the sharp band */
     float near_plane;         /* camera near plane, metres */
     float debug_view;         /* 0 = normal, 1 = circle of confusion, 2 = raw view distance */
+    float sample_count;       /* samples per pixel; the entire cost of the pass */
+    float bokeh_boost;        /* how strongly highlights outweigh their neighbours */
+    float bokeh_threshold;    /* linear HDR luminance that counts as a highlight */
+    float aperture_blades;    /* 0 = round, 5..9 = polygonal iris */
 };
 
 /* Every imgui-tweakable render parameter that crosses the FFI as a setter, in one block.
@@ -1715,8 +1719,8 @@ static_assert(sizeof(WgrSkyVisibility) == 32, "WgrSkyVisibility layout must matc
 static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrDepthOfField) == 36, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 532, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrRenderParams) == 548, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");
