@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -94,6 +95,12 @@ bool HelicopterAuto::AimWeapon(int weapon, Target* target)
             }
             float time = sqrt(time2);
             float fall = 0.5 * G_CONST * time2;
+            // Drag-correct drop and flight time where the ammo is an unpowered ballistic round.
+            // Both come from one solve, so the lead below is scaled by the time the round is
+            // REALLY in the air rather than the vacuum time -- the old form under-led as well as
+            // under-elevated. Falls back to the two lines above for anything it cannot describe.
+            Poseidon::Ballistics::SolveAimForAmmo(mode->_ammo, aInfo ? aInfo->_initSpeed : 0.0f, sqrt(dist2), time,
+                                                  fall);
             tgtPos[1] += fall;
             tgtPos += target->speed * (time + 0.25);
         }
@@ -301,12 +308,19 @@ float HelicopterAuto::GetAimed(int weapon, Target* target) const
         Vector3 ap = target->AimingPosition();
         float dist = ap.Distance(Position());
         float time = dist * aInfo->_invInitSpeed;
+        float predFall = G_CONST * time * time * 0.5f;
+        // Drag-correct flight time and drop for the hit PREDICTION. This decides whether the AI
+        // believes its current aim will connect, so a wrong flight model here does not just miss --
+        // it makes the unit hold fire when it would hit, or fire when it cannot. Same solve as the
+        // aiming sites, so prediction and aim agree; declines to the original vacuum form for
+        // anything it cannot describe.
+        Poseidon::Ballistics::SolveAimForAmmo(mode ? mode->_ammo : nullptr, aInfo->_initSpeed, dist, time, predFall);
         Vector3 estPos = ap + target->speed * time;
         Vector3 wDir = GetWeaponDirection(weapon);
         Vector3 wPos = PositionModelToWorld(GetWeaponCenter(weapon));
         float eDist = wPos.Distance(estPos);
         Vector3 hit = wPos + wDir * eDist;
-        hit[1] -= G_CONST * time * time * 0.5;
+        hit[1] -= predFall;
         Vector3 hError = hit - estPos;
         hError[1] *= 2;
         float error = hError.Size() * 0.5;

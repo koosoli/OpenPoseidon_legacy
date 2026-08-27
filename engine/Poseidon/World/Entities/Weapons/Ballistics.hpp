@@ -161,6 +161,16 @@ struct LevelShot
 };
 LevelShot SolveLevelShot(const ShellParams& shell, float initSpeed, float distance, float step = DefaultStep);
 
+/// The form every wired call site uses: "give me the flight time and the drop for this ammo over
+/// this range, or tell me you cannot and I will keep my own arithmetic."
+///
+/// Returns false -- leaving `time` and `fall` untouched -- when the lever is off, the ammo is not
+/// an unpowered ballistic projectile (bullets and shells only; missiles have their own model),
+/// or the geometry is outside what a level-shot solve can describe. Every call site MUST keep its
+/// original formula for the false case; a solver that silently answers zero is worse than one
+/// that admits it does not know.
+bool SolveAimForAmmo(const AmmoType* ammo, float initSpeed, float distance, float& time, float& fall);
+
 /// Master switch for the drag-correct aiming path, so a single binary can A/B the whole change:
 /// `POSEIDON_BALLISTIC_AIM=0` puts every wired call site back on the vacuum formula. Read once.
 bool DragCorrectAimEnabled();

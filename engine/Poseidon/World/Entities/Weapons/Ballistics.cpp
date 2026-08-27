@@ -258,8 +258,47 @@ LevelShot SolveLevelShot(const ShellParams& shell, float initSpeed, float distan
 
     out.drop = -hit.position[1];
     out.time = hit.time;
-    out.valid = out.drop >= 0.0f;
+
+    // A LEVEL-shot solve only describes a FLAT trajectory. Raise the barrel far enough and the
+    // path is no longer approximately the level path shifted up -- the round spends longer in the
+    // air, drags for longer, and the answer diverges. That is a lobbed weapon: a 30 m/s grenade
+    // launcher reaching 200 m is not a rifle with more elevation, it is a different problem, and
+    // the call sites that handle those already carry their own hand-tuned approximations.
+    //
+    // The cut-off is stated as geometry, not tuned: a drop of a quarter of the range is an
+    // elevation of about 14 degrees. Below that the linearisation holds to centimetres; above it
+    // the caller keeps whatever it was doing. This is what stops the solver from confidently
+    // returning nonsense for mortars and grenade launchers.
+    out.valid = out.drop >= 0.0f && out.drop <= 0.25f * distance;
     return out;
+}
+
+bool SolveAimForAmmo(const AmmoType* ammo, float initSpeed, float distance, float& time, float& fall)
+{
+    // One gate for every wired call site, so "which shots does this govern" has a single answer
+    // rather than six copies that drift.
+    //
+    // Bullets and shells only: those are unpowered ballistic projectiles, which is precisely what
+    // the integrator models. Missiles carry thrust, a launcher-relative up vector and, in this
+    // engine, a full rigid-body flight model (Missile::Simulate) -- they get their own solver,
+    // not this one.
+    if (!DragCorrectAimEnabled() || !ammo || initSpeed <= 0.0f || distance <= 0.0f)
+    {
+        return false;
+    }
+    if (ammo->_simulation != AmmoShotBullet && ammo->_simulation != AmmoShotShell)
+    {
+        return false;
+    }
+
+    const LevelShot shot = SolveLevelShot(ShellParamsFor(*ammo), initSpeed, distance);
+    if (!shot.valid)
+    {
+        return false;
+    }
+    time = shot.time;
+    fall = shot.drop;
+    return true;
 }
 
 Vector3 CompensateAimVacuum(float initSpeed, Vector3Par firingPos, Vector3Par targetPos)

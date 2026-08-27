@@ -46,6 +46,7 @@
 #include <Poseidon/Foundation/Enums/EnumNames.hpp>
 #include <Poseidon/Game/Commands/GameStateExt.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 
@@ -1415,12 +1416,19 @@ float EntityAI::GetAimed(int weapon, Target* target) const
         // predict shot result
         float dist = ap.Distance(Position());
         float time = dist * aInfo->_invInitSpeed;
+        float predFall = G_CONST * time * time * 0.5f;
+        // Drag-correct flight time and drop for the hit PREDICTION. This decides whether the AI
+        // believes its current aim will connect, so a wrong flight model here does not just miss --
+        // it makes the unit hold fire when it would hit, or fire when it cannot. Same solve as the
+        // aiming sites, so prediction and aim agree; declines to the original vacuum form for
+        // anything it cannot describe.
+        Poseidon::Ballistics::SolveAimForAmmo(ammo, aInfo->_initSpeed, dist, time, predFall);
         Vector3 estPos = ap + target->speed * time;
         Vector3 wDir = GetWeaponDirection(weapon);
         Vector3 wPos = PositionModelToWorld(GetWeaponPoint(weapon));
         float eDist = wPos.Distance(estPos);
         Vector3 hit = wPos + wDir * eDist;
-        hit[1] -= G_CONST * time * time * 0.5;
+        hit[1] -= predFall;
         Vector3 hError = hit - estPos;
         hError[1] *= 2;
         float error = hError.Size() * 0.5;

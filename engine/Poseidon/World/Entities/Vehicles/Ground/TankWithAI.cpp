@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Tank.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TankNetworkStabilization.hpp>
@@ -284,12 +285,19 @@ bool Tank::CalculateAimWeapon(int weapon, Vector3& dir, Target* target)
         }
     }
     float time = sqrt(time2);
+    float fall = 0.5f * G_CONST * time2;
+    // Drag-correct drop and flight time. `time2` above deliberately uses `_invInitSpeed * 1.2f` --
+    // a hand-tuned 20% velocity penalty standing in for the deceleration a tank round actually
+    // suffers over a kilometre. Where the solver answers, that guess is replaced by the modelled
+    // deceleration; where it declines (the AmmoShotMissile branch zeroes time2 anyway, and lobbed
+    // or unreachable shots are refused) the original arithmetic is untouched.
+    Poseidon::Ballistics::SolveAimForAmmo(ammo, aInfo ? aInfo->_initSpeed : 0.0f, sqrt(dist2), time, fall);
+
     const float minPredTime = 0.25f;
     float predTime = floatMax(time + 0.1f, minPredTime);
     Vector3 myPos = PositionModelToWorld(weaponPos);
     // tgtPos+=target->ObjectSpeed()*predTime;
     myPos += Speed() * minPredTime;
-    float fall = 0.5f * G_CONST * time2;
     // calculate balistics
     tgtPos[1] += fall; // consider balistics
     if (aInfo)

@@ -7,6 +7,7 @@
 #include <Poseidon/AI/AI.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Ground/Car.hpp>
 #include <Poseidon/Network/Network.hpp>
@@ -2168,11 +2169,20 @@ bool Car::AimWeapon(int weapon, Target* target)
         float time2 = dist2 * Square(aInfo->_invInitSpeed * 1.2);
 
         float time = sqrt(time2);
+        float fall = 0.5 * G_CONST * time2;
+        // Drag-correct drop and flight time. Note what this REPLACES: the `* 1.2f` on the muzzle
+        // velocity two lines up is a hand-tuned stand-in for "the round is slower than v0 by the
+        // time it arrives" -- which is drag, approximated by a constant. Where the solver answers,
+        // the real deceleration is modelled and the fudge is superseded; where it declines
+        // (missiles, lobbed rounds, unreachable ranges) the fudge is exactly what still runs.
+        const WeaponModeType* aimMode = GetWeaponMode(weapon);
+        Poseidon::Ballistics::SolveAimForAmmo(aimMode ? aimMode->_ammo : nullptr, aInfo->_initSpeed, sqrt(dist2), time,
+                                              fall);
+
         const float minPredTime = 0.25;
         float predTime = floatMax(time + 0.1, minPredTime);
 
         myPos += Speed() * minPredTime;
-        float fall = 0.5 * G_CONST * time2;
         tgtPos[1] += fall;
         Vector3 speedEst = target->speed;
         const float maxSpeedEst = aInfo->_maxLeadSpeed;

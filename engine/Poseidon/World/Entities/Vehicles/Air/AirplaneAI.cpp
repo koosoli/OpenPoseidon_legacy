@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 
 #include <Poseidon/World/Entities/Vehicles/Air/Airplane.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
@@ -280,6 +281,13 @@ float AirplaneAuto::GetAimed(int weapon, Target* target) const
         float dist = ap.Distance(wPos);
 
         float time = dist * aInfo->_invInitSpeed;
+        float predFall = G_CONST * time * time * 0.5f;
+        // Drag-correct flight time and drop for the hit PREDICTION. This decides whether the AI
+        // believes its current aim will connect, so a wrong flight model here does not just miss --
+        // it makes the unit hold fire when it would hit, or fire when it cannot. Same solve as the
+        // aiming sites, so prediction and aim agree; declines to the original vacuum form for
+        // anything it cannot describe.
+        Poseidon::Ballistics::SolveAimForAmmo(mode ? mode->_ammo : nullptr, aInfo->_initSpeed, dist, time, predFall);
         Vector3 leadSpeed = target->speed - Speed();
         Vector3 estPos = ap + leadSpeed * time;
 
@@ -288,7 +296,7 @@ float AirplaneAuto::GetAimed(int weapon, Target* target) const
         float eDist = estPos.Distance(wPos);
 
         Vector3 hit = wPos + wDir * eDist;
-        hit[1] -= 0.5f * G_CONST * time * time;
+        hit[1] -= predFall;
         Vector3 hError = hit - estPos;
 #if _ENABLE_CHEATS
         float distHit = hit.Distance(wPos);
