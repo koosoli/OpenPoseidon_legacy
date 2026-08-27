@@ -902,3 +902,97 @@ TEST_CASE("ParamFile - Rollback merge", "[paramfile][merge][rollback]")
 // - Corruption handling
 //
 // This completes Phase 5 of the ParamFile testing plan.
+
+TEST_CASE("ParamFile - An overlay class without a base keeps the base it is patching",
+          "[paramfile][merge][inherit][overlay]")
+{
+    // The shape every config overlay has: name the class, set one property, say nothing about
+    // where it came from. It cannot say `: Base`, because the parser drops a class whose base is
+    // not present in the SAME file and an overlay never carries the tree it patches.
+    //
+    // Update used to answer that by clearing the base -- so the only writable overlay form was also
+    // the destructive one. Found 2026-08-27 merging docs/ballistics/cwa-airfriction.cpp into a
+    // retail BIN\CONFIG.BIN: twelve CfgAmmo classes came out re-rooted, `class BulletSniper:
+    // BulletSingle` reduced to `class BulletSniper`, taking every inherited property and every
+    // child with them. Exit code 0, no diagnostic, and the file looks the right size.
+
+    SECTION("The base survives, and so does everything inherited through it")
+    {
+        ParamFile pf;
+        const char* base = "class Ammo {\n"
+                           "    class Default {\n"
+                           "        hit = 5;\n"
+                           "        typicalSpeed = 900;\n"
+                           "    };\n"
+                           "    class Bullet : Default {\n"
+                           "        hit = 9;\n"
+                           "    };\n"
+                           "    class Sniper : Bullet {\n"
+                           "        hit = 10;\n"
+                           "    };\n"
+                           "};\n";
+        QIStream in(base, strlen(base));
+        pf.Parse(in);
+
+        ParamFile overlay;
+        const char* patch = "class Ammo {\n"
+                            "    class Bullet {\n"
+                            "        airFriction = -0.001328;\n"
+                            "    };\n"
+                            "};\n";
+        QIStream inPatch(patch, strlen(patch));
+        overlay.Parse(inPatch);
+
+        pf.Update(overlay);
+
+        const ParamClass* ammo = pf.GetClass("Ammo");
+        REQUIRE(ammo != nullptr);
+        const ParamEntry* bulletEntry = ammo->FindEntry("Bullet");
+        REQUIRE(bulletEntry != nullptr);
+        const ParamClass* bullet = bulletEntry->GetClassInterface();
+        REQUIRE(bullet != nullptr);
+
+        // The overlay's own property arrived.
+        REQUIRE(bullet->FindEntry("airFriction") != nullptr);
+        // Its own property is untouched.
+        REQUIRE(bullet->FindEntry("hit")->GetInt() == 9);
+        // And the inherited one is still reachable -- this is what erasing the base destroyed.
+        REQUIRE(bullet->FindEntry("typicalSpeed") != nullptr);
+        REQUIRE(bullet->FindEntry("typicalSpeed")->GetInt() == 900);
+
+        // A child of the patched class still inherits through it, in both directions: the property
+        // it always had, and the one the overlay has just added.
+        const ParamClass* sniper = ammo->FindEntry("Sniper")->GetClassInterface();
+        REQUIRE(sniper != nullptr);
+        REQUIRE(sniper->FindEntry("hit")->GetInt() == 10);
+        REQUIRE(sniper->FindEntry("typicalSpeed") != nullptr);
+        REQUIRE(sniper->FindEntry("airFriction") != nullptr);
+    }
+
+    SECTION("An overlay that DOES name a base still re-parents, as it always did")
+    {
+        // The fix is only about silence, not about capability: an overlay that states a base is
+        // still authoritative.
+        ParamFile pf;
+        const char* base = "class A { x = 1; };\n"
+                           "class B { y = 2; };\n"
+                           "class C : A { z = 3; };\n";
+        QIStream in(base, strlen(base));
+        pf.Parse(in);
+
+        ParamFile overlay;
+        const char* patch = "class A { x = 1; };\n"
+                            "class B { y = 2; };\n"
+                            "class C : B { w = 4; };\n";
+        QIStream inPatch(patch, strlen(patch));
+        overlay.Parse(inPatch);
+
+        pf.Update(overlay);
+
+        const ParamClass* c = pf.GetClass("C");
+        REQUIRE(c != nullptr);
+        REQUIRE(c->FindEntry("w") != nullptr);
+        REQUIRE(c->FindEntry("y") != nullptr); // now inherits from B
+        REQUIRE(c->FindEntry("x") == nullptr); // and no longer from A
+    }
+}

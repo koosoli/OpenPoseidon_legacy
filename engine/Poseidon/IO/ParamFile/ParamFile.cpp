@@ -1931,24 +1931,24 @@ void ParamClass::Update(const ParamClass& source)
                     }
                 }
             }
-            else
-            {
-                if (dstCls->_base)
-                {
-                    if (dstCls->GetAccessMode() < PAReadOnly)
-                    {
-                        dstCls->_base = nullptr;
-                    }
-                    else
-                    {
-                        BString<256> buf;
-                        sprintf(buf, "** Update base %s-><null> **, by %s",
-                                dstCls->_base ? (const char*)dstCls->_base->GetName() : "",
-                                (const char*)source.GetContext());
-                        dstCls->AccessDenied(buf);
-                    }
-                }
-            }
+            // An overlay class that names NO base leaves the existing one alone. It does not mean
+            // "this class now derives from nothing".
+            //
+            // That distinction is the whole of an overlay: `class BulletSingle { airFriction = ...; }`
+            // is how config data has always been extended, and it cannot spell out `: Default`,
+            // because the parser drops a class whose base is not present in the SAME file -- an
+            // overlay never contains the tree it patches. So the only writable form is the one
+            // without a base, and clearing the base on that form made the only usable overlay the
+            // destructive one.
+            //
+            // Measured 2026-08-27 while merging docs/ballistics/cwa-airfriction.cpp into a retail
+            // BIN\CONFIG.BIN: twelve CfgAmmo classes came out with their parent erased --
+            // `class BulletSniper: BulletSingle` became `class BulletSniper` -- so every property
+            // and every child they inherited was gone. Exit code 0, no diagnostic.
+            //
+            // This also matches config semantics elsewhere: a redeclaration extends, it does not
+            // re-root. Nothing can express "remove this base", which is not a capability anyone has
+            // asked for and is not worth the way it failed.
             dstCls->Update(*srcCls);
         }
         else if (srcEntry.IsArray())
