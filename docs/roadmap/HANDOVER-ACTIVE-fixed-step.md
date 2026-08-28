@@ -54,6 +54,40 @@ only that neither system sees anything there. 72 hits is good evidence and not
 proof across 82,381 objects. Firing at varied object classes -- trees, rocks,
 fences, wrecks -- is what would harden it.
 
+## OPEN AND UNSOLVED: bullets do not go through a wooden gate
+
+Built, wired, switched on in the Physics tab, and it still does not work. The
+owner has now reported this twice, and the second report was AFTER the fix I
+thought would settle it. Do not assume the remaining cause is the same one.
+
+What is known:
+
+* The material table matched Czech material words (`drevo`, `beton`) in texture
+  paths. Stock OFP textures are named after the OBJECT -- `hotel_door1_ca.paa`,
+  `dvere_int3.paa` -- so almost nothing matched and everything fell to the
+  unknown default, which resists like concrete deliberately.
+* PENMISS logging was added for exactly this: every texture with no material logs
+  once with its full path. **Nobody has read that log yet.** That is the next
+  step and it is cheap -- shoot a gate, grep the log for PENMISS, and the real
+  texture names are there to build the table from.
+
+Candidate causes NOT yet excluded, roughly in order:
+
+1. The table still does not match -- read PENMISS first.
+2. `MeasureThickness` finds no far face. It casts backwards from 2 m beyond the
+   entry; a gate modelled as a single-sided plane has no far face at all, and the
+   honest answer for "not found" is "stopped". A whole class of OFP geometry is
+   single-sided.
+3. The legacy path deletes the round before `TryPenetrate` is reached on some
+   branch -- there are three `ObjectCollision` call sites in Shots.cpp and only
+   one is wired.
+4. World colliders were never registered in that session, so there is nothing to
+   measure a thickness against.
+
+Cause 2 is the one I would look at first after the log, because it would be
+invisible from outside and would make penetration fail for exactly the doors,
+fences and gates people try first.
+
 ## What is open
 
 1. **The ray audit has no data.** It reports 0 segments — nothing fires in a
