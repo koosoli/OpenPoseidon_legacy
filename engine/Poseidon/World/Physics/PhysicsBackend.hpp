@@ -4,6 +4,7 @@
 #include <Poseidon/World/Physics/PhysicsTypes.hpp>
 
 #include <memory>
+#include <vector>
 
 // The replaceable half. One implementation exists today (Box3D); PHY-001 names
 // Jolt as the fallback and lists three points at which that choice is revisited.
@@ -65,6 +66,16 @@ public:
     virtual void SetBodyTransform(BodyId id, const Matrix4& transform) = 0;
 
     virtual bool SetTerrain(const TerrainField& field) = 0;
+
+    /// PHY-020. A dynamic sphere the physics world owns outright.
+    virtual BodyId SpawnSphereProbe(const SphereProbeDef& def) = 0;
+    virtual void   ClearProbes() = 0;
+    /// Probe positions for debug drawing only. Scoped to probe bodies on purpose:
+    /// a general transform getter is what turns "physics is a query service" into
+    /// "physics owns the position", and PHY-020 is not that step.
+    virtual void GetProbeSamples(std::vector<ProbeSample>& out) const = 0;
+    /// Applied to every probe shape at the start of each step while enabled.
+    virtual void SetWind(const WindSettings& wind) = 0;
 
     [[nodiscard]] virtual PhysicsStats GetStats() const = 0;
 

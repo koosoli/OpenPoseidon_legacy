@@ -4,6 +4,7 @@
 #include <Poseidon/World/Physics/PhysicsTypes.hpp>
 
 #include <memory>
+#include <vector>
 
 // What the rest of the engine talks to. Deliberately smaller than the backend
 // interface: gameplay code registers a model, moves it, and forgets it.
@@ -83,6 +84,13 @@ public:
     /// Row-major heightfield, `width * height` samples `cellSize` apart.
     bool SetTerrain(const float* heights, int width, int height, float cellSize, float originX, float originZ);
 
+    /// PHY-020 dev probe. See SphereProbeDef.
+    BodyId SpawnSphereProbe(const SphereProbeDef& def);
+    void   ClearProbes();
+    void   GetProbeSamples(std::vector<ProbeSample>& out) const;
+    void   SetWind(const WindSettings& wind);
+    [[nodiscard]] const WindSettings& GetWind() const { return _wind; }
+
     [[nodiscard]] PhysicsStats GetStats() const;
     /// Backend name, or "none" when no world is up.
     [[nodiscard]] const char* BackendName() const;
@@ -101,6 +109,7 @@ private:
     std::uint32_t _modelsWithoutGeometry = 0;
     std::uint32_t _degenerateComponents = 0;
     std::uint32_t _maxComponentPoints = 0;
+    WindSettings  _wind;
 };
 
 /// The process-wide physics world. Null until something creates one; PHY-010

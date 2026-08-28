@@ -256,6 +256,37 @@ bool PhysicsWorld::SetTerrain(const float* heights, int width, int height, float
     return _backend->SetTerrain(field);
 }
 
+BodyId PhysicsWorld::SpawnSphereProbe(const SphereProbeDef& def)
+{
+    return _backend ? _backend->SpawnSphereProbe(def) : BodyId{};
+}
+
+void PhysicsWorld::ClearProbes()
+{
+    if (_backend)
+    {
+        _backend->ClearProbes();
+    }
+}
+
+void PhysicsWorld::GetProbeSamples(std::vector<ProbeSample>& out) const
+{
+    out.clear();
+    if (_backend)
+    {
+        _backend->GetProbeSamples(out);
+    }
+}
+
+void PhysicsWorld::SetWind(const WindSettings& wind)
+{
+    _wind = wind;
+    if (_backend)
+    {
+        _backend->SetWind(wind);
+    }
+}
+
 PhysicsStats PhysicsWorld::GetStats() const
 {
     // Backend owns what it built; the facade owns what it refused to hand over.

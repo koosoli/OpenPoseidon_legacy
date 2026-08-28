@@ -46,6 +46,7 @@
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
+#include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
 #include <Poseidon/Dev/Diag/WeatherTab.hpp>
 #include <Poseidon/Dev/Diag/SmokeTab.hpp>
@@ -6074,6 +6075,11 @@ void DrawMainWindow()
             ImGui::EndTabItem();
         }
         // Screenshot controls, kept apart from the diagnostics they have nothing to do with.
+        if (Dev::PanelTabItem("Physics"))
+        {
+            Poseidon::Dev::DrawPhysicsTab();
+            ImGui::EndTabItem();
+        }
         if (Dev::PanelTabItem("Fixed Step"))
         {
             Poseidon::Dev::DrawFixedStepTab();

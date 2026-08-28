@@ -9,6 +9,8 @@
 
 #include <box3d/box3d.h>
 
+#include <Poseidon/Foundation/Framework/Log.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -128,6 +130,9 @@ public:
         // indexes an empty vector -- a Destroy/Create cycle away from memory
         // corruption. Same shape of lifecycle bug as the accumulator static that
         // outlived its World.
+        // Probes are bodies in the world that is about to go, so the vector is
+        // dropped rather than destroyed body by body.
+        _probes.clear();
         _slots.clear();
         _free.clear();
         _terrainBody = b3_nullBodyId;
@@ -140,10 +145,26 @@ public:
 
     void Step(float deltaSeconds) override
     {
-        if (b3World_IsValid(_world) && deltaSeconds > 0.0f)
+        if (!b3World_IsValid(_world) || deltaSeconds <= 0.0f)
         {
-            b3World_Step(_world, deltaSeconds, SubSteps);
+            return;
         }
+        // Wind first, so the force acts during the step it was set for rather than
+        // the one after. Box3D computes the relative air speed itself, so nothing
+        // here subtracts the body's own velocity -- doing that too would apply the
+        // drag twice.
+        if (_wind.enabled)
+        {
+            const b3Vec3 wind = ToB3(_wind.velocity);
+            for (const Probe& probe : _probes)
+            {
+                if (b3Shape_IsValid(probe.shape))
+                {
+                    b3Shape_ApplyWind(probe.shape, wind, _wind.drag, _wind.lift, _wind.maxSpeed, true);
+                }
+            }
+        }
+        b3World_Step(_world, deltaSeconds, SubSteps);
     }
 
     BodyId AddStaticBody(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform) override
@@ -298,12 +319,107 @@ public:
         return true;
     }
 
+    BodyId SpawnSphereProbe(const SphereProbeDef& def) override
+    {
+        if (!b3World_IsValid(_world) || def.radius <= 0.0f)
+        {
+            return {};
+        }
+
+        b3BodyDef bodyDef = b3DefaultBodyDef();
+        bodyDef.type = b3_dynamicBody;
+        bodyDef.position = ToB3(def.position);
+        const b3BodyId body = b3CreateBody(_world, &bodyDef);
+
+        b3Sphere sphere{};
+        sphere.center = b3Vec3{0.0f, 0.0f, 0.0f};
+        sphere.radius = def.radius;
+
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+        // The dev UI speaks in kilograms because that is the unit a person has
+        // intuition about; Box3D wants density, so convert through the sphere's
+        // own volume rather than making the slider mean something nobody can
+        // picture.
+        const float volume = (4.0f / 3.0f) * 3.14159265f * def.radius * def.radius * def.radius;
+        shapeDef.density = volume > 0.0f ? std::max(def.mass, 0.001f) / volume : 1000.0f;
+        shapeDef.baseMaterial.friction = def.friction;
+        shapeDef.baseMaterial.restitution = def.restitution;
+
+        const b3ShapeId shape = b3CreateSphereShape(body, &shapeDef, &sphere);
+        if (!b3Shape_IsValid(shape))
+        {
+            b3DestroyBody(body);
+            return {};
+        }
+
+        b3Body_SetLinearVelocity(body, ToB3(def.velocity));
+
+        // Diagnostic: ask the physics world itself what is underneath the spawn
+        // point. If the answer is "nothing" while the engine says there is ground
+        // there, the colliders are not where the registration thinks they are --
+        // which a falling ball cannot distinguish from a stepping problem.
+        {
+            const b3Pos  from = ToB3(def.position);
+            const b3Vec3 down{0.0f, -500.0f, 0.0f};
+            const b3RayResult hit = b3World_CastRayClosest(_world, from, down, b3DefaultQueryFilter());
+            if (hit.hit)
+            {
+                LOG_WARN(World, "PHYSPROBE: ray down from y={:.2f} hits y={:.2f} (fraction {:.4f})",
+                         def.position[1], hit.point.y, hit.fraction);
+            }
+            else
+            {
+                LOG_WARN(World, "PHYSPROBE: ray down from y={:.2f} hits NOTHING within 500 m", def.position[1]);
+            }
+        }
+
+        _probes.push_back(Probe{body, shape, def.radius});
+        ++_shapeCount;
+        return Store(body, 1);
+    }
+
+    void ClearProbes() override
+    {
+        for (const Probe& probe : _probes)
+        {
+            // Drop the slot entry too, or the body count keeps counting probes
+            // that no longer exist.
+            for (Slot& slot : _slots)
+            {
+                if (slot.body.index1 == probe.body.index1 && slot.body.world0 == probe.body.world0)
+                {
+                    _shapeCount -= std::min(_shapeCount, slot.shapes);
+                    slot.shapes = 0;
+                    slot.body = b3_nullBodyId;
+                    ++slot.generation;
+                    _free.push_back(slot.index);
+                    break;
+                }
+            }
+            b3DestroyBody(probe.body);
+        }
+        _probes.clear();
+    }
+
+    void GetProbeSamples(std::vector<ProbeSample>& out) const override
+    {
+        out.reserve(_probes.size());
+        for (const Probe& probe : _probes)
+        {
+            const b3Pos p = b3Body_GetPosition(probe.body);
+            out.push_back(ProbeSample{Vector3(p.x, p.y, p.z), probe.radius});
+        }
+    }
+
+    void SetWind(const WindSettings& wind) override { _wind = wind; }
+
     [[nodiscard]] PhysicsStats GetStats() const override
     {
         PhysicsStats stats;
         stats.bodies = static_cast<std::uint32_t>(_slots.size() - _free.size());
         stats.shapes = _shapeCount;
         stats.hullFailures = _hullFailures;
+        stats.probes = static_cast<std::uint32_t>(_probes.size());
         stats.terrainRegistered = _heightField != nullptr;
         stats.terrainWidth = _terrainWidth;
         stats.terrainHeight = _terrainHeight;
@@ -366,6 +482,18 @@ private:
     b3BodyId           _terrainBody = b3_nullBodyId;
     bool               _terrainBodyValid = false;
     std::vector<float> _heights;
+
+    /// PHY-020 probes, kept apart from the static world so ClearProbes cannot
+    /// take a building with it and the debug draw never has to guess which body
+    /// is a probe.
+    struct Probe
+    {
+        b3BodyId  body = b3_nullBodyId;
+        b3ShapeId shape = b3_nullShapeId;
+        float     radius = 0.0f;
+    };
+    std::vector<Probe> _probes;
+    WindSettings       _wind;
 
     std::uint32_t _shapeCount = 0;
     std::uint32_t _hullFailures = 0;

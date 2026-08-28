@@ -60,11 +60,54 @@ struct PhysicsStats
     /// ASSUMPTION about the stock corpus; this is what turns it into a measurement.
     std::uint32_t maxComponentPoints = 0;
 
+    /// PHY-020 dev probes currently alive.
+    std::uint32_t probes = 0;
+
     bool terrainRegistered = false;
     /// Terrain grid actually handed to the backend, for comparison against the
     /// landscape's own dimensions.
     std::uint32_t terrainWidth = 0;
     std::uint32_t terrainHeight = 0;
+};
+
+/// PHY-020's dev probe: one dynamic sphere, owned entirely by physics.
+///
+/// Deliberately a PROBE and not an entity. It exists to answer one question --
+/// can Box3D move a dynamic body at 60 Hz across the real terrain and the real
+/// Geometry-LOD colliders -- and it is drawn from a probe-only readback rather
+/// than by giving gameplay a transform getter. That distinction is the PHY-010
+/// boundary and PHY-020 does not cross it.
+struct SphereProbeDef
+{
+    Vector3 position;
+    Vector3 velocity;
+    float   radius = 0.2f;
+    /// kg. Converted to Box3D's density (kg/m^3) from the sphere's own volume, so
+    /// the dev UI can speak in a unit a person has intuition about.
+    float mass = 0.5f;
+    float friction = 0.5f;
+    float restitution = 0.4f;
+};
+
+/// Enough to draw a probe. NOT a gameplay transform: it carries no orientation
+/// and is only produced for bodies the probe spawner created.
+struct ProbeSample
+{
+    Vector3 position;
+    float   radius = 0.0f;
+};
+
+/// World wind pushed onto probe shapes each step. Box3D 0.1.0 computes relative
+/// air speed itself (b3Shape_ApplyWind), so there is no second aerodynamic model
+/// here -- writing one while the library already has one is how two models end up
+/// disagreeing.
+struct WindSettings
+{
+    Vector3 velocity;
+    float   drag = 1.0f;
+    float   lift = 0.0f;
+    float   maxSpeed = 100.0f;
+    bool    enabled = false;
 };
 
 } // namespace Poseidon::Physics

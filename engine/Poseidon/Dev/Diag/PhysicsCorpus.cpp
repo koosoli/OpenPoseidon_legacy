@@ -82,8 +82,29 @@ void RunPhysicsCorpus()
         {
             for (int x = 0; x < range; ++x)
             {
-                heights[static_cast<std::size_t>(z) * range + x] = GLandscape->GetHeight(z, x);
+                // SurfaceY, NOT GetHeight(z, x). GetHeight returned something that is
+                // not the world surface: at the map centre it gave -59.44 where
+                // SurfaceY gives 269.55, and its whole range was -80..75 m on an
+                // island with mountains. SurfaceY is the query every other consumer
+                // of ground height uses, it takes WORLD coordinates so there is no
+                // index-order ambiguity left to get wrong, and 65k calls once at
+                // load costs nothing.
+                heights[static_cast<std::size_t>(z) * range + x] =
+                    GLandscape->SurfaceY(static_cast<float>(x) * LandGrid, static_cast<float>(z) * LandGrid);
             }
+        }
+        // Cross-check the grid we are about to hand over against the engine's own
+        // surface query at the same spot. A heightfield that is subtly wrong is
+        // indistinguishable from one that is right until something falls through it.
+        {
+            const auto mm = std::minmax_element(heights.begin(), heights.end());
+            const int  sx = range / 2;
+            const int  sz = range / 2;
+            const float gridHeight = heights[static_cast<std::size_t>(sz) * range + sx];
+            const float surfaceY = GLandscape->SurfaceY(static_cast<float>(sx) * LandGrid,
+                                                        static_cast<float>(sz) * LandGrid);
+            LOG_WARN(World, "PHYSCORPUS: heights min {:.2f} max {:.2f}; grid[{},{}]={:.2f} SurfaceY={:.2f} LandGrid={}",
+                     *mm.first, *mm.second, sx, sz, gridHeight, surfaceY, LandGrid);
         }
         const bool ok = world.SetTerrain(heights.data(), range, range, LandGrid, 0.0f, 0.0f);
         LOG_INFO(World, "PHYSCORPUS: terrain {}x{} grid {} m -> {}", range, range, LandGrid,

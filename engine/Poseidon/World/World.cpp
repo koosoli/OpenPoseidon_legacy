@@ -6,6 +6,8 @@
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -888,6 +890,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
             Dev::RunPhysicsCorpus();
         }
     }
+
+    // Presentation side of PHY-020: wind is refreshed and probes are drawn once
+    // per FRAME, not per tick -- drawing at the tick rate would blink at any frame
+    // rate that is not exactly 60.
+    Dev::AutoDropPhysicsProbes();
+    Dev::UpdatePhysicsProbeWind();
+    Dev::DrawPhysicsProbes();
 
     Dev::FixedStepFrame stepFrame;
     stepFrame.stepSeconds = static_cast<float>(_simulationSteps.StepSeconds());
@@ -1898,6 +1907,15 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
     if (updateVisibility)
     {
         GetSensorList()->SmartUpdateAll();
+    }
+
+    // PHY-020: exactly one physics step per fixed simulation tick. Deliberately
+    // NOT its own accumulator -- a second clock would drift against this one and
+    // reintroduce the frame-rate dependence the whole ARCH-001 item removed. It
+    // also inherits the catch-up cap and the pause behaviour for free.
+    if (Physics::PhysicsWorld* physics = Physics::GetPhysicsWorld())
+    {
+        physics->Step(deltaT);
     }
 }
 
