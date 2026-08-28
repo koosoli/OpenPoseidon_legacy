@@ -33,6 +33,10 @@ void UpdatePhysicsProbeWind();
 // struct through three files would be more machinery than the thing it configures.
 struct PhysicsProbeSettings
 {
+    /// 0 = sphere, 1 = capsule. Plain int so the tab can drive a combo without
+    /// dragging the physics headers into the UI include set.
+    int   shape = 0;
+    float halfLength = 0.6f;
     float radius = 0.2f;
     float mass = 0.5f;
     float friction = 0.5f;

@@ -331,10 +331,6 @@ public:
         bodyDef.position = ToB3(def.position);
         const b3BodyId body = b3CreateBody(_world, &bodyDef);
 
-        b3Sphere sphere{};
-        sphere.center = b3Vec3{0.0f, 0.0f, 0.0f};
-        sphere.radius = def.radius;
-
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         // The dev UI speaks in kilograms because that is the unit a person has
         // intuition about; Box3D wants density, so convert through the sphere's
@@ -346,7 +342,25 @@ public:
         shapeDef.baseMaterial.restitution = def.restitution;
         shapeDef.baseMaterial.rollingResistance = def.rollingResistance;
 
-        const b3ShapeId shape = b3CreateSphereShape(body, &shapeDef, &sphere);
+        const float halfLength = def.shape == ProbeShape::Capsule ? std::max(def.halfLength, 0.001f) : 0.0f;
+        b3ShapeId   shape;
+        if (def.shape == ProbeShape::Capsule)
+        {
+            // Laid along the body's local X so it starts horizontal, like something
+            // that has fallen over rather than a post standing on end.
+            b3Capsule capsule{};
+            capsule.center1 = b3Vec3{-halfLength, 0.0f, 0.0f};
+            capsule.center2 = b3Vec3{halfLength, 0.0f, 0.0f};
+            capsule.radius = def.radius;
+            shape = b3CreateCapsuleShape(body, &shapeDef, &capsule);
+        }
+        else
+        {
+            b3Sphere sphere{};
+            sphere.center = b3Vec3{0.0f, 0.0f, 0.0f};
+            sphere.radius = def.radius;
+            shape = b3CreateSphereShape(body, &shapeDef, &sphere);
+        }
         if (!b3Shape_IsValid(shape))
         {
             b3DestroyBody(body);
@@ -374,7 +388,7 @@ public:
             }
         }
 
-        _probes.push_back(Probe{body, shape, def.radius});
+        _probes.push_back(Probe{body, shape, def.radius, halfLength});
         ++_shapeCount;
         return Store(body, 1);
     }
@@ -407,8 +421,16 @@ public:
         out.reserve(_probes.size());
         for (const Probe& probe : _probes)
         {
-            const b3Pos p = b3Body_GetPosition(probe.body);
-            out.push_back(ProbeSample{Vector3(p.x, p.y, p.z), probe.radius});
+            const b3WorldTransform t = b3Body_GetTransform(probe.body);
+            ProbeSample            sample;
+            sample.position = Vector3(t.p.x, t.p.y, t.p.z);
+            sample.radius = probe.radius;
+            if (probe.halfLength > 0.0f)
+            {
+                const b3Vec3 axis = b3RotateVector(t.q, b3Vec3{probe.halfLength, 0.0f, 0.0f});
+                sample.axis = Vector3(axis.x, axis.y, axis.z);
+            }
+            out.push_back(sample);
         }
     }
 
@@ -492,6 +514,8 @@ private:
         b3BodyId  body = b3_nullBodyId;
         b3ShapeId shape = b3_nullShapeId;
         float     radius = 0.0f;
+        /// 0 for a sphere.
+        float halfLength = 0.0f;
     };
     std::vector<Probe> _probes;
     WindSettings       _wind;

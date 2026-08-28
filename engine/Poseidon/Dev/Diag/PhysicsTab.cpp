@@ -94,6 +94,26 @@ void DrawPhysicsTab()
     PhysicsProbeSettings& s = ProbeSettings();
 
     ImGui::SeparatorText("Probe");
+    static const char* shapeNames[] = {"Sphere", "Capsule"};
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::Combo("Shape", &s.shape, shapeNames, 2);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "A capsule topples and slides the way something body-shaped does,\n"
+            "which a sphere cannot. It is NOT a ragdoll and is not one step away\n"
+            "from being one: a ragdoll needs a joint per bone pair and a skeleton\n"
+            "hierarchy the engine does not carry. RTM stores a matrix per named\n"
+            "bone but as a FLAT LIST with no parent/child relation, so there is\n"
+            "nothing yet to connect. That table is PHY-040.\n");
+    }
+    if (s.shape == 1)
+    {
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Half length (m)", &s.halfLength, 0.05f, 3.0f, "%.2f");
+        ImGui::SameLine();
+        ImGui::TextDisabled("total %.2f m", 2.0f * (s.halfLength + s.radius));
+    }
     ImGui::SetNextItemWidth(200.0f);
     ImGui::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(200.0f);

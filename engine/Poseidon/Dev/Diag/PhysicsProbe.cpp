@@ -106,6 +106,8 @@ void SpawnPhysicsProbe(float throwSpeed)
     def.friction = s_settings.friction;
     def.restitution = s_settings.restitution;
     def.rollingResistance = s_settings.rollingResistance;
+    def.shape = s_settings.shape == 1 ? Physics::ProbeShape::Capsule : Physics::ProbeShape::Sphere;
+    def.halfLength = s_settings.halfLength;
 
     const Physics::BodyId id = world.SpawnSphereProbe(def);
     LOG_WARN(World, "PHYSPROBE: spawn r={} m={} kg at ({:.2f} {:.2f} {:.2f}) v={:.1f} -> {}", def.radius, def.mass,
@@ -170,6 +172,10 @@ void AutoDropPhysicsProbes()
     // POSEIDON_PHYSICS_PROBE_RADIUS overrides the slider for harness runs. A
     // 0.2 m ball is the realistic default and is also invisible in waist-high
     // grass from ten metres, which is not a useful thing to photograph.
+    if (const char* sh = std::getenv("POSEIDON_PHYSICS_PROBE_SHAPE"))
+    {
+        s_settings.shape = std::atoi(sh) == 1 ? 1 : 0;
+    }
     if (const char* r = std::getenv("POSEIDON_PHYSICS_PROBE_RADIUS"))
     {
         const float radius = static_cast<float>(std::atof(r));
@@ -225,6 +231,27 @@ void DrawPhysicsProbes()
     const PackedColor color = PackedColor(0xff40e0ff);
     for (const Physics::ProbeSample& sample : samples)
     {
+        const float axisLen = sample.axis.Size();
+        if (axisLen > 1e-4f)
+        {
+            // Capsule: a ring at each hemisphere centre plus four rails between
+            // them. The rails are what make the tumble readable -- two rings alone
+            // could be any two spheres.
+            const Vector3 axis = sample.axis / axisLen;
+            Vector3 a = fabs(axis[1]) < 0.9f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
+            a = (a - axis * (a * axis));
+            a = a / a.Size();
+            const Vector3 b = axis.CrossProduct(a);
+            const Vector3 e1 = sample.position - sample.axis;
+            const Vector3 e2 = sample.position + sample.axis;
+            SubmitCircle(e1, sample.radius, a, b, color);
+            SubmitCircle(e2, sample.radius, a, b, color);
+            SubmitLine(e1 + a * sample.radius, e2 + a * sample.radius, color);
+            SubmitLine(e1 - a * sample.radius, e2 - a * sample.radius, color);
+            SubmitLine(e1 + b * sample.radius, e2 + b * sample.radius, color);
+            SubmitLine(e1 - b * sample.radius, e2 - b * sample.radius, color);
+            continue;
+        }
         SubmitCircle(sample.position, sample.radius, VForward, VAside, color);
         SubmitCircle(sample.position, sample.radius, VForward, VUp, color);
         SubmitCircle(sample.position, sample.radius, VAside, VUp, color);

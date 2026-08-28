@@ -77,8 +77,24 @@ struct PhysicsStats
 /// Geometry-LOD colliders -- and it is drawn from a probe-only readback rather
 /// than by giving gameplay a transform getter. That distinction is the PHY-010
 /// boundary and PHY-020 does not cross it.
+/// What the probe is. A capsule is NOT a ragdoll and is not called one: it is a
+/// single rigid body that happens to be body-shaped, so it topples and slides
+/// down a slope in a way a sphere cannot. A ragdoll needs a joint per bone pair
+/// and a skeleton hierarchy the engine does not carry (PHY-040).
+enum class ProbeShape
+{
+    Sphere,
+    Capsule,
+};
+
 struct SphereProbeDef
 {
+    ProbeShape shape = ProbeShape::Sphere;
+    /// Capsule only: distance from the centre to each hemisphere centre, so the
+    /// total length is 2 * halfLength + 2 * radius. 0.6 m with a 0.25 m radius is
+    /// roughly a person lying down.
+    float halfLength = 0.6f;
+
     Vector3 position;
     Vector3 velocity;
     float   radius = 0.2f;
@@ -99,6 +115,10 @@ struct ProbeSample
 {
     Vector3 position;
     float   radius = 0.0f;
+    /// Capsule axis in world space, scaled by the half length. Zero for a sphere.
+    /// Orientation is here only so the debug view can draw a capsule the way it
+    /// actually lies; it is still probe-only and still not a gameplay transform.
+    Vector3 axis;
 };
 
 /// World wind pushed onto probe shapes each step. Box3D 0.1.0 computes relative
