@@ -1,6 +1,8 @@
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/World/Entities/Vehicles/Ground/TankNetworkStabilization.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 namespace
@@ -43,6 +45,26 @@ struct QuarterTurnTransform
 TEST_CASE("world compiles", "[world]")
 {
     REQUIRE(sizeof(World) > 0);
+}
+
+TEST_CASE("fixed-step accumulator emits whole simulation ticks and preserves the render fraction", "[world][time]")
+{
+    Poseidon::FixedStepAccumulator accumulator(0.1, 8);
+
+    REQUIRE(accumulator.Advance(0.03) == 0);
+    REQUIRE(accumulator.Alpha() == Catch::Approx(0.3));
+    REQUIRE(accumulator.Advance(0.17) == 2);
+    REQUIRE(accumulator.Alpha() == Catch::Approx(0.0));
+}
+
+TEST_CASE("fixed-step accumulator bounds catch-up without retaining a simulation backlog", "[world][time]")
+{
+    Poseidon::FixedStepAccumulator accumulator(0.1, 3);
+
+    REQUIRE(accumulator.Advance(1.0) == 3);
+    REQUIRE(accumulator.Alpha() == Catch::Approx(0.0));
+    REQUIRE(accumulator.Advance(0.0) == 0);
+    REQUIRE(accumulator.Alpha() == Catch::Approx(0.0));
 }
 
 TEST_CASE("multiplayer chat shortcuts are suppressed while chat input is active", "[world][chat][network]")
