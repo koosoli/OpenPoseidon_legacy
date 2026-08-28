@@ -6030,6 +6030,42 @@ void DrawMainWindow()
     // once per frame is once per tab.
     Dev::DrawPanelSearch();
 
+    // Reset-all, beside the search because both act on the same set: every
+    // control the panel has drawn. Behind a confirmation, since a dev session can
+    // be an hour of tuning and there is no undo.
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset all"))
+    {
+        ImGui::OpenPopup("Reset dev settings?");
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Restores every setting to the value it had the first time its tab\n"
+            "was opened -- which IS the default, since nothing could have changed\n"
+            "it before it was ever shown.\n"
+            "\n"
+            "Only reaches controls a tab has actually drawn: one never opened this\n"
+            "session is unknown and untouched.");
+    }
+    if (ImGui::BeginPopupModal("Reset dev settings?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        ImGui::Text("Restore %d setting(s) to their defaults?", Dev::PanelKnownControlCount());
+        ImGui::TextDisabled("Only tabs opened this session are known. There is no undo.");
+        ImGui::Separator();
+        if (ImGui::Button("Reset"))
+        {
+            Dev::ResetPanelSettings();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel"))
+        {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     if (ImGui::BeginTabBar("DevPanelTabs"))
     {
         if (Dev::PanelTabItem("Zeus"))

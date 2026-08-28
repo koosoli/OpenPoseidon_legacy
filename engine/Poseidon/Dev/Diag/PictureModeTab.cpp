@@ -20,6 +20,8 @@
 
 #include <imgui.h>
 
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
+
 namespace Poseidon::Dev
 {
 namespace
@@ -45,7 +47,7 @@ void DrawDepthOfFieldSection()
 
     ImGui::TextDisabled("Ctrl+click any slider to type an exact value.");
 
-    changed |= ImGui::Checkbox("Enable depth of field", &dof.enabled);
+    changed |= Dev::Checkbox("Enable depth of field", &dof.enabled);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("OFF costs nothing at all -- the renderer does not create the\n"
@@ -58,7 +60,7 @@ void DrawDepthOfFieldSection()
     ImGui::BeginDisabled(!dof.enabled);
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Focus distance (m)", &dof.focusDistance, 0.5f, 500.0f, "%.1f",
+    changed |= Dev::SliderFloat("Focus distance (m)", &dof.focusDistance, 0.5f, 500.0f, "%.1f",
                                   ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())
     {
@@ -67,7 +69,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Sharp band (+/- m)", &dof.focusRange, 0.0f, 100.0f, "%.1f",
+    changed |= Dev::SliderFloat("Sharp band (+/- m)", &dof.focusRange, 0.0f, 100.0f, "%.1f",
                                   ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())
     {
@@ -77,7 +79,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Max blur (px)", &dof.maxBlurPixels, 0.0f, 128.0f, "%.0f");
+    changed |= Dev::SliderFloat("Max blur (px)", &dof.maxBlurPixels, 0.0f, 128.0f, "%.0f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Widest circle of confusion, in pixels at 1080p. The value is\n"
@@ -89,9 +91,9 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Background amount", &dof.backgroundScale, 0.0f, 2.0f, "%.2f");
+    changed |= Dev::SliderFloat("Background amount", &dof.backgroundScale, 0.0f, 2.0f, "%.2f");
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Foreground amount", &dof.foregroundScale, 0.0f, 2.0f, "%.2f");
+    changed |= Dev::SliderFloat("Foreground amount", &dof.foregroundScale, 0.0f, 2.0f, "%.2f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Behind and in front of the focal plane, separately.\n"
@@ -102,7 +104,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Transition (1/m)", &dof.transition, 0.002f, 1.0f, "%.3f",
+    changed |= Dev::SliderFloat("Transition (1/m)", &dof.transition, 0.002f, 1.0f, "%.3f",
                                   ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())
     {
@@ -114,7 +116,7 @@ void DrawDepthOfFieldSection()
     ImGui::SeparatorText("Bokeh");
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Highlight boost", &dof.bokehBoost, 0.0f, 12.0f, "%.1f");
+    changed |= Dev::SliderFloat("Highlight boost", &dof.bokehBoost, 0.0f, 12.0f, "%.1f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -132,7 +134,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Highlight threshold", &dof.bokehThreshold, 0.0f, 4.0f, "%.2f");
+    changed |= Dev::SliderFloat("Highlight threshold", &dof.bokehThreshold, 0.0f, 4.0f, "%.2f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -142,7 +144,7 @@ void DrawDepthOfFieldSection()
     }
 
     ImGui::SetNextItemWidth(220.0f);
-    changed |= ImGui::SliderFloat("Aperture blades", &dof.apertureBlades, 0.0f, 9.0f, "%.0f");
+    changed |= Dev::SliderFloat("Aperture blades", &dof.apertureBlades, 0.0f, 9.0f, "%.0f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -169,7 +171,7 @@ void DrawDepthOfFieldSection()
         }
     }
     ImGui::SetNextItemWidth(220.0f);
-    if (ImGui::Combo("Quality", &qualityIndex, qualityNames, 4))
+    if (Dev::Combo("Quality", &qualityIndex, qualityNames, 4))
     {
         dof.sampleCount = qualityCounts[qualityIndex];
         changed = true;
@@ -250,7 +252,7 @@ void DrawCaptureSection()
     const bool available = DiagPauseAvailable();
     bool paused = DiagPauseActive();
     ImGui::BeginDisabled(!available);
-    if (ImGui::Checkbox("Pause simulation (Ctrl+P)", &paused))
+    if (Dev::Checkbox("Pause simulation (Ctrl+P)", &paused))
     {
         SetDiagPause(paused);
     }

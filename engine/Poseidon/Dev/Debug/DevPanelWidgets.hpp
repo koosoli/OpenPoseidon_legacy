@@ -30,6 +30,23 @@ namespace Poseidon::Dev
 /// itself for a scripted screenshot of a filtered tab.
 bool PanelSearchPreseeded();
 
+/// Restores every control the panel has drawn to the value it had the FIRST time
+/// it was drawn.
+///
+/// That first value is the default by construction: nothing can have changed it
+/// before it was ever shown. So no table of defaults has to be written or kept in
+/// step -- which matters, because such a table is exactly the thing that rots
+/// silently the first time somebody edits an initialiser and forgets it.
+///
+/// Only reaches controls that go through the wrappers below. A tab calling ImGui
+/// directly is invisible to this AND to the search box, and the two failures look
+/// nothing alike from outside: one is a dead reset, the other an empty search.
+void ResetPanelSettings();
+
+/// How many controls the reset would touch. Zero means no tab has been opened
+/// yet -- a control is only known once it has been drawn once.
+int PanelKnownControlCount();
+
 /// Draw the search box. Call ONCE per frame, above the tab bar.
 ///
 /// This also resets the per-frame attribution state, which is why it must come

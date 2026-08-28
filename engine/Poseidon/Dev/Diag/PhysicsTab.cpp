@@ -19,6 +19,8 @@
 
 #include <imgui.h>
 
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
+
 namespace Poseidon::Dev
 {
 
@@ -112,7 +114,7 @@ void DrawPhysicsTab()
 
     ImGui::Spacing();
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderInt("Terrain detail", &TerrainSubdivision(), 1, 16, "%dx");
+    Dev::SliderInt("Terrain detail", &TerrainSubdivision(), 1, 16, "%dx");
     ImGui::SameLine();
     ImGui::TextDisabled("%.2f m samples", TerrainSampleSpacing());
     if (ImGui::IsItemHovered())
@@ -153,7 +155,7 @@ void DrawPhysicsTab()
     ImGui::SeparatorText("Probe");
     static const char* shapeNames[] = {"Sphere", "Capsule", "Box", "Cylinder", "Model"};
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::Combo("Shape", &s.shape, shapeNames, 5);
+    Dev::Combo("Shape", &s.shape, shapeNames, 5);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -167,18 +169,18 @@ void DrawPhysicsTab()
     if (s.shape == 1 || s.shape == 3)
     {
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Half length (m)", &s.halfLength, 0.05f, 3.0f, "%.2f");
+        Dev::SliderFloat("Half length (m)", &s.halfLength, 0.05f, 3.0f, "%.2f");
         ImGui::SameLine();
         ImGui::TextDisabled("total %.2f m", 2.0f * (s.halfLength + (s.shape == 1 ? s.radius : 0.0f)));
     }
     if (s.shape == 2)
     {
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Half width X", &s.boxX, 0.02f, 3.0f, "%.2f");
+        Dev::SliderFloat("Half width X", &s.boxX, 0.02f, 3.0f, "%.2f");
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Half height Y", &s.boxY, 0.02f, 3.0f, "%.2f");
+        Dev::SliderFloat("Half height Y", &s.boxY, 0.02f, 3.0f, "%.2f");
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Half depth Z", &s.boxZ, 0.02f, 3.0f, "%.2f");
+        Dev::SliderFloat("Half depth Z", &s.boxZ, 0.02f, 3.0f, "%.2f");
         if (ImGui::Button("Domino"))
         {
             s.boxX = 0.03f;
@@ -202,24 +204,24 @@ void DrawPhysicsTab()
         ImGui::TextDisabled("starting points");
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    Dev::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Mass (kg)", &s.mass, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+    Dev::SliderFloat("Mass (kg)", &s.mass, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Kilograms, converted to Box3D's density through the sphere's own\n"
                           "volume. A slider in kg/m3 would be exact and useless to picture.");
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Friction", &s.friction, 0.0f, 2.0f, "%.2f");
+    Dev::SliderFloat("Friction", &s.friction, 0.0f, 2.0f, "%.2f");
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Restitution", &s.restitution, 0.0f, 1.0f, "%.2f");
+    Dev::SliderFloat("Restitution", &s.restitution, 0.0f, 1.0f, "%.2f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Bounciness. 0 = dead drop, 1 = returns to its release height.");
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Rolling resistance", &s.rollingResistance, 0.0f, 0.5f, "%.3f");
+    Dev::SliderFloat("Rolling resistance", &s.rollingResistance, 0.0f, 0.5f, "%.3f");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -228,7 +230,7 @@ void DrawPhysicsTab()
                           "This is the control that actually lets a ball settle.\n");
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Throw speed (m/s)", &s.throwSpeed, 1.0f, 60.0f, "%.1f");
+    Dev::SliderFloat("Throw speed (m/s)", &s.throwSpeed, 1.0f, 60.0f, "%.1f");
 
     ImGui::Spacing();
     if (ImGui::Button("Drop"))
@@ -246,8 +248,8 @@ void DrawPhysicsTab()
         ClearPhysicsProbes();
     }
     ImGui::SameLine();
-    ImGui::Checkbox("Draw", &s.draw);
-    ImGui::Checkbox("Solid", &s.drawSolid);
+    Dev::Checkbox("Draw", &s.draw);
+    Dev::Checkbox("Solid", &s.drawSolid);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(160.0f);
     ImGui::ColorEdit3("Colour", s.solidColor, ImGuiColorEditFlags_NoInputs);
@@ -258,14 +260,14 @@ void DrawPhysicsTab()
             "tinting a jeep red would hide the thing you spawned it to see.");
     }
     ImGui::SameLine();
-    ImGui::Checkbox("Outline", &s.drawOutline);
+    Dev::Checkbox("Outline", &s.drawOutline);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Wireframe on top of the solid. Useful when a probe is resting\n"
                           "against scenery of a similar colour.");
     }
     PollHotkeys(s);
-    ImGui::Checkbox("Hotkeys", &s.hotkeys);
+    Dev::Checkbox("Hotkeys", &s.hotkeys);
     ImGui::SameLine();
     ImGui::TextDisabled("Ctrl+J place | Ctrl+K drop | Ctrl+L throw");
     if (ImGui::IsItemHovered())
@@ -283,7 +285,7 @@ void DrawPhysicsTab()
     {
         static int towerHeight = 12;
         ImGui::SetNextItemWidth(140.0f);
-        ImGui::SliderInt("Tower bricks", &towerHeight, 2, 60);
+        Dev::SliderInt("Tower bricks", &towerHeight, 2, 60);
         ImGui::SameLine();
         if (ImGui::Button("Build tower"))
         {
@@ -297,7 +299,7 @@ void DrawPhysicsTab()
                               "apart at a touch.\n");
         }
     }
-    ImGui::Checkbox("Place on the ground under the crosshair", &s.placeOnGround);
+    Dev::Checkbox("Place on the ground under the crosshair", &s.placeOnGround);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -314,7 +316,7 @@ void DrawPhysicsTab()
     ImGui::SetNextItemWidth(200.0f);
     ImGui::InputText("Model name contains", s.modelFilter, sizeof(s.modelFilter));
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Model mass (kg)", &s.modelMass, 10.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    Dev::SliderFloat("Model mass (kg)", &s.modelMass, 10.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
     ImGui::TextDisabled("Pick Shape = Model, then Drop or Throw. e.g. jeep, uaz, t72");
     if (ImGui::IsItemHovered())
     {
@@ -332,7 +334,7 @@ void DrawPhysicsTab()
 
     ImGui::SeparatorText("Interaction");
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Hit impulse scale", &s.hitImpulseScale, 0.0f, 500.0f, "%.0fx");
+    Dev::SliderFloat("Hit impulse scale", &s.hitImpulseScale, 0.0f, 500.0f, "%.0fx");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -347,7 +349,7 @@ void DrawPhysicsTab()
             "\n"
             "Legacy collision and damage are untouched.\n");
     }
-    ImGui::Checkbox("Player can push probes", &s.playerProxy);
+    Dev::Checkbox("Player can push probes", &s.playerProxy);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -358,14 +360,14 @@ void DrawPhysicsTab()
     if (s.playerProxy)
     {
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Player radius", &s.playerRadius, 0.1f, 1.5f, "%.2f");
+        Dev::SliderFloat("Player radius", &s.playerRadius, 0.1f, 1.5f, "%.2f");
         ImGui::SetNextItemWidth(200.0f);
-        ImGui::SliderFloat("Player height", &s.playerHeight, 0.5f, 3.0f, "%.2f");
+        Dev::SliderFloat("Player height", &s.playerHeight, 0.5f, 3.0f, "%.2f");
     }
 
     ImGui::SeparatorText("Ray audit (PHY-030)");
     bool audit = RayAuditEnabled();
-    if (ImGui::Checkbox("Compare physics rays with the 2001 path", &audit))
+    if (Dev::Checkbox("Compare physics rays with the 2001 path", &audit))
     {
         SetRayAudit(audit);
     }
@@ -412,7 +414,7 @@ void DrawPhysicsTab()
 
     ImGui::SeparatorText("Bullet penetration");
     bool pen = Penetration::Enabled();
-    if (ImGui::Checkbox("Rounds penetrate materials", &pen))
+    if (Dev::Checkbox("Rounds penetrate materials", &pen))
     {
         Penetration::SetEnabled(pen);
     }
@@ -430,7 +432,7 @@ void DrawPhysicsTab()
     ImGui::BeginDisabled(!pen);
     float scale = Penetration::ResistanceScale();
     ImGui::SetNextItemWidth(200.0f);
-    if (ImGui::SliderFloat("Material resistance", &scale, 0.05f, 4.0f, "%.2fx",
+    if (Dev::SliderFloat("Material resistance", &scale, 0.05f, 4.0f, "%.2fx",
                            ImGuiSliderFlags_Logarithmic))
     {
         Penetration::SetResistanceScale(scale);
@@ -446,7 +448,7 @@ void DrawPhysicsTab()
     ImGui::EndDisabled();
 
     ImGui::SeparatorText("Wind");
-    ImGui::Checkbox("Apply world wind", &s.applyWind);
+    Dev::Checkbox("Apply world wind", &s.applyWind);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Routes Poseidon's own weather wind into the probe through\n"
@@ -456,7 +458,7 @@ void DrawPhysicsTab()
     }
     ImGui::BeginDisabled(!s.applyWind);
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Wind scale", &s.windScale, 0.0f, 50.0f, "%.1fx");
+    Dev::SliderFloat("Wind scale", &s.windScale, 0.0f, 50.0f, "%.1fx");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("World wind is a few m/s and barely moves a half-kilo ball.\n"
@@ -464,7 +466,7 @@ void DrawPhysicsTab()
                           "back to 1 for anything you want to believe.");
     }
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Drag", &s.windDrag, 0.0f, 8.0f, "%.2f");
+    Dev::SliderFloat("Drag", &s.windDrag, 0.0f, 8.0f, "%.2f");
     ImGui::EndDisabled();
 
     if (live)

@@ -16,6 +16,8 @@
 
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 
+#include <map>
+
 namespace Poseidon::Dev
 {
 namespace
@@ -177,32 +179,109 @@ void DrawPanelSearch()
     ImGui::Separator();
 }
 
+namespace
+{
+
+/// One remembered control: where its value lives, and what it was when first
+/// seen. Keyed by ADDRESS rather than label -- two tabs may reasonably both have
+/// a "Scale", and the address is what the reset has to write to anyway.
+struct KnownControl
+{
+    enum class Kind
+    {
+        Float,
+        Int,
+        Bool
+    };
+    Kind  kind;
+    float asFloat = 0.0f;
+    int   asInt = 0;
+    bool  asBool = false;
+};
+
+std::map<void*, KnownControl> g_known;
+
+/// Records a control the first time it is drawn. Returns nothing: the caller has
+/// already drawn it, and this only has to remember where it started.
+void Remember(float* v)
+{
+    if (v && g_known.find(v) == g_known.end())
+    {
+        KnownControl c;
+        c.kind = KnownControl::Kind::Float;
+        c.asFloat = *v;
+        g_known.emplace(v, c);
+    }
+}
+void Remember(int* v)
+{
+    if (v && g_known.find(v) == g_known.end())
+    {
+        KnownControl c;
+        c.kind = KnownControl::Kind::Int;
+        c.asInt = *v;
+        g_known.emplace(v, c);
+    }
+}
+void Remember(bool* v)
+{
+    if (v && g_known.find(v) == g_known.end())
+    {
+        KnownControl c;
+        c.kind = KnownControl::Kind::Bool;
+        c.asBool = *v;
+        g_known.emplace(v, c);
+    }
+}
+
+} // namespace
+
+void ResetPanelSettings()
+{
+    for (auto& [address, control] : g_known)
+    {
+        switch (control.kind)
+        {
+            case KnownControl::Kind::Float: *static_cast<float*>(address) = control.asFloat; break;
+            case KnownControl::Kind::Int: *static_cast<int*>(address) = control.asInt; break;
+            case KnownControl::Kind::Bool: *static_cast<bool*>(address) = control.asBool; break;
+        }
+    }
+}
+
+int PanelKnownControlCount() { return static_cast<int>(g_known.size()); }
+
 bool SliderFloat(const char* label, float* v, float min, float max, const char* format, ImGuiSliderFlags flags)
 {
+    Remember(v);
     g_lastShown = Match(label);
     return g_lastShown && ImGui::SliderFloat(label, v, min, max, format, flags);
 }
 
 bool SliderInt(const char* label, int* v, int min, int max, const char* format, ImGuiSliderFlags flags)
 {
+    Remember(v);
     g_lastShown = Match(label);
     return g_lastShown && ImGui::SliderInt(label, v, min, max, format, flags);
 }
 
 bool Checkbox(const char* label, bool* v)
 {
+    Remember(v);
     g_lastShown = Match(label);
     return g_lastShown && ImGui::Checkbox(label, v);
 }
 
 bool Combo(const char* label, int* currentItem, const char* const items[], int itemsCount, int popupMaxHeightInItems)
 {
+    Remember(currentItem);
     g_lastShown = Match(label);
     return g_lastShown && ImGui::Combo(label, currentItem, items, itemsCount, popupMaxHeightInItems);
 }
 
 bool Combo(const char* label, int* currentItem, const char* itemsSeparatedByZeros, int popupMaxHeightInItems)
 {
+    Remember(currentItem);
     g_lastShown = Match(label);
     return g_lastShown && ImGui::Combo(label, currentItem, itemsSeparatedByZeros, popupMaxHeightInItems);
 }

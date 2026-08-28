@@ -21,6 +21,8 @@
 
 #include <imgui.h>
 
+#include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
+
 namespace Poseidon::Dev
 {
 
@@ -133,7 +135,7 @@ void DrawFixedStepTab()
     ImGui::SeparatorText("Experimental");
 
     bool scripts = FixedStepScriptsEnabled();
-    if (ImGui::Checkbox("Run scripts in the fixed tick", &scripts))
+    if (Dev::Checkbox("Run scripts in the fixed tick", &scripts))
     {
         SetFixedStepScripts(scripts);
     }
