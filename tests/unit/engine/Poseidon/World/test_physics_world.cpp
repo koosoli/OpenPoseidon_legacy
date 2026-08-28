@@ -145,6 +145,70 @@ TEST_CASE("a heightfield is accepted and a degenerate one is not", "[physics]")
     backend->Destroy();
 }
 
+TEST_CASE("a destroy/create cycle does not reuse stale slots", "[physics]")
+{
+    // Regression: Destroy() cleared _slots but not _free, so the next Store()
+    // popped a stale index and indexed an empty vector. Silent memory corruption
+    // one mission reload away, and nothing in the earlier tests touched it because
+    // they never destroyed and recreated the same backend.
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+
+    const std::vector<Vector3> cube = UnitCube();
+    ConvexPiece                piece{cube.data(), static_cast<int>(cube.size())};
+
+    const BodyId first = backend->AddStaticBody(&piece, 1, Matrix4(MIdentity));
+    REQUIRE(first.IsValid());
+    backend->RemoveBody(first); // leaves a free slot behind
+
+    backend->Destroy();
+    REQUIRE(backend->Create());
+
+    // Counters must start from zero too, or two worlds accumulate into one report.
+    CHECK(backend->GetStats().bodies == 0);
+    CHECK(backend->GetStats().shapes == 0);
+    CHECK(backend->GetStats().hullFailures == 0);
+    CHECK_FALSE(backend->GetStats().terrainRegistered);
+
+    const BodyId afterCycle = backend->AddStaticBody(&piece, 1, Matrix4(MIdentity));
+    REQUIRE(afterCycle.IsValid());
+    CHECK(backend->GetStats().bodies == 1);
+
+    backend->Destroy();
+}
+
+TEST_CASE("terrain survives a replacement and a destroy", "[physics]")
+{
+    // b3CreateHeightFieldShape holds a REFERENCE to the height field for the
+    // lifetime of the shape, so the world must be destroyed before the field.
+    // This exercises both orders: replace-while-live, then destroy.
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+
+    constexpr int      N = 8;
+    std::vector<float> heights(N * N);
+    for (int i = 0; i < N * N; ++i)
+    {
+        heights[static_cast<std::size_t>(i)] = static_cast<float>(i % N) * 0.25f;
+    }
+
+    TerrainField field;
+    field.heights = heights.data();
+    field.width = N;
+    field.height = N;
+    field.cellSize = 50.0f;
+    field.originX = 0.0f;
+    field.originZ = 0.0f;
+
+    REQUIRE(backend->SetTerrain(field));
+    REQUIRE(backend->SetTerrain(field)); // replace the live one
+    backend->Step(1.0f / 60.0f);
+    CHECK(backend->GetStats().terrainRegistered);
+
+    backend->Destroy();
+    CHECK_FALSE(backend->GetStats().terrainRegistered);
+}
+
 TEST_CASE("a world with no backend answers safely", "[physics]")
 {
     // PhysicsWorld must be usable before Create() and after Destroy(): the engine

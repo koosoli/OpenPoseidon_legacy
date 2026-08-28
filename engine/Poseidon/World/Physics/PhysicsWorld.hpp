@@ -62,6 +62,8 @@ public:
     [[nodiscard]] const char* BackendName() const;
 
 private:
+    void ResetCounters();
+
     std::unique_ptr<PhysicsBackend> _backend;
 
     // Counted HERE and not in the backend, because these are facts about our

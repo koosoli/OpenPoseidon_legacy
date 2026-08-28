@@ -45,6 +45,7 @@ bool PhysicsWorld::Create()
         _backend.reset();
         return false;
     }
+    ResetCounters();
     return true;
 }
 
@@ -55,6 +56,17 @@ void PhysicsWorld::Destroy()
         _backend->Destroy();
         _backend.reset();
     }
+    ResetCounters();
+}
+
+void PhysicsWorld::ResetCounters()
+{
+    // The world is process-wide and long-lived, so without this two missions
+    // accumulate into one report and the corpus numbers stop meaning anything.
+    // Exactly the trap the fixed-step accumulator had, one layer up.
+    _modelsRegistered = 0;
+    _modelsWithoutGeometry = 0;
+    _degenerateComponents = 0;
 }
 
 void PhysicsWorld::Step(float deltaSeconds)
@@ -143,8 +155,21 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
         }
 
         const int count = static_cast<int>(points.size()) - begin;
-        const bool flat = (hi[0] - lo[0]) < MinComponentExtent && (hi[1] - lo[1]) < MinComponentExtent &&
-                          (hi[2] - lo[2]) < MinComponentExtent;
+        // SMALLEST extent, not all three. The previous form required every axis to
+        // be tiny, which only catches a point -- a wall-sized sheet lying in a
+        // plane sailed through it and then failed in the backend, so a data problem
+        // was reported as a library refusal.
+        //
+        // This catches a point, an axis-aligned line and an axis-aligned sheet,
+        // which is what authored Geometry components actually degenerate into.
+        // A set of points coplanar in an OBLIQUE plane still has extent on all
+        // three AABB axes and passes; Box3D remains the final validator for those
+        // and they land in hullFailures. Detecting them properly needs a rank or
+        // PCA pass over every component of every model, which is not worth paying
+        // for a diagnostic label.
+        const float smallestExtent =
+            std::min({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+        const bool flat = smallestExtent < MinComponentExtent;
         if (count < MinComponentPoints || flat)
         {
             points.resize(static_cast<std::size_t>(begin));

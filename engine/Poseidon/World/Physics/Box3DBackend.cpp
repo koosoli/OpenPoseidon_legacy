@@ -97,25 +97,42 @@ public:
 
     void Destroy() override
     {
-        // Hulls are ours; b3DestroyWorld does not own them. Bodies and shapes go
-        // with the world.
-        for (b3HullData* hull : _hulls)
+        // ORDER MATTERS, and only for the height field. b3CreateHeightFieldShape
+        // carries an explicit "@warning this holds reference to the input height
+        // field which must remain valid for the lifetime of this shape", so the
+        // world -- which owns the shape -- has to go FIRST. This was the wrong way
+        // round when the file was written.
+        //
+        // Hulls need no such care: b3CreateHullShape copies. Measured rather than
+        // assumed, because the headers are ambiguous (mesh and height field carry
+        // the reference warning, the plain hull variant does not, and the "world
+        // hull database" note belongs to the TRANSFORMED variant). A cube hull was
+        // built, its shape created, the source hull destroyed, thirty-two further
+        // hulls allocated and freed over the same region, and a ray still hit the
+        // shape afterwards while a control ray still missed. So hulls are freed at
+        // creation time now and none are retained here.
+        if (b3World_IsValid(_world))
         {
-            b3DestroyHull(hull);
+            b3DestroyWorld(_world);
         }
-        _hulls.clear();
+        _world = b3_nullWorldId;
 
         if (_heightField)
         {
             b3DestroyHeightField(_heightField);
             _heightField = nullptr;
         }
-        if (b3World_IsValid(_world))
-        {
-            b3DestroyWorld(_world);
-        }
-        _world = b3_nullWorldId;
+
+        // Every piece of slot state, not just the slots. Leaving _free populated
+        // while _slots is emptied means the next Store() pops a stale index and
+        // indexes an empty vector -- a Destroy/Create cycle away from memory
+        // corruption. Same shape of lifecycle bug as the accumulator static that
+        // outlived its World.
         _slots.clear();
+        _free.clear();
+        _terrainBody = b3_nullBodyId;
+        _terrainBodyValid = false;
+        _heights.clear();
         _shapeCount = 0;
         _hullFailures = 0;
         _terrainWidth = _terrainHeight = 0;
@@ -169,8 +186,20 @@ public:
                 ++_hullFailures;
                 continue;
             }
-            b3CreateHullShape(body, &shapeDef, hull);
-            _hulls.push_back(hull);
+            const b3ShapeId shape = b3CreateHullShape(body, &shapeDef, hull);
+            // The shape owns a copy (see Destroy), so the source hull is temporary.
+            // Retaining one per Geometry component would hold a second copy of every
+            // collider on the map for as long as the world lives.
+            b3DestroyHull(hull);
+
+            // b3CreateHullShape can still refuse -- a hull that constructed may be
+            // unusable as a collider. Counting before checking would report shapes
+            // that do not exist, which is the same lie as skipping a failure.
+            if (!b3Shape_IsValid(shape))
+            {
+                ++_hullFailures;
+                continue;
+            }
             ++_shapeCount;
             ++attached;
         }
@@ -320,7 +349,6 @@ private:
     b3WorldId                _world = b3_nullWorldId;
     std::vector<Slot>        _slots;
     std::vector<std::uint32_t> _free;
-    std::vector<b3HullData*> _hulls;
     std::vector<b3Vec3>      _scratch;
 
     b3HeightFieldData* _heightField = nullptr;
