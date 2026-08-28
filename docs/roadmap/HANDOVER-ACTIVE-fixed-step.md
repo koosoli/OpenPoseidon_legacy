@@ -78,6 +78,50 @@ fences, wrecks -- is what would harden it.
 5. **PHY-050 (real vehicle ownership)** remains the unanswered question. The
    separate-instance probe sidesteps it; it does not solve it.
 
+## LICENCE — read before porting anything else from the fork
+
+**`inspiration/otherfork` is AGPL-3.0-or-later.** 236 of its engine files carry
+that SPDX header; ~50 are MIT. Our project is **GPL-3.0-or-later**. These are not
+the same licence.
+
+GPLv3 §13 permits COMBINING with AGPL code, and the AGPL portion then keeps its
+own terms including the network clause. What is not permitted is copying AGPL
+source into a file and labelling that file GPL-3.0-or-later.
+
+**Open question, and it is ours:** `engine/Poseidon/World/Entities/Weapons/Ballistics.hpp`
+carries `SPDX-License-Identifier: GPL-3.0-or-later` and its solver is described in
+its own commit as ported from this fork. Nobody has checked how literal that port
+was. The drag equations themselves are standard exterior ballistics and not
+anyone's to license; a copied structure would be. Someone should diff the two and
+either correct the header or restate the file as an independent implementation.
+
+Nothing further should be taken from that tree until this is settled.
+
+## Material bullet-passthrough — worth taking, but it is NOT a penetration model
+
+The fork has `intersect::Material` with a per-material **boolean**
+`bulletPassthrough`, an impact decal per material, and a transparency class,
+driven from config:
+
+    class glass { bulletDecal="BulletHoleGlass"; bulletPassthrough=1; transparency="alpha"; };
+
+`Shot::ProcessCollision` loops: on hitting a passthrough material it records the
+section handle, skips it and re-tests from the hit point, leaving that material's
+decal. There is no energy loss, no thickness, no calibre dependence -- the author's
+own comment in that loop reads `// TODO add penetratino depth`.
+
+So it is "bullets ignore glass and leave a glass hole", not "different materials
+resist differently".
+
+**What is worth taking is the SHAPE, not the data model:** the ignore-section loop
+is exactly right, and small. **We are positioned to do better than the original.**
+PHY-030 already casts a physics ray over each projectile segment; entry and exit
+points against the same collider give a THICKNESS, and thickness plus the drag
+model already in `Ballistics.cpp` gives an energy loss. That is a real penetration
+model rather than a boolean, and the fork does not have it.
+
+Blocked on the licence question above.
+
 ## Traps worth not rediscovering
 
 * `Landscape::GetHeight(z, x)` is NOT the world surface — it read −59 where
