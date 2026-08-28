@@ -1437,10 +1437,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
         GEngine->InitDraw(clear, color);
     }
 
-    bool doSim = IsSimulationEnabled();
-
 #if BACKGROUND_AI
-    if (doSim)
+    if (IsSimulationEnabled())
     {
         _secThread->StartSecondary(DoBackgroundSimulate, &context);
     }
@@ -1767,6 +1765,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseHud);
 
+    bool updateVisibility = true;
+#if _ENABLE_CHEATS
+    static bool disableVis = false;
+    if (input.GetCheat2ToDo(SDL_SCANCODE_Y))
+    {
+        disableVis = !disableVis;
+        Foundation::GlobalShowMessage(500, "VisTests %s", disableVis ? "Off" : "On");
+    }
+    updateVisibility = !disableVis;
+#endif
+
     // Run gameplay-owned vehicle and AI state at a stable cadence while the
     // presentation work above continues at the display's frame rate.  The
     // accumulator is reset while paused so an idle menu cannot create a catch-up
@@ -1779,7 +1788,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
         const std::size_t steps = simulationSteps.Advance(deltaT);
         for (std::size_t step = 0; step < steps; ++step)
         {
-            StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle);
+            StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
         }
     }
     else
@@ -1811,13 +1820,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
     Poseidon::gPerfDrawCalls = 0;
 
 #if _ENABLE_CHEATS
-    static bool disableVis = false;
-    if (input.GetCheat2ToDo(SDL_SCANCODE_Y))
-    {
-        disableVis = !disableVis;
-        Foundation::GlobalShowMessage(500, "VisTests %s", disableVis ? "Off" : "On");
-    }
-
 #ifndef _DEBUG
 #define REGULAR_FOOTPRINT 1
 #endif
@@ -1845,18 +1847,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #endif
 
 #endif
-
-    if (doSim
-#if _ENABLE_CHEATS
-        && !disableVis
-#endif
-    )
-    {
-        GetSensorList()->SmartUpdateAll();
-    }
 }
 
-void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle)
+void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, bool updateVisibility)
 {
 #if BACKGROUND_AI
     _secThread->FinishSecondary();
@@ -1864,6 +1857,11 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
     PerformAI(deltaT, noAccDeltaT);
 #endif
     SimulateAllVehicles(deltaT, noAccDeltaT, cameraVehicle);
+
+    if (updateVisibility)
+    {
+        GetSensorList()->SmartUpdateAll();
+    }
 }
 
 void World::HandleVoiceChatShortcuts()
