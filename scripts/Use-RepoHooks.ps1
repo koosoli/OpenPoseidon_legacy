@@ -21,10 +21,16 @@
 
 .PARAMETER Remote
     Which remote the trunk should track. Defaults to `safety`, the private mirror
-    that carries the consolidated branch.
+    that carries the trunk.
 
 .PARAMETER Trunk
-    The branch treated as trunk. Defaults to `feat/consolidated`.
+    The branch treated as trunk. Defaults to `consolidated-v2`.
+
+    TRUNK MOVED ON 2026-08-28. It was `feat/consolidated`; that branch is frozen
+    at a1a39df0 and is 21 commits behind. Its archive copy is
+    `archive/consolidated-v1-20260828`. `feat/consolidated` still exists on the
+    mirror and was deliberately NOT deleted, so do not treat its presence as a
+    sign that it is live -- nothing should be committed there.
 
 .EXAMPLE
     .\scripts\Use-RepoHooks.ps1
@@ -32,7 +38,7 @@
 [CmdletBinding()]
 param(
     [string]$Remote = 'safety',
-    [string]$Trunk = 'feat/consolidated'
+    [string]$Trunk = 'consolidated-v2'
 )
 
 # NOT 'Stop'. Under it, a native command writing anything to stderr becomes a
