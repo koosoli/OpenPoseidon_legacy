@@ -2,6 +2,7 @@
   "name": "cwr",
   "version": "1.0",
   "dependencies": [
+    "box3d",
     "catch2",
     "cjson",
     { "name": "curl", "features": ["ssl"] },

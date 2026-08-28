@@ -1,0 +1,30 @@
+{
+  "$comment": [
+    "Routes ONE package to a newer vcpkg than our pinned builtin-baseline, and leaves every",
+    "other dependency exactly where it was.",
+    "",
+    "Why this exists: box3d entered vcpkg on 2026-07-03, and vcpkg.json's builtin-baseline",
+    "(170bd3bf...) is pinned to 2026-06-12, so `\"box3d\"` in the manifest fails with",
+    "'the baseline does not contain an entry for port box3d'. The obvious fix -- bumping",
+    "builtin-baseline -- would move sdl3, imgui, curl, spdlog and everything else three weeks",
+    "at once, in every worktree, for a reason that has nothing to do with physics. A package-",
+    "scoped git registry moves only what is named in `packages`.",
+    "",
+    "There is deliberately NO default-registry here: vcpkg treats declaring one alongside",
+    "vcpkg.json's builtin-baseline as an error, and the baseline is the more discoverable of",
+    "the two places to state it.",
+    "",
+    "The baseline below is an exact upstream commit, so a fresh clone resolves the same",
+    "box3d 0.1.0 this was verified against."
+  ],
+  "registries": [
+    {
+      "kind": "git",
+      "repository": "https://github.com/microsoft/vcpkg",
+      "baseline": "d87340acc46bdeda386037b38aca30136e667e47",
+      "packages": [
+        "box3d"
+      ]
+    }
+  ]
+}
