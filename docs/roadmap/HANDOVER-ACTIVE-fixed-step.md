@@ -37,8 +37,21 @@ slightly too large or too small shows there first, as a ball that floats above
 the treads or falls through them. This is owner ground truth from play, which
 outranks any capture I ran.
 
-**PHY-030.** Every projectile segment is asked of both collision systems and the
-disagreements are counted. Replaces nothing.
+**PHY-030, first measurement (owner, live fire).**
+
+    1793 segments | agree hit 72 | agree miss 1698
+    legacy hit, physics missed:  0
+    physics hit, legacy missed: 23
+
+**Zero legacy-only.** Not one case where the game collided with geometry the
+physics world does not have. The 23 the other way are expected: the physics world
+holds things the 2001 path cannot see -- the dev probes, which are deliberately
+absent from it, and the terrain, which the projectile path tests separately.
+
+Read the 72 HITS, not the 1793 segments: the 1698 mutual misses are air and prove
+only that neither system sees anything there. 72 hits is good evidence and not
+proof across 82,381 objects. Firing at varied object classes -- trees, rocks,
+fences, wrecks -- is what would harden it.
 
 ## What is open
 
