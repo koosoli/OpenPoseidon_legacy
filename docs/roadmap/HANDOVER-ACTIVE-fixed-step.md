@@ -40,6 +40,7 @@ All commits are pushed. Nothing is local-only.
 | `f21e6cba` | accumulator becomes a `World` member; Dev counters reset on world load |
 | `4a3bf51b` | fixed-step scripts as an **opt-in, off by default** |
 | `65e9bbba` | box3d reachable via a package-scoped vcpkg registry (plumbing only) |
+| `15f1ee1d` | **PHY-010**: physics interface, Box3D backend, Geometry-LOD bridge, 6 tests |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -161,38 +162,41 @@ let rendering run at a rate independent of simulation — but sessions 1-4 all
 measured the simulation as the FASTER clock, so there is no render rate to
 decouple toward. Do this when it buys something, not for tidiness.
 
-### 5. PHY-010 — UNBLOCKED. Dependency is in (`65e9bbba`); binding not started.
+### 5. PHY-010 — layer built (`15f1ee1d`); NOT yet connected to a world
 
-`box3d` 0.1.0 now resolves and builds. **The baseline was NOT bumped.**
+Three files under `engine/Poseidon/World/Physics/`:
 
-An earlier version of this document said a baseline bump was "the only [option]
-that is correct for every clone". That was wrong, and a reviewer caught it. Two
-other options are equally reproducible, and one is cleaner:
+* `PhysicsTypes.hpp` / `PhysicsWorld.hpp|cpp` — engine-facing. Register a model,
+  move it, forget it. Handles carry a generation counter.
+* `PhysicsBackend.hpp` — the replaceable seam.
+* `Box3DBackend.cpp` — the only translation unit that includes box3d, linked
+  `PRIVATE`. **Verified: box3d appears in no engine header** (one comment aside),
+  which is the property that keeps a Jolt swap a file rather than a project.
 
-* **Chosen:** `vcpkg-configuration.json` adds a git registry pinned to upstream
-  `d87340acc46bdeda386037b38aca30136e667e47`, scoped to `packages: ["box3d"]`.
-  Only that package is served from it; sdl3, imgui, curl, spdlog and the rest
-  still resolve through the untouched `builtin-baseline`.
-* Also viable: a checked-in overlay port at a **relative** path.
-* Rejected: a machine-local overlay (`C:cpkg\portsox3d`) — works here and
-  nowhere else. Rejected: FetchContent vendoring, while vcpkg solves it cleanly.
+The bridge READS the convex decomposition rather than computing one — OFP
+Geometry LODs are authored as named convex components and
+`Shape::GetGeomComponents()` exposes them.
 
-Verified from a clean configure: box3d builds in 12 s and is the only package the
-new registry served; PoseidonGame and PoseidonTests build; focused suite passes.
-No default-registry is declared in vcpkg-configuration.json — vcpkg treats that
-as an error alongside the manifest's `builtin-baseline`.
+Refusals are counted in three separate places because they mean different things:
+models with no usable Geometry LOD and components too thin to be a volume are
+decided engine-side; hull failures are the library's opinion.
 
-**Nothing links box3d yet.** The API PHY-010 needs is present: `b3CreateHull` /
-`b3CreateHullShape` for our `ConvexComponents`, `b3CreateHeightField` /
-`b3CreateHeightFieldShape` for terrain, `b3CreateMesh`, `b3CreateBody`. CMake
-target `box3d::box3d`.
+38 assertions in 8 cases pass. PoseidonGame builds.
 
-Next per PHY-001: the narrow engine-owned interface, then `ConvexComponents` →
-hull shapes and heightmap → heightfield, transforms flowing IN only.
+**What is NOT done, and it is the important half:** nothing constructs a
+`PhysicsWorld` yet. No real building has been through this — the tests use a unit
+cube. The next slice registers the loaded world's objects and terrain and reports
+the counters, which is what finally tests PHY-010's abort condition against the
+stock corpus.
 
-**Step 3 does not gate this.** Scripts are opt-in and off by default; the two
-tracks are independent. The numbering here is order-of-discovery, not a
-dependency chain.
+**Do not start PHY-020 (spawnable test bodies) before the owner reviews the
+collider architecture.** That was an explicit request. PHY-020 is where this
+becomes visually judgeable — a ball rolling down the hotel stairs instead of
+through them — so the architecture should be agreed first.
+
+Two API facts worth not rediscovering: `b3Quat` is `{ b3Vec3 v; float s; }`, not
+x/y/z/w; and `tests/unit/engine/Poseidon/CMakeLists.txt` lists sources
+explicitly, so a new test file is silently absent until added there.
 
 ## Traps specific to this branch
 
@@ -218,4 +222,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28. Steps 1-4 done; step 5's dependency is in, binding not started.*
+*Last updated: 2026-08-28. Steps 1-4 done; PHY-010's layer is built and untested against real models.*
