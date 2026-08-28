@@ -3,6 +3,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
+#include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -1766,7 +1767,35 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseHud);
 
-    StepSimulation(deltaT, noAccDeltaT, camVehicle, camInsideVehicle, quiet);
+    // Run gameplay-owned vehicle and AI state at a stable cadence while the
+    // presentation work above continues at the display's frame rate.  The
+    // accumulator is reset while paused so an idle menu cannot create a catch-up
+    // burst when simulation resumes.
+    static FixedStepAccumulator simulationSteps;
+    if (IsSimulationEnabled())
+    {
+        const float fixedDeltaT = static_cast<float>(simulationSteps.StepSeconds());
+        const float fixedNoAccDeltaT = fixedDeltaT / std::max(_acceleratedTime, 0.01f);
+        const std::size_t steps = simulationSteps.Advance(deltaT);
+        for (std::size_t step = 0; step < steps; ++step)
+        {
+            StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle);
+        }
+    }
+    else
+    {
+        simulationSteps.Reset();
+    }
+
+    if (IsSimulationEnabled())
+    {
+        PerformSound(camInsideVehicle, deltaT);
+    }
+    GSoundScene->AdvanceAll(deltaT, !IsSimulationEnabled() || quiet); // sort and activate sounds
+    if (GSoundsys)
+    {
+        GSoundsys->Commit(); // commit deferred settings
+    }
 
     perf.Mark(Dev::FrameProfiler::PhaseAiVehicles);
 
@@ -1827,25 +1856,14 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 }
 
-void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, Entity* insideVehicle, bool quiet)
+void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle)
 {
-    if (IsSimulationEnabled())
-    {
 #if BACKGROUND_AI
-        _secThread->FinishSecondary();
+    _secThread->FinishSecondary();
 #else
-        PerformAI(deltaT, noAccDeltaT);
+    PerformAI(deltaT, noAccDeltaT);
 #endif
-        SimulateAllVehicles(deltaT, noAccDeltaT, cameraVehicle);
-
-        PerformSound(insideVehicle, deltaT);
-    }
-
-    GSoundScene->AdvanceAll(deltaT, !IsSimulationEnabled() || quiet); // sort and activate sounds
-    if (GSoundsys)
-    {
-        GSoundsys->Commit(); // commit deferred settings
-    }
+    SimulateAllVehicles(deltaT, noAccDeltaT, cameraVehicle);
 }
 
 void World::HandleVoiceChatShortcuts()
