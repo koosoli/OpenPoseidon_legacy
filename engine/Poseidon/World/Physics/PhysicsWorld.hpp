@@ -22,6 +22,28 @@ namespace Poseidon::Physics
 
 class PhysicsBackend;
 
+/// Why one model did or did not become a body.
+///
+/// A plain BodyId cannot answer PHY-010's abort condition, which is not "how many
+/// failed" but "WHICH DISTINCT MODELS failed". Five hundred failures can be five
+/// hundred copies of one fence, and that is a very different finding from five
+/// hundred different buildings.
+struct RegisterResult
+{
+    enum class Outcome
+    {
+        Registered,
+        NoGeometryLod,          ///< no Geometry LOD, or it is empty -- normal for many props
+        AllComponentsDegenerate,///< had components, none of them a volume
+        BackendRefused,         ///< the library would not hull anything we offered
+    };
+
+    BodyId  id;
+    Outcome outcome = Outcome::NoGeometryLod;
+    /// Largest point count among this model's components, for sizing the hull cap.
+    int maxComponentPoints = 0;
+};
+
 class PhysicsWorld
 {
 public:
@@ -51,6 +73,10 @@ public:
     /// Returns an invalid id when the model has no usable geometry.
     BodyId RegisterStatic(LODShape* shape, const Matrix4& transform);
 
+    /// Same, but says WHY. Used by the corpus census; ordinary callers want the
+    /// short form.
+    RegisterResult RegisterStaticDetailed(LODShape* shape, const Matrix4& transform);
+
     void SetTransform(BodyId id, const Matrix4& transform);
     void Remove(BodyId id);
 
@@ -74,6 +100,7 @@ private:
     std::uint32_t _modelsRegistered = 0;
     std::uint32_t _modelsWithoutGeometry = 0;
     std::uint32_t _degenerateComponents = 0;
+    std::uint32_t _maxComponentPoints = 0;
 };
 
 /// The process-wide physics world. Null until something creates one; PHY-010

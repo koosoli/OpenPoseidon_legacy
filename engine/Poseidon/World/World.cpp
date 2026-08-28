@@ -5,6 +5,7 @@
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
+#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -874,6 +875,20 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     // Advance gameplay before deriving this frame's camera and draw lists so
     // presentation always sees the latest completed simulation tick.
+    // PHY-010 census (POSEIDON_PHYSICS_CORPUS). Deferred to the first simulated
+    // frame rather than run at load: object streaming fills the landscape grid
+    // after the world is nominally ready, and censusing too early counts an empty
+    // map as a clean pass -- the most flattering possible wrong answer.
+    if (Dev::PhysicsCorpusRequested())
+    {
+        static bool corpusDone = false;
+        if (!corpusDone && IsSimulationEnabled())
+        {
+            corpusDone = true;
+            Dev::RunPhysicsCorpus();
+        }
+    }
+
     Dev::FixedStepFrame stepFrame;
     stepFrame.stepSeconds = static_cast<float>(_simulationSteps.StepSeconds());
     if (IsSimulationEnabled())

@@ -145,6 +145,34 @@ TEST_CASE("a heightfield is accepted and a degenerate one is not", "[physics]")
     backend->Destroy();
 }
 
+TEST_CASE("removing a body gives its shapes back to the count", "[physics]")
+{
+    // Regression: _shapeCount only ever counted up. b3DestroyBody takes the
+    // body's shapes with it silently, so after any removal -- streaming, a
+    // mission reload -- the diagnostic reported more shapes than existed. A
+    // number that can only grow is not a diagnostic.
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+
+    const std::vector<Vector3> cube = UnitCube();
+    // Two pieces on one body, so the test would still fail if removal subtracted
+    // a flat 1 per body instead of what the body actually owned.
+    const ConvexPiece pieces[2] = {
+        {cube.data(), static_cast<int>(cube.size())},
+        {cube.data(), static_cast<int>(cube.size())},
+    };
+
+    const BodyId id = backend->AddStaticBody(pieces, 2, Matrix4(MIdentity));
+    REQUIRE(id.IsValid());
+    CHECK(backend->GetStats().shapes == 2);
+
+    backend->RemoveBody(id);
+    CHECK(backend->GetStats().bodies == 0);
+    CHECK(backend->GetStats().shapes == 0);
+
+    backend->Destroy();
+}
+
 TEST_CASE("a destroy/create cycle does not reuse stale slots", "[physics]")
 {
     // Regression: Destroy() cleared _slots but not _free, so the next Store()

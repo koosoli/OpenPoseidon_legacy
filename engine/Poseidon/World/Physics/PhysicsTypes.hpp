@@ -56,6 +56,10 @@ struct PhysicsStats
     /// Components the backend itself refused to hull.
     std::uint32_t hullFailures = 0;
 
+    /// Largest ConvexComponent point count seen. MaxHullVertices is currently an
+    /// ASSUMPTION about the stock corpus; this is what turns it into a measurement.
+    std::uint32_t maxComponentPoints = 0;
+
     bool terrainRegistered = false;
     /// Terrain grid actually handed to the backend, for comparison against the
     /// landscape's own dimensions.

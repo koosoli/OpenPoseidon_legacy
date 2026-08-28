@@ -210,7 +210,7 @@ public:
             return {};
         }
 
-        return Store(body);
+        return Store(body, static_cast<std::uint32_t>(attached));
     }
 
     void RemoveBody(BodyId id) override
@@ -222,6 +222,11 @@ public:
         }
         b3DestroyBody(slot->body);
         slot->body = b3_nullBodyId;
+        // b3DestroyBody takes the body's shapes with it, so the running total has
+        // to give them back. Without this, `shapes` only counts up and any
+        // streaming or mission reload inflates it past what exists.
+        _shapeCount -= std::min(_shapeCount, slot->shapes);
+        slot->shapes = 0;
         // Bump the generation so the caller's copy of this id stops resolving.
         // Reusing the slot without this is how a stale handle silently addresses
         // whatever was created next.
@@ -317,9 +322,13 @@ private:
         b3BodyId      body = b3_nullBodyId;
         std::uint32_t generation = 1;
         std::uint32_t index = 0;
+        /// Shapes this body owns. Kept per body because b3DestroyBody takes them
+        /// with it silently, and a total that only ever counts up stops being a
+        /// diagnostic the moment anything is streamed out.
+        std::uint32_t shapes = 0;
     };
 
-    BodyId Store(b3BodyId body)
+    BodyId Store(b3BodyId body, std::uint32_t shapes)
     {
         if (!_free.empty())
         {
@@ -327,10 +336,12 @@ private:
             _free.pop_back();
             Slot& slot = _slots[index];
             slot.body = body;
+            slot.shapes = shapes;
             return BodyId{index, slot.generation};
         }
         Slot slot;
         slot.body = body;
+        slot.shapes = shapes;
         slot.index = static_cast<std::uint32_t>(_slots.size());
         _slots.push_back(slot);
         return BodyId{slot.index, slot.generation};

@@ -67,6 +67,7 @@ void PhysicsWorld::ResetCounters()
     _modelsRegistered = 0;
     _modelsWithoutGeometry = 0;
     _degenerateComponents = 0;
+    _maxComponentPoints = 0;
 }
 
 void PhysicsWorld::Step(float deltaSeconds)
@@ -79,9 +80,15 @@ void PhysicsWorld::Step(float deltaSeconds)
 
 BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
 {
+    return RegisterStaticDetailed(shape, transform).id;
+}
+
+RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matrix4& transform)
+{
+    RegisterResult result;
     if (!_backend || !shape)
     {
-        return {};
+        return result;
     }
 
     // The Geometry LOD is the authored collision hull set. A model without one is
@@ -91,7 +98,8 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
     if (!geometry || geometry->NVertex() <= 0)
     {
         ++_modelsWithoutGeometry;
-        return {};
+        result.outcome = RegisterResult::Outcome::NoGeometryLod;
+        return result;
     }
 
     // Components are computed lazily and invalidated by animation, so ask for a
@@ -101,7 +109,8 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
     if (components.Size() <= 0)
     {
         ++_modelsWithoutGeometry;
-        return {};
+        result.outcome = RegisterResult::Outcome::NoGeometryLod;
+        return result;
     }
 
     // Flattened point soup plus a piece table: the backend gets contiguous spans
@@ -124,6 +133,8 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
             ++degenerate;
             continue;
         }
+
+        result.maxComponentPoints = std::max(result.maxComponentPoints, component->Size());
 
         const int   begin = static_cast<int>(points.size());
         Vector3     lo(0, 0, 0);
@@ -187,18 +198,29 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
     }
 
     _degenerateComponents += static_cast<std::uint32_t>(degenerate);
+    _maxComponentPoints =
+        std::max(_maxComponentPoints, static_cast<std::uint32_t>(result.maxComponentPoints));
+
     if (pieces.empty())
     {
-        ++_modelsWithoutGeometry;
-        return {};
+        // It HAD components; every one of them was a point, a line or a sheet.
+        // Distinct from having no Geometry LOD at all, because it points at the
+        // data rather than at the model simply not carrying collision.
+        result.outcome = RegisterResult::Outcome::AllComponentsDegenerate;
+        return result;
     }
 
-    const BodyId id = _backend->AddStaticBody(pieces.data(), static_cast<int>(pieces.size()), transform);
-    if (id.IsValid())
+    result.id = _backend->AddStaticBody(pieces.data(), static_cast<int>(pieces.size()), transform);
+    if (result.id.IsValid())
     {
         ++_modelsRegistered;
+        result.outcome = RegisterResult::Outcome::Registered;
     }
-    return id;
+    else
+    {
+        result.outcome = RegisterResult::Outcome::BackendRefused;
+    }
+    return result;
 }
 
 void PhysicsWorld::SetTransform(BodyId id, const Matrix4& transform)
@@ -241,6 +263,7 @@ PhysicsStats PhysicsWorld::GetStats() const
     stats.modelsRegistered = _modelsRegistered;
     stats.modelsWithoutGeometry = _modelsWithoutGeometry;
     stats.degenerateComponents = _degenerateComponents;
+    stats.maxComponentPoints = _maxComponentPoints;
     return stats;
 }
 
