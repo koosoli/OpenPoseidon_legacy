@@ -38,6 +38,7 @@ All commits are pushed. Nothing is local-only.
 | `5b6c49bb` | simulate **before** presenting, so a frame shows the tick it just ran |
 | `0a35211f` | dev-panel **Fixed Step** tab — the accumulator is now observable |
 | `f21e6cba` | accumulator becomes a `World` member; Dev counters reset on world load |
+| `4a3bf51b` | fixed-step scripts as an **opt-in, off by default** |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -122,29 +123,29 @@ frame rate -- the same mission used to run measurably differently on a 20 fps
 machine and a 144 fps one. That invariance is the prerequisite ARCH-001 wanted
 before physics, not a felt improvement.
 
-### 3. Scripts — DEFERRED, and the reason matters
+### 3. Scripts — IMPLEMENTED as an opt-in, OFF by default (`4a3bf51b`)
 
-`SimulateScripts()` (called at `World.cpp:930`, defined at `WorldSetup.cpp:1423`)
-looks like the obvious next move into `StepSimulation`. **It is not, and moving it
-naively will break missions.**
+`POSEIDON_FIXEDSTEP_SCRIPTS=1`, or the checkbox in the Fixed Step tab under
+*Experimental*. Both drive one storage location.
 
-It runs today **outside** the `IsSimulationEnabled()` check, deliberately. That
-function returns false for a dev pause, an open pause menu, a warning message, lost
-window focus, and `_enableSimulation == false` — which includes cutscenes, where
-camera scripts must keep running. Moving the call inside `StepSimulation` stops
-scripts in every one of those states. No unit test would catch it; only playing
-would.
+The cutscene hazard is handled in code, not by hoping: `SimulateScripts()` runs
+outside `IsSimulationEnabled()` on purpose, so the frame-driven call is KEPT
+whenever the simulation is off, whatever the switch says. Only the running case
+moves into the tick. Cutscenes behave identically in both configurations.
 
-There is a second change that survives even a correct implementation: scripts are
-polled once per **frame** today. Fixed-step means 60 polls/second — fewer above
-60 fps, and *more* below it via catch-up. OFP scripts get a time budget per call,
-so this changes how fast missions progress. Time-based is the more correct
-behaviour, but it is a gameplay change that needs mission playtesting, not code
-review.
+Inside the tick the call sits after the clock (a script reading `time` sees this
+tick's value) and before the AI (orders a script issues are acted on in the same
+tick, not the next).
 
-**If you do it:** fixed-step while simulation is enabled, one call per frame while
-it is disabled (preserving cutscenes), behind a switch that is OFF by default until
-missions have been played.
+**Why it stays off:** scripts are polled once per FRAME today and 60 times a
+second when enabled — fewer above 60 fps, more below it via catch-up. OFP scripts
+get a time budget per call, so this changes how fast missions progress.
+Time-based is the more correct behaviour and it is still a gameplay change.
+
+**To finish this item someone must PLAY missions with it on** — campaign
+missions with cutscenes and triggers, not a dev mission. Nothing else is
+blocking; the code is done. Both configurations boot and render clean (874 and
+871 log lines, zero errors), but that proves neither behaves *correctly*.
 
 ### 4. Wire the accumulator at the game loop — PARTLY DONE (`f21e6cba`)
 
@@ -190,4 +191,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28, after `f21e6cba`.*
+*Last updated: 2026-08-28, after `4a3bf51b`.*
