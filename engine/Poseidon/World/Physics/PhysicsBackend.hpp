@@ -69,6 +69,15 @@ public:
 
     /// PHY-020. A dynamic sphere the physics world owns outright.
     virtual BodyId SpawnSphereProbe(const SphereProbeDef& def) = 0;
+    /// A dynamic body built from convex pieces -- the same pieces a static body
+    /// takes, so a model's authored Geometry LOD can simply be made to move.
+    virtual BodyId SpawnDynamicPieces(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform,
+                                      float mass, float friction, float restitution) = 0;
+    /// Push a body at a point. Gameplay -> physics, which is the direction
+    /// PHY-010 already allows; nothing comes back.
+    virtual void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse) = 0;
+    /// Ray against the physics world; returns the body hit, invalid if none.
+    virtual BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const = 0;
     virtual void   ClearProbes() = 0;
     /// Probe positions for debug drawing only. Scoped to probe bodies on purpose:
     /// a general transform getter is what turns "physics is a query service" into
@@ -76,6 +85,12 @@ public:
     virtual void GetProbeSamples(std::vector<ProbeSample>& out) const = 0;
     /// Applied to every probe shape at the start of each step while enabled.
     virtual void SetWind(const WindSettings& wind) = 0;
+
+    /// A KINEMATIC capsule the caller moves every tick. Kinematic, not dynamic:
+    /// it pushes dynamic bodies and is pushed by nothing, so the player keeps
+    /// full authority over their own position and physics gains none. Pass a
+    /// zero height to remove it.
+    virtual void SetKinematicProxy(Vector3Par position, float radius, float height) = 0;
 
     [[nodiscard]] virtual PhysicsStats GetStats() const = 0;
 

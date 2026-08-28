@@ -7,6 +7,7 @@
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <cstring>
 #include <Poseidon/World/World.hpp>
 
 #include <cmath>
@@ -70,9 +71,116 @@ void SubmitCircle(Vector3Par centre, float radius, Vector3Par a, Vector3Par b, P
     }
 }
 
+/// One dynamic model copy: the physics body, the shape it was cloned from, and a
+/// draw-only Object placed at the body's transform every frame. The Object is NOT
+/// in the world's object grid and no entity references it, so nothing in the
+/// mission can see or save it.
+struct ModelProbe
+{
+    Physics::BodyId         id;
+    Ref<LODShapeWithShadow> shape;
+    Ref<Object>             draw;
+};
+std::vector<ModelProbe> s_modelProbes;
+
 } // namespace
 
 PhysicsProbeSettings& ProbeSettings() { return s_settings; }
+
+bool SpawnModelProbe(const char* nameFragment)
+{
+    if (!GWorld || !GScene || !GLandscape || !nameFragment || !*nameFragment)
+    {
+        return false;
+    }
+    Physics::PhysicsWorld& world = Physics::EnsurePhysicsWorld();
+    if (!world.Create())
+    {
+        return false;
+    }
+
+    // Reuse a model the world already loaded rather than naming a file. The dev
+    // tool then works on any island without knowing what lives there, and it
+    // cannot ask for a path the current data set does not have.
+    LODShapeWithShadow* found = nullptr;
+    const int           range = GLandscape->GetLandRange();
+    for (int z = 0; z < range && !found; ++z)
+    {
+        for (int x = 0; x < range && !found; ++x)
+        {
+            const ObjectList& list = GLandscape->GetObjects(z, x);
+            for (int i = 0; i < list.Size(); ++i)
+            {
+                Object* object = list[i];
+                LODShapeWithShadow* shape = object ? object->GetShape() : nullptr;
+                const char* name = shape ? shape->Name() : nullptr;
+                if (name && strstr(name, nameFragment))
+                {
+                    found = shape;
+                    break;
+                }
+            }
+        }
+    }
+    if (!found)
+    {
+        LOG_WARN(World, "PHYSPROBE: no loaded model matching '{}'", nameFragment);
+        return false;
+    }
+
+    const Vector3 forward = GScene->GetCamera()->Direction();
+    const Vector3 eye = GScene->GetCamera()->Position();
+    Vector3       origin = eye + forward * 8.0f;
+    if (GLandscape)
+    {
+        // Dropped from a couple of metres up so it lands rather than starting
+        // interpenetrated with the ground.
+        origin[1] = GLandscape->SurfaceY(origin[0], origin[2]) + 2.0f;
+    }
+
+    Matrix4 transform(MIdentity);
+    transform.SetPosition(origin);
+
+    const Physics::BodyId id =
+        world.SpawnModelProbe(found, transform, s_settings.modelMass, s_settings.friction, s_settings.restitution);
+    if (!id.IsValid())
+    {
+        LOG_WARN(World, "PHYSPROBE: model '{}' has no usable Geometry LOD", found->Name());
+        return false;
+    }
+
+    ModelProbe probe;
+    probe.id = id;
+    probe.shape = found;
+    probe.draw = new Object(found, -1);
+    s_modelProbes.push_back(probe);
+    LOG_WARN(World, "PHYSPROBE: model probe '{}' at ({:.1f} {:.1f} {:.1f}) mass {}", found->Name(), origin[0],
+             origin[1], origin[2], s_settings.modelMass);
+    return true;
+}
+
+void PhysicsProbeOnProjectileHit(Vector3Par from, Vector3Par to, float momentum)
+{
+    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
+    if (!world || !world->IsCreated())
+    {
+        return;
+    }
+    Vector3               hit;
+    const Physics::BodyId id = world->CastRay(from, to, hit);
+    if (!id.IsValid())
+    {
+        return;
+    }
+    Vector3 dir = to - from;
+    const float len = dir.Size();
+    if (len < 1e-4f)
+    {
+        return;
+    }
+    dir = dir / len;
+    world->ApplyImpulse(id, hit, dir * (momentum * s_settings.hitImpulseScale));
+}
 
 void SpawnPhysicsProbe(float throwSpeed)
 {
@@ -166,6 +274,7 @@ void ClearPhysicsProbes()
     {
         world->ClearProbes();
     }
+    s_modelProbes.clear();
 }
 
 void UpdatePhysicsProbeWind()
@@ -186,6 +295,20 @@ void UpdatePhysicsProbeWind()
     // here would prove nothing.
     wind.velocity = GLandscape ? GLandscape->GetWind() * s_settings.windScale : VZero;
     world->SetWind(wind);
+}
+
+void UpdatePhysicsPlayerProxy(Vector3Par position)
+{
+    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
+    if (!world || !world->IsCreated())
+    {
+        return;
+    }
+    // Height 0 removes it, so switching the checkbox off actually takes the
+    // capsule out of the world rather than leaving an invisible one standing
+    // where the player last was.
+    world->SetKinematicProxy(position + Vector3(0, s_settings.playerHeight * 0.5f, 0), s_settings.playerRadius,
+                             s_settings.playerProxy ? s_settings.playerHeight : 0.0f);
 }
 
 void AutoDropPhysicsProbes()
@@ -320,6 +443,32 @@ void DrawPhysicsProbes()
         SubmitCircle(sample.position, sample.radius, sample.axisX, sample.axisZ, color);
         SubmitCircle(sample.position, sample.radius, sample.axisX, sample.axisY, color);
         SubmitCircle(sample.position, sample.radius, sample.axisZ, sample.axisY, color);
+    }
+
+    // Model probes draw as the real model, placed at the body's transform. The
+    // Object is submitted straight to the scene and lives nowhere else -- it is
+    // not in the object grid, no entity holds it, and the mission cannot save it.
+    for (ModelProbe& probe : s_modelProbes)
+    {
+        if (!probe.draw)
+        {
+            continue;
+        }
+        for (const Physics::ProbeSample& sample : samples)
+        {
+            if (sample.id != probe.id)
+            {
+                continue;
+            }
+            Matrix3 orientation;
+            orientation.SetDirectionAside(sample.axisX);
+            orientation.SetDirectionUp(sample.axisY);
+            orientation.SetDirection(sample.axisZ);
+            probe.draw->SetOrientation(orientation);
+            probe.draw->SetPosition(sample.position);
+            GScene->ObjectForDrawing(probe.draw);
+            break;
+        }
     }
 }
 

@@ -9,6 +9,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
+#include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -699,7 +700,14 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 
     if (_initDelay <= 0)
     {
+        const Vector3 segmentStart = position;
         position += _speed * deltaT;
+        // PHY-020: physics probes are deliberately absent from the 2001 collision
+        // world, so ObjectCollision below cannot see them. Query the physics world
+        // with THIS TICK'S bullet segment instead of faking the probe into the old
+        // path. Legacy collision and damage are untouched -- this only pushes dev
+        // probes, and it is the same second-ray shape PHY-030 will want.
+        Poseidon::Dev::PhysicsProbeOnProjectileHit(segmentStart, position, _speed.Size());
     }
 
     if (deltaT > 0)

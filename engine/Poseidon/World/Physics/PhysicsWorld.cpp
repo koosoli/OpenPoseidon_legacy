@@ -83,48 +83,35 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
     return RegisterStaticDetailed(shape, transform).id;
 }
 
-RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matrix4& transform)
+// Extracts a model's authored convex components into flat spans the backend can
+// take. Shared by the static registration and the dynamic model probe, because
+// "make this model collide" and "make this model fall over" want exactly the same
+// geometry and any drift between the two would be invisible until something
+// behaved differently as a probe than it did as scenery.
+bool PhysicsWorld::ExtractPieces(LODShape* shape, std::vector<Vector3>& points, std::vector<ConvexPiece>& pieces,
+                                 int& degenerate, int& maxPoints)
 {
-    RegisterResult result;
-    if (!_backend || !shape)
-    {
-        return result;
-    }
+    points.clear();
+    pieces.clear();
+    degenerate = 0;
+    maxPoints = 0;
 
-    // The Geometry LOD is the authored collision hull set. A model without one is
-    // not broken -- plenty of props have no collision at all -- so this is counted
-    // and not warned about.
-    Shape* geometry = shape->GeometryLevel();
+    Shape* geometry = shape ? shape->GeometryLevel() : nullptr;
     if (!geometry || geometry->NVertex() <= 0)
     {
-        ++_modelsWithoutGeometry;
-        result.outcome = RegisterResult::Outcome::NoGeometryLod;
-        return result;
+        return false;
     }
-
-    // Components are computed lazily and invalidated by animation, so ask for a
-    // refresh rather than trusting whatever the last consumer left behind.
     shape->RecalculateGeomComponentsAsNeeded();
     const ConvexComponents& components = shape->GetGeomComponents();
     if (components.Size() <= 0)
     {
-        ++_modelsWithoutGeometry;
-        result.outcome = RegisterResult::Outcome::NoGeometryLod;
-        return result;
+        return false;
     }
 
-    // Flattened point soup plus a piece table: the backend gets contiguous spans
-    // and never walks our Selection type. One allocation pair per model, freed on
-    // return -- the backend copies what it keeps.
-    std::vector<Vector3>     points;
-    std::vector<ConvexPiece> pieces;
     pieces.reserve(components.Size());
-    // Offsets first, pointers after: `points` reallocates while filling, and a
-    // pointer taken before a reallocation is the classic way this loop breaks.
     std::vector<int> offsets;
     offsets.reserve(components.Size());
 
-    int degenerate = 0;
     for (int i = 0; i < components.Size(); ++i)
     {
         const ConvexComponent* component = components[i];
@@ -133,13 +120,12 @@ RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matri
             ++degenerate;
             continue;
         }
+        maxPoints = std::max(maxPoints, component->Size());
 
-        result.maxComponentPoints = std::max(result.maxComponentPoints, component->Size());
-
-        const int   begin = static_cast<int>(points.size());
-        Vector3     lo(0, 0, 0);
-        Vector3     hi(0, 0, 0);
-        bool        first = true;
+        const int begin = static_cast<int>(points.size());
+        Vector3   lo(0, 0, 0);
+        Vector3   hi(0, 0, 0);
+        bool      first = true;
         for (int p = 0; p < component->Size(); ++p)
         {
             const int vertex = (*component)[p];
@@ -156,38 +142,22 @@ RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matri
             }
             else
             {
-                lo[0] = std::min(lo[0], position[0]);
-                lo[1] = std::min(lo[1], position[1]);
-                lo[2] = std::min(lo[2], position[2]);
-                hi[0] = std::max(hi[0], position[0]);
-                hi[1] = std::max(hi[1], position[1]);
-                hi[2] = std::max(hi[2], position[2]);
+                for (int a = 0; a < 3; ++a)
+                {
+                    lo[a] = std::min(lo[a], position[a]);
+                    hi[a] = std::max(hi[a], position[a]);
+                }
             }
         }
 
-        const int count = static_cast<int>(points.size()) - begin;
-        // SMALLEST extent, not all three. The previous form required every axis to
-        // be tiny, which only catches a point -- a wall-sized sheet lying in a
-        // plane sailed through it and then failed in the backend, so a data problem
-        // was reported as a library refusal.
-        //
-        // This catches a point, an axis-aligned line and an axis-aligned sheet,
-        // which is what authored Geometry components actually degenerate into.
-        // A set of points coplanar in an OBLIQUE plane still has extent on all
-        // three AABB axes and passes; Box3D remains the final validator for those
-        // and they land in hullFailures. Detecting them properly needs a rank or
-        // PCA pass over every component of every model, which is not worth paying
-        // for a diagnostic label.
-        const float smallestExtent =
-            std::min({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
-        const bool flat = smallestExtent < MinComponentExtent;
-        if (count < MinComponentPoints || flat)
+        const int   count = static_cast<int>(points.size()) - begin;
+        const float smallestExtent = std::min({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+        if (count < MinComponentPoints || smallestExtent < MinComponentExtent)
         {
             points.resize(static_cast<std::size_t>(begin));
             ++degenerate;
             continue;
         }
-
         offsets.push_back(begin);
         pieces.push_back(ConvexPiece{nullptr, count});
     }
@@ -196,17 +166,73 @@ RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matri
     {
         pieces[i].points = points.data() + offsets[i];
     }
+    return !pieces.empty();
+}
+
+BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, float mass, float friction,
+                                     float restitution)
+{
+    if (!_backend)
+    {
+        return {};
+    }
+    std::vector<Vector3>     points;
+    std::vector<ConvexPiece> pieces;
+    int                      degenerate = 0;
+    int                      maxPoints = 0;
+    if (!ExtractPieces(shape, points, pieces, degenerate, maxPoints))
+    {
+        return {};
+    }
+    return _backend->SpawnDynamicPieces(pieces.data(), static_cast<int>(pieces.size()), transform, mass, friction,
+                                        restitution);
+}
+
+void PhysicsWorld::ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse)
+{
+    if (_backend && id.IsValid())
+    {
+        _backend->ApplyImpulse(id, point, impulse);
+    }
+}
+
+BodyId PhysicsWorld::CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const
+{
+    return _backend ? _backend->CastRay(from, to, hitPoint) : BodyId{};
+}
+
+RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matrix4& transform)
+{
+    RegisterResult result;
+    if (!_backend || !shape)
+    {
+        return result;
+    }
+
+    std::vector<Vector3>     points;
+    std::vector<ConvexPiece> pieces;
+    int                      degenerate = 0;
+    int                      maxPoints = 0;
+    const bool               usable = ExtractPieces(shape, points, pieces, degenerate, maxPoints);
 
     _degenerateComponents += static_cast<std::uint32_t>(degenerate);
-    _maxComponentPoints =
-        std::max(_maxComponentPoints, static_cast<std::uint32_t>(result.maxComponentPoints));
+    result.maxComponentPoints = maxPoints;
+    _maxComponentPoints = std::max(_maxComponentPoints, static_cast<std::uint32_t>(maxPoints));
 
-    if (pieces.empty())
+    if (!usable)
     {
-        // It HAD components; every one of them was a point, a line or a sheet.
-        // Distinct from having no Geometry LOD at all, because it points at the
-        // data rather than at the model simply not carrying collision.
-        result.outcome = RegisterResult::Outcome::AllComponentsDegenerate;
+        // No Geometry LOD at all, versus had components and none of them a volume.
+        // Different findings: one says the model carries no collision by design
+        // (roads, grass), the other says its data is thin.
+        if (degenerate > 0)
+        {
+            result.outcome = RegisterResult::Outcome::AllComponentsDegenerate;
+        }
+        else
+        {
+            ++_modelsWithoutGeometry;
+            result.outcome = RegisterResult::Outcome::NoGeometryLod;
+        }
         return result;
     }
 
@@ -284,6 +310,14 @@ void PhysicsWorld::SetWind(const WindSettings& wind)
     if (_backend)
     {
         _backend->SetWind(wind);
+    }
+}
+
+void PhysicsWorld::SetKinematicProxy(Vector3Par position, float radius, float height)
+{
+    if (_backend)
+    {
+        _backend->SetKinematicProxy(position, radius, height);
     }
 }
 

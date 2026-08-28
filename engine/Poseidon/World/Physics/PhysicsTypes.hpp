@@ -90,6 +90,13 @@ enum class ProbeShape
     /// contact solver and the friction actually behave.
     Box,
     Cylinder,
+    /// A real model's Geometry LOD, made dynamic. The physics owns this body
+    /// outright and NOTHING in the game knows about it -- it is a separate
+    /// instance that exists only in the physics world and the draw list, so no
+    /// gameplay entity is ever moved by the simulation and nothing is written
+    /// back into the mission. That is what makes it safe to throw a jeep around
+    /// while PHY-050 is still unplanned.
+    Model,
 };
 
 struct SphereProbeDef
@@ -121,6 +128,9 @@ struct SphereProbeDef
 /// and is only produced for bodies the probe spawner created.
 struct ProbeSample
 {
+    /// So a caller holding its own per-probe data (a render object, say) can find
+    /// the sample that belongs to it.
+    BodyId     id;
     ProbeShape shape = ProbeShape::Sphere;
     Vector3    position;
     /// Rotation columns, so the debug view can draw a box or cylinder as it lies.

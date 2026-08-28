@@ -1918,6 +1918,13 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
     // also inherits the catch-up cap and the pause behaviour for free.
     if (Physics::PhysicsWorld* physics = Physics::GetPhysicsWorld())
     {
+        // The proxy moves BEFORE the step, so its sweep is resolved in the same
+        // tick as the bodies it pushes. Moving it after would leave every shove
+        // one tick late and make contacts look sticky.
+        if (cameraVehicle)
+        {
+            Dev::UpdatePhysicsPlayerProxy(cameraVehicle->WorldTransform().Position());
+        }
         physics->Step(deltaT);
     }
 }

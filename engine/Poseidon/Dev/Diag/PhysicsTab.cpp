@@ -203,6 +203,64 @@ void DrawPhysicsTab()
             "Throw ignores it: a thrown body is meant to be in the air.\n");
     }
 
+    ImGui::SeparatorText("Model probe");
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::InputText("Model name contains", s.modelFilter, sizeof(s.modelFilter));
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::SliderFloat("Model mass (kg)", &s.modelMass, 10.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+    if (ImGui::Button("Spawn model"))
+    {
+        SpawnModelProbe(s.modelFilter);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("e.g. jeep, uaz, t72");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Takes a model already loaded in this world and makes a DYNAMIC copy of\n"
+            "it: the real visual shape, with a body built from its authored Geometry\n"
+            "LOD -- several convex hulls, not one box -- so it tumbles according to\n"
+            "its own collision shape.\n"
+            "\n"
+            "It is a separate instance. It is not a gameplay vehicle, it is not in the\n"
+            "landscape object lists, no AI or vehicle simulation touches it, it is not\n"
+            "networked, and it cannot reach a mission or a save. Clear removes it\n"
+            "completely.\n");
+    }
+
+    ImGui::SeparatorText("Interaction");
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::SliderFloat("Hit impulse scale", &s.hitImpulseScale, 0.0f, 500.0f, "%.0fx");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Shots push probes. The physics world is queried with the bullet's own\n"
+            "segment each tick, and the impulse is applied AT THE HIT POINT -- so an\n"
+            "off-centre hit spins the target instead of merely shoving it.\n"
+            "\n"
+            "A rifle round really carries about 4 Ns, which moves a domino and does\n"
+            "nothing at all to a jeep. This is an openly labelled DEV MULTIPLIER, not\n"
+            "a physical bullet mass: inventing one would look like data and be a\n"
+            "guess.\n"
+            "\n"
+            "Legacy collision and damage are untouched.\n");
+    }
+    ImGui::Checkbox("Player can push probes", &s.playerProxy);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Follows the player with a KINEMATIC capsule: it shoves dynamic probes\n"
+            "and nothing shoves it back. Physics gains no authority over where you\n"
+            "are -- the flow stays player -> physics, never the reverse.\n");
+    }
+    if (s.playerProxy)
+    {
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Player radius", &s.playerRadius, 0.1f, 1.5f, "%.2f");
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Player height", &s.playerHeight, 0.5f, 3.0f, "%.2f");
+    }
+
     ImGui::SeparatorText("Wind");
     ImGui::Checkbox("Apply world wind", &s.applyWind);
     if (ImGui::IsItemHovered())

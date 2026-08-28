@@ -86,9 +86,23 @@ public:
 
     /// PHY-020 dev probe. See SphereProbeDef.
     BodyId SpawnSphereProbe(const SphereProbeDef& def);
+
+    /// A DYNAMIC copy of a model's Geometry LOD. Deliberately a separate instance:
+    /// the physics world owns it, nothing in the game knows it exists, and no
+    /// mission state is touched. That is what lets a jeep be thrown around while
+    /// PHY-050 -- physics owning a real gameplay vehicle -- stays unplanned.
+    BodyId SpawnModelProbe(LODShape* shape, const Matrix4& transform, float mass, float friction,
+                           float restitution);
+
+    /// Gameplay -> physics. Nothing comes back, so PHY-010's rule holds.
+    void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse);
+    /// Ray against the physics world. Returns the body hit, invalid if none.
+    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const;
     void   ClearProbes();
     void   GetProbeSamples(std::vector<ProbeSample>& out) const;
     void   SetWind(const WindSettings& wind);
+    /// Follows the player so they can shove probes. Physics never moves them back.
+    void SetKinematicProxy(Vector3Par position, float radius, float height);
     [[nodiscard]] const WindSettings& GetWind() const { return _wind; }
 
     [[nodiscard]] PhysicsStats GetStats() const;
@@ -97,6 +111,8 @@ public:
 
 private:
     void ResetCounters();
+    bool ExtractPieces(LODShape* shape, std::vector<Vector3>& points, std::vector<struct ConvexPiece>& pieces,
+                       int& degenerate, int& maxPoints);
 
     std::unique_ptr<PhysicsBackend> _backend;
 

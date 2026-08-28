@@ -133,6 +133,8 @@ public:
         // Probes are bodies in the world that is about to go, so the vector is
         // dropped rather than destroyed body by body.
         _probes.clear();
+        _proxyValid = false;
+        _proxy = b3_nullBodyId;
         _slots.clear();
         _free.clear();
         _terrainBody = b3_nullBodyId;
@@ -424,6 +426,155 @@ public:
         return Store(body, 1);
     }
 
+    BodyId SpawnDynamicPieces(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform, float mass,
+                              float friction, float restitution) override
+    {
+        if (!b3World_IsValid(_world) || !pieces || pieceCount <= 0)
+        {
+            return {};
+        }
+
+        b3BodyDef bodyDef = b3DefaultBodyDef();
+        bodyDef.type = b3_dynamicBody;
+        bodyDef.position = ToB3(transform.Position());
+        bodyDef.rotation = QuatFromOrientation(transform);
+        const b3BodyId body = b3CreateBody(_world, &bodyDef);
+
+        // Density is derived from the model's own bounding volume rather than
+        // asked for, so the dev UI can keep speaking in kilograms. It only has to
+        // be the right order of magnitude: what matters is that a jeep is heavy
+        // enough not to be flicked away by a footstep.
+        Vector3 lo(0, 0, 0);
+        Vector3 hi(0, 0, 0);
+        bool    first = true;
+        for (int i = 0; i < pieceCount; ++i)
+        {
+            for (int p = 0; p < pieces[i].count; ++p)
+            {
+                const Vector3& v = pieces[i].points[p];
+                if (first)
+                {
+                    lo = hi = v;
+                    first = false;
+                    continue;
+                }
+                for (int a = 0; a < 3; ++a)
+                {
+                    lo[a] = std::min(lo[a], v[a]);
+                    hi[a] = std::max(hi[a], v[a]);
+                }
+            }
+        }
+        const float volume = std::max((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), 0.001f);
+
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+        shapeDef.density = std::max(mass, 0.1f) / volume;
+        shapeDef.baseMaterial.friction = friction;
+        shapeDef.baseMaterial.restitution = restitution;
+
+        int attached = 0;
+        for (int i = 0; i < pieceCount; ++i)
+        {
+            if (!pieces[i].points || pieces[i].count < 4)
+            {
+                ++_hullFailures;
+                continue;
+            }
+            _scratch.clear();
+            _scratch.reserve(static_cast<std::size_t>(pieces[i].count));
+            for (int p = 0; p < pieces[i].count; ++p)
+            {
+                _scratch.push_back(ToB3(pieces[i].points[p]));
+            }
+            b3HullData* hull = b3CreateHull(_scratch.data(), static_cast<int>(_scratch.size()), MaxHullVertices);
+            if (!hull)
+            {
+                ++_hullFailures;
+                continue;
+            }
+            const b3ShapeId shape = b3CreateHullShape(body, &shapeDef, hull);
+            b3DestroyHull(hull);
+            if (!b3Shape_IsValid(shape))
+            {
+                ++_hullFailures;
+                continue;
+            }
+            ++_shapeCount;
+            ++attached;
+        }
+
+        if (attached == 0)
+        {
+            b3DestroyBody(body);
+            return {};
+        }
+
+        // Density above came from the BOUNDING BOX, which overstates the volume of
+        // anything that is not a brick -- a jeep would have come out several times
+        // too light. Box3D has already computed the true compound mass properties
+        // from the hulls, so rescale them to the mass that was actually asked for
+        // and keep the centre of mass and inertia it derived. Verified separately
+        // that those properties are volume-weighted and correct.
+        const float actual = b3Body_GetMass(body);
+        if (actual > 0.0f)
+        {
+            b3MassData   data = b3Body_GetMassData(body);
+            const float  scale = std::max(mass, 0.1f) / actual;
+            data.mass *= scale;
+            // b3Matrix3 is three COLUMN VECTORS (cx, cy, cz), not a packed
+            // xx/xy/... run. Inertia is linear in mass, so every element scales.
+            const b3Vec3* in = &data.inertia.cx;
+            b3Vec3*       out = &data.inertia.cx;
+            for (int c = 0; c < 3; ++c)
+            {
+                out[c] = b3Vec3{in[c].x * scale, in[c].y * scale, in[c].z * scale};
+            }
+            b3Body_SetMassData(body, data);
+        }
+
+        Probe probe;
+        probe.body = body;
+        probe.kind = ProbeShape::Model;
+        _probes.push_back(probe);
+        return Store(body, static_cast<std::uint32_t>(attached));
+    }
+
+    void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse) override
+    {
+        if (Slot* slot = Find(id))
+        {
+            b3Body_ApplyLinearImpulse(slot->body, ToB3(impulse), ToB3(point), true);
+        }
+    }
+
+    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const override
+    {
+        if (!b3World_IsValid(_world))
+        {
+            return {};
+        }
+        const b3Vec3      translation{to[0] - from[0], to[1] - from[1], to[2] - from[2]};
+        const b3RayResult hit = b3World_CastRayClosest(_world, ToB3(from), translation, b3DefaultQueryFilter());
+        if (!hit.hit)
+        {
+            return {};
+        }
+        hitPoint = Vector3(hit.point.x, hit.point.y, hit.point.z);
+
+        // Map the hit body back to a handle. Linear over the slot table: probe
+        // counts are small, and a map would have to be kept in step with every
+        // create and destroy for no measurable gain.
+        const b3BodyId body = b3Shape_GetBody(hit.shapeId);
+        for (const Slot& slot : _slots)
+        {
+            if (slot.body.index1 == body.index1 && slot.body.world0 == body.world0 && slot.generation % 2 != 0)
+            {
+                return BodyId{slot.index, slot.generation};
+            }
+        }
+        return {};
+    }
+
     void ClearProbes() override
     {
         for (const Probe& probe : _probes)
@@ -455,6 +606,14 @@ public:
             const b3WorldTransform t = b3Body_GetTransform(probe.body);
             ProbeSample            sample;
             sample.shape = probe.kind;
+            for (const Slot& slot : _slots)
+            {
+                if (slot.body.index1 == probe.body.index1 && slot.body.world0 == probe.body.world0)
+                {
+                    sample.id = BodyId{slot.index, slot.generation};
+                    break;
+                }
+            }
             sample.position = Vector3(t.p.x, t.p.y, t.p.z);
             sample.radius = probe.radius;
             sample.halfLength = probe.halfLength;
@@ -470,6 +629,48 @@ public:
     }
 
     void SetWind(const WindSettings& wind) override { _wind = wind; }
+
+    void SetKinematicProxy(Vector3Par position, float radius, float height) override
+    {
+        if (!b3World_IsValid(_world))
+        {
+            return;
+        }
+        if (height <= 0.0f)
+        {
+            if (_proxyValid)
+            {
+                b3DestroyBody(_proxy);
+                _proxyValid = false;
+            }
+            return;
+        }
+        if (!_proxyValid)
+        {
+            b3BodyDef def = b3DefaultBodyDef();
+            // Kinematic: moved by us, never by the solver. A dynamic proxy would
+            // be shoved around by whatever it touched and would need the result
+            // written back into the player -- exactly the ownership step this
+            // avoids.
+            def.type = b3_kinematicBody;
+            def.position = ToB3(position);
+            _proxy = b3CreateBody(_world, &def);
+
+            const float half = std::max(height * 0.5f - radius, 0.01f);
+            b3Capsule   capsule{};
+            capsule.center1 = b3Vec3{0.0f, -half, 0.0f};
+            capsule.center2 = b3Vec3{0.0f, half, 0.0f};
+            capsule.radius = radius;
+
+            b3ShapeDef shapeDef = b3DefaultShapeDef();
+            shapeDef.baseMaterial.friction = 0.8f;
+            b3CreateCapsuleShape(_proxy, &shapeDef, &capsule);
+            _proxyValid = true;
+        }
+        // SetTransform rather than a velocity: the player's motion comes from the
+        // 2001 simulation and is not ours to model. Box3D resolves the sweep.
+        b3Body_SetTransform(_proxy, ToB3(position), b3Quat{{0.0f, 0.0f, 0.0f}, 1.0f});
+    }
 
     [[nodiscard]] PhysicsStats GetStats() const override
     {
@@ -535,6 +736,9 @@ private:
     std::vector<Slot>        _slots;
     std::vector<std::uint32_t> _free;
     std::vector<b3Vec3>      _scratch;
+
+    b3BodyId _proxy = b3_nullBodyId;
+    bool     _proxyValid = false;
 
     b3HeightFieldData* _heightField = nullptr;
     b3BodyId           _terrainBody = b3_nullBodyId;

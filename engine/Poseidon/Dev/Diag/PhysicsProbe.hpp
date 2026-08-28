@@ -25,9 +25,22 @@ void DrawPhysicsProbes();
 /// PHY-020 acceptance check can be captured without pressing a dev button.
 void AutoDropPhysicsProbes();
 
+/// Spawns a DYNAMIC copy of a model already loaded in the world, matched by a
+/// substring of its path (default "jeep"). A separate instance: the physics owns
+/// it, the mission never hears about it. Returns false if no loaded model matches.
+bool SpawnModelProbe(const char* nameFragment);
+
+/// Pushes whatever physics body a shot passed through. Called from the impact
+/// path; does nothing when no physics world exists.
+void PhysicsProbeOnProjectileHit(Vector3Par from, Vector3Par to, float momentum);
+
 /// Pushes the world's wind into the physics world, or clears it. Called once per
 /// frame so a change in weather reaches the probes without a respawn.
 void UpdatePhysicsProbeWind();
+
+/// Moves the kinematic player proxy to `position`. Called from the fixed tick so
+/// the proxy sweeps at the same rate the bodies it pushes are solved at.
+void UpdatePhysicsPlayerProxy(Vector3Par position);
 
 // Dev-panel state. Plain globals: this is a probe UI, and threading a settings
 // struct through three files would be more machinery than the thing it configures.
@@ -58,6 +71,17 @@ struct PhysicsProbeSettings
     float windScale = 1.0f;
     float windDrag = 1.0f;
     bool  draw = true;
+    /// Let the player shove probes by walking into them.
+    bool  playerProxy = true;
+    float playerRadius = 0.35f;
+    float playerHeight = 1.8f;
+    /// Model probe: which loaded model to copy, and how heavy to make it.
+    char  modelFilter[64] = "jeep";
+    float modelMass = 1200.0f;
+    /// Newton-seconds a hit transfers. A rifle bullet carries about 4 Ns, which
+    /// moves a domino and does nothing at all to a jeep -- so this is a multiplier
+    /// on reality, not reality, and it says so in the panel.
+    float hitImpulseScale = 40.0f;
 };
 
 PhysicsProbeSettings& ProbeSettings();
