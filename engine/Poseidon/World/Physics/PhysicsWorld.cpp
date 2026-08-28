@@ -212,6 +212,11 @@ BodyId PhysicsWorld::CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) 
     return _backend ? _backend->CastRay(from, to, hitPoint) : BodyId{};
 }
 
+bool PhysicsWorld::RayHitAnything(Vector3Par from, Vector3Par to) const
+{
+    return _backend && _backend->RayHitAnything(from, to);
+}
+
 RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matrix4& transform)
 {
     RegisterResult result;

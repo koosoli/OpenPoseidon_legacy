@@ -579,6 +579,16 @@ public:
         return {};
     }
 
+    bool RayHitAnything(Vector3Par from, Vector3Par to) const override
+    {
+        if (!b3World_IsValid(_world))
+        {
+            return false;
+        }
+        const b3Vec3 translation{to[0] - from[0], to[1] - from[1], to[2] - from[2]};
+        return b3World_CastRayClosest(_world, ToB3(from), translation, b3DefaultQueryFilter()).hit;
+    }
+
     void ClearProbes() override
     {
         for (const Probe& probe : _probes)

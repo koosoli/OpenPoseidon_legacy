@@ -10,6 +10,7 @@
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -715,6 +716,10 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
         // test collision with objects
         CollisionBuffer collision;
         GLandscape->ObjectCollision(collision, this, _parent, Position(), position, 0);
+        // PHY-030: ask the physics world the same question and count the
+        // disagreements. Watches only -- the legacy answer below is still the one
+        // the game acts on, and the audit is off unless switched on.
+        Poseidon::Dev::AuditProjectileSegment(Position(), position, collision.Size() > 0);
         if (collision.Size() > 0)
         {
             float minT = 1e10;

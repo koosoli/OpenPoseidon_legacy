@@ -9,6 +9,7 @@
 
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
+#include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
 // See the note in PictureModeTab.cpp: Foundation's DebugLog macro eats an ImGui
@@ -359,6 +360,53 @@ void DrawPhysicsTab()
         ImGui::SliderFloat("Player radius", &s.playerRadius, 0.1f, 1.5f, "%.2f");
         ImGui::SetNextItemWidth(200.0f);
         ImGui::SliderFloat("Player height", &s.playerHeight, 0.5f, 3.0f, "%.2f");
+    }
+
+    ImGui::SeparatorText("Ray audit (PHY-030)");
+    bool audit = RayAuditEnabled();
+    if (ImGui::Checkbox("Compare physics rays with the 2001 path", &audit))
+    {
+        SetRayAudit(audit);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Every projectile segment is asked of BOTH collision systems and the\n"
+            "disagreements are counted. Replaces nothing -- the legacy answer is\n"
+            "still the one the game acts on.\n"
+            "\n"
+            "The corpus census says 82,381 objects converted. It cannot say whether\n"
+            "they converted to the right SHAPE. Two rays over one segment can.\n"
+            "\n"
+            "Costs a second ray per projectile step, so it is off by default.");
+    }
+    {
+        const RayAuditStats a = GetRayAuditStats();
+        ImGui::Text("Segments %llu | agree hit %llu | agree miss %llu",
+                    static_cast<unsigned long long>(a.segments), static_cast<unsigned long long>(a.agreeHit),
+                    static_cast<unsigned long long>(a.agreeMiss));
+        ImGui::TextColored(a.legacyOnly ? ImVec4(1.0f, 0.7f, 0.3f, 1.0f) : ImVec4(0.6f, 0.6f, 0.6f, 1.0f),
+                           "Legacy hit, physics missed: %llu",
+                           static_cast<unsigned long long>(a.legacyOnly));
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "The interesting one: geometry the game collides with that the\n"
+                "physics world does not have, or has smaller than it draws.");
+        }
+        ImGui::TextDisabled("Physics hit, legacy missed: %llu",
+                            static_cast<unsigned long long>(a.physicsOnly));
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                "Expected to be non-zero: the terrain is in the physics world and\n"
+                "the projectile path tests it separately, so this is not a fault\n"
+                "by itself.");
+        }
+        if (ImGui::Button("Reset audit"))
+        {
+            ResetRayAudit();
+        }
     }
 
     ImGui::SeparatorText("Wind");

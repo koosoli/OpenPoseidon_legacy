@@ -2,6 +2,7 @@
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Scene/Object.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -87,6 +88,12 @@ void ReportPhysicsCost()
     const Physics::PhysicsStats stats = world->GetStats();
     LOG_WARN(World, "PHYSCOST: {:.3f} ms mean, {:.3f} ms worst over {} steps; {} bodies {} shapes",
              stats.meanStepMs, stats.worstStepMs, stats.stepsTimed, stats.bodies, stats.shapes);
+    if (RayAuditEnabled())
+    {
+        const RayAuditStats a = GetRayAuditStats();
+        LOG_WARN(World, "PHYSRAY: {} segments | agree hit {} miss {} | legacy-only {} | physics-only {}", a.segments,
+                 a.agreeHit, a.agreeMiss, a.legacyOnly, a.physicsOnly);
+    }
 }
 
 int&  TerrainSubdivision() { return s_subdivision; }

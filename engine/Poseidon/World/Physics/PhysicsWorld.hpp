@@ -98,6 +98,11 @@ public:
     void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse);
     /// Ray against the physics world. Returns the body hit, invalid if none.
     BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const;
+    /// Did the ray hit ANYTHING, including the terrain height field, which has no
+    /// body handle? CastRay alone cannot answer that: it returns an invalid id
+    /// both for "missed" and for "hit something untracked", and conflating those
+    /// would make the terrain look like a miss in every audit.
+    bool RayHitAnything(Vector3Par from, Vector3Par to) const;
     void   ClearProbes();
     void   GetProbeSamples(std::vector<ProbeSample>& out) const;
     void   SetWind(const WindSettings& wind);

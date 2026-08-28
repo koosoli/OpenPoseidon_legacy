@@ -78,6 +78,7 @@ public:
     virtual void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse) = 0;
     /// Ray against the physics world; returns the body hit, invalid if none.
     virtual BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const = 0;
+    virtual bool   RayHitAnything(Vector3Par from, Vector3Par to) const = 0;
     virtual void   ClearProbes() = 0;
     /// Probe positions for debug drawing only. Scoped to probe bodies on purpose:
     /// a general transform getter is what turns "physics is a query service" into
