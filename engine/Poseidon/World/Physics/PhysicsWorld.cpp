@@ -217,6 +217,44 @@ bool PhysicsWorld::RayHitAnything(Vector3Par from, Vector3Par to) const
     return _backend && _backend->RayHitAnything(from, to);
 }
 
+bool PhysicsWorld::MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness) const
+{
+    thickness = 0.0f;
+    if (!_backend || maxDepth <= 0.0f)
+    {
+        return false;
+    }
+    const float len = direction.Size();
+    if (len < 1e-6f)
+    {
+        return false;
+    }
+    const Vector3 dir = direction / len;
+
+    // Backwards from beyond the object. The far face is the first thing this ray
+    // meets, and the distance from `entry` to it is the thickness along the shot's
+    // own line -- which is what matters, not the wall's nominal thickness: a
+    // glancing shot through the same wall travels further inside it.
+    const Vector3 beyond = entry + dir * maxDepth;
+    Vector3       exit;
+    if (!_backend->CastRay(beyond, entry, exit).IsValid() && !_backend->RayHitAnything(beyond, entry))
+    {
+        return false;
+    }
+    // CastRay reports the point even when the body is untracked (terrain), but only
+    // fills it on a hit, so re-cast to read the point rather than trust a stale one.
+    Vector3 point;
+    _backend->CastRay(beyond, entry, point);
+
+    const float depth = (point - entry) * dir;
+    if (depth <= 0.0f || depth > maxDepth)
+    {
+        return false;
+    }
+    thickness = depth;
+    return true;
+}
+
 RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matrix4& transform)
 {
     RegisterResult result;

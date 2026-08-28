@@ -103,6 +103,20 @@ public:
     /// both for "missed" and for "hit something untracked", and conflating those
     /// would make the terrain look like a miss in every audit.
     bool RayHitAnything(Vector3Par from, Vector3Par to) const;
+
+    /// How thick is the thing a shot just entered?
+    ///
+    /// This is the measurement the fork's material system does NOT have -- its
+    /// bulletPassthrough is a boolean and its own code carries a TODO where the
+    /// depth should be. With colliders in a physics world the answer is two rays:
+    /// the entry is known, and casting BACKWARDS from beyond the object finds the
+    /// far face. Forwards from just inside would find the next object instead
+    /// whenever the shot is already past the mid-plane.
+    ///
+    /// Returns false when nothing is found within `maxDepth`, which means either a
+    /// very thick object or one the collider set does not have -- the caller must
+    /// not treat that as "thin".
+    bool MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness) const;
     void   ClearProbes();
     void   GetProbeSamples(std::vector<ProbeSample>& out) const;
     void   SetWind(const WindSettings& wind);
