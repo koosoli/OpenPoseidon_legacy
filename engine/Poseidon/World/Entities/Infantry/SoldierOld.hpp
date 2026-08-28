@@ -985,6 +985,9 @@ class Man: public Person
 	bool ShowCursor( int weapon, CameraType camType ) const override;
 
 	int InsideLOD( CameraType camType ) const override;
+	// A man's inside view is his own body seen from his own eyes -- outdoors,
+	// under the full sky.  Never damp its ambient like a vehicle cabin's.
+	bool InsideLODIsEnclosed() const override {return false;}
 	void InitVirtual
 	(
 		CameraType camType, float &heading, float &dive, float &fov

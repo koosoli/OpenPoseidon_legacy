@@ -55,6 +55,15 @@ enum class PassKindHint : std::uint8_t
     ScreenSpace3D, // Producer says "this is a 3D-mesh UI overlay"
                    // (notebook, HUD geometry); routes as ScreenSpace3D
                    // regardless of alpha.
+    FirstPersonBody, // Producer says "this is the player's OWN body or held
+                     // weapon at its inside-view LOD".  Routes into the same
+                     // Cockpit* pass family as `Cockpit` -- it is a late
+                     // first-person draw and needs that depth handling -- but
+                     // it is NOT an enclosed interior, so backends must not
+                     // apply cockpit ambient damping to it.  MAT-052's damping
+                     // was meant for a vehicle cabin no ambient occluder can
+                     // see; it was also reaching the soldier's sleeves and
+                     // rifle, which stand in the open sky.
 };
 
 // Depth test + write + stencil interaction.  Names align with the

@@ -1651,7 +1651,10 @@ static void DrawSortObject(SortObject* oi)
         return;
     }
     const render::PassKindHint savedHint = GEngine->GetPassKindHint();
-    GEngine->SetPassKindHint(render::PassKindHint::Cockpit);
+    // Both hints route into the Cockpit* pass family; they differ only in
+    // whether the backend treats the draw as an enclosed interior for ambient.
+    GEngine->SetPassKindHint(obj->InsideLODIsEnclosed() ? render::PassKindHint::Cockpit
+                                                        : render::PassKindHint::FirstPersonBody);
     obj->Draw(oi->drawLOD, oi->orClip, *obj);
     GEngine->SetPassKindHint(savedHint);
 }

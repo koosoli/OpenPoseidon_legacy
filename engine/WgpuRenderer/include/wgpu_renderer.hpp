@@ -256,8 +256,11 @@ enum WgrDraw3DFlags : uint32_t
      * 11%-alpha pane would otherwise vanish from the inside view. */
     WGR_DRAW3D_GLASS = 8,
     /* MAT-052 second half: this draw is part of the first-person cockpit (the engine's
-     * PassKindHint::Cockpit scope -- the camera vehicle's interior LOD and the soldier's
-     * hands/weapon). The lit shader takes the FLAT scene ambient for these instead of the
+     * PassKindHint::Cockpit scope -- the camera vehicle's interior LOD. NOT the soldier's
+     * own body or held weapon: those are PassKindHint::FirstPersonBody, drawn in the same
+     * late pass but under the open sky, and damping them turned the sleeve dark and the
+     * rifle's grazing-angle faces into a black patch via the view-facing normal flip.)
+     * The lit shader takes the FLAT scene ambient for these instead of the
      * sky-dome irradiance: a cockpit interior is enclosed by the vehicle body, and the
      * outdoor sky term washed every interior plate to near-sky brightness -- which against
      * the sky reads as a transparent cockpit (T72 interior: fine looking down at terrain,

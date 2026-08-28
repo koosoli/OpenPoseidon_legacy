@@ -3546,11 +3546,12 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         d.flags |= WGR_DRAW3D_GLASS;
     }
-    // MAT-052 second half: the engine already scopes first-person interior draws with
-    // PassKindHint::Cockpit (the camera vehicle's inside LOD in DrawSortObject, the
-    // soldier's hands/weapon in SoldierOldSimProxy). Carry that scope to the shader so
-    // the interior takes the flat scene ambient instead of the outdoor sky dome --
-    // see WGR_DRAW3D_COCKPIT in wgpu_renderer.hpp for the full story.
+    // MAT-052 second half: the engine scopes ENCLOSED first-person interiors with
+    // PassKindHint::Cockpit (the camera vehicle's inside LOD in DrawSortObject).
+    // Carry that scope to the shader so the interior takes a damped sky ambient --
+    // see WGR_DRAW3D_COCKPIT in wgpu_renderer.hpp for the full story. The soldier's
+    // own body and held weapon carry PassKindHint::FirstPersonBody instead: same late
+    // pass, but they stand in open sky and must NOT be damped or view-normal-flipped.
     if (GetPassKindHint() == render::PassKindHint::Cockpit)
     {
         d.flags |= WGR_DRAW3D_COCKPIT;

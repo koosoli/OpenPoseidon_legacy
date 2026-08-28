@@ -795,6 +795,11 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	virtual Matrix4 InsideCamera( CameraType camType ) const {return MIdentity;}
 	// Check which lod level should be used for internal view
 	virtual int InsideLOD( CameraType camType ) const {return LOD_INVISIBLE;}
+	// Is that internal view an ENCLOSED interior -- a vehicle cabin, whose
+	// surrounding body no ambient occluder can see -- or merely a first-person
+	// body drawn late?  Only the former wants the cockpit ambient damping
+	// (MAT-052); a soldier's own hands, sleeves and weapon stand in open sky.
+	virtual bool InsideLODIsEnclosed() const {return true;}
 	// Check which lod level should be used for internal view occlusion testing
 	virtual int InsideViewGeomLOD( CameraType camType ) const;
 	// Check if weapon may be controlled with this camera

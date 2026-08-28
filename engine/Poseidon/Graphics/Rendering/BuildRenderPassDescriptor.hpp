@@ -210,7 +210,10 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
         constexpr Routing fogOffMask = Routing::NoDropdown | Routing::FogDisabled;
         d.fog = ((routing & fogOffMask) == Routing::None) ? FogMode::Enabled : FogMode::Disabled;
 
-        const bool routeAsCockpit = (ctx.passKindHint == PassKindHint::Cockpit);
+        // FirstPersonBody routes identically to Cockpit here: both are late
+        // first-person draws.  They differ only in shading (see PassKindHint).
+        const bool routeAsCockpit =
+            (ctx.passKindHint == PassKindHint::Cockpit || ctx.passKindHint == PassKindHint::FirstPersonBody);
         const bool routeAsScreenSpace = (ctx.passKindHint == PassKindHint::ScreenSpace3D);
 
         if (Has(backend, Backend::IsAlpha))

@@ -414,7 +414,10 @@ void Man::DrawProxies(int level, ClipFlags clipFlags, const Matrix4& transform, 
         const render::PassKindHint savedHint = GEngine->GetPassKindHint();
         if (isCockpitProxy)
         {
-            GEngine->SetPassKindHint(render::PassKindHint::Cockpit);
+            // FirstPersonBody, not Cockpit: this is the soldier's held weapon.
+            // It needs the late first-person pass, but it is not an enclosed
+            // interior and must keep the full sky ambient (MAT-052 follow-up).
+            GEngine->SetPassKindHint(render::PassKindHint::FirstPersonBody);
         }
         shape->PrepareTextures(z2, shapeSpec);
         shape->Draw(this, lights, ClipAll, shapeSpec, pTransform, invPTransform);
