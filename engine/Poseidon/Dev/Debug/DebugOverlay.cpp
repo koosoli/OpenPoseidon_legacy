@@ -6034,24 +6034,30 @@ void DrawMainWindow()
     // control the panel has drawn. Behind a confirmation, since a dev session can
     // be an hour of tuning and there is no undo.
     ImGui::SameLine();
-    if (ImGui::SmallButton("Reset all"))
+    if (ImGui::SmallButton("Reset settings"))
     {
         ImGui::OpenPopup("Reset dev settings?");
     }
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
-            "Restores the dev panel settings to their compiled defaults.\n"
+            "Named settings only -- the dialog lists exactly which.\n"
             "\n"
-            "Each tab says how it resets, rather than the panel guessing from\n"
-            "pointers -- an earlier version did that and wrote into stack\n"
-            "addresses that had already died with the frame.");
+            "Not every setting: a tab is reset where it says how, and most tabs\n"
+            "do not yet. The pointer-based version that WOULD have covered\n"
+            "everything wrote into stack addresses that die with the frame.");
     }
     if (ImGui::BeginPopupModal("Reset dev settings?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::Text("Restore the dev panel settings to their defaults?");
-        ImGui::TextDisabled("Physics probes, penetration, ray audit, depth of field.\n"
-                            "There is no undo.");
+        ImGui::Text("Restore these to their defaults?");
+        ImGui::BulletText("Physics probes, world colliders, penetration, ray audit");
+        ImGui::BulletText("Fixed step");
+        ImGui::BulletText("Ballistics recorder and aim model");
+        ImGui::BulletText("Picture Mode / depth of field");
+        ImGui::Separator();
+        ImGui::TextDisabled("Everything else is untouched. A tab is reset only where it says\n"
+                            "how, and most do not yet -- so this list IS the coverage, not a\n"
+                            "summary of it. There is no undo.");
         ImGui::Separator();
         if (ImGui::Button("Reset"))
         {

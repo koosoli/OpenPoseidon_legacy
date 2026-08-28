@@ -16,10 +16,12 @@
 
 #include <Poseidon/Dev/Debug/DevPanelWidgets.hpp>
 
+#include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
+#include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 
 #include <map>
@@ -189,13 +191,26 @@ void ResetPanelSettings()
 {
     // Explicit list. A tab that wants resetting says so here; anything not named
     // is simply left alone, which is a visible gap rather than a silent one.
+    // Physics probes and their world
     ResetProbeSettings();
+    // Picture Mode
     ResetPictureModeSettings();
+    // Penetration
     Penetration::SetEnabled(false);
     Penetration::SetResistanceScale(1.0f);
+    // Ray audit
     SetRayAudit(false);
     ResetRayAudit();
+    // Fixed step
     ResetFixedStepStats();
+    SetFixedStepScripts(true);
+    // Ballistics recorder
+    Ballistics::SetEnabled(false);
+    Ballistics::SetDrawTrails(true);
+    Ballistics::ClearAll();
+    Ballistics::SetSelectedTrack(0);
+    Poseidon::Ballistics::SetDragCorrectAim(true);
+    Poseidon::Ballistics::SetForcedDragModel(Poseidon::Ballistics::DragModel::Constant, 0.0f);
 }
 
 bool SliderFloat(const char* label, float* v, float min, float max, const char* format, ImGuiSliderFlags flags)

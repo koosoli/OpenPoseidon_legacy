@@ -88,6 +88,27 @@ Cause 2 is the one I would look at first after the log, because it would be
 invisible from outside and would make penetration fail for exactly the doors,
 fences and gates people try first.
 
+## The dev panel's reset is INCOMPLETE by construction
+
+`Reset settings` covers a named list -- physics probes, penetration, ray audit,
+fixed step, ballistics recorder and aim model, Picture Mode -- and nothing else.
+The dialog lists exactly what it touches, and the button is not called "Reset
+all", because it is not.
+
+Why it is not automatic: the first version remembered a control's POINTER the
+first time it was drawn and wrote the value back on demand. That would have
+covered every tab for free, and it was unsafe -- tabs commonly bind a control to a
+member of a stack-local settings copy (`auto dof = GetDepthOfFieldSettings();
+Slider(&dof.focus)`), so the remembered address dies with the frame and the reset
+wrote into whatever took that stack space.
+
+To extend it, a tab exposes its own reset and DevPanelWidgets.cpp's
+ResetPanelSettings calls it. The owner found Ballistics missing within a minute
+of the first version, and said there was certainly more: there is.
+
+The real fix, if this ever matters enough, is to stop tabs binding controls to
+stack copies -- then the pointer approach becomes both safe and complete.
+
 ## What is open
 
 1. **The ray audit has no data.** It reports 0 segments — nothing fires in a
