@@ -1932,7 +1932,14 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
         // The proxy moves BEFORE the step, so its sweep is resolved in the same
         // tick as the bodies it pushes. Moving it after would leave every shove
         // one tick late and make contacts look sticky.
-        if (cameraVehicle)
+        // The PLAYER, not the camera's vehicle. In free-fly there is no camera
+        // vehicle at all, so the proxy silently never moved -- which reads exactly
+        // like "objects ignore me".
+        if (Person* player = PlayerOn())
+        {
+            Dev::UpdatePhysicsPlayerProxy(player->WorldTransform().Position());
+        }
+        else if (cameraVehicle)
         {
             Dev::UpdatePhysicsPlayerProxy(cameraVehicle->WorldTransform().Position());
         }

@@ -104,7 +104,9 @@ struct PhysicsProbeSettings
     /// Newton-seconds a hit transfers. A rifle bullet carries about 4 Ns, which
     /// moves a domino and does nothing at all to a jeep -- so this is a multiplier
     /// on reality, not reality, and it says so in the panel.
-    float hitImpulseScale = 40.0f;
+    /// Default 4, not 40. At 40 a domino left the county. The scale multiplies a
+    /// figure that is ALREADY the projectile's speed, so it was compounding twice.
+    float hitImpulseScale = 4.0f;
 };
 
 PhysicsProbeSettings& ProbeSettings();

@@ -82,6 +82,12 @@ struct ModelProbe
     Physics::BodyId         id;
     Ref<LODShapeWithShadow> shape;
     Ref<Object>             draw;
+    /// The temporary entity the shape came from, kept ALIVE. Holding only the
+    /// shape was not enough: the jeep drew with white untextured panels because
+    /// its textures are referenced by the entity, and letting that die released
+    /// them. The lighthouse model taken straight from the landscape drew
+    /// correctly, which is what narrowed it to the config path.
+    Ref<Entity> source;
 };
 std::vector<ModelProbe> s_modelProbes;
 
@@ -176,10 +182,26 @@ bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
         }
     }
 
-    // Last resort: load it. Lets the tool reach a model the current mission does
-    // not happen to place, at the cost of needing a real path rather than a
-    // fragment.
+    // Ask the CONFIG, the way the Zeus tab does. NewNonAIVehicle builds an entity
+    // from a class name on any island, so "Jeep" works whether or not one happens
+    // to be standing nearby -- which is the whole point, and what the two searches
+    // above cannot give. The entity is temporary and never enters the world: only
+    // its shape is kept, held by a Ref so it outlives the entity that owned it.
+    Ref<Entity>             configEntity;
     Ref<LODShapeWithShadow> loaded;
+    if (!found)
+    {
+        // fullCreate=true: with it false the shape comes back with its levels
+        // unresolved and the object draws its GEOMETRY LOD -- the collision hulls
+        // render as white boxes over the vehicle.
+        configEntity = NewNonAIVehicle(RString(nameFragment), nullptr, true);
+        if (configEntity)
+        {
+            found = configEntity->GetShape();
+        }
+    }
+
+    // And finally as a literal model path, for something with no config class.
     if (!found)
     {
         loaded = Shapes.New(nameFragment, false, false);
@@ -191,11 +213,12 @@ bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
 
     if (!found)
     {
-        LOG_WARN(World, "PHYSPROBE: no model matching '{}' among {} vehicles or the landscape, and it did not load "
-                        "as a path either",
-                 nameFragment, GWorld->NVehicles());
+        LOG_WARN(World,
+                 "PHYSPROBE: '{}' is not a loaded model, not a config class, and not a model path", nameFragment);
         return false;
     }
+    // Keep the shape alive past the temporary entity.
+    Ref<LODShapeWithShadow> keep = found;
 
     const Vector3 forward = GScene->GetCamera()->Direction();
     const Vector3 eye = GScene->GetCamera()->Position();
@@ -233,7 +256,8 @@ bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
 
     ModelProbe probe;
     probe.id = id;
-    probe.shape = found;
+    probe.shape = keep;
+    probe.source = configEntity;
     probe.draw = new Object(found, -1);
     s_modelProbes.push_back(probe);
     LOG_WARN(World, "PHYSPROBE: model probe '{}' at ({:.1f} {:.1f} {:.1f}) mass {}", found->Name(), origin[0],
@@ -261,7 +285,13 @@ void PhysicsProbeOnProjectileHit(Vector3Par from, Vector3Par to, float momentum)
         return;
     }
     dir = dir / len;
-    world->ApplyImpulse(id, hit, dir * (momentum * s_settings.hitImpulseScale));
+    // `momentum` is the projectile's SPEED, several hundred m/s. Multiplying that
+    // by a scale of 40 gave a bullet the punch of a truck -- the owner's "objects
+    // fly much too far". Treated as a real projectile mass instead: about 4 g,
+    // which makes the product genuine newton-seconds, and the scale then means
+    // what it says rather than compounding an already-large number.
+    constexpr float BulletMassKg = 0.004f;
+    world->ApplyImpulse(id, hit, dir * (momentum * BulletMassKg * s_settings.hitImpulseScale));
 }
 
 void SpawnPhysicsProbe(float throwSpeed)
@@ -432,6 +462,9 @@ void UpdatePhysicsProbeWind()
     world->SetWind(wind);
 }
 
+Vector3 s_proxyCentre;
+bool    s_proxyLive = false;
+
 void UpdatePhysicsPlayerProxy(Vector3Par position)
 {
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
@@ -442,7 +475,9 @@ void UpdatePhysicsPlayerProxy(Vector3Par position)
     // Height 0 removes it, so switching the checkbox off actually takes the
     // capsule out of the world rather than leaving an invisible one standing
     // where the player last was.
-    world->SetKinematicProxy(position + Vector3(0, s_settings.playerHeight * 0.5f, 0), s_settings.playerRadius,
+    s_proxyCentre = position + Vector3(0, s_settings.playerHeight * 0.5f, 0);
+    s_proxyLive = s_settings.playerProxy;
+    world->SetKinematicProxy(s_proxyCentre, s_settings.playerRadius,
                              s_settings.playerProxy ? s_settings.playerHeight : 0.0f);
 }
 
@@ -476,6 +511,10 @@ void AutoDropPhysicsProbes()
     // POSEIDON_PHYSICS_PROBE_RADIUS overrides the slider for harness runs. A
     // 0.2 m ball is the realistic default and is also invisible in waist-high
     // grass from ten metres, which is not a useful thing to photograph.
+    if (const char* nd = std::getenv("POSEIDON_PHYSICS_PROBE_NODRAW"))
+    {
+        s_settings.draw = std::atoi(nd) == 0;
+    }
     if (const char* sh = std::getenv("POSEIDON_PHYSICS_PROBE_SHAPE"))
     {
         // 0..3, not a bool. The first version accepted only 0 or 1, so asking
@@ -632,6 +671,18 @@ void DrawPhysicsProbes()
     }
 
 drawModels:
+    // The player proxy, drawn so a probe that is NOT being pushed can be told
+    // apart from a proxy that is in the wrong place. Without seeing it, "I walk
+    // through things" and "the capsule is at my chest" look identical.
+    if (s_proxyLive && s_settings.draw)
+    {
+        const PackedColor proxyColor = PackedColor(0xffffc040);
+        const float       half = s_settings.playerHeight * 0.5f;
+        SubmitCircle(s_proxyCentre - Vector3(0, half, 0), s_settings.playerRadius, VForward, VAside, proxyColor);
+        SubmitCircle(s_proxyCentre + Vector3(0, half, 0), s_settings.playerRadius, VForward, VAside, proxyColor);
+        SubmitCircle(s_proxyCentre, s_settings.playerRadius, VForward, VAside, proxyColor);
+    }
+
     // Model probes draw as the real model, placed at the body's transform. The
     // Object is submitted straight to the scene and lives nowhere else -- it is
     // not in the object grid, no entity holds it, and the mission cannot save it.

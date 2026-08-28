@@ -15,7 +15,11 @@ namespace
 // Same recipe ObjectLine::CreateShape uses, generalised. IsColored is what lets
 // SetConstantColor tint the result, which is how a probe stays distinguishable
 // from the scenery it is resting on.
-constexpr int ProbeSpecial = NoShadow | IsColored;
+// NO NoShadow. That flag was copied from ObjectLine::CreateShape, where a debug
+// line has no business casting one -- but a crate resting on the ground without a
+// shadow reads as floating, and the shadow is half of what tells you it is
+// actually touching.
+constexpr int ProbeSpecial = IsColored;
 
 /// Builds one shape from flat-shaded quads and triangles. `indices` holds 3 or 4
 /// entries per face; `counts` says which.
