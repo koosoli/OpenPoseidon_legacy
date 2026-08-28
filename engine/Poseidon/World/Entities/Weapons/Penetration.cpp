@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 
+#include <Poseidon/Foundation/Framework/Log.hpp>
+
 #include <algorithm>
+#include <mutex>
+#include <set>
+#include <string>
 
 #include <atomic>
 #include <cmath>
@@ -78,6 +83,25 @@ const Material& Lookup(const char* texturePath)
         if (std::strstr(texturePath, entry.fragment))
         {
             return entry.material;
+        }
+    }
+
+    // Log every texture that falls through, ONCE each.
+    //
+    // The table was written by guessing that OFP texture paths carry material
+    // words. They largely do not -- stock textures are named after the OBJECT
+    // (`hotel_door1_ca.paa`, `dvere_int3.paa`), so a wooden gate lands here and
+    // resists like concrete, which is what the owner saw. Rather than guess more
+    // words, this makes the game report what it actually meets: shoot around,
+    // read PENMISS in the log, and the table can be built from the corpus instead
+    // of from assumption.
+    static std::mutex           mutex;
+    static std::set<std::string> reported;
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (reported.size() < 500 && reported.insert(texturePath).second)
+        {
+            LOG_WARN(World, "PENMISS: no material for '{}' -- resisting as unknown", texturePath);
         }
     }
     return kDefault;

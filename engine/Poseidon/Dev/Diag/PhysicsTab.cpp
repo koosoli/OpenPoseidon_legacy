@@ -10,6 +10,7 @@
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
+#include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
 // See the note in PictureModeTab.cpp: Foundation's DebugLog macro eats an ImGui
@@ -408,6 +409,41 @@ void DrawPhysicsTab()
             ResetRayAudit();
         }
     }
+
+    ImGui::SeparatorText("Bullet penetration");
+    bool pen = Penetration::Enabled();
+    if (ImGui::Checkbox("Rounds penetrate materials", &pen))
+    {
+        Penetration::SetEnabled(pen);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "A round measures how far it must travel INSIDE what it hit, pays that\n"
+            "material's price in energy, and comes out slower -- or does not come out.\n"
+            "Needs world colliders registered: the thickness comes from a ray.\n"
+            "\n"
+            "Every material the table does not know resists like a wall, and logs\n"
+            "PENMISS once with the texture name. If something wooden stops a round\n"
+            "it should not, that log line is the reason and the fix.");
+    }
+    ImGui::BeginDisabled(!pen);
+    float scale = Penetration::ResistanceScale();
+    ImGui::SetNextItemWidth(200.0f);
+    if (ImGui::SliderFloat("Material resistance", &scale, 0.05f, 4.0f, "%.2fx",
+                           ImGuiSliderFlags_Logarithmic))
+    {
+        Penetration::SetResistanceScale(scale);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Scales the whole table at once. The constants are ESTIMATES -- real\n"
+            "penetration data is classified, proprietary or absent -- so this exists\n"
+            "to make everything harder or softer without pretending a particular\n"
+            "number is a measurement.");
+    }
+    ImGui::EndDisabled();
 
     ImGui::SeparatorText("Wind");
     ImGui::Checkbox("Apply world wind", &s.applyWind);
