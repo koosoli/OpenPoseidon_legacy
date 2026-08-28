@@ -342,9 +342,36 @@ public:
         shapeDef.baseMaterial.restitution = def.restitution;
         shapeDef.baseMaterial.rollingResistance = def.rollingResistance;
 
-        const float halfLength = def.shape == ProbeShape::Capsule ? std::max(def.halfLength, 0.001f) : 0.0f;
+        const float halfLength =
+            (def.shape == ProbeShape::Capsule || def.shape == ProbeShape::Cylinder)
+                ? std::max(def.halfLength, 0.001f)
+                : 0.0f;
         b3ShapeId   shape;
-        if (def.shape == ProbeShape::Capsule)
+        b3HullData* ownedHull = nullptr;
+        if (def.shape == ProbeShape::Box)
+        {
+            // b3MakeBoxHull returns the hull BY VALUE with its arrays embedded, and
+            // must not be destroyed. The shape copies (measured -- see Destroy), so
+            // letting the stack value die here is correct.
+            b3BoxHull box = b3MakeBoxHull(std::max(def.halfExtents[0], 0.001f),
+                                          std::max(def.halfExtents[1], 0.001f),
+                                          std::max(def.halfExtents[2], 0.001f));
+            shape = b3CreateHullShape(body, &shapeDef, &box.base);
+        }
+        else if (def.shape == ProbeShape::Cylinder)
+        {
+            // Upright: a tower block stands on its end. 16 sides is round enough to
+            // roll believably and cheap enough to stack a lot of.
+            ownedHull = b3CreateCylinder(2.0f * halfLength, def.radius, 0.0f, 16);
+            if (!ownedHull)
+            {
+                b3DestroyBody(body);
+                ++_hullFailures;
+                return {};
+            }
+            shape = b3CreateHullShape(body, &shapeDef, ownedHull);
+        }
+        else if (def.shape == ProbeShape::Capsule)
         {
             // Laid along the body's local X so it starts horizontal, like something
             // that has fallen over rather than a post standing on end.
@@ -360,6 +387,10 @@ public:
             sphere.center = b3Vec3{0.0f, 0.0f, 0.0f};
             sphere.radius = def.radius;
             shape = b3CreateSphereShape(body, &shapeDef, &sphere);
+        }
+        if (ownedHull)
+        {
+            b3DestroyHull(ownedHull);
         }
         if (!b3Shape_IsValid(shape))
         {
@@ -388,7 +419,7 @@ public:
             }
         }
 
-        _probes.push_back(Probe{body, shape, def.radius, halfLength});
+        _probes.push_back(Probe{body, shape, def.radius, halfLength, def.shape, def.halfExtents});
         ++_shapeCount;
         return Store(body, 1);
     }
@@ -423,13 +454,17 @@ public:
         {
             const b3WorldTransform t = b3Body_GetTransform(probe.body);
             ProbeSample            sample;
+            sample.shape = probe.kind;
             sample.position = Vector3(t.p.x, t.p.y, t.p.z);
             sample.radius = probe.radius;
-            if (probe.halfLength > 0.0f)
-            {
-                const b3Vec3 axis = b3RotateVector(t.q, b3Vec3{probe.halfLength, 0.0f, 0.0f});
-                sample.axis = Vector3(axis.x, axis.y, axis.z);
-            }
+            sample.halfLength = probe.halfLength;
+            sample.halfExtents = probe.halfExtents;
+            const b3Vec3 ax = b3RotateVector(t.q, b3Vec3{1.0f, 0.0f, 0.0f});
+            const b3Vec3 ay = b3RotateVector(t.q, b3Vec3{0.0f, 1.0f, 0.0f});
+            const b3Vec3 az = b3RotateVector(t.q, b3Vec3{0.0f, 0.0f, 1.0f});
+            sample.axisX = Vector3(ax.x, ax.y, ax.z);
+            sample.axisY = Vector3(ay.x, ay.y, ay.z);
+            sample.axisZ = Vector3(az.x, az.y, az.z);
             out.push_back(sample);
         }
     }
@@ -516,6 +551,10 @@ private:
         float     radius = 0.0f;
         /// 0 for a sphere.
         float halfLength = 0.0f;
+        /// `kind`, not `shape`: the b3ShapeId above already owns that name, and a
+        /// second member called shape reads as the same thing.
+        ProbeShape kind = ProbeShape::Sphere;
+        Vector3    halfExtents;
     };
     std::vector<Probe> _probes;
     WindSettings       _wind;

@@ -85,6 +85,11 @@ enum class ProbeShape
 {
     Sphere,
     Capsule,
+    /// Box and cylinder exist to be STACKED. A sphere proves the physics runs; a
+    /// tower of boxes that stays standing until something hits it proves the
+    /// contact solver and the friction actually behave.
+    Box,
+    Cylinder,
 };
 
 struct SphereProbeDef
@@ -94,6 +99,9 @@ struct SphereProbeDef
     /// total length is 2 * halfLength + 2 * radius. 0.6 m with a 0.25 m radius is
     /// roughly a person lying down.
     float halfLength = 0.6f;
+    /// Box only: half extents. A domino is thin on one axis and tall on another,
+    /// which is the shape that makes a stack interesting.
+    Vector3 halfExtents{0.1f, 0.4f, 0.25f};
 
     Vector3 position;
     Vector3 velocity;
@@ -113,7 +121,14 @@ struct SphereProbeDef
 /// and is only produced for bodies the probe spawner created.
 struct ProbeSample
 {
-    Vector3 position;
+    ProbeShape shape = ProbeShape::Sphere;
+    Vector3    position;
+    /// Rotation columns, so the debug view can draw a box or cylinder as it lies.
+    Vector3 axisX{1, 0, 0};
+    Vector3 axisY{0, 1, 0};
+    Vector3 axisZ{0, 0, 1};
+    Vector3 halfExtents;
+    float   halfLength = 0.0f;
     float   radius = 0.0f;
     /// Capsule axis in world space, scaled by the half length. Zero for a sphere.
     /// Orientation is here only so the debug view can draw a capsule the way it

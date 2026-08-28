@@ -96,7 +96,44 @@ void SpawnPhysicsProbe(float throwSpeed)
     // height under the spawn point came back as -72 m with the player visibly
     // standing on grass.
     const Vector3 forward = GScene->GetCamera()->Direction();
-    const Vector3 origin = GScene->GetCamera()->Position() + forward * 2.0f;
+    Vector3       origin = GScene->GetCamera()->Position() + forward * 2.0f;
+
+    if (s_settings.placeOnGround && throwSpeed <= 0.0f)
+    {
+        // Walk the view ray out to 100 m and stop where it meets the ground, then
+        // sit the body on top of it. Deliberately a march against SurfaceY rather
+        // than a physics cast: the physics world may hold only terrain, and a
+        // domino placed against a collider the player cannot see is worse than one
+        // placed on the visible ground.
+        const Vector3 eye = GScene->GetCamera()->Position();
+        float         hit = -1.0f;
+        for (float t = 1.0f; t < 100.0f; t += 0.25f)
+        {
+            const Vector3 p = eye + forward * t;
+            if (GLandscape && p[1] <= GLandscape->SurfaceY(p[0], p[2]))
+            {
+                hit = t;
+                break;
+            }
+        }
+        if (hit > 0.0f)
+        {
+            const Vector3 p = eye + forward * hit;
+            const float   ground = GLandscape->SurfaceY(p[0], p[2]);
+            // Half the body's own height above the surface, plus a millimetre, so
+            // it starts resting rather than interpenetrating and being shoved out.
+            float lift = s_settings.radius;
+            if (s_settings.shape == 2)
+            {
+                lift = s_settings.boxY;
+            }
+            else if (s_settings.shape == 3)
+            {
+                lift = s_settings.halfLength;
+            }
+            origin = Vector3(p[0], ground + lift + 0.001f, p[2]);
+        }
+    }
 
     Physics::SphereProbeDef def;
     def.position = origin;
@@ -108,6 +145,15 @@ void SpawnPhysicsProbe(float throwSpeed)
     def.rollingResistance = s_settings.rollingResistance;
     def.shape = s_settings.shape == 1 ? Physics::ProbeShape::Capsule : Physics::ProbeShape::Sphere;
     def.halfLength = s_settings.halfLength;
+    def.halfExtents = Vector3(s_settings.boxX, s_settings.boxY, s_settings.boxZ);
+    if (s_settings.shape == 2)
+    {
+        def.shape = Physics::ProbeShape::Box;
+    }
+    else if (s_settings.shape == 3)
+    {
+        def.shape = Physics::ProbeShape::Cylinder;
+    }
 
     const Physics::BodyId id = world.SpawnSphereProbe(def);
     LOG_WARN(World, "PHYSPROBE: spawn r={} m={} kg at ({:.2f} {:.2f} {:.2f}) v={:.1f} -> {}", def.radius, def.mass,
@@ -231,19 +277,37 @@ void DrawPhysicsProbes()
     const PackedColor color = PackedColor(0xff40e0ff);
     for (const Physics::ProbeSample& sample : samples)
     {
-        const float axisLen = sample.axis.Size();
-        if (axisLen > 1e-4f)
+        if (sample.shape == Physics::ProbeShape::Box)
         {
-            // Capsule: a ring at each hemisphere centre plus four rails between
-            // them. The rails are what make the tumble readable -- two rings alone
-            // could be any two spheres.
-            const Vector3 axis = sample.axis / axisLen;
-            Vector3 a = fabs(axis[1]) < 0.9f ? Vector3(0, 1, 0) : Vector3(1, 0, 0);
-            a = (a - axis * (a * axis));
-            a = a / a.Size();
-            const Vector3 b = axis.CrossProduct(a);
-            const Vector3 e1 = sample.position - sample.axis;
-            const Vector3 e2 = sample.position + sample.axis;
+            // Twelve edges from the three rotated half-axes. A box has to show its
+            // ORIENTATION or a toppled domino looks identical to a standing one.
+            const Vector3 hx = sample.axisX * sample.halfExtents[0];
+            const Vector3 hy = sample.axisY * sample.halfExtents[1];
+            const Vector3 hz = sample.axisZ * sample.halfExtents[2];
+            Vector3       corner[8];
+            for (int i = 0; i < 8; ++i)
+            {
+                corner[i] = sample.position + (i & 1 ? hx : -hx) + (i & 2 ? hy : -hy) + (i & 4 ? hz : -hz);
+            }
+            static const int edge[12][2] = {{0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3},
+                                            {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
+            for (const auto& e : edge)
+            {
+                SubmitLine(corner[e[0]], corner[e[1]], color);
+            }
+            continue;
+        }
+
+        if (sample.shape == Physics::ProbeShape::Capsule || sample.shape == Physics::ProbeShape::Cylinder)
+        {
+            // Capsule lies along local X, cylinder stands along local Y.
+            const bool    upright = sample.shape == Physics::ProbeShape::Cylinder;
+            const Vector3 axis = upright ? sample.axisY : sample.axisX;
+            const Vector3 a = upright ? sample.axisX : sample.axisY;
+            const Vector3 b = sample.axisZ;
+            const Vector3 half = axis * sample.halfLength;
+            const Vector3 e1 = sample.position - half;
+            const Vector3 e2 = sample.position + half;
             SubmitCircle(e1, sample.radius, a, b, color);
             SubmitCircle(e2, sample.radius, a, b, color);
             SubmitLine(e1 + a * sample.radius, e2 + a * sample.radius, color);
@@ -252,9 +316,10 @@ void DrawPhysicsProbes()
             SubmitLine(e1 - b * sample.radius, e2 - b * sample.radius, color);
             continue;
         }
-        SubmitCircle(sample.position, sample.radius, VForward, VAside, color);
-        SubmitCircle(sample.position, sample.radius, VForward, VUp, color);
-        SubmitCircle(sample.position, sample.radius, VAside, VUp, color);
+
+        SubmitCircle(sample.position, sample.radius, sample.axisX, sample.axisZ, color);
+        SubmitCircle(sample.position, sample.radius, sample.axisX, sample.axisY, color);
+        SubmitCircle(sample.position, sample.radius, sample.axisZ, sample.axisY, color);
     }
 }
 

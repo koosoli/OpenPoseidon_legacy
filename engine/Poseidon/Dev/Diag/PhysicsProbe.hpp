@@ -35,8 +35,16 @@ struct PhysicsProbeSettings
 {
     /// 0 = sphere, 1 = capsule. Plain int so the tab can drive a combo without
     /// dragging the physics headers into the UI include set.
+    /// 0 sphere, 1 capsule, 2 box, 3 cylinder.
     int   shape = 0;
     float halfLength = 0.6f;
+    float boxX = 0.10f;
+    float boxY = 0.40f;
+    float boxZ = 0.25f;
+    /// Place the body on the ground under the crosshair instead of dropping it
+    /// from in front of the camera. Without this a domino row is unbuildable:
+    /// every piece arrives falling and lands wherever it bounces.
+    bool placeOnGround = true;
     float radius = 0.2f;
     float mass = 0.5f;
     float friction = 0.5f;

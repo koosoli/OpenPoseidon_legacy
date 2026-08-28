@@ -94,9 +94,9 @@ void DrawPhysicsTab()
     PhysicsProbeSettings& s = ProbeSettings();
 
     ImGui::SeparatorText("Probe");
-    static const char* shapeNames[] = {"Sphere", "Capsule"};
+    static const char* shapeNames[] = {"Sphere", "Capsule", "Box", "Cylinder"};
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::Combo("Shape", &s.shape, shapeNames, 2);
+    ImGui::Combo("Shape", &s.shape, shapeNames, 4);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -107,12 +107,42 @@ void DrawPhysicsTab()
             "bone but as a FLAT LIST with no parent/child relation, so there is\n"
             "nothing yet to connect. That table is PHY-040.\n");
     }
-    if (s.shape == 1)
+    if (s.shape == 1 || s.shape == 3)
     {
         ImGui::SetNextItemWidth(200.0f);
         ImGui::SliderFloat("Half length (m)", &s.halfLength, 0.05f, 3.0f, "%.2f");
         ImGui::SameLine();
-        ImGui::TextDisabled("total %.2f m", 2.0f * (s.halfLength + s.radius));
+        ImGui::TextDisabled("total %.2f m", 2.0f * (s.halfLength + (s.shape == 1 ? s.radius : 0.0f)));
+    }
+    if (s.shape == 2)
+    {
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Half width X", &s.boxX, 0.02f, 3.0f, "%.2f");
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Half height Y", &s.boxY, 0.02f, 3.0f, "%.2f");
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::SliderFloat("Half depth Z", &s.boxZ, 0.02f, 3.0f, "%.2f");
+        if (ImGui::Button("Domino"))
+        {
+            s.boxX = 0.03f;
+            s.boxY = 0.25f;
+            s.boxZ = 0.12f;
+            s.mass = 0.4f;
+            s.friction = 0.6f;
+            s.restitution = 0.05f;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Brick"))
+        {
+            s.boxX = 0.11f;
+            s.boxY = 0.05f;
+            s.boxZ = 0.24f;
+            s.mass = 3.0f;
+            s.friction = 0.8f;
+            s.restitution = 0.02f;
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("starting points");
     }
     ImGui::SetNextItemWidth(200.0f);
     ImGui::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
@@ -160,7 +190,18 @@ void DrawPhysicsTab()
     }
     ImGui::SameLine();
     ImGui::Checkbox("Draw", &s.draw);
-    ImGui::TextDisabled("Spawns 2 m in front of the camera.");
+    ImGui::Checkbox("Place on the ground under the crosshair", &s.placeOnGround);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Off: the body appears 2 m in front of the camera and falls.\n"
+            "\n"
+            "On: Drop sets it down on the ground you are looking at, already\n"
+            "resting. A domino row is unbuildable without this -- every piece\n"
+            "would arrive falling and land wherever it bounced.\n"
+            "\n"
+            "Throw ignores it: a thrown body is meant to be in the air.\n");
+    }
 
     ImGui::SeparatorText("Wind");
     ImGui::Checkbox("Apply world wind", &s.applyWind);
