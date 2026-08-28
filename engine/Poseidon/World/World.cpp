@@ -1766,35 +1766,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     perf.Mark(Dev::FrameProfiler::PhaseHud);
 
-    if (doSim)
-    {
-#if BACKGROUND_AI
-        _secThread->FinishSecondary();
-#else
-        PerformAI(deltaT, noAccDeltaT);
-#endif
-        SimulateAllVehicles(deltaT, noAccDeltaT, camVehicle);
-    }
+    StepSimulation(deltaT, noAccDeltaT, camVehicle, camInsideVehicle, quiet);
 
     perf.Mark(Dev::FrameProfiler::PhaseAiVehicles);
-
-    if (IsSimulationEnabled())
-    {
-        if (camInsideVehicle)
-        {
-            PerformSound(camInsideVehicle, deltaT);
-        }
-        else
-        {
-            PerformSound(nullptr, deltaT);
-        }
-    }
-
-    GSoundScene->AdvanceAll(deltaT, !IsSimulationEnabled() || quiet); // sort and activate sounds
-    if (GSoundsys)
-    {
-        GSoundsys->Commit(); // commit deferred settings
-    }
 
     perf.Mark(Dev::FrameProfiler::PhaseSound);
 
@@ -1850,6 +1824,27 @@ void World::Simulate(float deltaT, bool& enableDraw)
     )
     {
         GetSensorList()->SmartUpdateAll();
+    }
+}
+
+void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, Entity* insideVehicle, bool quiet)
+{
+    if (IsSimulationEnabled())
+    {
+#if BACKGROUND_AI
+        _secThread->FinishSecondary();
+#else
+        PerformAI(deltaT, noAccDeltaT);
+#endif
+        SimulateAllVehicles(deltaT, noAccDeltaT, cameraVehicle);
+
+        PerformSound(insideVehicle, deltaT);
+    }
+
+    GSoundScene->AdvanceAll(deltaT, !IsSimulationEnabled() || quiet); // sort and activate sounds
+    if (GSoundsys)
+    {
+        GSoundsys->Commit(); // commit deferred settings
     }
 }
 

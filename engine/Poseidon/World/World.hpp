@@ -514,6 +514,9 @@ class World
 	InputContextResolution ResolveInputContextResolution() const;
 	InputContext ResolveInputContext() const;
 	void UpdateInputContext();
+	// The simulation-only tail of a frame. Rendering remains in Simulate while
+	// the outer game loop is converted to drive this at a fixed rate.
+	void StepSimulation(float deltaT, float noAccDeltaT, Entity *cameraVehicle, Entity *insideVehicle, bool quiet);
 	void Simulate( float deltaT, bool &enableDraw );
 	void PerformAI( float deltaT, float noAccDeltaT );
 	void ProcessNetwork();
