@@ -54,6 +54,13 @@ bool PhysicsCorpusRequested()
     return requested;
 }
 
+namespace
+{
+bool s_hasRun = false;
+}
+
+bool PhysicsCorpusHasRun() { return s_hasRun; }
+
 void RunPhysicsCorpus()
 {
     if (!GLandscape)
@@ -189,6 +196,7 @@ void RunPhysicsCorpus()
                  static_cast<int>(sorted.size()) - shown);
     }
     LOG_WARN(World, "PHYSCORPUS: ---- end ----");
+    s_hasRun = true;
 }
 
 } // namespace Poseidon::Dev

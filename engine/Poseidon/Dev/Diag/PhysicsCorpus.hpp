@@ -20,6 +20,14 @@ bool PhysicsCorpusRequested();
 
 /// Walks the loaded landscape, registers terrain and every object, logs the
 /// census. Safe to call with no world loaded -- it does nothing.
+///
+/// Also the way the world gets its colliders at all, so the dev panel calls it
+/// from a button: requiring an environment variable before a ball can hit a wall
+/// is a bad trade for anyone who just wants to start the game and try it.
 void RunPhysicsCorpus();
+
+/// True once RunPhysicsCorpus has registered a world, so the UI can say whether
+/// the ball will hit buildings or only terrain.
+bool PhysicsCorpusHasRun();
 
 } // namespace Poseidon::Dev

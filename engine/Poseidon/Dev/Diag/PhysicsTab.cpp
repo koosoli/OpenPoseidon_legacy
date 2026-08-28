@@ -7,6 +7,7 @@
 
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 
+#include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
@@ -47,10 +48,29 @@ void DrawPhysicsTab()
         }
         else
         {
-            ImGui::TextDisabled("No world geometry registered — set POSEIDON_PHYSICS_CORPUS=1\n"
-                                "to have the whole map registered on load, or the ball will\n"
-                                "fall through everything except the terrain.");
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
+                               "Terrain only -- the ball will fall THROUGH buildings.\nPress Register world colliders.");
         }
+    }
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(PhysicsCorpusHasRun());
+    if (ImGui::Button(PhysicsCorpusHasRun() ? "World colliders registered" : "Register world colliders"))
+    {
+        RunPhysicsCorpus();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "Builds the terrain height field and a collider for every object on\n"
+                          "the map -- about 82,000 bodies on Everon, a second or two.\n"
+                          "\n"
+                          "Until this is pressed the ball only meets the ground, because\n"
+                          "nothing in the game uses physics yet, and building 82,000 bodies\n"
+                          "for every session that never opens this tab would be rude.\n"
+                          "\n"
+                          "POSEIDON_PHYSICS_CORPUS=1 does the same at load, for capture runs.\n");
     }
 
     PhysicsProbeSettings& s = ProbeSettings();
