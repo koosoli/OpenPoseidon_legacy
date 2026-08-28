@@ -4,6 +4,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -874,6 +875,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // Advance gameplay before deriving this frame's camera and draw lists so
     // presentation always sees the latest completed simulation tick.
     static FixedStepAccumulator simulationSteps;
+    Dev::FixedStepFrame stepFrame;
+    stepFrame.stepSeconds = static_cast<float>(simulationSteps.StepSeconds());
     if (IsSimulationEnabled())
     {
         const float fixedDeltaT = static_cast<float>(simulationSteps.StepSeconds());
@@ -883,11 +886,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
         {
             StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
         }
+        stepFrame.steps = static_cast<std::uint32_t>(steps);
+        stepFrame.running = true;
     }
     else
     {
         simulationSteps.Reset();
     }
+    // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
+    // sampling it earlier would report the previous frame's leftover.
+    stepFrame.alpha = static_cast<float>(simulationSteps.Alpha());
+    Dev::PublishFixedStepFrame(stepFrame);
 
     if (IsSimulationEnabled())
     {
