@@ -61,9 +61,8 @@ effect, HUD, zoom, sound. That is presentation and belongs at the display rate.
 
 ## What is NOT verified
 
-* No performance measurement under load, and **no play-session reading of the new
-  Fixed Step tab**. The tab makes the numbers available; nobody has looked at them
-  while actually playing.
+* Fixed Step tab READ during play — see step 2 for the numbers. Still no profiler
+  measurement of what the accumulator itself costs.
 * No mission/integration run (Trident). Only one dev mission, one screenshot.
 * Multiplayer untouched and unconsidered. `IsSimulationEnabled()` takes a
   different branch under `GModeNetware`; nothing here was reasoned about for it.
@@ -84,22 +83,32 @@ session — the automated capture proves it boots, not what the ratio is on this
 machine under load. That reading is the input to step 2, so ask for it before
 starting any interpolation work.
 
-### 2. Camera / entity interpolation — GATED on the step-1 reading
+### 2. Camera / entity interpolation — CANCELLED, measured 2026-08-28
 
-Do not start until the Fixed Step tab has been read during actual play. The tab
-prints the verdict directly:
+**Do not build this.** The owner read the Fixed Step tab across three play
+sessions on the target machine:
 
-* *"Rendering OUTRUNS simulation"* (ticks/frame < 1) — interpolation pays off.
-* *"Simulation outruns rendering"* (> 1) — **do not build it**; every frame
-  already shows fresh state and the work would buy nothing.
+| session | ticks/frame | implied fps | worst frame | catch-up cap |
+|---|---|---|---|---|
+| 1 (1379 ticks / 909 frames) | 1.517 | 39.6 | 8 | 3 frames, 0.33 % |
+| 2 (2211 / 1916) | 1.154 | 52.0 | 8 | 1 frame, 0.05 % |
+| 3 (1184 / 1051) — clean, reset after load | 1.127 | 53.3 | 2 | never |
 
-`Alpha()` exists and nothing uses it. Without interpolation, rendering above the
-simulation rate shows the same state twice.
+Every session reads **above 1.0**: the simulation is the FASTER clock and several
+ticks run per drawn frame. Interpolation only pays when rendering outruns
+simulation, so here it would buy nothing — every frame already shows fresh state.
+Frame rate is the limit, not the simulation.
 
-**Scope warning:** this is not a camera-only change. Every rendered entity moves at
-60 Hz, so a correct fix needs previous + current transforms per entity, which is a
-broad change to the entity system. Do not start it on the assumption that it is
-small.
+This matches what the renderer work already measured independently: stock worlds
+are GPU-bound and grass alone is about a third of the frame. Reopen this only if
+the frame rate ever rises well above 60 on the target hardware.
+
+**Side finding, not a blocker.** Sessions 1 and 2 hit the 8-step catch-up cap on a
+handful of frames, meaning simulation time was discarded and gameplay briefly ran
+slower than wall clock. Session 3 — reset after the loading screen — peaked at 2
+ticks and never capped, so those hits are load-screen spikes rather than
+steady-state behaviour. Worth re-checking after any change that lengthens a frame;
+not worth acting on now.
 
 ### 3. Scripts — DEFERRED, and the reason matters
 
@@ -162,4 +171,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28, after `0a35211f`.*
+*Last updated: 2026-08-28, after the owner's Fixed Step readings cancelled step 2.*
