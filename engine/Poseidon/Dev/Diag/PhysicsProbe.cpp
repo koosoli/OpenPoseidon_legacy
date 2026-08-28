@@ -130,6 +130,13 @@ void SubmitSolid(LODShapeWithShadow* mesh, Vector3Par position, Vector3Par x, Ve
 
 PhysicsProbeSettings& ProbeSettings() { return s_settings; }
 
+void ResetProbeSettings()
+{
+    // Assignment from a fresh instance, so the defaults are the ones written in
+    // the struct and cannot drift out of step with a second copy of them.
+    s_settings = PhysicsProbeSettings{};
+}
+
 bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
 {
     if (!GWorld || !GScene || !GLandscape || !nameFragment || !*nameFragment)

@@ -9,4 +9,7 @@ namespace Poseidon::Dev
 {
 /// Draws the tab contents. Call between ImGui::BeginTabItem / EndTabItem.
 void DrawPictureModeTab();
+
+/// Restores depth of field to its compiled defaults.
+void ResetPictureModeSettings();
 } // namespace Poseidon::Dev

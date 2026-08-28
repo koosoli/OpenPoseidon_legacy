@@ -122,4 +122,7 @@ struct PhysicsProbeSettings
 
 PhysicsProbeSettings& ProbeSettings();
 
+/// Restores the probe settings to their compiled defaults.
+void ResetProbeSettings();
+
 } // namespace Poseidon::Dev

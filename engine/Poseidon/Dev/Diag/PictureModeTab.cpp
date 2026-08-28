@@ -277,6 +277,16 @@ void DrawCaptureSection()
 
 } // namespace
 
+void ResetPictureModeSettings()
+{
+    if (GEngine && GEngine->SupportsDepthOfField())
+    {
+        // Off, and back to the struct's own defaults. Depth of field is off by
+        // default for a reason -- it is a screenshot tool, not a play setting.
+        GEngine->SetDepthOfFieldSettings(Engine::DepthOfFieldSettings{});
+    }
+}
+
 void DrawPictureModeTab()
 {
     DrawDepthOfFieldSection();

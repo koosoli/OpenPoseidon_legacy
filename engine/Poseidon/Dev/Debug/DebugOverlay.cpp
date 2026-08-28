@@ -6041,17 +6041,17 @@ void DrawMainWindow()
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
-            "Restores every setting to the value it had the first time its tab\n"
-            "was opened -- which IS the default, since nothing could have changed\n"
-            "it before it was ever shown.\n"
+            "Restores the dev panel settings to their compiled defaults.\n"
             "\n"
-            "Only reaches controls a tab has actually drawn: one never opened this\n"
-            "session is unknown and untouched.");
+            "Each tab says how it resets, rather than the panel guessing from\n"
+            "pointers -- an earlier version did that and wrote into stack\n"
+            "addresses that had already died with the frame.");
     }
     if (ImGui::BeginPopupModal("Reset dev settings?", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
     {
-        ImGui::Text("Restore %d setting(s) to their defaults?", Dev::PanelKnownControlCount());
-        ImGui::TextDisabled("Only tabs opened this session are known. There is no undo.");
+        ImGui::Text("Restore the dev panel settings to their defaults?");
+        ImGui::TextDisabled("Physics probes, penetration, ray audit, depth of field.\n"
+                            "There is no undo.");
         ImGui::Separator();
         if (ImGui::Button("Reset"))
         {
