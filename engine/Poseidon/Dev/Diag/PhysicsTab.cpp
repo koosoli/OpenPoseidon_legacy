@@ -55,7 +55,7 @@ void DrawPhysicsTab()
 
     ImGui::Spacing();
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderInt("Terrain detail", &TerrainSubdivision(), 1, 12, "%dx");
+    ImGui::SliderInt("Terrain detail", &TerrainSubdivision(), 1, 16, "%dx");
     ImGui::SameLine();
     ImGui::TextDisabled("%.2f m samples", TerrainSampleSpacing());
     if (ImGui::IsItemHovered())
@@ -192,18 +192,34 @@ void DrawPhysicsTab()
     ImGui::Checkbox("Draw", &s.draw);
     ImGui::Checkbox("Solid", &s.drawSolid);
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::ColorEdit3("Colour", s.solidColor, ImGuiColorEditFlags_NoInputs);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Primitives only. A model probe keeps its own textures --\n"
+            "tinting a jeep red would hide the thing you spawned it to see.");
+    }
+    ImGui::SameLine();
     ImGui::Checkbox("Outline", &s.drawOutline);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip("Wireframe on top of the solid. Useful when a probe is resting\n"
                           "against scenery of a similar colour.");
     }
-    ImGui::Text("Ctrl+B places one at the crosshair while you play.");
+    ImGui::Checkbox("Hotkeys", &s.hotkeys);
+    ImGui::SameLine();
+    ImGui::TextDisabled("Ctrl+B place | Ctrl+N drop | Ctrl+M throw");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
-                          "A key, not a button: the panel holds the mouse while it is open,\n"
-                          "so a domino row has to be laid by aiming and tapping.\n");
+            "Keys rather than buttons: the panel holds the mouse while it is open,\n"
+            "so a domino row has to be laid by aiming and tapping. Clicking a button\n"
+            "and hoping the camera has not moved is not placing anything.\n"
+            "\n"
+            "OFF by default -- until you ask for them these stay ordinary game keys,\n"
+            "and a dev tool should not take three of them from a player who never\n"
+            "opened this tab.");
     }
     if (s.shape == 2)
     {

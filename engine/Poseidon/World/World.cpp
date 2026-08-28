@@ -869,9 +869,22 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // button: the dev panel takes the mouse while it is open, so a row can only
     // be laid by aiming and tapping, not by clicking a button and hoping the
     // camera has not moved.
-    if (input.GetCheat2ToDo(SDL_SCANCODE_B))
+    // Gated: until the panel switch is on these are ordinary game keys, and a dev
+    // tool should not take three of them from a player who never opened it.
+    if (Dev::PhysicsHotkeysEnabled())
     {
-        Dev::PlaceProbeAtCrosshair();
+        if (input.GetCheat2ToDo(SDL_SCANCODE_B))
+        {
+            Dev::PlaceProbeAtCrosshair();
+        }
+        if (input.GetCheat2ToDo(SDL_SCANCODE_N))
+        {
+            Dev::SpawnPhysicsProbe(0.0f);
+        }
+        if (input.GetCheat2ToDo(SDL_SCANCODE_M))
+        {
+            Dev::SpawnPhysicsProbe(Dev::ProbeSettings().throwSpeed);
+        }
     }
 #endif
 

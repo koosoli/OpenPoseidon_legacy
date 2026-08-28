@@ -28,6 +28,9 @@ void SpawnBrickTower(int count);
 /// mouse the moment it is open.
 void PlaceProbeAtCrosshair();
 
+/// True while the panel's hotkey switch is on.
+bool PhysicsHotkeysEnabled();
+
 /// Draws every live probe as three great circles. Called from the frame path, not
 /// the fixed tick -- drawing is presentation.
 void DrawPhysicsProbes();
@@ -94,7 +97,15 @@ struct PhysicsProbeSettings
     /// Wireframe on top of the solid, so an edge stays readable against scenery
     /// of a similar colour.
     bool  drawOutline = false;
+    /// Solid probe colour, RGB 0..1. Red by default: a probe has to be
+    /// distinguishable from the scenery it is resting against, and Everon is
+    /// green and sand from one end to the other. Model probes keep their own
+    /// textures -- tinting a jeep red would hide the thing you spawned it to see.
+    float solidColor[3] = {0.85f, 0.15f, 0.10f};
     /// Let the player shove probes by walking into them.
+    /// OFF by default. Ctrl+B/N/M are ordinary game keys otherwise, and a dev
+    /// tool has no business claiming them until it is asked to.
+    bool  hotkeys = false;
     bool  playerProxy = true;
     float playerRadius = 0.35f;
     float playerHeight = 1.8f;

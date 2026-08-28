@@ -12,6 +12,7 @@
 #include <cstring>
 #include <Poseidon/World/World.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -433,6 +434,8 @@ void SpawnBrickTower(int count)
 
 void PlaceProbeAtCrosshair() { SpawnPhysicsProbe(0.0f); }
 
+bool PhysicsHotkeysEnabled() { return s_settings.hotkeys; }
+
 void ClearPhysicsProbes()
 {
     if (Physics::PhysicsWorld* world = Physics::GetPhysicsWorld())
@@ -583,7 +586,10 @@ void DrawPhysicsProbes()
     // would read more cleanly, but axis-aligned rings also show ROTATION once the
     // ball starts rolling, which is exactly what this check is looking for.
     const PackedColor color = PackedColor(0xff40e0ff);
-    const PackedColor solidColor = PackedColor(0xff2f9fd0);
+    auto channel = [](float v) { return static_cast<unsigned>(std::min(std::max(v, 0.0f), 1.0f) * 255.0f + 0.5f); };
+    const PackedColor solidColor =
+        PackedColor(0xff000000u | (channel(s_settings.solidColor[0]) << 16) |
+                    (channel(s_settings.solidColor[1]) << 8) | channel(s_settings.solidColor[2]));
     s_solidUsed = 0;
 
     if (s_settings.drawSolid)

@@ -27,7 +27,10 @@ int s_subdivision = []
 {
     const char* v = std::getenv("POSEIDON_PHYSICS_TERRAIN_SUBDIV");
     const int   parsed = v ? std::atoi(v) : 0;
-    return (parsed >= 1 && parsed <= 16) ? parsed : 4;
+    // 12 by default. 3061x3061 samples, about 37 MB of heights plus Box3D's own
+    // copy -- expensive for a renderer, nothing for a dev tool, and it is what
+    // stops bodies sinking into hillsides.
+    return (parsed >= 1 && parsed <= 16) ? parsed : 12;
 }();
 
 struct FailureGroup
