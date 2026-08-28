@@ -935,7 +935,16 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     {
-        SimulateScripts();
+        // Frame-driven scripts are the DEFAULT and the safe path. The opt-in moves
+        // them into the fixed tick, but only while the simulation is actually
+        // running: this call has always been outside IsSimulationEnabled() on
+        // purpose, because camera scripts must keep running through cutscenes and
+        // pauses, where that check is false. So when the simulation is off, the
+        // once-per-frame call stays no matter what the switch says.
+        if (!(Dev::FixedStepScriptsEnabled() && IsSimulationEnabled()))
+        {
+            SimulateScripts();
+        }
 
         if (_cameraEffect && _cameraEffect->IsTerminated())
         {
@@ -1854,6 +1863,15 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
     // that consume them. Rendering observes the most recently completed tick.
     Glob.time += deltaT;
     SimulateLandscape(deltaT);
+
+    // Opt-in (POSEIDON_FIXEDSTEP_SCRIPTS / the Fixed Step tab). Placed after the
+    // clock so a script observing `time` sees this tick's value, and before the AI
+    // so orders a script issues are acted on within the same tick rather than the
+    // next one. Off by default -- see the note on FixedStepScriptsEnabled().
+    if (Dev::FixedStepScriptsEnabled())
+    {
+        SimulateScripts();
+    }
 
 #if BACKGROUND_AI
     _secThread->FinishSecondary();

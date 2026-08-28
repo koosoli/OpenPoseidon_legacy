@@ -57,4 +57,26 @@ std::uint32_t FixedStepMaxStepsInFrame();
 
 void ResetFixedStepStats();
 
+// ---------------------------------------------------------------------------
+// Opt-in: run SimulateScripts() inside the fixed tick instead of once per
+// rendered frame. OFF by default, and it must stay that way until missions have
+// been played, because it changes gameplay in two ways at once.
+//
+// 1. SCRIPTS WOULD STOP WHILE THE SIMULATION IS DISABLED. Today SimulateScripts()
+//    runs outside the IsSimulationEnabled() check on purpose, and that check is
+//    false during a dev pause, an open pause menu, a warning message, lost window
+//    focus, and _enableSimulation == false -- which includes cutscenes, where
+//    camera scripts must keep running. The call site therefore keeps the
+//    once-per-frame path whenever the simulation is off, even with this enabled;
+//    only the running case moves into the tick.
+// 2. POLLING RATE CHANGES. Scripts are polled once per FRAME today. Fixed-step
+//    means 60 polls a second: fewer above 60 fps, and more below it via catch-up.
+//    OFP scripts get a time budget per call, so this changes how fast missions
+//    progress. Time-based is the more correct behaviour, but it is a gameplay
+//    change that needs mission playtesting, not code review.
+//
+// Seeded from POSEIDON_FIXEDSTEP_SCRIPTS; also togglable in the Fixed Step tab.
+bool FixedStepScriptsEnabled();
+void SetFixedStepScripts(bool enabled);
+
 } // namespace Poseidon::Dev

@@ -130,6 +130,34 @@ void DrawFixedStepTab()
         ImGui::TextDisabled("No simulation time has been discarded.");
     }
 
+    ImGui::SeparatorText("Experimental");
+
+    bool scripts = FixedStepScriptsEnabled();
+    if (ImGui::Checkbox("Run scripts in the fixed tick", &scripts))
+    {
+        SetFixedStepScripts(scripts);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "OFF by default, and it should stay off until missions have been played.\n"
+            "\n"
+            "Scripts are polled once per FRAME today. On, they are polled 60 times a\n"
+            "second instead: fewer times above 60 fps, and MORE below it via catch-up.\n"
+            "OFP scripts get a time budget per call, so this changes how fast missions\n"
+            "progress. Time-based is the more correct behaviour, but it is a gameplay\n"
+            "change that needs playing to judge, not reading.\n"
+            "\n"
+            "Cutscenes are safe either way: while the simulation is disabled the\n"
+            "once-per-frame call is kept regardless of this switch, because camera\n"
+            "scripts have to keep running when everything else is frozen.\n");
+    }
+    if (scripts)
+    {
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "(experimental)");
+    }
+
     ImGui::Spacing();
     if (ImGui::Button("Reset counters"))
     {

@@ -1,6 +1,8 @@
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
 namespace Poseidon::Dev
 {
@@ -27,6 +29,15 @@ std::atomic<std::uint32_t> g_maxSteps{0};
 // accumulator's cap changes, this becomes wrong in the harmless direction: the
 // panel under-reports capped frames rather than inventing them.
 constexpr std::uint32_t AssumedCatchUpCap = 8;
+
+// One storage location for the scripts opt-in, seeded from the environment once.
+// A separate "env said X" flag beside a "panel said Y" flag is how a toggle ends
+// up disagreeing with what the engine actually does.
+std::atomic<bool> g_fixedStepScripts{[]
+                                     {
+                                         const char* v = std::getenv("POSEIDON_FIXEDSTEP_SCRIPTS");
+                                         return v && std::strcmp(v, "0") != 0;
+                                     }()};
 
 } // namespace
 
@@ -75,6 +86,10 @@ std::uint64_t FixedStepFrameCount() { return g_frames.load(std::memory_order_rel
 std::uint64_t FixedStepTickCount() { return g_ticks.load(std::memory_order_relaxed); }
 std::uint64_t FixedStepCappedFrames() { return g_cappedFrames.load(std::memory_order_relaxed); }
 std::uint32_t FixedStepMaxStepsInFrame() { return g_maxSteps.load(std::memory_order_relaxed); }
+
+bool FixedStepScriptsEnabled() { return g_fixedStepScripts.load(std::memory_order_relaxed); }
+
+void SetFixedStepScripts(bool enabled) { g_fixedStepScripts.store(enabled, std::memory_order_relaxed); }
 
 void ResetFixedStepStats()
 {
