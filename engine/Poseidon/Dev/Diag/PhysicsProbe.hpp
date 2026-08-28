@@ -71,6 +71,13 @@ struct PhysicsProbeSettings
     float windScale = 1.0f;
     float windDrag = 1.0f;
     bool  draw = true;
+    /// Solid meshes instead of wireframe. Wireframe shows WHERE a body is; solid
+    /// shows what it looks like resting against something, which is what you
+    /// actually judge when a domino row half-falls.
+    bool  drawSolid = true;
+    /// Wireframe on top of the solid, so an edge stays readable against scenery
+    /// of a similar colour.
+    bool  drawOutline = false;
     /// Let the player shove probes by walking into them.
     bool  playerProxy = true;
     float playerRadius = 0.35f;

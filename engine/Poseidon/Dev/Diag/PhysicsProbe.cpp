@@ -1,5 +1,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 
+#include <Poseidon/Dev/Diag/ProbeMeshes.hpp>
+
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
@@ -82,6 +84,40 @@ struct ModelProbe
     Ref<Object>             draw;
 };
 std::vector<ModelProbe> s_modelProbes;
+
+// Solid probes reuse one Object per drawn body, like the line pool: an Object
+// carries a transform, so it cannot be shared between two bodies in one frame.
+std::vector<Ref<Object>> s_solidObjects;
+int                      s_solidUsed = 0;
+
+/// Submits a unit mesh scaled and rotated into place. Object has no scale of its
+/// own, but the orientation is three column vectors -- scaling them scales the
+/// model, which is why one unit mesh serves every size.
+void SubmitSolid(LODShapeWithShadow* mesh, Vector3Par position, Vector3Par x, Vector3Par y, Vector3Par z,
+                 PackedColor color)
+{
+    if (!mesh || !GScene || s_solidUsed >= 512)
+    {
+        return;
+    }
+    if (s_solidUsed >= static_cast<int>(s_solidObjects.size()))
+    {
+        s_solidObjects.push_back(new ObjectColored(mesh, -1));
+    }
+    Object* obj = s_solidObjects[static_cast<std::size_t>(s_solidUsed)];
+    ++s_solidUsed;
+
+    // The pooled object may have been built around a different mesh last frame.
+    obj->SetShape(mesh);
+    Matrix3 orientation;
+    orientation.SetDirectionAside(x);
+    orientation.SetDirectionUp(y);
+    orientation.SetDirection(z);
+    obj->SetOrientation(orientation);
+    obj->SetPosition(position);
+    obj->SetConstantColor(color);
+    GScene->ObjectForDrawing(obj);
+}
 
 } // namespace
 
@@ -343,7 +379,11 @@ void AutoDropPhysicsProbes()
     // grass from ten metres, which is not a useful thing to photograph.
     if (const char* sh = std::getenv("POSEIDON_PHYSICS_PROBE_SHAPE"))
     {
-        s_settings.shape = std::atoi(sh) == 1 ? 1 : 0;
+        // 0..3, not a bool. The first version accepted only 0 or 1, so asking
+        // for a box silently got a sphere -- and the resulting screenshot looked
+        // like the solid renderer was broken when it was working perfectly.
+        const int parsed = std::atoi(sh);
+        s_settings.shape = (parsed >= 0 && parsed <= 3) ? parsed : 0;
     }
     if (const char* r = std::getenv("POSEIDON_PHYSICS_PROBE_RADIUS"))
     {
@@ -398,6 +438,46 @@ void DrawPhysicsProbes()
     // would read more cleanly, but axis-aligned rings also show ROTATION once the
     // ball starts rolling, which is exactly what this check is looking for.
     const PackedColor color = PackedColor(0xff40e0ff);
+    const PackedColor solidColor = PackedColor(0xff2f9fd0);
+    s_solidUsed = 0;
+
+    if (s_settings.drawSolid)
+    {
+        for (const Physics::ProbeSample& sample : samples)
+        {
+            switch (sample.shape)
+            {
+                case Physics::ProbeShape::Box:
+                    SubmitSolid(ProbeBoxMesh(), sample.position, sample.axisX * sample.halfExtents[0],
+                                sample.axisY * sample.halfExtents[1], sample.axisZ * sample.halfExtents[2],
+                                solidColor);
+                    break;
+                case Physics::ProbeShape::Sphere:
+                    SubmitSolid(ProbeSphereMesh(), sample.position, sample.axisX * sample.radius,
+                                sample.axisY * sample.radius, sample.axisZ * sample.radius, solidColor);
+                    break;
+                case Physics::ProbeShape::Cylinder:
+                    SubmitSolid(ProbeCylinderMesh(), sample.position, sample.axisX * sample.radius,
+                                sample.axisY * sample.halfLength, sample.axisZ * sample.radius, solidColor);
+                    break;
+                case Physics::ProbeShape::Capsule:
+                    // Drawn as a cylinder of the same extent. The hemispherical
+                    // ends are missing, which is honest enough for a probe and
+                    // avoids a fourth mesh for a shape nobody stacks.
+                    SubmitSolid(ProbeCylinderMesh(), sample.position, sample.axisY * sample.radius,
+                                sample.axisX * (sample.halfLength + sample.radius), sample.axisZ * sample.radius,
+                                solidColor);
+                    break;
+                default: break;
+            }
+        }
+        if (!s_settings.drawOutline)
+        {
+            // Model probes still draw below.
+            goto drawModels;
+        }
+    }
+
     for (const Physics::ProbeSample& sample : samples)
     {
         if (sample.shape == Physics::ProbeShape::Box)
@@ -445,6 +525,7 @@ void DrawPhysicsProbes()
         SubmitCircle(sample.position, sample.radius, sample.axisZ, sample.axisY, color);
     }
 
+drawModels:
     // Model probes draw as the real model, placed at the body's transform. The
     // Object is submitted straight to the scene and lives nowhere else -- it is
     // not in the object grid, no entity holds it, and the mission cannot save it.

@@ -1,0 +1,215 @@
+#include <Poseidon/Dev/Diag/ProbeMeshes.hpp>
+
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <Poseidon/Graphics/Textures/TexturePreload.hpp>
+#include <Poseidon/World/Scene/Scene.hpp>
+
+#include <cmath>
+#include <vector>
+
+namespace Poseidon::Dev
+{
+namespace
+{
+
+// Same recipe ObjectLine::CreateShape uses, generalised. IsColored is what lets
+// SetConstantColor tint the result, which is how a probe stays distinguishable
+// from the scenery it is resting on.
+constexpr int ProbeSpecial = NoShadow | IsColored;
+
+/// Builds one shape from flat-shaded quads and triangles. `indices` holds 3 or 4
+/// entries per face; `counts` says which.
+LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vector<Vector3>& normals,
+                          const std::vector<int>& indices, const std::vector<int>& counts)
+{
+    LODShapeWithShadow* lShape = new LODShapeWithShadow;
+    lShape->SetAutoCenter(false);
+    Shape* shape = new Shape;
+    lShape->AddShape(shape, 0);
+    lShape->SetSpecial(ProbeSpecial);
+
+    shape->ReallocTable(static_cast<int>(positions.size()));
+    for (std::size_t i = 0; i < positions.size(); ++i)
+    {
+        shape->SetPos(static_cast<int>(i)) = positions[i];
+        shape->SetNorm(static_cast<int>(i)) = normals[i];
+        shape->SetClip(static_cast<int>(i), ClipAll);
+    }
+
+    int cursor = 0;
+    for (const int n : counts)
+    {
+        Poly face;
+        face.Init();
+        face.SetN(n);
+        for (int i = 0; i < n; ++i)
+        {
+            face.Set(i, indices[static_cast<std::size_t>(cursor + i)]);
+        }
+        face.SetTexture(GScene->Preloaded(TextureWhite));
+        face.SetSpecial(ProbeSpecial);
+        shape->AddFace(face);
+        cursor += n;
+    }
+
+    shape->SetSpecial(ProbeSpecial);
+    shape->FindSections();
+    shape->CalculateHints();
+    lShape->CalculateMinMax(true);
+    return lShape;
+}
+
+} // namespace
+
+LODShapeWithShadow* ProbeBoxMesh()
+{
+    static LODShapeWithShadow* mesh = []
+    {
+        // 24 vertices, not 8: a shared corner would average three face normals and
+        // give a cube soft, rounded-looking shading. Four own vertices per face
+        // keeps every face flat, which is what makes the edges readable.
+        static const float axis[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+        std::vector<Vector3> positions;
+        std::vector<Vector3> normals;
+        std::vector<int>     indices;
+        std::vector<int>     counts;
+
+        for (int a = 0; a < 3; ++a)
+        {
+            const int b = (a + 1) % 3;
+            const int c = (a + 2) % 3;
+            for (int sign = -1; sign <= 1; sign += 2)
+            {
+                const Vector3 n(axis[a][0] * sign, axis[a][1] * sign, axis[a][2] * sign);
+                const Vector3 u(axis[b][0], axis[b][1], axis[b][2]);
+                const Vector3 v(axis[c][0], axis[c][1], axis[c][2]);
+                const int     base = static_cast<int>(positions.size());
+                // Wound so the face points outwards for either sign.
+                const float   su = static_cast<float>(sign);
+                positions.push_back(n - u * su - v);
+                positions.push_back(n + u * su - v);
+                positions.push_back(n + u * su + v);
+                positions.push_back(n - u * su + v);
+                for (int i = 0; i < 4; ++i)
+                {
+                    normals.push_back(n);
+                    indices.push_back(base + i);
+                }
+                counts.push_back(4);
+            }
+        }
+        return Build(positions, normals, indices, counts);
+    }();
+    return mesh;
+}
+
+LODShapeWithShadow* ProbeSphereMesh()
+{
+    static LODShapeWithShadow* mesh = []
+    {
+        // A UV sphere. 16x8 is round enough at the sizes a probe is looked at and
+        // cheap enough that a hundred of them cost nothing.
+        constexpr int Segments = 16;
+        constexpr int Rings = 8;
+        std::vector<Vector3> positions;
+        std::vector<Vector3> normals;
+        std::vector<int>     indices;
+        std::vector<int>     counts;
+
+        auto point = [](int ring, int seg)
+        {
+            const float phi = 3.14159265f * static_cast<float>(ring) / static_cast<float>(Rings);
+            const float theta = 6.28318531f * static_cast<float>(seg % Segments) / static_cast<float>(Segments);
+            return Vector3(std::sin(phi) * std::cos(theta), std::cos(phi), std::sin(phi) * std::sin(theta));
+        };
+
+        for (int r = 0; r < Rings; ++r)
+        {
+            for (int sgm = 0; sgm < Segments; ++sgm)
+            {
+                const Vector3 p[4] = {point(r, sgm), point(r, sgm + 1), point(r + 1, sgm + 1), point(r + 1, sgm)};
+                const int     base = static_cast<int>(positions.size());
+                // Poles collapse to a triangle; a quad there would be degenerate.
+                const int n = (r == 0 || r == Rings - 1) ? 3 : 4;
+                for (int i = 0; i < 4; ++i)
+                {
+                    if (n == 3 && ((r == 0 && i == 1) || (r == Rings - 1 && i == 2)))
+                    {
+                        continue;
+                    }
+                    positions.push_back(p[i]);
+                    normals.push_back(p[i]); // unit sphere: position IS the normal
+                    indices.push_back(base + static_cast<int>(positions.size()) - base - 1);
+                }
+                counts.push_back(n);
+            }
+        }
+        return Build(positions, normals, indices, counts);
+    }();
+    return mesh;
+}
+
+LODShapeWithShadow* ProbeCylinderMesh()
+{
+    static LODShapeWithShadow* mesh = []
+    {
+        constexpr int Sides = 16;
+        std::vector<Vector3> positions;
+        std::vector<Vector3> normals;
+        std::vector<int>     indices;
+        std::vector<int>     counts;
+
+        auto ring = [](int i)
+        {
+            const float t = 6.28318531f * static_cast<float>(i % Sides) / static_cast<float>(Sides);
+            return Vector3(std::cos(t), 0.0f, std::sin(t));
+        };
+
+        for (int i = 0; i < Sides; ++i)
+        {
+            const Vector3 a = ring(i);
+            const Vector3 b = ring(i + 1);
+            const int     base = static_cast<int>(positions.size());
+            positions.push_back(Vector3(a[0], -1.0f, a[2]));
+            positions.push_back(Vector3(b[0], -1.0f, b[2]));
+            positions.push_back(Vector3(b[0], 1.0f, b[2]));
+            positions.push_back(Vector3(a[0], 1.0f, a[2]));
+            normals.push_back(a);
+            normals.push_back(b);
+            normals.push_back(b);
+            normals.push_back(a);
+            for (int k = 0; k < 4; ++k)
+            {
+                indices.push_back(base + k);
+            }
+            counts.push_back(4);
+        }
+
+        // Caps as triangle fans from the centre.
+        for (int sign = -1; sign <= 1; sign += 2)
+        {
+            const Vector3 n(0.0f, static_cast<float>(sign), 0.0f);
+            const int     centre = static_cast<int>(positions.size());
+            positions.push_back(Vector3(0.0f, static_cast<float>(sign), 0.0f));
+            normals.push_back(n);
+            for (int i = 0; i < Sides; ++i)
+            {
+                const Vector3 a = ring(sign < 0 ? i : i + 1);
+                const Vector3 b = ring(sign < 0 ? i + 1 : i);
+                const int     base = static_cast<int>(positions.size());
+                positions.push_back(Vector3(a[0], static_cast<float>(sign), a[2]));
+                positions.push_back(Vector3(b[0], static_cast<float>(sign), b[2]));
+                normals.push_back(n);
+                normals.push_back(n);
+                indices.push_back(centre);
+                indices.push_back(base);
+                indices.push_back(base + 1);
+                counts.push_back(3);
+            }
+        }
+        return Build(positions, normals, indices, counts);
+    }();
+    return mesh;
+}
+
+} // namespace Poseidon::Dev

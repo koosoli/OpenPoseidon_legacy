@@ -190,6 +190,14 @@ void DrawPhysicsTab()
     }
     ImGui::SameLine();
     ImGui::Checkbox("Draw", &s.draw);
+    ImGui::Checkbox("Solid", &s.drawSolid);
+    ImGui::SameLine();
+    ImGui::Checkbox("Outline", &s.drawOutline);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Wireframe on top of the solid. Useful when a probe is resting\n"
+                          "against scenery of a similar colour.");
+    }
     ImGui::Checkbox("Place on the ground under the crosshair", &s.placeOnGround);
     if (ImGui::IsItemHovered())
     {
