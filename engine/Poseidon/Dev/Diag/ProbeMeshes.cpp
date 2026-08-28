@@ -26,10 +26,14 @@ constexpr int ProbeSpecial = IsColored;
 ///
 /// WINDING: the object pipelines cull with front_face = Cw, so a face must read
 /// CLOCKWISE from outside or it is culled and you see straight through the model
-/// to its far side. `reverse` flips each face's index order, which is cheaper to
-/// get right once here than to reason about separately in three generators.
+/// to its far side.
+///
+/// `reverse` is PER MESH and not a global correction. Flipping it for everything
+/// fixed the cylinder and broke the box, which had been wound correctly all
+/// along -- so the box then showed only its inside faces. Each generator states
+/// its own convention rather than sharing a guess.
 LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vector<Vector3>& normals,
-                          const std::vector<int>& indices, const std::vector<int>& counts, bool reverse = true)
+                          const std::vector<int>& indices, const std::vector<int>& counts, bool reverse)
 {
     LODShapeWithShadow* lShape = new LODShapeWithShadow;
     lShape->SetAutoCenter(false);
@@ -108,7 +112,8 @@ LODShapeWithShadow* ProbeBoxMesh()
                 counts.push_back(4);
             }
         }
-        return Build(positions, normals, indices, counts);
+        // Already clockwise from outside.
+        return Build(positions, normals, indices, counts, false);
     }();
     return mesh;
 }
@@ -154,7 +159,8 @@ LODShapeWithShadow* ProbeSphereMesh()
                 counts.push_back(n);
             }
         }
-        return Build(positions, normals, indices, counts);
+        // Same convention as the box.
+        return Build(positions, normals, indices, counts, false);
     }();
     return mesh;
 }
@@ -217,7 +223,10 @@ LODShapeWithShadow* ProbeCylinderMesh()
                 counts.push_back(3);
             }
         }
-        return Build(positions, normals, indices, counts);
+        // The ring is generated anticlockwise in XZ, so these come out the wrong
+        // way round and need the flip. Measured, not assumed: the cylinder was the
+        // one shape the owner could see through.
+        return Build(positions, normals, indices, counts, true);
     }();
     return mesh;
 }
