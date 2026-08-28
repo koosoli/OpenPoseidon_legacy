@@ -331,6 +331,8 @@ public:
         b3BodyDef bodyDef = b3DefaultBodyDef();
         bodyDef.type = b3_dynamicBody;
         bodyDef.position = ToB3(def.position);
+        // Yaw about Y, as a quaternion: (0, sin(y/2), 0, cos(y/2)).
+        bodyDef.rotation = b3Quat{{0.0f, std::sin(def.yaw * 0.5f), 0.0f}, std::cos(def.yaw * 0.5f)};
         const b3BodyId body = b3CreateBody(_world, &bodyDef);
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();

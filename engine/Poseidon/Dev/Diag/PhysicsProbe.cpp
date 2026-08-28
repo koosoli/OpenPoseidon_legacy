@@ -158,9 +158,42 @@ bool SpawnModelProbe(const char* nameFragment)
             }
         }
     }
+    // Vehicles are NOT in the landscape grid -- that holds buildings, trees and
+    // props. A jeep comes from the mission, so the world's vehicle list has to be
+    // searched too, or "spawn a jeep" only ever finds scenery.
     if (!found)
     {
-        LOG_WARN(World, "PHYSPROBE: no loaded model matching '{}'", nameFragment);
+        for (int i = 0; i < GWorld->NVehicles(); ++i)
+        {
+            Entity* vehicle = GWorld->GetVehicle(i);
+            LODShapeWithShadow* shape = vehicle ? vehicle->GetShape() : nullptr;
+            const char* name = shape ? shape->Name() : nullptr;
+            if (name && strstr(name, nameFragment))
+            {
+                found = shape;
+                break;
+            }
+        }
+    }
+
+    // Last resort: load it. Lets the tool reach a model the current mission does
+    // not happen to place, at the cost of needing a real path rather than a
+    // fragment.
+    Ref<LODShapeWithShadow> loaded;
+    if (!found)
+    {
+        loaded = Shapes.New(nameFragment, false, false);
+        if (loaded && loaded->NLevels() > 0)
+        {
+            found = loaded;
+        }
+    }
+
+    if (!found)
+    {
+        LOG_WARN(World, "PHYSPROBE: no model matching '{}' among {} vehicles or the landscape, and it did not load "
+                        "as a path either",
+                 nameFragment, GWorld->NVehicles());
         return false;
     }
 
@@ -169,9 +202,14 @@ bool SpawnModelProbe(const char* nameFragment)
     Vector3       origin = eye + forward * 8.0f;
     if (GLandscape)
     {
-        // Dropped from a couple of metres up so it lands rather than starting
-        // interpenetrated with the ground.
-        origin[1] = GLandscape->SurfaceY(origin[0], origin[2]) + 2.0f;
+        // Lift by the model's OWN lower extent, not a flat two metres. A model's
+        // origin is wherever the artist put it -- often at the base, sometimes at
+        // the axle line -- so a fixed offset buries anything whose geometry
+        // reaches below the origin. The first test did exactly that and the body
+        // spent its first second being violently ejected from the ground, which
+        // looks like a physics fault and is a placement one.
+        const float bottom = found->Min()[1];
+        origin[1] = GLandscape->SurfaceY(origin[0], origin[2]) - bottom + 0.5f;
     }
 
     Matrix4 transform(MIdentity);
@@ -290,6 +328,9 @@ void SpawnPhysicsProbe(float throwSpeed)
     def.shape = s_settings.shape == 1 ? Physics::ProbeShape::Capsule : Physics::ProbeShape::Sphere;
     def.halfLength = s_settings.halfLength;
     def.halfExtents = Vector3(s_settings.boxX, s_settings.boxY, s_settings.boxZ);
+    // Face where the camera faces, so successive pieces line up along the path
+    // being walked rather than all pointing at world north.
+    def.yaw = atan2(forward[0], forward[2]);
     if (s_settings.shape == 2)
     {
         def.shape = Physics::ProbeShape::Box;
@@ -397,6 +438,13 @@ void AutoDropPhysicsProbes()
 
     // Spread across the view so at least one is likely to meet an object rather
     // than all of them stacking on the same patch of ground.
+    if (const char* m = std::getenv("POSEIDON_PHYSICS_PROBE_MODEL"))
+    {
+        // Model probes cannot be reached from a capture run any other way, and
+        // "does the jeep work" is not a question to answer by assertion.
+        SpawnModelProbe(m);
+        return;
+    }
     for (int i = 0; i < wanted; ++i)
     {
         SpawnPhysicsProbe(i == 0 ? 0.0f : static_cast<float>(i) * 3.0f);

@@ -109,6 +109,11 @@ struct SphereProbeDef
     /// Box only: half extents. A domino is thin on one axis and tall on another,
     /// which is the shape that makes a stack interesting.
     Vector3 halfExtents{0.1f, 0.4f, 0.25f};
+    /// Yaw in radians. A domino has to FACE somewhere: a row of world-aligned
+    /// bricks cannot be laid along a path, and the first one to fall would miss
+    /// the next. Placement uses the camera's heading so a row builds itself as
+    /// you walk it.
+    float yaw = 0.0f;
 
     Vector3 position;
     Vector3 velocity;
