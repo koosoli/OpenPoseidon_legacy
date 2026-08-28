@@ -224,6 +224,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     
     # World/Model tests (new architecture)
     World/Weapons/test_ballistics.cpp
+    World/test_physics_world.cpp
     Foundation/Threads/test_watchdog.cpp
     World/Model/test_flag_bit_preservation.cpp
     World/Model/test_lod_purpose.cpp

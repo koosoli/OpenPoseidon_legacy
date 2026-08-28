@@ -286,6 +286,14 @@ target_link_libraries(Poseidon PUBLIC cjson)
 # zstd: downloaded mods ship as zstd-wrapped PBOs (.pbo.zst); ModArchive streams
 # the decode on unpack. BSD-3-Clause libzstd.
 find_package(zstd CONFIG REQUIRED)
+# PRIVATE on purpose: box3d appears in exactly one translation unit
+# (World/Physics/Box3DBackend.cpp) and must not become part of Poseidon's public
+# link surface. The engine reaches physics through PhysicsWorld / PhysicsBackend,
+# and PHY-001's whole argument for tolerating a 0.1.0 dependency is that swapping
+# it stays a file rather than a project. A PUBLIC link would quietly make it one.
+find_package(box3d CONFIG REQUIRED)
+target_link_libraries(Poseidon PRIVATE box3d::box3d)
+
 target_link_libraries(Poseidon PRIVATE zstd::libzstd)
 
 # zlib: Enfusion's .pak archives store every compressed entry as a raw zlib stream
