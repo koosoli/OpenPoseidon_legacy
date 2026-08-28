@@ -126,6 +126,13 @@ private:
     std::uint32_t _degenerateComponents = 0;
     std::uint32_t _maxComponentPoints = 0;
     WindSettings  _wind;
+
+    // Timing lives in the facade, not the backend: it measures OUR cost of asking
+    // for a step, which is what a person cares about, and it stays identical if
+    // the backend is replaced.
+    double        _stepMsTotal = 0.0;
+    double        _stepMsWorst = 0.0;
+    std::uint64_t _stepsTimed = 0;
 };
 
 /// The process-wide physics world. Null until something creates one; PHY-010

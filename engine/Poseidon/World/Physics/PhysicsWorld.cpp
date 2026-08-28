@@ -4,6 +4,7 @@
 #include <Poseidon/World/Physics/PhysicsBackend.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -68,14 +69,24 @@ void PhysicsWorld::ResetCounters()
     _modelsWithoutGeometry = 0;
     _degenerateComponents = 0;
     _maxComponentPoints = 0;
+    _stepMsTotal = 0.0;
+    _stepMsWorst = 0.0;
+    _stepsTimed = 0;
 }
 
 void PhysicsWorld::Step(float deltaSeconds)
 {
-    if (_backend)
+    if (!_backend)
     {
-        _backend->Step(deltaSeconds);
+        return;
     }
+    const auto begin = std::chrono::steady_clock::now();
+    _backend->Step(deltaSeconds);
+    const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
+    _stepMsTotal += ms;
+    _stepMsWorst = std::max(_stepMsWorst, ms);
+    ++_stepsTimed;
 }
 
 BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
@@ -329,6 +340,9 @@ PhysicsStats PhysicsWorld::GetStats() const
     stats.modelsWithoutGeometry = _modelsWithoutGeometry;
     stats.degenerateComponents = _degenerateComponents;
     stats.maxComponentPoints = _maxComponentPoints;
+    stats.stepsTimed = _stepsTimed;
+    stats.meanStepMs = _stepsTimed ? static_cast<float>(_stepMsTotal / static_cast<double>(_stepsTimed)) : 0.0f;
+    stats.worstStepMs = static_cast<float>(_stepMsWorst);
     return stats;
 }
 

@@ -30,6 +30,9 @@ void RunPhysicsCorpus();
 /// the ball will hit buildings or only terrain.
 bool PhysicsCorpusHasRun();
 
+/// Logs the step cost every 600 frames once a world has been registered.
+void ReportPhysicsCost();
+
 /// Terrain samples per 50 m landscape cell. Higher means a collider that follows
 /// the visible ground more closely, at 4 bytes per sample: 4 -> 12.5 m and 4 MB,
 /// 12 (the default) -> 4.2 m and 37 MB. Changing it takes effect on the next

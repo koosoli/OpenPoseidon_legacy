@@ -63,6 +63,17 @@ struct PhysicsStats
     /// PHY-020 dev probes currently alive.
     std::uint32_t probes = 0;
 
+    /// Mean wall-clock cost of ONE b3World_Step, in milliseconds, since the last
+    /// reset. Multiply by the Fixed Step tab's ticks-per-frame for the per-frame
+    /// cost -- the two numbers are deliberately separate because a step is a
+    /// fixed unit of work and a frame is not.
+    float meanStepMs = 0.0f;
+    /// Steps behind that mean, so a figure from three samples is not read as a
+    /// measurement.
+    std::uint64_t stepsTimed = 0;
+    /// Worst single step seen. A mean hides the hitch that a player feels.
+    float worstStepMs = 0.0f;
+
     bool terrainRegistered = false;
     /// Terrain grid actually handed to the backend, for comparison against the
     /// landscape's own dimensions.

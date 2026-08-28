@@ -67,9 +67,27 @@ bool PhysicsCorpusRequested()
 namespace
 {
 bool s_hasRun = false;
+bool s_reportCost = false;
+int  s_costFrames = 0;
 }
 
 bool PhysicsCorpusHasRun() { return s_hasRun; }
+
+void ReportPhysicsCost()
+{
+    if (!s_reportCost || ++s_costFrames % 600 != 0)
+    {
+        return;
+    }
+    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
+    if (!world || !world->IsCreated())
+    {
+        return;
+    }
+    const Physics::PhysicsStats stats = world->GetStats();
+    LOG_WARN(World, "PHYSCOST: {:.3f} ms mean, {:.3f} ms worst over {} steps; {} bodies {} shapes",
+             stats.meanStepMs, stats.worstStepMs, stats.stepsTimed, stats.bodies, stats.shapes);
+}
 
 int&  TerrainSubdivision() { return s_subdivision; }
 float TerrainSampleSpacing() { return LandGrid / static_cast<float>(s_subdivision); }
@@ -226,6 +244,10 @@ void RunPhysicsCorpus()
                  static_cast<int>(sorted.size()) - shown);
     }
     LOG_WARN(World, "PHYSCORPUS: ---- end ----");
+    // Cost, logged periodically after the world is built. Without a number here
+    // "the physics is cheap" is an assertion, and this project has a rule about
+    // those.
+    s_reportCost = true;
     s_hasRun = true;
 }
 

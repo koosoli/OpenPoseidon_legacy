@@ -80,6 +80,21 @@ void DrawPhysicsTab()
         ImGui::Text("Terrain: %s (%ux%u)", stats.terrainRegistered ? "registered" : "none", stats.terrainWidth,
                     stats.terrainHeight);
         ImGui::Text("Live probes: %u", stats.probes);
+        if (stats.stepsTimed > 0)
+        {
+            ImGui::Text("Step cost: %.3f ms mean, %.3f ms worst (%llu steps)", stats.meanStepMs, stats.worstStepMs,
+                        static_cast<unsigned long long>(stats.stepsTimed));
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip(
+                    "Cost of ONE simulation step. Multiply by the Fixed Step tab's\n"
+                    "ticks-per-frame for the per-frame cost -- kept separate because a\n"
+                    "step is a fixed unit of work and a frame is not.\n"
+                    "\n"
+                    "The worst figure matters more than the mean: a mean hides the one\n"
+                    "hitch a player actually feels.");
+            }
+        }
         if (stats.modelsRegistered > 0)
         {
             ImGui::TextDisabled("Models registered %u | no geometry %u | degenerate %u | hull refusals %u",

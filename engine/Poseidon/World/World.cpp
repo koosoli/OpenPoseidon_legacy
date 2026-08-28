@@ -894,6 +894,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // Presentation side of PHY-020: wind is refreshed and probes are drawn once
     // per FRAME, not per tick -- drawing at the tick rate would blink at any frame
     // rate that is not exactly 60.
+    Dev::ReportPhysicsCost();
     Dev::AutoDropPhysicsProbes();
     Dev::UpdatePhysicsProbeWind();
 
