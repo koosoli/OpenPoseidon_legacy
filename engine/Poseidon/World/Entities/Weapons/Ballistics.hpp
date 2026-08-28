@@ -126,6 +126,18 @@ struct ShellParams
     /// `ballisticCoefficient` from the ammo's config, converted to kg/m^2. Only consulted when
     /// `dragModel` is not Constant; zero or negative disables the drag function and falls back.
     float ballisticCoefficient = 0.0f;
+
+    /// Projectile mass in kg and calibre in metres, for the penetration model.
+    ///
+    /// CWA's CfgAmmo carries NEITHER -- it is a 2001 gameplay config, not a
+    /// ballistics one -- so these come from the same overlay as the drag data
+    /// (`bulletMass`, `caliber`). Absent an overlay they fall back to a
+    /// 5.56-sized round, which is right for rifles and wrong for a tank shell;
+    /// `massAssumed` says which happened, so nothing presents a guess as a
+    /// measurement.
+    float mass = 0.004f;
+    float calibre = 0.00556f;
+    bool  massAssumed = true;
 };
 
 /// The coefficient every round used before `airFriction` became config-driven, and the fallback

@@ -377,6 +377,23 @@ ShellParams ShellParamsFor(const AmmoType& type)
     // Optional drag FUNCTION, which supersedes the constant when both a model and a coefficient
     // are given. Absent -> Constant -> today's flight, unchanged. Ballistic coefficients are
     // quoted in lb/in^2 by convention, so convert once here rather than at every use.
+    if (const ParamEntry* entry = pars.FindEntry("bulletMass"))
+    {
+        const float value = *entry;
+        if (value > 0.0f)
+        {
+            out.mass = value;
+            out.massAssumed = false;
+        }
+    }
+    if (const ParamEntry* entry = pars.FindEntry("caliber"))
+    {
+        const float value = *entry;
+        if (value > 0.0f)
+        {
+            out.calibre = value;
+        }
+    }
     if (const ParamEntry* entry = pars.FindEntry("dragModel"))
     {
         const RString name = *entry;

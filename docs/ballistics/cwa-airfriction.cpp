@@ -60,6 +60,10 @@ class CfgAmmo
 	// Retained velocity: 641 m/s at 300 m, 402 m/s at 600 m.
 	class BulletSingle
 	{
+		// 62 gr = 4.0 g, 5.56 mm. Published and exact, unlike the material
+		// resistances they feed: those are estimates, the projectile is not.
+		bulletMass = 0.004;
+		caliber = 0.00556;
 		dragModel = "G7";
 		ballisticCoefficient = 0.151;
 		airFriction = -0.001328; // fallback only; was -0.000983, fitted to an unsourced anchor
@@ -70,6 +74,9 @@ class CfgAmmo
 	// Retained velocity: 598 m/s at 300 m, 426 m/s at 600 m.
 	class BulletSniper
 	{
+		// 147 gr = 9.5 g, 7.62 mm.
+		bulletMass = 0.0095;
+		caliber = 0.00762;
 		dragModel = "G1";
 		ballisticCoefficient = 0.397;
 		airFriction = -0.001039; // fallback only; was -0.000600
@@ -79,6 +86,9 @@ class CfgAmmo
 	// Retained velocity: 628 m/s at 300 m, 460 m/s at 600 m.
 	class Bullet7_6
 	{
+		// 148 gr = 9.6 g, 7.62 mm.
+		bulletMass = 0.0096;
+		caliber = 0.00762;
 		dragModel = "G1";
 		ballisticCoefficient = 0.426;
 		airFriction = -0.000954; // fallback only; was -0.000616
@@ -88,6 +98,9 @@ class CfgAmmo
 	// speed like that, and the old -0.000314 made it hold rather more.
 	class Bullet12_7
 	{
+		// 647 gr = 41.9 g, 12.7 mm.
+		bulletMass = 0.0419;
+		caliber = 0.0127;
 		dragModel = "G1";
 		ballisticCoefficient = 0.670;
 		airFriction = -0.000570; // fallback only; was -0.000314

@@ -11,6 +11,8 @@
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
+#include <Poseidon/World/Entities/Weapons/Penetration.hpp>
+#include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
 #include <Poseidon/AI/VehicleAI.hpp>
 #include <Poseidon/AI/AI.hpp>
@@ -668,6 +670,58 @@ void ShotShell::Sound(bool inside, float deltaT)
     base::Sound(inside, deltaT);
 }
 
+/// Does this round come out the far side of what it just hit?
+///
+/// Returns true when it did, having moved the shot past the exit point and taken
+/// the energy the material cost it. False means stopped, and the caller deletes
+/// the round exactly as before.
+///
+/// Requires the physics collider set: the thickness comes from a ray, and without
+/// PHY-010 there is nothing to cast against. With physics absent this returns
+/// false, which is today's behaviour and the safe direction.
+bool ShotShell::TryPenetrate(const CollisionInfo& info, float deltaT)
+{
+    Physics::PhysicsWorld* physics = Physics::GetPhysicsWorld();
+    if (!physics || !physics->IsCreated() || !info.object)
+    {
+        return false;
+    }
+
+    const float speed = _speed.Size();
+    if (speed <= 1.0f)
+    {
+        return false;
+    }
+    const Vector3 dir = _speed / speed;
+    const Point3  entry = info.object->PositionModelToTop(info.pos);
+
+    // 2 m of search. Beyond that it is a hill or a bunker, and the honest answer
+    // for "no far face found" is "stopped" rather than a guessed thickness.
+    constexpr float MaxDepth = 2.0f;
+    float           thickness = 0.0f;
+    if (!physics->MeasureThickness(entry, dir, MaxDepth, thickness))
+    {
+        return false;
+    }
+
+    const Ballistics::ShellParams shell = Ballistics::ShellParamsFor(*Type());
+    const Penetration::Material&  material =
+        Penetration::Lookup(info.texture && info.texture->Name() ? info.texture->Name() : nullptr);
+    const Penetration::Result result =
+        Penetration::Compute(material, speed, shell.mass, shell.calibre, thickness);
+
+    if (!result.penetrated)
+    {
+        return false;
+    }
+
+    // Out the far side, a little past it so the next segment does not start inside
+    // the surface it just left and hit it again.
+    SetPosition(entry + dir * (thickness + 0.01f));
+    _speed = dir * result.exitSpeed;
+    return true;
+}
+
 void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
@@ -806,6 +860,15 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                     }
                     GLandscape->ExplosionDammage(_parent, this, info.object, pos, info.dirOut, Type());
                 }
+
+                // PENETRATION. The round has already damaged what it hit -- a bullet
+                // that goes through a wall still marks the wall -- so this only
+                // decides whether it also survives to carry on.
+                if (Penetration::Enabled() && TryPenetrate(collision[minI], deltaT))
+                {
+                    return;
+                }
+
                 _delete = true;
                 return;
             }

@@ -137,6 +137,11 @@ protected:
 public:
 	ShotShell( EntityAI *parent, const AmmoType *type );
 	void Simulate( float deltaT, SimulationImportance prec ) override;
+	/// Penetration follow-up to PHY-030: does this round come out the far side of
+	/// what it just hit? Needs the physics collider set -- the thickness comes from
+	/// a ray, so with physics absent it returns false, which is today's behaviour
+	/// and the safe direction.
+	bool TryPenetrate(const CollisionInfo &info, float deltaT);
 	bool Invisible() const override;
 	void Sound( bool inside, float deltaT ) override;
 
