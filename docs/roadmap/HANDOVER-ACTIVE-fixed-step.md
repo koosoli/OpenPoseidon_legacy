@@ -30,6 +30,13 @@ drawn solid, placed on the ground facing the camera, thrown, shot at (impulse at
 the hit point, so off-centre hits spin things), pushed by a kinematic player
 proxy, and blown by Poseidon's own wind through `b3Shape_ApplyWind`.
 
+**PHY-020 ACCEPTED BY THE OWNER, and on the exact test PHY-001 named.** Balls
+spawned inside a house came down the stairs properly. Building interiors and
+stairs are the hardest case for a converted collider set -- a hull that is
+slightly too large or too small shows there first, as a ball that floats above
+the treads or falls through them. This is owner ground truth from play, which
+outranks any capture I ran.
+
 **PHY-030.** Every projectile segment is asked of both collision systems and the
 disagreements are counted. Replaces nothing.
 
