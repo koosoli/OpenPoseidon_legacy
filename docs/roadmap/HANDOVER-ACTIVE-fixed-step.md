@@ -11,8 +11,9 @@ code.**
 
 ## Done, with numbers
 
-**Fixed step (ARCH-001 C).** World clock, weather, wind, AI, vehicles and
-visibility run at a fixed 1/60 s. Measured across four play sessions: 1.03–1.52
+**Fixed step (ARCH-001 C) — COMPLETE.** World clock, weather, wind, AI, vehicles,
+visibility AND scripts run at a fixed 1/60 s. Mission timing no longer depends on
+frame rate, which is the prerequisite for deterministic multiplayer and replay. Measured across four play sessions: 1.03–1.52
 ticks per frame, so the SIMULATION IS THE FASTER CLOCK on this machine and entity
 interpolation was cancelled rather than built — it only pays when rendering
 outruns simulation.
@@ -60,10 +61,11 @@ fences, wrecks -- is what would harden it.
    "Compare physics rays" in the Physics tab, empty a magazine into a wall, read
    `legacy-only`. That counter is the only thing that can say whether 82,381
    objects converted to the right SHAPE, as opposed to merely converting.
-2. **Fixed-step scripts are implemented and OFF** (`POSEIDON_FIXEDSTEP_SCRIPTS`,
-   or the Fixed Step tab). The last ARCH-001 item. Needs campaign missions with
-   cutscenes played, not code review — see §3 of the old handover text below for
-   why a naive move breaks them.
+2. ~~Fixed-step scripts~~ **DONE 2026-08-29.** ON by default after the owner
+   played with it and reported no difference. `POSEIDON_FIXEDSTEP_SCRIPTS=0`
+   still turns it off: one playtest is evidence, not proof, and mission pacing is
+   the kind of thing that surfaces in an odd mission weeks later.
+   **ARCH-001 item C is now complete.**
 3. **Cosmetic, owner has deprioritised all three:** solid probes render white and
    black because `SetConstantColor` does not reach the shader; the cylinder wall
    has gaps; a config-spawned jeep draws white boxes, established to be its

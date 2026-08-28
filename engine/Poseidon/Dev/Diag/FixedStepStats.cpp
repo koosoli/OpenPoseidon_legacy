@@ -33,10 +33,14 @@ constexpr std::uint32_t AssumedCatchUpCap = 8;
 // One storage location for the scripts opt-in, seeded from the environment once.
 // A separate "env said X" flag beside a "panel said Y" flag is how a toggle ends
 // up disagreeing with what the engine actually does.
+// ON by default since 2026-08-29, after the owner played with it and reported no
+// difference. `POSEIDON_FIXEDSTEP_SCRIPTS=0` turns it off again, because one
+// playtest is evidence and not proof, and the thing it changes -- mission pacing
+// -- is the kind that surfaces in an odd mission weeks later.
 std::atomic<bool> g_fixedStepScripts{[]
                                      {
                                          const char* v = std::getenv("POSEIDON_FIXEDSTEP_SCRIPTS");
-                                         return v && std::strcmp(v, "0") != 0;
+                                         return !v || std::strcmp(v, "0") != 0;
                                      }()};
 
 } // namespace

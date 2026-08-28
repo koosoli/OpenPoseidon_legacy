@@ -58,9 +58,10 @@ std::uint32_t FixedStepMaxStepsInFrame();
 void ResetFixedStepStats();
 
 // ---------------------------------------------------------------------------
-// Opt-in: run SimulateScripts() inside the fixed tick instead of once per
-// rendered frame. OFF by default, and it must stay that way until missions have
-// been played, because it changes gameplay in two ways at once.
+// Runs SimulateScripts() inside the fixed tick instead of once per rendered
+// frame. ON since 2026-08-29, after the owner played campaign content with it.
+// It changes gameplay in two ways at once, both recorded below, and the switch
+// stays so it can be turned off if either surfaces later.
 //
 // 1. SCRIPTS WOULD STOP WHILE THE SIMULATION IS DISABLED. Today SimulateScripts()
 //    runs outside the IsSimulationEnabled() check on purpose, and that check is
