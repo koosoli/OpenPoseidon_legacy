@@ -860,6 +860,35 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 #endif
 
+    bool updateVisibility = true;
+#if _ENABLE_CHEATS
+    static bool disableVis = false;
+    if (input.GetCheat2ToDo(SDL_SCANCODE_Y))
+    {
+        disableVis = !disableVis;
+        Foundation::GlobalShowMessage(500, "VisTests %s", disableVis ? "Off" : "On");
+    }
+    updateVisibility = !disableVis;
+#endif
+
+    // Advance gameplay before deriving this frame's camera and draw lists so
+    // presentation always sees the latest completed simulation tick.
+    static FixedStepAccumulator simulationSteps;
+    if (IsSimulationEnabled())
+    {
+        const float fixedDeltaT = static_cast<float>(simulationSteps.StepSeconds());
+        const float fixedNoAccDeltaT = fixedDeltaT / std::max(_acceleratedTime, 0.01f);
+        const std::size_t steps = simulationSteps.Advance(deltaT);
+        for (std::size_t step = 0; step < steps; ++step)
+        {
+            StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
+        }
+    }
+    else
+    {
+        simulationSteps.Reset();
+    }
+
     if (IsSimulationEnabled())
     {
         if (_titleEffect && _titleEffect->IsTerminated())
@@ -1757,37 +1786,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     perf.Mark(Dev::FrameProfiler::PhaseHud);
-
-    bool updateVisibility = true;
-#if _ENABLE_CHEATS
-    static bool disableVis = false;
-    if (input.GetCheat2ToDo(SDL_SCANCODE_Y))
-    {
-        disableVis = !disableVis;
-        Foundation::GlobalShowMessage(500, "VisTests %s", disableVis ? "Off" : "On");
-    }
-    updateVisibility = !disableVis;
-#endif
-
-    // Run gameplay-owned vehicle and AI state at a stable cadence while the
-    // presentation work above continues at the display's frame rate.  The
-    // accumulator is reset while paused so an idle menu cannot create a catch-up
-    // burst when simulation resumes.
-    static FixedStepAccumulator simulationSteps;
-    if (IsSimulationEnabled())
-    {
-        const float fixedDeltaT = static_cast<float>(simulationSteps.StepSeconds());
-        const float fixedNoAccDeltaT = fixedDeltaT / std::max(_acceleratedTime, 0.01f);
-        const std::size_t steps = simulationSteps.Advance(deltaT);
-        for (std::size_t step = 0; step < steps; ++step)
-        {
-            StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
-        }
-    }
-    else
-    {
-        simulationSteps.Reset();
-    }
 
     if (IsSimulationEnabled())
     {
