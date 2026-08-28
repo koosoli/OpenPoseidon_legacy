@@ -160,12 +160,46 @@ let rendering run at a rate independent of simulation — but sessions 1-4 all
 measured the simulation as the FASTER clock, so there is no render rate to
 decouple toward. Do this when it buys something, not for tidiness.
 
-### 5. Only then: PHY-010
+### 5. PHY-010 — BLOCKED on one decision, measured 2026-08-28
 
-Physics binding per PHY-001. Do not start it before the accumulator is settled —
-that is the whole reason ARCH-001 put item C first.
+The accumulator work is done, so PHY-010 is unblocked in ARCH-001's sense. It is
+blocked on something smaller and entirely mechanical instead.
 
----
+**`box3d` is not reachable from our pinned vcpkg baseline.** Adding `"box3d"` to
+`vcpkg.json` fails at configure time:
+
+```
+error: the baseline does not contain an entry for port box3d
+```
+
+Measured:
+
+| | |
+|---|---|
+| our `builtin-baseline` `170bd3bf…` | 2026-06-12 |
+| `box3d` added to vcpkg | 2026-07-03 |
+
+So the port exists in the local vcpkg checkout but postdates the baseline by
+three weeks. The change was reverted; the tree configures and builds clean.
+
+**Three ways out, and the choice is the owner's because two of them reach past
+this branch:**
+
+1. **Bump `builtin-baseline`** to a commit containing box3d. The normal vcpkg
+   workflow, and the only one that is correct for every clone — but it moves
+   *every* dependency (sdl3, imgui, curl, spdlog, …) by three weeks at once. A
+   break there would have nothing to do with physics, and it lands on every other
+   agent's worktree at the same time. Wants its own commit and its own build
+   verification, not a ride-along on a physics change.
+2. **Overlay port** — `vcpkg-configuration.json` pointing at the local
+   `C:cpkg\portsox3d`. Touches nothing else, but hardcodes a machine-specific
+   path, so it works here and for nobody else.
+3. **Vendor box3d** under `thirdparty/` via FetchContent, like corrosion is
+   already fetched. Self-contained and baseline-independent; adds a submodule-ish
+   dependency to maintain by hand.
+
+Option 1 is the right long-term answer and the riskiest to do casually. Nothing
+else in PHY-010 can start until one of these is chosen.
 
 ## Traps specific to this branch
 
@@ -191,4 +225,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28, after `4a3bf51b`.*
+*Last updated: 2026-08-28. Steps 1-4 done; step 5 blocked on the vcpkg baseline decision.*
