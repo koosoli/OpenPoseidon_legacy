@@ -874,14 +874,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     // Advance gameplay before deriving this frame's camera and draw lists so
     // presentation always sees the latest completed simulation tick.
-    static FixedStepAccumulator simulationSteps;
     Dev::FixedStepFrame stepFrame;
-    stepFrame.stepSeconds = static_cast<float>(simulationSteps.StepSeconds());
+    stepFrame.stepSeconds = static_cast<float>(_simulationSteps.StepSeconds());
     if (IsSimulationEnabled())
     {
-        const float fixedDeltaT = static_cast<float>(simulationSteps.StepSeconds());
+        const float fixedDeltaT = static_cast<float>(_simulationSteps.StepSeconds());
         const float fixedNoAccDeltaT = fixedDeltaT / std::max(_acceleratedTime, 0.01f);
-        const std::size_t steps = simulationSteps.Advance(deltaT);
+        const std::size_t steps = _simulationSteps.Advance(deltaT);
         for (std::size_t step = 0; step < steps; ++step)
         {
             StepSimulation(fixedDeltaT, fixedNoAccDeltaT, camVehicle, updateVisibility);
@@ -891,11 +890,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
     else
     {
-        simulationSteps.Reset();
+        _simulationSteps.Reset();
     }
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
     // sampling it earlier would report the previous frame's leftover.
-    stepFrame.alpha = static_cast<float>(simulationSteps.Alpha());
+    stepFrame.alpha = static_cast<float>(_simulationSteps.Alpha());
     Dev::PublishFixedStepFrame(stepFrame);
 
     if (IsSimulationEnabled())

@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -92,6 +93,13 @@ World::World(Engine* engine, bool editor)
     : _engine(engine), _editor(editor), _camTypeMain(CamInternal), _camType(CamInternal), _gridOffsetX(0),
       _gridOffsetY(0)
 {
+    // A new World means a new run of the simulation clock, so the fixed-step
+    // panel starts counting again. Without this the averages mix two missions
+    // and every loading screen's catch-up burst is carried into the next one's
+    // numbers -- which is exactly the reading that made the cap look alarming
+    // before the counters were reset by hand.
+    Dev::ResetFixedStepStats();
+
 #define PRINT_SIZE(type) Log(#type " size %d", sizeof(type))
     PRINT_SIZE(Object);
     PRINT_SIZE(Frame);

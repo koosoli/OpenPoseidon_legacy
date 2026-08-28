@@ -1,5 +1,6 @@
 #pragma once
 #include <Poseidon/Core/Types.hpp>
+#include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/UI/InGame/InGameUI.hpp>
@@ -517,6 +518,12 @@ class World
 	// The simulation-only tail of a frame. Rendering remains in Simulate while
 	// the outer game loop is converted to drive this at a fixed rate.
 	void StepSimulation(float deltaT, float noAccDeltaT, Entity *cameraVehicle, bool updateVisibility);
+	// Paces StepSimulation. A MEMBER, not a function-local static: a static
+	// outlives the World that filled it, so loading a new mission would inherit
+	// the previous one's leftover fraction and could run a stray catch-up tick
+	// on the first frame of the new world. Per-World it simply dies with the
+	// world it belongs to.
+	FixedStepAccumulator _simulationSteps;
 	void Simulate( float deltaT, bool &enableDraw );
 	void PerformAI( float deltaT, float noAccDeltaT );
 	void ProcessNetwork();
