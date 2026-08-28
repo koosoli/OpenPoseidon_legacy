@@ -37,6 +37,7 @@ All commits are pushed. Nothing is local-only.
 | `a489475c` | world clock, terrain weather, wind join it |
 | `5b6c49bb` | simulate **before** presenting, so a frame shows the tick it just ran |
 | `0a35211f` | dev-panel **Fixed Step** tab — the accumulator is now observable |
+| `f21e6cba` | accumulator becomes a `World` member; Dev counters reset on world load |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -145,11 +146,18 @@ review.
 it is disabled (preserving cutscenes), behind a switch that is OFF by default until
 missions have been played.
 
-### 4. Wire the accumulator at the game loop
+### 4. Wire the accumulator at the game loop — PARTLY DONE (`f21e6cba`)
 
-`GameLoop.cpp:60` still welds the sim and render ticks. The accumulator currently
-lives inside `World::Simulate` as a function-local static. That is fine for now but
-is not where it belongs long-term.
+The ownership half is done: the accumulator is a `World` member rather than a
+function-local static, so it no longer outlives the world that filled it, and the
+Dev counters reset in `World`'s constructor.
+
+**What remains is optional, and measurement says it is not urgent.** `GameLoop.cpp`
+still calls `GWorld->Simulate(deltaT, enableDraw)` once per frame (line 143) and
+the fixed stepping happens inside. Hoisting the accumulator out to the loop would
+let rendering run at a rate independent of simulation — but sessions 1-4 all
+measured the simulation as the FASTER clock, so there is no render rate to
+decouple toward. Do this when it buys something, not for tidiness.
 
 ### 5. Only then: PHY-010
 
@@ -182,4 +190,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28, after the owner's Fixed Step readings cancelled step 2.*
+*Last updated: 2026-08-28, after `f21e6cba`.*
