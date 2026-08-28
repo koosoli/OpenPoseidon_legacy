@@ -165,7 +165,19 @@ void AutoDropPhysicsProbes()
         return;
     }
     dropped = true;
-    LOG_WARN(World, "PHYSPROBE: auto-drop {} probe(s)", wanted);
+
+    // POSEIDON_PHYSICS_PROBE_RADIUS overrides the slider for harness runs. A
+    // 0.2 m ball is the realistic default and is also invisible in waist-high
+    // grass from ten metres, which is not a useful thing to photograph.
+    if (const char* r = std::getenv("POSEIDON_PHYSICS_PROBE_RADIUS"))
+    {
+        const float radius = static_cast<float>(std::atof(r));
+        if (radius > 0.0f)
+        {
+            s_settings.radius = radius;
+        }
+    }
+    LOG_WARN(World, "PHYSPROBE: auto-drop {} probe(s) r={}", wanted, s_settings.radius);
 
     // Spread across the view so at least one is likely to meet an object rather
     // than all of them stacking on the same patch of ground.

@@ -896,7 +896,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // rate that is not exactly 60.
     Dev::AutoDropPhysicsProbes();
     Dev::UpdatePhysicsProbeWind();
-    Dev::DrawPhysicsProbes();
 
     Dev::FixedStepFrame stepFrame;
     stepFrame.stepSeconds = static_cast<float>(_simulationSteps.StepSeconds());
@@ -1515,6 +1514,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
         // window — the same one VehicleAI's path diagnostic draws its lines in.
         // Returns immediately unless the dev-panel switch is on.
         Dev::Ballistics::Draw();
+        // PHY-020 probes, for the same reason and in the same window. Submitting
+        // outside BeginObjects/EndObjects silently draws nothing, which reads as
+        // "the ball does not exist" while the physics log shows it rolling.
+        Dev::DrawPhysicsProbes();
     }
 
     if (camInsideVehicle)
