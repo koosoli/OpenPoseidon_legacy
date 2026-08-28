@@ -36,6 +36,7 @@ All commits are pushed. Nothing is local-only.
 | `9c6134c0` | AI visibility joins the same tick |
 | `a489475c` | world clock, terrain weather, wind join it |
 | `5b6c49bb` | simulate **before** presenting, so a frame shows the tick it just ran |
+| `0a35211f` | dev-panel **Fixed Step** tab — the accumulator is now observable |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -60,8 +61,9 @@ effect, HUD, zoom, sound. That is presentation and belongs at the display rate.
 
 ## What is NOT verified
 
-* No performance measurement. Nobody knows what the accumulator costs, or how
-  often catch-up steps actually fire on this machine.
+* No performance measurement under load, and **no play-session reading of the new
+  Fixed Step tab**. The tab makes the numbers available; nobody has looked at them
+  while actually playing.
 * No mission/integration run (Trident). Only one dev mission, one screenshot.
 * Multiplayer untouched and unconsidered. `IsSimulationEnabled()` takes a
   different branch under `GModeNetware`; nothing here was reasoned about for it.
@@ -70,24 +72,26 @@ effect, HUD, zoom, sound. That is presentation and belongs at the display rate.
 
 ## Next steps, in the order they should be taken
 
-### 1. Fixed-step diagnostics — IN PROGRESS
+### 1. Fixed-step diagnostics — DONE (`0a35211f`)
 
-A dev-panel readout: ticks executed this frame, `Alpha()`, catch-up events, and
-whether the cap has been hit. Cannot affect gameplay.
+Dev panel → **Fixed Step**. Shows ticks this frame, alpha, ticks-per-frame with
+the implied frame rate, worst frame, and catch-up-cap hits, plus a plain verdict
+line saying which clock is ahead. `Dev/Diag/FixedStepStats.*` publishes; the tab
+renders. Publishing is four relaxed atomic stores on the sim path.
 
-Do this **before** interpolation, because it answers whether interpolation is
-needed at all: if the machine runs below 60 fps the sim is the *faster* clock and
-there is no judder to fix. Our own measurements say stock worlds are GPU-bound and
-grass alone is a third of the frame, so that is a real possibility rather than a
-hypothetical.
+**THE OWNER STILL HAS TO READ IT.** Nobody has seen these numbers in a real play
+session — the automated capture proves it boots, not what the ratio is on this
+machine under load. That reading is the input to step 2, so ask for it before
+starting any interpolation work.
 
-Tab registration pattern is `DebugOverlay.cpp:6068` — `Dev::PanelTabItem("Name")`
-then a `Draw…Tab()` call whose body lives in its own file under `Dev/Diag/`. Follow
-`PictureModeTab.cpp`; note it needs `#undef DebugLog` before `#include <imgui.h>`
-because `Foundation/Framework/DebugLog.hpp` defines a macro that eats an ImGui
-member of the same name.
+### 2. Camera / entity interpolation — GATED on the step-1 reading
 
-### 2. Camera / entity interpolation — only if step 1 shows judder
+Do not start until the Fixed Step tab has been read during actual play. The tab
+prints the verdict directly:
+
+* *"Rendering OUTRUNS simulation"* (ticks/frame < 1) — interpolation pays off.
+* *"Simulation outruns rendering"* (> 1) — **do not build it**; every frame
+  already shows fresh state and the work would buy nothing.
 
 `Alpha()` exists and nothing uses it. Without interpolation, rendering above the
 simulation rate shows the same state twice.
@@ -158,4 +162,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28, after `5b6c49bb`.*
+*Last updated: 2026-08-28, after `0a35211f`.*
