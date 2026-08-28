@@ -41,6 +41,8 @@ All commits are pushed. Nothing is local-only.
 | `4a3bf51b` | fixed-step scripts as an **opt-in, off by default** |
 | `65e9bbba` | box3d reachable via a package-scoped vcpkg registry (plumbing only) |
 | `15f1ee1d` | **PHY-010**: physics interface, Box3D backend, Geometry-LOD bridge, 6 tests |
+| `c982b096` | five lifetime/honesty fixes from review (two would have corrupted memory) |
+| `faafd151` | shape-count fix + **corpus census: PHY-010 PASSES on stock Everon** |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -162,41 +164,46 @@ let rendering run at a rate independent of simulation — but sessions 1-4 all
 measured the simulation as the FASTER clock, so there is no render rate to
 decouple toward. Do this when it buys something, not for tidiness.
 
-### 5. PHY-010 — layer built (`15f1ee1d`); NOT yet connected to a world
+### 5. PHY-010 — PASSED (`faafd151`). Stop here for architecture review.
 
-Three files under `engine/Poseidon/World/Physics/`:
+Census on stock CWA Everon, `POSEIDON_PHYSICS_CORPUS=1`:
 
-* `PhysicsTypes.hpp` / `PhysicsWorld.hpp|cpp` — engine-facing. Register a model,
-  move it, forget it. Handles carry a generation counter.
-* `PhysicsBackend.hpp` — the replaceable seam.
-* `Box3DBackend.cpp` — the only translation unit that includes box3d, linked
-  `PRIVATE`. **Verified: box3d appears in no engine header** (one comment aside),
-  which is the property that keeps a Jolt swap a file rather than a project.
+| | |
+|---|---|
+| instances seen | 103,115 |
+| registered | **82,381** |
+| bodies / shapes | 82,381 / 151,038 |
+| distinct models failed | 32 |
+| degenerate components | **0** |
+| backend hull refusals | **0** |
+| max ConvexComponent points | **53** |
+| terrain | 256x256 at 50 m, registered |
 
-The bridge READS the convex decomposition rather than computing one — OFP
-Geometry LODs are authored as named convex components and
-`Shape::GetGeomComponents()` exposes them.
+**No systematic incompatibility.** Nothing was too thin to hull and Box3D refused
+nothing. All 32 failures are `no-geometry-lod` and fall into two classes that
+*should* have none: ground clutter (`ker trs travy` x9722, `ker rakosi` x6096) and
+30 road/path/junction segments (`cesta`, `silnice`, `asfaltka`, `kr_*`). Roads are
+not solid — the terrain under them carries the collision. Registering nothing is
+the correct outcome, which is why "no Geometry LOD" is counted apart from "had
+components, none usable".
 
-Refusals are counted in three separate places because they mean different things:
-models with no usable Geometry LOD and components too thin to be a volume are
-decided engine-side; hull failures are the library's opinion.
+`MaxHullVertices = 64` is now measured, but with only 17 % headroom (worst
+component 53 points). Left alone; check it first on a denser world.
 
-38 assertions in 8 cases pass. PoseidonGame builds.
+The census runs on the first SIMULATED frame, not at load — streaming fills the
+landscape grid after the world is nominally ready, and censusing early would
+count an empty map as a clean pass.
 
-**What is NOT done, and it is the important half:** nothing constructs a
-`PhysicsWorld` yet. No real building has been through this — the tests use a unit
-cube. The next slice registers the loaded world's objects and terrain and reports
-the counters, which is what finally tests PHY-010's abort condition against the
-stock corpus.
+**PHY-020 is next and is deliberately NOT started:** the owner asked to review the
+collider architecture first, because PHY-020 is where it becomes visually
+judgeable (a ball rolling down the hotel stairs rather than through them).
 
-**Do not start PHY-020 (spawnable test bodies) before the owner reviews the
-collider architecture.** That was an explicit request. PHY-020 is where this
-becomes visually judgeable — a ball rolling down the hotel stairs instead of
-through them — so the architecture should be agreed first.
-
-Two API facts worth not rediscovering: `b3Quat` is `{ b3Vec3 v; float s; }`, not
-x/y/z/w; and `tests/unit/engine/Poseidon/CMakeLists.txt` lists sources
-explicitly, so a new test file is silently absent until added there.
+Useful for PHY-020 when it starts: Box3D 0.1.0 already exposes
+`b3Shape_ApplyWind()` with world-space wind velocity, drag, lift and max speed,
+for sphere, capsule and hull — so Poseidon's `GWind` could reach the first dev
+sphere without writing a drag model. Prefer Box3D debug draw for the first
+dynamic probe so visualising it does not require weakening the
+no-gameplay-pose-getter boundary.
 
 ## Traps specific to this branch
 
@@ -222,4 +229,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28. Steps 1-4 done; PHY-010's layer is built and untested against real models.*
+*Last updated: 2026-08-28. Steps 1-4 done; PHY-010 PASSED on the stock corpus. PHY-020 awaits review.*
