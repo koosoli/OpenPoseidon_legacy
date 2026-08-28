@@ -93,6 +93,7 @@ sessions on the target machine:
 | 1 (1379 ticks / 909 frames) | 1.517 | 39.6 | 8 | 3 frames, 0.33 % |
 | 2 (2211 / 1916) | 1.154 | 52.0 | 8 | 1 frame, 0.05 % |
 | 3 (1184 / 1051) — clean, reset after load | 1.127 | 53.3 | 2 | never |
+| 4 (5089 / 4919) — **under heavy AI load** | 1.035 | 58.0 | 8 | 7 frames, 0.14 % |
 
 Every session reads **above 1.0**: the simulation is the FASTER clock and several
 ticks run per drawn frame. Interpolation only pays when rendering outruns
@@ -107,8 +108,18 @@ the frame rate ever rises well above 60 on the target hardware.
 handful of frames, meaning simulation time was discarded and gameplay briefly ran
 slower than wall clock. Session 3 — reset after the loading screen — peaked at 2
 ticks and never capped, so those hits are load-screen spikes rather than
-steady-state behaviour. Worth re-checking after any change that lengthens a frame;
-not worth acting on now.
+steady-state behaviour. Session 4 capped on 7 of 4919 frames while many AI units
+were spawned, so under real load some of these are genuine hitches rather than
+load spikes. Still small, still not worth acting on before something else makes
+frames longer -- but this is the number to watch when PHY-010 adds per-frame work.
+
+**On "should I feel a difference": no, and that is correct.** AI previously ran
+once per rendered frame, so ~50 updates/s at 50 fps; it now runs at a fixed 60.
+Too small a change to perceive, and AI decisions hang off second-scale timers
+rather than individual ticks. The gain is that behaviour no longer varies with
+frame rate -- the same mission used to run measurably differently on a 20 fps
+machine and a 144 fps one. That invariance is the prerequisite ARCH-001 wanted
+before physics, not a felt improvement.
 
 ### 3. Scripts — DEFERRED, and the reason matters
 
