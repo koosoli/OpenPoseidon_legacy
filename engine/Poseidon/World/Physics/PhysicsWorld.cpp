@@ -170,7 +170,7 @@ bool PhysicsWorld::ExtractPieces(LODShape* shape, std::vector<Vector3>& points, 
 }
 
 BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, float mass, float friction,
-                                     float restitution)
+                                     float restitution, Vector3Par velocity)
 {
     if (!_backend)
     {
@@ -185,7 +185,7 @@ BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, 
         return {};
     }
     return _backend->SpawnDynamicPieces(pieces.data(), static_cast<int>(pieces.size()), transform, mass, friction,
-                                        restitution);
+                                        restitution, velocity);
 }
 
 void PhysicsWorld::ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse)

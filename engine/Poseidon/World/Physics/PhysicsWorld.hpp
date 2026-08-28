@@ -92,7 +92,7 @@ public:
     /// mission state is touched. That is what lets a jeep be thrown around while
     /// PHY-050 -- physics owning a real gameplay vehicle -- stays unplanned.
     BodyId SpawnModelProbe(LODShape* shape, const Matrix4& transform, float mass, float friction,
-                           float restitution);
+                           float restitution, Vector3Par velocity = VZero);
 
     /// Gameplay -> physics. Nothing comes back, so PHY-010's rule holds.
     void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse);

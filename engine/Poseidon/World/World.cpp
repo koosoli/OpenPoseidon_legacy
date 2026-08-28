@@ -864,6 +864,17 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 #endif
 
+#if _ENABLE_CHEATS
+    // Ctrl+B places one physics body at the crosshair. A KEY and not a panel
+    // button: the dev panel takes the mouse while it is open, so a row can only
+    // be laid by aiming and tapping, not by clicking a button and hoping the
+    // camera has not moved.
+    if (input.GetCheat2ToDo(SDL_SCANCODE_B))
+    {
+        Dev::PlaceProbeAtCrosshair();
+    }
+#endif
+
     bool updateVisibility = true;
 #if _ENABLE_CHEATS
     static bool disableVis = false;

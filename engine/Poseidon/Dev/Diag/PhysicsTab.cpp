@@ -94,9 +94,9 @@ void DrawPhysicsTab()
     PhysicsProbeSettings& s = ProbeSettings();
 
     ImGui::SeparatorText("Probe");
-    static const char* shapeNames[] = {"Sphere", "Capsule", "Box", "Cylinder"};
+    static const char* shapeNames[] = {"Sphere", "Capsule", "Box", "Cylinder", "Model"};
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::Combo("Shape", &s.shape, shapeNames, 4);
+    ImGui::Combo("Shape", &s.shape, shapeNames, 5);
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -198,6 +198,31 @@ void DrawPhysicsTab()
         ImGui::SetTooltip("Wireframe on top of the solid. Useful when a probe is resting\n"
                           "against scenery of a similar colour.");
     }
+    ImGui::Text("Ctrl+B places one at the crosshair while you play.");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "A key, not a button: the panel holds the mouse while it is open,\n"
+                          "so a domino row has to be laid by aiming and tapping.\n");
+    }
+    if (s.shape == 2)
+    {
+        static int towerHeight = 12;
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::SliderInt("Tower bricks", &towerHeight, 2, 60);
+        ImGui::SameLine();
+        if (ImGui::Button("Build tower"))
+        {
+            SpawnBrickTower(towerHeight);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip(
+                              "Alternate courses are turned a quarter, the way a real wall is\n"
+                              "laid. Aligned blocks are a set of separate columns and fall\n"
+                              "apart at a touch.\n");
+        }
+    }
     ImGui::Checkbox("Place on the ground under the crosshair", &s.placeOnGround);
     if (ImGui::IsItemHovered())
     {
@@ -216,12 +241,7 @@ void DrawPhysicsTab()
     ImGui::InputText("Model name contains", s.modelFilter, sizeof(s.modelFilter));
     ImGui::SetNextItemWidth(200.0f);
     ImGui::SliderFloat("Model mass (kg)", &s.modelMass, 10.0f, 20000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
-    if (ImGui::Button("Spawn model"))
-    {
-        SpawnModelProbe(s.modelFilter);
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("e.g. jeep, uaz, t72");
+    ImGui::TextDisabled("Pick Shape = Model, then Drop or Throw. e.g. jeep, uaz, t72");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(

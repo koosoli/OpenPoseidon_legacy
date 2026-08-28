@@ -123,7 +123,7 @@ void SubmitSolid(LODShapeWithShadow* mesh, Vector3Par position, Vector3Par x, Ve
 
 PhysicsProbeSettings& ProbeSettings() { return s_settings; }
 
-bool SpawnModelProbe(const char* nameFragment)
+bool SpawnModelProbe(const char* nameFragment, float throwSpeed)
 {
     if (!GWorld || !GScene || !GLandscape || !nameFragment || !*nameFragment)
     {
@@ -214,9 +214,17 @@ bool SpawnModelProbe(const char* nameFragment)
 
     Matrix4 transform(MIdentity);
     transform.SetPosition(origin);
+    if (throwSpeed > 0.0f)
+    {
+        // Thrown: start it in the air in front of the camera rather than on the
+        // ground, or the first thing it does is scrape.
+        origin = eye + forward * 6.0f;
+        transform.SetPosition(origin);
+    }
 
     const Physics::BodyId id =
-        world.SpawnModelProbe(found, transform, s_settings.modelMass, s_settings.friction, s_settings.restitution);
+        world.SpawnModelProbe(found, transform, s_settings.modelMass, s_settings.friction, s_settings.restitution,
+                              throwSpeed > 0.0f ? forward * throwSpeed : VZero);
     if (!id.IsValid())
     {
         LOG_WARN(World, "PHYSPROBE: model '{}' has no usable Geometry LOD", found->Name());
@@ -260,6 +268,11 @@ void SpawnPhysicsProbe(float throwSpeed)
 {
     if (!GWorld || !GScene)
     {
+        return;
+    }
+    if (s_settings.shape == 4)
+    {
+        SpawnModelProbe(s_settings.modelFilter, throwSpeed);
         return;
     }
     Physics::PhysicsWorld& world = Physics::EnsurePhysicsWorld();
@@ -344,6 +357,51 @@ void SpawnPhysicsProbe(float throwSpeed)
     LOG_WARN(World, "PHYSPROBE: spawn r={} m={} kg at ({:.2f} {:.2f} {:.2f}) v={:.1f} -> {}", def.radius, def.mass,
              def.position[0], def.position[1], def.position[2], throwSpeed, id.IsValid() ? "ok" : "REFUSED");
 }
+
+void SpawnBrickTower(int count)
+{
+    const int wasShape = s_settings.shape;
+    const bool wasPlace = s_settings.placeOnGround;
+    s_settings.shape = 2;
+    s_settings.placeOnGround = false;
+
+    if (!GScene || !GLandscape)
+    {
+        return;
+    }
+    const Vector3 forward = GScene->GetCamera()->Direction();
+    const Vector3 eye = GScene->GetCamera()->Position();
+    Vector3       base = eye + forward * 6.0f;
+    base[1] = GLandscape->SurfaceY(base[0], base[2]);
+
+    Physics::PhysicsWorld& world = Physics::EnsurePhysicsWorld();
+    if (world.Create())
+    {
+        const float yaw = atan2(forward[0], forward[2]);
+        for (int i = 0; i < count; ++i)
+        {
+            Physics::SphereProbeDef def;
+            def.shape = Physics::ProbeShape::Box;
+            def.halfExtents = Vector3(s_settings.boxX, s_settings.boxY, s_settings.boxZ);
+            // A hair of clearance per layer. Bricks born touching are born
+            // interpenetrating, and the solver answers by launching the tower.
+            def.position = base + Vector3(0, s_settings.boxY * (2.0f * i + 1.0f) + 0.002f * i, 0);
+            // Quarter turn on alternate courses, as a real wall is laid. Aligned
+            // blocks are a set of independent columns and topple at a touch.
+            def.yaw = yaw + (i % 2 ? 1.5707963f : 0.0f);
+            def.mass = s_settings.mass;
+            def.friction = s_settings.friction;
+            def.restitution = s_settings.restitution;
+            def.rollingResistance = s_settings.rollingResistance;
+            world.SpawnSphereProbe(def);
+        }
+    }
+
+    s_settings.shape = wasShape;
+    s_settings.placeOnGround = wasPlace;
+}
+
+void PlaceProbeAtCrosshair() { SpawnPhysicsProbe(0.0f); }
 
 void ClearPhysicsProbes()
 {

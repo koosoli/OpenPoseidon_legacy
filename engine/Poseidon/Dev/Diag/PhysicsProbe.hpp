@@ -17,6 +17,17 @@ namespace Poseidon::Dev
 void SpawnPhysicsProbe(float throwSpeed);
 void ClearPhysicsProbes();
 
+/// Stacks `count` bricks in front of the camera using the current box settings.
+/// Alternating layers are rotated a quarter turn, the way a real wall is laid --
+/// a tower of aligned blocks is a column of separate stacks and falls apart at a
+/// touch.
+void SpawnBrickTower(int count);
+
+/// Places one body at the crosshair. Bound to a key so a row can be laid by
+/// walking and tapping, which a panel button cannot do -- the panel steals the
+/// mouse the moment it is open.
+void PlaceProbeAtCrosshair();
+
 /// Draws every live probe as three great circles. Called from the frame path, not
 /// the fixed tick -- drawing is presentation.
 void DrawPhysicsProbes();
@@ -28,7 +39,7 @@ void AutoDropPhysicsProbes();
 /// Spawns a DYNAMIC copy of a model already loaded in the world, matched by a
 /// substring of its path (default "jeep"). A separate instance: the physics owns
 /// it, the mission never hears about it. Returns false if no loaded model matches.
-bool SpawnModelProbe(const char* nameFragment);
+bool SpawnModelProbe(const char* nameFragment, float throwSpeed = 0.0f);
 
 /// Pushes whatever physics body a shot passed through. Called from the impact
 /// path; does nothing when no physics world exists.
@@ -48,7 +59,12 @@ struct PhysicsProbeSettings
 {
     /// 0 = sphere, 1 = capsule. Plain int so the tab can drive a combo without
     /// dragging the physics headers into the UI include set.
-    /// 0 sphere, 1 capsule, 2 box, 3 cylinder.
+    /// 0 sphere, 1 capsule, 2 box, 3 cylinder, 4 model.
+    ///
+    /// Model sits in the same list rather than behind its own button so Drop and
+    /// Throw work on it like anything else -- a separate Spawn button meant a jeep
+    /// could only ever be placed, never thrown, which was the one thing the owner
+    /// asked for.
     int   shape = 0;
     float halfLength = 0.6f;
     float boxX = 0.10f;

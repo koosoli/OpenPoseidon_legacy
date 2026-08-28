@@ -429,7 +429,7 @@ public:
     }
 
     BodyId SpawnDynamicPieces(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform, float mass,
-                              float friction, float restitution) override
+                              float friction, float restitution, Vector3Par velocity) override
     {
         if (!b3World_IsValid(_world) || !pieces || pieceCount <= 0)
         {
@@ -533,6 +533,8 @@ public:
             }
             b3Body_SetMassData(body, data);
         }
+
+        b3Body_SetLinearVelocity(body, ToB3(velocity));
 
         Probe probe;
         probe.body = body;

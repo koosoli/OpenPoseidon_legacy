@@ -72,7 +72,7 @@ public:
     /// A dynamic body built from convex pieces -- the same pieces a static body
     /// takes, so a model's authored Geometry LOD can simply be made to move.
     virtual BodyId SpawnDynamicPieces(const ConvexPiece* pieces, int pieceCount, const Matrix4& transform,
-                                      float mass, float friction, float restitution) = 0;
+                                      float mass, float friction, float restitution, Vector3Par velocity) = 0;
     /// Push a body at a point. Gameplay -> physics, which is the direction
     /// PHY-010 already allows; nothing comes back.
     virtual void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse) = 0;
