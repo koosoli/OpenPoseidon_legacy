@@ -37,6 +37,7 @@ struct PhysicsProbeSettings
     float mass = 0.5f;
     float friction = 0.5f;
     float restitution = 0.4f;
+    float rollingResistance = 0.05f;
     float throwSpeed = 15.0f;
     bool  applyWind = false;
     /// Multiplies the world wind before it reaches the probe. World wind is a few

@@ -344,6 +344,7 @@ public:
         shapeDef.density = volume > 0.0f ? std::max(def.mass, 0.001f) / volume : 1000.0f;
         shapeDef.baseMaterial.friction = def.friction;
         shapeDef.baseMaterial.restitution = def.restitution;
+        shapeDef.baseMaterial.rollingResistance = def.rollingResistance;
 
         const b3ShapeId shape = b3CreateSphereShape(body, &shapeDef, &sphere);
         if (!b3Shape_IsValid(shape))

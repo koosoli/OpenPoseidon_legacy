@@ -94,6 +94,15 @@ void DrawPhysicsTab()
         ImGui::SetTooltip("Bounciness. 0 = dead drop, 1 = returns to its release height.");
     }
     ImGui::SetNextItemWidth(200.0f);
+    ImGui::SliderFloat("Rolling resistance", &s.rollingResistance, 0.0f, 0.5f, "%.3f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+                          "0 makes a sphere roll for ever on any slope: sliding friction\n"
+                          "never opposes rolling, so raising Friction does not stop it.\n"
+                          "This is the control that actually lets a ball settle.\n");
+    }
+    ImGui::SetNextItemWidth(200.0f);
     ImGui::SliderFloat("Throw speed (m/s)", &s.throwSpeed, 1.0f, 60.0f, "%.1f");
 
     ImGui::Spacing();

@@ -23,6 +23,20 @@ namespace
 /// printed beside it so a truncated list never reads as a complete one.
 constexpr int MaxNamedFailures = 40;
 
+/// Terrain samples per landscape cell. 4 -> 12.5 m spacing on OFP's 50 m grid.
+/// POSEIDON_PHYSICS_TERRAIN_SUBDIV overrides it, because the right value is a
+/// trade between collider fidelity and memory that only measurement settles.
+int FineTerrainSubdivision()
+{
+    static const int subdiv = []
+    {
+        const char* v = std::getenv("POSEIDON_PHYSICS_TERRAIN_SUBDIV");
+        const int   parsed = v ? std::atoi(v) : 0;
+        return (parsed >= 1 && parsed <= 16) ? parsed : 4;
+    }();
+    return subdiv;
+}
+
 struct FailureGroup
 {
     std::uint32_t instances = 0;
@@ -84,37 +98,47 @@ void RunPhysicsCorpus()
     const int range = GLandscape->GetLandRange();
     if (range > 1)
     {
-        std::vector<float> heights(static_cast<std::size_t>(range) * range);
-        for (int z = 0; z < range; ++z)
+        // SUBDIVIDED. The landscape grid is 50 m, and between two samples Box3D
+        // spans a straight chord while the rendered ground curves above it. On a
+        // hillside that chord cuts the corner by metres, so a ball sinks into the
+        // slope and never finds the surface you can see -- which is exactly what
+        // the owner reported on Desert ("clips through the mountain").
+        //
+        // SurfaceY interpolates, so sampling finer costs nothing but memory:
+        // 4x gives 12.5 m spacing, 1024x1024 samples, 4 MB. Raising it further
+        // has a real cost and buys less each time, because past a point the
+        // remaining error is the engine's own interpolation rather than ours.
+        const int subdiv = FineTerrainSubdivision();
+        const int grid = (range - 1) * subdiv + 1;
+        const float spacing = LandGrid / static_cast<float>(subdiv);
+
+        std::vector<float> heights(static_cast<std::size_t>(grid) * grid);
+        for (int z = 0; z < grid; ++z)
         {
-            for (int x = 0; x < range; ++x)
+            for (int x = 0; x < grid; ++x)
             {
-                // SurfaceY, NOT GetHeight(z, x). GetHeight returned something that is
-                // not the world surface: at the map centre it gave -59.44 where
-                // SurfaceY gives 269.55, and its whole range was -80..75 m on an
-                // island with mountains. SurfaceY is the query every other consumer
-                // of ground height uses, it takes WORLD coordinates so there is no
-                // index-order ambiguity left to get wrong, and 65k calls once at
-                // load costs nothing.
-                heights[static_cast<std::size_t>(z) * range + x] =
-                    GLandscape->SurfaceY(static_cast<float>(x) * LandGrid, static_cast<float>(z) * LandGrid);
+                heights[static_cast<std::size_t>(z) * grid + x] =
+                    GLandscape->SurfaceY(static_cast<float>(x) * spacing, static_cast<float>(z) * spacing);
             }
         }
-        // Cross-check the grid we are about to hand over against the engine's own
-        // surface query at the same spot. A heightfield that is subtly wrong is
-        // indistinguishable from one that is right until something falls through it.
+
+        // Cross-check against the engine's own surface query. A height field that
+        // is subtly wrong is indistinguishable from a right one until something
+        // falls through it.
         {
-            const auto mm = std::minmax_element(heights.begin(), heights.end());
-            const int  sx = range / 2;
-            const int  sz = range / 2;
-            const float gridHeight = heights[static_cast<std::size_t>(sz) * range + sx];
-            const float surfaceY = GLandscape->SurfaceY(static_cast<float>(sx) * LandGrid,
-                                                        static_cast<float>(sz) * LandGrid);
-            LOG_WARN(World, "PHYSCORPUS: heights min {:.2f} max {:.2f}; grid[{},{}]={:.2f} SurfaceY={:.2f} LandGrid={}",
-                     *mm.first, *mm.second, sx, sz, gridHeight, surfaceY, LandGrid);
+            const auto  mm = std::minmax_element(heights.begin(), heights.end());
+            const int   sx = grid / 2;
+            const int   sz = grid / 2;
+            const float gridHeight = heights[static_cast<std::size_t>(sz) * grid + sx];
+            const float surfaceY = GLandscape->SurfaceY(static_cast<float>(sx) * spacing,
+                                                        static_cast<float>(sz) * spacing);
+            LOG_WARN(World,
+                     "PHYSCORPUS: heights min {:.2f} max {:.2f}; grid[{},{}]={:.2f} SurfaceY={:.2f} spacing {:.2f} m",
+                     *mm.first, *mm.second, sx, sz, gridHeight, surfaceY, spacing);
         }
-        const bool ok = world.SetTerrain(heights.data(), range, range, LandGrid, 0.0f, 0.0f);
-        LOG_INFO(World, "PHYSCORPUS: terrain {}x{} grid {} m -> {}", range, range, LandGrid,
+
+        const bool ok = world.SetTerrain(heights.data(), grid, grid, spacing, 0.0f, 0.0f);
+        LOG_INFO(World, "PHYSCORPUS: terrain {}x{} at {:.2f} m (subdiv {}) -> {}", grid, grid, spacing, subdiv,
                  ok ? "registered" : "REFUSED");
     }
 

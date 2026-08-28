@@ -87,6 +87,10 @@ struct SphereProbeDef
     float mass = 0.5f;
     float friction = 0.5f;
     float restitution = 0.4f;
+    /// [0,1], spheres and capsules only. Without it a sphere on any slope rolls
+    /// for ever: sliding friction never opposes rolling, so the ball never
+    /// settles no matter how high `friction` goes.
+    float rollingResistance = 0.05f;
 };
 
 /// Enough to draw a probe. NOT a gameplay transform: it carries no orientation

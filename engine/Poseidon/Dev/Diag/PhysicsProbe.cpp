@@ -105,6 +105,7 @@ void SpawnPhysicsProbe(float throwSpeed)
     def.mass = s_settings.mass;
     def.friction = s_settings.friction;
     def.restitution = s_settings.restitution;
+    def.rollingResistance = s_settings.rollingResistance;
 
     const Physics::BodyId id = world.SpawnSphereProbe(def);
     LOG_WARN(World, "PHYSPROBE: spawn r={} m={} kg at ({:.2f} {:.2f} {:.2f}) v={:.1f} -> {}", def.radius, def.mass,
