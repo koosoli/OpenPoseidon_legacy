@@ -39,6 +39,7 @@ All commits are pushed. Nothing is local-only.
 | `0a35211f` | dev-panel **Fixed Step** tab — the accumulator is now observable |
 | `f21e6cba` | accumulator becomes a `World` member; Dev counters reset on world load |
 | `4a3bf51b` | fixed-step scripts as an **opt-in, off by default** |
+| `65e9bbba` | box3d reachable via a package-scoped vcpkg registry (plumbing only) |
 
 `FixedStepAccumulator` (`engine/Poseidon/Core/Game/FixedStepAccumulator.hpp`):
 1/60 s default, max 8 catch-up steps, keeps at most one unsimulated step after the
@@ -160,46 +161,38 @@ let rendering run at a rate independent of simulation — but sessions 1-4 all
 measured the simulation as the FASTER clock, so there is no render rate to
 decouple toward. Do this when it buys something, not for tidiness.
 
-### 5. PHY-010 — BLOCKED on one decision, measured 2026-08-28
+### 5. PHY-010 — UNBLOCKED. Dependency is in (`65e9bbba`); binding not started.
 
-The accumulator work is done, so PHY-010 is unblocked in ARCH-001's sense. It is
-blocked on something smaller and entirely mechanical instead.
+`box3d` 0.1.0 now resolves and builds. **The baseline was NOT bumped.**
 
-**`box3d` is not reachable from our pinned vcpkg baseline.** Adding `"box3d"` to
-`vcpkg.json` fails at configure time:
+An earlier version of this document said a baseline bump was "the only [option]
+that is correct for every clone". That was wrong, and a reviewer caught it. Two
+other options are equally reproducible, and one is cleaner:
 
-```
-error: the baseline does not contain an entry for port box3d
-```
+* **Chosen:** `vcpkg-configuration.json` adds a git registry pinned to upstream
+  `d87340acc46bdeda386037b38aca30136e667e47`, scoped to `packages: ["box3d"]`.
+  Only that package is served from it; sdl3, imgui, curl, spdlog and the rest
+  still resolve through the untouched `builtin-baseline`.
+* Also viable: a checked-in overlay port at a **relative** path.
+* Rejected: a machine-local overlay (`C:cpkg\portsox3d`) — works here and
+  nowhere else. Rejected: FetchContent vendoring, while vcpkg solves it cleanly.
 
-Measured:
+Verified from a clean configure: box3d builds in 12 s and is the only package the
+new registry served; PoseidonGame and PoseidonTests build; focused suite passes.
+No default-registry is declared in vcpkg-configuration.json — vcpkg treats that
+as an error alongside the manifest's `builtin-baseline`.
 
-| | |
-|---|---|
-| our `builtin-baseline` `170bd3bf…` | 2026-06-12 |
-| `box3d` added to vcpkg | 2026-07-03 |
+**Nothing links box3d yet.** The API PHY-010 needs is present: `b3CreateHull` /
+`b3CreateHullShape` for our `ConvexComponents`, `b3CreateHeightField` /
+`b3CreateHeightFieldShape` for terrain, `b3CreateMesh`, `b3CreateBody`. CMake
+target `box3d::box3d`.
 
-So the port exists in the local vcpkg checkout but postdates the baseline by
-three weeks. The change was reverted; the tree configures and builds clean.
+Next per PHY-001: the narrow engine-owned interface, then `ConvexComponents` →
+hull shapes and heightmap → heightfield, transforms flowing IN only.
 
-**Three ways out, and the choice is the owner's because two of them reach past
-this branch:**
-
-1. **Bump `builtin-baseline`** to a commit containing box3d. The normal vcpkg
-   workflow, and the only one that is correct for every clone — but it moves
-   *every* dependency (sdl3, imgui, curl, spdlog, …) by three weeks at once. A
-   break there would have nothing to do with physics, and it lands on every other
-   agent's worktree at the same time. Wants its own commit and its own build
-   verification, not a ride-along on a physics change.
-2. **Overlay port** — `vcpkg-configuration.json` pointing at the local
-   `C:cpkg\portsox3d`. Touches nothing else, but hardcodes a machine-specific
-   path, so it works here and for nobody else.
-3. **Vendor box3d** under `thirdparty/` via FetchContent, like corrosion is
-   already fetched. Self-contained and baseline-independent; adds a submodule-ish
-   dependency to maintain by hand.
-
-Option 1 is the right long-term answer and the riskiest to do casually. Nothing
-else in PHY-010 can start until one of these is chosen.
+**Step 3 does not gate this.** Scripts are opt-in and off by default; the two
+tracks are independent. The numbering here is order-of-discovery, not a
+dependency chain.
 
 ## Traps specific to this branch
 
@@ -225,4 +218,4 @@ push immediately, and if you commit someone else's work say so in the first line
 
 ---
 
-*Last updated: 2026-08-28. Steps 1-4 done; step 5 blocked on the vcpkg baseline decision.*
+*Last updated: 2026-08-28. Steps 1-4 done; step 5's dependency is in, binding not started.*
