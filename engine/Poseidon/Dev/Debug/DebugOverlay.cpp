@@ -6661,14 +6661,33 @@ bool WantsKeyboard()
 {
     if (!s_initialized || (!s_visible && !s_zeusConsumeKeyboardEvent))
         return false;
-    return s_zeusConsumeKeyboardEvent || ImGui::GetIO().WantCaptureKeyboard;
+    if (s_zeusConsumeKeyboardEvent)
+        return true;
+
+    // WantTextInput, not WantCaptureKeyboard. The latter is true merely because a
+    // panel window has focus, which meant opening the panel froze the player in
+    // place -- you could look at a tower and not walk to it. WantTextInput is true
+    // only while a field is actually being typed into, so the model-name box still
+    // works and WASD reaches the game the rest of the time.
+    const ImGuiIO& io = ImGui::GetIO();
+    return io.WantTextInput;
 }
 
 bool WantsMouse()
 {
-    // Claim every mouse event while the panel is open to prevent the camera from moving.
-    // Zeus claims only a placement click; motion still reaches the free-fly camera.
-    return s_initialized && (s_visible || s_zeusConsumeMouseEvent);
+    if (!s_initialized)
+        return false;
+    if (s_zeusConsumeMouseEvent)
+        return true;
+    if (!s_visible)
+        return false;
+
+    // Only while the cursor is actually over a panel window, or a widget is being
+    // dragged. Claiming every event whenever the panel was open meant the camera
+    // could not be turned at all with it up, so aiming at the thing you were about
+    // to spawn required closing the tool first. WantCaptureMouse stays true for
+    // the whole of a slider drag, so dragging off a window does not snap the view.
+    return ImGui::GetIO().WantCaptureMouse;
 }
 
 void AdoptFreeFlyCamera(CameraVehicle* camera)
