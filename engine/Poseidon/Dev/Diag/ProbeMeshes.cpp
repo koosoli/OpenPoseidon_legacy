@@ -23,8 +23,13 @@ constexpr int ProbeSpecial = IsColored;
 
 /// Builds one shape from flat-shaded quads and triangles. `indices` holds 3 or 4
 /// entries per face; `counts` says which.
+///
+/// WINDING: the object pipelines cull with front_face = Cw, so a face must read
+/// CLOCKWISE from outside or it is culled and you see straight through the model
+/// to its far side. `reverse` flips each face's index order, which is cheaper to
+/// get right once here than to reason about separately in three generators.
 LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vector<Vector3>& normals,
-                          const std::vector<int>& indices, const std::vector<int>& counts)
+                          const std::vector<int>& indices, const std::vector<int>& counts, bool reverse = true)
 {
     LODShapeWithShadow* lShape = new LODShapeWithShadow;
     lShape->SetAutoCenter(false);
@@ -48,7 +53,8 @@ LODShapeWithShadow* Build(const std::vector<Vector3>& positions, const std::vect
         face.SetN(n);
         for (int i = 0; i < n; ++i)
         {
-            face.Set(i, indices[static_cast<std::size_t>(cursor + i)]);
+            const int source = reverse ? (n - 1 - i) : i;
+            face.Set(i, indices[static_cast<std::size_t>(cursor + source)]);
         }
         face.SetTexture(GScene->Preloaded(TextureWhite));
         face.SetSpecial(ProbeSpecial);

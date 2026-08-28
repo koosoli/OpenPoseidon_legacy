@@ -20,6 +20,46 @@
 namespace Poseidon::Dev
 {
 
+namespace
+{
+
+/// Hotkeys read straight from ImGui, not through the engine's cheat actions.
+///
+/// The first attempt used GetCheat2ToDo, and Cheat2 is a BOUND ACTION rather than
+/// a fixed key -- so "Ctrl+B" was an invention, and with nothing bound to that
+/// action the keys did nothing at all. ImGui sees the physical keys regardless of
+/// what the game's bindings say, which is the right level for a dev tool.
+///
+/// Ctrl+J / K / L, chosen to miss the map (M), the journal and the rest of the
+/// stock bindings -- and Ctrl is held, so they cannot collide with a bare key.
+void PollHotkeys(PhysicsProbeSettings& s)
+{
+    if (!s.hotkeys)
+    {
+        return;
+    }
+    const ImGuiIO& io = ImGui::GetIO();
+    // Never while a field is being typed into: J in a model name must stay a J.
+    if (io.WantTextInput || !io.KeyCtrl)
+    {
+        return;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_J, false))
+    {
+        PlaceProbeAtCrosshair();
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_K, false))
+    {
+        SpawnPhysicsProbe(0.0f);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_L, false))
+    {
+        SpawnPhysicsProbe(s.throwSpeed);
+    }
+}
+
+} // namespace
+
 void DrawPhysicsTab()
 {
     Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
@@ -207,9 +247,10 @@ void DrawPhysicsTab()
         ImGui::SetTooltip("Wireframe on top of the solid. Useful when a probe is resting\n"
                           "against scenery of a similar colour.");
     }
+    PollHotkeys(s);
     ImGui::Checkbox("Hotkeys", &s.hotkeys);
     ImGui::SameLine();
-    ImGui::TextDisabled("Ctrl+B place | Ctrl+N drop | Ctrl+M throw");
+    ImGui::TextDisabled("Ctrl+J place | Ctrl+K drop | Ctrl+L throw");
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
