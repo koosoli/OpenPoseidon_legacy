@@ -78,25 +78,6 @@ fences, wrecks -- is what would harden it.
 5. **PHY-050 (real vehicle ownership)** remains the unanswered question. The
    separate-instance probe sidesteps it; it does not solve it.
 
-## LICENCE — read before porting anything else from the fork
-
-**`inspiration/otherfork` is AGPL-3.0-or-later.** 236 of its engine files carry
-that SPDX header; ~50 are MIT. Our project is **GPL-3.0-or-later**. These are not
-the same licence.
-
-GPLv3 §13 permits COMBINING with AGPL code, and the AGPL portion then keeps its
-own terms including the network clause. What is not permitted is copying AGPL
-source into a file and labelling that file GPL-3.0-or-later.
-
-**Open question, and it is ours:** `engine/Poseidon/World/Entities/Weapons/Ballistics.hpp`
-carries `SPDX-License-Identifier: GPL-3.0-or-later` and its solver is described in
-its own commit as ported from this fork. Nobody has checked how literal that port
-was. The drag equations themselves are standard exterior ballistics and not
-anyone's to license; a copied structure would be. Someone should diff the two and
-either correct the header or restate the file as an independent implementation.
-
-Nothing further should be taken from that tree until this is settled.
-
 ## Material bullet-passthrough — worth taking, but it is NOT a penetration model
 
 The fork has `intersect::Material` with a per-material **boolean**
@@ -120,7 +101,8 @@ points against the same collider give a THICKNESS, and thickness plus the drag
 model already in `Ballistics.cpp` gives an energy loss. That is a real penetration
 model rather than a boolean, and the fork does not have it.
 
-Blocked on the licence question above.
+*Licensing was raised and settled: the owner confirmed on 2026-08-29 that we have
+permission to take from that tree. One line, so nobody re-opens it.*
 
 ## Traps worth not rediscovering
 
