@@ -390,11 +390,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
     Dev::Ballistics::Sample();
 
     Glob.uiTime += noAccDeltaT;
-    if (IsSimulationEnabled())
-    {
-        Glob.time += deltaT;
-    }
-
     // multiplayer chat control
     if (GetNetworkManager().GetGameState() >= NGSCreate &&
         Poseidon::ShouldHandleMultiplayerChatShortcut(_chat != nullptr))
@@ -683,8 +678,6 @@ void World::Simulate(float deltaT, bool& enableDraw)
     }
 
     {
-        SimulateLandscape(deltaT);
-
 #if _ENABLE_CHEATS
         {
             if (input.GetCheat1(SDL_SCANCODE_U))
@@ -1851,6 +1844,11 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
 void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, bool updateVisibility)
 {
+    // Keep the world clock, weather and wind in the same tick as the vehicles
+    // that consume them. Rendering observes the most recently completed tick.
+    Glob.time += deltaT;
+    SimulateLandscape(deltaT);
+
 #if BACKGROUND_AI
     _secThread->FinishSecondary();
 #else
