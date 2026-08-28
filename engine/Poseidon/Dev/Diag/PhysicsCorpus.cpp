@@ -23,19 +23,12 @@ namespace
 /// printed beside it so a truncated list never reads as a complete one.
 constexpr int MaxNamedFailures = 40;
 
-/// Terrain samples per landscape cell. 4 -> 12.5 m spacing on OFP's 50 m grid.
-/// POSEIDON_PHYSICS_TERRAIN_SUBDIV overrides it, because the right value is a
-/// trade between collider fidelity and memory that only measurement settles.
-int FineTerrainSubdivision()
+int s_subdivision = []
 {
-    static const int subdiv = []
-    {
-        const char* v = std::getenv("POSEIDON_PHYSICS_TERRAIN_SUBDIV");
-        const int   parsed = v ? std::atoi(v) : 0;
-        return (parsed >= 1 && parsed <= 16) ? parsed : 4;
-    }();
-    return subdiv;
-}
+    const char* v = std::getenv("POSEIDON_PHYSICS_TERRAIN_SUBDIV");
+    const int   parsed = v ? std::atoi(v) : 0;
+    return (parsed >= 1 && parsed <= 16) ? parsed : 4;
+}();
 
 struct FailureGroup
 {
@@ -75,6 +68,9 @@ bool s_hasRun = false;
 
 bool PhysicsCorpusHasRun() { return s_hasRun; }
 
+int&  TerrainSubdivision() { return s_subdivision; }
+float TerrainSampleSpacing() { return LandGrid / static_cast<float>(s_subdivision); }
+
 void RunPhysicsCorpus()
 {
     if (!GLandscape)
@@ -84,6 +80,13 @@ void RunPhysicsCorpus()
     }
 
     Physics::PhysicsWorld& world = Physics::EnsurePhysicsWorld();
+    // Rebuilt from scratch, so changing the subdivision and pressing the button
+    // again actually changes the colliders instead of adding a second copy of the
+    // map on top of the first.
+    if (world.IsCreated())
+    {
+        world.Destroy();
+    }
     if (!world.Create())
     {
         LOG_WARN(World, "PHYSCORPUS: no physics backend available");
@@ -108,7 +111,7 @@ void RunPhysicsCorpus()
         // 4x gives 12.5 m spacing, 1024x1024 samples, 4 MB. Raising it further
         // has a real cost and buys less each time, because past a point the
         // remaining error is the engine's own interpolation rather than ours.
-        const int subdiv = FineTerrainSubdivision();
+        const int subdiv = s_subdivision;
         const int grid = (range - 1) * subdiv + 1;
         const float spacing = LandGrid / static_cast<float>(subdiv);
 

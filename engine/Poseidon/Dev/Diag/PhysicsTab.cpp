@@ -54,12 +54,30 @@ void DrawPhysicsTab()
     }
 
     ImGui::Spacing();
-    ImGui::BeginDisabled(PhysicsCorpusHasRun());
-    if (ImGui::Button(PhysicsCorpusHasRun() ? "World colliders registered" : "Register world colliders"))
+    ImGui::SetNextItemWidth(200.0f);
+    ImGui::SliderInt("Terrain detail", &TerrainSubdivision(), 1, 12, "%dx");
+    ImGui::SameLine();
+    ImGui::TextDisabled("%.2f m samples", TerrainSampleSpacing());
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Height samples per 50 m landscape cell.\n"
+            "\n"
+            "Between samples Box3D spans a straight chord while the visible ground\n"
+            "curves above it, so on a hillside a ball rests BELOW the slope you can\n"
+            "see. Raising this is what closes that gap. 4x = 12.5 m and 4 MB,\n"
+            "8x = 6.25 m and 17 MB.\n"
+            "\n"
+            "Past a point the remaining error is the engine's own interpolation\n"
+            "rather than our sampling, so more stops helping.\n"
+            "\n"
+            "Takes effect when you register again.");
+    }
+
+    if (ImGui::Button(PhysicsCorpusHasRun() ? "Re-register world colliders" : "Register world colliders"))
     {
         RunPhysicsCorpus();
     }
-    ImGui::EndDisabled();
     if (ImGui::IsItemHovered())
     {
         ImGui::SetTooltip(
@@ -77,7 +95,7 @@ void DrawPhysicsTab()
 
     ImGui::SeparatorText("Probe");
     ImGui::SetNextItemWidth(200.0f);
-    ImGui::SliderFloat("Radius (m)", &s.radius, 0.02f, 2.0f, "%.2f");
+    ImGui::SliderFloat("Radius (m)", &s.radius, 0.02f, 10.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(200.0f);
     ImGui::SliderFloat("Mass (kg)", &s.mass, 0.01f, 100.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
     if (ImGui::IsItemHovered())

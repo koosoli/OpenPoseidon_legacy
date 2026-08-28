@@ -30,4 +30,11 @@ void RunPhysicsCorpus();
 /// the ball will hit buildings or only terrain.
 bool PhysicsCorpusHasRun();
 
+/// Terrain samples per 50 m landscape cell. Higher means a collider that follows
+/// the visible ground more closely, at 4 bytes per sample: 4 -> 12.5 m and 4 MB,
+/// 8 -> 6.25 m and 17 MB. Changing it takes effect on the next registration.
+int&  TerrainSubdivision();
+/// Metres between height samples at the current subdivision.
+float TerrainSampleSpacing();
+
 } // namespace Poseidon::Dev
