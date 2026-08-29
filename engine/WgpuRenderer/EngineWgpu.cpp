@@ -2970,9 +2970,11 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     const bool productionMaterialTarget = !diagnosticSelector && debugSection.surfMat;
     const bool materialBindingTarget = materialDebugTarget || productionMaterialTarget;
     d.normal_texture_id = 0;
-    d._pad = materialDebugTarget
-                 ? static_cast<uint32_t>(_materialDebug.view) | (_materialDebug.invertNormalY ? 0x100u : 0u)
-                 : 0;
+    // Shared lane: material-debug bits 0-8, REN-TEMP-001H object id bits 16-31.
+    d.misc = (materialDebugTarget
+                  ? static_cast<uint32_t>(_materialDebug.view) | (_materialDebug.invertNormalY ? 0x100u : 0u)
+                  : 0) |
+             (CurrentDrawObjectId() << 16);
     _materialDebugInfo = {};
     if (unassignedMaterialTarget)
     {
@@ -6146,11 +6148,49 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     obj->SetGpuCoverage(static_cast<int>(cov));
 }
 
+// REN-TEMP-001H: pointer -> stable 16-bit draw-object id, allocated on first sight.
+// Cached per bracket (the same object submits many sections in a row). 0 is reserved
+// for "no identity"; the 16-bit counter wraps long after the ids it re-issues have
+// been evicted.
+uint32_t EngineWgpu::CurrentDrawObjectId()
+{
+    const void* obj = GetDrawObject();
+    if (!obj)
+    {
+        return 0;
+    }
+    if (obj == _lastDrawObjectPtr)
+    {
+        return _lastDrawObjectId;
+    }
+    auto [it, inserted] = _drawObjectIds.try_emplace(obj, 0u);
+    if (inserted)
+    {
+        uint32_t id = _nextDrawObjectId++ & 0xFFFFu;
+        if (id == 0)
+        {
+            id = _nextDrawObjectId++ & 0xFFFFu;
+        }
+        it->second = id;
+    }
+    _lastDrawObjectPtr = obj;
+    _lastDrawObjectId = it->second;
+    return it->second;
+}
+
 void EngineWgpu::SceneObjectRemoved(Object* obj)
 {
     if (!_renderer)
     {
         return;
+    }
+    // REN-TEMP-001H: drop the draw-object identity with the object, so a recycled
+    // address gets a FRESH id instead of inheriting the dead object's motion history.
+    _drawObjectIds.erase(obj);
+    if (_lastDrawObjectPtr == obj)
+    {
+        _lastDrawObjectPtr = nullptr;
+        _lastDrawObjectId = 0;
     }
     RemoveGpuProxies(obj); // §12d: drop the object's furniture child instances (no-op if none)
     auto it = _gpuInstances.find(obj);

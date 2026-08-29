@@ -180,7 +180,14 @@ pub struct WgrDraw3D {
     // sampled alpha is below this. 0 disables the test.
     pub alpha_ref: f32,
     pub flags: u32,
-    pub _pad: u32,
+    // A shared lane (WgrDraw3D is ABI-frozen; layout and hash unchanged by construction):
+    //   bits 0-7  = material-debug view index   (dev panel Materials tab)
+    //   bit  8    = material-debug invert-normal-Y
+    //   bits 16-31 = REN-TEMP-001H stable object id for rigid motion vectors (renderer
+    //               keeps id -> previous world). 0 = no identity — the safe default: an
+    //               exe predating the id writes only the debug bits (or zero), and such
+    //               draws fall back to camera-only velocity.
+    pub misc: u32,
     // Per-draw material lighting, folded exactly like GL33's
     // UploadVSMaterialConstants (raw sun colour x material, sun-enable already
     // multiplied into the sun terms; emissive shows regardless). The lit shader

@@ -311,6 +311,11 @@ class Engine : public IGraphicsEngine
     bool _nightVision;
     bool _multitexturing;
     render::PassKindHint _passKindHint = render::PassKindHint::None; // explicit cockpit pass routing
+    // REN-TEMP-001H: identity of the object whose draws are currently being submitted
+    // (the scene draw loop brackets each object; see SetDrawObject below). Same
+    // non-virtual-hint shape as _passKindHint — no vtable slot, backends that do not
+    // care never read it.
+    const void* _drawObjectHint = nullptr;
     int _showFps;
     AspectSettings _aspectSettings;
 
@@ -482,6 +487,15 @@ class Engine : public IGraphicsEngine
     render::PassKindHint GetPassKindHint() const { return _passKindHint; }
     void SetPassKindHint(render::PassKindHint hint) { _passKindHint = hint; }
     void ClearPassKindHint() { _passKindHint = render::PassKindHint::None; }
+
+    // REN-TEMP-001H: per-object draw bracket, set/cleared by the scene draw loop around
+    // one complete object (proxies included — Object::Draw re-enters itself on proxy
+    // Objects, which are SHAPE-shared across every placement of a model, so the parent's
+    // identity must stand for the whole scope). The wgpu backend maps this pointer to a
+    // stable small id for motion vectors; other backends never read it.
+    const void* GetDrawObject() const { return _drawObjectHint; }
+    void SetDrawObject(const void* obj) { _drawObjectHint = obj; }
+    void ClearDrawObject() { _drawObjectHint = nullptr; }
 
     // Typed form — callers split a legacy int via `render::SplitLegacy` at the
     // boundary; backends read whichever category they care about.

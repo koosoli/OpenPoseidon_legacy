@@ -9,7 +9,22 @@
 // Gated by WGR_TEMPORAL=1 and OFF by default: jitter with no temporal accumulator behind
 // it reads as shimmer, so the native path must not pay it.
 
+use rustc_hash::FxHashMap;
+
 const VELOCITY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg16Float;
+
+// REN-TEMP-001H: uniform block for the rigid dynamic-object velocity pass
+// (gfx3d/velocity_obj.wgsl `ObjVelMats`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ObjVelUniform {
+    pub jittered_vp: [f32; 16],
+    pub cur_vp: [f32; 16],
+    pub prev_vp: [f32; 16],
+    // x = relative depth tolerance for the fs visibility compare.
+    pub misc: [f32; 4],
+}
+const _: () = assert!(std::mem::size_of::<ObjVelUniform>() == 208);
 
 // Snapshot of the UNJITTERED main scene camera. `view`/`proj` are the raw WgrCamera
 // matrices (column-major, camera-relative view with zeroed translation, forward
@@ -70,6 +85,17 @@ pub struct Temporal {
     render_size: (u32, u32),
     shader: Option<wgpu::ShaderModule>,
     velocity: Option<VelocityPass>,
+    // REN-TEMP-001H: ABSOLUTE world matrices of identified rigid draws, this frame and
+    // last. Absolute on purpose — WgrDraw3D.world is camera-relative, which changes for
+    // every object whenever the CAMERA moves; storing it directly would flag the whole
+    // world as "moved" on any pan. Keyed by WgrDraw3D.object_id.
+    cur_worlds: FxHashMap<u32, [f32; 16]>,
+    prev_worlds: FxHashMap<u32, [f32; 16]>,
+}
+
+// The stable object id rides bits 16-31 of WgrDraw3D.misc (see ffi.rs) — 0 = none.
+pub fn draw_object_id(d: &crate::ffi::WgrDraw3D) -> u32 {
+    d.misc >> 16
 }
 
 fn halton(mut index: u64, base: u64) -> f32 {
@@ -104,11 +130,11 @@ impl Temporal {
             render_size: (0, 0),
             shader: None,
             velocity: None,
+            cur_worlds: FxHashMap::default(),
+            prev_worlds: FxHashMap::default(),
         }
     }
 
-    // Ingest the UNJITTERED main scene camera and decide this frame's jitter. Call once
-    // per frame, BEFORE apply_jitter and before any camera upload.
     // Raise an explicit history reset, consumed by the next begin_frame. Callable from
     // any thread-confined renderer entry point (world load via the heightmap upload,
     // future mode/upscaler switches, an eventual C++ camera-cut event).
@@ -116,6 +142,8 @@ impl Temporal {
         self.pending_reset = Some(reason);
     }
 
+    // Ingest the UNJITTERED main scene camera and decide this frame's jitter. Call once
+    // per frame, BEFORE apply_jitter and before any camera upload.
     pub fn begin_frame(&mut self, cam: &crate::ffi::WgrCamera, render_size: (u32, u32)) {
         if render_size != self.render_size {
             self.reset = true;
@@ -149,6 +177,10 @@ impl Temporal {
             } else {
                 self.reset = self.prev.is_none();
             }
+        }
+        if self.reset {
+            // Invalid history invalidates the object-world history with it.
+            self.prev_worlds.clear();
         }
         self.cur = Some(CameraSnap {
             view: cam.view,
@@ -190,6 +222,113 @@ impl Temporal {
         if let Some(cur) = self.cur.take() {
             self.prev = Some(cur);
         }
+        std::mem::swap(&mut self.prev_worlds, &mut self.cur_worlds);
+        self.cur_worlds.clear();
+    }
+
+    // REN-TEMP-001H: record this frame's identified rigid draws as ABSOLUTE worlds
+    // (camera-relative world + this frame's camera position on the translation column).
+    // Skinned draws (palette_slot != NO_PALETTE, which includes the baked path) are
+    // deliberately excluded — root motion presented as limb motion is exactly the false
+    // vector the plan forbids; they stay on camera velocity until Phase 9.
+    pub fn ingest_draws(&mut self, draws: &[crate::ffi::WgrDraw3D]) {
+        if !self.enabled {
+            return;
+        }
+        let Some(cur) = self.cur.as_ref() else {
+            return;
+        };
+        let cam = cur.cam_pos;
+        self.cur_worlds.clear();
+        for d in draws {
+            let id = draw_object_id(d);
+            if id == 0 || d.palette_slot != crate::ffi::NO_PALETTE {
+                continue;
+            }
+            self.cur_worlds.entry(id).or_insert_with(|| {
+                let mut w = d.world;
+                w[12] += cam[0];
+                w[13] += cam[1];
+                w[14] += cam[2];
+                w
+            });
+        }
+    }
+
+    // The matrices the object-velocity pass needs, or None while history is invalid.
+    pub fn object_velocity_uniform(&self) -> Option<ObjVelUniform> {
+        if !self.enabled || self.reset {
+            return None;
+        }
+        let (cur, prev) = (self.cur.as_ref()?, self.prev.as_ref()?);
+        let view = glam::Mat4::from_cols_array(&cur.view);
+        let proj = glam::Mat4::from_cols_array(&cur.proj);
+        let mut proj_j = cur.proj;
+        self.apply_jitter(&mut proj_j);
+        let jittered_vp = (glam::Mat4::from_cols_array(&proj_j) * view).to_cols_array();
+        let cur_vp = (proj * view).to_cols_array();
+        let prev_vp = (glam::Mat4::from_cols_array(&prev.proj)
+            * glam::Mat4::from_cols_array(&prev.view))
+        .to_cols_array();
+        Some(ObjVelUniform {
+            jittered_vp,
+            cur_vp,
+            prev_vp,
+            // 2% distance tolerance: stored depth is near/dist, so the fs ratio compare
+            // tolerates the sub-pixel depth disagreement between the jittered scene
+            // raster and this pass without letting occluded surfaces through.
+            misc: [0.02, 0.0, 0.0, 0.0],
+        })
+    }
+
+    // Build the moving-rigid subset for this frame: (draws3d index, previous world
+    // RELATIVE TO THE PREVIOUS CAMERA — the space prev_vp consumes). Objects whose
+    // absolute world is unchanged (within 1 mm / 1e-3 per element) are skipped: the
+    // fullscreen camera reprojection is already exact for them.
+    pub fn object_velocity_subset(
+        &self,
+        draws: &[crate::ffi::WgrDraw3D],
+    ) -> Vec<(u32, [f32; 16])> {
+        if !self.enabled || self.reset {
+            return Vec::new();
+        }
+        let Some(prev_cam) = self.prev.as_ref() else {
+            return Vec::new();
+        };
+        let Some(cur_cam) = self.cur.as_ref() else {
+            return Vec::new();
+        };
+        let mut seen: FxHashMap<u32, bool> = FxHashMap::default();
+        let mut out = Vec::new();
+        for (i, d) in draws.iter().enumerate() {
+            let id = draw_object_id(d);
+            if id == 0 || d.palette_slot != crate::ffi::NO_PALETTE {
+                continue;
+            }
+            let moved = *seen.entry(id).or_insert_with(|| {
+                let Some(prev_abs) = self.prev_worlds.get(&id) else {
+                    return false;
+                };
+                let mut cur_abs = d.world;
+                cur_abs[12] += cur_cam.cam_pos[0];
+                cur_abs[13] += cur_cam.cam_pos[1];
+                cur_abs[14] += cur_cam.cam_pos[2];
+                cur_abs
+                    .iter()
+                    .zip(prev_abs.iter())
+                    .any(|(a, b)| (a - b).abs() > 1e-3)
+            });
+            if !moved {
+                continue;
+            }
+            let prev_abs = self.prev_worlds.get(&id).expect("seen implies prev");
+            let mut prev_rel = *prev_abs;
+            prev_rel[12] -= prev_cam.cam_pos[0];
+            prev_rel[13] -= prev_cam.cam_pos[1];
+            prev_rel[14] -= prev_cam.cam_pos[2];
+            out.push((i as u32, prev_rel));
+        }
+        out
     }
 
     pub fn last_reset_reason(&self) -> &'static str {

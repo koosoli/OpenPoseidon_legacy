@@ -1643,6 +1643,21 @@ static void DrawSortObject(SortObject* oi)
         explicit SkipOwnedGuard(bool v) : prev(GSkipGpuOwnedSections) { GSkipGpuOwnedSections = v; }
         ~SkipOwnedGuard() { GSkipGpuOwnedSections = prev; }
     } skipOwnedGuard(cov == GpuDrawCoverage::Partial);
+    // REN-TEMP-001H: identity bracket for motion vectors. Placed HERE and not inside
+    // Object::Draw because DrawProxies re-enters Object::Draw on proxy Objects, which are
+    // shape-shared across every placement of a model — the parent must own the whole
+    // scope. Instanced runs call this for the head object only, but their gate requires
+    // Static(), so no moving rigid object is ever mis-attributed. RAII like the guards
+    // above: this function has several exits.
+    struct DrawObjectGuard
+    {
+        const void* prev;
+        explicit DrawObjectGuard(const Object* obj) : prev(GEngine->GetDrawObject())
+        {
+            GEngine->SetDrawObject(obj);
+        }
+        ~DrawObjectGuard() { GEngine->SetDrawObject(prev); }
+    } drawObjectGuard(obj);
     const bool cockpit =
         GWorld && oi->drawLOD != LOD_INVISIBLE && oi->drawLOD == obj->InsideLOD(GWorld->GetCameraType());
     if (!cockpit)

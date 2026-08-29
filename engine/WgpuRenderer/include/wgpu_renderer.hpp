@@ -296,7 +296,12 @@ struct WgrDraw3D
      * Mirrors GL33's per-draw alphaRef (IsAlpha ~1/255, IsTransparent 0xC0). */
     float alpha_ref;
     uint32_t flags; // WgrDraw3DFlags
-    uint32_t _pad;
+    /* Shared lane (WgrDraw3D is ABI-frozen; size and layout hash unchanged):
+     *   bits 0-7   material-debug view index (dev panel Materials tab)
+     *   bit  8     material-debug invert-normal-Y
+     *   bits 16-31 REN-TEMP-001H stable object id for rigid motion vectors
+     *              (renderer keeps id -> previous world; 0 = no identity). */
+    uint32_t misc;
     /* Per-draw material lighting, folded exactly like GL33's
      * UploadVSMaterialConstants: raw MainLight diffuse/ambient x material, with
      * the sun-enable already multiplied into the sun terms (emissive shows

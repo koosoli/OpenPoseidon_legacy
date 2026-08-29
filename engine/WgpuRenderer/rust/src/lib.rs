@@ -1721,6 +1721,7 @@ impl Renderer {
         source: &wgpu::TextureView,
         dst: &wgpu::TextureView,
         underwater_time: Option<f32>,
+        draws3d: &[WgrDraw3D],
     ) {
         if self.tonemap.is_none() {
             return;
@@ -1745,6 +1746,23 @@ impl Renderer {
                     depth_gen,
                     render_size,
                 );
+                // REN-TEMP-001H: moving rigid objects overwrite their camera-only
+                // reprojection with true per-object motion.
+                if let (Some(obj_uniform), Some(vel_view)) = (
+                    self.temporal.object_velocity_uniform(),
+                    self.temporal.velocity_view().cloned(),
+                ) {
+                    let subset = self.temporal.object_velocity_subset(draws3d);
+                    self.gfx3d.render_object_velocity(
+                        &self.device,
+                        &self.queue,
+                        encoder,
+                        &vel_view,
+                        draws3d,
+                        &subset,
+                        &obj_uniform,
+                    );
+                }
             }
         }
         // MSAA: resolve the multisampled scene colour into the single-sample HDR target the
@@ -2610,6 +2628,9 @@ impl Renderer {
             self.temporal.begin_frame(cam, self.render_size());
             self.temporal.apply_jitter(&mut cam.proj);
         }
+        // REN-TEMP-001H: absolute worlds of this frame's identified rigid draws, for the
+        // object-velocity subset at tonemap time (and next frame's previous worlds).
+        self.temporal.ingest_draws(draws3d);
         let mut reflected_vp = [0.0f32; 16];
         let reflected_camera = if planar_active {
             let sea = planar_sea.unwrap();
@@ -4501,7 +4522,7 @@ impl Renderer {
                     .as_ref()
                     .map(|(_, v)| v.clone())
                     .unwrap_or_else(|| scene_view.clone());
-                self.run_tonemap(&mut encoder, &hdr_source, &color, underwater_time);
+                self.run_tonemap(&mut encoder, &hdr_source, &color, underwater_time, draws3d);
                 resolved = true;
                 target = color.clone();
                 display_2d = true;
@@ -4544,7 +4565,7 @@ impl Renderer {
                 .as_ref()
                 .map(|(_, v)| v.clone())
                 .unwrap_or_else(|| scene_view.clone());
-            self.run_tonemap(&mut encoder, &hdr_source, &color, underwater_time);
+            self.run_tonemap(&mut encoder, &hdr_source, &color, underwater_time, draws3d);
         } else if underwater_time.is_some() && !resolved {
             self.ensure_far_depth_resolve(&mut encoder);
             let depth = self

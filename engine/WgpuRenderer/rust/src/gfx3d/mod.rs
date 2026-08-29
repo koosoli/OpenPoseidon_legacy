@@ -375,6 +375,20 @@ struct BakeParamsGpu {
 // Bytes per baked vertex = one WgrMeshVertex (pos+norm+uv+conform+tangent/binormal).
 const BAKED_VERT_SIZE: u64 = std::mem::size_of::<WgrMeshVertex>() as u64;
 
+// REN-TEMP-001H: the rigid dynamic-object velocity pass (velocity_obj.wgsl). Owned by
+// Gfx3d because it re-draws pool geometry — the pool, the mesh table and the depth
+// resolve are all private here, and draw_one's addressing (vbuf sliced to vbase,
+// first_index = ibase + index_begin) must be mirrored exactly.
+struct VelocityObjPass {
+    pipeline: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
+    uniform: wgpu::Buffer,
+    ssbo: wgpu::Buffer,
+    ssbo_cap: u64,
+    bind: Option<wgpu::BindGroup>,
+    bound_depth_gen: u64,
+}
+
 // Blocking copy of one D32 texture layer into `out` (row 0 = top).
 fn read_depth_layer(
     device: &wgpu::Device,
@@ -2936,6 +2950,9 @@ pub struct Gfx3d {
     // the HUD (the UI segment already clears depth even on the 1x path).
     ui_depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     ui_depth_size: (u32, u32),
+    // REN-TEMP-001H: rigid dynamic-object velocity (lazy; only exists once the temporal
+    // path has actually asked for it).
+    velocity_obj: Option<VelocityObjPass>,
     // Hi-Z depth pyramid + GPU-driven occlusion cull toggle (docs §5). The pyramid is built
     // from the post-prepass depth; the color-pass cull samples it. occlusion_enabled gates the
     // whole path (env WGR_GPU_OCCLUSION + ImGui Culling tab); when off, the color pass reuses
@@ -3603,6 +3620,7 @@ impl Gfx3d {
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
             ui_depth_size: (0, 0),
+            velocity_obj: None,
             hiz: hiz::HiZ::new(device),
             // GPU Hi-Z occlusion: default on when GPU-driven is on (the point of this feature),
             // opt-out via WGR_GPU_OCCLUSION=0; also toggleable live from the ImGui Culling tab.
@@ -4574,6 +4592,213 @@ impl Gfx3d {
 
     pub fn depth_gen(&self) -> u64 {
         self.depth_gen
+    }
+
+    // REN-TEMP-001H: re-draw the frame's MOVING rigid draws into the velocity target
+    // (LoadOp::Load — the fullscreen camera reprojection is already there). `subset`
+    // is (draws3d index, previous world relative to the previous camera), built by
+    // Temporal::object_velocity_subset. Occlusion is a fragment-shader compare against
+    // the far-depth resolve (this pass has no depth attachment: the scene depth is
+    // multisampled, the velocity target is 1x). Mirrors draw_one's mesh addressing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_object_velocity(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        draws: &[crate::ffi::WgrDraw3D],
+        subset: &[(u32, [f32; 16])],
+        uniform: &crate::temporal::ObjVelUniform,
+    ) {
+        if subset.is_empty() {
+            return;
+        }
+        let Some(depth) = self.water_depth_view.clone() else {
+            return;
+        };
+        if self.velocity_obj.is_none() {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("wgr_velocity_obj_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("velocity_obj.wgsl").into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_velocity_obj_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_velocity_obj_pipeline_layout"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            // Position-only view of the pool vertex layout: same stride, one attribute.
+            let vbuf_layout = wgpu::VertexBufferLayout {
+                array_stride: BAKED_VERT_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            };
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_velocity_obj_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_velocity"),
+                    buffers: &[vbuf_layout],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_velocity"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rg16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_obj_uniform"),
+                size: std::mem::size_of::<crate::temporal::ObjVelUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_obj_worlds"),
+                size: 128 * 128,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.velocity_obj = Some(VelocityObjPass {
+                pipeline,
+                layout,
+                uniform: uniform_buf,
+                ssbo,
+                ssbo_cap: 128 * 128,
+                bind: None,
+                bound_depth_gen: u64::MAX,
+            });
+        }
+        // Per-entry payload = velocity_obj.wgsl `VelObj`: current world then previous.
+        let mut data: Vec<f32> = Vec::with_capacity(subset.len() * 32);
+        for (idx, prev_rel) in subset {
+            let d = &draws[*idx as usize];
+            data.extend_from_slice(&d.world);
+            data.extend_from_slice(prev_rel);
+        }
+        let bytes: &[u8] = bytemuck::cast_slice(&data);
+        let vp = self.velocity_obj.as_mut().expect("velocity obj pass");
+        if (bytes.len() as u64) > vp.ssbo_cap {
+            vp.ssbo_cap = (bytes.len() as u64).next_power_of_two();
+            vp.ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_obj_worlds"),
+                size: vp.ssbo_cap,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            vp.bind = None;
+        }
+        queue.write_buffer(&vp.ssbo, 0, bytes);
+        queue.write_buffer(&vp.uniform, 0, bytemuck::bytes_of(uniform));
+        if vp.bind.is_none() || vp.bound_depth_gen != self.depth_gen {
+            vp.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_velocity_obj_bind"),
+                layout: &vp.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: vp.uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: vp.ssbo.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&depth),
+                    },
+                ],
+            }));
+            vp.bound_depth_gen = self.depth_gen;
+        }
+        encoder.push_debug_group("wgr_velocity_obj");
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_velocity_obj"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&vp.pipeline);
+        pass.set_bind_group(0, vp.bind.as_ref().expect("velocity obj bind"), &[]);
+        pass.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+        for (i, (idx, _)) in subset.iter().enumerate() {
+            let d = &draws[*idx as usize];
+            let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
+            let Some(mesh) = self.meshes.get(key) else {
+                continue;
+            };
+            // Rigid only, and stay inside the mesh's index range (mirrors draw_one).
+            if d.index_begin + d.index_count > mesh.index_count {
+                continue;
+            }
+            let vert_off = mesh.alloc.vbase as u64 * BAKED_VERT_SIZE;
+            pass.set_vertex_buffer(0, self.pool.vbuf().slice(vert_off..));
+            let first = mesh.alloc.ibase + d.index_begin;
+            pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
+        }
+        drop(pass);
+        encoder.pop_debug_group();
     }
 
     // Single-sample UI-phase depth (Some only under MSAA); the post-tonemap 2D uses it instead of
@@ -5668,9 +5893,9 @@ impl Gfx3d {
                             // seven vec4s are otherwise fully spoken for.
                             normal_map: [
                                 f32::from_bits(normal_packed),
-                                (d._pad & 0xff) as f32,
+                                (d.misc & 0xff) as f32,
                                 if d.normal_texture_id != 0 { 1.0 } else { 0.0 },
-                                (u32::from(d._pad & 0x100 != 0)
+                                (u32::from(d.misc & 0x100 != 0)
                                     | (u32::from(d.flags & crate::ffi::WGR_DRAW3D_REFLECTIVE != 0)
                                         << 1)
                                     | (u32::from(
