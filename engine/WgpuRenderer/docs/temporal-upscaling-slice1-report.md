@@ -201,9 +201,24 @@ Bring-up war stories (recorded because each cost a debug cycle):
    "18445 fps") and the cheapest-repeat rule quoted it; the water-mission timing trap
    in new clothes. Always sanity-check cpu_frame alongside the GPU total.
 
+## Phase 10/11 v1 — history-control mask (commit 657a0122, deployed)
+
+Engine-owned reactive semantics, fed to DLSS as the SDK's TransparencyMask (this SDK
+generation has no separate "reactive" input): sky/cloud pixels (far-clear depth) at
+WGR_REACTIVE_SKY=0.4, water-surface pixels (opaque depth reconstructs below sea level)
+at WGR_REACTIVE_WATER=0.3. Costs nothing measurable; 0-strength terms skip the pass.
+Play-session tuning also landed first: jitter to DLSS in pixel space (Y flip),
+sky/underwater rays from the PREPARED (jittered) camera, MVJittered flag dropped,
+phase count ~8x(out/render)^2, and mip bias defaulting to HALF log2(scale) — each one
+found by the owner playing and each a one-line convention truth, which is the §21
+"validate inputs, never tune around them" doctrine paying out. Owner-confirmed state:
+vibration gone, sharpness good; residual shadow/sky ghosting is what this mask targets.
+Follow-ups (documented, not faked): wind-sway vegetation vectors or masking, particles,
+cloud-shadow-delta masking, and the owner's §6.7 live dev-panel tuning surface.
+
 ## Next (per the approved order)
 
-Phase 10/11: reactive/no-history mask (water, particles, wind-swayed foliage) — DLSS
+Phase 10/11 remainder: sway/particle handling (water, particles, wind-swayed foliage) — DLSS
 currently sees no reactive input, so water/particle ghosting is expected until then.
 Phase 13 proper: fold Native/TemporalDebug/DLSS behind the `TemporalUpscaler` trait
 (today the seams exist but the trait is not yet formalised). Then DLAA, the §24/§25
