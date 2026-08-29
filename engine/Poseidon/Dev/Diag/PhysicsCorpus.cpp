@@ -1,5 +1,7 @@
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 
+#include <Poseidon/World/Scene/Thing.hpp>
+
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
@@ -178,6 +180,18 @@ void RunPhysicsCorpus()
     // cannot convert. Instance counts ride along so a single bad fence copied a
     // thousand times cannot masquerade as a systematic failure.
     std::map<std::string, FailureGroup> failures;
+
+    // THE LOOSE OBJECTS, counted rather than assumed. Everything the fork handed
+    // to its physics engine was a Thing, and the open question before doing the
+    // same here was whether the barrels and pallets a map actually contains are
+    // Things at all -- or terrain decoration with no entity behind it. Grouped
+    // by config class, with the network id, because a body the physics owns has
+    // to belong to exactly one machine and an object with no id belongs to none.
+    std::map<std::string, std::uint32_t> things;
+    std::uint32_t                        thingsTotal = 0;
+    std::uint32_t                        thingsWithNetworkId = 0;
+    std::uint32_t                        thingsLocal = 0;
+
     std::uint32_t                       instancesSeen = 0;
     std::uint32_t                       instancesRegistered = 0;
     std::uint32_t                       instancesNoShape = 0;
@@ -195,6 +209,21 @@ void RunPhysicsCorpus()
                 {
                     continue;
                 }
+                if (Thing* thing = dyn_cast<Thing>(object))
+                {
+                    ++thingsTotal;
+                    ++things[static_cast<const char*>(thing->GetName())];
+                    const NetworkId id = thing->GetNetworkId();
+                    if (id.creator != 0 || id.id != 0)
+                    {
+                        ++thingsWithNetworkId;
+                    }
+                    if (thing->IsLocal())
+                    {
+                        ++thingsLocal;
+                    }
+                }
+
                 LODShape* shape = object->GetShape();
                 if (!shape)
                 {
@@ -250,6 +279,14 @@ void RunPhysicsCorpus()
         LOG_WARN(World, "PHYSCORPUS:   ... and {} more distinct models not listed",
                  static_cast<int>(sorted.size()) - shown);
     }
+    // The loose-object answer, in the log rather than in a design note.
+    LOG_WARN(World, "PHYSTHINGS: {} loose objects ({} distinct classes); {} carry a network id, {} local",
+             thingsTotal, static_cast<std::uint32_t>(things.size()), thingsWithNetworkId, thingsLocal);
+    for (const auto& [className, count] : things)
+    {
+        LOG_WARN(World, "PHYSTHINGS:   {} x{}", className.c_str(), count);
+    }
+
     LOG_WARN(World, "PHYSCORPUS: ---- end ----");
     // Cost, logged periodically after the world is built. Without a number here
     // "the physics is cheap" is an assertion, and this project has a rule about
