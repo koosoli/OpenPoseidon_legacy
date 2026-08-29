@@ -128,6 +128,10 @@ pub enum WgrDepthMode {
     None = 0,
     Test = 1,
     TestWrite = 2,
+    /// Test + write with an alpha cutout (discard below 0.5). See WGR_DEPTH_TEST_WRITE_CUT
+    /// in wgpu_renderer.h: the first-person optics quads must occlude the god-ray march,
+    /// but only where the weapon is actually solid.
+    TestWriteCut = 3,
 }
 
 #[repr(C)]

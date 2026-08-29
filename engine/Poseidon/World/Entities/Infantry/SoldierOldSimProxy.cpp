@@ -557,7 +557,14 @@ void Man::Draw(int level, ClipFlags clipFlags, const FrameBase& pos)
                     // binoculars are a 4:3 vignette (scopes keep full width) — stretch when bars off.
                     const bool isBinocular = BinocularSelected();
                     const bool preserve4x3 = isBinocular && AspectRatio::ArePillarboxBarsEnabled();
-                    Draw2D(oShape, 0, GetOpticsColor(this), /*preserveAspect4x3*/ preserve4x3);
+                    // occludeVolumetrics: the optics model is screen-space quads with no
+                    // depth of its own, so the god-ray march read the SKY depth underneath
+                    // it and painted full-length sun shafts over the weapon -- the owner's
+                    // "im Visier gegen die Sonne wird die Waffe durchsichtig". Ruled out as
+                    // a bloom effect first: bloom intensity 0 changes nothing, because the
+                    // shafts are ADDED here, not bled in from the sky around.
+                    Draw2D(oShape, 0, GetOpticsColor(this), /*preserveAspect4x3*/ preserve4x3,
+                           /*occludeVolumetrics*/ true);
                     if (isBinocular)
                         Object::DrawWidescreenPillarbox();
                 }

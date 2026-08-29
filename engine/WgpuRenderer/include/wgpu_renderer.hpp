@@ -135,7 +135,20 @@ enum WgrDepthMode : uint32_t
 {
     WGR_DEPTH_NONE = 0,      // no test, no write
     WGR_DEPTH_TEST = 1,      // test (LessEqual), no write
-    WGR_DEPTH_TEST_WRITE = 2 // test (LessEqual) + write
+    WGR_DEPTH_TEST_WRITE = 2, // test (LessEqual) + write
+    /* Test + write, with an alpha cutout: a fragment whose sampled alpha is below 0.5
+     * is discarded, so it writes neither colour nor depth. For a 2D draw that stands
+     * IN FRONT of the world and must occlude the volumetrics -- the first-person
+     * optics/iron-sight model, which Object::Draw2D emits as screen-space quads. Those
+     * quads carried WGR_DEPTH_NONE, so the god-ray march read SKY depth underneath them
+     * and additively painted full-length sun shafts over the weapon: the owner's "gegen
+     * die Sonne wird die Waffe durchsichtig", and invisible to every bloom or exposure
+     * knob because the shafts were being added, not bled. The cutout is what keeps the
+     * SEE-THROUGH part of the sight honest -- the aperture must still show the sky and
+     * the shafts in it, so only the solid body of the weapon may write depth.
+     * An older DLL that does not know this mode falls back to the no-depth pipeline,
+     * which is exactly the previous behaviour. */
+    WGR_DEPTH_TEST_WRITE_CUT = 3
 };
 
 /* Selects what a WgrCmd does when the frame's command stream is replayed. */

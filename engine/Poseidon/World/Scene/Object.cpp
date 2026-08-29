@@ -1338,7 +1338,8 @@ void Object::DrawDecal(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
     Deanimate(forceLOD);
 }
 
-void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3)
+void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserveAspect4x3,
+                    bool occludeVolumetrics)
 {
     LightSun* sun = GScene->MainLight();
     TLMaterial mat;
@@ -1438,6 +1439,7 @@ void Object::Draw2D(LODShape* lShape, int lod, PackedColor cColor, bool preserve
         const int clampMask = NoClamp | ClampU | ClampV;
         pars.mip = GEngine->TextBank()->UseMipmap(texture, 0, 0);
         pars.spec = NoZBuf | IsAlpha | IsAlphaFog | (clampMask & face.Special());
+        pars.occludeVolumetrics = occludeVolumetrics;
         ClipFlags clip = (shape->Clip(iTL) & shape->Clip(iTR) & shape->Clip(iBL) & shape->Clip(iBR));
         if ((clip & ClipUserMask) == static_cast<uint32_t>(MSShining) * ClipUserStep)
         {
