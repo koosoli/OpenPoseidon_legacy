@@ -2281,7 +2281,17 @@ impl Renderer {
         let jitter = [j[0], if jy { -j[1] } else { j[1] }];
         let reset = self.temporal.reset_this_frame();
         let mv_sign = if mvf { -1.0f32 } else { 1.0 };
-        let mv_scale = [render.0 as f32 * mv_sign, render.1 as f32 * mv_sign];
+        // MV scale: our velocity is a UV-space delta; DLSS wants pixels. The owner's
+        // pan test ("content lags the pan, most visible on soft shadow/cloud
+        // gradients") is the symptom of scaling by the wrong space — smooth content
+        // undershoots its reprojection by exactly the upscale ratio. OUTPUT pixels is
+        // the default; WGR_DLSS_MV_RENDER=1 is the A/B arm for render-pixel scaling.
+        static MV_RENDER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let mv_render_space = *MV_RENDER.get_or_init(|| {
+            std::env::var("WGR_DLSS_MV_RENDER").map(|v| v != "0").unwrap_or(false)
+        });
+        let (mvw, mvh) = if mv_render_space { render } else { output };
+        let mv_scale = [mvw as f32 * mv_sign, mvh as f32 * mv_sign];
         let ngx = self.ngx.as_mut().expect("ngx initialised above");
         // wgpu forbids mixing its own encoding API with raw hal encoding in ONE encoder,
         // so the frame splits here: everything recorded so far (scene + the transitions
