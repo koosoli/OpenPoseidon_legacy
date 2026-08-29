@@ -81,6 +81,18 @@ struct ResolvePass {
     view_pipeline: Option<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
 }
 
+// REN-TEMP-001J: the history-control ("reactive") mask target + pass.
+struct HistoryControlPass {
+    target: wgpu::Texture,
+    view: wgpu::TextureView,
+    size: (u32, u32),
+    uniform: wgpu::Buffer,
+    layout: wgpu::BindGroupLayout,
+    bind: Option<wgpu::BindGroup>,
+    bound_depth_gen: u64,
+    pipeline: wgpu::RenderPipeline,
+}
+
 pub struct Temporal {
     pub enabled: bool,
     // WGR_TEMPORAL_DEBUG: 0 = off, 1 = velocity overlay.
@@ -107,6 +119,10 @@ pub struct Temporal {
     shader: Option<wgpu::ShaderModule>,
     velocity: Option<VelocityPass>,
     resolve: Option<ResolvePass>,
+    history_control: Option<HistoryControlPass>,
+    // WGR_REACTIVE_SKY / WGR_REACTIVE_WATER strengths (0 disables a term).
+    reactive_sky: f32,
+    reactive_water: f32,
     // REN-TEMP-001H: ABSOLUTE world matrices of identified rigid draws, this frame and
     // last. Absolute on purpose — WgrDraw3D.world is camera-relative, which changes for
     // every object whenever the CAMERA moves; storing it directly would flag the whole
@@ -159,6 +175,17 @@ impl Temporal {
             shader: None,
             velocity: None,
             resolve: None,
+            history_control: None,
+            reactive_sky: std::env::var("WGR_REACTIVE_SKY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.4f32)
+                .clamp(0.0, 1.0),
+            reactive_water: std::env::var("WGR_REACTIVE_WATER")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.3f32)
+                .clamp(0.0, 1.0),
             cur_worlds: FxHashMap::default(),
             prev_worlds: FxHashMap::default(),
             cur_skin_bases: FxHashMap::default(),
@@ -774,6 +801,186 @@ impl Temporal {
         encoder.pop_debug_group();
     }
 
+    pub fn camera_y(&self) -> f32 {
+        self.cur.as_ref().map(|c| c.cam_pos[1]).unwrap_or(0.0)
+    }
+
+    pub fn history_control_view(&self) -> Option<&wgpu::TextureView> {
+        self.history_control.as_ref().map(|h| &h.view)
+    }
+
+    pub fn history_control_texture(&self) -> Option<&wgpu::Texture> {
+        self.history_control.as_ref().map(|h| &h.target)
+    }
+
+    // REN-TEMP-001J: build this frame's history-control mask (R8Unorm, render res) from
+    // the frame-final depth. `sea_level` = None disables the water term this frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_history_control(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        depth: &wgpu::TextureView,
+        depth_gen: u64,
+        render_size: (u32, u32),
+        sea_level: Option<f32>,
+    ) {
+        if !self.enabled || (self.reactive_sky <= 0.0 && self.reactive_water <= 0.0) {
+            return;
+        }
+        self.ensure_shader(device);
+        let shader = self.shader.clone().expect("temporal shader");
+        if self
+            .history_control
+            .as_ref()
+            .is_some_and(|h| h.size != render_size)
+        {
+            self.history_control = None;
+        }
+        if self.history_control.is_none() {
+            let target = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_history_control"),
+                size: wgpu::Extent3d {
+                    width: render_size.0.max(1),
+                    height: render_size.1.max(1),
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_history_control_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_history_control_pl"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_history_control"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_fullscreen"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_history_control"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::R8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_history_control_params"),
+                size: std::mem::size_of::<TemporalParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.history_control = Some(HistoryControlPass {
+                target,
+                view,
+                size: render_size,
+                uniform,
+                layout,
+                bind: None,
+                bound_depth_gen: u64::MAX,
+                pipeline,
+            });
+        }
+        let mut params = self.params();
+        params.misc = [
+            self.reactive_sky,
+            if sea_level.is_some() {
+                self.reactive_water
+            } else {
+                0.0
+            },
+            self.camera_y(),
+            sea_level.unwrap_or(f32::MIN),
+        ];
+        let hc = self.history_control.as_mut().expect("history control");
+        queue.write_buffer(&hc.uniform, 0, bytemuck::bytes_of(&params));
+        if hc.bind.is_none() || hc.bound_depth_gen != depth_gen {
+            hc.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_history_control_bind"),
+                layout: &hc.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(depth),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: hc.uniform.as_entire_binding(),
+                    },
+                ],
+            }));
+            hc.bound_depth_gen = depth_gen;
+        }
+        encoder.push_debug_group("wgr_history_control");
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_history_control"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &hc.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&hc.pipeline);
+        pass.set_bind_group(0, hc.bind.as_ref().expect("hc bind"), &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        encoder.pop_debug_group();
+    }
+
     // REN-TEMP-001K: run the minimal temporal debug resolve. `cur_color` is this frame's
     // single-sample resolved HDR at render resolution. Only runs under
     // WGR_TEMPORAL_DEBUG=2 — the accumulator is a diagnostic, nothing consumes it.
@@ -1317,6 +1524,8 @@ mod tests {
             t.debug_view = 2;
             t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
             t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
+            // REN-TEMP-001J: history-control pipeline (lazily built like the others).
+            t.render_history_control(&device, &queue, &mut encoder, &depth_view, 1, (W, H), Some(5.0));
             t.render_debug(
                 &device,
                 &queue,

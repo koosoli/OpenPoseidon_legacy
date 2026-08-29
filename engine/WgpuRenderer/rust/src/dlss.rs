@@ -530,6 +530,9 @@ impl Ngx {
         depth: &mut NgxResourceVk,
         motion: &mut NgxResourceVk,
         exposure: Option<&mut NgxResourceVk>,
+        // Engine "history control" (plan Phase 11), fed as the SDK's TransparencyMask:
+        // 0..1, higher = trust temporal history less at this pixel.
+        history_control: Option<&mut NgxResourceVk>,
         output: &mut NgxResourceVk,
         jitter_px: [f32; 2],
         mv_scale: [f32; 2],
@@ -553,6 +556,13 @@ impl Ngx {
                     p,
                     name!("ExposureTexture"),
                     exposure as *mut _ as *mut c_void,
+                );
+            }
+            if let Some(hc) = history_control {
+                NVSDK_NGX_Parameter_SetVoidPointer(
+                    p,
+                    name!("TransparencyMask"),
+                    hc as *mut _ as *mut c_void,
                 );
             }
             NVSDK_NGX_Parameter_SetVoidPointer(p, name!("Output"), output as *mut _ as *mut c_void);

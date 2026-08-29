@@ -70,6 +70,42 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
 }
 
 // ---------------------------------------------------------------------------------
+// REN-TEMP-001J — history control ("reactive"): per-pixel 0..1, higher = trust the
+// temporal history LESS. Engine-owned semantics (plan §16); the DLSS backend feeds it
+// as the SDK's TransparencyMask. v1 covers the two classes the owner's play sessions
+// confirmed and that provably have no usable motion vectors:
+//   * sky/clouds (stored depth = far clear): cloud drift and the procedural sky's
+//     animation are unvectorised — misc.x strength;
+//   * water surface: identified by "the OPAQUE depth under this pixel reconstructs
+//     below sea level" — the water pass writes no depth, so a submarine seabed means
+//     the pixel is (almost surely) covered by the FFT-displaced surface — misc.y
+//     strength, misc.z = camera world y (rel->abs rebase), misc.w = sea level.
+// Wind-swayed vegetation and particles are documented follow-ups, not silently faked.
+
+@group(0) @binding(0) var hc_depth: texture_depth_2d;
+@group(0) @binding(1) var<uniform> hc: TemporalParams;
+
+@fragment
+fn fs_history_control(in: VsOut) -> @location(0) vec4<f32> {
+    let frag = vec2<i32>(in.pos.xy);
+    let d = textureLoad(hc_depth, frag, 0);
+    var mask = 0.0;
+    if (d <= 1e-6) {
+        mask = hc.misc.x;
+    } else if (hc.misc.y > 0.0) {
+        let dims = vec2<f32>(textureDimensions(hc_depth));
+        let uv = in.pos.xy / dims;
+        let ndc = vec2<f32>(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0);
+        let rel_h = hc.inv_view_proj * vec4<f32>(ndc.x, ndc.y, 1.0 - d, 1.0);
+        let abs_y = rel_h.y / rel_h.w + hc.misc.z;
+        if (abs_y < hc.misc.w) {
+            mask = max(mask, hc.misc.y);
+        }
+    }
+    return vec4<f32>(mask, 0.0, 0.0, 1.0);
+}
+
+// ---------------------------------------------------------------------------------
 // REN-TEMP-001K — temporal debug RESOLVE: a deliberately minimal accumulator whose only
 // job is to expose bad temporal inputs (wrong jitter sign, wrong velocity scale, missing
 // resets) before a vendor upscaler hides or amplifies them. Reproject history along

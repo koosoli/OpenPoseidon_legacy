@@ -1820,6 +1820,21 @@ impl Renderer {
                     depth_gen,
                     render_size,
                 );
+                // REN-TEMP-001J: the history-control ("reactive") mask — sky/clouds and
+                // the water surface have no usable motion vectors; DLSS gets told so
+                // instead of ghosting through them.
+                {
+                    let sea = self.water.underwater_params().map(|(s, _, _)| s);
+                    self.temporal.render_history_control(
+                        &self.device,
+                        &self.queue,
+                        encoder,
+                        &depth,
+                        depth_gen,
+                        render_size,
+                        sea,
+                    );
+                }
                 // REN-TEMP-001H: moving rigid objects overwrite their camera-only
                 // reprojection with true per-object motion.
                 if let (Some(obj_uniform), Some(vel_view)) = (
@@ -2128,6 +2143,12 @@ impl Renderer {
         let Some(vel_tex) = self.temporal.velocity_texture().cloned() else {
             return fail(self, "velocity target missing");
         };
+        // Optional: absent only when both reactive terms are disabled.
+        let hc_pair = self
+            .temporal
+            .history_control_texture()
+            .cloned()
+            .zip(self.temporal.history_control_view().cloned());
         let Some(exposure) = self.exposure.as_ref() else {
             return fail(self, "exposure pass missing");
         };
@@ -2188,6 +2209,16 @@ impl Renderer {
             ]
             .into_iter(),
         );
+        if let Some((hc_tex, _)) = hc_pair.as_ref() {
+            encoder.transition_resources(
+                std::iter::empty(),
+                std::iter::once(wgpu::TextureTransition {
+                    texture: hc_tex,
+                    selector: None,
+                    state: wgpu::TextureUses::RESOURCE,
+                }),
+            );
+        }
 
         // Raw handles for NGX. VK_FORMAT values: R16G16B16A16_SFLOAT=97, R16G16_SFLOAT=83,
         // R32_SFLOAT=100, D32_SFLOAT=126. Aspects: COLOR=1, DEPTH=2.
@@ -2229,6 +2260,10 @@ impl Renderer {
         ) else {
             return fail(self, "as_hal returned no Vulkan handles");
         };
+        // R8Unorm = VK_FORMAT_R8_UNORM (9).
+        let mut hcm = hc_pair
+            .as_ref()
+            .and_then(|(t, v)| vk_res(t, v, 9, 1, render, false));
 
         // Jitter reaches DLSS in PIXEL space (y-down); our jitter is applied in NDC
         // (y-up), so Y flips by default. WGR_DLSS_JY_FLIP=0 / WGR_DLSS_MV_FLIP=1 exist
@@ -2287,6 +2322,7 @@ impl Renderer {
                     &mut depth,
                     &mut motion,
                     Some(&mut expo),
+                    hcm.as_mut(),
                     &mut out,
                     jitter,
                     mv_scale,
