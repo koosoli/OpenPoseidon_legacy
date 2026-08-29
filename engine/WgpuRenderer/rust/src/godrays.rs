@@ -339,7 +339,17 @@ impl GodRays {
     /// `scene_format` is the HDR scene target's format; the composite blends into it. This is only
     /// constructed on the HDR path — an LDR-direct swapchain has already been tonemapped by the
     /// time anything could be added to it, so there is nothing sensible to add shafts to.
-    pub fn new(device: &wgpu::Device, scene_format: wgpu::TextureFormat) -> Self {
+    /// `scene_samples` is the MSAA sample count of the target the COMPOSITE draws into. It is
+    /// not cosmetic: the shafts are now composited inside the world segment, before the
+    /// transparent draws (so a blended surface is not painted over by a march that cannot see
+    /// it), and that target is the multisampled scene, not the resolved one. A pipeline built
+    /// for one sample is rejected outright by the pass -- "Incompatible sample count" -- and the
+    /// frame renders black.
+    pub fn new(
+        device: &wgpu::Device,
+        scene_format: wgpu::TextureFormat,
+        scene_samples: u32,
+    ) -> Self {
         let march_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("wgr_godrays_march_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("godrays.wgsl").into()),
@@ -490,7 +500,10 @@ impl GodRays {
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: scene_samples,
+                ..Default::default()
+            },
             fragment: Some(wgpu::FragmentState {
                 module: &composite_shader,
                 entry_point: Some("fs_composite"),
@@ -851,7 +864,7 @@ mod tests {
         let Some((device, _queue)) = headless() else {
             return;
         };
-        let _ = GodRays::new(&device, wgpu::TextureFormat::Rgba16Float);
+        let _ = GodRays::new(&device, wgpu::TextureFormat::Rgba16Float, 1);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 

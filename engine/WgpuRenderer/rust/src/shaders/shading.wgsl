@@ -342,6 +342,13 @@ fn shade(
             (sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;
         // Glass canopies: keep only a fraction of the sky wash so they read as glazing, not a lit
         // diffuse dome (the direct sun sheen + any glint still sit on top).
+        // NOTE, and it is a note about what this is NOT. `is_translucent` means "this draw is
+        // alpha-blended", not "this is glass": the alpha classifier calls a texture BLEND from
+        // 2% partial-alpha texels, and a road sign's plate (89% fully opaque, 2.5% soft border)
+        // therefore lands here too. That made this term the obvious suspect for the owner's
+        // black road signs on Nogova -- and it is NOT the cause. Measured 2026-08-29: setting
+        // this factor to 1.0 leaves the sign exactly as dark. Left as it is, and recorded so the
+        // next reader does not spend the same afternoon on it.
         if (is_translucent) {
             ambient *= 0.2;
         }

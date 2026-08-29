@@ -632,6 +632,9 @@ pub struct Renderer {
     // the camera the SKY pass chose, captured at the sky upload and consumed in run_tonemap.
     godrays: Option<GodRays>,
     godrays_frame: Option<GodRayFrame>,
+    /// The shafts have already been composited for this frame, inside the world segment and
+    /// BEFORE the transparent draws. See the call site for why they moved there.
+    godrays_composited: bool,
     // Set once the frame's single-sample depth resolve has run at a point where the 3D depth is
     // already final, so the god-ray march can reuse it instead of recording a second resolve.
     // Deliberately NOT set by the pre-water resolve: depth is still being written after that one.
@@ -1187,7 +1190,7 @@ impl Renderer {
         let bloom = hdr_enabled.then(|| Bloom::new(&device, HDR_FORMAT));
         // God rays composite into the HDR scene target, so like bloom they only exist on the
         // HDR path. Default ON; `WGR_GODRAYS=0` ablates it for an A/B capture.
-        let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT));
+        let godrays = hdr_enabled.then(|| GodRays::new(&device, HDR_FORMAT, sample_count));
         let planar_mips = PlanarMips::new(&device, HDR_FORMAT);
         let exposure = hdr_enabled.then(|| Exposure::new(&device, &queue));
         // The sky targets the scene color format (HDR target or swapchain), matching
@@ -1308,6 +1311,7 @@ impl Renderer {
             },
             godrays,
             godrays_frame: None,
+            godrays_composited: false,
             frame_depth_final_resolved: false,
             far_depth_resolve_current: false,
             bloom,
@@ -1708,7 +1712,9 @@ impl Renderer {
         // adaptation / the tonemap curve, so the shafts bloom, drive exposure and roll off like
         // every other light in the frame. Skipped underwater — the submerged look has its own
         // compositor and its own shafts, and every occluder this pass reads is above the surface.
-        if underwater_time.is_none() {
+        // Fallback only. The shafts are normally composited inside the world segment, before
+        // the transparent draws (see there); this covers a frame that never reached that point.
+        if underwater_time.is_none() && !self.godrays_composited {
             self.gpu_timers.begin(encoder, TimerRegion::GodRays);
             self.render_god_rays(encoder, source);
             self.gpu_timers.end(encoder, TimerRegion::GodRays);
@@ -2733,6 +2739,7 @@ impl Renderer {
         // Cleared per frame; set by the first depth resolve recorded after the 3D depth is final,
         // so the god-ray march can reuse it (see render_god_rays).
         self.frame_depth_final_resolved = false;
+        self.godrays_composited = false;
         // New encoder, and the depth target is about to be cleared and rewritten: nothing
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
@@ -4171,6 +4178,36 @@ impl Renderer {
                     self.gpu_timers
                         .end(&mut encoder, TimerRegion::CloudComposite);
                 }
+            }
+
+            // VOLUMETRIC SHAFTS, composited HERE -- after the opaque world, after water and
+            // clouds, and BEFORE the transparent draws below.
+            //
+            // They used to run in the post chain, after everything. That is wrong for the same
+            // reason it was wrong for the cockpit: the march stops at the SCENE DEPTH, and an
+            // alpha-blended surface writes no depth. So at every pixel covered by glass, a road
+            // sign, or the first-person iron sight, the march read the sky BEHIND the surface and
+            // additively painted a full-length shaft over it -- which against a bright sky reads
+            // as the surface being transparent. The owner confirmed the mechanism by switching
+            // the god rays off: sign solid, iron sight solid, everything else unchanged.
+            //
+            // No amount of tuning fixes that from the post chain, because the information the
+            // march needs (that something opaque-looking is in front) does not exist in the
+            // depth buffer and never will for a blended draw. Ordering is the fix: volumetrics
+            // belong BEHIND transparents, so transparents composite over them.
+            //
+            // The cost is that the additive blend now runs on the MSAA target rather than the
+            // resolved one, i.e. once per sample instead of once per pixel. The pass is a
+            // low-resolution march upsampled by one full-screen triangle, so this is a small
+            // absolute number -- and it buys the one thing the post-chain position cannot.
+            //
+            // Once per frame, in the world segment only: `godrays_composited` makes the post
+            // chain's call a no-op rather than double-adding the shafts.
+            if start == 0 && !self.godrays_composited && underwater_time.is_none() {
+                self.godrays_composited = true;
+                self.gpu_timers.begin(&mut encoder, TimerRegion::GodRays);
+                self.render_god_rays(&mut encoder, &target);
+                self.gpu_timers.end(&mut encoder, TimerRegion::GodRays);
             }
 
             // The rest of the plan's world draws, now that water and clouds are down.
