@@ -4627,6 +4627,31 @@ void DrawTonemapTab()
     changed |= Dev::SliderFloat("Exposure", &t.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
 
     Dev::PanelSeparator();
+    // Roads and decals. Here rather than on the Sky tab, where these spent one afternoon
+    // because that was the push path that already existed: they describe how ground-conformed
+    // geometry wins its depth test, which has nothing to do with the atmosphere.
+    Dev::PanelSeparator();
+    auto road = GEngine->GetRoadSettings();
+    bool roadChanged = ResetToDefaultsButton(road, "Reset roads to defaults",
+                                             "(only the road/decal conform below)");
+    Dev::PanelHeading("Roads and decals (per-pixel ground conform)");
+    roadChanged |= Dev::SliderFloat("Road lift, flat", &road.liftFlat, 0.0f, 0.5f, "%.3f m");
+    Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
+                      "every angle, so this is the one to raise if a road flickers right in front of you.");
+    roadChanged |= Dev::SliderFloat("Road lift, per metre", &road.liftPerMetre, 0.0f, 0.02f, "%.4f /m");
+    Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
+                      "shader, because the error it covers is a height error and a height error becomes\n"
+                      "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
+                      "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
+                      "alternately: continuous close up, continuous from above, in pieces in between.\n"
+                      "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
+    roadChanged |= Dev::SliderFloat("Road lift ceiling", &road.liftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
+    Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
+                      "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
+                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
+    if (roadChanged)
+        GEngine->SetRoadSettings(road);
+
     Dev::PanelHeading("Grade");
     changed |= Dev::SliderFloat("Temperature (warm+/cool-)", &t.temperature, -1.0f, 1.0f, "%.3f");
     changed |= Dev::SliderFloat("Tint (magenta+/green-)", &t.tint, -1.0f, 1.0f, "%.3f");
@@ -4924,21 +4949,6 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Aerial sun shadow", &s.aerialShadow, 0.0f, 4.0f, "%.2f");
     Dev::PanelTooltip("Terrain occlusion of the froxel fog: 0 = off (sun lights the haze everywhere, for A/B), "
                       "1 = physical, >1 exaggerated to make the shadowed fog / god-ray shafts obvious");
-    Dev::PanelHeading("Roads and decals (per-pixel ground conform)");
-    changed |= Dev::SliderFloat("Road lift, flat", &s.roadLiftFlat, 0.0f, 0.5f, "%.3f m");
-    Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
-                      "every angle, so this is the one to raise if a road flickers right in front of you.");
-    changed |= Dev::SliderFloat("Road lift, per metre", &s.roadLiftPerMetre, 0.0f, 0.02f, "%.4f /m");
-    Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
-                      "shader, because the error it covers is a height error and a height error becomes\n"
-                      "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
-                      "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
-                      "alternately: continuous close up, continuous from above, in pieces in between.\n"
-                      "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
-    changed |= Dev::SliderFloat("Road lift ceiling", &s.roadLiftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
-    Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
-                      "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
-                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
     changed |= Dev::SliderFloat("Fog closes at", &s.fogFarClose, 0.3f, 1.0f, "%.2f");
     Dev::PanelTooltip("WHERE the fog finishes, as a fraction of the draw distance.\n"
                       "1.00 = fog reaches full only exactly at the far plane -- which is also exactly where "
@@ -5192,12 +5202,6 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Night at sun elev (deg)", &s.nightEndDeg, -20.0f, 5.0f, "%.1f");
     Dev::PanelTooltip("Sun elevation at/below which it's full night (night floor at full intensity)");
 
-    if (Dev::Button("Reset to defaults"))
-    {
-        s = decltype(s){};
-        changed = true;
-    }
-
     ImGui::EndDisabled();
 
     if (changed)
@@ -5216,18 +5220,12 @@ void DrawSkyTab()
         GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
         GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
         GEngine->SetFogFarClose(s.fogFarClose);
-        // Road conform: own entry point for the same reason, and unconditional inside
-        // `changed` so "Reset to defaults" restores it too.
-        GEngine->SetRoadConform(s.roadLiftFlat, s.roadLiftPerMetre, s.roadLiftMaxFrac);
         // Amount + match-the-deck. Own entry point for the same reason as the two above: the sky
         // look block's size is part of the renderer's ABI handshake and must not grow.
         GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
         GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
         // Where the fog finishes. Own entry point for the same reason as the cirrus pushes above.
         GEngine->SetFogFarClose(s.fogFarClose);
-        // Road conform: own entry point for the same reason, and unconditional inside
-        // `changed` so "Reset to defaults" restores it too.
-        GEngine->SetRoadConform(s.roadLiftFlat, s.roadLiftPerMetre, s.roadLiftMaxFrac);
         // God rays: same story again, not a sky-look lane, so its own push. Unconditional inside
         // `changed` so "Reset to defaults" restores it too.
         GEngine->SetGodRays(s.godRays, s.godRayIntensity, s.godRayDensity, s.godRayDistance, s.godRayG,

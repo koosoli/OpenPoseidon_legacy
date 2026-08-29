@@ -237,15 +237,15 @@ class EngineWgpu : public EngineDummy
         if (_renderer != nullptr)
             wgr_set_fog_far_close(_renderer, close);
     }
-    // Road / decal per-pixel depth conform. Same shape again: the three knobs that decide
-    // whether a road wins its depth test against the terrain it lies on.
-    void SetRoadConform(float flat, float perMetre, float maxFrac) override
+    // Road / decal per-pixel ground conform: the three knobs that decide whether a road wins
+    // its depth test against the terrain it lies on. Its own struct and its own FFI entry
+    // point, for the same reason SetFogFarClose has one -- pushed live, never baked.
+    RoadSettings GetRoadSettings() const override { return _road; }
+    void SetRoadSettings(const RoadSettings& road) override
     {
-        _sky.roadLiftFlat = flat;
-        _sky.roadLiftPerMetre = perMetre;
-        _sky.roadLiftMaxFrac = maxFrac;
+        _road = road;
         if (_renderer != nullptr)
-            wgr_set_road_conform(_renderer, flat, perMetre, maxFrac);
+            wgr_set_road_conform(_renderer, _road.liftFlat, _road.liftPerMetre, _road.liftMaxFrac);
     }
     // God rays. Same shape again (own FFI entry point, _sky updated so GetSkySettings round-trips
     // and "Reset to defaults" restores it). The renderer clamps every value, so a garbage push
@@ -539,6 +539,8 @@ class EngineWgpu : public EngineDummy
     // Authored procedural-sky params (atmosphere + look); celestial fields are filled
     // per frame from LightSun in PushSkyRuntime.
     Engine::SkySettings _sky;
+    // Road / decal ground conform, pushed live from the dev panel (see SetRoadSettings).
+    Engine::RoadSettings _road;
     // Smoothed celestial inputs: LightSun::Recalculate refreshes sun/moon direction,
     // night factor and fog colour only every few seconds with no interpolation, which
     // makes the sun disc + horizon haze stutter. PushSkyRuntime eases these toward the

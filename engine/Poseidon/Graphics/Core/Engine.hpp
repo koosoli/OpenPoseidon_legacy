@@ -1746,23 +1746,6 @@ class Engine : public IGraphicsEngine
         // This is a DIFFERENT question from fogFalloff below: that shapes how fast the ramp
         // climbs, so using it to thicken the far field also thickens the near and mid field.
         float fogFarClose = 0.85f;
-        // ROAD / DECAL per-pixel depth conform. An OnSurface fragment re-seats its depth on the
-        // terrain height field and is then pulled this far toward the camera ALONG THE RAY so it
-        // wins the depth test against the ground it lies on.
-        //
-        // The per-metre term is divided by |dir.y| in the shader, because the residual it has to
-        // cover is a height error and a height error becomes error/|dir.y| along the ray -- about
-        // 6x at the angle you get looking down a road from standing height. Before that division
-        // existed, one constant had to serve both the top-down view and the grazing one, and at
-        // grazing angles the road broke into a chequer of tiles that won and lost the test
-        // alternately (owner, Malden 2026-08-29: "die strasse ist nicht durchgehend sichtbar").
-        //
-        // Swept on that road: 0.0015/m closes most of it, 0.004 closes it completely.
-        float roadLiftFlat = 0.02f;
-        float roadLiftPerMetre = 0.004f;
-        // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
-        // FINITE as the ray flattens toward the horizon, where the division above runs away.
-        float roadLiftMaxFrac = 0.02f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so
@@ -2026,6 +2009,30 @@ class Engine : public IGraphicsEngine
         // Negative = use the real phase. Only affects the LOOK; the position is unchanged.
         float moonPhaseOverride = -1.0f;
     };
+
+    /// ROAD / DECAL per-pixel ground conform. Deliberately NOT part of SkySettings: these
+    /// describe how ground-conformed geometry wins its depth test, which has nothing to do with
+    /// the atmosphere. They lived there for one afternoon because that was the push path that
+    /// already existed, and that is not a reason.
+    struct RoadSettings
+    {
+        // An OnSurface fragment re-seats its depth on the terrain height field and is then pulled
+        // this far toward the camera ALONG THE RAY so it wins against the ground it lies on.
+        float liftFlat = 0.02f;
+        // Per metre of distance, and divided by |dir.y| in the shader: the residual it covers is a
+        // height error, and a height error becomes error/|dir.y| along the ray -- about 6x looking
+        // down a road from standing height. Before that division existed one constant had to serve
+        // both the top-down view and the grazing one, and at grazing angles the road broke into a
+        // chequer of tiles that won and lost the test alternately (owner, Malden 2026-08-29).
+        // Swept on that road: 0.0015 closes most of it, 0.004 closes it completely.
+        float liftPerMetre = 0.004f;
+        // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
+        // FINITE as the ray flattens toward the horizon, where the division above runs away.
+        float liftMaxFrac = 0.02f;
+    };
+    virtual RoadSettings GetRoadSettings() const { return {}; }
+    virtual void SetRoadSettings(const RoadSettings&) {}
+
     // True on backends with a procedural sky pass (wgpu); gates the ImGui Sky tab.
     virtual bool SupportsSky() const { return false; }
     virtual SkySettings GetSkySettings() const { return {}; }
@@ -2610,9 +2617,6 @@ class Engine : public IGraphicsEngine
     // fogFarClose). Same reasoning as SetSkyCirrus above for being its own entry point rather
     // than a lane in an ABI-checked struct. APPENDED at the class end (vtable-slot note above).
     virtual void SetFogFarClose(float /*close*/) {}
-    /// Road / decal per-pixel depth conform (see SkySettings::roadLiftFlat). Own entry point for
-    /// the same reason as SetFogFarClose: it is pushed live from the dev panel, not baked.
-    virtual void SetRoadConform(float /*flat*/, float /*perMetre*/, float /*maxFrac*/) {}
 
     // SECOND cloud layer EDGE SOFTNESS (see SkySettings::cirrusSoftness). Same reasoning as
     // SetSkyCirrus above for being its own entry point rather than a lane in an ABI-checked

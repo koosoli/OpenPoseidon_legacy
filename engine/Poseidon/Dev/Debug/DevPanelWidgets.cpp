@@ -21,6 +21,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 
@@ -204,6 +205,19 @@ void ResetPanelSettings()
     // Fixed step
     ResetFixedStepStats();
     SetFixedStepScripts(true);
+    // Sky look and the road/decal ground conform. Written out here rather than called through
+    // DebugOverlay: that translation unit is not linked into every app that draws these widgets
+    // (Tetris is not), and a reset that only exists in some builds is worse than none.
+    // Both are settings structs whose own initialisers ARE the defaults, so this cannot drift
+    // from the tabs that edit them.
+    if (GEngine != nullptr)
+    {
+        if (GEngine->SupportsSky())
+        {
+            GEngine->SetSkySettings(Engine::SkySettings{});
+        }
+        GEngine->SetRoadSettings(Engine::RoadSettings{});
+    }
     // Ballistics recorder
     Ballistics::SetEnabled(false);
     Ballistics::SetDrawTrails(true);
