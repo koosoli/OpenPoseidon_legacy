@@ -47,6 +47,8 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
+#include <algorithm>
 
 extern bool DisableTextures;
 
@@ -549,6 +551,36 @@ void BuildShapeCacheKey(const char* name, bool reversed, bool shadow, char (&low
     strlwr(lowName);
     snprintf(cacheKey, sizeof(cacheKey), "%s|R%dS%d", lowName, reversed ? 1 : 0, shadow ? 1 : 0);
 }
+
+// Cache keys whose load is CURRENTLY RUNNING on this thread, innermost last.
+//
+// NewFromModel inserts into `_cache` only after the adapter has returned, but the adapter
+// resolves the model's proxies while it runs (ShapeAdapter -> NewProxyObject -> Shapes.New).
+// So for the whole of a cold load the shape being loaded is not yet findable, and a proxy
+// that points back at an ancestor re-enters New for a key that still misses -- and loads it
+// again, and again. DayZ's `dz\structures\wrecksehicles\wreck_offroad02_aban1.p3d` and
+// its own `proxy\wreck_offroad02_aban1_proxy.p3d` are exactly such a pair: measured at 204
+// alternating loads and ~407 repeated stack frames before the thread died on 0xC00000FD.
+//
+// thread_local, deliberately. This guards RE-ENTRANCY, which is per-thread by definition;
+// it is not a lock and makes no claim about two threads loading the same shape, which the
+// cache's own behaviour governs and which this change does not alter.
+thread_local std::vector<std::string> GShapeLoadsInFlight;
+
+bool ShapeLoadIsInFlight(const char* cacheKey)
+{
+    return std::find(GShapeLoadsInFlight.begin(), GShapeLoadsInFlight.end(), cacheKey) !=
+           GShapeLoadsInFlight.end();
+}
+
+// Push on construction, pop on every exit (including a throw).
+struct ShapeLoadInFlightScope
+{
+    explicit ShapeLoadInFlightScope(const char* cacheKey) { GShapeLoadsInFlight.emplace_back(cacheKey); }
+    ~ShapeLoadInFlightScope() { GShapeLoadsInFlight.pop_back(); }
+    ShapeLoadInFlightScope(const ShapeLoadInFlightScope&) = delete;
+    ShapeLoadInFlightScope& operator=(const ShapeLoadInFlightScope&) = delete;
+};
 } // namespace
 
 LODShapeWithShadow* ShapeBank::Find(const char* name, bool reversed, bool shadow) const
@@ -589,6 +621,31 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             timing->cacheHit = true;
         return existing;
     }
+    // Proxy cycle: this key is already being loaded further up this call stack, so the miss
+    // above is not "not loaded", it is "not loaded YET" -- and loading it again is what turns
+    // a cyclic proxy graph into a stack overflow. Hand back an empty shape instead. It is the
+    // same object this function already falls back to when a model cannot be decoded, so every
+    // caller is prepared for it; returning null is NOT an option, because NewProxyObject feeds
+    // the result straight into NewObject, which dereferences it.
+    //
+    // Cutting the cycle here rather than "resolving" it by publishing the half-built parent is
+    // the conservative half of the choice: a proxy that refers to its own ancestor cannot be
+    // expanded into finite geometry under any policy, so the only question is whether the
+    // engine notices or dies. Publishing a partially-adapted shape would hand every OTHER
+    // caller an object whose sections are not yet built.
+    if (ShapeLoadIsInFlight(cacheKey))
+    {
+        static std::unordered_set<std::string> reported;
+        if (reported.insert(cacheKey).second)
+        {
+            LOG_WARN(Graphics,
+                     "Proxy cycle: {} contains a proxy that resolves back to itself; the inner "
+                     "reference is dropped (empty shape). Nesting depth {}.",
+                     lowName, GShapeLoadsInFlight.size());
+        }
+        return new LODShapeWithShadow();
+    }
+    const ShapeLoadInFlightScope inFlight(cacheKey);
     // Lookup returned nullptr — either the key was never inserted, or a
     // previously-inserted shape was destroyed and its weak Link auto-nulled.
     // In the latter case the slot is still keyed but dead; drop it so the
