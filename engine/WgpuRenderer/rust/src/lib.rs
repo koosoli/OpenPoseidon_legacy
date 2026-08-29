@@ -1,4 +1,6 @@
 mod bloom;
+#[cfg(feature = "dlss")]
+mod dlss;
 mod dof;
 mod exposure;
 mod far;

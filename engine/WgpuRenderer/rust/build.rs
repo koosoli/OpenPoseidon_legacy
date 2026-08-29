@@ -58,4 +58,36 @@ fn main() {
     // Test-only override used to produce a compatible-import ABI mismatch DLL.
     // It is never set by CMake or a normal Cargo invocation.
     println!("cargo:rerun-if-env-changed=WGR_TEST_ABI_VERSION");
+    // REN-TEMP-001M: the `dlss` feature links NVIDIA's static NGX lib from the
+    // UNTRACKED SDK checkout (github.com/NVIDIA/DLSS). The SDK may live in this
+    // worktree's root or in the main checkout the worktree hangs off; WGR_DLSS_SDK
+    // overrides. _d = dynamic CRT, matching the Rust MSVC target.
+    if std::env::var_os("CARGO_FEATURE_DLSS").is_some() {
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        if let Ok(over) = std::env::var("WGR_DLSS_SDK") {
+            candidates.push(std::path::PathBuf::from(over));
+        }
+        candidates.push(repo.join(".tmp-dlss-sdk"));
+        // A linked worktree lives at <main>/.claude/worktrees/<name>; hop up to <main>.
+        if let Some(main_root) = repo.ancestors().nth(3) {
+            candidates.push(main_root.join(".tmp-dlss-sdk"));
+        }
+        let sdk = candidates
+            .iter()
+            .find(|c| c.join("lib/Windows_x86_64/x64/nvsdk_ngx_d.lib").exists())
+            .unwrap_or_else(|| {
+                panic!(
+                    "dlss feature: NGX SDK not found (looked at {:?}); clone                      github.com/NVIDIA/DLSS to <repo>/.tmp-dlss-sdk or set WGR_DLSS_SDK",
+                    candidates
+                )
+            });
+        println!(
+            "cargo:rustc-link-search=native={}",
+            sdk.join("lib/Windows_x86_64/x64").display()
+        );
+        println!("cargo:rustc-link-lib=static=nvsdk_ngx_d");
+        // NGX reads driver paths from the registry.
+        println!("cargo:rustc-link-lib=advapi32");
+        println!("cargo:rerun-if-env-changed=WGR_DLSS_SDK");
+    }
 }
