@@ -241,6 +241,8 @@ override cutout_mip_alpha: f32 = 0.0;
 // pulled TOWARD THE CAMERA along its view ray after fs_surface has re-seated its depth on the
 // terrain (see surface_pixel_depth). Only fs_surface reads it; fs_main never writes depth.
 override pixel_lift: f32 = 0.02;
+// WGR_ROAD_KILL_DOOR=1 -- see fs_surface. A probe, never a look.
+override road_kill_door: f32 = 0.0;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -471,6 +473,25 @@ struct SurfaceOut {
 @fragment
 fn fs_surface(in: VsOut) -> SurfaceOut {
     var out: SurfaceOut;
+    // KILL DOOR (WGR_ROAD_KILL_DOOR=1). Paint every OnSurface fragment solid magenta and hand
+    // it the nearest possible depth, so nothing downstream can hide it. It answers one question
+    // and only one: is this road tile RASTERISED AT ALL?
+    //
+    // That is the question left after the Malden hole, and the two answers need opposite fixes.
+    // Magenta appears -> the tile is submitted and drawn, and something after rasterisation
+    // loses it (depth, blending, a later pass). Hole stays -> the tile never reaches the
+    // rasteriser, and the fault is upstream in culling, LOD or the draw list, where no amount of
+    // depth-conform tuning will ever reach it.
+    //
+    // Four things have already been eliminated by ablation and none of them was it: the
+    // GPU-driven path, the CPU road split, the conform height source, and the lift itself
+    // (raising it closes the fringes and never closes this hole). Guessing a fifth is worth
+    // less than this one measurement.
+    if (road_kill_door > 0.5) {
+        out.color = vec4<f32>(1.0, 0.0, 1.0, 1.0);
+        out.depth = 1.0; // reversed-Z near plane: wins every comparison
+        return out;
+    }
     out.color = shade_fragment(in);
     out.depth = surface_pixel_depth(in);
     return out;
@@ -506,15 +527,20 @@ const PIXEL_CONFORM_STEPS: i32 = 3;
 // Below this |dir.y| the ray is too flat to solve for its terrain hit (a 1 m height gap is
 // a 20 m slide); the point is seated vertically instead, which the lift then covers.
 const PIXEL_CONFORM_MIN_DIR_Y: f32 = 0.05;
+// How far the seated point may still be from the terrain before the solve is declared failed
+// and the fragment keeps its vertex-conformed depth. Generous: the conform is worth having
+// whenever it is roughly right, and this only has to catch the runaway case, where the error is
+// metres rather than centimetres.
+const PIXEL_CONFORM_MAX_RESIDUAL: f32 = 0.75;
 // Per metre of seated distance, BEFORE the grazing division below. Sweepable, because the
 // value that matters is the product of this and 1/|dir.y| and neither half is guessable.
-override pixel_lift_per_m: f32 = 0.0005;
+override pixel_lift_per_m: f32 = 0.0067;
 // Upper bound on the along-ray pull, as a fraction of the seated distance. The grazing
 // compensation below is a division and therefore unbounded as the ray flattens; without a cap a
 // near-horizontal ray would pull the road far enough toward the camera to show through a rise in
 // front of it. Default 3.5% (the owner's value) = 2.8 m at 80 m: generous, because the residual it
 // covers is itself metres along the ray once the grazing division is in play.
-override pixel_lift_max_frac: f32 = 0.004;
+override pixel_lift_max_frac: f32 = 0.04;
 
 // ROAD / DECAL per-pixel depth conform knobs, from the reserved fogfar lanes. Each reads 0 as
 // "use the shipped default", so an unwritten camera is bit-identical to the pre-lane behaviour.
@@ -524,10 +550,10 @@ fn road_lift_flat() -> f32 {
     return select(clamp(frame.fogfar.y, 0.0, 1.0), 0.02, frame.fogfar.y <= 0.0);
 }
 fn road_lift_per_m() -> f32 {
-    return select(clamp(frame.fogfar.z, 0.0, 0.02), 0.004, frame.fogfar.z <= 0.0);
+    return select(clamp(frame.fogfar.z, 0.0, 0.05), 0.0067, frame.fogfar.z <= 0.0);
 }
 fn road_lift_max_frac() -> f32 {
-    return select(clamp(frame.fogfar.w, 0.0005, 0.05), 0.035, frame.fogfar.w <= 0.0);
+    return select(clamp(frame.fogfar.w, 0.0005, 0.04), 0.04, frame.fogfar.w <= 0.0);
 }
 
 fn surface_pixel_depth(in: VsOut) -> f32 {
@@ -553,6 +579,27 @@ fn surface_pixel_depth(in: VsOut) -> f32 {
             p = vec3<f32>(p.x, hy, p.z);
         }
         i = i + 1;
+    }
+    // DID THE ITERATION ACTUALLY CONVERGE? Three steps of a fixed-point solve are enough on any
+    // slope the solve is stable on -- and it is NOT stable everywhere. The step slides along the
+    // ray by hy / dir.y, so at a grazing angle a small height error is a large slide, and the
+    // clamp above then pins the point at 1.5x its true distance. A fragment placed half again as
+    // far away as the road really is loses the depth test against the terrain by TENS OF METRES,
+    // which is why raising the lift narrowed the fringes and never closed the owner's hole on
+    // Malden: the lift is centimetres and the error is not.
+    //
+    // Established by kill door (WGR_ROAD_KILL_DOOR=1): with depth forced to the near plane the
+    // road is a continuous ribbon with no hole at all, so every fragment IS rasterised and the
+    // loss is downstream in depth. Four upstream suspects had already been eliminated by
+    // ablation -- GPU-driven, the CPU road split, the conform height source, and the lift.
+    //
+    // So: measure the residual and, when the solve did not land on the terrain, return the
+    // VERTEX-conformed depth this function was handed. That is the depth the road had before
+    // per-pixel conform existed -- imperfect, but never catastrophically wrong. A refinement
+    // that cannot converge must not be allowed to return something worse than its input.
+    let residual_y = surface_y_raster(p.xz + cam.xz, cam) - cam.y;
+    if (abs(p.y - residual_y) > PIXEL_CONFORM_MAX_RESIDUAL) {
+        return in.clip.z;
     }
     let seated_dist = length(p);
     // GRAZING COMPENSATION. The iteration above leaves a small height residual, and the comment

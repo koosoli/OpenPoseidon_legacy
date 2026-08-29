@@ -2024,11 +2024,18 @@ class Engine : public IGraphicsEngine
         // down a road from standing height. Before that division existed one constant had to serve
         // both the top-down view and the grazing one, and at grazing angles the road broke into a
         // chequer of tiles that won and lost the test alternately (owner, Malden 2026-08-29).
-        // Swept on that road: 0.0015 closes most of it, 0.004 closes it completely.
-        float liftPerMetre = 0.004f;
+        // Swept on Malden; the owner's value after testing the remaining hole himself.
+        float liftPerMetre = 0.0067f;
         // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
         // FINITE as the ray flattens toward the horizon, where the division above runs away.
-        float liftMaxFrac = 0.035f;
+        // 0.04 is a CEILING ON THE CEILING, not a taste setting, and every clamp on the way to
+        // the shader enforces it. The owner measured what lies past it: at 0.1263 a road is
+        // pulled far enough toward the camera to be drawn OVER HOUSES AND OTHER OBJECTS
+        // standing on or near it. That is the failure this whole term exists to bound -- the
+        // pull has to be large enough to beat the conform residual and small enough that the
+        // road never wins against something genuinely in front of it, and 0.04 is where those
+        // two meet on Malden. Raise it only with a picture that shows nothing else broke.
+        float liftMaxFrac = 0.04f;
     };
     virtual RoadSettings GetRoadSettings() const { return {}; }
     virtual void SetRoadSettings(const RoadSettings&) {}

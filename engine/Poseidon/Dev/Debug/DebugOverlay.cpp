@@ -4596,17 +4596,21 @@ void DrawRenderTab()
     roadChanged |= Dev::SliderFloat("Road lift, flat", &road.liftFlat, 0.0f, 0.5f, "%.3f m");
     Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
                       "every angle, so this is the one to raise if a road flickers right in front of you.");
-    roadChanged |= Dev::SliderFloat("Road lift, per metre", &road.liftPerMetre, 0.0f, 0.02f, "%.4f /m");
+    roadChanged |= Dev::SliderFloat("Road lift, per metre", &road.liftPerMetre, 0.0f, 0.05f, "%.4f /m");
     Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
                       "shader, because the error it covers is a height error and a height error becomes\n"
                       "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
                       "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
                       "alternately: continuous close up, continuous from above, in pieces in between.\n"
                       "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
-    roadChanged |= Dev::SliderFloat("Road lift ceiling", &road.liftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
+    roadChanged |= Dev::SliderFloat("Road lift ceiling", &road.liftMaxFrac, 0.0005f, 0.04f, "%.4f x dist",
+                                    ImGuiSliderFlags_Logarithmic);
     Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
                       "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
-                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
+                      "flattens toward the horizon.\n"
+                      "The slider stops at 0.0400, and that is a correctness bound, not a taste one. Past it\n"
+                      "the road is pulled far enough toward the camera to be drawn OVER HOUSES and other\n"
+                      "objects standing on it -- measured by the owner at 0.1263 on Malden.");
     if (roadChanged)
         GEngine->SetRoadSettings(road);
     Dev::PanelHelp("settings are session-only; persist via graphics.cfg");
