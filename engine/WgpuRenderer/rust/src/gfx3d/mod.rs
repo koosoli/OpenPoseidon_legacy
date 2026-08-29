@@ -7730,7 +7730,11 @@ impl Gfx3d {
             std::env::var("WGR_MIP_BIAS").ok().and_then(|v| v.parse::<f32>().ok())
         });
         self.render_scale_lane = if scale < 1.0 && scale > 0.0 {
-            let bias = over.unwrap_or_else(|| scale.log2()).clamp(-4.0, 0.0);
+            // Default = HALF the textbook log2(scale): the owner's measured sweet spot
+            // on this content (2026-08-29) — full bias keeps distant grass/terrain above
+            // the frequency the accumulator can settle and reads as far-field shimmer.
+            // Still scale-derived per plan §8; WGR_MIP_BIAS pins an absolute value.
+            let bias = over.unwrap_or_else(|| 0.5 * scale.log2()).clamp(-4.0, 0.0);
             // Gradient scale for textureSampleGrad paths mirrors the bias: 2^bias.
             [bias, bias.exp2(), 0.0, 0.0]
         } else {
