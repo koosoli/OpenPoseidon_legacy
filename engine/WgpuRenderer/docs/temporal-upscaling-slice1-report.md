@@ -119,8 +119,50 @@ Validation:
   (settle 30 s + static 30 s) — a capture before frame ~2600 photographs the static
   phase and says nothing about motion.
 
+## Phases 8/9/12 — object motion vectors + debug resolve (commits 13411ee8…3aacf518)
+
+- **Rigid motion (H):** the scene draw loop brackets each object (`DrawSortObject` RAII —
+  proxies inherit the parent), `Engine::SetDrawObject` is a non-virtual hint like
+  `_passKindHint` (no vtable change), and EngineWgpu maps the pointer to a stable 16-bit
+  id riding bits 16-31 of `WgrDraw3D.misc` — the lane material-debug already shares, so
+  layout and ABI hash are untouched (`_pad` was NOT free; it carries debug bits 0-8).
+  Temporal keeps id → ABSOLUTE world (camera-relative worlds change on every pan);
+  movers re-rasterise in a gfx3d-owned velocity pass (mirrors `draw_one`'s pool
+  addressing; fs depth-compare against the far resolve stands in for a depth attachment).
+- **Skinned motion (I):** the compute skin-bake output ping-pongs; last frame's baked
+  vertices ARE the previous pose (no previous palettes, per-limb motion falls out of the
+  bake). Association is (object id, mesh) → baked base_vertex — palette slots are
+  per-frame arena indices and cannot carry identity. VS-skinned fallback stays excluded.
+- **Debug resolve (K):** reproject-along-velocity + 3×3 clamp + 90/10 blend into a
+  ping-ponged HDR pair (`WGR_TEMPORAL_DEBUG=2`), Reinhard'd for display. Deliberately
+  minimal; not a production TAA.
+
+Validation (deploy 3aacf518, all in-game via the capture harness):
+- Purpose-built mission (`.tmp-movecam/missions/abel-vehvel_perf_abel.abel`): static
+  camera + driverless jeep on a `setVelocity` oscillation + AI soldier on a patrol loop.
+  Velocity debug view, quantified per pixel: jeep patch 3469 px at R=132 (rightward),
+  soldier 158 px at R=114 (leftward) against a perfectly neutral (127,127) background —
+  rigid AND skinned object motion are real, correctly signed, and confined to the movers.
+- Accumulator on static `perf_abel`: fences/barbed wire crisply resolved, no double
+  edges, no judder — which is the end-to-end proof of the jitter sign, velocity scale
+  and reset contract (any of them wrong is immediately visible here).
+- Accumulator under fast lateral camera motion: coherent image; high-frequency grass
+  shows the expected minimal-TAA smear (the neighbourhood clamp is permissive there) —
+  this is what the reactive mask (Phase 11) and a real upscaler exist to fix, and it is
+  the reason the plan forbids polishing this pass.
+- False alarm worth recording: the movecam cutscene draws its own all-round dark
+  vignette — it is in the PLAIN frame too (corners RGB ≈ 3,4,4 with temporal off).
+  Diagnose debug-view anomalies against a no-debug capture of the same pose first.
+- Headless device tests now cover every lazily-built temporal pipeline (fullscreen
+  velocity + readback both ways, rigid+skinned object pipelines, resolve + history view).
+
+Traps added to the ledger: `cargo build` does NOT restage `dist/` (the `OpenPoseidon.exe`
+target does) — a Deploy after a cargo-only build ships a stale DLL under a fresh stamp;
+caught here by the deploy stamp predating the code being tested.
+
 ## Next (per the approved order)
 
-Phase 5 proper + Phase 8: the ABI change — explicit history-reset events on `WgrFrame`
-and a stable `object_id` on `WgrDraw3D` (version-guarded bump), then rigid-object
-motion vectors; skinned motion via double-buffered skin-bake output after that.
+Phase 10/11: reactive/no-history policy for water, particles, wind-swayed foliage
+(engine-owned mask, vendor-translated later). Phase 13: the `TemporalUpscaler` trait
+(Native/TemporalDebug as first impls). Phase 14: DLSS SR via wgpu-hal/NGX Vulkan —
+NOTE: needs the NVIDIA DLSS SDK on this machine, which the owner must download/license.
