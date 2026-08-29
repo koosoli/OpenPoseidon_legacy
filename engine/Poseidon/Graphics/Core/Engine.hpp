@@ -2028,7 +2028,7 @@ class Engine : public IGraphicsEngine
         float liftPerMetre = 0.004f;
         // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
         // FINITE as the ray flattens toward the horizon, where the division above runs away.
-        float liftMaxFrac = 0.02f;
+        float liftMaxFrac = 0.035f;
     };
     virtual RoadSettings GetRoadSettings() const { return {}; }
     virtual void SetRoadSettings(const RoadSettings&) {}

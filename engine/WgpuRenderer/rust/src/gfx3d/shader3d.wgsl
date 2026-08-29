@@ -512,7 +512,8 @@ override pixel_lift_per_m: f32 = 0.0005;
 // Upper bound on the along-ray pull, as a fraction of the seated distance. The grazing
 // compensation below is a division and therefore unbounded as the ray flattens; without a cap a
 // near-horizontal ray would pull the road far enough toward the camera to show through a rise in
-// front of it. 0.4% is 32 cm at 80 m -- comfortably past the residual, nowhere near a hill.
+// front of it. Default 3.5% (the owner's value) = 2.8 m at 80 m: generous, because the residual it
+// covers is itself metres along the ray once the grazing division is in play.
 override pixel_lift_max_frac: f32 = 0.004;
 
 // ROAD / DECAL per-pixel depth conform knobs, from the reserved fogfar lanes. Each reads 0 as
@@ -526,7 +527,7 @@ fn road_lift_per_m() -> f32 {
     return select(clamp(frame.fogfar.z, 0.0, 0.02), 0.004, frame.fogfar.z <= 0.0);
 }
 fn road_lift_max_frac() -> f32 {
-    return select(clamp(frame.fogfar.w, 0.0005, 0.05), 0.02, frame.fogfar.w <= 0.0);
+    return select(clamp(frame.fogfar.w, 0.0005, 0.05), 0.035, frame.fogfar.w <= 0.0);
 }
 
 fn surface_pixel_depth(in: VsOut) -> f32 {

@@ -140,7 +140,7 @@ pub(crate) fn road_pixel_lift() -> f32 {
 /// show through a rise in front of it. `WGR_ROAD_PIXEL_LIFT_MAX_FRAC` sweeps it without a
 /// rebuild, which is how the shipped value was chosen.
 pub(crate) fn road_pixel_lift_max_frac() -> f32 {
-    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.02).clamp(0.0005, 0.05)
+    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.035).clamp(0.0005, 0.05)
 }
 
 /// Along-ray lift per metre of distance, before the grazing division. `WGR_ROAD_PIXEL_LIFT_PER_M`.
