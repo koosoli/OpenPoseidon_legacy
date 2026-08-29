@@ -22,6 +22,7 @@ mod terrain;
 mod textures;
 mod tonemap;
 mod underwater;
+mod upscaler;
 mod water;
 mod water_visibility;
 
@@ -607,24 +608,15 @@ pub struct Renderer {
     // Output-resolution single-sample HDR target the render-res scene is upscaled into before
     // bloom/exposure/tonemap. None at 100% render scale.
     hdr_upscaled: Option<(wgpu::Texture, wgpu::TextureView)>,
-    // Bilinear fullscreen blit used for that upscale (a diagnostic-grade spatial filter; the
-    // temporal upscaler replaces this pass, not the plumbing around it). Built lazily.
-    upscale_blitter: Option<wgpu::util::TextureBlitter>,
+    // REN-TEMP-001L (plan Phase 13): the ordered upscaler chain - first Done wins.
+    // [DLSS (dlss builds, when the NGX route came up), Bilinear]. All vendor state
+    // (NGX objects, raw device handles, failure latches) lives inside the backends.
+    upscalers: Vec<Box<dyn upscaler::TemporalUpscaler>>,
+    // True when the NGX hal device route was taken at startup (feeds temporal_info).
+    ngx_route: bool,
     // REN-TEMP-001E/F/G: temporal camera state, jitter, static-world velocity + debug view.
     // WGR_TEMPORAL=1 to enable (off by default — jitter with no accumulator is shimmer).
     temporal: temporal::Temporal,
-    // REN-TEMP-001M: raw Vulkan handles for NGX, Some only when the WGR_DLSS hal
-    // device route was taken.
-    #[cfg(feature = "dlss")]
-    ngx_raw: Option<dlss_device::NgxRawHandles>,
-    #[cfg(feature = "dlss")]
-    ngx: Option<dlss::Ngx>,
-    // The (render, output, auto_exposure) the current DLSS feature was created for.
-    #[cfg(feature = "dlss")]
-    ngx_feature_sizes: Option<((u32, u32), (u32, u32), bool)>,
-    // Latched on first NGX failure: DLSS logs once and the bilinear path takes over.
-    #[cfg(feature = "dlss")]
-    ngx_failed: bool,
     // REN-TEMP-001 §6.7: live tuning (dev panel). Seeded from env; the panel overwrites.
     dlss_runtime_on: bool,
     dlss_auto_exposure: bool,
@@ -1048,14 +1040,26 @@ impl Renderer {
         let prepass_enabled = std::env::var("WGR_PREPASS")
             .map(|v| v != "0")
             .unwrap_or(true);
-        // Compute skin bake is OPT-IN (default off): it is correct + validated but pure
-        // overhead until GPU-driven rendering consumes the baked rigid geometry (VS skinning
-        // is ~free for OFP's low-poly characters, so amortizing it saves nothing measurable).
-        // WGR_SKIN_BAKE=1 re-enables it so the path stays exercisable. See
-        // docs/compute-skin-bake-plan.md + docs/gpu-culling-and-depth-plan.md.
+        // Compute skin bake: historically OPT-IN (pure overhead — VS skinning is ~free
+        // for OFP's low-poly characters). REN-TEMP-001I changed the economics: the baked
+        // output double-buffers into REAL per-limb motion vectors for skinned characters,
+        // which a temporal upscaler needs — so the bake now defaults ON whenever the
+        // temporal path will run (DLSS route up, or WGR_TEMPORAL=1). WGR_SKIN_BAKE pins
+        // either way. See docs/compute-skin-bake-plan.md.
+        let temporal_will_run = {
+            let env_on = std::env::var("WGR_TEMPORAL").map(|v| v != "0").unwrap_or(false);
+            #[cfg(feature = "dlss")]
+            {
+                env_on || ngx_raw.is_some()
+            }
+            #[cfg(not(feature = "dlss"))]
+            {
+                env_on
+            }
+        };
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(false);
+            .unwrap_or(temporal_will_run);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance
@@ -1413,7 +1417,6 @@ impl Renderer {
             hdr_size: (0, 0),
             render_scale: if hdr_enabled { render_scale } else { 1.0 },
             hdr_upscaled: None,
-            upscale_blitter: None,
             temporal: {
                 let mut t = temporal::Temporal::from_env();
                 #[cfg(feature = "dlss")]
@@ -1424,14 +1427,25 @@ impl Renderer {
                 }
                 t
             },
-            #[cfg(feature = "dlss")]
-            ngx_raw,
-            #[cfg(feature = "dlss")]
-            ngx: None,
-            #[cfg(feature = "dlss")]
-            ngx_feature_sizes: None,
-            #[cfg(feature = "dlss")]
-            ngx_failed: false,
+            ngx_route: {
+                #[cfg(feature = "dlss")]
+                {
+                    ngx_raw.is_some()
+                }
+                #[cfg(not(feature = "dlss"))]
+                {
+                    false
+                }
+            },
+            upscalers: {
+                let mut v: Vec<Box<dyn upscaler::TemporalUpscaler>> = Vec::new();
+                #[cfg(feature = "dlss")]
+                if let Some(raw) = ngx_raw {
+                    v.push(Box::new(upscaler::DlssUpscaler::new(raw)));
+                }
+                v.push(Box::new(upscaler::BilinearUpscaler::new()));
+                v
+            },
             dlss_runtime_on: true,
             dlss_auto_exposure: std::env::var("WGR_DLSS_AUTO_EXPOSURE")
                 .map(|v| v != "0")
@@ -1955,9 +1969,8 @@ impl Renderer {
             self.render_god_rays(encoder, source);
             self.gpu_timers.end(encoder, TimerRegion::GodRays);
         }
-        // The texture behind `post_source`, tracked for native interop (NGX needs the
-        // VkImage, not just a view). Starts at the resolved scene target.
-        #[cfg(feature = "dlss")]
+        // The texture behind `post_source`, tracked for native interop (a raw-API
+        // upscaler needs the VkImage, not just a view). Starts at the resolved target.
         let mut post_source_tex: Option<wgpu::Texture> = if self.hdr_resolve.is_some() {
             self.hdr_resolve.as_ref().map(|(t, _)| t.clone())
         } else {
@@ -1987,10 +2000,7 @@ impl Renderer {
                 .render(&self.device, encoder, source, depth, target, &displacement);
             self.gpu_timers
                 .end(encoder, TimerRegion::UnderwaterComposite);
-            #[cfg(feature = "dlss")]
-            {
-                post_source_tex = self.underwater_target.as_ref().map(|(t, _)| t.clone());
-            }
+            post_source_tex = self.underwater_target.as_ref().map(|(t, _)| t.clone());
             target.clone()
         } else {
             source.clone()
@@ -1998,7 +2008,6 @@ impl Renderer {
         // Depth of field, between the god-ray composite and bloom. Returns `post_source`
         // untouched when Picture Mode has not enabled it.
         let (post_source, dof_applied) = self.run_depth_of_field(encoder, &post_source);
-        #[cfg(feature = "dlss")]
         if dof_applied {
             post_source_tex = self.dof_target.as_ref().map(|(t, _)| t.clone());
         }
@@ -2008,29 +2017,82 @@ impl Renderer {
         // upscaler replaces. When scaling, bloom/exposure/tonemap are permanently bound to
         // `hdr_upscaled` (see ensure_hdr) and the source-swap rebind below must not run: the
         // swap happens on the blit's INPUT instead.
-        let post_source = if let Some((_, up_view)) = self.hdr_upscaled.as_ref() {
+        let post_source = if let Some((up_tex, up_view)) = self.hdr_upscaled.as_ref() {
+            // REN-TEMP-001L: run the upscaler chain (plan Phase 13) - DLSS first when
+            // present, bilinear as the guaranteed terminal fallback.
+            let up_tex = up_tex.clone();
             let up_view = up_view.clone();
-            // REN-TEMP-001M: DLSS first; the bilinear blit is the fallback and the
-            // native path when DLSS is off.
-            #[cfg(feature = "dlss")]
-            let dlss_done = match post_source_tex.as_ref() {
-                Some(tex) => {
-                    let tex = tex.clone();
-                    self.try_dlss_upscale(encoder, &post_source, &tex)
-                }
-                None => false,
+            let render = self.render_size();
+            let output = (self.config.width, self.config.height);
+            let mut ctx = upscaler::UpscaleContext {
+                device: &self.device,
+                queue: &self.queue,
+                encoder,
+                color_tex: post_source_tex.clone(),
+                color_view: post_source.clone(),
+                depth: self
+                    .gfx3d
+                    .water_depth_texture()
+                    .cloned()
+                    .zip(self.gfx3d.water_depth_view().cloned()),
+                velocity: self
+                    .temporal
+                    .velocity_texture()
+                    .cloned()
+                    .zip(self.temporal.velocity_view().cloned()),
+                exposure: self
+                    .exposure
+                    .as_ref()
+                    .map(|e| (e.scale_texture().clone(), e.scale_view().clone())),
+                history_control: self
+                    .temporal
+                    .history_control_texture()
+                    .cloned()
+                    .zip(self.temporal.history_control_view().cloned()),
+                output_tex: up_tex,
+                output_view: up_view.clone(),
+                render,
+                output,
+                jitter_px: self.temporal.jitter_px,
+                reset: self.temporal.reset_this_frame(),
+                settings: upscaler::UpscaleSettings {
+                    temporal_enabled: self.temporal.enabled,
+                    dlss_runtime_on: self.dlss_runtime_on,
+                    dlss_auto_exposure: self.dlss_auto_exposure,
+                    jitter_y_flip: self.dlss_jy_flip,
+                    mv_render_space: self.dlss_mv_render_space,
+                    mv_flip: self.dlss_mv_flip,
+                    // The MANUAL exposure factor the tonemap multiplies on top of the
+                    // auto-exposure texture - a temporal backend must see the same total.
+                    exposure_scale: self.tonemap_params.exposure.max(1e-4),
+                },
+                notes: Vec::new(),
             };
-            #[cfg(not(feature = "dlss"))]
-            let dlss_done = false;
-            if !dlss_done {
-                let blitter = self.upscale_blitter.get_or_insert_with(|| {
-                    wgpu::util::TextureBlitterBuilder::new(&self.device, HDR_FORMAT)
-                        .sample_type(wgpu::FilterMode::Linear)
-                        .build()
-                });
-                encoder.push_debug_group("wgr_upscale");
-                blitter.copy(&self.device, encoder, &post_source, &up_view);
-                encoder.pop_debug_group();
+            let mut winner: Option<(&'static str, i32)> = None;
+            let mut disabled: Vec<String> = Vec::new();
+            for u in self.upscalers.iter_mut() {
+                match u.evaluate(&mut ctx) {
+                    upscaler::UpscaleOutcome::Done { quality } => {
+                        winner = Some((u.label(), quality));
+                        break;
+                    }
+                    upscaler::UpscaleOutcome::Skip => {}
+                    upscaler::UpscaleOutcome::Disabled(msg) => {
+                        disabled.push(format!("{} disabled: {}", u.label(), msg));
+                    }
+                }
+            }
+            let notes = std::mem::take(&mut ctx.notes);
+            drop(ctx);
+            for n in &notes {
+                self.log.log(log_level::INFO, n);
+            }
+            for m in &disabled {
+                self.log.log(log_level::WARN, m);
+            }
+            if let Some(("DLSS", q)) = winner {
+                self.dlss_active_frame = true;
+                self.dlss_last_quality = q;
             }
             up_view
         } else {
@@ -2163,10 +2225,7 @@ impl Renderer {
 
     fn temporal_info(&self) -> ffi::WgrTemporalInfo {
         let r = self.render_size();
-        #[cfg(feature = "dlss")]
-        let dlss_route = u32::from(self.ngx_raw.is_some());
-        #[cfg(not(feature = "dlss"))]
-        let dlss_route = 0u32;
+        let dlss_route = u32::from(self.ngx_route);
         ffi::WgrTemporalInfo {
             render_width: r.0,
             render_height: r.1,
@@ -2180,287 +2239,6 @@ impl Renderer {
             jitter_y: self.temporal.jitter_px[1],
             mip_bias_effective: self.gfx3d.mip_bias_effective(),
             reset_this_frame: u32::from(self.temporal.reset_this_frame()),
-        }
-    }
-
-    // REN-TEMP-001M: DLSS Super Resolution in place of the bilinear upscale. Returns
-    // true when DLSS was recorded (the caller then skips the blit); any failure marks
-    // the session failed, logs once and falls back to the bilinear path forever.
-    #[cfg(feature = "dlss")]
-    fn try_dlss_upscale(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        source_view: &wgpu::TextureView,
-        source_tex: &wgpu::Texture,
-    ) -> bool {
-        use wgpu::hal::vulkan as hal_vk;
-        if self.ngx_failed || !self.dlss_runtime_on {
-            return false;
-        }
-        let mut fail = |this: &mut Self, msg: &str| -> bool {
-            this.ngx_failed = true;
-            this.log
-                .log(log_level::WARN, &format!("DLSS disabled: {msg}"));
-            false
-        };
-        // DLSS consumes the temporal contract; without jitter+velocity it would only
-        // produce the artefacts the plan spent five phases preventing.
-        if !self.temporal.enabled {
-            return fail(self, "WGR_DLSS needs WGR_TEMPORAL=1 (jitter + motion vectors)");
-        }
-        let Some(raw) = self.ngx_raw.as_ref() else {
-            // Not a failure: WGR_DLSS was off (or the hal route already logged its own
-            // fallback) — the bilinear path is simply the active one.
-            return false;
-        };
-        if self.ngx.is_none() {
-            let ngx = match unsafe {
-                dlss::Ngx::init(raw.instance, raw.physical_device, raw.device)
-            } {
-                Ok(n) => n,
-                Err(r) => return fail(self, &format!("NGX init failed: {r:#x}")),
-            };
-            if !ngx.supersampling_available() {
-                let diag = ngx.availability_diagnostics();
-                return fail(
-                    self,
-                    &format!("driver reports DLSS Super Sampling unavailable ({diag})"),
-                );
-            }
-            self.log
-                .log(log_level::INFO, "NGX initialised; DLSS Super Resolution available");
-            self.ngx = Some(ngx);
-        }
-        let render = self.render_size();
-        let output = (self.config.width, self.config.height);
-        let Some((out_tex, _)) = self.hdr_upscaled.as_ref() else {
-            return false; // 100% scale: nothing to upscale (DLAA comes later)
-        };
-        let out_tex = out_tex.clone();
-        let Some(depth_tex) = self.gfx3d.water_depth_texture().cloned() else {
-            return fail(self, "no single-sample depth resolve (1x MSAA path not wired)");
-        };
-        let Some(vel_tex) = self.temporal.velocity_texture().cloned() else {
-            return fail(self, "velocity target missing");
-        };
-        // Optional: absent only when both reactive terms are disabled.
-        let hc_pair = self
-            .temporal
-            .history_control_texture()
-            .cloned()
-            .zip(self.temporal.history_control_view().cloned());
-        let Some(exposure) = self.exposure.as_ref() else {
-            return fail(self, "exposure pass missing");
-        };
-        let exp_tex = exposure.scale_texture().clone();
-        let exp_view = exposure.scale_view().clone();
-        let vel_view = self.temporal.velocity_view().cloned().expect("vel view");
-        let depth_view = self
-            .gfx3d
-            .water_depth_view()
-            .cloned()
-            .expect("depth view exists with texture");
-        let out_view = self.hdr_upscaled.as_ref().map(|(_, v)| v.clone()).expect("out view");
-
-        // (Re)create the feature when the extents change. Quality is the nearest DLSS
-        // preset for the active render scale — the SDK's optimal-settings query stays
-        // the source of truth for preset ratios; we drive explicit extents.
-        let scale = render.0 as f32 / output.0.max(1) as f32;
-        let quality = if scale >= 0.99 {
-            dlss::Quality::Dlaa
-        } else if scale >= 0.63 {
-            dlss::Quality::Quality
-        } else if scale >= 0.54 {
-            dlss::Quality::Balanced
-        } else {
-            dlss::Quality::Performance
-        };
-        let need_create = self.ngx_feature_sizes != Some((render, output, self.dlss_auto_exposure));
-
-        // Hand wgpu the layout truth BEFORE going raw: inputs sampled, output storage.
-        encoder.transition_resources(
-            std::iter::empty(),
-            [
-                wgpu::TextureTransition {
-                    texture: source_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::RESOURCE,
-                },
-                wgpu::TextureTransition {
-                    texture: &depth_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::RESOURCE,
-                },
-                wgpu::TextureTransition {
-                    texture: &vel_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::RESOURCE,
-                },
-                wgpu::TextureTransition {
-                    texture: &exp_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::RESOURCE,
-                },
-                wgpu::TextureTransition {
-                    texture: &out_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::STORAGE_READ_WRITE,
-                },
-            ]
-            .into_iter(),
-        );
-        if let Some((hc_tex, _)) = hc_pair.as_ref() {
-            encoder.transition_resources(
-                std::iter::empty(),
-                std::iter::once(wgpu::TextureTransition {
-                    texture: hc_tex,
-                    selector: None,
-                    state: wgpu::TextureUses::RESOURCE,
-                }),
-            );
-        }
-
-        // Raw handles for NGX. VK_FORMAT values: R16G16B16A16_SFLOAT=97, R16G16_SFLOAT=83,
-        // R32_SFLOAT=100, D32_SFLOAT=126. Aspects: COLOR=1, DEPTH=2.
-        let vk_res = |tex: &wgpu::Texture,
-                      view: &wgpu::TextureView,
-                      format: u32,
-                      aspect: u32,
-                      size: (u32, u32),
-                      rw: bool|
-         -> Option<dlss::NgxResourceVk> {
-            let image = unsafe { tex.as_hal::<hal_vk::Api>()?.raw_handle() };
-            let image_view = unsafe { view.as_hal::<hal_vk::Api>()?.raw_handle() };
-            use ash::vk::Handle;
-            Some(dlss::NgxResourceVk {
-                image_view_info: dlss::NgxImageViewInfoVk {
-                    image_view: image_view.as_raw(),
-                    image: image.as_raw(),
-                    subresource_range: dlss::VkImageSubresourceRange {
-                        aspect_mask: aspect,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1,
-                    },
-                    format,
-                    width: size.0,
-                    height: size.1,
-                },
-                ty: dlss::NGX_RESOURCE_VK_TYPE_IMAGEVIEW,
-                read_write: rw,
-            })
-        };
-        let (Some(mut color), Some(mut depth), Some(mut motion), Some(mut expo), Some(mut out)) = (
-            vk_res(source_tex, source_view, 97, 1, render, false),
-            vk_res(&depth_tex, &depth_view, 126, 2, render, false),
-            vk_res(&vel_tex, &vel_view, 83, 1, render, false),
-            vk_res(&exp_tex, &exp_view, 100, 1, (1, 1), false),
-            vk_res(&out_tex, &out_view, 97, 1, output, true),
-        ) else {
-            return fail(self, "as_hal returned no Vulkan handles");
-        };
-        // R8Unorm = VK_FORMAT_R8_UNORM (9).
-        let mut hcm = hc_pair
-            .as_ref()
-            .and_then(|(t, v)| vk_res(t, v, 9, 1, render, false));
-
-        // Jitter reaches DLSS in PIXEL space (y-down); our jitter is applied in NDC
-        // (y-up), so Y flips by default. The remaining sign/space knobs are live-tunable
-        // A/B arms (dev panel / env seeds) — the plan's §21 forbids "tuning artefacts
-        // out" with sharpening instead of validating the convention.
-        let jy = self.dlss_jy_flip;
-        let mvf = self.dlss_mv_flip;
-        let j = self.temporal.jitter_px;
-        let jitter = [j[0], if jy { -j[1] } else { j[1] }];
-        let reset = self.temporal.reset_this_frame();
-        // WGR_DLSS_AUTO_EXPOSURE=1: let DLSS meter for itself (bypasses our exposure
-        // texture) — the decisive arm for exposure-mismatch ghosting in shadows/sky.
-        // DEFAULT ON — the owner's blind A/B (2026-08-30): DLSS metering for itself
-        // beat every variant of feeding our exposure chain, especially in shadows.
-        let auto_exposure = self.dlss_auto_exposure;
-        // The MANUAL exposure factor the tonemap multiplies on top of the auto-exposure
-        // texture (colour *= params.exposure * auto_exp) — DLSS must see the same total.
-        let exposure_scale = self.tonemap_params.exposure.max(1e-4);
-        let mv_sign = if mvf { -1.0f32 } else { 1.0 };
-        // MV scale: our velocity is a UV-space delta; DLSS wants pixels. The owner's
-        // pan test ("content lags the pan, most visible on soft shadow/cloud
-        // gradients") is the symptom of scaling by the wrong space — smooth content
-        // undershoots its reprojection by exactly the upscale ratio. OUTPUT pixels is
-        // the default; WGR_DLSS_MV_RENDER=1 is the A/B arm for render-pixel scaling.
-        let (mvw, mvh) = if self.dlss_mv_render_space { render } else { output };
-        let mv_scale = [mvw as f32 * mv_sign, mvh as f32 * mv_sign];
-        let ngx = self.ngx.as_mut().expect("ngx initialised above");
-        // wgpu forbids mixing its own encoding API with raw hal encoding in ONE encoder,
-        // so the frame splits here: everything recorded so far (scene + the transitions
-        // above) is submitted, NGX records into a DEDICATED raw-only encoder submitted
-        // next, and the caller continues the frame on a fresh encoder. Queue order
-        // preserves the data flow exactly.
-        let scene_encoder = std::mem::replace(
-            encoder,
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("wgr_frame_post_dlss"),
-                }),
-        );
-        self.queue.submit([scene_encoder.finish()]);
-        let mut dlss_encoder =
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("wgr_dlss_raw"),
-                });
-        let result: Result<(), dlss::NgxResult> = unsafe {
-            use ash::vk::Handle;
-            let mut r = Ok(());
-            dlss_encoder.as_hal_mut::<hal_vk::Api, _, _>(|hal_enc| {
-                let Some(hal_enc) = hal_enc else {
-                    r = Err(0);
-                    return;
-                };
-                let cmd = hal_enc.raw_handle().as_raw() as usize as *mut std::os::raw::c_void;
-                if need_create {
-                    if let Err(e) =
-                        ngx.create_feature(cmd, render, output, quality, auto_exposure)
-                    {
-                        r = Err(e);
-                        return;
-                    }
-                }
-                r = ngx.evaluate(
-                    cmd,
-                    &mut color,
-                    &mut depth,
-                    &mut motion,
-                    Some(&mut expo),
-                    hcm.as_mut(),
-                    &mut out,
-                    jitter,
-                    mv_scale,
-                    reset,
-                    render,
-                    exposure_scale,
-                );
-            });
-            r
-        };
-        self.queue.submit([dlss_encoder.finish()]);
-        match result {
-            Ok(()) => {
-                self.dlss_active_frame = true;
-                self.dlss_last_quality = quality as i32;
-                if need_create {
-                    self.ngx_feature_sizes = Some((render, output, auto_exposure));
-                    self.log.log(
-                        log_level::INFO,
-                        &format!(
-                            "DLSS feature created: {}x{} -> {}x{} ({quality:?})",
-                            render.0, render.1, output.0, output.1
-                        ),
-                    );
-                }
-                true
-            }
-            Err(r) => fail(self, &format!("NGX create/evaluate failed: {r:#x}")),
         }
     }
 
@@ -2509,6 +2287,15 @@ impl Renderer {
     // (Re)allocate the offscreen HDR scene target to match the swapchain size, and
     // repoint the tonemap resolve at the new view. No-op when the HDR path is off or
     // the size is unchanged. Mirrors Gfx3d::ensure_depth.
+    // REN-TEMP-001N: DLAA = the DLSS backend running at render == output (pure temporal
+    // AA, no resolution win). True when the route is up and both switches are on; the
+    // failure latch lives inside the backend, so after an NGX failure this stays true
+    // and the frame degrades to a redundant bilinear copy — turn DLSS off (panel or
+    // WGR_DLSS=0) to reclaim the byte-identical native path.
+    fn dlaa_active(&self) -> bool {
+        self.ngx_route && self.dlss_runtime_on && self.temporal.enabled
+    }
+
     fn ensure_hdr(&mut self, width: u32, height: u32) {
         if !self.hdr_enabled || width == 0 || height == 0 {
             return;
@@ -2518,9 +2305,13 @@ impl Renderer {
         // the render size identical across an output resize, so the scene size alone is not
         // enough to prove the upscale target is current.
         let out = (self.config.width, self.config.height);
+        // REN-TEMP-001N: at 100% scale the upscale target normally does not exist — except
+        // for DLAA, where DLSS runs at render == output purely as a temporal AA pass and
+        // still needs its own storage-image output to write into.
+        let want_upscaled = (width, height) != out || self.dlaa_active();
         let upscaled_current = match self.hdr_upscaled.as_ref() {
-            Some((t, _)) => (width, height) != out && (t.width(), t.height()) == out,
-            None => (width, height) == out,
+            Some((t, _)) => want_upscaled && (t.width(), t.height()) == out,
+            None => !want_upscaled,
         };
         if self.hdr.is_some() && self.hdr_size == (width, height) && upscaled_current {
             return;
@@ -2595,7 +2386,7 @@ impl Renderer {
         // into, not the render-resolution resolve. At 100% no such target exists and the
         // chain reads the resolve directly — the pre-split behaviour, byte for byte.
         let (out_w, out_h) = (self.config.width, self.config.height);
-        self.hdr_upscaled = ((width, height) != (out_w, out_h)).then(|| {
+        self.hdr_upscaled = want_upscaled.then(|| {
             let t = self.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("wgr_hdr_upscaled"),
                 size: wgpu::Extent3d {

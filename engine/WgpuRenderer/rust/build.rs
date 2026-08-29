@@ -86,6 +86,13 @@ fn main() {
             sdk.join("lib/Windows_x86_64/x64").display()
         );
         println!("cargo:rustc-link-lib=static=nvsdk_ngx_d");
+        // Where the dev snippet DLL lives — the headless tests point the runtime
+        // WGR_NGX_SNIPPET_DIR override here (a test exe runs from target/debug/deps,
+        // which has no nvngx_dlss.dll beside it).
+        println!(
+            "cargo:rustc-env=WGR_DLSS_SNIPPET_DIR={}",
+            sdk.join("lib/Windows_x86_64/rel").display()
+        );
         // NGX reads driver paths from the registry.
         println!("cargo:rustc-link-lib=advapi32");
         println!("cargo:rerun-if-env-changed=WGR_DLSS_SDK");

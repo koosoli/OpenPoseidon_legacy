@@ -265,7 +265,9 @@ pub fn feature_requirements(
     instance: VkInstance,
     physical_device: VkPhysicalDevice,
 ) -> Result<u32, NgxResult> {
-    let data_path: Vec<u16> = ". ".encode_utf16().collect();
+    // NUL-terminated wide "." — built without a literal NUL byte (a raw NUL in the
+    // source makes grep treat the file as binary and text patches silently miss).
+    let data_path: Vec<u16> = ".".encode_utf16().chain(std::iter::once(0)).collect();
     let disco = NgxFeatureDiscoveryInfo {
         sdk_version: NGX_VERSION_API,
         feature_id: NGX_FEATURE_SUPERSAMPLING,
@@ -353,12 +355,18 @@ impl Ngx {
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_else(|| ".".to_owned());
-        let paths: &'static [*const u16] =
-            Box::leak(vec![wide(&exe_dir).as_ptr()].into_boxed_slice());
+        // WGR_NGX_SNIPPET_DIR appends an extra search directory — the headless tests
+        // use it (their exe dir is target/debug/deps, which carries no snippet).
+        let mut path_vec: Vec<*const u16> = vec![wide(&exe_dir).as_ptr()];
+        if let Ok(extra) = std::env::var("WGR_NGX_SNIPPET_DIR") {
+            path_vec.push(wide(&extra).as_ptr());
+        }
+        let path_len = path_vec.len() as u32;
+        let paths: &'static [*const u16] = Box::leak(path_vec.into_boxed_slice());
         let common: &'static NgxFeatureCommonInfo = Box::leak(Box::new(NgxFeatureCommonInfo {
             path_list: NgxPathListInfo {
                 path: paths.as_ptr(),
-                length: 1,
+                length: path_len,
             },
             internal_data: std::ptr::null_mut(),
             logging: NgxLoggingInfo {

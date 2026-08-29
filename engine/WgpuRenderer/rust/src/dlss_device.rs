@@ -107,6 +107,9 @@ mod tests {
 
     #[test]
     fn ngx_initialises_and_reports_supersampling_on_this_gpu() {
+        // The test exe runs from target/debug/deps, which has no nvngx_dlss.dll beside
+        // it — point the snippet search at the SDK copy build.rs located.
+        unsafe { std::env::set_var("WGR_NGX_SNIPPET_DIR", env!("WGR_DLSS_SNIPPET_DIR")) };
         let instance = match super::create_instance(wgpu::InstanceFlags::empty()) {
             Ok(i) => i,
             Err(e) => {
