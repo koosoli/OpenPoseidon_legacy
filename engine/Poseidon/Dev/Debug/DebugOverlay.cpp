@@ -6077,12 +6077,12 @@ void DrawMainWindow()
     // Reset-all, beside the search because both act on the same set: every
     // control the panel has drawn. Behind a confirmation, since a dev session can
     // be an hour of tuning and there is no undo.
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reset settings"))
+    Dev::PanelSameLine();
+    if (Dev::SmallButton("Reset settings"))
     {
         ImGui::OpenPopup("Reset dev settings?");
     }
-    if (ImGui::IsItemHovered())
+    if (Dev::PanelItemHovered())
     {
         ImGui::SetTooltip(
             "Named settings only -- the dialog lists exactly which.\n"
@@ -6104,13 +6104,13 @@ void DrawMainWindow()
                             "how, and most do not yet -- so this list IS the coverage, not a\n"
                             "summary of it. There is no undo.");
         ImGui::Separator();
-        if (ImGui::Button("Reset"))
+        if (Dev::Button("Reset"))
         {
             Dev::ResetPanelSettings();
             ImGui::CloseCurrentPopup();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel"))
+        Dev::PanelSameLine();
+        if (Dev::Button("Cancel"))
         {
             ImGui::CloseCurrentPopup();
         }
