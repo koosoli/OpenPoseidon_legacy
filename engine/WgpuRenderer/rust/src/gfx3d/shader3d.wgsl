@@ -195,6 +195,7 @@ override a2c: f32 = 0.0;
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
 // ambient so transparent cockpit canopies don't wash out to the sky (and crash auto-exposure).
 override translucent: f32 = 0.0;
+
 // Brightness a fully terrain-shadowed alpha-tested surface (foliage cutout) keeps.
 // Dense canopy self-occludes its sky ambient — which the world-space terrain mask
 // can't model and foliage materials inflate for the sunlit look — so shadowed
@@ -243,6 +244,8 @@ override cutout_mip_alpha: f32 = 0.0;
 override pixel_lift: f32 = 0.02;
 // WGR_ROAD_KILL_DOOR=1 -- see fs_surface. A probe, never a look.
 override road_kill_door: f32 = 0.0;
+// WGR_ALPHA_KILL_DOOR=1 -- forces blended fragments opaque. A probe, never a look.
+override alpha_kill_door: f32 = 0.0;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
@@ -550,10 +553,10 @@ fn road_lift_flat() -> f32 {
     return select(clamp(frame.fogfar.y, 0.0, 1.0), 0.02, frame.fogfar.y <= 0.0);
 }
 fn road_lift_per_m() -> f32 {
-    return select(clamp(frame.fogfar.z, 0.0, 0.05), 0.0067, frame.fogfar.z <= 0.0);
+    return select(clamp(frame.fogfar.z, 0.0, 0.2), 0.0067, frame.fogfar.z <= 0.0);
 }
 fn road_lift_max_frac() -> f32 {
-    return select(clamp(frame.fogfar.w, 0.0005, 0.04), 0.04, frame.fogfar.w <= 0.0);
+    return select(clamp(frame.fogfar.w, 0.0005, 2.0), 0.04, frame.fogfar.w <= 0.0);
 }
 
 fn surface_pixel_depth(in: VsOut) -> f32 {
@@ -776,6 +779,20 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         }
     } else if (cut_a < alpha_ref) {
         discard;
+    }
+    // WGR_ALPHA_KILL_DOOR=1 -- force every blended fragment fully opaque. One question only:
+    // is a translucent-looking surface translucent because of its ALPHA, or because of the
+    // order it is drawn in? Those need opposite fixes and a screenshot cannot tell them apart.
+    // Written for the Malden town sign, whose plate texture measures 89% fully opaque and still
+    // shows the houses behind it.
+    if (alpha_kill_door > 0.5) {
+        // Solid red at alpha 1, not just alpha 1. Forcing the alpha alone cannot tell three
+        // cases apart, and on the Malden sign that ambiguity cost a wrong conclusion: nothing
+        // changed, and "the alpha is not the cause" and "the probe never reached this draw"
+        // look identical. With a colour: red and opaque = the probe reached it and the blend is
+        // over, so the fault is upstream of alpha. Red and still see-through = it reached it and
+        // the blend is NOT over. Unchanged = it never reached this draw at all.
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
     if (is_shadow > 0.5) {
         return vec4<f32>(0.0, 0.0, 0.0, frame.params.shadow_strength * base.a);

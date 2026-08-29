@@ -2028,13 +2028,16 @@ class Engine : public IGraphicsEngine
         float liftPerMetre = 0.0067f;
         // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
         // FINITE as the ray flattens toward the horizon, where the division above runs away.
-        // 0.04 is a CEILING ON THE CEILING, not a taste setting, and every clamp on the way to
-        // the shader enforces it. The owner measured what lies past it: at 0.1263 a road is
-        // pulled far enough toward the camera to be drawn OVER HOUSES AND OTHER OBJECTS
-        // standing on or near it. That is the failure this whole term exists to bound -- the
-        // pull has to be large enough to beat the conform residual and small enough that the
-        // road never wins against something genuinely in front of it, and 0.04 is where those
-        // two meet on Malden. Raise it only with a picture that shows nothing else broke.
+        // The DEFAULT is bounded at 0.04; the control is not. The owner measured what lies
+        // past it: at 0.1263 a road is pulled far enough toward the camera to be drawn OVER
+        // HOUSES AND OTHER OBJECTS standing on or near it (the pull is ~8.7 m at 80 m and ~25 m
+        // at 200 m, so anything closer than that in front of the road loses). That is the
+        // failure this term exists to bound, and 0.04 is where the two requirements meet on
+        // Malden -- large enough to beat the conform residual, small enough to lose to a house.
+        //
+        // Clamped generously rather than at 0.04 on purpose: a shipped default is mine to keep
+        // safe, a dev-panel slider is the user's to push. Anyone who raises it will see the
+        // artefact immediately, which is a better teacher than a slider that stops.
         float liftMaxFrac = 0.04f;
     };
     virtual RoadSettings GetRoadSettings() const { return {}; }

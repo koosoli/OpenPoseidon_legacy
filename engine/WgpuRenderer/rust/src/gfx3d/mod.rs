@@ -140,12 +140,12 @@ pub(crate) fn road_pixel_lift() -> f32 {
 /// show through a rise in front of it. `WGR_ROAD_PIXEL_LIFT_MAX_FRAC` sweeps it without a
 /// rebuild, which is how the shipped value was chosen.
 pub(crate) fn road_pixel_lift_max_frac() -> f32 {
-    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.04).clamp(0.0005, 0.04)
+    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.04).clamp(0.0005, 2.0)
 }
 
 /// Along-ray lift per metre of distance, before the grazing division. `WGR_ROAD_PIXEL_LIFT_PER_M`.
 pub(crate) fn road_pixel_lift_per_m() -> f32 {
-    env_f32("WGR_ROAD_PIXEL_LIFT_PER_M", 0.0067).clamp(0.0, 0.05)
+    env_f32("WGR_ROAD_PIXEL_LIFT_PER_M", 0.0067).clamp(0.0, 0.2)
 }
 
 /// The GAME-log announcement (the launcher discards stderr): which arm drew the roads.
@@ -3850,9 +3850,18 @@ impl Gfx3d {
             ("linear", linear),
             ("a2c", if a2c { 1.0 } else { 0.0 }),
             ("translucent", translucent),
+
             ("emissive_night", emissive_night() as f64),
             ("cutout_mip_alpha", cutout_mip_alpha() as f64),
             ("pixel_lift", road_pixel_lift() as f64),
+            (
+                "alpha_kill_door",
+                if std::env::var("WGR_ALPHA_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
+                    1.0
+                } else {
+                    0.0
+                },
+            ),
             (
                 "road_kill_door",
                 if std::env::var("WGR_ROAD_KILL_DOOR").map(|v| v != "0").unwrap_or(false) {
@@ -7213,11 +7222,11 @@ impl Gfx3d {
     /// value that closes a road on Malden cost one rebuild and one redeploy per sample.
     pub fn set_road_conform(&mut self, flat: f32, per_m: f32, max_frac: f32) {
         self.fog_far[1] = flat.clamp(0.0, 1.0);
-        self.fog_far[2] = per_m.clamp(0.0, 0.05);
-        // Hard-limited to 0.04: past it the road is pulled far enough forward to draw over
-        // houses and other objects standing on it (owner, measured at 0.1263). See
-        // Engine::RoadSettings::liftMaxFrac.
-        self.fog_far[3] = max_frac.clamp(0.0, 0.04);
+        self.fog_far[2] = per_m.clamp(0.0, 0.2);
+        // Wide on purpose. The DEFAULT is bounded at 0.04 (see Engine::RoadSettings), because
+        // past it a road is pulled far enough forward to draw over houses; the control itself
+        // is the user's to push.
+        self.fog_far[3] = max_frac.clamp(0.0, 2.0);
     }
 
     pub fn set_water_anim(&mut self, time: f32, flow_slot: u32, flow_strength: f32) {
