@@ -2280,6 +2280,15 @@ impl Renderer {
         let j = self.temporal.jitter_px;
         let jitter = [j[0], if jy { -j[1] } else { j[1] }];
         let reset = self.temporal.reset_this_frame();
+        // WGR_DLSS_AUTO_EXPOSURE=1: let DLSS meter for itself (bypasses our exposure
+        // texture) — the decisive arm for exposure-mismatch ghosting in shadows/sky.
+        static AUTO_EXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let auto_exposure = *AUTO_EXP.get_or_init(|| {
+            std::env::var("WGR_DLSS_AUTO_EXPOSURE").map(|v| v != "0").unwrap_or(false)
+        });
+        // The MANUAL exposure factor the tonemap multiplies on top of the auto-exposure
+        // texture (colour *= params.exposure * auto_exp) — DLSS must see the same total.
+        let exposure_scale = self.tonemap_params.exposure.max(1e-4);
         let mv_sign = if mvf { -1.0f32 } else { 1.0 };
         // MV scale: our velocity is a UV-space delta; DLSS wants pixels. The owner's
         // pan test ("content lags the pan, most visible on soft shadow/cloud
@@ -2321,7 +2330,9 @@ impl Renderer {
                 };
                 let cmd = hal_enc.raw_handle().as_raw() as usize as *mut std::os::raw::c_void;
                 if need_create {
-                    if let Err(e) = ngx.create_feature(cmd, render, output, quality) {
+                    if let Err(e) =
+                        ngx.create_feature(cmd, render, output, quality, auto_exposure)
+                    {
                         r = Err(e);
                         return;
                     }
@@ -2338,6 +2349,7 @@ impl Renderer {
                     mv_scale,
                     reset,
                     render,
+                    exposure_scale,
                 );
             });
             r

@@ -488,6 +488,7 @@ impl Ngx {
         render: (u32, u32),
         output: (u32, u32),
         quality: Quality,
+        auto_exposure: bool,
     ) -> Result<(), NgxResult> {
         self.release_feature();
         unsafe {
@@ -500,11 +501,13 @@ impl Ngx {
             // purpose (temporal.wgsl), so the vectors carry no jitter — claiming they do
             // makes DLSS "compensate" motion that is not there, which reads as a
             // permanent slight blur.
-            NVSDK_NGX_Parameter_SetI(
-                self.params,
-                name!("DLSS.Feature.Create.Flags"),
-                DLSS_FLAG_IS_HDR | DLSS_FLAG_MV_LOWRES | DLSS_FLAG_DEPTH_INVERTED,
-            );
+            let mut flags = DLSS_FLAG_IS_HDR | DLSS_FLAG_MV_LOWRES | DLSS_FLAG_DEPTH_INVERTED;
+            if auto_exposure {
+                // A/B arm: DLSS derives exposure itself, bypassing our exposure texture
+                // entirely — the decisive test for exposure-mismatch artefacts.
+                flags |= DLSS_FLAG_AUTO_EXPOSURE;
+            }
+            NVSDK_NGX_Parameter_SetI(self.params, name!("DLSS.Feature.Create.Flags"), flags);
             let mut handle: *mut NgxHandle = std::ptr::null_mut();
             let r = NVSDK_NGX_VULKAN_CreateFeature1(
                 self.device,
@@ -538,6 +541,10 @@ impl Ngx {
         mv_scale: [f32; 2],
         reset: bool,
         render: (u32, u32),
+        // The MANUAL exposure factor the tonemap multiplies ON TOP of the auto-exposure
+        // texture (tonemap.wgsl: colour *= params.exposure * auto_exp). DLSS must see
+        // the same total, or it misjudges luminance — worst in shadows and sky.
+        exposure_scale: f32,
     ) -> Result<(), NgxResult> {
         let Some(feature) = self.feature else {
             return Err(1);
@@ -571,6 +578,7 @@ impl Ngx {
             NVSDK_NGX_Parameter_SetF(p, name!("MV.Scale.X"), mv_scale[0]);
             NVSDK_NGX_Parameter_SetF(p, name!("MV.Scale.Y"), mv_scale[1]);
             NVSDK_NGX_Parameter_SetI(p, name!("Reset"), i32::from(reset));
+            NVSDK_NGX_Parameter_SetF(p, name!("DLSS.Exposure.Scale"), exposure_scale);
             NVSDK_NGX_Parameter_SetUI(p, name!("DLSS.Render.Subrect.Dimensions.Width"), render.0);
             NVSDK_NGX_Parameter_SetUI(p, name!("DLSS.Render.Subrect.Dimensions.Height"), render.1);
             let r = NVSDK_NGX_VULKAN_EvaluateFeature_C(cmd, feature, p, std::ptr::null());
