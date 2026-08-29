@@ -233,11 +233,95 @@ render scale 50–100 % (live, with explicit history reset; 100 % = DLAA), mip b
 auto/manual, reactive strengths, jitter phases, convention probes under a leave-alone
 header, all beside an fps readout and an info block. The owner tunes without rebuilds.
 
-## Next (per the approved order)
+## Default-on, Phase 13, DLAA, skinned-MV fix (2026-08-30, commits 972d1fdd…)
 
-Phase 10/11 remainder: sway/particle handling (water, particles, wind-swayed foliage) — DLSS
-currently sees no reactive input, so water/particle ghosting is expected until then.
-Phase 13 proper: fold Native/TemporalDebug/DLSS behind the `TemporalUpscaler` trait
-(today the seams exist but the trait is not yet formalised). Then DLAA, the §24/§25
-validation matrices, mode plumbing into the Options UI, and FSR 3.1 as the in-tree
-all-vendor backend.
+- **DLSS is baked into the exe** (972d1fdd): in a dlss build the NGX route, temporal
+  path and the owner-validated 67 % scale are the plain-launch defaults — no launcher,
+  no env vars. `WGR_DLSS=0`, the panel, or any failure anywhere on the route fall back
+  to the untouched native path. Zero-env smoke: route up → 67 % → feature created
+  (Quality).
+- **Phase 13 is formalised** (f1c4710a, `src/upscaler.rs`): a vendor-neutral
+  `TemporalUpscaler` trait + `UpscaleContext`, renderer holds an ordered backend chain
+  ([DLSS, Bilinear], first `Done` wins). Every NGX object, raw device handle and
+  failure latch lives inside the DLSS backend; FSR 3.1 / XeSS / DLSS 5 are now "one
+  more impl", which is the whole point of the phase. "Native" is the absence of the
+  chain (no upscale target at 100 % without DLAA).
+- **DLAA is reachable**: at 100 % scale the upscale target now exists whenever the DLSS
+  route is live, so DLSS runs as a pure temporal-AA pass (render == output). The
+  panel's scale slider at 100 % = DLAA, exactly as its tooltip promised.
+- **Skinned motion vectors were silently OFF in play** — the `skin_bake=false` gate
+  log was real: compute skin bake was opt-in, and without it the ping-ponged bake
+  buffers Phase 9 reads never existed, so soldiers got camera-only velocity. The
+  attempted fix (bake default-on with temporal, f1c4710a) **shipped a regression and
+  was reverted the same night** (be94e6d7): enabling the bake explodes all skinned
+  geometry into full-screen triangle shards — the owner saw it live, and the §25
+  matrix photographed it in every DLSS arm. Probes proved the fault sits in the
+  bake/draw path itself (shatter persists with DLSS off, temporal off, gpu_driven
+  off: `final-matrix/probe-bake-*`), i.e. the compute bake was broken all along and
+  its default-off status had been hiding that. Until it is root-caused (follow-up task
+  filed), skinned characters ride rigid/camera velocity — the state every
+  owner-validated session actually ran. Lesson recorded: *a default flip is a
+  feature's first real deployment — screenshot it before shipping it.*
+- The NGX headless test was repaired (it runs from `target/debug/deps`, which has no
+  snippet DLL — `WGR_NGX_SNIPPET_DIR` override, pointed at the SDK copy by the test),
+  and the literal NUL byte in `feature_requirements`' wide-string terminator is gone
+  (raw NULs make grep call the file binary; that failure mode already cost hours once).
+
+## Phase 10/11 closure — difficult content posture (recorded, not faked)
+
+Per plan §10/§11 the rule is *reactive/no-history over false vectors*. Shipped
+history-control producers: **sky** (far-clear depth test) and **water** (seabed
+reconstruction below sea level), both live-tunable. Deliberately deferred, with the
+hooks in place (`misc` id lane + the R8 mask channel): wind-swayed foliage (vertex
+sway in shader — no artefact surfaced in any owner session; A2C stipple under jitter
+never materialised as shimmer), rain/particles/smoke, rotor discs, muzzle flashes.
+DLSS's own auto-exposure + clamp handled all of these acceptably in play; none of the
+owner's three reported artefact classes traced to them (vibration = jitter conventions,
+sharpness = mip bias, ghosting = exposure). If one surfaces later, the fix is a mask
+write in the relevant pass, not new architecture.
+
+## §24/§25 — final validation matrix (installed a211baeb, fullscreen 3441×1440)
+
+Modes: native (no temporal), bilinear 67 % (spatial-only control), DLSS Quality 67 % /
+Balanced 58 % / Performance 50 %, DLAA 100 %. 4 GPU-bound scenes, 2 repeats each;
+perf_combat excluded — it is CPU-bound (GPU 25–39 % in Phase 0) and no upscaler can
+help it.
+
+Avg fps (CPU-side `cpu_frame_phases_ms.avg_fps`, best of 2 valid 256-frame captures;
+the GPU frame-total timer straddles DLSS's 3-part submission split, so wall-clock is
+the honest number). Percentages vs native. Data: `.tmp-farfield-bench/final-matrix/`.
+
+| Scene | Native 100% | Bilinear 67% | DLSS Q 67% | DLSS B 58% | DLSS P 50% | DLAA 100% |
+|---|---|---|---|---|---|---|
+| abel  | 28.4 | 37.9 (+34%) | 35.4 (+25%) | 38.1 (+34%) | 36.5 (+29%) | 26.3 (−7%) |
+| town  | 37.6 | 53.1 (+41%) | 45.9 (+22%) | 50.1 (+33%) | 47.4 (+26%) | 33.8 (−10%) |
+| water | 20.0 | 27.6 (+38%) | 26.2 (+31%) | 28.7 (+44%) | 29.0 (+45%) | 18.8 (−6%) |
+| field | 36.9 | 52.1 (+41%) | 46.0 (+24%) | 50.5 (+37%) | 46.7 (+26%) | 33.8 (−9%) |
+
+Readings: (1) DLSS Quality costs ~2–7 fps of the bilinear win — the ~2.4 ms NGX
+evaluate — and buys near-native sharpness for it; the shipped default (67 %) is the
+right call. (2) Below ~58 % the CPU limit starts to bite (abel/field P50 < B58):
+Performance mode has no headroom left to convert, so there is no reason to ship below
+Balanced on this box. (3) DLAA costs 6–10 % vs native for the best image of the set
+(the 4×MSAA scene plus a full-res DLSS pass) — a quality option, not a perf one.
+(4) Every capture of every arm was eyeballed clean; this same table photographed the
+skin-bake regression before the rerun, which is why the PNG review is not optional.
+
+## Definition of Done — reconciliation
+
+| Plan item | State |
+| --- | --- |
+| Resolution split, native-res UI/HUD | done (ee5a0d24), regression-free at 100 % |
+| Mip bias | done; default = half log2(scale) (owner A/B), panel/env override |
+| Jitter + reset contract | done (14b8807a); phases ≈ 8·(out/render)² |
+| Motion vectors: static/rigid/skinned | static+rigid done; skinned implemented but parked behind the broken skin bake (see regression note) |
+| Reactive/history control | sky + water shipped; rest recorded above as reactive-by-DLSS |
+| Debug resolve | done (WGR_TEMPORAL_DEBUG=2), retained as diagnostic |
+| TemporalUpscaler abstraction | done (f1c4710a, `upscaler.rs`) |
+| DLSS SR in-tree, feature-gated, clean fallback | done; default-on in dlss builds, GPL builds unaffected |
+| DLAA | done (a211baeb wiring); measured below |
+| Live tuning surface (§6.7) | done (Temporal tab) |
+| Validation matrices (§24/§25) | this section |
+| Options-menu plumbing for players | NOT done — dev panel only (next milestone) |
+| FSR 3.1 / XeSS backends | NOT done — trait boundary ready (next milestone) |
+| Frame Generation / DLSS 5 | tracked only, per plan |
