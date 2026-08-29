@@ -62,6 +62,10 @@ pub struct Temporal {
     // change, enable toggle). The velocity pass writes zero and the debug view flashes
     // blue on these frames.
     reset: bool,
+    // An explicit reset raised outside the frame (world load, upscaler change …),
+    // consumed by the next begin_frame. REN-TEMP-001 plan Phase 5: resets are explicit
+    // events wherever possible, not matrix-diff inference.
+    pending_reset: Option<&'static str>,
     last_reset_reason: &'static str,
     render_size: (u32, u32),
     shader: Option<wgpu::ShaderModule>,
@@ -95,6 +99,7 @@ impl Temporal {
             cur: None,
             prev: None,
             reset: true,
+            pending_reset: None,
             last_reset_reason: "first frame",
             render_size: (0, 0),
             shader: None,
@@ -104,6 +109,13 @@ impl Temporal {
 
     // Ingest the UNJITTERED main scene camera and decide this frame's jitter. Call once
     // per frame, BEFORE apply_jitter and before any camera upload.
+    // Raise an explicit history reset, consumed by the next begin_frame. Callable from
+    // any thread-confined renderer entry point (world load via the heightmap upload,
+    // future mode/upscaler switches, an eventual C++ camera-cut event).
+    pub fn notify_reset(&mut self, reason: &'static str) {
+        self.pending_reset = Some(reason);
+    }
+
     pub fn begin_frame(&mut self, cam: &crate::ffi::WgrCamera, render_size: (u32, u32)) {
         if render_size != self.render_size {
             self.reset = true;
@@ -114,8 +126,29 @@ impl Temporal {
             };
             self.prev = None;
             self.render_size = render_size;
+        } else if let Some(reason) = self.pending_reset.take() {
+            self.reset = true;
+            self.last_reset_reason = reason;
+            self.prev = None;
         } else {
-            self.reset = self.prev.is_none();
+            // Teleport guard: >100 m of camera travel in ONE frame is not movement any
+            // vehicle in this engine performs — it is a scripted cut/teleport that never
+            // raised an event. This is a discontinuity detector, not the matrix-diff
+            // inference the plan forbids relying on: explicit events stay the contract,
+            // this only catches the ones nothing raises yet.
+            let teleported = self.prev.as_ref().is_some_and(|p| {
+                let dx = cam.cam_pos[0] - p.cam_pos[0];
+                let dy = cam.cam_pos[1] - p.cam_pos[1];
+                let dz = cam.cam_pos[2] - p.cam_pos[2];
+                dx * dx + dy * dy + dz * dz > 100.0 * 100.0
+            });
+            if teleported {
+                self.reset = true;
+                self.last_reset_reason = "camera teleport";
+                self.prev = None;
+            } else {
+                self.reset = self.prev.is_none();
+            }
         }
         self.cur = Some(CameraSnap {
             view: cam.view,
@@ -583,6 +616,33 @@ mod tests {
         assert_eq!(t.last_reset_reason(), "render-size change");
     }
 
+    #[test]
+    fn explicit_events_and_teleports_reset_history() {
+        let mut cam = crate::ffi::WgrCamera::zeroed();
+        let mut t = Temporal::from_env();
+        t.enabled = true;
+        t.begin_frame(&cam, (100, 100));
+        t.end_frame();
+        // Explicit event (world load) raised between frames.
+        t.notify_reset("world load");
+        t.begin_frame(&cam, (100, 100));
+        assert!(t.reset && t.last_reset_reason() == "world load");
+        t.end_frame();
+        // Steady frame clears it.
+        t.begin_frame(&cam, (100, 100));
+        assert!(!t.reset);
+        t.end_frame();
+        // 200 m in one frame = scripted teleport, no event raised.
+        cam.cam_pos = [200.0, 0.0, 0.0, 0.0];
+        t.begin_frame(&cam, (100, 100));
+        assert!(t.reset && t.last_reset_reason() == "camera teleport");
+        t.end_frame();
+        // Normal movement (2 m) must NOT reset.
+        cam.cam_pos = [202.0, 0.0, 0.0, 0.0];
+        t.begin_frame(&cam, (100, 100));
+        assert!(!t.reset, "ordinary movement must keep history");
+    }
+
     // Headless-device validation, because the pipelines here are built lazily at runtime:
     // a WGSL/bind mismatch would otherwise first appear in-game. The readback is asserted
     // non-vacuous both ways — a translated camera must produce NON-zero velocity and a
@@ -749,6 +809,17 @@ mod tests {
             "a yaw must produce horizontal velocity, got ({rx_}, {ry_})"
         );
         assert!(rx_.is_finite() && ry_.is_finite());
+        // Translated camera (strafe): geometry is camera-relative, so translation reaches
+        // the reprojection ONLY through cam_pos / cam_delta — this is the arm that catches
+        // a delta that never propagates. Centre depth 0.5 stored = 1 m away at near 0.5;
+        // a half-metre strafe at 1 m must move the pixel a lot.
+        let mut cam_strafe = cam;
+        cam_strafe.cam_pos = [0.5, 0.0, 0.0, 0.0];
+        let (tx_, ty_) = run(cam, cam_strafe);
+        assert!(
+            tx_.abs() > 1e-3,
+            "a strafe must produce horizontal velocity, got ({tx_}, {ty_})"
+        );
     }
 
     #[test]

@@ -4853,6 +4853,10 @@ impl Renderer {
     }
 
     fn terrain_set_heightmap(&mut self, heights: &[f32], params: WgrTerrainParams) {
+        // REN-TEMP-001 Phase 5: a new heightmap IS a world load — the one explicit reset
+        // event the renderer can see today without an ABI change. Camera history from the
+        // previous world must not reproject into this one.
+        self.temporal.notify_reset("world load");
         self.terrain
             .set_heightmap(&self.device, &self.queue, heights, params);
     }
