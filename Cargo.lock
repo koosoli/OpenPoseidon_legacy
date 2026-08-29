@@ -3994,8 +3994,10 @@ dependencies = [
 name = "wgpu_renderer"
 version = "0.1.0"
 dependencies = [
+ "ash",
  "bytemuck",
  "glam",
+ "libloading",
  "naga",
  "naga_oil",
  "pollster",
