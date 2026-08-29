@@ -789,8 +789,12 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         // Gentle energy coupling on top of the amplitude slider. Deliberately NOT a
         // linear speed ratio: at calm the mean wind is ~1.5 m/s and a literal ratio
         // would flatten the sea to a mirror, which reads as a broken ocean rather
-        // than a calm one. Anchored so 12 m/s (the shipped constant) is exactly 1.0.
-        windMultiplier *= std::clamp(0.55f + 0.45f * (_seaWindSpeed / 12.0f), 0.55f, 1.60f);
+        // than a calm one. Intercept plus slope, with the slope DERIVED from the
+        // intercept so 12 m/s (the speed the spectrum was authored at) stays exactly
+        // 1.0 however the calm end is tuned. See WaterLook::seaCalmScale.
+        const float calmScale = std::clamp(look.seaCalmScale, 0.0f, 1.0f);
+        const float calmSlope = (1.0f - calmScale) / 12.0f;
+        windMultiplier *= std::clamp(calmScale + calmSlope * _seaWindSpeed, calmScale, 1.60f);
     }
     if (look.seaStateCoupling)
     {

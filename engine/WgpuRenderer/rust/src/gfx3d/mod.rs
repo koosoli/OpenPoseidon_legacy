@@ -134,6 +134,20 @@ pub(crate) fn road_pixel_lift() -> f32 {
     env_f32("WGR_ROAD_PIXEL_LIFT", 0.02).min(1.0)
 }
 
+/// Ceiling on the along-ray road lift, as a fraction of the seated distance. The grazing
+/// compensation in `surface_pixel_depth` is a division by |dir.y| and so is unbounded as the
+/// ray flattens; this is what stops a near-horizontal ray pulling a road far enough forward to
+/// show through a rise in front of it. `WGR_ROAD_PIXEL_LIFT_MAX_FRAC` sweeps it without a
+/// rebuild, which is how the shipped value was chosen.
+pub(crate) fn road_pixel_lift_max_frac() -> f32 {
+    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.02).clamp(0.0005, 0.05)
+}
+
+/// Along-ray lift per metre of distance, before the grazing division. `WGR_ROAD_PIXEL_LIFT_PER_M`.
+pub(crate) fn road_pixel_lift_per_m() -> f32 {
+    env_f32("WGR_ROAD_PIXEL_LIFT_PER_M", 0.004).clamp(0.0, 0.02)
+}
+
 /// The GAME-log announcement (the launcher discards stderr): which arm drew the roads.
 pub(crate) fn road_pixel_conform_log_line() -> String {
     if road_pixel_conform() {
@@ -3839,6 +3853,8 @@ impl Gfx3d {
             ("emissive_night", emissive_night() as f64),
             ("cutout_mip_alpha", cutout_mip_alpha() as f64),
             ("pixel_lift", road_pixel_lift() as f64),
+            ("pixel_lift_max_frac", road_pixel_lift_max_frac() as f64),
+            ("pixel_lift_per_m", road_pixel_lift_per_m() as f64),
         ];
         // OnSurface (Offset::Decal) draws on the plain path take the frag_depth-writing twin
         // so the road hugs the terrain at every PIXEL (WGR_ROAD_PIXEL_CONFORM). Plain only:
@@ -7178,6 +7194,19 @@ impl Gfx3d {
     /// shader as well, so a garbage push cannot black the screen.
     pub fn set_fog_far_close(&mut self, close: f32) {
         self.fog_far[0] = close.clamp(0.3, 1.0);
+    }
+
+    /// The three OnSurface (road / decal) per-pixel depth-conform knobs, live from the dev
+    /// panel. They ride the reserved `fogfar` yzw lanes, so nothing about the struct layout or
+    /// the C ABI moves. 0 in any lane means "use the shipped default", which is what an
+    /// unwritten camera and every headless run get.
+    ///
+    /// Live rather than pipeline override constants because they WERE constants: finding the
+    /// value that closes a road on Malden cost one rebuild and one redeploy per sample.
+    pub fn set_road_conform(&mut self, flat: f32, per_m: f32, max_frac: f32) {
+        self.fog_far[1] = flat.clamp(0.0, 1.0);
+        self.fog_far[2] = per_m.clamp(0.0, 0.02);
+        self.fog_far[3] = max_frac.clamp(0.0, 0.05);
     }
 
     pub fn set_water_anim(&mut self, time: f32, flow_slot: u32, flow_strength: f32) {

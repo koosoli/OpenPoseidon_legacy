@@ -285,11 +285,15 @@ struct GrassParams {
     // Photo-card tone block; mirrors `card_tone` in grass.wgsl and
     // grass_shadow.wgsl. Renderer-owned (see CardTone), never from the caller.
     //   .x = per-layer tone target luma (0 = off), .y = tone gain cap,
-    //   .z = card wind flutter 0..1, .w spare
+    //   .z = card wind flutter 0..1, .w = wind noise-field scroll multiplier
+    // The .w lane is NOT renderer-owned like the other three: it is the caller's
+    // `wind_scroll`, passed through. It rides in this block because card_tone.w was
+    // the one free lane the shaders already had, which keeps the whole slider off
+    // the ABI struct layout.
     card_tone_target: f32,
     card_tone_gain_max: f32,
     card_flutter: f32,
-    _card_tone_pad: f32,
+    wind_scroll: f32,
     // Renderer-derived from the uploaded atlas, never from the caller.
     photo_layer_bounds: [f32; 128],
     photo_layer_means: [f32; 128],
@@ -645,7 +649,7 @@ impl Grass {
             card_tone_target: card_tone.target,
             card_tone_gain_max: card_tone.gain_max,
             card_flutter: card_tone.flutter,
-            _card_tone_pad: 0.0,
+            wind_scroll: 1.0,
             photo_layer_bounds: default_layer_bounds(),
             photo_layer_means: default_layer_means(),
         };
@@ -1804,7 +1808,14 @@ impl Grass {
             card_tone_target: self.card_tone.target,
             card_tone_gain_max: self.card_tone.gain_max,
             card_flutter: self.card_tone.flutter,
-            _card_tone_pad: 0.0,
+            // Passed through from the caller, clamped rather than trusted: 0 would
+            // freeze the field into a static crumple and a large value aliases the
+            // noise into strobing. 0 (an untouched struct) reads as the shipped 1.0.
+            wind_scroll: if params.wind_scroll > 0.0 {
+                params.wind_scroll.clamp(0.02, 4.0)
+            } else {
+                1.0
+            },
             // Always the renderer's own measurement of the loaded atlas.
             photo_layer_bounds: self.tuft_bounds,
             photo_layer_means: self.tuft_means,
@@ -2315,6 +2326,37 @@ mod tests {
 
     const SHADER: &str = include_str!("grass.wgsl");
     const SHADOW: &str = include_str!("grass_shadow.wgsl");
+
+    // The blade and the shadow it casts are two shaders reading one wind field. The scroll
+    // scale therefore has to reach BOTH copies of sample_wind_field and be applied to every
+    // scroll term in each -- miss one and a blade leans while its shadow leans somewhere
+    // else, which nobody notices in a screenshot and everybody notices in motion. Asserted
+    // on the source: a pipeline test would build happily with the override declared and
+    // never used.
+    #[test]
+    fn the_wind_scroll_scale_reaches_every_scroll_term_in_both_grass_shaders()
+    {
+        for (name, src) in [("grass.wgsl", SHADER), ("grass_shadow.wgsl", SHADOW)]
+        {
+            assert!(
+                src.contains("fn wind_scroll_scale() -> f32 {")
+                    && src.contains("grass.card_tone.w"),
+                "{name} must read the scroll scale from the shared card_tone.w lane"
+            );
+            for term in ["broad_scroll", "gust_scroll", "flutter_scroll"]
+            {
+                let head = format!("let {term} =");
+                let start = src
+                    .find(&head)
+                    .unwrap_or_else(|| panic!("{name} has no `{head}`"));
+                let end = start + src[start..].find(';').expect("unterminated statement");
+                assert!(
+                    src[start..end].contains("wind_scroll_scale()"),
+                    "{name}: `{term}` is not scaled by wind_scroll_scale"
+                );
+            }
+        }
+    }
 
     // The card flicker fix is alpha-to-coverage, and A2C is only correct if the
     // prepass and the colour pass emit the SAME coverage from the SAME sample:

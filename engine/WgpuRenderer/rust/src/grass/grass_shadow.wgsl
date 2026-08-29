@@ -150,19 +150,27 @@ fn pick_photo_layer(patch_cell: vec2<f32>) -> u32 {
 
 // Mirrors grass.wgsl's world-space wind field. Shadow cascades now use the
 // same moving gusts as the visible blades, instead of the former sine wave.
+// Mirror of grass.wgsl's helper of the same name, reading the SAME uniform lane: the blade
+// and the shadow it casts are two shaders over one wind field, and a scroll scale applied to
+// only one of them makes a blade lean while its shadow leans elsewhere.
+fn wind_scroll_scale() -> f32 {
+    return select(clamp(grass.card_tone.w, 0.02, 4.0), 1.0, grass.card_tone.w <= 0.0);
+}
+
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> vec4<f32> {
     let strength = clamp(grass.wind_strength, 0.0, 3.0);
     let base_angle = grass.wind_direction * 0.01745329252;
     let base_direction = vec2<f32>(cos(base_angle), sin(base_angle));
     // Negated scroll: see the convention note in grass.wgsl. Both copies must
     // agree or shadows drift against the blades that cast them.
-    let broad_scroll = -base_direction * terrain.time * (16.0 + strength * 9.0);
-    let gust_scroll = -base_direction * terrain.time * (30.0 + strength * 15.0);
+    let broad_scroll = -base_direction * terrain.time * (16.0 + strength * 9.0) * wind_scroll_scale();
+    let gust_scroll = -base_direction * terrain.time * (30.0 + strength * 15.0) * wind_scroll_scale();
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
     let gust_noise = clump_noise(world_xz + gust_scroll, 0.022, 0xa12f7c59u);
     let gust = mix(0.18, 1.0, pow(smoothstep(0.40, 0.84, gust_noise), 2.0));
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
-    let flutter_scroll = gust_scroll * 2.1 + vec2<f32>(terrain.time * 3.7, -terrain.time * 2.9);
+    let flutter_scroll =
+        gust_scroll * 2.1 + vec2<f32>(terrain.time * 3.7, -terrain.time * 2.9) * wind_scroll_scale();
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +
                                     vec2<f32>(seed * 19.0, seed * 31.0), 0.105, 0x3f5a91c7u);
     let turbulence = (flutter_noise - 0.5) * (0.035 + 0.085 * gust) * height_t;

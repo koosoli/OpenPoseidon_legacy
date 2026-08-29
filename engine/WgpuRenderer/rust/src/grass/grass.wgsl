@@ -556,6 +556,21 @@ fn density_field(world_xz: vec2<f32>) -> f32 {
     return mix(1.0, patchy * bare_gap, grass.debug_flags.y);
 }
 
+// How fast the wind NOISE FIELDS travel across the world, as a multiple of the shipped
+// speeds. 1.0 is the historical look, and 0 (an untouched uniform) reads as 1.0.
+// Rides card_tone.w -- the one lane both grass shaders already had spare -- so the whole
+// control stays off the ABI struct layout. Live from the dev panel's Grass tab.
+//
+// Why it is a knob worth having: the scroll speeds below are not tied to the wind speed at
+// all. At the default 6 m/s mean wind the shader's `wind_strength` is 1.2, which puts the
+// gust field at 30 + 1.2*15 = 48 m/s and the tip-flutter field at 2.1x that, ~101 m/s. The
+// gust pattern therefore crosses the field about EIGHT times faster than the wind that is
+// supposed to be driving it, and the flutter about seventeen. That is what reads as blades
+// shivering or springing rather than leaning and releasing.
+fn wind_scroll_scale() -> f32 {
+    return select(clamp(grass.card_tone.w, 0.02, 4.0), 1.0, grass.card_tone.w <= 0.0);
+}
+
 fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField {
     let strength = clamp(grass.wind_strength, 0.0, 3.0);
     let base_angle = grass.wind_direction * 0.01745329252;
@@ -567,8 +582,8 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     // which is also the direction blades bend. Sampling noise at `p + v*t`
     // makes the pattern travel along `-v`, so the scroll is negated -- gust
     // fronts previously swept across the field opposite to the blades' lean.
-    let broad_scroll = -base_direction * terrain.time * (16.0 + strength * 9.0);
-    let gust_scroll = -base_direction * terrain.time * (30.0 + strength * 15.0);
+    let broad_scroll = -base_direction * terrain.time * (16.0 + strength * 9.0) * wind_scroll_scale();
+    let gust_scroll = -base_direction * terrain.time * (30.0 + strength * 15.0) * wind_scroll_scale();
     let direction_noise = clump_noise(world_xz + broad_scroll, 0.006, 0x0d7e31a5u);
     let gust_noise = clump_noise(world_xz + gust_scroll, 0.022, 0xa12f7c59u);
     // There is always a small travelling sway. Stronger, soft-edged gusts
@@ -577,7 +592,8 @@ fn sample_wind_field(world_xz: vec2<f32>, height_t: f32, seed: f32) -> WindField
     let gust_pulse = pow(smoothstep(0.40, 0.84, gust_noise), 2.0);
     let gust = mix(0.18, 1.0, gust_pulse);
     let direction_angle = base_angle + (direction_noise - 0.5) * min(strength, 1.5) * 1.10;
-    let flutter_scroll = gust_scroll * 2.1 + vec2<f32>(terrain.time * 3.7, -terrain.time * 2.9);
+    let flutter_scroll =
+        gust_scroll * 2.1 + vec2<f32>(terrain.time * 3.7, -terrain.time * 2.9) * wind_scroll_scale();
     let flutter_noise = clump_noise(world_xz + flutter_scroll + base_direction * (height_t * height_t * 4.0) +
                                     vec2<f32>(seed * 19.0, seed * 31.0),
                                     0.105, 0x3f5a91c7u);

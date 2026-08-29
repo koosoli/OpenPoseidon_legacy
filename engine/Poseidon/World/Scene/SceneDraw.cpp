@@ -2268,6 +2268,32 @@ static bool CockpitBlendLegacy()
     return on;
 }
 
+// WGR_SHADOW_GATE_TRACE=1 also reports THIS gate, on transition. The backend's own trace
+// (EngineWgpu "Wgpu shadow gate") can only say that the cascades were invalid; it cannot say
+// whether the depth pass ran at all, and those are different bugs with different fixes. Logged
+// on change, not per frame, for the same reason the backend's is.
+static void ShadowPassTrace(bool mapsEnabled, float shadowFactor, int nDraw)
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SHADOW_GATE_TRACE");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    if (!on)
+    {
+        return;
+    }
+    const int state = (mapsEnabled ? 1 : 0) | (shadowFactor > 0.01f ? 2 : 0) | (nDraw > 0 ? 4 : 0);
+    static int last = -1;
+    if (state == last)
+    {
+        return;
+    }
+    last = state;
+    LOG_INFO(Graphics, "Scene shadow pass gate: mapsEnabled={} shadowFactor={:.3f} nDraw={} ran={}", mapsEnabled,
+             shadowFactor, nDraw, mapsEnabled && shadowFactor > 0.01f);
+}
+
 void Scene::DrawObjectsAndShadowsPass2()
 {
     // must be sorted by distance
@@ -2365,6 +2391,11 @@ void Scene::DrawObjectsAndShadowsPass2()
             {
                 RenderShadowMapDepthPass(nDraw);
             }
+            ShadowPassTrace(true, shadowFactor, nDraw);
+        }
+        else
+        {
+            ShadowPassTrace(false, 0.0f, nDraw);
         }
 
         // Projected accumulator shadows — the fallback path.  When shadow maps are

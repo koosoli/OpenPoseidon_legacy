@@ -3636,6 +3636,15 @@ void DrawGrassTab()
     changed |= Dev::SliderFloat("Wind strength", &grass.windStrength, 0.0f, 3.0f, "%.2f");
     changed |= Dev::SliderFloat("Wind direction", &grass.windDirection, -180.0f, 180.0f, "%.0f deg");
     Dev::PanelHelp("Live wind follows weather. Disable it to test a manual direction; 0 degrees points east (+X).");
+    changed |= Dev::Checkbox("Auto gust speed (from wind)", &grass.windScrollAuto);
+    changed |= Dev::SliderFloat("Wind gust speed", &grass.windScroll, 0.02f, 4.0f, "%.2fx");
+    Dev::PanelTooltip("How fast gusts travel across the field, NOT how far blades bend.\n"
+                      "With Auto on (the shipped behaviour) this follows the live wind and tops out at\n"
+                      "1.00 in a storm, so the game never goes above it; calm air scrolls at 0.15.\n"
+                      "The slider is the manual override and the only way past 1.00.\n"
+                      "Why it matters: the scroll speeds in the shader are constants unrelated to the\n"
+                      "wind speed, so at 1.00 the gust field crosses the world at ~48 m/s against a\n"
+                      "6 m/s wind -- which reads as shivering rather than leaning and releasing.");
     changed |= Dev::SliderFloat("Field clumping", &grass.clumping, 0.0f, 1.0f, "%.2f");
     changed |= Dev::SliderFloat("Colour variation", &grass.colorVariation, 0.0f, 1.0f, "%.2f");
     changed |= Dev::SliderFloat("Backlight transmission", &grass.transmission, 0.0f, 1.0f, "%.2f");
@@ -3770,6 +3779,8 @@ void DrawGrassTab()
         grass.height = 1.25f;
         grass.useLiveWind = true;
         grass.windStrength = 1.2f;
+        grass.windScroll = 1.0f;
+        grass.windScrollAuto = true;
         grass.clumping = 0.55f;
         grass.colorVariation = 0.35f;
         grass.transmission = 0.10f;
@@ -3921,7 +3932,9 @@ void DrawFoliageTab()
     Dev::PanelHelp("  lobe tightness; higher = a smaller, sharper backlit glow near the sun");
     changed |= Dev::SliderFloat("Wrap", &f.wrap, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  softens the front terminator; 0 = hard Lambert (lit side stays unchanged)");
-    changed |= Dev::SliderFloat("Ambient boost", &f.ambientBoost, 0.5f, 4.0f, "%.2f");
+    // Range starts at 0, not 0.5: on DayZ-era canopy zero is a real look the owner prefers
+    // (see FoliageSettings::ambientBoost), and a slider that cannot reach it hides that.
+    changed |= Dev::SliderFloat("Ambient boost", &f.ambientBoost, 0.0f, 4.0f, "%.2f");
     Dev::PanelHelp("  sky-ambient multiplier for foliage only (1 = off); fades with distance");
     changed |= Dev::SliderFloat("GI (ambient x light)", &f.giStrength, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  scale ambient by terrain light level so shadowed foliage stops glowing (0 = off)");
@@ -4836,6 +4849,12 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Moon brightness scale", &s.moonBrightnessScale, 0.0f, 8.0f, "%.2f");
     Dev::PanelTooltip("Artistic gain on BOTH the drawn disc and the moonlight, on top of the physical "
                       "phase falloff. 0 turns the moon off entirely.");
+    changed |= Dev::SliderFloat("Moon daylight scale", &s.moonDaylightScale, 0.0f, 1.0f, "%.3f");
+    Dev::PanelTooltip("Fraction of the moon disc's NIGHT brightness that survives at noon.\n"
+                      "The disc carries a ~24000x artistic inflation so it is visible at all under a\n"
+                      "non-scotopic tonemap; kept in daylight that draws a disc at 6% of the SUN's\n"
+                      "radiance, which is the reported second sun.\n"
+                      "1.0 restores the old behaviour. Night is unaffected at any value.");
     changed |=
         Dev::SliderFloat("Moonlight intensity", &s.moonIntensity, 0.0f, 0.30f, "%.4f", ImGuiSliderFlags_Logarithmic);
     Dev::PanelTooltip("Full-moon irradiance as a FRACTION of the sun's. Drives BOTH the moonlight and the\n"
@@ -4905,6 +4924,21 @@ void DrawSkyTab()
     changed |= Dev::SliderFloat("Aerial sun shadow", &s.aerialShadow, 0.0f, 4.0f, "%.2f");
     Dev::PanelTooltip("Terrain occlusion of the froxel fog: 0 = off (sun lights the haze everywhere, for A/B), "
                       "1 = physical, >1 exaggerated to make the shadowed fog / god-ray shafts obvious");
+    Dev::PanelHeading("Roads and decals (per-pixel ground conform)");
+    changed |= Dev::SliderFloat("Road lift, flat", &s.roadLiftFlat, 0.0f, 0.5f, "%.3f m");
+    Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
+                      "every angle, so this is the one to raise if a road flickers right in front of you.");
+    changed |= Dev::SliderFloat("Road lift, per metre", &s.roadLiftPerMetre, 0.0f, 0.02f, "%.4f /m");
+    Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
+                      "shader, because the error it covers is a height error and a height error becomes\n"
+                      "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
+                      "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
+                      "alternately: continuous close up, continuous from above, in pieces in between.\n"
+                      "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
+    changed |= Dev::SliderFloat("Road lift ceiling", &s.roadLiftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
+    Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
+                      "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
+                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
     changed |= Dev::SliderFloat("Fog closes at", &s.fogFarClose, 0.3f, 1.0f, "%.2f");
     Dev::PanelTooltip("WHERE the fog finishes, as a fraction of the draw distance.\n"
                       "1.00 = fog reaches full only exactly at the far plane -- which is also exactly where "
@@ -5182,12 +5216,18 @@ void DrawSkyTab()
         GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
         GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
         GEngine->SetFogFarClose(s.fogFarClose);
+        // Road conform: own entry point for the same reason, and unconditional inside
+        // `changed` so "Reset to defaults" restores it too.
+        GEngine->SetRoadConform(s.roadLiftFlat, s.roadLiftPerMetre, s.roadLiftMaxFrac);
         // Amount + match-the-deck. Own entry point for the same reason as the two above: the sky
         // look block's size is part of the renderer's ABI handshake and must not grow.
         GEngine->SetSkyCirrusLook(s.cirrusAmount, s.cirrusMatchDeck);
         GEngine->SetSkyCirrusSoftness(s.cirrusSoftness);
         // Where the fog finishes. Own entry point for the same reason as the cirrus pushes above.
         GEngine->SetFogFarClose(s.fogFarClose);
+        // Road conform: own entry point for the same reason, and unconditional inside
+        // `changed` so "Reset to defaults" restores it too.
+        GEngine->SetRoadConform(s.roadLiftFlat, s.roadLiftPerMetre, s.roadLiftMaxFrac);
         // God rays: same story again, not a sky-look lane, so its own push. Unconditional inside
         // `changed` so "Reset to defaults" restores it too.
         GEngine->SetGodRays(s.godRays, s.godRayIntensity, s.godRayDensity, s.godRayDistance, s.godRayG,
@@ -5545,6 +5585,12 @@ void DrawWaterTab()
                       "wavelength ~amp^0.75). OFF: the legacy behaviour — the whole spectrum is "
                       "scaled uniformly, so waves only get taller at the same wavelength, which "
                       "reads as short steep chop.");
+    changed |= Dev::SliderFloat("Calm sea energy", &s.seaCalmScale, 0.0f, 1.0f, "%.2f");
+    Dev::PanelTooltip("Wave energy left at DEAD CALM, as a fraction of the 12 m/s reference sea.\n"
+                      "Was effectively 0.61 at the calm-weather mean of 1.5 m/s -- a flat day carried\n"
+                      "nearly two thirds of a blustery one. Not zero: a literal ratio flattens the sea\n"
+                      "to a mirror, which reads as broken water rather than calm water.\n"
+                      "The 12 m/s look does not move: the slope is derived so that anchor always holds.");
     changed |= Dev::SliderFloat("Shore breaker gain", &s.shoreWaveGain, 0.0f, 3.0f, "%.2f");
     Dev::PanelTooltip("Strength of the shoaling swell that runs in toward the beach. The train "
                       "grows (Green's law) and its crests sharpen as the water shallows.");

@@ -1205,7 +1205,11 @@ pub struct WgrGrassParams {
     /// than tall). Arma's own clutter plants are ~0.3-0.9 m, so the stock card is
     /// two to three times the plant it stands for; this is the lever for that.
     pub card_scale: f32,
-    pub _pad_look: [f32; 2],
+    /// Wind noise-field scroll multiplier; 0 reads as 1.0 (the shipped look).
+    /// See WGR_GRASS_PARAMS `wind_scroll` in wgpu_renderer.h. Takes one of the
+    /// two former `_pad_look` lanes, so no offset moves.
+    pub wind_scroll: f32,
+    pub _pad_look: f32,
     /// Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
     /// Renderer-derived from the uploaded atlas; ignored on input.
     pub photo_layer_bounds: [f32; 36],
@@ -3334,6 +3338,24 @@ pub unsafe extern "C" fn wgr_set_fog_far_close(renderer: *mut WgrRenderer, close
     }
     let renderer = unsafe { &mut *renderer };
     renderer.set_fog_far_close(close);
+}
+
+/// Road / decal per-pixel depth conform: flat lift (m), lift per metre of distance (before the
+/// grazing division), and the ceiling as a fraction of distance. 0 in a field = shipped default.
+///
+/// # Safety
+/// `renderer` must be a live renderer from `wgr_create`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_road_conform(
+    renderer: *mut WgrRenderer,
+    flat: f32,
+    per_m: f32,
+    max_frac: f32,
+) {
+    let Some(renderer) = (unsafe { renderer.as_mut() }) else {
+        return;
+    };
+    renderer.set_road_conform(flat, per_m, max_frac);
 }
 
 /// Volumetric sun shafts (crepuscular rays / god rays), from the dev panel's Sky tab.

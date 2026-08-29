@@ -1730,6 +1730,27 @@ static bool ShadowLodPropCacheEnabled()
     return on;
 }
 
+// WGR_IGNORE_LODNOSHADOW=1 makes the shadow-LOD search ignore the `lodnoshadow` property, so a
+// model that declares every visual LOD non-casting still casts from the one it draws. An
+// ABLATION, default off: it exists to A/B whether a world's missing object shadows are that
+// property or something else, without a rebuild between the two captures.
+//
+// Why it is worth having: `lodnoshadow` is a 2001 authoring hint meaning "do not build a stencil
+// shadow VOLUME from this LOD" -- the volume was extruded per-object on the CPU and a canopy of
+// alpha cards would have produced garbage. It does not mean "this object occludes no light", and
+// a depth-map cascade has no such problem. DayZ's trees carry it on their visual LODs (measured:
+// b_fagussylvatica_1f 6 occurrences over 8 LODs, b_piceaabies_1f 4), which is why a Chernarus
+// forest lights every leaf card equally and throws nothing on the ground.
+static bool IgnoreLodNoShadow()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_IGNORE_LODNOSHADOW");
+        return v && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+
 int LODShape::FindNearestWithoutProperty(int i, const char* property) const
 {
     if (i == LOD_INVISIBLE)
@@ -1742,6 +1763,10 @@ int LODShape::FindNearestWithoutProperty(int i, const char* property) const
     // once per drawn object per complexity iteration, up to seven iterations a frame). Shape
     // memoises that one answer, so recognise it ONCE per call instead of paying FindProperty's
     // snprintf/strlwr/strcmp assertion machinery once per LOD stepped over.
+    if (IgnoreLodNoShadow() && std::strcmp(property, "lodnoshadow") == 0)
+    {
+        return i;
+    }
     const bool useCache = ShadowLodPropCacheEnabled() && std::strcmp(property, "lodnoshadow") == 0;
     const auto hasProperty = [&](const Shape* lod)
     { return useCache ? lod->HasNoShadowProperty() : (lod->FindProperty(property) >= 0); };

@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/World/Terrain/WaterSurfaceQuery.hpp>
 #include <stdlib.h>
 #include <cmath>
 #include <Poseidon/Foundation/Common/FltOpts.hpp>
@@ -623,6 +624,34 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
                 float bump1 = bump10 + (bump11 - bump10) * bumpX;
                 float bump = bump0 + (bump1 - bump0) * bumpZ; // result in range 0 .. 1
                 bumpySea -= bump * 0.5;
+            }
+
+            // WAVE BUOYANCY. The flat `_seaLevelWave` above is why a boat rode the sea like a
+            // road: this is the ONE place a floating body learns how deep each of its hull
+            // points is, and it asked a horizontal plane. Everything downstream was already
+            // right -- the callers turn `under` into a per-point up-force and a torque about
+            // the centre of mass (Ship.cpp, Car/Tank/Airplane/Helicopter/Parachute), so heave,
+            // pitch and roll all fall out of feeding this the real surface. There is no
+            // kinematic override to write and nothing to hand-tune.
+            //
+            // QueryWaterSurface is the CPU predictor the infantry buoyancy already uses: a
+            // six-component Gerstner sum scaled by the live water look, deterministic, no GPU
+            // texture, so the server and every client agree. It matches the drawn sea in scale,
+            // period and roughness -- not crest for crest.
+            //
+            // Cost is contained: this branch runs only for points that are ALREADY over water
+            // (`surfaceY < _seaLevelWave`), so a land vehicle never pays for it.
+            //
+            // WGR_WAVE_BUOYANCY=0 restores the flat plane, for A/B and as the escape hatch if
+            // a vehicle turns out to have been tuned around a dead-flat sea.
+            static const bool waveBuoyancy = []
+            {
+                const char* v = std::getenv("WGR_WAVE_BUOYANCY");
+                return !(v && v[0] == '0');
+            }();
+            if (waveBuoyancy)
+            {
+                bumpySea = QueryWaterSurface(pos[0], pos[2], Glob.time.toFloat(), _seaLevelWave).height;
             }
 
             // water on level bumpySea

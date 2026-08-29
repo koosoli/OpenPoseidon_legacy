@@ -7332,6 +7332,9 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     params.blade_height = std::clamp(settings.height * catchAllHeight, 0.10f, 3.00f);
     params.wind_strength = std::clamp(settings.windStrength, 0.0f, 3.0f);
     params.wind_direction = settings.windDirection;
+    // Manual by default here; the live-wind block below overrides it when windScrollAuto is
+    // set, which is what keeps the shipped game at or below 1.0.
+    params.wind_scroll = std::clamp(settings.windScroll, 0.02f, 4.0f);
     // Match the simulation's actual weather vector (the same one used by
     // smoke, cloth and parachutes). The developer strength is deliberately
     // retained as a gain so artists can test gust visibility without
@@ -7351,6 +7354,16 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         {
             params.wind_direction = wind.directionRad * (180.0f / 3.14159265358979323846f);
             params.wind_strength = std::clamp(wind.speed * 0.20f * settings.windStrength, 0.0f, 3.0f);
+            // Gust travel from the wind that causes it: linear in speed, reaching 1.0 only
+            // at a storm. Capped there rather than allowed to run on -- past 1 the field
+            // crosses the world faster than the shipped look and begins to strobe, and
+            // nothing the weather can produce should get there. The dev slider still can,
+            // by turning windScrollAuto off.
+            if (settings.windScrollAuto)
+            {
+                params.wind_scroll = std::clamp(wind.speed / GrassSettings::kWindScrollFullSpeed,
+                                                GrassSettings::kWindScrollFloor, 1.0f);
+            }
         }
     }
     // The far ring must start beyond the mid ring, whose reach the shader
@@ -8031,11 +8044,32 @@ void EngineWgpu::PushRenderParams()
     // simulation freezes the canopy instead of leaving it stirring over a stopped world.
     const float swayTime = _waterLook.freeze.freezeTime ? _waterLook.freeze.fixedTime : Glob.time.toFloat();
 
+    // WGR_FOLIAGE_ABLATE=1 zeroes the leaf-lighting model for ONE frame's worth of A/B: the
+    // subsurface fill, the terminator wrap, the ambient boost and -- the one that matters most
+    // for "the canopy is completely flat" -- the SPHERICAL NORMALS. treeBend/normalBend replace
+    // each leaf card's geometric normal with a radial one about the crown centre, which is what
+    // makes a canopy read as one smooth ball instead of a stack of separately-lit cards. The
+    // sway terms are deliberately NOT touched: this ablates lighting, not motion.
+    //
+    // An ablation, default off, so the comparison costs an env var instead of a rebuild. It is
+    // not a quality setting and must not become one -- the knobs exist because a low-poly card
+    // canopy DOES split into a hard lit/black pair without them.
+    static const bool foliageAblate = []
+    {
+        const char* v = std::getenv("WGR_FOLIAGE_ABLATE");
+        return v && v[0] != '0';
+    }();
+    const float fTrans = foliageAblate ? 0.0f : _foliage.transScale;
+    const float fWrap = foliageAblate ? 0.0f : _foliage.wrap;
+    const float fAmbBoost = foliageAblate ? 1.0f : _foliage.ambientBoost;
+    const float fNormalBend = foliageAblate ? 0.0f : _foliage.normalBend;
+    const float fTreeBend = foliageAblate ? 0.0f : _foliage.treeBend;
+
     // Foliage lighting (emulated leaf SSS for alpha-tested vegetation); rides the Frame UBO.
     p.foliage = {
-        _foliage.transScale,   _foliage.distortion,  _foliage.transPower,   _foliage.wrap,
-        _foliage.ambientBoost, _foliage.normalBend,  _foliage.crownYOffset, _foliage.fillFadeEnd,
-        _foliage.giStrength,   _foliage.treeBend,    _foliage.treeCrownY,   0.0f,
+        fTrans,                _foliage.distortion,  _foliage.transPower,   fWrap,
+        fAmbBoost,             fNormalBend,          _foliage.crownYOffset, _foliage.fillFadeEnd,
+        _foliage.giStrength,   fTreeBend,            _foliage.treeCrownY,   0.0f,
         swayAmp,               _foliage.swaySpeed,   swayDirX,              swayDirZ,
         swayTime,              swayGust,             _foliage.swayLeafFlutter,
         std::clamp(_foliage.swayStiffness, 0.25f, 4.0f),
@@ -8165,6 +8199,13 @@ void EngineWgpu::PushSkyRuntime()
         const float k = std::max(moonIllum, 0.02f);
         moonDiscScale = _sky.sunIntensity * _sky.exposure * _sky.moonIntensity *
                         (ml->MoonBrightness() / k) * std::max(_sky.moonBrightnessScale, 0.0f);
+        // Retire the night-vision inflation as the sun comes up. NightEffect is 0 in
+        // daylight and 1 at night, so this is exactly 1.0 at night -- the night moon is
+        // unchanged to the bit -- and moonDaylightScale at noon. Without it the disc kept
+        // its full night radiance in a daylit sky and read as a second sun.
+        const float nightFactor = std::clamp(ml->NightEffect(), 0.0f, 1.0f);
+        const float daylightFade = std::max(_sky.moonDaylightScale, 0.0f);
+        moonDiscScale *= daylightFade + (1.0f - daylightFade) * nightFactor;
         // Earthshine is brightest when the moon is thinnest (the Earth is then "full" as seen
         // from the moon). A reflectance floor added to the BRDF before the radiance scale, so
         // it tracks the disc's overall level instead of floating free of it.

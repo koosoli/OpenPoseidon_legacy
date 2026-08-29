@@ -1093,7 +1093,16 @@ struct WgrGrassParams
     float blade_root_shade;
     /* Photo card size multiplier; 1.0 = the stock card. */
     float card_scale;
-    float _pad_look[2];
+    /* How fast the wind NOISE FIELDS travel, as a multiple of the shipped speeds.
+     * 1.0 = the historical look; 0 is read as 1.0 so a zeroed struct is unchanged.
+     * The scroll speeds in grass.wgsl are constants unrelated to the wind speed: at
+     * the default 6 m/s wind the gust field crosses the world at ~48 m/s and the
+     * tip flutter at ~101, i.e. eight and seventeen times the wind driving them,
+     * which is what reads as blades shivering instead of leaning and releasing.
+     * Occupies one of the two lanes that were `_pad_look`, so the struct layout and
+     * every existing field offset are untouched. */
+    float wind_scroll;
+    float _pad_look;
     /* Opaque bounding box per photo layer, (u0, u1, v0, v1) in texture space.
      * Renderer-derived from the uploaded atlas; ignored on input. */
     float photo_layer_bounds[36];
@@ -2168,6 +2177,12 @@ extern "C"
        This one only ever adds coverage at the far end, which is why it cannot reintroduce the
        object pop-in that anchoring the cull to the fog range was there to fix. */
     WGR_API void wgr_set_fog_far_close(WgrRenderer* renderer, float close);
+
+    /* Road / decal per-pixel depth conform. `flat` is a fixed along-ray lift in metres,
+     * `per_m` the same per metre of distance BEFORE the grazing division, `max_frac` the
+     * ceiling as a fraction of the distance. 0 in any field = the shipped default. Rides the
+     * reserved fogfar lanes, so no struct layout and no ABI version moves. */
+    WGR_API void wgr_set_road_conform(WgrRenderer* renderer, float flat, float per_m, float max_frac);
 
     /* Volumetric sun shafts (crepuscular rays / god rays).
 

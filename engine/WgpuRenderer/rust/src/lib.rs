@@ -1505,6 +1505,10 @@ impl Renderer {
         self.sky.set_cirrus_softness(softness);
     }
 
+    fn set_road_conform(&mut self, flat: f32, per_m: f32, max_frac: f32) {
+        self.gfx3d.set_road_conform(flat, per_m, max_frac);
+    }
+
     fn set_fog_far_close(&mut self, close: f32) {
         self.gfx3d.set_fog_far_close(close);
     }

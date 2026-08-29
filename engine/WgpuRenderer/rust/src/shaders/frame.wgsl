@@ -128,8 +128,14 @@ struct Frame {
     //   x = the fraction of the draw distance at which fog reaches FULL. 1.0 is the behaviour
     //       from before this lane existed, where fog saturates only exactly at the far plane.
     //       Lower closes the horizon earlier, which is what hides the edge of the drawn world.
-    //   yzw = reserved (0).
-    // 0 reads as 1.0, so a zero-filled or never-written camera keeps the old ramp exactly.
+    //   y = OnSurface (road/decal) per-pixel depth lift, flat metres
+    //   z = the same, per metre of distance, BEFORE the grazing division
+    //   w = ceiling on the total lift, as a fraction of the distance
+    // Every lane reads 0 as "use the shipped default", so a zero-filled or never-written camera
+    // behaves exactly as it did before the lane existed. The three road knobs live here rather
+    // than as pipeline override constants because they were CONSTANTS: tuning them cost a
+    // rebuild and a redeploy per value, which is how a ten-minute sweep became an afternoon.
+    // See road_lift_flat / road_lift_per_m / road_lift_max_frac below.
     fogfar: vec4<f32>,
 };
 

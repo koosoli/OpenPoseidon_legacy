@@ -237,6 +237,16 @@ class EngineWgpu : public EngineDummy
         if (_renderer != nullptr)
             wgr_set_fog_far_close(_renderer, close);
     }
+    // Road / decal per-pixel depth conform. Same shape again: the three knobs that decide
+    // whether a road wins its depth test against the terrain it lies on.
+    void SetRoadConform(float flat, float perMetre, float maxFrac) override
+    {
+        _sky.roadLiftFlat = flat;
+        _sky.roadLiftPerMetre = perMetre;
+        _sky.roadLiftMaxFrac = maxFrac;
+        if (_renderer != nullptr)
+            wgr_set_road_conform(_renderer, flat, perMetre, maxFrac);
+    }
     // God rays. Same shape again (own FFI entry point, _sky updated so GetSkySettings round-trips
     // and "Reset to defaults" restores it). The renderer clamps every value, so a garbage push
     // cannot make the march expensive.

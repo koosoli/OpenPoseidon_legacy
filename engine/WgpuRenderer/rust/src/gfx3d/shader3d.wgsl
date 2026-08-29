@@ -506,7 +506,28 @@ const PIXEL_CONFORM_STEPS: i32 = 3;
 // Below this |dir.y| the ray is too flat to solve for its terrain hit (a 1 m height gap is
 // a 20 m slide); the point is seated vertically instead, which the lift then covers.
 const PIXEL_CONFORM_MIN_DIR_Y: f32 = 0.05;
-const PIXEL_CONFORM_LIFT_PER_M: f32 = 0.0005;
+// Per metre of seated distance, BEFORE the grazing division below. Sweepable, because the
+// value that matters is the product of this and 1/|dir.y| and neither half is guessable.
+override pixel_lift_per_m: f32 = 0.0005;
+// Upper bound on the along-ray pull, as a fraction of the seated distance. The grazing
+// compensation below is a division and therefore unbounded as the ray flattens; without a cap a
+// near-horizontal ray would pull the road far enough toward the camera to show through a rise in
+// front of it. 0.4% is 32 cm at 80 m -- comfortably past the residual, nowhere near a hill.
+override pixel_lift_max_frac: f32 = 0.004;
+
+// ROAD / DECAL per-pixel depth conform knobs, from the reserved fogfar lanes. Each reads 0 as
+// "use the shipped default", so an unwritten camera is bit-identical to the pre-lane behaviour.
+// The defaults here are the values swept on Malden -- see surface_pixel_depth in shader3d.wgsl
+// for what they do and why the per-metre term is divided by the grazing angle.
+fn road_lift_flat() -> f32 {
+    return select(clamp(frame.fogfar.y, 0.0, 1.0), 0.02, frame.fogfar.y <= 0.0);
+}
+fn road_lift_per_m() -> f32 {
+    return select(clamp(frame.fogfar.z, 0.0, 0.02), 0.004, frame.fogfar.z <= 0.0);
+}
+fn road_lift_max_frac() -> f32 {
+    return select(clamp(frame.fogfar.w, 0.0005, 0.05), 0.02, frame.fogfar.w <= 0.0);
+}
 
 fn surface_pixel_depth(in: VsOut) -> f32 {
     let w = clamp(in.conform_w, 0.0, 1.0);
@@ -533,7 +554,26 @@ fn surface_pixel_depth(in: VsOut) -> f32 {
         i = i + 1;
     }
     let seated_dist = length(p);
-    let lift = pixel_lift + PIXEL_CONFORM_LIFT_PER_M * seated_dist;
+    // GRAZING COMPENSATION. The iteration above leaves a small height residual, and the comment
+    // at the head of this function already states the conversion: a height gap becomes an
+    // ALONG-RAY distance of gap / |dir.y|, which is 6x at the ~9 degrees you get looking down a
+    // road from standing height, and 20x at the floor below. The lift has to cover the residual
+    // in the same units the depth test sees it in, so it takes the same division -- otherwise a
+    // constant that is generous when looking straight down is a coin toss at a grazing angle,
+    // and the road breaks into a staggered chequer of tiles that win and lose the depth test
+    // alternately. That is exactly what was reported on Malden: continuous from above,
+    // continuous close up, and in pieces across the middle distance.
+    //
+    // Only the DISTANCE term is divided. `pixel_lift` stays flat so the near field and the
+    // top-down view are bit-identical to before; there was nothing wrong with either.
+    let graze = max(abs(dir.y), PIXEL_CONFORM_MIN_DIR_Y);
+    // Live from the dev panel's Roads section via the reserved fogfar lanes; the override
+    // constants remain as the env-var seed for a headless A/B and as the value an unwritten
+    // camera falls back to.
+    let flat = select(road_lift_flat(), pixel_lift, frame.fogfar.y <= 0.0 && pixel_lift > 0.0);
+    let per_m = select(road_lift_per_m(), pixel_lift_per_m, frame.fogfar.z <= 0.0);
+    let max_frac = select(road_lift_max_frac(), pixel_lift_max_frac, frame.fogfar.w <= 0.0);
+    let lift = min(flat + per_m * seated_dist / graze, max_frac * seated_dist);
     let pulled = p * max(seated_dist - lift, 1e-3) / max(seated_dist, 1e-3);
     let clip = reverse_z(frame.proj * frame.view * vec4<f32>(pulled, 1.0));
     if (clip.w <= 1e-6) {

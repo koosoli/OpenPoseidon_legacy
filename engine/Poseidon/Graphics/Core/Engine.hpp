@@ -903,7 +903,18 @@ class Engine : public IGraphicsEngine
         float distortion = 0.49f;  // transmission light-dir bend toward the normal (0..1)
         float transPower = 5.1f;   // transmission lobe tightness (higher = tighter backlit glow)
         float wrap = 0.5f;         // front terminator-wrap fill (0 = hard Lambert; lit side unchanged)
-        float ambientBoost = 2.5f; // sky-irradiance ambient multiplier for foliage (1 = off), distance-faded
+        // Sky-irradiance multiplier for foliage (1 = off), distance-faded.
+        //
+        // 2.5 until 2026-08-29, which was tuned against CWA's small trees and washed a dense
+        // Arma-2/DayZ-era crown flat: with 2.5x sky on every leaf card the canopy has no lit
+        // side left to lose. The owner's call after looking at both: on DayZ a boost of 0
+        // reads BEST -- those crowns carry their own depth and want no lift at all -- but 0
+        // is worse on OFP's sparse trees, which do need the fill. 1.6 is the compromise
+        // that keeps OFP whole, and it is a compromise, not an optimum for either.
+        //
+        // If a per-world or per-generation split ever lands, DayZ-like content should take
+        // something near 0 and OFP content the old lift.
+        float ambientBoost = 1.6f;
         float normalBend = 0.8f;   // BUSH spherical-normal blend (0 = geometric, 1 = full radial)
         float crownYOffset = 0.27f; // BUSH crown-centre Y lift (lifts the crown up into the canopy)
         float fillFadeEnd = 500.0f; // distance (m) by which the SSS fill + ambient boost fade (0 = never)
@@ -1390,6 +1401,34 @@ class Engine : public IGraphicsEngine
         bool useLiveWind = true;
         float windStrength = 1.07f;
         float windDirection = 0.0f; // degrees, 0 = +X / east
+        // How fast the wind NOISE FIELDS travel, as a multiple of the shipped speeds.
+        // 1.0 is the historical look. NOT a strength control: it changes how quickly a
+        // gust crosses the field, not how far a blade bends.
+        //
+        // Worth a knob because the shader's scroll speeds are constants with no relation
+        // to the wind speed. At the default 6 m/s mean wind the gust field crosses the
+        // world at ~48 m/s and the tip-flutter field at ~101 -- eight and seventeen times
+        // the wind supposedly driving them, which is what reads as grass shivering or
+        // springing rather than leaning and releasing. ~0.15 puts the gust field at
+        // roughly wind speed.
+        //
+        // In the GAME this is driven from the live wind and never exceeds 1.0 (see
+        // windScrollAuto). The manual value reaches 4 so the dev panel can still push it
+        // past anything the weather will ever produce.
+        float windScroll = 1.0f;
+        // Derive the scroll from the live wind speed instead of from `windScroll`. On by
+        // default, and the only reason the shipped game never sees a value above 1: 1.0 is
+        // reserved for a STORM (kWindScrollFullSpeed, the top of the weather model's
+        // envelope -- WindModel's 1.5 m/s calm plus 7.5 m/s of overcast, gusting). Calm air
+        // scrolls at the floor instead, so a still day stops shivering.
+        //
+        // Turn it off to use the slider, which is the only way to exceed 1.
+        bool windScrollAuto = true;
+        // Wind speed (m/s) at which the automatic scroll reaches its 1.0 ceiling.
+        static constexpr float kWindScrollFullSpeed = 13.0f;
+        // Floor for the automatic scroll: dead calm should still breathe rather than freeze
+        // the noise field into a static crumple.
+        static constexpr float kWindScrollFloor = 0.15f;
         // Reference-style field variation. These affect deterministic GPU
         // hashes, so they do not make blades swim when the camera moves.
         float clumping = 0.35f;
@@ -1707,6 +1746,23 @@ class Engine : public IGraphicsEngine
         // This is a DIFFERENT question from fogFalloff below: that shapes how fast the ramp
         // climbs, so using it to thicken the far field also thickens the near and mid field.
         float fogFarClose = 0.85f;
+        // ROAD / DECAL per-pixel depth conform. An OnSurface fragment re-seats its depth on the
+        // terrain height field and is then pulled this far toward the camera ALONG THE RAY so it
+        // wins the depth test against the ground it lies on.
+        //
+        // The per-metre term is divided by |dir.y| in the shader, because the residual it has to
+        // cover is a height error and a height error becomes error/|dir.y| along the ray -- about
+        // 6x at the angle you get looking down a road from standing height. Before that division
+        // existed, one constant had to serve both the top-down view and the grazing one, and at
+        // grazing angles the road broke into a chequer of tiles that won and lost the test
+        // alternately (owner, Malden 2026-08-29: "die strasse ist nicht durchgehend sichtbar").
+        //
+        // Swept on that road: 0.0015/m closes most of it, 0.004 closes it completely.
+        float roadLiftFlat = 0.02f;
+        float roadLiftPerMetre = 0.004f;
+        // Ceiling as a fraction of distance. Its job is not to keep the lift small but to keep it
+        // FINITE as the ray flattens toward the horizon, where the division above runs away.
+        float roadLiftMaxFrac = 0.02f;
         float fogFalloff = 3.0f;                             // aerial fog distance-ramp exponent (pow(dist/drawDist, k)). High = clear near/mid, fog only at the edge; low (~1) = dense fog throughout, which reveals the volumetric terrain shadowing / god rays. Pushed via camera fog_color.w
 
         // Authored night-sky floor: a deep-blue radiance blended in by sun elevation so
@@ -1930,6 +1986,20 @@ class Engine : public IGraphicsEngine
         // Multiplies both the drawn disc and the moonlight. Artistic gain on top of the
         // physical phase falloff, not a replacement for it.
         float moonBrightnessScale = 1.0f;
+        // What fraction of the moon disc's night brightness survives in FULL DAYLIGHT.
+        //
+        // The disc's radiance is its irradiance divided by its solid angle, and that
+        // irradiance carries a deliberate ~24,000x artistic inflation: the physical
+        // full-moon/sun ratio is ~2.5e-6 and `moonIntensity` uses 0.06, because anything
+        // physical renders as black once the tonemap is not scotopic. That inflation is
+        // justified only while the eye is adapted to night. Carried into daylight unchanged
+        // -- which is what it did until 2026-08-29 -- it draws a disc at 6% of the SUN's
+        // radiance into a daylit sky, i.e. a second sun, which is exactly what players
+        // reported. The real daytime moon is a pale grey wafer barely above the sky.
+        //
+        // Ramped by LightSun::NightEffect, so the NIGHT look is bit-identical: the fade only
+        // acts where NightEffect is below 1, and the value here is where it lands at noon.
+        float moonDaylightScale = 0.03f;
         // Full-moon irradiance as a fraction of the sun's, for the sky-lit scene path.
         // The physical ratio is ~2.5e-6, which renders as black: human night vision is
         // scotopic and the tonemap here is not. What it must beat is the night AMBIENT
@@ -2162,6 +2232,20 @@ class Engine : public IGraphicsEngine
         // WaterWgpu.cpp) precisely so this does not cost an h0 rebuild per frame.
         // Force off for A/B with the environment variable WGR_WATER_WIND=0.
         bool windFromWeather = true;
+        // Wave energy left at DEAD CALM, as a fraction of the 12 m/s reference sea.
+        //
+        // The coupling is an intercept-plus-slope anchored so 12 m/s is exactly 1.0 (the
+        // sea the spectrum was authored against). This is the intercept. It was 0.55 with a
+        // 0.45 slope, which put the calm-weather mean of 1.5 m/s at 0.61 -- a flat day still
+        // carried nearly two thirds of a blustery one's wave energy, and it showed.
+        //
+        // Not zero, and not near it: a literal speed ratio flattens the sea to a mirror,
+        // which reads as broken water rather than calm water. There is also always some
+        // residual swell on a real sea, generated by wind that is somewhere else.
+        //
+        // Changing this does NOT move the 12 m/s look: the slope is derived from it as
+        // (1 - seaCalmScale) / 12, so the anchor holds at any value.
+        float seaCalmScale = 0.30f;
         // Shore breaker gain — the shoaling swell that runs in toward the beach. OFF by default:
         // the current train is an analytic two-harmonic sine, which can shoal and steepen but
         // fundamentally cannot overturn, so it never reads as a wave crashing into itself. A real
@@ -2526,6 +2610,9 @@ class Engine : public IGraphicsEngine
     // fogFarClose). Same reasoning as SetSkyCirrus above for being its own entry point rather
     // than a lane in an ABI-checked struct. APPENDED at the class end (vtable-slot note above).
     virtual void SetFogFarClose(float /*close*/) {}
+    /// Road / decal per-pixel depth conform (see SkySettings::roadLiftFlat). Own entry point for
+    /// the same reason as SetFogFarClose: it is pushed live from the dev panel, not baked.
+    virtual void SetRoadConform(float /*flat*/, float /*perMetre*/, float /*maxFrac*/) {}
 
     // SECOND cloud layer EDGE SOFTNESS (see SkySettings::cirrusSoftness). Same reasoning as
     // SetSkyCirrus above for being its own entry point rather than a lane in an ABI-checked
