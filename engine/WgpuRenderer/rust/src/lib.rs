@@ -13,6 +13,7 @@ mod log;
 mod planar_mips;
 mod shaders;
 mod sky;
+mod temporal;
 mod terrain;
 mod textures;
 mod tonemap;
@@ -605,6 +606,9 @@ pub struct Renderer {
     // Bilinear fullscreen blit used for that upscale (a diagnostic-grade spatial filter; the
     // temporal upscaler replaces this pass, not the plumbing around it). Built lazily.
     upscale_blitter: Option<wgpu::util::TextureBlitter>,
+    // REN-TEMP-001E/F/G: temporal camera state, jitter, static-world velocity + debug view.
+    // WGR_TEMPORAL=1 to enable (off by default — jitter with no accumulator is shimmer).
+    temporal: temporal::Temporal,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -1317,6 +1321,7 @@ impl Renderer {
             render_scale: if hdr_enabled { render_scale } else { 1.0 },
             hdr_upscaled: None,
             upscale_blitter: None,
+            temporal: temporal::Temporal::from_env(),
             sample_count,
             tonemap,
             underwater,
@@ -1720,6 +1725,28 @@ impl Renderer {
         if self.tonemap.is_none() {
             return;
         }
+        // REN-TEMP-001F: static-world velocity, computed here because every 3D depth write
+        // is done by the Resolve op. Reads the frame-final far-reduce depth resolve (the
+        // same freshness machinery the god rays use); the DLSS stage may later prefer the
+        // nearest-sample resolve — that choice is confined to this call.
+        if self.temporal.enabled {
+            if !self.frame_depth_final_resolved {
+                self.ensure_far_depth_resolve(encoder);
+                self.frame_depth_final_resolved = true;
+            }
+            if let Some(depth) = self.gfx3d.water_depth_view().cloned() {
+                let depth_gen = self.gfx3d.depth_gen();
+                let render_size = self.render_size();
+                self.temporal.render_velocity(
+                    &self.device,
+                    &self.queue,
+                    encoder,
+                    &depth,
+                    depth_gen,
+                    render_size,
+                );
+            }
+        }
         // MSAA: resolve the multisampled scene colour into the single-sample HDR target the
         // post-processing chain (bloom/exposure/tonemap) samples. An empty load/store pass with a
         // resolve_target performs the resolve at pass end; StoreOp::Discard drops the now-unneeded
@@ -1892,6 +1919,12 @@ impl Renderer {
         drop(pass);
         encoder.pop_debug_group();
         self.gpu_timers.end(encoder, TimerRegion::TonemapResolve);
+        // REN-TEMP-001G: velocity debug overlay (WGR_TEMPORAL_DEBUG=1), over the tonemapped
+        // frame and under the UI phase, at output resolution.
+        let output_size = (self.config.width, self.config.height);
+        let dst_format = self.config.format;
+        self.temporal
+            .render_debug(&self.device, &self.queue, encoder, dst, dst_format, output_size);
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -2565,6 +2598,18 @@ impl Renderer {
             self.water_flow_strength,
         );
         let mut prepared_cameras = cameras.to_vec();
+        // REN-TEMP-001E: temporal camera state + jitter. The UNJITTERED main camera is
+        // snapshotted first (velocity and history math use it), then the jitter is folded
+        // into the projection HERE — the single camera-ingest point — so the prepass,
+        // colour, water, cloud and GPU-cull consumers all rasterise with the same
+        // sub-pixel offset, while C++ (gameplay, culling truth, picking) and the shadow
+        // cascade VPs never see a jittered matrix. The planar-reflection camera below is
+        // copied from the ORIGINAL slice and stays unjittered on purpose (it feeds a
+        // mip-blurred reflection; jitter there is pure shimmer).
+        if let Some(cam) = prepared_cameras.get_mut(main_scene_cam) {
+            self.temporal.begin_frame(cam, self.render_size());
+            self.temporal.apply_jitter(&mut cam.proj);
+        }
         let mut reflected_vp = [0.0f32; 16];
         let reflected_camera = if planar_active {
             let sea = planar_sea.unwrap();
@@ -4591,6 +4636,8 @@ impl Renderer {
         // command buffers that are still executing on the GPU.
         self.gfx3d.frame_submitted();
         frame.present();
+        // REN-TEMP-001E: this frame's camera becomes the previous frame's history.
+        self.temporal.end_frame();
         if let Some((buffer, width, height, bytes_per_row, padded_bytes_per_row, is_bgra)) =
             screenshot_staging
         {
