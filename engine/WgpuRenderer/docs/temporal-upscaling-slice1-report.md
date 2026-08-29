@@ -160,9 +160,52 @@ Traps added to the ledger: `cargo build` does NOT restage `dist/` (the `OpenPose
 target does) — a Deploy after a cargo-only build ships a stale DLL under a fresh stamp;
 caught here by the deploy stamp predating the code being tested.
 
+## Phase 14 — DLSS Super Resolution RENDERS (commits b856cb99…dc90f2b9, deploy dc90f2b9)
+
+DLSS SR runs in-game, end to end, on the first bring-up day:
+
+- **SDK**: public clone of github.com/NVIDIA/DLSS at `<main checkout>/.tmp-dlss-sdk`
+  (gitignored; owner authorized). `dlss` cargo feature / `-DPOSEIDON_DLSS=ON` — OFF by
+  default, GPL posture unchanged; the plain build is byte-identical in behaviour.
+- **Device**: WGR_DLSS=1 routes instance/device creation through ash + wgpu-hal
+  `from_raw`/`device_from_raw` with wgpu's extension lists UNIONed with NGX's; strict
+  fallback to the native path on any error. Booted the real game first try.
+- **Init**: `Init_with_ProjectID` + a 'static-leaked `FeatureCommonInfo` (exe-dir snippet
+  path + verbose log callback) + absolute data dir. The driver store on this box ships
+  `nvngx_dlssg.dll` (frame gen) but NOT the SR snippet — the app-local `nvngx_dlss.dll`
+  is load-bearing, and Deploy.ps1 now ships the release snippet automatically whenever
+  the deployed renderer exports NGX symbols.
+- **Evaluate**: wgpu forbids mixing raw-hal and wgpu encoding in one encoder → the frame
+  submits in three parts at the upscale point (scene + `transition_resources`, raw NGX
+  encoder, rest of frame). Inputs are exactly the temporal contract: post-DoF resolved
+  HDR, far-depth resolve (DepthInverted), velocity (MVLowRes+MVJittered, scale =
+  render extent), 1x1 exposure texture; output is `hdr_upscaled` (now storage-capable),
+  which the post chain already read — DLSS dropped in precisely where the bilinear blit
+  was, and the blit remains the fallback (latched, logged once).
+- **Measured** (perf_abel, native 3441×1440): native 31.99 ms / 28.6 fps → **DLSS
+  Quality (2305×965) 25.08 ms / 35.4 fps (+24 %)** — ~2.4 ms over the bilinear-67 path,
+  buying near-native sharpness. 1080p Quality capture visually verified (fences, grass,
+  HUD); release snippet renders without the dev watermark.
+
+Bring-up war stories (recorded because each cost a debug cycle):
+1. **A NUL byte in the source**: the initial `".\0"` string literal was written as a
+   REAL NUL into the file; Rust compiles that silently, and every later textual patch
+   of the init body missed without erroring — so app id / FeatureCommonInfo "changes"
+   were never actually tested, while NGX read an empty path and reported
+   FeatureNotFound with zero log output. GetFeatureRequirements (which said
+   "supported") was the wedge that broke the false picture. Grep for `Binary file
+   ... matches` is the tell.
+2. The headless NGX device test (init + capability probe, seconds per iteration) is
+   what made the diagnosis tractable — game launches were 90 s each.
+3. Repeat-2 of the native DLSS bench caught the post-mission idle (cpu_avg 0.05 ms,
+   "18445 fps") and the cheapest-repeat rule quoted it; the water-mission timing trap
+   in new clothes. Always sanity-check cpu_frame alongside the GPU total.
+
 ## Next (per the approved order)
 
-Phase 10/11: reactive/no-history policy for water, particles, wind-swayed foliage
-(engine-owned mask, vendor-translated later). Phase 13: the `TemporalUpscaler` trait
-(Native/TemporalDebug as first impls). Phase 14: DLSS SR via wgpu-hal/NGX Vulkan —
-NOTE: needs the NVIDIA DLSS SDK on this machine, which the owner must download/license.
+Phase 10/11: reactive/no-history mask (water, particles, wind-swayed foliage) — DLSS
+currently sees no reactive input, so water/particle ghosting is expected until then.
+Phase 13 proper: fold Native/TemporalDebug/DLSS behind the `TemporalUpscaler` trait
+(today the seams exist but the trait is not yet formalised). Then DLAA, the §24/§25
+validation matrices, mode plumbing into the Options UI, and FSR 3.1 as the in-tree
+all-vendor backend.
