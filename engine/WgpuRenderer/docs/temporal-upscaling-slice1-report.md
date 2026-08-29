@@ -89,8 +89,38 @@ GPU frame (cheapest) and whole-frame fps (profiler average — what the player s
 3. PowerShell: `$args` is an automatic variable (splatting it re-binds positionally), and
    `-Env @{…}` cannot be passed through `powershell -File` — use a wrapper script.
 
+## Phases 4/6/7 — temporal camera, jitter, static-world velocity (commit 14b8807a)
+
+Landed after the owner approved the slice-1 visuals (2026-08-29 evening):
+
+- `WGR_TEMPORAL=1` (OFF by default — jitter with no accumulator is shimmer): 8-phase
+  Halton (2,3) sub-pixel jitter folded into the main scene camera's projection at the
+  single camera-ingest point in `lib.rs`. C++ matrices, culling truth, shadow cascade VPs
+  and the planar-reflection camera stay unjittered by construction.
+- Renderer-owned previous-camera history (`temporal.rs`), resets on first frame /
+  render-size change (the explicit engine-event reset contract of plan Phase 5 is the
+  next ABI change, together with `object_id`).
+- Static-world velocity pass: Rg16Float at RenderExtent, reprojecting the frame-final
+  far-depth resolve through unjittered current/previous matrices with camera-relative
+  rebase (`cam_pos` delta), f64-inverted like `Frame.inv_view_proj`. Sky pixels fall out
+  of the same math via the stored-depth clamp (d = near/dist → 1e-7 is "hundreds of km").
+- `WGR_TEMPORAL_DEBUG=1`: velocity-as-colour overlay after tonemap, under the UI;
+  history resets flash blue for one frame.
+
+Validation:
+- Headless device test renders the real pass and reads texels back: static camera → 0,
+  yaw → horizontal velocity, strafe → horizontal velocity (the arm that would catch a
+  cam-delta that never propagates). An all-zeros output cannot pass.
+- In-game (1080p windowed, deploy 14b8807a): `perf_abel` static camera → uniform neutral
+  (zero velocity), HUD drawn over the debug view (UI is outside the temporal path);
+  `abel-walk` during its movement phase → the expected radial flow field: strong
+  outward/downward motion on the near ground fading to zero at the vanishing point,
+  smooth and coherent. NOTE: the walk mission is static for its first ~60 s
+  (settle 30 s + static 30 s) — a capture before frame ~2600 photographs the static
+  phase and says nothing about motion.
+
 ## Next (per the approved order)
 
-Phase 4: temporal camera state + jitter (renderer-side, jitter applied in the Rust camera
-upload so C++ matrices/culling stay unjittered), then history-reset contract (ABI bump),
-then static-world motion vectors from the existing depth resolves.
+Phase 5 proper + Phase 8: the ABI change — explicit history-reset events on `WgrFrame`
+and a stable `object_id` on `WgrDraw3D` (version-guarded bump), then rigid-object
+motion vectors; skinned motion via double-buffered skin-bake output after that.
