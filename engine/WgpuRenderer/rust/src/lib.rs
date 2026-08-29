@@ -2230,9 +2230,23 @@ impl Renderer {
             return fail(self, "as_hal returned no Vulkan handles");
         };
 
-        let jitter = self.temporal.jitter_px;
+        // Jitter reaches DLSS in PIXEL space (y-down); our jitter is applied in NDC
+        // (y-up), so Y flips by default. WGR_DLSS_JY_FLIP=0 / WGR_DLSS_MV_FLIP=1 exist
+        // for the one visual A/B that settles a vendor sign convention — the plan's §21
+        // forbids "tuning it out" with sharpening instead.
+        static JY_FLIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        static MV_FLIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let jy = *JY_FLIP.get_or_init(|| {
+            std::env::var("WGR_DLSS_JY_FLIP").map(|v| v != "0").unwrap_or(true)
+        });
+        let mvf = *MV_FLIP.get_or_init(|| {
+            std::env::var("WGR_DLSS_MV_FLIP").map(|v| v != "0").unwrap_or(false)
+        });
+        let j = self.temporal.jitter_px;
+        let jitter = [j[0], if jy { -j[1] } else { j[1] }];
         let reset = self.temporal.reset_this_frame();
-        let mv_scale = [render.0 as f32, render.1 as f32];
+        let mv_sign = if mvf { -1.0f32 } else { 1.0 };
+        let mv_scale = [render.0 as f32 * mv_sign, render.1 as f32 * mv_sign];
         let ngx = self.ngx.as_mut().expect("ngx initialised above");
         // wgpu forbids mixing its own encoding API with raw hal encoding in ONE encoder,
         // so the frame splits here: everything recorded so far (scene + the transitions
