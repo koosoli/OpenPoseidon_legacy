@@ -744,6 +744,17 @@ impl Terrain {
             ("tile_normal_strength", tile_normal_strength),
             ("surface_normalise", surface_normalise),
             ("linear", linear),
+            // WGR_TERRAIN_MIP_FROM_TILE=1 restores mip selection from the JITTERED tiling UV,
+            // whose derivative jumps at every cell boundary and stamps a hard square grid into
+            // close, steeply-viewed ground. Default 0 = gradients from the smooth cell position.
+            (
+                "jitter_scale",
+                std::env::var("WGR_TERRAIN_JITTER")
+                    .ok()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 1.0),
+            ),
         ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_terrain_pipeline_layout"),

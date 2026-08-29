@@ -145,6 +145,11 @@ fn cell_entry(cell: vec2<i32>) -> u32 {
 // the wrong ground type across the border and put the tile's own wrap seam on
 // the cell edge). Explicit gradients keep mip selection continuous across the
 // frame switch and keep the call legal in non-uniform control flow.
+// WGR_TERRAIN_JITTER=0 removes the per-cell UV offset entirely. An ABLATION: the offset is a
+// piecewise-BILINEAR warp of the tiling UV, and a bilinear field has a crease along every cell
+// boundary -- which is a candidate for the square lattice reported on Desert Island's sand.
+override jitter_scale: f32 = 1.0;
+
 fn sample_cell(entry: u32, cell: vec2<f32>, tile_uv: vec2<f32>,
                ddx: vec2<f32>, ddy: vec2<f32>) -> vec3<f32> {
     let layer = entry & CELL_LAYER_MASK;
@@ -689,9 +694,35 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // smooths the field around non-simple cells, so clamped transition tiles
     // are never warped off their designed edges.
     let jdim = vec2<f32>(textureDimensions(jitter_map));
-    let jitter = textureSampleLevel(jitter_map, ground_clamp_samp,
-                                    (cell_pos + vec2<f32>(0.5)) / jdim, 0.0).xy;
-    let tile_uv = cell_pos + jitter;
+    // SMOOTH the interpolation, do not just interpolate.
+    //
+    // A hardware bilinear tap is C0 but not C1: its gradient is piecewise-constant and jumps
+    // across every texel boundary. Here one texel IS one land cell, so a plain bilinear jitter
+    // gives the tiling UV a CREASE along every cell edge -- and a crease in a texture warp reads
+    // as a straight line. That is the square lattice reported on Desert Island's sand: visible
+    // looking steeply down from close, gone at a flat angle or from height, and (measured) gone
+    // entirely with WGR_TERRAIN_JITTER=0.
+    //
+    // Ruled out first, each with its own capture: the ground texture's own wrap seam (bt.paa's
+    // opposite edges differ by 8.3/255 against an adjacent-pixel variation of 6.5, so it tiles),
+    // and mip selection from the jittered UV (WGR_TERRAIN_MIP_FROM_TILE, no change).
+    //
+    // The fix is Perlin's: keep the same values at the grid points -- which is what preserves
+    // the GL33 vertex-UV parity this field exists for -- and interpolate with a smoothstep
+    // weight, whose derivative is zero at both ends, so neighbouring cells meet with matching
+    // gradients and there is no crease to see.
+    let jcoord = cell_pos;
+    let jbase = floor(jcoord);
+    let jf = jcoord - jbase;
+    let jw = jf * jf * (3.0 - 2.0 * jf);
+    let ji = vec2<i32>(jbase);
+    let jmax = vec2<i32>(jdim) - vec2<i32>(1, 1);
+    let j00 = textureLoad(jitter_map, clamp(ji, vec2<i32>(0), jmax), 0).xy;
+    let j10 = textureLoad(jitter_map, clamp(ji + vec2<i32>(1, 0), vec2<i32>(0), jmax), 0).xy;
+    let j01 = textureLoad(jitter_map, clamp(ji + vec2<i32>(0, 1), vec2<i32>(0), jmax), 0).xy;
+    let j11 = textureLoad(jitter_map, clamp(ji + vec2<i32>(1, 1), vec2<i32>(0), jmax), 0).xy;
+    let jitter = mix(mix(j00, j10, jw.x), mix(j01, j11, jw.x), jw.y);
+    let tile_uv = cell_pos + jitter * jitter_scale;
     // Gradients of the shared tiling UV, for every ground tap (see sample_cell).
     let duvdx = dpdx(tile_uv);
     let duvdy = dpdy(tile_uv);
