@@ -767,8 +767,11 @@ impl Renderer {
         // REN-TEMP-001M: WGR_DLSS=1 (dlss builds only) routes instance/device creation
         // through ash + wgpu-hal so the NGX-required Vulkan extensions are enabled.
         // STRICT fallback: any failure logs and continues on the untouched native path.
+        // DEFAULT ON in a dlss build (owner request 2026-08-30: "like other games, no
+        // .bat"): the route falls back to the untouched native path on ANY failure, so
+        // a default-on request is safe. WGR_DLSS=0 opts out.
         #[cfg(feature = "dlss")]
-        let dlss_requested = std::env::var("WGR_DLSS").map(|v| v != "0").unwrap_or(false);
+        let dlss_requested = std::env::var("WGR_DLSS").map(|v| v != "0").unwrap_or(true);
         #[cfg(feature = "dlss")]
         let mut dlss_instance_active = false;
         let instance = 'inst: {
@@ -1136,6 +1139,22 @@ impl Renderer {
                 );
             }
         }
+        // Default DLSS experience = the owner-validated Quality point (67%), whenever the
+        // NGX route came up and the env did not pin a scale. The dev panel's Temporal tab
+        // changes it live; a plain (non-dlss) build never reaches this.
+        #[cfg(feature = "dlss")]
+        let render_scale = if ngx_raw.is_some()
+            && hdr_enabled
+            && std::env::var("WGR_RENDER_SCALE").is_err()
+        {
+            log.log(
+                log_level::INFO,
+                "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
+            );
+            0.67
+        } else {
+            render_scale
+        };
         if !prepass_enabled {
             log.log(
                 log_level::INFO,
@@ -1395,7 +1414,16 @@ impl Renderer {
             render_scale: if hdr_enabled { render_scale } else { 1.0 },
             hdr_upscaled: None,
             upscale_blitter: None,
-            temporal: temporal::Temporal::from_env(),
+            temporal: {
+                let mut t = temporal::Temporal::from_env();
+                #[cfg(feature = "dlss")]
+                if ngx_raw.is_some() && std::env::var("WGR_TEMPORAL").is_err() {
+                    // The NGX route is up and nothing said otherwise: DLSS is the
+                    // default experience, and it needs the temporal contract.
+                    t.enabled = true;
+                }
+                t
+            },
             #[cfg(feature = "dlss")]
             ngx_raw,
             #[cfg(feature = "dlss")]
