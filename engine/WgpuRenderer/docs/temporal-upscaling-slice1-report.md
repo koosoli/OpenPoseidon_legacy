@@ -216,6 +216,23 @@ vibration gone, sharpness good; residual shadow/sky ghosting is what this mask t
 Follow-ups (documented, not faked): wind-sway vegetation vectors or masking, particles,
 cloud-shadow-delta masking, and the owner's §6.7 live dev-panel tuning surface.
 
+## Owner acceptance + the exposure endgame (2026-08-30, commits …7b77aadc)
+
+The owner's three-arm blind test closed the ghosting hunt:
+- **DLSS auto-exposure wins** (now the default): shadows clean, only slight cloud
+  ghosting left — and the NATIVE control arm showed the same cloud ghosting and the same
+  building/tree wobble under fast movement. **Parity with native reached, at more fps**;
+  the wobble is pre-existing engine behaviour (LOD/geometry), out of scope here.
+- En route, the exposure gap was found (tonemap = manual x auto texture; DLSS saw only
+  the texture — DLSS.Exposure.Scale now carries the manual factor for the non-auto arm),
+  and MV scale moved to output-pixel space (no visible delta either way — recorded, knob
+  kept). TransparencyMask on this snippet generation is visibly inert — recorded.
+
+**The §6.7 dev panel is live** (Temporal tab beside Tonemap): temporal/DLSS toggles,
+render scale 50–100 % (live, with explicit history reset; 100 % = DLAA), mip bias
+auto/manual, reactive strengths, jitter phases, convention probes under a leave-alone
+header, all beside an fps readout and an info block. The owner tunes without rebuilds.
+
 ## Next (per the approved order)
 
 Phase 10/11 remainder: sway/particle handling (water, particles, wind-swayed foliage) — DLSS
