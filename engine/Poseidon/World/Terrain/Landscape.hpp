@@ -212,6 +212,13 @@ GroundSolid, GroundWater DEFINE_ENUM_END(GroundType) namespace Poseidon
         Object* obj;
         Point3 pos;      // world coordinate position of collision
         float under;     // how much are we under the ground level
+        // WATER ONLY: the same submersion measured against the MEAN sea level, i.e. with the
+        // wave taken out. `under` is the real depth and is what buoyancy must integrate; this is
+        // for the terms that are really a function of how the hull SITS, not of which crest it
+        // happens to be on. Ship's planing lift is one: it multiplies the up-force by up to 120x
+        // with speed, and applied to a wave-varying depth that gain turns a swell into a
+        // catapult. Equal to `under` on a flat sea and for every non-water contact.
+        float underFlat;
         float dX, dZ;    // surface differential
         int vertex;      // which vertex of checked object
         int level;       // which level (landcontact or geometry)

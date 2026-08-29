@@ -664,6 +664,9 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
             info.texture = texture;
             info.obj = nullptr;
             info.under = underWater;
+            // The same depth with the wave taken out; see UndergroundInfo::underFlat for why the
+            // two have to be told apart now that `bumpySea` follows a real surface.
+            info.underFlat = above + _seaLevelWave - pos[1];
             info.pos = pos;
             info.pos[1] = bumpySea; // applied directly on surface
             info.dX = 0;
@@ -683,6 +686,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
         info.texture = texture;
         info.obj = nullptr;
         info.under = underLevel;
+        info.underFlat = info.under;
         info.pos = pos;
         info.dX = dX;
         info.dZ = dZ;
@@ -749,6 +753,7 @@ void Landscape::GroundCollision(GroundCollisionBuffer& retVal, Object* with, con
                     info.texture = texture;
                     info.obj = obj;
                     info.under = underLevel;
+                    info.underFlat = info.under;
                     info.pos = obj->PositionModelToWorld(pos);
                     info.dX = dX;
                     info.dZ = dZ;
@@ -875,6 +880,7 @@ void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with
             info.texture = texture;
             info.obj = nullptr;
             info.under = waterY - jpos.Y();
+            info.underFlat = info.under;
             info.pos = jpos;
             info.pos[1] = waterY;
             info.dX = 0;
@@ -895,6 +901,7 @@ void Landscape::GroundCollisionPlane(GroundCollisionBuffer& retVal, Object* with
         info.texture = texture;
         info.obj = obj;
         info.under = underLevel;
+        info.underFlat = info.under;
         info.pos = jpos;
         info.dX = dX;
         info.dZ = dZ;

@@ -620,7 +620,27 @@ void Ship::Simulate(float deltaT, SimulationImportance prec)
                             pForce = Vector3(0, (1200000 / baseMass) * GetMass() * info.under * coefNPoints, 0);
                             if (smallShip)
                             {
-                                pForce *= 20 + floatMin(floatMax(speed[2], 0) * 6, 100);
+                                // PLANING LIFT. A small hull gets up to 120x the static buoyancy
+                                // as it picks up speed, which is the 2001 engine's stand-in for
+                                // planing. That gain was written for a DEAD FLAT sea, where
+                                // `under` barely moves; applied to a depth that now follows a real
+                                // wave it multiplies the swell itself and the boat is thrown about
+                                // (owner's players, 2026-08-29: "when boats move faster buoyancy is
+                                // losing its marbles" -- fine at low speed, wild at speed).
+                                //
+                                // So the gain acts on the part of the submersion that is really
+                                // about how the hull SITS -- the depth against the mean sea level,
+                                // `underFlat` -- and the wave-induced difference keeps the static
+                                // buoyancy it physically has. The boat still rides up as it planes
+                                // and still rides the swell; it is no longer catapulted by it.
+                                //
+                                // On a flat sea underFlat == under, so this is bit-identical to
+                                // the behaviour before wave buoyancy existed.
+                                const float gain = 20 + floatMin(floatMax(speed[2], 0) * 6, 100);
+                                const float flat = floatMax(info.underFlat, 0.0f);
+                                const float wave = info.under - flat;
+                                const float lift = (flat * gain + wave) * Inv(floatMax(info.under, 1e-3f));
+                                pForce *= floatMax(lift, 1.0f);
                             }
                             pCenter = info.pos - wCenter;
                             torque += pCenter.CrossProduct(pForce * 0.2);
