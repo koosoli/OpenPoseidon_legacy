@@ -440,12 +440,7 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// viewports) instead of being stretched to fill the full width. Used by the optic
 	// overlays (binocular / scope / gunsight); the lateral strips it leaves are filled
 	// by DrawWidescreenPillarbox. Default false keeps the full-width fill (cinema border).
-	// `occludeVolumetrics`: the quads write near depth where they are solid, so
-	// screen-space post that marches the depth buffer (god rays) stops at this
-	// overlay instead of reading the world behind it. Off by default -- only the
-	// first-person optics view wants it. See Draw2DPars::occludeVolumetrics.
-	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false,
-	                    bool occludeVolumetrics = false );
+	static void Draw2D( LODShape *lShape, int lod, PackedColor cColor, bool preserveAspect4x3 = false );
 
 	// Paint solid-black pillarbox bars outside the central 4:3 area for
 	// 4:3-authored overlays. By default this is gated to gameplay so menu

@@ -49,23 +49,3 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let rgb = mix(globals.fog_color.rgb, base.rgb, clamp(in.fog, 0.0, 1.0));
     return vec4<f32>(rgb, base.a);
 }
-
-// WGR_DEPTH_TEST_WRITE_CUT only. Identical to fs_main except that a near-transparent
-// fragment is DISCARDED rather than blended, so it writes no depth either. The colour
-// difference is nil in practice (an alpha of 0.03 contributes 3% of one texel), and the
-// depth difference is the whole point: this variant exists so the first-person optics
-// model occludes the god-ray march where the weapon is SOLID, while its aperture keeps
-// showing the sky -- and the shafts in it -- behind the sight. A plain depth-writing 2D
-// pipeline would stamp the near plane over the entire quad, aperture included, and
-// silently delete every sun shaft the moment the player aims.
-const CUT_ALPHA: f32 = 0.5;
-
-@fragment
-fn fs_main_cut(in: VsOut) -> @location(0) vec4<f32> {
-    let base = textureSample(tex, samp, in.uv) * in.color;
-    if (base.a < CUT_ALPHA) {
-        discard;
-    }
-    let rgb = mix(globals.fog_color.rgb, base.rgb, clamp(in.fog, 0.0, 1.0));
-    return vec4<f32>(rgb, base.a);
-}

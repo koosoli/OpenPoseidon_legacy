@@ -82,12 +82,6 @@ struct Draw2DPars
     PackedColor colorTL, colorTR, colorBL, colorBR;
     void SetColor(PackedColor c) { colorTL = colorTR = colorBL = colorBR = c; }
     int spec;                 // which specflags are used
-    // Opt-in: this 2D draw stands IN FRONT of the world and must occlude the
-    // volumetrics, so it writes near depth wherever it is solid (alpha >= 0.5).
-    // Default false, which is the historical behaviour of every 2D draw: no depth
-    // at all. Only the first-person optics/iron-sight model sets it -- see
-    // Object::Draw2D and WGR_DEPTH_TEST_WRITE_CUT. GL33 ignores it.
-    bool occludeVolumetrics = false;
     float uTL, vTL, uTR, vTR; // u,v range
     float uBL, vBL, uBR, vBR; // u,v range
     void SetU(float u0, float u1) { uTL = uBL = u0, uTR = uBR = u1; }

@@ -10,11 +10,10 @@ const OVERLAY_SAMPLER: usize = 3;
 pub struct Gfx2d {
     globals_buffer: wgpu::Buffer,
     globals_bind: wgpu::BindGroup,
-    // [depth_mode][blend]: depth mode = WgrDepthMode
-    // (none / test / test+write / test+write+alpha-cut).
+    // [depth_mode][blend]: depth mode = WgrDepthMode (none / test / test+write).
     // `pipelines` -> scene colour target; `pipelines_display` -> swapchain (UI phase).
-    pipelines: [[wgpu::RenderPipeline; 3]; 4],
-    pipelines_display: [[wgpu::RenderPipeline; 3]; 4],
+    pipelines: [[wgpu::RenderPipeline; 3]; 3],
+    pipelines_display: [[wgpu::RenderPipeline; 3]; 3],
 
     vbuf: Option<wgpu::Buffer>,
     vbuf_cap: u64,
@@ -97,12 +96,9 @@ impl Gfx2d {
 
         // (test, write): plain 2D / sky use (false,false); transparent meshes
         // (false… ) — see callers below. test gates GreaterEqual (reversed-Z) vs Always.
-        // `cut` picks the alpha-discarding fragment entry point; see fs_main_cut in
-        // shader.wgsl and WGR_DEPTH_TEST_WRITE_CUT in the ABI header.
         let make_pipeline = |blend: Option<wgpu::BlendState>,
                              test: bool,
                              write: bool,
-                             cut: bool,
                              format: wgpu::TextureFormat,
                              samples: u32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -137,7 +133,7 @@ impl Gfx2d {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: Some(if cut { "fs_main_cut" } else { "fs_main" }),
+                    entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
@@ -178,18 +174,9 @@ impl Gfx2d {
         // resolve. Identical when HDR is off (surface_format == overlay_format).
         let make_set = |format: wgpu::TextureFormat, samples: u32| {
             [
-                std::array::from_fn(|b| {
-                    make_pipeline(blends[b], false, false, false, format, samples)
-                }),
-                std::array::from_fn(|b| {
-                    make_pipeline(blends[b], true, false, false, format, samples)
-                }),
-                std::array::from_fn(|b| {
-                    make_pipeline(blends[b], true, true, false, format, samples)
-                }),
-                std::array::from_fn(|b| {
-                    make_pipeline(blends[b], true, true, true, format, samples)
-                }),
+                std::array::from_fn(|b| make_pipeline(blends[b], false, false, format, samples)),
+                std::array::from_fn(|b| make_pipeline(blends[b], true, false, format, samples)),
+                std::array::from_fn(|b| make_pipeline(blends[b], true, true, format, samples)),
             ]
         };
         let pipelines = make_set(surface_format, sample_count);
@@ -407,88 +394,5 @@ impl Gfx2d {
             );
         }
         pass.set_scissor_rect(0, 0, width, height);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // A real wgpu device, not naga. The alpha-cut 2D pipeline (WGR_DEPTH_TEST_WRITE_CUT)
-    // names a SECOND fragment entry point, `fs_main_cut`, and the pipeline array grew from
-    // three depth modes to four. Both are the kind of mistake naga cannot see: a
-    // misspelled entry point or an illegal depth state fails inside
-    // `create_render_pipeline`, which the game only reaches at device init -- i.e. as a
-    // black window on the owner's machine, not as a failing test. So build the whole set
-    // inside a validation error scope and assert the scope pops empty.
-    #[test]
-    fn every_2d_pipeline_including_the_alpha_cut_one_is_valid() {
-        // Own device rather than cull::tests::headless(): SharedTextures binds a texture
-        // ARRAY, so the device must be created with TEXTURE_BINDING_ARRAY or the bind
-        // group layout is rejected before any pipeline is reached.
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let Some(adapter) =
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            }))
-            .ok()
-        else {
-            // No adapter in this environment (headless CI without a GPU). Skipping is
-            // correct; silently passing while pretending to have tested is not.
-            eprintln!("no wgpu adapter available -- 2D pipeline validation skipped");
-            return;
-        };
-        let wanted = wgpu::Features::TEXTURE_BINDING_ARRAY;
-        if !adapter.features().contains(wanted) {
-            eprintln!("adapter lacks TEXTURE_BINDING_ARRAY -- 2D pipeline validation skipped");
-            return;
-        }
-        let Ok((device, queue)) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                required_features: wanted,
-                // The default limits put max_binding_array_elements_per_shader_stage at 0,
-                // which rejects the texture array before any pipeline is built. The real
-                // renderer asks the adapter for what it has; so does this.
-                required_limits: adapter.limits(),
-                ..Default::default()
-            }))
-        else {
-            eprintln!("could not create a device -- 2D pipeline validation skipped");
-            return;
-        };
-        let textures = crate::textures::SharedTextures::new(
-            &device,
-            &queue,
-            /*bc_supported*/ false,
-            /*object_cap*/ 4,
-            /*partially_bound*/ false,
-            &crate::log::LogSink::none(),
-        );
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let gfx2d = Gfx2d::new(
-            &device,
-            &textures,
-            wgpu::TextureFormat::Rgba16Float,
-            wgpu::TextureFormat::Bgra8UnormSrgb,
-            /*sample_count*/ 1,
-        );
-        let err = pollster::block_on(scope.pop());
-        assert!(
-            err.is_none(),
-            "2D pipeline creation failed validation: {err:?}"
-        );
-        // Four depth modes, and the fourth is the alpha-cut one. Asserted rather than
-        // assumed: `draw_one` falls back to `sets[0]` (no depth at all) for an index it
-        // does not have, so a set that never grew would put the bug straight back and
-        // every other test would stay green.
-        assert_eq!(gfx2d.pipelines.len(), 4);
-        assert_eq!(gfx2d.pipelines_display.len(), 4);
-        assert_eq!(
-            crate::ffi::WgrDepthMode::TestWriteCut as usize,
-            gfx2d.pipelines.len() - 1
-        );
     }
 }

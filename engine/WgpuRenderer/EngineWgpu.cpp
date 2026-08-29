@@ -2227,13 +2227,7 @@ void EngineWgpu::Draw2D(const Draw2DPars& pars, const Rect2DAbs& rect, const Rec
     const WgrVertex2D bl = MakeVertex(c.xBeg, c.yEnd, c.uBL, c.vBL, pars.colorBL);
     const WgrVertex2D quad[6] = {tl, tr, br, tl, br, bl};
 
-    // 2D is depth-less by default. `occludeVolumetrics` is the one opt-in: the quad
-    // writes near depth where it is solid, so screen-space post that marches against the
-    // depth buffer -- the god rays above all -- stops at it instead of reading the sky
-    // behind it and painting sun shafts straight over the weapon. See
-    // WGR_DEPTH_TEST_WRITE_CUT for why the cutout half is not optional.
-    const WgrDepthMode depth2d = pars.occludeVolumetrics ? WGR_DEPTH_TEST_WRITE_CUT : WGR_DEPTH_NONE;
-    AppendTriangles(ResolveTexture(pars.mip), BlendForSpec(pars.spec), SamplerForSpec(pars.spec), depth2d, quad);
+    AppendTriangles(ResolveTexture(pars.mip), BlendForSpec(pars.spec), SamplerForSpec(pars.spec), WGR_DEPTH_NONE, quad);
 }
 
 void EngineWgpu::DrawPoly(const MipInfo& mip, const Vertex2DAbs* vertices, int n, const Rect2DAbs& clip, int specFlags)

@@ -106,7 +106,6 @@ Engine::~Engine()
 void Draw2DPars::Init()
 {
     spec = NoZBuf | IsAlpha | ClampU | ClampV | IsAlphaFog;
-    occludeVolumetrics = false;
     SetU(0, 1);
     SetV(0, 1);
 }
