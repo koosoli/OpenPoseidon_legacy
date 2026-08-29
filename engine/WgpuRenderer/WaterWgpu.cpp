@@ -539,6 +539,13 @@ bool WaterWgpu::UpdateSeaWind(float now)
         _seaWindSpeed = wantSpeed;
         _seaWindDirRad = wantDir;
         _seaWindLatchTime = now;
+        // Log the FIRST latch too, not only later re-derives. Without this a run that never
+        // changes weather -- which is every scripted capture, and any mission with steady
+        // weather -- prints nothing at all about the sea's wind, and "is the wave height
+        // coupled to the wind?" cannot be answered from a log. It is asked (players, 2026-08-29:
+        // "Does the wind setting influence the wave high? For me it looks all the same").
+        LOG_INFO(Graphics, "Water sea-state wind latched: {:.1f} m/s heading {:.0f} deg (first latch)",
+                 _seaWindSpeed, _seaWindDirRad * (180.0f / 3.14159265358979323846f));
         return true;
     }
 
@@ -795,6 +802,19 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         const float calmScale = std::clamp(look.seaCalmScale, 0.0f, 1.0f);
         const float calmSlope = (1.0f - calmScale) / 12.0f;
         windMultiplier *= std::clamp(calmScale + calmSlope * _seaWindSpeed, calmScale, 1.60f);
+        // The number that actually reaches the spectrum, once per change of it. This is the
+        // answer to "does wind change the waves": if this does not move when the weather does,
+        // the coupling is broken; if it moves and the sea looks the same, the coupling is too
+        // weak. Logging the value is what tells those two apart.
+        static float loggedMultiplier = -1.0f;
+        if (std::abs(windMultiplier - loggedMultiplier) > 0.01f)
+        {
+            loggedMultiplier = windMultiplier;
+            LOG_INFO(Graphics,
+                     "Water sea state: wind {:.1f} m/s -> energy x{:.3f}, sea-state lane {:.3f}, "
+                     "cascade length x{:.3f}",
+                     _seaWindSpeed, windMultiplier, _params.fft_wind_sea.w, lengthMultiplier);
+        }
     }
     if (look.seaStateCoupling)
     {
