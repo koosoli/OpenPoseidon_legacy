@@ -1,0 +1,91 @@
+version=11;
+class Mission
+{
+	randomSeed=1234;
+	class Intel { year=1985; month=6; day=21; hour=12; minute=0; };
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={2402.0,0.0,9740.0};
+					azimut=320.0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=1.0;
+				};
+			};
+		};
+
+	};
+	class Vehicles
+	{
+		items=6;
+			class Item0
+			{
+				position[]={2406.0,0.0,9744.0};
+				azimut=0.0;
+				id=10;
+				side="EMPTY";
+				vehicle="Barrel1";
+				skill=0.6;
+			};
+			class Item1
+			{
+				position[]={2408.0,0.0,9744.0};
+				azimut=0.0;
+				id=11;
+				side="EMPTY";
+				vehicle="Barrel2";
+				skill=0.6;
+			};
+			class Item2
+			{
+				position[]={2410.0,0.0,9744.0};
+				azimut=0.0;
+				id=12;
+				side="EMPTY";
+				vehicle="Barrels";
+				skill=0.6;
+			};
+			class Item3
+			{
+				position[]={2406.0,0.0,9748.0};
+				azimut=0.0;
+				id=13;
+				side="EMPTY";
+				vehicle="Paleta1";
+				skill=0.6;
+			};
+			class Item4
+			{
+				position[]={2408.0,0.0,9748.0};
+				azimut=0.0;
+				id=14;
+				side="EMPTY";
+				vehicle="Paleta2";
+				skill=0.6;
+			};
+			class Item5
+			{
+				position[]={2410.0,0.0,9748.0};
+				azimut=0.0;
+				id=15;
+				side="EMPTY";
+				vehicle="Table";
+				skill=0.6;
+			};
+	};
+};
+class Intro { randomSeed=1; class Intel { }; };
+class OutroWin { randomSeed=2; class Intel { }; };
+class OutroLoose { randomSeed=3; class Intel { }; };

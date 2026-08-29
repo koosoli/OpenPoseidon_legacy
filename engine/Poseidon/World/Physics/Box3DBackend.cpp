@@ -642,6 +642,33 @@ public:
         }
     }
 
+    bool GetBodyMotion(BodyId id, BodyMotion& out) const override
+    {
+        // Find() is non-const because it hands back a mutable slot for the write
+        // paths. Reading through a const_cast here is narrower than making the
+        // whole lookup const-correct for one caller, and the alternative -- a
+        // second near-identical finder -- is the kind of duplication that drifts.
+        const Slot* slot = const_cast<Box3DBackend*>(this)->Find(id);
+        if (!slot)
+        {
+            return false;
+        }
+        const b3WorldTransform t = b3Body_GetTransform(slot->body);
+        out.position = Vector3(t.p.x, t.p.y, t.p.z);
+        const b3Vec3 ax = b3RotateVector(t.q, b3Vec3{1.0f, 0.0f, 0.0f});
+        const b3Vec3 ay = b3RotateVector(t.q, b3Vec3{0.0f, 1.0f, 0.0f});
+        const b3Vec3 az = b3RotateVector(t.q, b3Vec3{0.0f, 0.0f, 1.0f});
+        out.axisX = Vector3(ax.x, ax.y, ax.z);
+        out.axisY = Vector3(ay.x, ay.y, ay.z);
+        out.axisZ = Vector3(az.x, az.y, az.z);
+        const b3Vec3 lv = b3Body_GetLinearVelocity(slot->body);
+        const b3Vec3 av = b3Body_GetAngularVelocity(slot->body);
+        out.linearVelocity = Vector3(lv.x, lv.y, lv.z);
+        out.angularVelocity = Vector3(av.x, av.y, av.z);
+        out.awake = b3Body_IsAwake(slot->body);
+        return true;
+    }
+
     void SetWind(const WindSettings& wind) override { _wind = wind; }
 
     void SetKinematicProxy(Vector3Par position, float radius, float height) override

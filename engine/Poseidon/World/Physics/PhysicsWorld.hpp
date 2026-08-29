@@ -119,6 +119,9 @@ public:
     bool MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness) const;
     void   ClearProbes();
     void   GetProbeSamples(std::vector<ProbeSample>& out) const;
+    /// Physics -> gameplay, for a body the caller spawned as dynamic. See
+    /// BodyMotion for why this exception to PHY-010's one-way rule exists.
+    bool   GetBodyMotion(BodyId id, BodyMotion& out) const;
     void   SetWind(const WindSettings& wind);
     /// Follows the player so they can shove probes. Physics never moves them back.
     void SetKinematicProxy(Vector3Par position, float radius, float height);

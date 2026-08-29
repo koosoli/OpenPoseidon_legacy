@@ -349,6 +349,11 @@ void PhysicsWorld::ClearProbes()
     }
 }
 
+bool PhysicsWorld::GetBodyMotion(BodyId id, BodyMotion& out) const
+{
+    return _backend && _backend->GetBodyMotion(id, out);
+}
+
 void PhysicsWorld::GetProbeSamples(std::vector<ProbeSample>& out) const
 {
     out.clear();

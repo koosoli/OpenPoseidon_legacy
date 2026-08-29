@@ -24,6 +24,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/World/Entities/Weapons/Ballistics.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
+#include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 
 #include <map>
@@ -201,6 +202,7 @@ void ResetPanelSettings()
     Penetration::SetEnabled(false);
     Penetration::SetResistanceScale(1.0f);
     GrenadeFuse::Reset();
+    LooseObjects::Reset();
     // Ray audit
     SetRayAudit(false);
     ResetRayAudit();

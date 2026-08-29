@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Poseidon/World/Entities/Vehicles/Transport.hpp>
+#include <Poseidon/World/Physics/PhysicsTypes.hpp>
 
 namespace Poseidon
 {
@@ -37,10 +38,16 @@ class Thing: public VehicleSupply
 	float _submerged; // some thing submerge - see ThingType
 	bool _isCloudlet;
 
+	/// This object's body in the physics world. Invalid unless loose-object
+	/// physics is switched on AND this object is ours to move; see LooseObjects,
+	/// which owns every rule about when that is true.
+	Physics::BodyId _physicsBody;
+
 	typedef VehicleSupply base;
 
 	public:
 	Thing( VehicleType *name );
+	~Thing() override;
 	
 	const ThingType *Type() const
 	{

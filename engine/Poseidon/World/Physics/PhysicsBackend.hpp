@@ -84,6 +84,9 @@ public:
     /// a general transform getter is what turns "physics is a query service" into
     /// "physics owns the position", and PHY-020 is not that step.
     virtual void GetProbeSamples(std::vector<ProbeSample>& out) const = 0;
+    /// One body's pose and motion. False when the id is stale or the backend has
+    /// no such body. See BodyMotion for why reading back is allowed at all.
+    virtual bool GetBodyMotion(BodyId id, BodyMotion& out) const = 0;
     /// Applied to every probe shape at the start of each step while enabled.
     virtual void SetWind(const WindSettings& wind) = 0;
 

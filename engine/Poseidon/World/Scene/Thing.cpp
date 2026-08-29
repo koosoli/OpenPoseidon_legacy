@@ -1,6 +1,8 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/World/Scene/Thing.hpp>
+
+#include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Weapons/Shots.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -57,6 +59,14 @@ Thing::Thing(VehicleType* name) : base(name), _doCrash(CrashNone)
     _destrType = GetType()->GetDestructType();
 }
 
+Thing::~Thing()
+{
+    // Give the physics body back. Without this a destroyed barrel leaves its
+    // shapes in the solver for the rest of the mission -- invisible, still
+    // colliding, and impossible to attribute afterwards.
+    LooseObjects::Release(_physicsBody);
+}
+
 Vector3 Thing::Friction(Vector3Par speed)
 {
     Vector3 friction;
@@ -87,6 +97,19 @@ void Thing::Simulate(float deltaT, SimulationImportance prec)
     }
 
     base::Simulate(deltaT, prec);
+
+    // PHYSICS OWNERSHIP. When a loose object belongs to the solver, the solver
+    // decides where it is, and the 2001 force/friction/torque integration below
+    // is SKIPPED rather than run and overwritten -- running both would fight,
+    // and what you would see is a barrel that jitters.
+    //
+    // One hand-over point, the same one the fork chose: of everything it
+    // registered with PhysX, only Thing ever read a pose back out. Off by
+    // default; LooseObjects owns every rule about when this is allowed.
+    if (LooseObjects::Step(*this, _physicsBody))
+    {
+        return;
+    }
 
 #define SIM_STEP_LIMIT 1
 

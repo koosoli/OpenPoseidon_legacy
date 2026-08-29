@@ -11,6 +11,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
 #include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
+#include <Poseidon/World/Physics/LooseObjects.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
@@ -445,6 +446,43 @@ void DrawPhysicsTab()
             "penetration data is classified, proprietary or absent -- so this exists\n"
             "to make everything harder or softer without pretending a particular\n"
             "number is a measurement.");
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Loose objects");
+    LooseObjects::Settings& loose = LooseObjects::Get();
+    Dev::Checkbox("Barrels and pallets are physics bodies", &loose.enabled);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Hands mission-placed props -- barrels, pallets, tables -- to the solver.\n"
+            "They fall, tip and stack instead of running the 2001 simulation.\n"
+            "\n"
+            "NEEDS world colliders registered, above. Without ground they would fall\n"
+            "through the world, so this refuses to act rather than produce that.\n"
+            "\n"
+            "MEASURED on Noe: none of a map's 177,225 baked objects is one of these.\n"
+            "Barrels in the terrain are decoration with no entity behind them, so\n"
+            "this only affects props a MISSION places.\n"
+            "\n"
+            "OFF by default and experimental: what a moved barrel does to a saved\n"
+            "game, and who owns it in multiplayer, are both unanswered.");
+    }
+    ImGui::BeginDisabled(!loose.enabled);
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Object mass", &loose.mass, 1.0f, 400.0f, "%.0f kg", ImGuiSliderFlags_Logarithmic);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("CfgVehicles gives a Thing no mass -- 2001 had no use for one -- so\n"
+                          "this is a guess with a slider on it. 30 kg is an empty oil drum.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Object friction", &loose.friction, 0.0f, 2.0f, "%.2f");
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Object bounce", &loose.restitution, 0.0f, 1.0f, "%.2f");
+    if (ImGui::Button("Reset loose objects"))
+    {
+        LooseObjects::Reset();
     }
     ImGui::EndDisabled();
 

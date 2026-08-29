@@ -142,6 +142,29 @@ struct SphereProbeDef
 
 /// Enough to draw a probe. NOT a gameplay transform: it carries no orientation
 /// and is only produced for bodies the probe spawner created.
+/// One body's pose and motion, read back OUT of the physics world.
+///
+/// PHY-010 held that data only ever flows gameplay -> physics, so that nothing
+/// in the game could depend on the solver. Owning a loose object breaks that by
+/// necessity -- a barrel the solver moves is only useful if the game can see
+/// where it went -- so the exception is named here rather than smuggled in as a
+/// second meaning for something else. It applies to bodies a caller spawned as
+/// dynamic and to nothing else.
+struct BodyMotion
+{
+    Vector3 position;
+    /// Orientation columns, in the same form Object keeps its own.
+    Vector3 axisX{1, 0, 0};
+    Vector3 axisY{0, 1, 0};
+    Vector3 axisZ{0, 0, 1};
+    Vector3 linearVelocity;
+    Vector3 angularVelocity;
+    /// False when the solver has put the body to sleep. A sleeping body needs no
+    /// further reading and, in multiplayer, is the moment its owner can hand it
+    /// back.
+    bool awake = true;
+};
+
 struct ProbeSample
 {
     /// So a caller holding its own per-probe data (a render object, say) can find

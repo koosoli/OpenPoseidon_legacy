@@ -192,6 +192,14 @@ void RunPhysicsCorpus()
     std::uint32_t                        thingsWithNetworkId = 0;
     std::uint32_t                        thingsLocal = 0;
 
+    // THE CONTROL. Zero Things is only meaningful if this grid holds entities at
+    // all -- if it is the WRP's static decoration and nothing else, then counting
+    // Things here would report zero however many the map has, and the number
+    // would be an artefact of where I looked rather than a fact about the map.
+    // The mission puts a player on the map, so Entity must not come back zero.
+    std::uint32_t entitiesSeen = 0;
+    std::uint32_t vehiclesSeen = 0;
+
     std::uint32_t                       instancesSeen = 0;
     std::uint32_t                       instancesRegistered = 0;
     std::uint32_t                       instancesNoShape = 0;
@@ -208,6 +216,14 @@ void RunPhysicsCorpus()
                 if (!object)
                 {
                     continue;
+                }
+                if (dyn_cast<Entity>(object))
+                {
+                    ++entitiesSeen;
+                }
+                if (dyn_cast<Vehicle>(object))
+                {
+                    ++vehiclesSeen;
                 }
                 if (Thing* thing = dyn_cast<Thing>(object))
                 {
@@ -280,6 +296,8 @@ void RunPhysicsCorpus()
                  static_cast<int>(sorted.size()) - shown);
     }
     // The loose-object answer, in the log rather than in a design note.
+    LOG_WARN(World, "PHYSTHINGS: control -- {} entities, {} vehicles in the same walk", entitiesSeen,
+             vehiclesSeen);
     LOG_WARN(World, "PHYSTHINGS: {} loose objects ({} distinct classes); {} carry a network id, {} local",
              thingsTotal, static_cast<std::uint32_t>(things.size()), thingsWithNetworkId, thingsLocal);
     for (const auto& [className, count] : things)

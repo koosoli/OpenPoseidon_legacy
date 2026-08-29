@@ -6096,6 +6096,7 @@ void DrawMainWindow()
         ImGui::Text("Restore these to their defaults?");
         ImGui::BulletText("Physics probes, world colliders, penetration, ray audit");
         ImGui::BulletText("Grenade fuse and bounce tuning");
+        ImGui::BulletText("Loose-object physics");
         ImGui::BulletText("Fixed step");
         ImGui::BulletText("Ballistics recorder and aim model");
         ImGui::BulletText("Picture Mode / depth of field");
