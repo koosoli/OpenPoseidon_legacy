@@ -5780,12 +5780,6 @@ void DrawWaterTab()
                       "camera-path recorder itself is a separate WTR-004 work package; here we "
                       "expose just the integer index for manual capture-then-replay audits.");
 
-    if (Dev::Button("Reset to defaults"))
-    {
-        s = decltype(s){};
-        changed = true;
-    }
-
     ImGui::EndDisabled();
 
     // WTR-003 — water debug views. Replaces the water surface shading with a single diagnostic

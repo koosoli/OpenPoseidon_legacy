@@ -205,7 +205,8 @@ void ResetPanelSettings()
     // Fixed step
     ResetFixedStepStats();
     SetFixedStepScripts(true);
-    // Sky look and the road/decal ground conform. Written out here rather than called through
+    // Sky look, the water look, and the road/decal ground conform. Written out here rather
+    // than called through
     // DebugOverlay: that translation unit is not linked into every app that draws these widgets
     // (Tetris is not), and a reset that only exists in some builds is worse than none.
     // Both are settings structs whose own initialisers ARE the defaults, so this cannot drift
@@ -217,6 +218,10 @@ void ResetPanelSettings()
             GEngine->SetSkySettings(Engine::SkySettings{});
         }
         GEngine->SetRoadSettings(Engine::RoadSettings{});
+        if (GEngine->SupportsWater())
+        {
+            GEngine->SetWaterSettings(Engine::WaterSettings{});
+        }
     }
     // Ballistics recorder
     Ballistics::SetEnabled(false);
