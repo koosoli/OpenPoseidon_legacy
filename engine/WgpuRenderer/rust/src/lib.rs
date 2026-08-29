@@ -1040,26 +1040,18 @@ impl Renderer {
         let prepass_enabled = std::env::var("WGR_PREPASS")
             .map(|v| v != "0")
             .unwrap_or(true);
-        // Compute skin bake: historically OPT-IN (pure overhead — VS skinning is ~free
-        // for OFP's low-poly characters). REN-TEMP-001I changed the economics: the baked
-        // output double-buffers into REAL per-limb motion vectors for skinned characters,
-        // which a temporal upscaler needs — so the bake now defaults ON whenever the
-        // temporal path will run (DLSS route up, or WGR_TEMPORAL=1). WGR_SKIN_BAKE pins
-        // either way. See docs/compute-skin-bake-plan.md.
-        let temporal_will_run = {
-            let env_on = std::env::var("WGR_TEMPORAL").map(|v| v != "0").unwrap_or(false);
-            #[cfg(feature = "dlss")]
-            {
-                env_on || ngx_raw.is_some()
-            }
-            #[cfg(not(feature = "dlss"))]
-            {
-                env_on
-            }
-        };
+        // Compute skin bake: OPT-IN, and currently BROKEN — enabling it explodes skinned
+        // geometry into full-screen triangle shards (probes 2026-08-30: shatter persists
+        // with DLSS off, temporal off AND gpu_driven off, so the corruption is in the
+        // bake/draw path itself, not in any temporal consumer; it predates the ping-pong
+        // since the swap alone cannot un-write a fully re-baked buffer). Until that is
+        // root-caused the default stays OFF even though the temporal path would love the
+        // baked output as per-limb motion vectors — skinned characters ride the rigid/
+        // camera velocity instead, which is the state every owner-validated session ran.
+        // WGR_SKIN_BAKE=1 re-enables it for debugging only.
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(temporal_will_run);
+            .unwrap_or(false);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance
