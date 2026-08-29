@@ -6152,6 +6152,48 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
 // Cached per bracket (the same object submits many sections in a row). 0 is reserved
 // for "no identity"; the 16-bit counter wraps long after the ids it re-issues have
 // been evicted.
+// REN-TEMP-001 §6.7 — dev-panel Temporal tab bridge.
+void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
+{
+    _temporalTuning = t;
+    if (!_renderer)
+        return;
+    WgrTemporalTuning w{};
+    w.temporal_on = t.temporalOn ? 1u : 0u;
+    w.dlss_on = t.dlssOn ? 1u : 0u;
+    w.render_scale_pct = static_cast<uint32_t>(std::clamp(t.renderScalePct, 50, 100));
+    w.jitter_phases = static_cast<uint32_t>(std::max(0, t.jitterPhases));
+    // > 0 is the renderer's "auto" sentinel (real biases are <= 0).
+    w.mip_bias = t.mipBiasAuto ? 1.0f : std::clamp(t.mipBias, -4.0f, 0.0f);
+    w.reactive_sky = std::clamp(t.reactiveSky, 0.0f, 1.0f);
+    w.reactive_water = std::clamp(t.reactiveWater, 0.0f, 1.0f);
+    w.flags = (t.dlssAutoExposure ? 1u : 0u) | (t.jitterYFlip ? 2u : 0u) |
+              (t.mvRenderSpace ? 4u : 0u) | (t.mvFlip ? 8u : 0u);
+    wgr_set_temporal_tuning(_renderer, &w);
+}
+
+Engine::TemporalInfo EngineWgpu::GetTemporalInfo()
+{
+    TemporalInfo out{};
+    if (!_renderer)
+        return out;
+    WgrTemporalInfo w{};
+    wgr_get_temporal_info(_renderer, &w);
+    out.renderWidth = static_cast<int>(w.render_width);
+    out.renderHeight = static_cast<int>(w.render_height);
+    out.outputWidth = static_cast<int>(w.output_width);
+    out.outputHeight = static_cast<int>(w.output_height);
+    out.temporalActive = w.temporal_active != 0;
+    out.dlssRoute = w.dlss_route != 0;
+    out.dlssActive = w.dlss_active != 0;
+    out.dlssQuality = w.dlss_quality;
+    out.jitterX = w.jitter_x;
+    out.jitterY = w.jitter_y;
+    out.mipBiasEffective = w.mip_bias_effective;
+    out.resetThisFrame = w.reset_this_frame != 0;
+    return out;
+}
+
 uint32_t EngineWgpu::CurrentDrawObjectId()
 {
     const void* obj = GetDrawObject();

@@ -2078,7 +2078,34 @@ extern "C"
      * terrain sun-shadow, sky-visibility) in one block. The two terrain setters are diffed
      * renderer-side against the last block, so a per-frame push doesn't thrash the sweep/scan.
      * See docs/render-params-consolidation-plan.md. */
-    WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams* params);
+    /* REN-TEMP-001 §6.7 — live temporal/upscaler tuning (dev panel). Not part of the
+ * hashed layout set: an older DLL simply lacks the exports. */
+typedef struct WgrTemporalTuning
+{
+    uint32_t temporal_on;
+    uint32_t dlss_on;          /* request; effective only on a WGR_DLSS launch */
+    uint32_t render_scale_pct; /* 50..100 */
+    uint32_t jitter_phases;    /* 0 = auto */
+    float mip_bias;            /* > 0 = auto (half log2(scale)); else clamped [-4, 0] */
+    float reactive_sky;
+    float reactive_water;
+    uint32_t flags; /* bit0 auto-exposure, bit1 jitter-Y flip, bit2 MV render-space, bit3 MV flip */
+} WgrTemporalTuning;
+
+typedef struct WgrTemporalInfo
+{
+    uint32_t render_width, render_height, output_width, output_height;
+    uint32_t temporal_active, dlss_route, dlss_active;
+    int32_t dlss_quality;
+    float jitter_x, jitter_y;
+    float mip_bias_effective;
+    uint32_t reset_this_frame;
+} WgrTemporalInfo;
+
+WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);
+WGR_API void wgr_get_temporal_info(WgrRenderer* renderer, WgrTemporalInfo* info);
+
+WGR_API void wgr_set_render_params(WgrRenderer* renderer, const WgrRenderParams* params);
 
     /* AO march resolution: 1 = one GTAO horizon march per pixel, 2 = one per 2x2 block, denoised
        back to full resolution by the AO bilateral filter (which already rejects on full-res depth

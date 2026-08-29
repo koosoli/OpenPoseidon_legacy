@@ -120,9 +120,11 @@ pub struct Temporal {
     velocity: Option<VelocityPass>,
     resolve: Option<ResolvePass>,
     history_control: Option<HistoryControlPass>,
-    // WGR_REACTIVE_SKY / WGR_REACTIVE_WATER strengths (0 disables a term).
-    reactive_sky: f32,
-    reactive_water: f32,
+    // WGR_REACTIVE_SKY / WGR_REACTIVE_WATER strengths (0 disables a term). Live-tunable.
+    pub reactive_sky: f32,
+    pub reactive_water: f32,
+    // 0 = auto (~8 x (out/render)^2). Live-tunable (dev panel).
+    pub jitter_phase_override: u64,
     // REN-TEMP-001H: ABSOLUTE world matrices of identified rigid draws, this frame and
     // last. Absolute on purpose — WgrDraw3D.world is camera-relative, which changes for
     // every object whenever the CAMERA moves; storing it directly would flag the whole
@@ -186,6 +188,10 @@ impl Temporal {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.3f32)
                 .clamp(0.0, 1.0),
+            jitter_phase_override: std::env::var("WGR_JITTER_PHASES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
             cur_worlds: FxHashMap::default(),
             prev_worlds: FxHashMap::default(),
             cur_skin_bases: FxHashMap::default(),
@@ -258,12 +264,8 @@ impl Temporal {
             // positions to reconstruct detail from — 8 phases at Quality ratio measurably
             // soften the result). WGR_JITTER_PHASES overrides for A/Bs; the sequence
             // itself stays replaceable per the plan.
-            static PHASES: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
-            let override_phases = *PHASES.get_or_init(|| {
-                std::env::var("WGR_JITTER_PHASES")
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-            });
+            let override_phases =
+                (self.jitter_phase_override > 0).then_some(self.jitter_phase_override);
             let phases = override_phases.unwrap_or_else(|| {
                 let (rw, _) = self.render_size;
                 let out_w = self.output_width_hint.max(rw).max(1);

@@ -1640,6 +1640,80 @@ pub extern "C" fn wgr_abi_layout_hash() -> u32 {
     wgr_layout_hash()
 }
 
+// REN-TEMP-001 §6.7 — live temporal/upscaler tuning (dev panel). Plain data, not part
+// of the hashed layout set: an older exe simply never calls these exports.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct WgrTemporalTuning {
+    pub temporal_on: u32,
+    // Request only: effective when the WGR_DLSS hal device route is up (that part is
+    // decided at startup and cannot change live).
+    pub dlss_on: u32,
+    pub render_scale_pct: u32, // 50..=100
+    pub jitter_phases: u32,    // 0 = auto (~8 x (out/render)^2)
+    pub mip_bias: f32,         // > 0 = auto (half log2(scale)); else clamped [-4, 0]
+    pub reactive_sky: f32,
+    pub reactive_water: f32,
+    // bit0 = DLSS auto-exposure, bit1 = jitter-Y flip, bit2 = MV render-space,
+    // bit3 = MV flip.
+    pub flags: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrTemporalInfo {
+    pub render_width: u32,
+    pub render_height: u32,
+    pub output_width: u32,
+    pub output_height: u32,
+    pub temporal_active: u32,
+    pub dlss_route: u32,  // hal device route up (startup decision)
+    pub dlss_active: u32, // actually evaluated last frame
+    pub dlss_quality: i32, // NGX PerfQuality value, -1 = none
+    pub jitter_x: f32,
+    pub jitter_y: f32,
+    pub mip_bias_effective: f32,
+    pub reset_this_frame: u32,
+}
+
+/// Push live temporal/upscaler tuning (dev panel). Null-safe.
+///
+/// # Safety
+/// `renderer` must be live; `tuning` must point to one valid struct or be null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_set_temporal_tuning(
+    renderer: *mut WgrRenderer,
+    tuning: *const WgrTemporalTuning,
+) {
+    if renderer.is_null() || tuning.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let tuning = unsafe { *tuning };
+        renderer.set_temporal_tuning(&tuning);
+    }));
+}
+
+/// Read the current temporal state for display. Null-safe; zeroes on error.
+///
+/// # Safety
+/// `renderer` must be live; `info` must point to writable storage for one struct.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_temporal_info(
+    renderer: *mut WgrRenderer,
+    info: *mut WgrTemporalInfo,
+) {
+    if renderer.is_null() || info.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &mut *renderer };
+        let out = renderer.temporal_info();
+        unsafe { *info = out };
+    }));
+}
+
 /// Queue one capture of the next fully composited swapchain frame.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn wgr_screenshot_request(renderer: *mut WgrRenderer) {

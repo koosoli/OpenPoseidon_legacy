@@ -1679,6 +1679,39 @@ class Engine : public IGraphicsEngine
     virtual DepthOfFieldSettings GetDepthOfFieldSettings() const { return {}; }
     virtual void SetDepthOfFieldSettings(const DepthOfFieldSettings& /*s*/) {}
 
+    // REN-TEMP-001 §6.7 — live temporal/upscaler tuning (dev panel Temporal tab).
+    // Defaults mirror the renderer's shipped seeds; the panel pushes only on change, so
+    // an env-tuned session is not clobbered by merely opening the tab.
+    struct TemporalSettings
+    {
+        bool temporalOn = true;      // jitter + motion vectors + history
+        bool dlssOn = true;          // request; effective only on a WGR_DLSS launch
+        int renderScalePct = 67;     // 50..100 (100 + DLSS = DLAA)
+        int jitterPhases = 0;        // 0 = auto (~8 x (out/render)^2)
+        bool mipBiasAuto = true;     // auto = half log2(scale)
+        float mipBias = -0.3f;       // used when !mipBiasAuto, clamped [-4, 0]
+        float reactiveSky = 0.4f;    // history-control strengths (0 = off)
+        float reactiveWater = 0.3f;
+        bool dlssAutoExposure = true; // owner's A/B winner 2026-08-30
+        bool jitterYFlip = true;      // convention A/B arms — leave alone unless probing
+        bool mvRenderSpace = false;
+        bool mvFlip = false;
+    };
+
+    // Read-only display block for the same tab.
+    struct TemporalInfo
+    {
+        int renderWidth = 0, renderHeight = 0;
+        int outputWidth = 0, outputHeight = 0;
+        bool temporalActive = false;
+        bool dlssRoute = false;  // NGX device route up (decided at launch)
+        bool dlssActive = false; // evaluated last frame
+        int dlssQuality = -1;    // NGX PerfQuality value
+        float jitterX = 0.0f, jitterY = 0.0f;
+        float mipBiasEffective = 0.0f;
+        bool resetThisFrame = false;
+    };
+
     struct TonemapSettings
     {
         float exposure = 1.0f;    // linear pre-curve multiplier (main per-ToD lever)
@@ -2646,6 +2679,13 @@ class Engine : public IGraphicsEngine
     // SetSkyCirrus above for being its own entry point rather than a lane in an ABI-checked
     // struct. APPENDED at the class end (vtable-slot note above).
     virtual void SetSkyCirrusSoftness(float /*softness*/) {}
+
+    // REN-TEMP-001 §6.7 — live temporal/upscaler tuning. APPENDED at the class end
+    // (vtable-slot note above). Wgpu-only; the base is inert so GL33/tools need nothing.
+    virtual bool SupportsTemporalTuning() const { return false; }
+    virtual TemporalSettings GetTemporalTuning() const { return {}; }
+    virtual void SetTemporalTuning(const TemporalSettings& /*t*/) {}
+    virtual TemporalInfo GetTemporalInfo() { return {}; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

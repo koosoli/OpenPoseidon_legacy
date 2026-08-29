@@ -619,12 +619,20 @@ pub struct Renderer {
     ngx_raw: Option<dlss_device::NgxRawHandles>,
     #[cfg(feature = "dlss")]
     ngx: Option<dlss::Ngx>,
-    // The (render, output) extents the current DLSS feature was created for.
+    // The (render, output, auto_exposure) the current DLSS feature was created for.
     #[cfg(feature = "dlss")]
-    ngx_feature_sizes: Option<((u32, u32), (u32, u32))>,
+    ngx_feature_sizes: Option<((u32, u32), (u32, u32), bool)>,
     // Latched on first NGX failure: DLSS logs once and the bilinear path takes over.
     #[cfg(feature = "dlss")]
     ngx_failed: bool,
+    // REN-TEMP-001 §6.7: live tuning (dev panel). Seeded from env; the panel overwrites.
+    dlss_runtime_on: bool,
+    dlss_auto_exposure: bool,
+    dlss_jy_flip: bool,
+    dlss_mv_render_space: bool,
+    dlss_mv_flip: bool,
+    dlss_active_frame: bool,
+    dlss_last_quality: i32,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -1396,6 +1404,21 @@ impl Renderer {
             ngx_feature_sizes: None,
             #[cfg(feature = "dlss")]
             ngx_failed: false,
+            dlss_runtime_on: true,
+            dlss_auto_exposure: std::env::var("WGR_DLSS_AUTO_EXPOSURE")
+                .map(|v| v != "0")
+                .unwrap_or(true),
+            dlss_jy_flip: std::env::var("WGR_DLSS_JY_FLIP")
+                .map(|v| v != "0")
+                .unwrap_or(true),
+            dlss_mv_render_space: std::env::var("WGR_DLSS_MV_RENDER")
+                .map(|v| v != "0")
+                .unwrap_or(false),
+            dlss_mv_flip: std::env::var("WGR_DLSS_MV_FLIP")
+                .map(|v| v != "0")
+                .unwrap_or(false),
+            dlss_active_frame: false,
+            dlss_last_quality: -1,
             sample_count,
             tonemap,
             underwater,
@@ -2083,6 +2106,55 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
+    // REN-TEMP-001 §6.7: live tuning from the dev panel. Everything here applies on
+    // the NEXT frame — targets resize lazily, the DLSS feature recreates on any
+    // extent/flag change, and a scale change raises an explicit history reset.
+    fn set_temporal_tuning(&mut self, t: &ffi::WgrTemporalTuning) {
+        self.temporal.enabled = t.temporal_on != 0;
+        self.dlss_runtime_on = t.dlss_on != 0;
+        if self.hdr_enabled {
+            let pct = t.render_scale_pct.clamp(50, 100);
+            let new_scale = pct as f32 / 100.0;
+            if (new_scale - self.render_scale).abs() > 1e-3 {
+                self.render_scale = new_scale;
+                self.temporal.notify_reset("render-scale change (dev panel)");
+            }
+        }
+        self.temporal.jitter_phase_override = u64::from(t.jitter_phases);
+        self.temporal.reactive_sky = t.reactive_sky.clamp(0.0, 1.0);
+        self.temporal.reactive_water = t.reactive_water.clamp(0.0, 1.0);
+        // mip_bias > 0 is the "auto" sentinel (real biases are <= 0).
+        self.gfx3d.set_mip_bias_override(
+            (t.mip_bias <= 0.0).then(|| t.mip_bias.clamp(-4.0, 0.0)),
+        );
+        self.dlss_auto_exposure = t.flags & 1 != 0;
+        self.dlss_jy_flip = t.flags & 2 != 0;
+        self.dlss_mv_render_space = t.flags & 4 != 0;
+        self.dlss_mv_flip = t.flags & 8 != 0;
+    }
+
+    fn temporal_info(&self) -> ffi::WgrTemporalInfo {
+        let r = self.render_size();
+        #[cfg(feature = "dlss")]
+        let dlss_route = u32::from(self.ngx_raw.is_some());
+        #[cfg(not(feature = "dlss"))]
+        let dlss_route = 0u32;
+        ffi::WgrTemporalInfo {
+            render_width: r.0,
+            render_height: r.1,
+            output_width: self.config.width,
+            output_height: self.config.height,
+            temporal_active: u32::from(self.temporal.enabled),
+            dlss_route,
+            dlss_active: u32::from(self.dlss_active_frame),
+            dlss_quality: self.dlss_last_quality,
+            jitter_x: self.temporal.jitter_px[0],
+            jitter_y: self.temporal.jitter_px[1],
+            mip_bias_effective: self.gfx3d.mip_bias_effective(),
+            reset_this_frame: u32::from(self.temporal.reset_this_frame()),
+        }
+    }
+
     // REN-TEMP-001M: DLSS Super Resolution in place of the bilinear upscale. Returns
     // true when DLSS was recorded (the caller then skips the blit); any failure marks
     // the session failed, logs once and falls back to the bilinear path forever.
@@ -2094,7 +2166,7 @@ impl Renderer {
         source_tex: &wgpu::Texture,
     ) -> bool {
         use wgpu::hal::vulkan as hal_vk;
-        if self.ngx_failed {
+        if self.ngx_failed || !self.dlss_runtime_on {
             return false;
         }
         let mut fail = |this: &mut Self, msg: &str| -> bool {
@@ -2175,7 +2247,7 @@ impl Renderer {
         } else {
             dlss::Quality::Performance
         };
-        let need_create = self.ngx_feature_sizes != Some((render, output));
+        let need_create = self.ngx_feature_sizes != Some((render, output, self.dlss_auto_exposure));
 
         // Hand wgpu the layout truth BEFORE going raw: inputs sampled, output storage.
         encoder.transition_resources(
@@ -2266,26 +2338,19 @@ impl Renderer {
             .and_then(|(t, v)| vk_res(t, v, 9, 1, render, false));
 
         // Jitter reaches DLSS in PIXEL space (y-down); our jitter is applied in NDC
-        // (y-up), so Y flips by default. WGR_DLSS_JY_FLIP=0 / WGR_DLSS_MV_FLIP=1 exist
-        // for the one visual A/B that settles a vendor sign convention — the plan's §21
-        // forbids "tuning it out" with sharpening instead.
-        static JY_FLIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        static MV_FLIP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let jy = *JY_FLIP.get_or_init(|| {
-            std::env::var("WGR_DLSS_JY_FLIP").map(|v| v != "0").unwrap_or(true)
-        });
-        let mvf = *MV_FLIP.get_or_init(|| {
-            std::env::var("WGR_DLSS_MV_FLIP").map(|v| v != "0").unwrap_or(false)
-        });
+        // (y-up), so Y flips by default. The remaining sign/space knobs are live-tunable
+        // A/B arms (dev panel / env seeds) — the plan's §21 forbids "tuning artefacts
+        // out" with sharpening instead of validating the convention.
+        let jy = self.dlss_jy_flip;
+        let mvf = self.dlss_mv_flip;
         let j = self.temporal.jitter_px;
         let jitter = [j[0], if jy { -j[1] } else { j[1] }];
         let reset = self.temporal.reset_this_frame();
         // WGR_DLSS_AUTO_EXPOSURE=1: let DLSS meter for itself (bypasses our exposure
         // texture) — the decisive arm for exposure-mismatch ghosting in shadows/sky.
-        static AUTO_EXP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let auto_exposure = *AUTO_EXP.get_or_init(|| {
-            std::env::var("WGR_DLSS_AUTO_EXPOSURE").map(|v| v != "0").unwrap_or(false)
-        });
+        // DEFAULT ON — the owner's blind A/B (2026-08-30): DLSS metering for itself
+        // beat every variant of feeding our exposure chain, especially in shadows.
+        let auto_exposure = self.dlss_auto_exposure;
         // The MANUAL exposure factor the tonemap multiplies on top of the auto-exposure
         // texture (colour *= params.exposure * auto_exp) — DLSS must see the same total.
         let exposure_scale = self.tonemap_params.exposure.max(1e-4);
@@ -2295,11 +2360,7 @@ impl Renderer {
         // gradients") is the symptom of scaling by the wrong space — smooth content
         // undershoots its reprojection by exactly the upscale ratio. OUTPUT pixels is
         // the default; WGR_DLSS_MV_RENDER=1 is the A/B arm for render-pixel scaling.
-        static MV_RENDER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let mv_render_space = *MV_RENDER.get_or_init(|| {
-            std::env::var("WGR_DLSS_MV_RENDER").map(|v| v != "0").unwrap_or(false)
-        });
-        let (mvw, mvh) = if mv_render_space { render } else { output };
+        let (mvw, mvh) = if self.dlss_mv_render_space { render } else { output };
         let mv_scale = [mvw as f32 * mv_sign, mvh as f32 * mv_sign];
         let ngx = self.ngx.as_mut().expect("ngx initialised above");
         // wgpu forbids mixing its own encoding API with raw hal encoding in ONE encoder,
@@ -2357,8 +2418,10 @@ impl Renderer {
         self.queue.submit([dlss_encoder.finish()]);
         match result {
             Ok(()) => {
+                self.dlss_active_frame = true;
+                self.dlss_last_quality = quality as i32;
                 if need_create {
-                    self.ngx_feature_sizes = Some((render, output));
+                    self.ngx_feature_sizes = Some((render, output, auto_exposure));
                     self.log.log(
                         log_level::INFO,
                         &format!(
@@ -3054,6 +3117,7 @@ impl Renderer {
         // REN-TEMP-001H: absolute worlds of this frame's identified rigid draws, for the
         // object-velocity subset at tonemap time (and next frame's previous worlds).
         self.temporal.ingest_draws(draws3d);
+        self.dlss_active_frame = false;
         // REN-TEMP-001I: (object, mesh) -> baked base_vertex — the cross-frame identity
         // palette slots cannot provide. prepare_skin_bake already ran above.
         if self.temporal.enabled {

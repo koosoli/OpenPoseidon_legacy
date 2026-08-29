@@ -3146,6 +3146,9 @@ pub struct Gfx3d {
     // REN-TEMP-001D: frame.wgsl `renscale` — (mip bias log2(render/output), gradient scale
     // 2^bias, 0, 0). Set once per frame from the renderer's render scale; all-zero = native.
     render_scale_lane: [f32; 4],
+    // Live-tunable absolute mip-bias override (None = auto half log2(scale)). Seeded
+    // from WGR_MIP_BIAS at startup.
+    mip_bias_override: Option<f32>,
     // (proj_xx, proj_yy, near) per camera, cached from `prepare` so the GTAO dispatch uses the
     // SAME projection the prepass rasterised with. Recomputing it at dispatch time from a
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
@@ -3846,6 +3849,9 @@ impl Gfx3d {
                 0.0,
             ],
             render_scale_lane: [0.0; 4],
+            mip_bias_override: std::env::var("WGR_MIP_BIAS")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok()),
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
             ui_depth_size: (0, 0),
@@ -7724,11 +7730,16 @@ impl Gfx3d {
     // WGR_MIP_BIAS overrides the derived log2(scale) bias — the A/B knob for the
     // sharpness-vs-distant-shimmer trade under a temporal upscaler (0 = no bias, softest
     // and calmest; log2(0.67) = -0.58 is the textbook value and the default).
+    pub fn set_mip_bias_override(&mut self, bias: Option<f32>) {
+        self.mip_bias_override = bias;
+    }
+
+    pub fn mip_bias_effective(&self) -> f32 {
+        self.render_scale_lane[0]
+    }
+
     pub fn set_render_scale_lane(&mut self, scale: f32) {
-        static BIAS_OVERRIDE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-        let over = *BIAS_OVERRIDE.get_or_init(|| {
-            std::env::var("WGR_MIP_BIAS").ok().and_then(|v| v.parse::<f32>().ok())
-        });
+        let over = self.mip_bias_override;
         self.render_scale_lane = if scale < 1.0 && scale > 0.0 {
             // Default = HALF the textbook log2(scale): the owner's measured sweet spot
             // on this content (2026-08-29) — full bias keeps distant grass/terrain above

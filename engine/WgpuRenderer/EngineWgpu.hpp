@@ -178,6 +178,15 @@ class EngineWgpu : public EngineDummy
     DepthOfFieldSettings GetDepthOfFieldSettings() const override { return _dof; }
     void SetDepthOfFieldSettings(const DepthOfFieldSettings& s) override;
 
+    // REN-TEMP-001 §6.7 — the dev panel's Temporal tab. Set pushes to the renderer
+    // immediately (applies next frame); Get returns the last pushed values, seeded from
+    // the shipped defaults, so the panel never clobbers an env-tuned session until the
+    // user actually moves a control.
+    bool SupportsTemporalTuning() const override { return _renderer != nullptr && _hdrEnabled; }
+    TemporalSettings GetTemporalTuning() const override { return _temporalTuning; }
+    void SetTemporalTuning(const TemporalSettings& t) override;
+    TemporalInfo GetTemporalInfo() override;
+
     TonemapSettings GetTonemapSettings() const override { return _tonemap; }
     void SetTonemapSettings(const TonemapSettings& s) override;
     bool GetTonemapAuto() const override { return _tonemapAuto; }
@@ -651,6 +660,7 @@ class EngineWgpu : public EngineDummy
     // by SceneObjectRemoved, which also protects against address recycling for scene
     // objects; a recycled DYNAMIC entity address inside the id's lifetime would
     // mis-attribute one frame of motion, which the velocity pass's depth test bounds.
+    TemporalSettings _temporalTuning;
     std::unordered_map<const void*, uint32_t> _drawObjectIds;
     uint32_t _nextDrawObjectId = 1;
     const void* _lastDrawObjectPtr = nullptr;

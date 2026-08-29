@@ -4621,6 +4621,73 @@ void DrawRenderTab()
 // exposure + a colour-grade block. "Auto (time of day)" drives the grade from the
 // per-ToD preset keyframes; uncheck to override and tune a keyframe by eye, then
 // copy the preset line back. See engine/WgpuRenderer/docs/hdr-pipeline-plan.md.
+// REN-TEMP-001 §6.7 — the owner's live tuning surface: every temporal/DLSS knob next
+// to a live frame-time readout, so the sweet spot is found by eye and measured in fps.
+void DrawTemporalTab()
+{
+    if (!GEngine)
+    {
+        Dev::PanelHelp("engine not up");
+        return;
+    }
+    if (!GEngine->SupportsTemporalTuning())
+    {
+        Dev::PanelHelp("wgpu HDR path required (WGR_HDR=1)");
+        return;
+    }
+
+    const auto info = GEngine->GetTemporalInfo();
+    const float fps = ImGui::GetIO().Framerate;
+    Dev::PanelHelp("%.1f fps  (%.2f ms)", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
+    Dev::PanelHelp("render %dx%d -> output %dx%d", info.renderWidth, info.renderHeight,
+                   info.outputWidth, info.outputHeight);
+    Dev::PanelHelp("temporal %s | DLSS route %s | DLSS %s (quality %d)",
+                   info.temporalActive ? "on" : "off", info.dlssRoute ? "up" : "down",
+                   info.dlssActive ? "active" : "inactive", info.dlssQuality);
+    Dev::PanelHelp("jitter (%.3f, %.3f) px | mip bias %.3f%s", info.jitterX, info.jitterY,
+                   info.mipBiasEffective, info.resetThisFrame ? " | HISTORY RESET" : "");
+    if (!info.dlssRoute)
+        Dev::PanelHelp("launch with WGR_DLSS=1 (a DLSS-featured build) to enable the NGX route");
+
+    Dev::PanelSeparator();
+    auto t = GEngine->GetTemporalTuning();
+    bool changed = false;
+    changed |= Dev::Checkbox("Temporal (jitter + motion vectors)", &t.temporalOn);
+    changed |= Dev::Checkbox("DLSS Super Resolution", &t.dlssOn);
+    Dev::PanelTooltip("Off = bilinear upscale fallback. Needs the NGX route (launch-time).");
+    changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 100);
+    Dev::PanelTooltip("100%% + DLSS = DLAA (max quality, no fps gain). 67%% ~ Quality, 58%% ~ Balanced, 50%% ~ Performance.");
+
+    Dev::PanelSeparator();
+    Dev::PanelHeading("Image tuning");
+    changed |= Dev::Checkbox("Mip bias auto (half log2(scale))", &t.mipBiasAuto);
+    if (!t.mipBiasAuto)
+    {
+        changed |= Dev::SliderFloat("Mip bias", &t.mipBias, -2.0f, 0.0f, "%.2f");
+        Dev::PanelTooltip("More negative = sharper textures but more distant shimmer.");
+    }
+    changed |= Dev::SliderFloat("Reactive: sky/clouds", &t.reactiveSky, 0.0f, 1.0f, "%.2f");
+    changed |= Dev::SliderFloat("Reactive: water", &t.reactiveWater, 0.0f, 1.0f, "%.2f");
+    int phases = t.jitterPhases;
+    if (ImGui::SliderInt("Jitter phases (0 = auto)", &phases, 0, 64))
+    {
+        t.jitterPhases = phases;
+        changed = true;
+    }
+
+    if (ImGui::CollapsingHeader("Conventions (A/B probes - leave alone)"))
+    {
+        changed |= Dev::Checkbox("DLSS auto exposure", &t.dlssAutoExposure);
+        Dev::PanelTooltip("Owner A/B winner. Off = feed the engine exposure chain instead.");
+        changed |= Dev::Checkbox("Jitter Y flip", &t.jitterYFlip);
+        changed |= Dev::Checkbox("MV render-space scale", &t.mvRenderSpace);
+        changed |= Dev::Checkbox("MV sign flip", &t.mvFlip);
+    }
+
+    if (changed)
+        GEngine->SetTemporalTuning(t);
+}
+
 void DrawTonemapTab()
 {
     if (!GEngine)
@@ -6223,6 +6290,11 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Material Debug"))
         {
             DrawMaterialDebugTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("Temporal"))
+        {
+            DrawTemporalTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Tonemap"))
