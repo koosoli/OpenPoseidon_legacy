@@ -10,6 +10,7 @@
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 
@@ -444,6 +445,70 @@ void DrawPhysicsTab()
             "penetration data is classified, proprietary or absent -- so this exists\n"
             "to make everything harder or softer without pretending a particular\n"
             "number is a measurement.");
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SeparatorText("Grenade fuse");
+    GrenadeFuse::Settings& fuse = GrenadeFuse::Get();
+    if (Dev::Checkbox("Grenades bounce and cook off", &fuse.enabled))
+    {
+        // Nothing to publish: shells read these live, and rounds already in the
+        // air keep whatever they were armed with when they were thrown.
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "A 2001 grenade detonates the instant it touches anything. With this on,\n"
+            "ammo whose config declares `explosionTime` bounces instead and goes off\n"
+            "when its fuse runs out.\n"
+            "\n"
+            "WHICH rounds have a fuse is decided by CONFIG, never here -- flares and\n"
+            "smoke shells descend from the same Grenade class and must not acquire\n"
+            "one. Turning this off restores contact detonation for everything.\n"
+            "\n"
+            "This changes how the weapon plays: five seconds of warning is a\n"
+            "different grenade, and the AI does not know to run from it.");
+    }
+    ImGui::BeginDisabled(!fuse.enabled);
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Bounce back", &fuse.restitution, 0.0f, 1.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("How much of the speed INTO a surface comes back out.\n"
+                          "0 drops dead on contact, 1 bounces forever.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Slide along", &fuse.tangentialKeep, 0.0f, 1.0f, "%.2f");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "How much of the speed ALONG a surface survives the scrape -- the one\n"
+            "that decides whether a grenade sits down where it lands or skates on.\n"
+            "\n"
+            "A real grenade is an ovoid lump with a lever and travels much less\n"
+            "than a sphere would. If it runs away from you, lower this.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Come to rest below", &fuse.restSpeed, 0.0f, 6.0f, "%.1f m/s");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Slower than this and it is left to lie and count down.\n"
+                          "Higher settles it sooner.");
+    }
+    ImGui::SetNextItemWidth(200.0f);
+    Dev::SliderFloat("Fuse override", &fuse.fuseOverrideSeconds, 0.0f, 8.0f, "%.1f s");
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Replaces the delay every fused round got from its config, so 2 s and\n"
+            "5 s can be compared without a rebuild. Zero means the config decides.\n"
+            "\n"
+            "Applies only to rounds thrown AFTER you move it -- a grenade in flight\n"
+            "keeps the fuse it was armed with.");
+    }
+    if (ImGui::Button("Reset grenade tuning"))
+    {
+        GrenadeFuse::Reset();
     }
     ImGui::EndDisabled();
 

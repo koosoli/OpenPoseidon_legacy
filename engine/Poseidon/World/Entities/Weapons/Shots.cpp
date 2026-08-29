@@ -11,6 +11,7 @@
 #include <Poseidon/Dev/Diag/BallisticsRecorder.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/Dev/Diag/PhysicsRayAudit.hpp>
+#include <Poseidon/World/Entities/Weapons/GrenadeFuse.hpp>
 #include <Poseidon/World/Entities/Weapons/Penetration.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -650,6 +651,65 @@ ShotShell::ShotShell(EntityAI* parent, const AmmoType* type) : base(parent, type
     _ballisticCoefficient = shell.ballisticCoefficient;
 
     _waterImpactDone = false;
+
+    // Zero for every stock round -- see AmmoType::explosionTime. A grenade only
+    // gets a fuse if its config asks for one.
+    _fuse = type->explosionTime;
+    // The panel override wins when set, so a delay can be tried without
+    // rebuilding -- but only for ammo the CONFIG already gave a fuse. It changes
+    // how long, never which rounds, so flares and smoke shells (which also
+    // descend from Grenade) cannot acquire one by moving a slider.
+    const GrenadeFuse::Settings& tuning = GrenadeFuse::Get();
+    if (_fuse > 0.0f && tuning.fuseOverrideSeconds > 0.0f)
+    {
+        _fuse = tuning.fuseOverrideSeconds;
+    }
+    _fuseArmed = tuning.enabled && _fuse > 0.0f;
+}
+
+/// Reflection off a surface, with the energy a real bounce loses.
+///
+/// The two coefficients are not measurements of anything: a hand grenade is an
+/// irregular lump of steel and how it bounces depends on where it lands. They
+/// are chosen so it kicks off a wall, loses most of its speed doing so, and
+/// settles within a metre or two rather than skating across the map.
+bool ShotShell::BounceOff(Vector3Par surfaceNormal, Vector3Par contactPoint)
+{
+    // Lifted off the surface by a few centimetres. Without this the next tick
+    // starts its sweep exactly on the face it just left and finds the same
+    // contact again, which reads as a grenade stuck buzzing against a wall.
+    SetPosition(contactPoint + surfaceNormal * 0.03f);
+
+    const GrenadeFuse::BounceResult bounce = GrenadeFuse::Bounce(_speed, surfaceNormal, GrenadeFuse::Get());
+    _speed = bounce.speed;
+    _atRest = bounce.atRest;
+    return !bounce.atRest;
+}
+
+/// The detonation itself, with no opinion about what triggered it.
+void ShotShell::Detonate(Vector3Par pos, Object* hitObject, Vector3Par hitNormal)
+{
+    if (!IsLocal())
+    {
+        return;
+    }
+    Vector3 exploPos = pos;
+    if (Type()->explosive)
+    {
+        // The 0.003 of the ground path, not the 0.001 of the object path. The
+        // latter sits behind a `hit > 50` gate that a hand grenade (hit = 20)
+        // never passes, so using it would give a fused grenade no visible
+        // explosion at all -- which is exactly the sort of thing that reads as a
+        // broken build rather than a chosen constant.
+        float size = Type()->hit * 0.003;
+        saturate(size, MinExplosion, MaxExplosion);
+        exploPos[1] += 0.5 * size;
+        Explosion* explosion = new Explosion(nullptr, _parent, size);
+        explosion->SetPosition(exploPos);
+        GLOB_WORLD->AddAnimal(explosion);
+        GetNetworkManager().CreateVehicle(explosion, VLTAnimal, "", -1);
+    }
+    GLandscape->ExplosionDammage(_parent, this, hitObject, pos, hitNormal, Type());
 }
 
 bool ShotShell::Invisible() const
@@ -726,6 +786,30 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
 {
     Point3 position = Position();
 
+    // FUSE. Only ammo whose config declares `explosionTime` gets here; for
+    // everything else `_fuseArmed` is false and every path below is the one it
+    // always took. See AmmoType::explosionTime for why absent means zero.
+    if (_fuseArmed)
+    {
+        _fuse -= deltaT;
+        if (_fuse <= 0.0f)
+        {
+            // Wherever it happens to be: in the air, against a wall, or lying on
+            // the ground. That is the point of a fuse.
+            Detonate(Position(), nullptr, VUp);
+            _delete = true;
+            return;
+        }
+        if (_atRest)
+        {
+            // Lying still, counting down. Integration is skipped ENTIRELY rather
+            // than run with a zero speed: `accel` below still holds gravity, so
+            // stepping it would push the grenade through the ground it rests on
+            // a little further every tick.
+            return;
+        }
+    }
+
     // Drag on the RELATIVE airflow. Identical to `_speed * (_speed.Size() *
     // _airFriction)` unless the ballistics wind opt-in is on — see ShotAirspeed.
     const Vector3 airspeed = ShotAirspeed(_speed);
@@ -797,6 +881,42 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
                     }
                 }
             }
+
+            // A fused round bounces off what it hits. This has to come BEFORE the
+            // damage loop below: a grenade that clatters off a wall must not also
+            // deal its hit value to the wall on every contact.
+            if (_fuseArmed && minI >= 0)
+            {
+                CollisionInfo& info = collision[minI];
+                const Point3 contact = info.object->PositionModelToTop(info.pos);
+
+                // `surfaceNormal`, not `dirOut`. On this swept-point path dirOut is
+                // the penetration chord and points ALONG travel, so reflecting off
+                // it would send the grenade onwards rather than back. CollisionInfo
+                // documents this at its declaration.
+                Vector3 normal = info.object->DirectionModelToTop(info.surfaceNormal);
+                const float length = normal.Size();
+                if (length > 1e-4f)
+                {
+                    normal = normal / length;
+                }
+                else
+                {
+                    // No usable normal: come back the way we came. Crude, but it
+                    // keeps the grenade out of the geometry, which is the part
+                    // that matters.
+                    const float speed = _speed.Size();
+                    normal = speed > 1e-4f ? -_speed / speed : VUp;
+                }
+                // Component planes face into the solid; we want the outward side.
+                if (normal.DotProduct(_speed) > 0.0f)
+                {
+                    normal = -normal;
+                }
+                BounceOff(normal, contact);
+                return;
+            }
+
             if (IsLocal())
             {
                 for (int i = 0; i < collision.Size(); i++)
@@ -949,6 +1069,26 @@ void ShotShell::Simulate(float deltaT, SimulationImportance prec)
             if (t <= maxDist)
             {
                 position = isect;
+
+                // A fused round bounces off the ground too -- unless it went into
+                // the sea, where there is nothing to bounce from and a grenade
+                // that kept skipping across the surface would look absurd. Water
+                // detonates on contact, as it does today.
+                if (_fuseArmed && !hitSea && !_waterImpactDone)
+                {
+                    // SurfaceY's gradient form gives dY/dX and dY/dZ at the point,
+                    // and the upward normal follows from them directly. There is no
+                    // SurfaceNormal() on Landscape -- this IS the way to ask.
+                    float dX = 0.0f;
+                    float dZ = 0.0f;
+                    GLandscape->SurfaceY(isect.X(), isect.Z(), &dX, &dZ);
+                    Vector3 normal(-dX, 1.0f, -dZ);
+                    const float length = normal.Size();
+                    normal = length > 1e-4f ? normal / length : VUp;
+
+                    BounceOff(normal, isect);
+                    return;
+                }
 
                 // Ballistics diagnostic — terrain / sea terminus.
                 Poseidon::Dev::Ballistics::NotifyImpact(static_cast<Entity*>(this), position.X(), position.Y(), position.Z(),

@@ -121,6 +121,15 @@ void AmmoType::Load(const ParamEntry& par)
     GET_PAR(manualControl);
     GET_PAR(explosive);
 
+    // NOT GET_PAR: that requires the entry to exist, and no stock class declares
+    // a fuse. FindEntry lets absent mean zero, so unmodified content keeps
+    // detonating on contact exactly as it did.
+    explosionTime = 0.0f;
+    if (const ParamEntry* fuse = par.FindEntry("explosionTime"))
+    {
+        explosionTime = *fuse;
+    }
+
     const ParamEntry* entry = par.FindEntry("defaultMagazine");
     if (entry)
     {

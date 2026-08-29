@@ -67,6 +67,15 @@ class AmmoType: public VehicleNonAIType
 	bool manualControl;
 	bool explosive;
 
+	/// Fuse delay in seconds, or 0 for a round that detonates on contact.
+	///
+	/// ABSENT from stock CWA content: 2001 hand grenades explode the instant they
+	/// touch anything, and no CfgAmmo class declares this. It therefore defaults to
+	/// 0, and 0 IS the old behaviour -- a round only gains a fuse if its config
+	/// asks for one. That keeps every existing mission and every upstream config
+	/// working unchanged, which matters more here than a nicer default.
+	float explosionTime;
+
 	Ref<Texture> _texture;
 	AmmoSimulation _simulation;
 	Ref<VehicleType> _cartridgeType;

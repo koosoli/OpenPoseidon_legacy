@@ -134,6 +134,17 @@ protected:
 	float _ballisticCoefficient = 0.0f;
 	bool _waterImpactDone;
 
+	/// Seconds left on the fuse. Only meaningful while `_fuseArmed`.
+	float _fuse = 0.0f;
+	/// True when the ammo config declared `explosionTime > 0`. Everything the fuse
+	/// changes hangs off this one flag, so a round without it takes byte-identical
+	/// paths to before.
+	bool _fuseArmed = false;
+	/// The grenade has stopped moving and is only counting down. Integration is
+	/// skipped while this holds -- otherwise gravity keeps accumulating into
+	/// `_speed` and a resting grenade slowly sinks through the ground it lies on.
+	bool _atRest = false;
+
 public:
 	ShotShell( EntityAI *parent, const AmmoType *type );
 	void Simulate( float deltaT, SimulationImportance prec ) override;
@@ -142,6 +153,13 @@ public:
 	/// a ray, so with physics absent it returns false, which is today's behaviour
 	/// and the safe direction.
 	bool TryPenetrate(const CollisionInfo &info, float deltaT);
+	/// Reflects the shell off a surface and bleeds energy into it. Returns false
+	/// when what is left is too slow to be worth simulating, in which case the
+	/// shell is left at rest to cook off where it lies.
+	bool BounceOff(Vector3Par surfaceNormal, Vector3Par contactPoint);
+	/// Explodes here and now: the visual, the damage, and nothing else. Shared by
+	/// the fuse and by the contact detonation so the two cannot drift apart.
+	void Detonate(Vector3Par pos, Object *hitObject, Vector3Par hitNormal);
 	bool Invisible() const override;
 	void Sound( bool inside, float deltaT ) override;
 
