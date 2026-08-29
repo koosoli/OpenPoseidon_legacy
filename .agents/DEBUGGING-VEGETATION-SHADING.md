@@ -177,12 +177,15 @@ worse one is the one you did not have open.
   `ambientBoost` ≈ 1.6) is proposed but **not** validated against CWA's own trees at low sun,
   which is the case the current values were chosen for. Check both worlds before changing a
   default.
-- **Individual blown-out trees.** At `freefly [1025.37, 2708.48, 21.56] az 331.5 el 4.6` on
-  Chernarus one tree renders near-white and uniform while its neighbours have tonal range.
-  Not yet isolated. Two candidates, both unproven: the ambient boost clipping a pale-leaved
-  species, or the material — that world logs 163 `Wgpu material: no albedo for …` warnings,
-  many of them `dz\plants\*` leaf and trunk rvmats, which fall back to the face texture.
-  Establish which by killing the material before theorising about the lighting.
+- **Individual blown-out trees — CLOSED, by the global knob.** At
+  `freefly [1025.37, 2708.48, 21.56] az 331.5 el 4.6` on Chernarus one tree rendered near-white
+  and tonally flat while its neighbours kept their range. The standing suspicion was its
+  material — that world logs 163 `Wgpu material: no albedo for …` warnings, many of them
+  `dz\plants\*` leaf and trunk rvmats. It was not needed: dropping `ambientBoost` 2.5 -> 1.6
+  brought that tree back with the rest, so it was the same over-lift clipping a pale-leaved
+  species, not a per-asset fault. Recorded because the cheap global fix was tried second and
+  should have been tried first: before chasing one asset's material, move the knob that acts on
+  every asset and see whether the outlier is simply the first to clip.
 
 ---
 
