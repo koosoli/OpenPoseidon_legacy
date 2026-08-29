@@ -2989,6 +2989,7 @@ impl Renderer {
         // copied from the ORIGINAL slice and stays unjittered on purpose (it feeds a
         // mip-blurred reflection; jitter there is pure shimmer).
         if let Some(cam) = prepared_cameras.get_mut(main_scene_cam) {
+            self.temporal.set_output_width(self.config.width);
             self.temporal.begin_frame(cam, self.render_size());
             self.temporal.apply_jitter(&mut cam.proj);
         }
@@ -3111,7 +3112,8 @@ impl Renderer {
                     let player_submerged = submersion > 0.0;
                     // Use the water draw camera, not an unrelated terrain/scene batch. The visual
                     // submersion boundary is the actual camera crossing the gameplay sea plane.
-                    cameras.get(water_camera).and_then(|cam| {
+                    // Prepared (jittered) camera, same reasoning as the sky ivp above.
+                    prepared_cameras.get(water_camera).and_then(|cam| {
                         let cam_above = cam.cam_pos[1] - sea_level;
                         let engage = underwater_enabled
                             && (player_submerged || cam_above < underwater_near_surface_band);
@@ -3794,7 +3796,12 @@ impl Renderer {
                     );
                 }
             }
-            cameras.get(main_cam).map(|cam| {
+            // PREPARED cameras: the sky's rays must be reconstructed from the SAME
+            // (jittered) projection the scene rasterises with, or sky/cloud pixels sit a
+            // sub-pixel off from geometry every frame — invisible under MSAA, but a
+            // temporal upscaler un-jitters the whole frame and the mismatch reads as the
+            // sky (and horizon) faintly vibrating.
+            prepared_cameras.get(main_cam).map(|cam| {
                 // Reconstruct inv(proj*view) = inv(view) * inv(proj), inverting the two
                 // matrices SEPARATELY and in f64. Our projection is reversed-Z with an
                 // infinite far plane (ill-conditioned z-row); inverting the *combined*

@@ -101,6 +101,9 @@ pub struct Temporal {
     pending_reset: Option<&'static str>,
     last_reset_reason: &'static str,
     render_size: (u32, u32),
+    // Output width, for the jitter phase-count ratio (render_size alone cannot tell
+    // 67% at 4K from 100% at 1440p). Set alongside begin_frame by the renderer.
+    output_width_hint: u32,
     shader: Option<wgpu::ShaderModule>,
     velocity: Option<VelocityPass>,
     resolve: Option<ResolvePass>,
@@ -152,6 +155,7 @@ impl Temporal {
             pending_reset: None,
             last_reset_reason: "first frame",
             render_size: (0, 0),
+            output_width_hint: 0,
             shader: None,
             velocity: None,
             resolve: None,
@@ -165,6 +169,10 @@ impl Temporal {
     // Raise an explicit history reset, consumed by the next begin_frame. Callable from
     // any thread-confined renderer entry point (world load via the heightmap upload,
     // future mode/upscaler switches, an eventual C++ camera-cut event).
+    pub fn set_output_width(&mut self, w: u32) {
+        self.output_width_hint = w;
+    }
+
     pub fn notify_reset(&mut self, reason: &'static str) {
         self.pending_reset = Some(reason);
     }
@@ -218,11 +226,24 @@ impl Temporal {
         self.frame_index += 1;
         self.prev_jitter_px = self.jitter_px;
         self.jitter_px = if self.enabled {
-            // Halton (2,3), 8-phase cycle: enough phases to cover the pixel while staying
-            // short enough that a debug accumulator converges quickly. Replaceable — the
-            // plan forbids baking one vendor's sequence into the camera system, and this
-            // is one function.
-            let i = self.frame_index % 8 + 1;
+            // Halton (2,3). Phase count follows the upscale ratio (NVIDIA's guidance:
+            // ~8 x (output/render)^2, so an upscaler actually receives distinct sample
+            // positions to reconstruct detail from — 8 phases at Quality ratio measurably
+            // soften the result). WGR_JITTER_PHASES overrides for A/Bs; the sequence
+            // itself stays replaceable per the plan.
+            static PHASES: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+            let override_phases = *PHASES.get_or_init(|| {
+                std::env::var("WGR_JITTER_PHASES")
+                    .ok()
+                    .and_then(|v| v.parse::<u64>().ok())
+            });
+            let phases = override_phases.unwrap_or_else(|| {
+                let (rw, _) = self.render_size;
+                let out_w = self.output_width_hint.max(rw).max(1);
+                let ratio = out_w as f32 / rw.max(1) as f32;
+                ((8.0 * ratio * ratio).ceil() as u64).clamp(8, 64)
+            });
+            let i = self.frame_index % phases + 1;
             [halton(i, 2) - 0.5, halton(i, 3) - 0.5]
         } else {
             [0.0; 2]

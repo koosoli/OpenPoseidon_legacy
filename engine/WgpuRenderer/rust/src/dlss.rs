@@ -496,11 +496,14 @@ impl Ngx {
             NVSDK_NGX_Parameter_SetUI(self.params, name!("OutWidth"), output.0);
             NVSDK_NGX_Parameter_SetUI(self.params, name!("OutHeight"), output.1);
             NVSDK_NGX_Parameter_SetI(self.params, name!("PerfQualityValue"), quality as i32);
+            // NOT MVJittered: our velocity is computed from the UNJITTERED matrices on
+            // purpose (temporal.wgsl), so the vectors carry no jitter — claiming they do
+            // makes DLSS "compensate" motion that is not there, which reads as a
+            // permanent slight blur.
             NVSDK_NGX_Parameter_SetI(
                 self.params,
                 name!("DLSS.Feature.Create.Flags"),
-                DLSS_FLAG_IS_HDR | DLSS_FLAG_MV_LOWRES | DLSS_FLAG_MV_JITTERED
-                    | DLSS_FLAG_DEPTH_INVERTED,
+                DLSS_FLAG_IS_HDR | DLSS_FLAG_MV_LOWRES | DLSS_FLAG_DEPTH_INVERTED,
             );
             let mut handle: *mut NgxHandle = std::ptr::null_mut();
             let r = NVSDK_NGX_VULKAN_CreateFeature1(
