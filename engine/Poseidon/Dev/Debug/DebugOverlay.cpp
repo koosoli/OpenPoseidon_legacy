@@ -4585,6 +4585,30 @@ void DrawRenderTab()
     Dev::PanelSeparator();
     ImGui::Text("window  %d x %d", GEngine->Width(), GEngine->Height());
     ImGui::Text("target  scale %.2fx, %dx MSAA", GEngine->GetRenderScale(), GEngine->GetMsaaSamples());
+    // Roads and decals. Here rather than on the Sky tab, where these spent one afternoon
+    // because that was the push path that already existed: they describe how ground-conformed
+    // geometry wins its depth test, which has nothing to do with the atmosphere.
+    Dev::PanelSeparator();
+    auto road = GEngine->GetRoadSettings();
+    bool roadChanged = ResetToDefaultsButton(road, "Reset roads to defaults",
+                                             "(only the road/decal conform below)");
+    Dev::PanelHeading("Roads and decals (per-pixel ground conform)");
+    roadChanged |= Dev::SliderFloat("Road lift, flat", &road.liftFlat, 0.0f, 0.5f, "%.3f m");
+    Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
+                      "every angle, so this is the one to raise if a road flickers right in front of you.");
+    roadChanged |= Dev::SliderFloat("Road lift, per metre", &road.liftPerMetre, 0.0f, 0.02f, "%.4f /m");
+    Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
+                      "shader, because the error it covers is a height error and a height error becomes\n"
+                      "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
+                      "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
+                      "alternately: continuous close up, continuous from above, in pieces in between.\n"
+                      "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
+    roadChanged |= Dev::SliderFloat("Road lift ceiling", &road.liftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
+    Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
+                      "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
+                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
+    if (roadChanged)
+        GEngine->SetRoadSettings(road);
     Dev::PanelHelp("settings are session-only; persist via graphics.cfg");
 }
 // HDR tonemap / look tuning (wgpu HDR path). The Hable curve is fixed; these are
@@ -4627,30 +4651,6 @@ void DrawTonemapTab()
     changed |= Dev::SliderFloat("Exposure", &t.exposure, 0.05f, 8.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
 
     Dev::PanelSeparator();
-    // Roads and decals. Here rather than on the Sky tab, where these spent one afternoon
-    // because that was the push path that already existed: they describe how ground-conformed
-    // geometry wins its depth test, which has nothing to do with the atmosphere.
-    Dev::PanelSeparator();
-    auto road = GEngine->GetRoadSettings();
-    bool roadChanged = ResetToDefaultsButton(road, "Reset roads to defaults",
-                                             "(only the road/decal conform below)");
-    Dev::PanelHeading("Roads and decals (per-pixel ground conform)");
-    roadChanged |= Dev::SliderFloat("Road lift, flat", &road.liftFlat, 0.0f, 0.5f, "%.3f m");
-    Dev::PanelTooltip("Fixed part of the pull toward the camera, in metres. Acts at every distance and\n"
-                      "every angle, so this is the one to raise if a road flickers right in front of you.");
-    roadChanged |= Dev::SliderFloat("Road lift, per metre", &road.liftPerMetre, 0.0f, 0.02f, "%.4f /m");
-    Dev::PanelTooltip("THE one that matters, and the one that was wrong. Divided by the grazing angle in the\n"
-                      "shader, because the error it covers is a height error and a height error becomes\n"
-                      "error/|dir.y| along the view ray -- about 6x looking down a road from standing height.\n"
-                      "Too small and the road breaks into a chequer of tiles that win and lose the depth test\n"
-                      "alternately: continuous close up, continuous from above, in pieces in between.\n"
-                      "Swept on Malden: 0.0015 closes most of it, 0.0040 closes it completely.");
-    roadChanged |= Dev::SliderFloat("Road lift ceiling", &road.liftMaxFrac, 0.0005f, 0.05f, "%.4f x dist");
-    Dev::PanelTooltip("Upper bound on the total pull, as a fraction of the distance. Its job is not to keep\n"
-                      "the lift small but to keep it FINITE: the grazing division above runs away as the ray\n"
-                      "flattens toward the horizon. Lower it if a road ever shows through a rise in front.");
-    if (roadChanged)
-        GEngine->SetRoadSettings(road);
 
     Dev::PanelHeading("Grade");
     changed |= Dev::SliderFloat("Temperature (warm+/cool-)", &t.temperature, -1.0f, 1.0f, "%.3f");
