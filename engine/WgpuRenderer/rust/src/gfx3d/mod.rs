@@ -7721,9 +7721,18 @@ impl Gfx3d {
 
     // REN-TEMP-001D: render-scale texture LOD (frame.wgsl `renscale`). `scale` is
     // render_width / output_width; 1.0 (or anything >= 1.0) writes the all-zero native lane.
+    // WGR_MIP_BIAS overrides the derived log2(scale) bias — the A/B knob for the
+    // sharpness-vs-distant-shimmer trade under a temporal upscaler (0 = no bias, softest
+    // and calmest; log2(0.67) = -0.58 is the textbook value and the default).
     pub fn set_render_scale_lane(&mut self, scale: f32) {
+        static BIAS_OVERRIDE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+        let over = *BIAS_OVERRIDE.get_or_init(|| {
+            std::env::var("WGR_MIP_BIAS").ok().and_then(|v| v.parse::<f32>().ok())
+        });
         self.render_scale_lane = if scale < 1.0 && scale > 0.0 {
-            [scale.log2(), scale, 0.0, 0.0]
+            let bias = over.unwrap_or_else(|| scale.log2()).clamp(-4.0, 0.0);
+            // Gradient scale for textureSampleGrad paths mirrors the bias: 2^bias.
+            [bias, bias.exp2(), 0.0, 0.0]
         } else {
             [0.0; 4]
         };
