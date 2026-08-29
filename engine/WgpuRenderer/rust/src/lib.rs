@@ -1,6 +1,8 @@
 mod bloom;
 #[cfg(feature = "dlss")]
 mod dlss;
+#[cfg(feature = "dlss")]
+mod dlss_device;
 mod dof;
 mod exposure;
 mod far;
@@ -611,6 +613,10 @@ pub struct Renderer {
     // REN-TEMP-001E/F/G: temporal camera state, jitter, static-world velocity + debug view.
     // WGR_TEMPORAL=1 to enable (off by default — jitter with no accumulator is shimmer).
     temporal: temporal::Temporal,
+    // REN-TEMP-001M: raw Vulkan handles for NGX, Some only when the WGR_DLSS hal
+    // device route was taken. Consumed by the (upcoming) NGX bring-up.
+    #[cfg(feature = "dlss")]
+    ngx_raw: Option<dlss_device::NgxRawHandles>,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -742,7 +748,33 @@ impl Renderer {
             log_level::INFO,
             &format!("wgpu instance flags: {:?}", instance_desc.flags),
         );
-        let instance = wgpu::Instance::new(instance_desc);
+        // REN-TEMP-001M: WGR_DLSS=1 (dlss builds only) routes instance/device creation
+        // through ash + wgpu-hal so the NGX-required Vulkan extensions are enabled.
+        // STRICT fallback: any failure logs and continues on the untouched native path.
+        #[cfg(feature = "dlss")]
+        let dlss_requested = std::env::var("WGR_DLSS").map(|v| v != "0").unwrap_or(false);
+        #[cfg(feature = "dlss")]
+        let mut dlss_instance_active = false;
+        let instance = 'inst: {
+            #[cfg(feature = "dlss")]
+            if dlss_requested {
+                match dlss_device::create_instance(instance_desc.flags) {
+                    Ok(i) => {
+                        log.log(
+                            log_level::INFO,
+                            "wgpu instance created via hal route with NGX extensions (WGR_DLSS)",
+                        );
+                        dlss_instance_active = true;
+                        break 'inst i;
+                    }
+                    Err(e) => log.log(
+                        log_level::WARN,
+                        &format!("WGR_DLSS instance path failed ({e}); native path instead"),
+                    ),
+                }
+            }
+            wgpu::Instance::new(instance_desc)
+        };
 
         let surface: wgpu::Surface<'static> = unsafe {
             instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
@@ -910,18 +942,42 @@ impl Renderer {
             ..Default::default()
         };
 
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            required_features: bc_features
-                | bindless
-                | partially_bound
-                | indirect_avail
-                | mdic_avail
-                | vertex_writable_storage
-                | ts_request,
-            required_limits,
-            ..Default::default()
-        }))
-        .map_err(|e| format!("request_device failed: {e}"))?;
+        let requested_features = bc_features
+            | bindless
+            | partially_bound
+            | indirect_avail
+            | mdic_avail
+            | vertex_writable_storage
+            | ts_request;
+        // REN-TEMP-001M: raw handles for NGX init, present only when the hal device
+        // route succeeded. Same strict-fallback rule as the instance.
+        #[cfg(feature = "dlss")]
+        let mut ngx_raw: Option<dlss_device::NgxRawHandles> = None;
+        let (device, queue) = 'dev: {
+            #[cfg(feature = "dlss")]
+            if dlss_instance_active {
+                match dlss_device::create_device(&adapter, requested_features, &required_limits) {
+                    Ok((d, q, raw)) => {
+                        log.log(
+                            log_level::INFO,
+                            "wgpu device created via hal route with NGX extensions (WGR_DLSS)",
+                        );
+                        ngx_raw = Some(raw);
+                        break 'dev (d, q);
+                    }
+                    Err(e) => log.log(
+                        log_level::WARN,
+                        &format!("WGR_DLSS device path failed ({e}); native path instead"),
+                    ),
+                }
+            }
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                required_features: requested_features,
+                required_limits,
+                ..Default::default()
+            }))
+            .map_err(|e| format!("request_device failed: {e}"))?
+        };
 
         // Keep GPU failures diagnosable at the FFI boundary. Preview-0 does not
         // attempt in-process device recovery, but it must report why a restart
@@ -1324,6 +1380,8 @@ impl Renderer {
             hdr_upscaled: None,
             upscale_blitter: None,
             temporal: temporal::Temporal::from_env(),
+            #[cfg(feature = "dlss")]
+            ngx_raw,
             sample_count,
             tonemap,
             underwater,

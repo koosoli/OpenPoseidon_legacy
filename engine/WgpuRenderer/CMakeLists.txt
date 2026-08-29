@@ -37,10 +37,22 @@ else()
     set(_wgr_cargo_profile rel)
 endif()
 
+# REN-TEMP-001M: -DPOSEIDON_DLSS=ON compiles the renderer with the proprietary NGX/DLSS
+# path (runtime-gated by WGR_DLSS=1; needs the untracked .tmp-dlss-sdk checkout). OFF is
+# the default and the only configuration that may ever be distributed — the SDK is
+# GPL-incompatible (docs/temporal-upscaling-plan.md §0.1).
+option(POSEIDON_DLSS "Build wgpu_renderer with the DLSS (NGX) feature" OFF)
+if(POSEIDON_DLSS)
+    set(_wgr_cargo_features FEATURES dlss)
+else()
+    set(_wgr_cargo_features)
+endif()
+
 corrosion_import_crate(
     MANIFEST_PATH ${CMAKE_CURRENT_SOURCE_DIR}/rust/Cargo.toml
     CRATE_TYPES cdylib
     PROFILE ${_wgr_cargo_profile}
+    ${_wgr_cargo_features}
 )
 
 add_library(WgpuRenderer STATIC
