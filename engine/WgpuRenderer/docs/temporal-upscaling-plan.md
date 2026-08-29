@@ -10,24 +10,35 @@ Verdict: **feasible**. The renderer's existing shape is unusually favourable in 
 (a single global resolution, an identity-free immediate draw path, and an explicit
 "MSAA + no TAA" design pin). One issue is not technical at all: licensing.
 
+Owner direction (2026-08-29): the primary goal is **performance headroom**, with DLSS as the
+quality/perf target on the owner's NVIDIA RTX 3070, and DLSS 5 adopted later once its public
+custom-engine SDK exists. Builds are private (private mirror, no published releases). All open
+decisions in this document are resolved accordingly — see §6.
+
+Performance expectation, stated honestly up front: upscaling only buys frame time in
+**GPU-bound** scenes. Measured history here says stock worlds at high resolution are
+GPU-bound and grass-dominated (good candidates), but some scenes are CPU-bound (a measured
+case had the GPU at 8.9% of the frame) — those gain nothing from DLSS and need other work,
+which is out of scope for REN-TEMP-001. Phase 0 exists to separate the two before any
+architecture work is justified by assumed FPS.
+
 ---
 
 ## 0. Corrections to the original draft
 
-1. **Licensing gate (new, decision required).** This repo is GPL-3.0-or-later with Section 7
-   additional terms (`LICENSE:1-3`). The DLSS SDK/NGX binaries are proprietary and
-   GPL-incompatible; the same applies to the XeSS SDK. Linking them into the distributed
-   `wgpu_renderer.dll` is a licence conflict *when the binary is distributed* (GitHub releases
-   count; purely local builds do not). FSR 3.1 is MIT and fully compatible.
-   Consequences for the plan:
-   - The vendor-neutral `TemporalUpscaler` boundary is not just good architecture here, it is
-     the legal firewall. DLSS/XeSS must live in an **optional, separately-built plugin DLL**
-     that the renderer `dlopen`s at runtime and functions without — never linked into the
-     GPL cdylib. (Precedent in-tree: the game already loads `wgpu_renderer.dll` across a C ABI.)
-   - **FSR 3.1 SR should be the first *in-tree* backend** (after the debug resolve), because it
-     is MIT, runs on all vendors including the CI/test pool, and validates the identical input
-     contract. DLSS remains the primary *quality* target and follows immediately as the plugin.
-   - Owner must confirm this distribution posture before milestone M (DLSS bring-up).
+1. **Licensing (resolved 2026-08-29 — private-build posture).** This repo is GPL-3.0-or-later
+   with Section 7 additional terms (`LICENSE:1-3`). The DLSS SDK/NGX binaries are proprietary
+   and GPL-incompatible (likewise XeSS; FSR 3.1 is MIT and fully compatible). GPL obligations
+   trigger **on distribution only** — and this project is a private mirror with no published
+   releases, so DLSS may be **linked directly into `wgpu_renderer.dll` behind a Cargo feature
+   that is OFF by default** (`dlss`, plus a matching CMake option). The GPL cdylib must always
+   build and run with the feature off and no vendor SDK present.
+   Note also that the renderer is not single-author (52 commits by Paavo Huhtala in
+   `engine/WgpuRenderer/`), so no part of it can be unilaterally declared non-GPL.
+   **Standing gate:** before any *public* release or binary distribution that includes DLSS,
+   this decision must be revisited — the vendor-neutral `TemporalUpscaler` boundary (§Phase 13)
+   is deliberately kept clean so that moving DLSS out into a separately-distributed plugin DLL
+   is a packaging change, not a redesign.
 2. **Integration path: direct NGX Vulkan, not Streamline.** The renderer is a Rust wgpu 29
    cdylib (`rust/Cargo.toml:16`); Streamline is a D3D-oriented C++ interposer and a poor fit.
    The proven path for wgpu is hal interop + the NGX Vulkan API (as used by Bevy's DLSS
@@ -113,17 +124,18 @@ Verdict: **feasible**. The renderer's existing shape is unusually favourable in 
 ## 1. Architecture
 
 ```
-Poseidon C++ (EngineWgpu)          Rust cdylib (GPL)                 Plugin DLLs (non-GPL)
-─────────────────────────          ─────────────────                 ─────────────────────
+Poseidon C++ (EngineWgpu)          Rust cdylib
+─────────────────────────          ─────────────────
 render-scale option (existing UI)  RenderExtent/OutputExtent split
 explicit reset events              temporal camera state + jitter
 object_id on WgrDraw3D             velocity pass + debug views
 prev-pose palette upload (none —   TemporalUpscaler trait:
   bake is renderer-side)             - Native (passthrough)
                                      - TemporalDebug (in-tree)
-                                     - FSR 3.1 (in-tree, MIT)
-                                     - DLSS  ──────────────────────►  dlss plugin (NGX Vulkan)
-                                     - XeSS  ──────────────────────►  xess plugin
+                                     - DLSS (in-tree, cargo feature `dlss`,
+                                             OFF by default; NGX Vulkan)
+                                     - FSR 3.1 (in-tree, MIT — follow-up)
+                                     - XeSS (later, same posture as DLSS)
                                    hal-route device creation
                                    (Vulkan forced when temporal)
 ```
@@ -214,28 +226,42 @@ producers: A2C foliage coverage, water, particles/smoke, rotor discs, muzzle fla
 **Phase 12 — Temporal debug resolve.** As drafted: minimal reproject + reject + visualise, a
 diagnostic, not a product TAA. Retire the "no TAA" test pins consciously here (§0.4).
 
-**Phase 13 — TemporalUpscaler abstraction.** As drafted, with the plugin firewall from §0.1:
-trait in-tree; Native/TemporalDebug/FSR as in-tree impls; DLSS/XeSS behind a C plugin ABI
-(`wgr_upscaler_*`) loaded at runtime.
+**Phase 13 — TemporalUpscaler abstraction.** As drafted: a Rust trait, in-tree;
+Native/TemporalDebug as the first two impls. No vendor type may appear outside its backend
+module — this boundary is what later makes both the plugin split (§0.1 standing gate) and a
+DLSS 5 backend a contained change.
 
-**Phase 14a — FSR 3.1 SR (in-tree).** MIT, all vendors, validates the contract end-to-end.
-Vulkan backend via the same hal route DLSS needs — building this first also de-risks the
-interop rewrite of `lib.rs:709-907` inside GPL code.
+**Phase 14 — DLSS SR (in-tree, feature-gated).** Direct NGX Vulkan (§0.2), behind the
+off-by-default `dlss` cargo feature: forced Vulkan backend, hal-route device creation with
+`NVSDK_NGX_VULKAN_RequiredExtensions()`, hardware/feature detection, clean fallback to Native
+when unsupported or the feature is compiled out, Quality/Balanced/Performance queried not
+hard-coded, depth-inverted + HDR + MV-scale flags set per §0.8. Input validation checklist
+from draft §21 unchanged and mandatory: validate every input independently (MV orientation/
+scale/convention, jitter sign, depth convention, exposure, extents, reset) before judging
+image quality; never tune sharpening to hide a wrong input.
 
-**Phase 14b — DLSS SR (plugin).** Direct NGX Vulkan (§0.2): forced Vulkan backend, hal-route
-device creation with `NVSDK_NGX_VULKAN_RequiredExtensions()`, feature detection, clean
-fallback, Quality/Balanced/Performance queried not hard-coded, depth-inverted + HDR + MV-scale
-flags set per §0.8. Input validation checklist from draft §21 unchanged and mandatory.
+**Phase 15 — DLAA + validation.** Conservative 4×MSAA+DLAA comparison config; full §24
+image-quality matrix (slow pan, fast rotation, fences, grass in wind, rotor blades, night
+lights, camera cuts…); §25 benchmark matrix with CPU/GPU-bound reporting per scene.
 
-**Phase 15 — DLAA + validation + XeSS.** As drafted (conservative 4×MSAA+DLAA comparison
-config; full §24 image-quality matrix; §25 benchmark matrix with CPU/GPU-bound reporting;
-XeSS as a second plugin, only if the abstraction survives FSR+DLSS unchanged).
+**Phase 16 — FSR 3.1 SR (follow-up).** MIT, in-tree unconditionally (no feature gate needed),
+all vendors. Must consume the identical `TemporalUpscaler` contract; if it needs renderer
+changes beyond its own backend module, the abstraction failed — review it before continuing.
+XeSS later still, same feature-gate posture as DLSS.
+
+**DLSS 5 (TRACK ONLY — unchanged).** No speculative API work, no effort estimates from
+announcement material. When the public custom-engine SDK exists, it enters as another backend
+behind the same trait; the NR-intensity / colour-grade / masking controls from the owner's
+notes are exposed through the dev panel *as the SDK defines them*, with 0% preserving the
+conventional output and neural rendering never on by default. Nothing in REN-TEMP-001 may
+hard-code assumptions that would block this. Note: whether specific DLSS 5 features run on an
+RTX 3070 is unknown today — do not promise them for this hardware.
 
 ## 3. Stop conditions
 
 All of draft §32, plus:
-- **Licensing**: distribution posture for proprietary SDK plugins not confirmed by the owner
-  by the start of Phase 14b.
+- **Licensing**: any plan to publish releases or distribute binaries while DLSS/XeSS is
+  compiled in — stop and execute the plugin split from §0.1 first.
 - **ABI**: if `object_id` on `WgrDraw3D` cannot be added without breaking the 272-byte layout
   discipline or the version handshake, stop and report rather than keying off `(mesh, offset)`.
 - **hal interop**: if `Instance::from_hal`/`create_device_from_hal` cannot reproduce the current
@@ -260,6 +286,29 @@ vendor SDK work before the review.
 
 ## 5. Milestones
 
-Draft §33's lettering kept, with M split: `REN-TEMP-001M1` FSR SR (in-tree), `REN-TEMP-001M2`
-DLSS SR (plugin). Definition of Done: draft §34 items 1–20, plus "the GPL cdylib builds and
-runs with no vendor SDK present" as item 21.
+Draft §33's lettering kept (A baseline … L abstraction, M DLSS SR bring-up, N DLAA+quality
+modes, O validation/performance report); FSR and XeSS are separate follow-up milestones after
+O. Definition of Done: draft §34 items 1–20, plus item 21: "the cdylib builds and runs with
+the `dlss` feature off and no vendor SDK present on the machine."
+
+## 6. Decisions taken on the owner's behalf (2026-08-29)
+
+The owner's stated goals: more performance now; DLSS 5 eventually, for better graphics.
+Resolved accordingly:
+
+1. **Private-build posture** — DLSS linked in-tree behind an off-by-default cargo feature;
+   plugin split deferred until public distribution is ever planned (§0.1). The `TemporalUpscaler`
+   boundary keeps that door open at packaging cost only.
+2. **DLSS before FSR** — the owner's GPU is an RTX 3070 and DLSS is the stated target; FSR's
+   earlier ordering existed for legal reasons that the private posture removes. FSR remains a
+   committed follow-up (all-vendor fallback + abstraction validation).
+3. **Restart-on-mode-switch accepted** for the first implementation (`sample_count` and target
+   sets are fixed at startup; live switching is deferred).
+4. **Quality presets** map render scales the standard way: Quality 67%, Balanced 58%,
+   Performance 50%; DLAA = 100%. Exact mode availability is queried from the SDK at runtime.
+5. **Performance honesty rule** — every reported FPS gain names whether the scene was GPU- or
+   CPU-bound at that resolution. CPU-bound scenes are explicitly out of scope here; if Phase 0
+   shows the owner's actual play scenarios are predominantly CPU-bound, stop and report per
+   §3 instead of continuing on momentum.
+6. **The user-visible endpoint** is the existing Options render-scale control plus a Temporal
+   section in the dev panel (draft §29, built incrementally, never ahead of the feature).
