@@ -1753,6 +1753,7 @@ impl Renderer {
                     self.temporal.velocity_view().cloned(),
                 ) {
                     let subset = self.temporal.object_velocity_subset(draws3d);
+                    let skin_subset = self.temporal.skinned_velocity_subset(draws3d);
                     self.gfx3d.render_object_velocity(
                         &self.device,
                         &self.queue,
@@ -1760,6 +1761,7 @@ impl Renderer {
                         &vel_view,
                         draws3d,
                         &subset,
+                        &skin_subset,
                         &obj_uniform,
                     );
                 }
@@ -2631,6 +2633,12 @@ impl Renderer {
         // REN-TEMP-001H: absolute worlds of this frame's identified rigid draws, for the
         // object-velocity subset at tonemap time (and next frame's previous worlds).
         self.temporal.ingest_draws(draws3d);
+        // REN-TEMP-001I: (object, mesh) -> baked base_vertex — the cross-frame identity
+        // palette slots cannot provide. prepare_skin_bake already ran above.
+        if self.temporal.enabled {
+            let bases = self.gfx3d.collect_skin_bases(draws3d);
+            self.temporal.ingest_skin_bases(bases);
+        }
         let mut reflected_vp = [0.0f32; 16];
         let reflected_camera = if planar_active {
             let sea = planar_sea.unwrap();

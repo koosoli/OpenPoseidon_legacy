@@ -91,6 +91,11 @@ pub struct Temporal {
     // world as "moved" on any pan. Keyed by WgrDraw3D.object_id.
     cur_worlds: FxHashMap<u32, [f32; 16]>,
     prev_worlds: FxHashMap<u32, [f32; 16]>,
+    // REN-TEMP-001I: (object id, mesh handle) -> baked base_vertex in that frame's skin
+    // bake output. The association is the identity that palette_slot (a per-frame arena
+    // index in submission order) cannot provide across frames.
+    cur_skin_bases: FxHashMap<(u32, u64), u32>,
+    prev_skin_bases: FxHashMap<(u32, u64), u32>,
 }
 
 // The stable object id rides bits 16-31 of WgrDraw3D.misc (see ffi.rs) — 0 = none.
@@ -132,6 +137,8 @@ impl Temporal {
             velocity: None,
             cur_worlds: FxHashMap::default(),
             prev_worlds: FxHashMap::default(),
+            cur_skin_bases: FxHashMap::default(),
+            prev_skin_bases: FxHashMap::default(),
         }
     }
 
@@ -179,8 +186,9 @@ impl Temporal {
             }
         }
         if self.reset {
-            // Invalid history invalidates the object-world history with it.
+            // Invalid history invalidates the object-world and skin-pose history with it.
             self.prev_worlds.clear();
+            self.prev_skin_bases.clear();
         }
         self.cur = Some(CameraSnap {
             view: cam.view,
@@ -224,6 +232,44 @@ impl Temporal {
         }
         std::mem::swap(&mut self.prev_worlds, &mut self.cur_worlds);
         self.cur_worlds.clear();
+        std::mem::swap(&mut self.prev_skin_bases, &mut self.cur_skin_bases);
+        self.cur_skin_bases.clear();
+    }
+
+    // REN-TEMP-001I: this frame's (object id, mesh) -> baked base_vertex associations,
+    // collected by Gfx3d::collect_skin_bases after the bake plan exists.
+    pub fn ingest_skin_bases(&mut self, entries: Vec<(u32, u64, u32)>) {
+        if !self.enabled {
+            return;
+        }
+        self.cur_skin_bases.clear();
+        for (id, mesh, base) in entries {
+            self.cur_skin_bases.entry((id, mesh)).or_insert(base);
+        }
+    }
+
+    // The skinned velocity subset: (draws3d index, PREVIOUS frame's baked base_vertex for
+    // the same object+mesh). Every skinned identified draw with usable history is
+    // included — animation moves essentially always, so there is no cheap "unchanged"
+    // filter like the rigid path's.
+    pub fn skinned_velocity_subset(
+        &self,
+        draws: &[crate::ffi::WgrDraw3D],
+    ) -> Vec<(u32, u32)> {
+        if !self.enabled || self.reset {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (i, d) in draws.iter().enumerate() {
+            let id = draw_object_id(d);
+            if id == 0 || d.palette_slot == crate::ffi::NO_PALETTE {
+                continue;
+            }
+            if let Some(prev_base) = self.prev_skin_bases.get(&(id, d.mesh)) {
+                out.push((i as u32, *prev_base));
+            }
+        }
+        out
     }
 
     // REN-TEMP-001H: record this frame's identified rigid draws as ABSOLUTE worlds

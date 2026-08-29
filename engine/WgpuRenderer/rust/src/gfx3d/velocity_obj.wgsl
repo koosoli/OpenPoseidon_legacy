@@ -53,6 +53,41 @@ fn vs_velocity(@location(0) pos: vec3<f32>, @builtin(instance_index) inst: u32) 
     return out;
 }
 
+// --- REN-TEMP-001I: skinned variant ---------------------------------------------
+// The current pose arrives as the vertex stream (this frame's bake output, sliced to
+// the draw's baked base exactly like draw_one); the PREVIOUS pose is read from last
+// frame's ping-ponged bake buffer by mesh-local vertex index. Baked vertices are
+// camera-relative world space with their own frame's camera folded in, so no world
+// matrices appear: current positions go through the current VPs, previous positions
+// through the previous VP, by construction. Per-limb motion falls out of the bake —
+// this is real skinned motion, not root motion in disguise.
+
+struct SkinInst {
+    prev_base: u32,
+    pada: u32,
+    padb: u32,
+    padc: u32,
+};
+@group(0) @binding(3) var<storage, read> skin_insts: array<SkinInst>;
+// Last frame's bake output as raw floats: WgrMeshVertex is 68 B = 17 floats, pos at 0.
+@group(0) @binding(4) var<storage, read> prev_baked: array<f32>;
+
+@vertex
+fn vs_skinned_velocity(@location(0) pos: vec3<f32>,
+                       @builtin(vertex_index) vi: u32,
+                       @builtin(instance_index) inst: u32) -> VsOut {
+    let si = skin_insts[inst];
+    let base = (si.prev_base + vi) * 17u;
+    let prev_pos = vec3<f32>(prev_baked[base], prev_baked[base + 1u], prev_baked[base + 2u]);
+    var raster = mats.jittered_vp * vec4<f32>(pos, 1.0);
+    raster.z = raster.w - raster.z;
+    var out: VsOut;
+    out.pos = raster;
+    out.cur_clip = mats.cur_vp * vec4<f32>(pos, 1.0);
+    out.prev_clip = mats.prev_vp * vec4<f32>(prev_pos, 1.0);
+    return out;
+}
+
 @fragment
 fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
     // Visibility: this pass has no depth attachment (the scene depth is multisampled,

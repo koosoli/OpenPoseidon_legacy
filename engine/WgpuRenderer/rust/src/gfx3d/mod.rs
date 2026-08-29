@@ -387,7 +387,223 @@ struct VelocityObjPass {
     ssbo_cap: u64,
     bind: Option<wgpu::BindGroup>,
     bound_depth_gen: u64,
+    // REN-TEMP-001I skinned variant: previous pose from the ping-ponged bake buffer.
+    // Its bind is rebuilt every frame — the prev buffer identity alternates by design.
+    skin_pipeline: wgpu::RenderPipeline,
+    skin_layout: wgpu::BindGroupLayout,
+    skin_ssbo: wgpu::Buffer,
+    skin_ssbo_cap: u64,
 }
+
+impl VelocityObjPass {
+    // All pipeline/BGL construction for both variants lives here so the headless device
+    // test can build them without a full Gfx3d — a lazily-built pipeline that first runs
+    // in-game is exactly the validation gap the test suite exists to close.
+    fn new(device: &wgpu::Device) -> Self {
+        {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("wgr_velocity_obj_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("velocity_obj.wgsl").into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_velocity_obj_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_velocity_obj_pipeline_layout"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            // Position-only view of the pool vertex layout: same stride, one attribute.
+            let vbuf_layout = wgpu::VertexBufferLayout {
+                array_stride: BAKED_VERT_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            };
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_velocity_obj_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_velocity"),
+                    buffers: &[vbuf_layout],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_velocity"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rg16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_obj_uniform"),
+                size: std::mem::size_of::<crate::temporal::ObjVelUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_obj_worlds"),
+                size: 128 * 128,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            // Skinned variant: bindings 0 (mats), 3 (per-instance prev base), 4 (prev
+            // baked floats), 2 (depth) — group indices match velocity_obj.wgsl.
+            let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_velocity_skin_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let skin_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("wgr_velocity_skin_pipeline_layout"),
+                    bind_group_layouts: &[Some(&skin_layout)],
+                    immediate_size: 0,
+                });
+            let skin_vbuf_layout = wgpu::VertexBufferLayout {
+                array_stride: BAKED_VERT_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            };
+            let skin_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_velocity_skin_pipeline"),
+                layout: Some(&skin_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_skinned_velocity"),
+                    buffers: &[skin_vbuf_layout],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Cw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_velocity"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rg16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let skin_ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_skin_insts"),
+                size: 16 * 256,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            VelocityObjPass {
+                pipeline,
+                layout,
+                uniform: uniform_buf,
+                ssbo,
+                ssbo_cap: 128 * 128,
+                bind: None,
+                bound_depth_gen: u64::MAX,
+                skin_pipeline,
+                skin_layout,
+                skin_ssbo,
+                skin_ssbo_cap: 16 * 256,
+            }
+        }
+    }
+}
+
 
 // Blocking copy of one D32 texture layer into `out` (row 0 = top).
 fn read_depth_layer(
@@ -3052,6 +3268,15 @@ pub struct Gfx3d {
     // is (re)allocated (rare growth), evicted on mesh destroy/reskin. This turns the
     // per-frame "one vkUpdateDescriptorSets per skinned mesh" into zero on steady frames.
     bake_bind_cache: FxHashMap<MeshKey, wgpu::BindGroup>,
+    // REN-TEMP-001I: LAST frame's bake output (ping-ponged with skinned_vbuf every
+    // enabled prepare_skin_bake), read by the skinned velocity pass as "previous pose".
+    // The bind cache swaps alongside so each cache still pins the buffer it was built
+    // against. `skinned_prev_valid` = the prev buffer really holds last frame's bake.
+    skinned_vbuf_prev: Option<wgpu::Buffer>,
+    skinned_cap_prev: u64,
+    bake_bind_cache_prev: FxHashMap<MeshKey, wgpu::BindGroup>,
+    skinned_prev_valid: bool,
+    skinned_baked_this_frame: bool,
 
     // Merged geometry pool: one shared vertex buffer + one shared Uint32 index buffer
     // that every mesh suballocates into (docs/gpu-culling-and-depth-plan.md §2.1). Each
@@ -3674,6 +3899,11 @@ impl Gfx3d {
             bake_groups: Vec::new(),
             skin_base_vertex: FxHashMap::default(),
             bake_bind_cache: FxHashMap::default(),
+            skinned_vbuf_prev: None,
+            skinned_cap_prev: 0,
+            bake_bind_cache_prev: FxHashMap::default(),
+            skinned_prev_valid: false,
+            skinned_baked_this_frame: false,
             pool: GeometryPool::new(device),
             indirect_enabled,
             indirect_args: None,
@@ -4121,6 +4351,7 @@ impl Gfx3d {
         // (binding 0), so drop the cache when the pool moved.
         if self.pool.generation() != gen_before {
             self.bake_bind_cache.clear();
+            self.bake_bind_cache_prev.clear();
         }
         let (mut aabb_min, mut aabb_max) = ([f32::MAX; 3], [f32::MIN; 3]);
         for v in verts {
@@ -4182,6 +4413,7 @@ impl Gfx3d {
         );
         // A cached skin-bake bind would reference the old (or absent) skin buffer.
         self.bake_bind_cache.remove(&key);
+        self.bake_bind_cache_prev.remove(&key);
     }
 
     // Re-upload vertex data for an existing (dynamic) mesh, e.g. a skeletally
@@ -4208,6 +4440,7 @@ impl Gfx3d {
             }
             // Drop any cached skin-bake bind that referenced this mesh's skin buffer.
             self.bake_bind_cache.remove(&key);
+            self.bake_bind_cache_prev.remove(&key);
         }
     }
 
@@ -4220,6 +4453,22 @@ impl Gfx3d {
             return None;
         }
         self.skin_base_vertex.get(&palette_slot).copied()
+    }
+
+    // REN-TEMP-001I: this frame's (object id, mesh) -> baked base_vertex, for the skinned
+    // velocity association. Call after prepare_skin_bake; identified skinned draws only.
+    pub fn collect_skin_bases(&self, draws: &[WgrDraw3D]) -> Vec<(u32, u64, u32)> {
+        let mut out = Vec::new();
+        for d in draws {
+            let id = d.misc >> 16;
+            if id == 0 || d.palette_slot == NO_PALETTE {
+                continue;
+            }
+            if let Some(base) = self.baked_base_vertex(d.palette_slot) {
+                out.push((id, d.mesh, base));
+            }
+        }
+        out
     }
 
     // Build this frame's skin-bake plan (docs/compute-skin-bake-plan.md) from BOTH the
@@ -4242,6 +4491,14 @@ impl Gfx3d {
         if !self.skin_bake_enabled {
             return;
         }
+        // REN-TEMP-001I: ping-pong the bake output. LAST frame's baked vertices become
+        // this frame's previous pose (skinned velocity pass); the old prev becomes this
+        // frame's write target (its stale contents are fully overwritten by the bake).
+        std::mem::swap(&mut self.skinned_vbuf, &mut self.skinned_vbuf_prev);
+        std::mem::swap(&mut self.skinned_cap, &mut self.skinned_cap_prev);
+        std::mem::swap(&mut self.bake_bind_cache, &mut self.bake_bind_cache_prev);
+        self.skinned_prev_valid = self.skinned_baked_this_frame && self.skinned_vbuf_prev.is_some();
+        self.skinned_baked_this_frame = false;
 
         // Collect distinct skinned instances by palette_slot. A palette block is one
         // skeleton's skinning, so a slot maps to exactly one (mesh, pose): first-seen wins.
@@ -4315,6 +4572,7 @@ impl Gfx3d {
         // against; when either regrows they are stale, so flush.
         if buffers_grew {
             self.bake_bind_cache.clear();
+            self.bake_bind_cache_prev.clear();
         }
 
         // All group params in ONE upload (the dynamic-offset UBO strides entries by
@@ -4395,6 +4653,8 @@ impl Gfx3d {
         for (k, b) in new_binds {
             self.bake_bind_cache.insert(k, b);
         }
+        // REN-TEMP-001I: next frame's swap may trust this buffer as "previous pose".
+        self.skinned_baked_this_frame = true;
     }
 
     // Record the compute skin-bake pass: one dispatch per BakeGroup, skinning its verts
@@ -4609,116 +4869,22 @@ impl Gfx3d {
         target: &wgpu::TextureView,
         draws: &[crate::ffi::WgrDraw3D],
         subset: &[(u32, [f32; 16])],
+        skin_subset: &[(u32, u32)],
         uniform: &crate::temporal::ObjVelUniform,
     ) {
-        if subset.is_empty() {
+        // Skinned entries are drawable only when both sides of the bake ping-pong exist.
+        let skin_ready = !skin_subset.is_empty()
+            && self.skinned_prev_valid
+            && self.skinned_vbuf.is_some()
+            && self.skinned_vbuf_prev.is_some();
+        if subset.is_empty() && !skin_ready {
             return;
         }
         let Some(depth) = self.water_depth_view.clone() else {
             return;
         };
         if self.velocity_obj.is_none() {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("wgr_velocity_obj_shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("velocity_obj.wgsl").into()),
-            });
-            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("wgr_velocity_obj_layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Depth,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                ],
-            });
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("wgr_velocity_obj_pipeline_layout"),
-                bind_group_layouts: &[Some(&layout)],
-                immediate_size: 0,
-            });
-            // Position-only view of the pool vertex layout: same stride, one attribute.
-            let vbuf_layout = wgpu::VertexBufferLayout {
-                array_stride: BAKED_VERT_SIZE,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
-            };
-            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("wgr_velocity_obj_pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_velocity"),
-                    buffers: &[vbuf_layout],
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face: wgpu::FrontFace::Cw,
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_velocity"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rg16Float,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                multiview_mask: None,
-                cache: None,
-            });
-            let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("wgr_velocity_obj_uniform"),
-                size: std::mem::size_of::<crate::temporal::ObjVelUniform>() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let ssbo = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("wgr_velocity_obj_worlds"),
-                size: 128 * 128,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.velocity_obj = Some(VelocityObjPass {
-                pipeline,
-                layout,
-                uniform: uniform_buf,
-                ssbo,
-                ssbo_cap: 128 * 128,
-                bind: None,
-                bound_depth_gen: u64::MAX,
-            });
+            self.velocity_obj = Some(VelocityObjPass::new(device));
         }
         // Per-entry payload = velocity_obj.wgsl `VelObj`: current world then previous.
         let mut data: Vec<f32> = Vec::with_capacity(subset.len() * 32);
@@ -4729,18 +4895,66 @@ impl Gfx3d {
         }
         let bytes: &[u8] = bytemuck::cast_slice(&data);
         let vp = self.velocity_obj.as_mut().expect("velocity obj pass");
-        if (bytes.len() as u64) > vp.ssbo_cap {
-            vp.ssbo_cap = (bytes.len() as u64).next_power_of_two();
-            vp.ssbo = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("wgr_velocity_obj_worlds"),
-                size: vp.ssbo_cap,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            vp.bind = None;
+        if !bytes.is_empty() {
+            if (bytes.len() as u64) > vp.ssbo_cap {
+                vp.ssbo_cap = (bytes.len() as u64).next_power_of_two();
+                vp.ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_velocity_obj_worlds"),
+                    size: vp.ssbo_cap,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+                vp.bind = None;
+            }
+            queue.write_buffer(&vp.ssbo, 0, bytes);
         }
-        queue.write_buffer(&vp.ssbo, 0, bytes);
         queue.write_buffer(&vp.uniform, 0, bytemuck::bytes_of(uniform));
+        // Skinned per-instance data (velocity_obj.wgsl `SkinInst`) + this frame's bind —
+        // rebuilt every call, because the prev-pose buffer alternates by design.
+        let mut skin_bind: Option<wgpu::BindGroup> = None;
+        if skin_ready {
+            let insts: Vec<[u32; 4]> = skin_subset
+                .iter()
+                .map(|(_, prev_base)| [*prev_base, 0, 0, 0])
+                .collect();
+            let ibytes: &[u8] = bytemuck::cast_slice(&insts);
+            if (ibytes.len() as u64) > vp.skin_ssbo_cap {
+                vp.skin_ssbo_cap = (ibytes.len() as u64).next_power_of_two();
+                vp.skin_ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_velocity_skin_insts"),
+                    size: vp.skin_ssbo_cap,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            queue.write_buffer(&vp.skin_ssbo, 0, ibytes);
+            skin_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_velocity_skin_bind"),
+                layout: &vp.skin_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: vp.uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&depth),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: vp.skin_ssbo.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: self
+                            .skinned_vbuf_prev
+                            .as_ref()
+                            .expect("skin_ready implies prev buffer")
+                            .as_entire_binding(),
+                    },
+                ],
+            }));
+        }
         if vp.bind.is_none() || vp.bound_depth_gen != self.depth_gen {
             vp.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_velocity_obj_bind"),
@@ -4779,23 +4993,49 @@ impl Gfx3d {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&vp.pipeline);
-        pass.set_bind_group(0, vp.bind.as_ref().expect("velocity obj bind"), &[]);
         pass.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
-        for (i, (idx, _)) in subset.iter().enumerate() {
-            let d = &draws[*idx as usize];
-            let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
-            let Some(mesh) = self.meshes.get(key) else {
-                continue;
-            };
-            // Rigid only, and stay inside the mesh's index range (mirrors draw_one).
-            if d.index_begin + d.index_count > mesh.index_count {
-                continue;
+        if !subset.is_empty() {
+            pass.set_pipeline(&vp.pipeline);
+            pass.set_bind_group(0, vp.bind.as_ref().expect("velocity obj bind"), &[]);
+            for (i, (idx, _)) in subset.iter().enumerate() {
+                let d = &draws[*idx as usize];
+                let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
+                let Some(mesh) = self.meshes.get(key) else {
+                    continue;
+                };
+                // Rigid only, and stay inside the mesh's index range (mirrors draw_one).
+                if d.index_begin + d.index_count > mesh.index_count {
+                    continue;
+                }
+                let vert_off = mesh.alloc.vbase as u64 * BAKED_VERT_SIZE;
+                pass.set_vertex_buffer(0, self.pool.vbuf().slice(vert_off..));
+                let first = mesh.alloc.ibase + d.index_begin;
+                pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
             }
-            let vert_off = mesh.alloc.vbase as u64 * BAKED_VERT_SIZE;
-            pass.set_vertex_buffer(0, self.pool.vbuf().slice(vert_off..));
-            let first = mesh.alloc.ibase + d.index_begin;
-            pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
+        }
+        // REN-TEMP-001I: skinned draws — current pose from this frame's bake output
+        // (sliced to the draw's baked base, exactly like draw_one), previous pose read
+        // in-shader from the ping-ponged buffer by mesh-local vertex index.
+        if let Some(skin_bind) = skin_bind.as_ref() {
+            let cur_baked = self.skinned_vbuf.as_ref().expect("skin_ready implies cur");
+            pass.set_pipeline(&vp.skin_pipeline);
+            pass.set_bind_group(0, skin_bind, &[]);
+            for (i, (idx, _)) in skin_subset.iter().enumerate() {
+                let d = &draws[*idx as usize];
+                let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
+                let Some(mesh) = self.meshes.get(key) else {
+                    continue;
+                };
+                if d.index_begin + d.index_count > mesh.index_count {
+                    continue;
+                }
+                let Some(cur_base) = self.baked_base_vertex(d.palette_slot) else {
+                    continue;
+                };
+                pass.set_vertex_buffer(0, cur_baked.slice(cur_base as u64 * BAKED_VERT_SIZE..));
+                let first = mesh.alloc.ibase + d.index_begin;
+                pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
+            }
         }
         drop(pass);
         encoder.pop_debug_group();
@@ -8812,4 +9052,27 @@ mod staging_tests {
         assert_eq!(fired, vec![1, 10, 100, 1000]);
         assert!(!is_power_of_ten(0));
     }
+}
+
+// REN-TEMP-001H/I: both velocity-object pipelines (rigid + skinned) are lazily built at
+// runtime; this builds them on a real device so a WGSL/BGL mismatch fails HERE, not on
+// the first frame someone enables WGR_TEMPORAL in-game. Skips silently with no adapter.
+#[test]
+fn velocity_obj_pipelines_build_on_a_real_device() {
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::default(),
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    })) else {
+        return;
+    };
+    let Ok((device, _queue)) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+    else {
+        return;
+    };
+    let _pass = VelocityObjPass::new(&device);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }
