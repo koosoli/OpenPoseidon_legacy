@@ -370,6 +370,11 @@ impl Exposure {
     }
 
     // The stable 1x1 exposure-scale view the tonemap samples.
+    // REN-TEMP-001M: the 1x1 R32Float exposure-scale TEXTURE, for native (NGX) interop.
+    pub fn scale_texture(&self) -> &wgpu::Texture {
+        &self.current
+    }
+
     pub fn scale_view(&self) -> &wgpu::TextureView {
         &self.current_view
     }

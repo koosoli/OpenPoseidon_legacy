@@ -1538,6 +1538,8 @@ pub(crate) struct DepthResolve {
     layout: wgpu::BindGroupLayout,
     // Per-size: the resolved depth target's view (both the resolve pass' depth attachment and the
     // sample view handed to depth_sample_view) + the bind group over the MSAA source depth.
+    // The texture rides along for native interop (REN-TEMP-001M: NGX wants the VkImage).
+    texture: Option<wgpu::Texture>,
     view: Option<wgpu::TextureView>,
     bind: Option<wgpu::BindGroup>,
 }
@@ -1607,6 +1609,7 @@ impl DepthResolve {
         Self {
             pipeline,
             layout,
+            texture: None,
             view: None,
             bind: None,
         }
@@ -1645,6 +1648,7 @@ impl DepthResolve {
             }],
         }));
         self.view = Some(view.clone());
+        self.texture = Some(tex);
         view
     }
 
@@ -4839,6 +4843,13 @@ impl Gfx3d {
     // depth aspect. Paired with depth_gen() for bind-group rebuild tracking.
     pub fn water_depth_view(&self) -> Option<&wgpu::TextureView> {
         self.water_depth_view.as_ref()
+    }
+
+    // REN-TEMP-001M: the far-resolve's TEXTURE, for native (NGX) interop. None at 1x —
+    // there the "resolved" view is the live depth aspect and DLSS gets its image from
+    // the depth target instead (not wired yet; MSAA is the supported first path).
+    pub fn water_depth_texture(&self) -> Option<&wgpu::Texture> {
+        self.depth_resolve_far.as_ref().and_then(|d| d.texture.as_ref())
     }
 
     // Record the water far-resolve (MSAA depth → single-sample farthest). No-op at 1x (water_depth_view

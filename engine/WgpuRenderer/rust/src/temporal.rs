@@ -549,6 +549,15 @@ impl Temporal {
         self.velocity.as_ref().map(|v| &v.view)
     }
 
+    // REN-TEMP-001M: the velocity TEXTURE, for native (NGX) interop.
+    pub fn velocity_texture(&self) -> Option<&wgpu::Texture> {
+        self.velocity.as_ref().map(|v| &v.target)
+    }
+
+    pub fn reset_this_frame(&self) -> bool {
+        self.reset
+    }
+
     // Record the static-world velocity pass. `depth` must be the frame's FINAL
     // single-sample depth (the far-reduce resolve; ensure_far_depth_resolve has run).
     // `depth_gen` tracks depth-target reallocation so the bind group follows it.

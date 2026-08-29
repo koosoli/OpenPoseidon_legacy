@@ -181,6 +181,23 @@ else
     }
 }
 
+# REN-TEMP-001M: a DLSS-featured wgpu_renderer.dll needs the NVIDIA snippet next to the
+# exe (NGX searches the executable's folder). Ship the RELEASE snippet whenever the
+# deployed renderer was built with the feature; without it DLSS silently falls back to
+# the bilinear upscale (FeatureNotFound), which is safe but wastes the build.
+$deployedDll = Join-Path $GameDir 'wgpu_renderer.dll'
+$snippet = Join-Path $RepoRoot '..\..\..\.tmp-dlss-sdk\lib\Windows_x86_64\rel\nvngx_dlss.dll'
+if (-not (Test-Path -LiteralPath $snippet)) { $snippet = Join-Path $RepoRoot '.tmp-dlss-sdk\lib\Windows_x86_64\rel\nvngx_dlss.dll' }
+if ((Test-Path -LiteralPath $deployedDll) -and (Test-Path -LiteralPath $snippet))
+{
+    $dllBytes = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($deployedDll))
+    if ($dllBytes.Contains('NVSDK_NGX'))
+    {
+        Copy-Item -LiteralPath $snippet -Destination (Join-Path $GameDir 'nvngx_dlss.dll') -Force
+        Write-Host "  + nvngx_dlss.dll          (DLSS snippet, release)"
+    }
+}
+
 # Record what is now installed, in the format the existing file already used:
 # "<branch> <commit> <timestamp> <who>". The next deploy READS this, so an unstamped install is
 # an install the guard above cannot protect.

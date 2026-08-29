@@ -87,6 +87,66 @@ pub fn create_instance(flags: wgpu::InstanceFlags) -> Result<wgpu::Instance, Str
     Ok(unsafe { wgpu::Instance::from_hal::<wgpu::hal::api::Vulkan>(hal_instance) })
 }
 
+#[cfg(test)]
+mod tests {
+    // Headless NGX bring-up: the same instance/device route the game takes, minus the
+    // surface, then a real NGX init + capability probe. This is the tight iteration
+    // loop for "SuperSampling unavailable" — seconds instead of game launches.
+    #[test]
+    fn ngx_snippet_dll_loads_into_this_process() {
+        // FeatureNotFound can mean "the snippet DLL exists but does not LOAD" (missing
+        // dependency, blocked signature). LoadLibrary answers that directly.
+        let game = std::path::Path::new(
+            "D:/SteamLibrary/steamapps/common/ARMA Cold War Assault/nvngx_dlss.dll",
+        );
+        match unsafe { libloading::Library::new(game) } {
+            Ok(_) => eprintln!("nvngx_dlss.dll loads fine"),
+            Err(e) => panic!("nvngx_dlss.dll failed to load: {e}"),
+        }
+    }
+
+    #[test]
+    fn ngx_initialises_and_reports_supersampling_on_this_gpu() {
+        let instance = match super::create_instance(wgpu::InstanceFlags::empty()) {
+            Ok(i) => i,
+            Err(e) => {
+                eprintln!("skip: {e}");
+                return;
+            }
+        };
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(
+            &wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            },
+        )) else {
+            eprintln!("skip: no adapter");
+            return;
+        };
+        let features = wgpu::Features::empty();
+        let limits = wgpu::Limits::default();
+        let (device, _queue, raw) =
+            super::create_device(&adapter, features, &limits).expect("hal device route");
+        match crate::dlss::feature_requirements(raw.instance, raw.physical_device) {
+            Ok(bits) => eprintln!(
+                "GetFeatureRequirements: supported-bitfield={bits:#x} (0 = supported; 1 CheckNotPresent, 2 driver, 4 adapter, 8 OS, 16 NotImplemented)"
+            ),
+            Err(r) => eprintln!("GetFeatureRequirements FAILED: {r:#x}"),
+        }
+        let ngx = unsafe {
+            crate::dlss::Ngx::init(raw.instance, raw.physical_device, raw.device)
+        }
+        .expect("NGX init");
+        let avail = ngx.supersampling_available();
+        eprintln!("NGX diagnostics: {}", ngx.availability_diagnostics());
+        // Keep the device alive until after ngx teardown.
+        ngx.release();
+        drop(device);
+        assert!(avail, "DLSS SuperSampling should be available on this GPU");
+    }
+}
+
 // Create the device with NGX's device extensions and hand back (Device, Queue) plus the
 // raw handles NGX init needs. `features`/`limits` are the same negotiated values the
 // normal `request_device` call would use.

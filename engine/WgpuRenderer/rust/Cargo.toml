@@ -44,3 +44,7 @@ rustc-hash = "2"
 # wrapped back into wgpu via wgpu-hal from_raw/device_from_raw. Version MUST match the
 # ash wgpu-hal 29 pins (0.38), or the two disagree about handle types.
 ash = { version = "0.38", optional = true }
+
+[dev-dependencies]
+# dlss bring-up diagnostics only (LoadLibrary probe of the NGX snippet DLL).
+libloading = "0.8"

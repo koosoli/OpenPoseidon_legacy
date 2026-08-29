@@ -116,7 +116,28 @@ unsafe extern "C" {
         feature_info: *const c_void,
         sdk_version: u32,
     ) -> NgxResult;
+    // The path NVIDIA recommends for applications without an NVIDIA-assigned id: any
+    // stable project string + ENGINE_TYPE_CUSTOM.
+    fn NVSDK_NGX_VULKAN_Init_with_ProjectID(
+        project_id: *const c_char,
+        engine_type: u32, // 0 = NVSDK_NGX_ENGINE_TYPE_CUSTOM
+        engine_version: *const c_char,
+        app_data_path: *const u16,
+        instance: VkInstance,
+        physical_device: VkPhysicalDevice,
+        device: VkDevice,
+        gipa: *const c_void,
+        gdpa: *const c_void,
+        feature_info: *const c_void,
+        sdk_version: u32,
+    ) -> NgxResult;
     fn NVSDK_NGX_VULKAN_Shutdown1(device: VkDevice) -> NgxResult;
+    fn NVSDK_NGX_VULKAN_GetFeatureRequirements(
+        instance: VkInstance,
+        physical_device: VkPhysicalDevice,
+        discovery: *const NgxFeatureDiscoveryInfo,
+        out: *mut NgxFeatureRequirement,
+    ) -> NgxResult;
     fn NVSDK_NGX_VULKAN_GetCapabilityParameters(out: *mut *mut NgxParameter) -> NgxResult;
     fn NVSDK_NGX_VULKAN_AllocateParameters(out: *mut *mut NgxParameter) -> NgxResult;
     fn NVSDK_NGX_VULKAN_DestroyParameters(params: *mut NgxParameter) -> NgxResult;
@@ -187,6 +208,101 @@ pub fn required_extensions() -> Result<(Vec<String>, Vec<String>), NgxResult> {
     Ok((read(iexts, icount), read(dexts, dcount)))
 }
 
+// NVSDK_NGX_FeatureCommonInfo (nvsdk_ngx_defs.h:400): the snippet-DLL search-path list.
+// Passed at init because the engine curates its own DLL search paths, and NGX's default
+// probe (the executable folder) demonstrably misses there (FeatureInitResult was
+// 0xBAD00004 FeatureNotFound with nvngx_dlss.dll sitting right next to the exe).
+#[repr(C)]
+struct NgxPathListInfo {
+    path: *const *const u16,
+    length: c_uint,
+}
+#[repr(C)]
+struct NgxLoggingInfo {
+    callback: *const c_void,
+    minimum_level: u32,
+    disable_other_sinks: bool,
+}
+#[repr(C)]
+struct NgxFeatureCommonInfo {
+    path_list: NgxPathListInfo,
+    internal_data: *mut c_void,
+    logging: NgxLoggingInfo,
+}
+
+// NVSDK_NGX_FeatureDiscoveryInfo family (nvsdk_ngx_defs.h:473-546), for the
+// GetFeatureRequirements diagnostic — the driver's own answer to "why not".
+#[repr(C)]
+struct NgxProjectIdDescription {
+    project_id: *const c_char,
+    engine_type: u32,
+    engine_version: *const c_char,
+}
+#[repr(C)]
+struct NgxApplicationIdentifier {
+    identifier_type: u32, // 1 = Project_Id
+    // Union { ProjectIdDescription, u64 } — the struct member is the larger.
+    project: NgxProjectIdDescription,
+}
+#[repr(C)]
+struct NgxFeatureDiscoveryInfo {
+    sdk_version: u32,
+    feature_id: u32,
+    identifier: NgxApplicationIdentifier,
+    application_data_path: *const u16,
+    feature_info: *const NgxFeatureCommonInfo,
+}
+#[repr(C)]
+struct NgxFeatureRequirement {
+    feature_supported: u32,
+    min_hw_architecture: c_uint,
+    min_os_version: [u8; 255],
+}
+
+// Ask the driver directly whether DLSS SR is supported on this adapter, BEFORE any
+// device exists. Returns the raw support bitfield (0 = supported) or Err(ngx result).
+pub fn feature_requirements(
+    instance: VkInstance,
+    physical_device: VkPhysicalDevice,
+) -> Result<u32, NgxResult> {
+    let data_path: Vec<u16> = ". ".encode_utf16().collect();
+    let disco = NgxFeatureDiscoveryInfo {
+        sdk_version: NGX_VERSION_API,
+        feature_id: NGX_FEATURE_SUPERSAMPLING,
+        identifier: NgxApplicationIdentifier {
+            identifier_type: 1,
+            project: NgxProjectIdDescription {
+                project_id: name!("cc7a5a52-6d2e-4cf1-9e04-9a2f1c9b7f10"),
+                engine_type: 0,
+                engine_version: name!("0.1"),
+            },
+        },
+        application_data_path: data_path.as_ptr(),
+        feature_info: std::ptr::null(),
+    };
+    let mut req = NgxFeatureRequirement {
+        feature_supported: u32::MAX,
+        min_hw_architecture: 0,
+        min_os_version: [0; 255],
+    };
+    let r = unsafe {
+        NVSDK_NGX_VULKAN_GetFeatureRequirements(instance, physical_device, &disco, &mut req)
+    };
+    if r != NGX_SUCCESS {
+        return Err(r);
+    }
+    Ok(req.feature_supported)
+}
+
+// NGX log hook: forwarded to stderr, which the capture harness records per run.
+unsafe extern "C" fn ngx_log(msg: *const c_char, _level: u32, _component: u32) {
+    if msg.is_null() {
+        return;
+    }
+    let text = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+    eprintln!("[ngx] {}", text.trim_end());
+}
+
 // One initialised NGX instance bound to a Vulkan device, plus the created DLSS
 // feature. Drop order: feature, then shutdown — enforced by `release`.
 pub struct Ngx {
@@ -212,17 +328,59 @@ impl Ngx {
         physical_device: VkPhysicalDevice,
         device: VkDevice,
     ) -> Result<Self, NgxResult> {
-        let data_path: Vec<u16> = ".\0".encode_utf16().collect();
+        // EVERYTHING handed to NGX at init is leaked to 'static on purpose: whether the
+        // driver copies the FeatureCommonInfo/paths or stores the pointers and probes
+        // lazily is undocumented, and a dangling stack pointer here would read back as
+        // FeatureNotFound with no log anywhere. A few hundred bytes, once per process.
+        fn wide(s: &str) -> &'static [u16] {
+            Box::leak(
+                s.encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect::<Vec<u16>>()
+                    .into_boxed_slice(),
+            )
+        }
+        // Absolute, writable data path (NGX logs/caches there).
+        let data_dir = std::env::var("LOCALAPPDATA")
+            .map(|l| format!("{l}\\OpenPoseidon\\ngx"))
+            .unwrap_or_else(|_| ".".to_owned());
+        let _ = std::fs::create_dir_all(&data_dir);
+        let data_path: &'static [u16] = wide(&data_dir);
+        // Explicit snippet search path: the executable's folder, where Deploy.ps1 puts
+        // nvngx_dlss.dll.
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .map(|d| d.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_owned());
+        let paths: &'static [*const u16] =
+            Box::leak(vec![wide(&exe_dir).as_ptr()].into_boxed_slice());
+        let common: &'static NgxFeatureCommonInfo = Box::leak(Box::new(NgxFeatureCommonInfo {
+            path_list: NgxPathListInfo {
+                path: paths.as_ptr(),
+                length: 1,
+            },
+            internal_data: std::ptr::null_mut(),
+            logging: NgxLoggingInfo {
+                callback: ngx_log as *const c_void,
+                minimum_level: 2, // verbose
+                disable_other_sinks: false,
+            },
+        }));
         let r = unsafe {
-            NVSDK_NGX_VULKAN_Init(
-                0x0,
+            NVSDK_NGX_VULKAN_Init_with_ProjectID(
+                // A stable project UUID + CUSTOM engine: NVIDIA's documented path for
+                // applications without an assigned application id.
+                name!("cc7a5a52-6d2e-4cf1-9e04-9a2f1c9b7f10"),
+                0,
+                name!("0.1"),
                 data_path.as_ptr(),
                 instance,
                 physical_device,
                 device,
                 std::ptr::null(),
                 std::ptr::null(),
-                std::ptr::null(),
+                common as *const NgxFeatureCommonInfo as *const c_void,
                 NGX_VERSION_API,
             )
         };
@@ -256,6 +414,25 @@ impl Ngx {
             NVSDK_NGX_Parameter_GetI(self.capability, name!("SuperSampling.Available"), &mut v)
         };
         r == NGX_SUCCESS && v != 0
+    }
+
+    // Why SuperSampling is unavailable, in the driver's own words — logged on failure so
+    // "unavailable" is diagnosable from a capture log (driver too old vs snippet DLL not
+    // found vs feature denied).
+    pub fn availability_diagnostics(&self) -> String {
+        let get = |n: *const c_char| -> Option<i32> {
+            let mut v: i32 = 0;
+            (unsafe { NVSDK_NGX_Parameter_GetI(self.capability, n, &mut v) } == NGX_SUCCESS)
+                .then_some(v)
+        };
+        format!(
+            "available={:?} needs_driver_update={:?} min_driver={:?}.{:?} init_result={:#x?}",
+            get(name!("SuperSampling.Available")),
+            get(name!("SuperSampling.NeedsUpdatedDriver")),
+            get(name!("SuperSampling.MinDriverVersionMajor")),
+            get(name!("SuperSampling.MinDriverVersionMinor")),
+            get(name!("SuperSampling.FeatureInitResult")),
+        )
     }
 
     // The render resolution DLSS wants for a given output size + quality mode, from
