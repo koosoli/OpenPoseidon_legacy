@@ -312,3 +312,11 @@ Resolved accordingly:
    §3 instead of continuing on momentum.
 6. **The user-visible endpoint** is the existing Options render-scale control plus a Temporal
    section in the dev panel (draft §29, built incrementally, never ahead of the feature).
+7. **Owner requirement (2026-08-29, after first play):** once the roadmap's rendering work
+   stands, the dev panel's Temporal section must expose the tuning surface LIVE — mode
+   (Native/DLAA/DLSS), render scale / quality preset, mip bias, jitter phase count, the
+   sign/convention A/B knobs — next to a live frame-time readout, so the perfect settings
+   are FOUND by eye and measured in fps, not argued from theory. The play sessions that
+   shaped this (vibration → jitter conventions; softness → MVJittered + phase count; far
+   shimmer → mip-bias sweet spot at HALF log2(scale)) are the proof these need to be
+   turnable without a rebuild-deploy cycle.
