@@ -1796,6 +1796,13 @@ impl Renderer {
             encoder.pop_debug_group();
             self.gpu_timers.end(encoder, TimerRegion::HdrResolve);
         }
+        // REN-TEMP-001K: temporal debug resolve (WGR_TEMPORAL_DEBUG=2) — accumulate the
+        // resolved HDR frame along velocity. Diagnostic only; nothing downstream reads it.
+        if self.temporal.enabled {
+            let render_size = self.render_size();
+            self.temporal
+                .render_debug_resolve(&self.device, &self.queue, encoder, source, render_size);
+        }
         // Volumetric sun shafts, added to the LINEAR HDR scene here: after the MSAA resolve (so
         // the blend costs one sample per pixel, not `sample_count`) and before bloom / eye
         // adaptation / the tonemap curve, so the shafts bloom, drive exposure and roll off like

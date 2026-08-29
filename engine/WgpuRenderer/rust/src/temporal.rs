@@ -63,6 +63,24 @@ struct VelocityPass {
     debug_pipeline: Option<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
 }
 
+// REN-TEMP-001K: the minimal temporal debug resolve (accumulator). Two HDR history
+// textures ping-pong; the pass reprojects last frame's accumulator along velocity,
+// neighbourhood-clamps it against the current frame and blends 90/10. Diagnostic only.
+struct ResolvePass {
+    history: [(wgpu::Texture, wgpu::TextureView); 2],
+    // Which history slot the NEXT resolve writes into (the other is read).
+    write_slot: usize,
+    size: (u32, u32),
+    sampler: wgpu::Sampler,
+    uniform: wgpu::Buffer,
+    layout: wgpu::BindGroupLayout,
+    pipeline: wgpu::RenderPipeline,
+    // History display (WGR_TEMPORAL_DEBUG=2).
+    view_layout: wgpu::BindGroupLayout,
+    view_uniform: wgpu::Buffer,
+    view_pipeline: Option<(wgpu::TextureFormat, wgpu::RenderPipeline)>,
+}
+
 pub struct Temporal {
     pub enabled: bool,
     // WGR_TEMPORAL_DEBUG: 0 = off, 1 = velocity overlay.
@@ -85,6 +103,7 @@ pub struct Temporal {
     render_size: (u32, u32),
     shader: Option<wgpu::ShaderModule>,
     velocity: Option<VelocityPass>,
+    resolve: Option<ResolvePass>,
     // REN-TEMP-001H: ABSOLUTE world matrices of identified rigid draws, this frame and
     // last. Absolute on purpose — WgrDraw3D.world is camera-relative, which changes for
     // every object whenever the CAMERA moves; storing it directly would flag the whole
@@ -135,6 +154,7 @@ impl Temporal {
             render_size: (0, 0),
             shader: None,
             velocity: None,
+            resolve: None,
             cur_worlds: FxHashMap::default(),
             prev_worlds: FxHashMap::default(),
             cur_skin_bases: FxHashMap::default(),
@@ -381,6 +401,107 @@ impl Temporal {
         self.last_reset_reason
     }
 
+    // REN-TEMP-001K: blit the just-written accumulator slot to the swapchain (Reinhard
+    // roll-off in the shader; the history is linear HDR).
+    fn render_history_view(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        dst: &wgpu::TextureView,
+        dst_format: wgpu::TextureFormat,
+        output_size: (u32, u32),
+    ) {
+        let mut params = self.params();
+        params.misc = [0.0, 0.0, output_size.0 as f32, output_size.1 as f32];
+        self.ensure_shader(device);
+        let shader = self.shader.clone().expect("temporal shader");
+        let Some(rp) = self.resolve.as_mut() else {
+            return; // resolve has not run yet this session
+        };
+        queue.write_buffer(&rp.view_uniform, 0, bytemuck::bytes_of(&params));
+        if rp
+            .view_pipeline
+            .as_ref()
+            .is_some_and(|(f, _)| *f != dst_format)
+        {
+            rp.view_pipeline = None;
+        }
+        if rp.view_pipeline.is_none() {
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_temporal_history_view_pl"),
+                bind_group_layouts: &[Some(&rp.view_layout)],
+                immediate_size: 0,
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_temporal_history_view"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_fullscreen"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_history_debug"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: dst_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            rp.view_pipeline = Some((dst_format, pipeline));
+        }
+        // write_slot was flipped after the resolve — the freshly-written slot is the
+        // one the next frame reads, i.e. the CURRENT write_slot after the flip.
+        let fresh = &rp.history[1 - rp.write_slot].1;
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_temporal_history_view_bind"),
+            layout: &rp.view_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(fresh),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: rp.view_uniform.as_entire_binding(),
+                },
+            ],
+        });
+        encoder.push_debug_group("wgr_temporal_history_view");
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_temporal_history_view"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: dst,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let (_, pipeline) = rp.view_pipeline.as_ref().expect("view pipeline");
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        encoder.pop_debug_group();
+    }
+
     fn params(&self) -> TemporalParams {
         let (cur, prev) = match (self.cur.as_ref(), self.prev.as_ref()) {
             (Some(c), Some(p)) => (c, p),
@@ -623,6 +744,223 @@ impl Temporal {
         encoder.pop_debug_group();
     }
 
+    // REN-TEMP-001K: run the minimal temporal debug resolve. `cur_color` is this frame's
+    // single-sample resolved HDR at render resolution. Only runs under
+    // WGR_TEMPORAL_DEBUG=2 — the accumulator is a diagnostic, nothing consumes it.
+    pub fn render_debug_resolve(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        cur_color: &wgpu::TextureView,
+        render_size: (u32, u32),
+    ) {
+        if !self.enabled || self.debug_view != 2 {
+            return;
+        }
+        let Some(velocity_view) = self.velocity.as_ref().map(|v| v.view.clone()) else {
+            return;
+        };
+        let params = self.params();
+        self.ensure_shader(device);
+        let shader = self.shader.clone().expect("temporal shader");
+        if self.resolve.as_ref().is_some_and(|r| r.size != render_size) {
+            self.resolve = None;
+        }
+        if self.resolve.is_none() {
+            let mk_hist = |slot: usize| {
+                let t = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some(if slot == 0 {
+                        "wgr_temporal_history_a"
+                    } else {
+                        "wgr_temporal_history_b"
+                    }),
+                    size: wgpu::Extent3d {
+                        width: render_size.0.max(1),
+                        height: render_size.1.max(1),
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    // Matches the resolved HDR scene (lib.rs HDR_FORMAT).
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                });
+                let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+                (t, v)
+            };
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("wgr_temporal_resolve_sampler"),
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+            let tex_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            };
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_temporal_resolve_layout"),
+                entries: &[
+                    tex_entry(0),
+                    // Velocity is Rg16Float and only ever textureLoad-ed, but declaring it
+                    // filterable is harmless and keeps one entry constructor.
+                    tex_entry(1),
+                    tex_entry(2),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_temporal_resolve_pipeline_layout"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_temporal_resolve_pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_fullscreen"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_temporal_resolve"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_temporal_history_view_layout"),
+                entries: &[
+                    tex_entry(0),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_temporal_resolve_params"),
+                size: std::mem::size_of::<TemporalParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let view_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_temporal_history_view_params"),
+                size: std::mem::size_of::<TemporalParams>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.resolve = Some(ResolvePass {
+                history: [mk_hist(0), mk_hist(1)],
+                write_slot: 0,
+                size: render_size,
+                sampler,
+                uniform,
+                layout,
+                pipeline,
+                view_layout,
+                view_uniform,
+                view_pipeline: None,
+            });
+        }
+        let rp = self.resolve.as_mut().expect("resolve pass");
+        queue.write_buffer(&rp.uniform, 0, bytemuck::bytes_of(&params));
+        let read_slot = 1 - rp.write_slot;
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_temporal_resolve_bind"),
+            layout: &rp.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(cur_color),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&velocity_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&rp.history[read_slot].1),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&rp.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: rp.uniform.as_entire_binding(),
+                },
+            ],
+        });
+        encoder.push_debug_group("wgr_temporal_resolve");
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_temporal_resolve"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &rp.history[rp.write_slot].1,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&rp.pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(0..3, 0..1);
+        drop(pass);
+        encoder.pop_debug_group();
+        rp.write_slot = read_slot;
+    }
+
     // Draw the velocity debug overlay over the tonemapped frame (output resolution).
     pub fn render_debug(
         &mut self,
@@ -633,7 +971,15 @@ impl Temporal {
         dst_format: wgpu::TextureFormat,
         output_size: (u32, u32),
     ) {
-        if !self.enabled || self.debug_view != 1 {
+        if !self.enabled {
+            return;
+        }
+        // WGR_TEMPORAL_DEBUG=2: show the debug-resolve accumulator instead of velocity.
+        if self.debug_view == 2 {
+            self.render_history_view(device, queue, encoder, dst, dst_format, output_size);
+            return;
+        }
+        if self.debug_view != 1 {
             return;
         }
         let mut params = self.params();
@@ -920,6 +1266,36 @@ mod tests {
                 wgpu::TextureFormat::Rgba8Unorm,
                 (W, H),
             );
+            // REN-TEMP-001K: exercise the debug resolve + history view too (their
+            // pipelines are lazily built — this is their only pre-game validation).
+            let color_tex = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("test_hdr_color"),
+                size: wgpu::Extent3d {
+                    width: W,
+                    height: H,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let color_view = color_tex.create_view(&Default::default());
+            t.debug_view = 2;
+            t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
+            t.render_debug_resolve(&device, &queue, &mut encoder, &color_view, (W, H));
+            t.render_debug(
+                &device,
+                &queue,
+                &mut encoder,
+                &dbg_view,
+                wgpu::TextureFormat::Rgba8Unorm,
+                (W, H),
+            );
+            t.debug_view = 1;
             // Read back the velocity centre texel (Rg16Float, 4 B/px; W=64 -> 256 B rows).
             let buf = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("test_readback"),

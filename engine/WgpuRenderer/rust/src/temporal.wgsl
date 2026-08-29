@@ -70,6 +70,63 @@ fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
 }
 
 // ---------------------------------------------------------------------------------
+// REN-TEMP-001K — temporal debug RESOLVE: a deliberately minimal accumulator whose only
+// job is to expose bad temporal inputs (wrong jitter sign, wrong velocity scale, missing
+// resets) before a vendor upscaler hides or amplifies them. Reproject history along
+// velocity, reject by 3x3 neighbourhood clamp, blend 90/10. NOT a production TAA —
+// the plan forbids polishing it into one.
+
+@group(0) @binding(0) var res_color: texture_2d<f32>;    // this frame's resolved HDR
+@group(0) @binding(1) var res_velocity: texture_2d<f32>; // uv-space motion, cur -> prev
+@group(0) @binding(2) var res_history: texture_2d<f32>;  // last frame's accumulator
+@group(0) @binding(3) var res_samp: sampler;             // bilinear, clamp-to-edge
+@group(0) @binding(4) var<uniform> res_params: TemporalParams; // cam_delta.w = history valid
+
+@fragment
+fn fs_temporal_resolve(in: VsOut) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(res_color));
+    let frag = vec2<i32>(in.pos.xy);
+    let uv = in.pos.xy / dims;
+    let cur = textureLoad(res_color, frag, 0);
+    if (res_params.cam_delta.w < 0.5) {
+        return cur; // explicit reset: history is not consulted at all
+    }
+    let vel = textureLoad(res_velocity, frag, 0).xy;
+    let prev_uv = uv - vel;
+    if (prev_uv.x < 0.0 || prev_uv.y < 0.0 || prev_uv.x > 1.0 || prev_uv.y > 1.0) {
+        return cur; // reprojected off-screen: no history exists there
+    }
+    var hist = textureSampleLevel(res_history, res_samp, prev_uv, 0.0);
+    // 3x3 neighbourhood clamp — the standard minimal disocclusion/ghosting rejection.
+    var lo = cur.rgb;
+    var hi = cur.rgb;
+    for (var dy = -1; dy <= 1; dy = dy + 1) {
+        for (var dx = -1; dx <= 1; dx = dx + 1) {
+            let n = textureLoad(res_color, frag + vec2<i32>(dx, dy), 0).rgb;
+            lo = min(lo, n);
+            hi = max(hi, n);
+        }
+    }
+    let clamped = clamp(hist.rgb, lo, hi);
+    return vec4<f32>(mix(cur.rgb, clamped, 0.9), cur.a);
+}
+
+// History display (WGR_TEMPORAL_DEBUG=2): the accumulator is linear HDR, so roll it off
+// with a plain Reinhard for inspection — the point is stability/sharpness/ghost trails,
+// not colour fidelity.
+@group(0) @binding(0) var hist_view_tex: texture_2d<f32>;
+@group(0) @binding(4) var<uniform> hist_params: TemporalParams; // misc.zw = dst size
+
+@fragment
+fn fs_history_debug(in: VsOut) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(hist_view_tex));
+    let uv = in.pos.xy / max(hist_params.misc.zw, vec2<f32>(1.0, 1.0));
+    let c = textureLoad(hist_view_tex, vec2<i32>(uv * dims), 0).rgb;
+    let mapped = c / (vec3<f32>(1.0) + c);
+    return vec4<f32>(mapped, 1.0);
+}
+
+// ---------------------------------------------------------------------------------
 // Debug view: velocity direction/magnitude as colour, drawn over the tonemapped frame.
 //   R = 0.5 + vel.x * scale, G = 0.5 + vel.y * scale  (grey = static)
 //   B = 1 on a history-reset frame, so a reset is visible for exactly one frame.
