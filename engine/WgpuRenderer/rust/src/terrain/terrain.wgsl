@@ -7,7 +7,7 @@
 // Shares group(0) (the camera UBO + cascade shadow map) with the lit 3D
 // pipeline via the frame module, so terrain receives the same CSM shadows and
 // sun lighting.
-#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity}
+#import frame::{frame, reverse_z, fog_factor, apply_fog, sky_irradiance, sky_vis_ao, cloud_sun_shadow, sky_vis_debug_on, sky_vis_debug_value, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, grad_scale}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -724,8 +724,15 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     let jitter = mix(mix(j00, j10, jw.x), mix(j01, j11, jw.x), jw.y);
     let tile_uv = cell_pos + jitter * jitter_scale;
     // Gradients of the shared tiling UV, for every ground tap (see sample_cell).
-    let duvdx = dpdx(tile_uv);
-    let duvdy = dpdy(tile_uv);
+    // REN-TEMP-001D: ground taps use textureSampleGrad, which ignores any sampler/mip bias,
+    // so the render-scale correction multiplies the TEXTURE gradients instead (2^bias).
+    // The raw dwx/dwy above stay unscaled — the shadow receiver-plane math they also feed
+    // describes geometry, not texel density.
+    let gscale = grad_scale();
+    let duvdx = dpdx(tile_uv) * gscale;
+    let duvdy = dpdy(tile_uv) * gscale;
+    let dwx_tex = dwx * gscale;
+    let dwy_tex = dwy * gscale;
     let cc = cell_pos - vec2<f32>(0.5);
     let base = floor(cc);
     let f = cc - base;
@@ -764,14 +771,14 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
     // Those keep the full blend.
     let uniform_cell = e00 == e10 && e00 == e01 && e00 == e11 && (e00 & CELL_CLAMPED) == 0u;
     if (uniform_cell) {
-        let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        let c = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
         rgb = c.rgb;
         authored_normal_ts = c.normal_ts;
     } else {
-        let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-        let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-        let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
-        let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx, dwy);
+        let c00 = sample_authored_cell(e00, base, tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        let c10 = sample_authored_cell(e10, base + vec2<f32>(1.0, 0.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        let c01 = sample_authored_cell(e01, base + vec2<f32>(0.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
+        let c11 = sample_authored_cell(e11, base + vec2<f32>(1.0, 1.0), tile_uv, duvdx, duvdy, absolute_world_pos, in.world_pos, dwx_tex, dwy_tex);
         rgb = w00 * c00.rgb + w10 * c10.rgb + w01 * c01.rgb + w11 * c11.rgb;
         // The authored surface normal, blended across the same four cells as the colour so it
         // stays continuous over a cell boundary.
@@ -781,7 +788,7 @@ fn fs_terrain(in: VsOut) -> @location(0) vec4<f32> {
 
     // High-frequency detail noise: alpha modulates around neutral (matches GL33's
     // r0.rgb *= t1.a * 2.0, detail UV = base UV * 32).
-    let detail_a = textureSample(detail, ground_samp, tile_uv * 32.0).a;
+    let detail_a = textureSampleBias(detail, ground_samp, tile_uv * 32.0, frame.renscale.x).a;
     rgb *= detail_a * 2.0;
     // HDR path: decode the gamma-space ground albedo (blend + detail done in gamma,
     // the §5 pragmatic fold) to linear before lighting.

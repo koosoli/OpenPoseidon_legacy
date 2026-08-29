@@ -598,9 +598,9 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     //
     // mask_slot == 0 means "not a layered material" and takes layer 0 alone, which is
     // every non-Multi section and is byte-identical to the previous behaviour.
-    var base = textureSample(textures[sm.texture_slot],
+    var base = textureSampleBias(textures[sm.texture_slot],
                              samplers[sm.sampler_idx],
-                             in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw);
+                             in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, frame.renscale.x);
     // The final per-layer mask weights, hoisted out of the block below so the NORMAL blend
     // (MAT-048, further down) uses exactly the weights the colour blend used — one mask
     // sample, one set of weights, colours and normals agreeing per fragment by construction.
@@ -608,7 +608,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     var layer_w = vec3<f32>(0.0);
     if (sm.mask_slot != 0u && matdbg_flag(MATDBG_COMPOSE_MULTI)) {
         let mask_uv = select(in.uv, in.uv1, (sm.flags & SECTION_MASK_UV1) != 0u);
-        let mask = textureSample(textures[sm.mask_slot], samplers[sm.sampler_idx], mask_uv).rgb;
+        let mask = textureSampleBias(textures[sm.mask_slot], samplers[sm.sampler_idx], mask_uv, frame.renscale.x).rgb;
         // Slot 0 is the white fallback. A layer the material does not name must contribute
         // NOTHING and leave its mask weight to layer 0; sampling it blind blends white into
         // the surface, which blows the building out and drags the whole frame's
@@ -636,7 +636,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
                 continue;
             }
             let uv_i = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
-            let layer = textureSample(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i).rgb;
+            let layer = textureSampleBias(textures[sm.layer_slot[i]], samplers[sm.sampler_idx], uv_i, frame.renscale.x).rgb;
             blended = blended + layer * lw[i];
         }
         let weight = min(total, 1.0);
@@ -707,7 +707,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // channel is there when that question is answered.
     m.spec_mask = 1.0;
     if (sm.specular_slot != 0u) {
-        m.spec_mask = textureSample(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv).g;
+        m.spec_mask = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv, frame.renscale.x).g;
     }
     // Foliage lighting (leaf SSS + canopy self-occlusion AO) applies only to real VEGETATION
     // cutouts (Stage 2 MapType gate, carried per-instance via the canopy flag) — other alpha-tested
@@ -748,7 +748,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         var normal_ts = vec3<f32>(0.0, 0.0, 1.0);
         if (sm.normal_slot != 0u) {
             let uv0 = in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw;
-            normal_ts = decode_nohq(textureSample(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0));
+            normal_ts = decode_nohq(textureSampleBias(textures[sm.normal_slot], samplers[sm.sampler_idx], uv0, frame.renscale.x));
         }
         // Decode each layer's normal, THEN blend — see decode_nohq on why the packed texels
         // must not be mixed. The weighted sum of unit vectors is renormalised at the end.
@@ -764,7 +764,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
             }
             let uvn = in.uv * sm.layer_uv[i + 1u].xy + sm.layer_uv[i + 1u].zw;
             let layer_n = decode_nohq(
-                textureSample(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn));
+                textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x));
             n_sum = n_sum + layer_n * layer_w[i];
             n_weight = n_weight + layer_w[i];
         }
@@ -909,7 +909,7 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
         // Same mip-coverage lift as fs_gpu, or the prepass keeps depth for texels the colour
         // pass discards (and vice versa) -- the exact mismatch prepass_match exists to prevent.
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let a = mip_alpha_boost(textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a,
+        let a = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
                                 base_uv, dims0, cutout_mip_alpha);
         if (a < sm.alpha_ref) {
             discard;
@@ -936,7 +936,7 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     if (sm.alpha_ref > 0.0) {
         let base_uv = prepass_base_uv(in.uv, sm.layer_uv[0]);
         let dims0 = vec2<f32>(textureDimensions(textures[sm.texture_slot]));
-        let alpha = mip_alpha_boost(textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv).a,
+        let alpha = mip_alpha_boost(textureSampleBias(textures[sm.texture_slot], samplers[sm.sampler_idx], base_uv, frame.renscale.x).a,
                                     base_uv, dims0, cutout_mip_alpha);
         cov = a2c_coverage(alpha, sm.alpha_ref);
         if (cov <= 0.0) {

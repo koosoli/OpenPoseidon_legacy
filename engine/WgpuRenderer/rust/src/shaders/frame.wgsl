@@ -136,8 +136,31 @@ struct Frame {
     // than as pipeline override constants because they were CONSTANTS: tuning them cost a
     // rebuild and a redeploy per value, which is how a ten-minute sweep became an afternoon.
     // See road_lift_flat / road_lift_per_m / road_lift_max_frac below.
+    // (No longer the last lane — `renscale` was appended after it, REN-TEMP-001D.)
     fogfar: vec4<f32>,
+    // REN-TEMP-001D — render-scale-aware texture LOD, the LAST lane (appended by Rust; the
+    // WgrCamera C ABI is unchanged). When the 3D scene renders below the output resolution
+    // (WGR_RENDER_SCALE), implicit-derivative texture sampling picks mips for the REDUCED
+    // pixel density and the upscaled image goes soft. The fix is the standard one: bias the
+    // sampled LOD by log2(render/output).
+    //   x = mip bias, log2(render_width / output_width), <= 0 (0 at native scale)
+    //   y = gradient scale, 2^x — multiplies EXPLICIT gradients (textureSampleGrad ignores
+    //       bias, so the terrain path scales its ddx/ddy instead; same optics, other API)
+    //   z, w = unused
+    // A zero-filled camera reads bias 0 / grad_scale() 1.0 — bit-identical to pre-lane.
+    renscale: vec4<f32>,
 };
+
+// REN-TEMP-001D helpers. Material/albedo/normal/cutout sampling uses `mip_bias()` via
+// textureSampleBias; explicit-gradient sampling multiplies both gradients by `grad_scale()`.
+// LUT / env / shadow / SampleLevel lookups take NEITHER — their LOD is not a function of
+// screen pixel density.
+fn mip_bias() -> f32 {
+    return frame.renscale.x;
+}
+fn grad_scale() -> f32 {
+    return select(frame.renscale.y, 1.0, frame.renscale.y <= 0.0);
+}
 
 // ---------------------------------------------------------------------------
 // VEG-SWAY -- geometric wind on vegetation MODELS.

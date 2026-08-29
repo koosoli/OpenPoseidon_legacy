@@ -642,8 +642,11 @@ impl CameraGroup {
             // here moves them and both offsets are updated with it.
             + 16
             // Far-fog closure (frame.wgsl `fogfar`): the fraction of the draw distance at which
-            // distance fog reaches full. NOW the last lane; the three writes above it are
-            // addressed from bind_size backwards and all three moved with it.
+            // distance fog reaches full. The three writes above it are addressed from
+            // bind_size backwards and all three moved with it.
+            + 16
+            // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`): mip bias +
+            // gradient scale. NOW the last lane; the four writes above it moved again.
             + 16;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_3d_camera_layout"),
@@ -2906,6 +2909,9 @@ pub struct Gfx3d {
     /// frame.wgsl `fogfar`: x = the fraction of the draw distance at which distance fog reaches
     /// full, yzw reserved. See `set_fog_far_close`.
     fog_far: [f32; 4],
+    // REN-TEMP-001D: frame.wgsl `renscale` — (mip bias log2(render/output), gradient scale
+    // 2^bias, 0, 0). Set once per frame from the renderer's render scale; all-zero = native.
+    render_scale_lane: [f32; 4],
     // (proj_xx, proj_yy, near) per camera, cached from `prepare` so the GTAO dispatch uses the
     // SAME projection the prepass rasterised with. Recomputing it at dispatch time from a
     // separately-chosen camera is how AO ends up subtly offset from the depth it is reading.
@@ -2929,6 +2935,7 @@ pub struct Gfx3d {
     // scene depth (mismatched sample counts). Cleared per use; world occlusion isn't carried into
     // the HUD (the UI segment already clears depth even on the 1x path).
     ui_depth: Option<(wgpu::Texture, wgpu::TextureView)>,
+    ui_depth_size: (u32, u32),
     // Hi-Z depth pyramid + GPU-driven occlusion cull toggle (docs §5). The pyramid is built
     // from the post-prepass depth; the color-pass cull samples it. occlusion_enabled gates the
     // whole path (env WGR_GPU_OCCLUSION + ImGui Culling tab); when off, the color pass reuses
@@ -3592,8 +3599,10 @@ impl Gfx3d {
                 0.0,
                 0.0,
             ],
+            render_scale_lane: [0.0; 4],
             cam_gtao_proj: Vec::new(),
             ui_depth: None,
+            ui_depth_size: (0, 0),
             hiz: hiz::HiZ::new(device),
             // GPU Hi-Z occlusion: default on when GPU-driven is on (the point of this feature),
             // opt-out via WGR_GPU_OCCLUSION=0; also toggleable live from the ImGui Culling tab.
@@ -4505,30 +4514,42 @@ impl Gfx3d {
             self.gtao_blur
                 .resize(device, size.0, size.1, &depth, &normal, &ao);
         }
-        // Single-sample UI-phase depth-stencil (MSAA only): the post-tonemap 2D composites to the
-        // 1x swapchain and needs a matching-sample depth attachment for its (1x) pipelines.
-        self.ui_depth = (self.sample_count > 1).then(|| {
-            let tex = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("wgr_3d_ui_depth"),
-                size: wgpu::Extent3d {
-                    width: size.0,
-                    height: size.1,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: DEPTH_FORMAT,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-            let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
-            (tex, view)
-        });
         self.depth_size = size;
         self.depth_gen += 1;
         // The Hi-Z pyramid tracks this size; (re)allocated in prepare_cull (gated on occlusion
         // being active) so a live toggle picks up the current size without a resize.
+    }
+
+    // Single-sample UI-phase depth-stencil (MSAA only): the post-tonemap 2D composites to the
+    // 1x swapchain and needs a matching-sample depth attachment for its (1x) pipelines. Sized
+    // separately from the scene depth — under render scale (REN-TEMP-001B) the scene depth is
+    // render-resolution while this one must match the OUTPUT-resolution swapchain.
+    pub fn ensure_ui_depth(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        let size = (width.max(1), height.max(1));
+        if self.sample_count <= 1 {
+            self.ui_depth = None;
+            return;
+        }
+        if self.ui_depth.is_some() && self.ui_depth_size == size {
+            return;
+        }
+        let tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_3d_ui_depth"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = tex.create_view(&wgpu::TextureViewDescriptor::default());
+        self.ui_depth = Some((tex, view));
+        self.ui_depth_size = size;
     }
 
     pub fn depth_view(&self) -> Option<&wgpu::TextureView> {
@@ -5478,7 +5499,7 @@ impl Gfx3d {
                 ];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 64,
+                    base + self.cameras.bind_size - 80,
                     bytemuck::cast_slice(&matdbg),
                 );
                 // DZ-005 water surface animation (frame.wgsl `wateranim`).
@@ -5486,7 +5507,7 @@ impl Gfx3d {
                 // water params cannot leave the ripple frozen at a stale time.
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 48,
+                    base + self.cameras.bind_size - 64,
                     bytemuck::cast_slice(&self.water_anim),
                 );
                 // Normal-map relief under ambient light (frame.wgsl `relief`), the LAST lane.
@@ -5500,16 +5521,25 @@ impl Gfx3d {
                 let relief = [normal_cavity(), sky_specular(), 0.0f32, 0.0f32];
                 queue.write_buffer(
                     buf,
-                    base + self.cameras.bind_size - 32,
+                    base + self.cameras.bind_size - 48,
                     bytemuck::cast_slice(&relief),
                 );
-                // Far-fog closure (frame.wgsl `fogfar`), now the LAST lane. Unconditional for the
-                // same reason as the three above: a camera that skipped it would read whatever
-                // the previous frame left there.
+                // Far-fog closure (frame.wgsl `fogfar`). Unconditional for the same reason as
+                // the three above: a camera that skipped it would read whatever the previous
+                // frame left there.
+                queue.write_buffer(
+                    buf,
+                    base + self.cameras.bind_size - 32,
+                    bytemuck::cast_slice(&self.fog_far),
+                );
+                // REN-TEMP-001D render-scale texture LOD (frame.wgsl `renscale`), the LAST
+                // lane. Unconditional like the four above, and for one more reason: the lane
+                // must read 0/0 the moment the render scale returns to native, not whenever
+                // the next camera happens to rewrite it.
                 queue.write_buffer(
                     buf,
                     base + self.cameras.bind_size - 16,
-                    bytemuck::cast_slice(&self.fog_far),
+                    bytemuck::cast_slice(&self.render_scale_lane),
                 );
             }
         }
@@ -7213,6 +7243,16 @@ impl Gfx3d {
         self.fog_far[0] = close.clamp(0.3, 1.0);
     }
 
+    // REN-TEMP-001D: render-scale texture LOD (frame.wgsl `renscale`). `scale` is
+    // render_width / output_width; 1.0 (or anything >= 1.0) writes the all-zero native lane.
+    pub fn set_render_scale_lane(&mut self, scale: f32) {
+        self.render_scale_lane = if scale < 1.0 && scale > 0.0 {
+            [scale.log2(), scale, 0.0, 0.0]
+        } else {
+            [0.0; 4]
+        };
+    }
+
     /// The three OnSurface (road / decal) per-pixel depth-conform knobs, live from the dev
     /// panel. They ride the reserved `fogfar` yzw lanes, so nothing about the struct layout or
     /// the C ABI moves. 0 in any lane means "use the shipped default", which is what an
@@ -7824,7 +7864,7 @@ fn multi_blends_layer_normals_with_the_same_weights_as_the_colours() {
     );
     // The layer sample feeds decode_nohq directly -- nothing accumulates a raw texel.
     let layer_sample =
-        "textureSample(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn)";
+        "textureSampleBias(textures[sm.layer_normal_slot[i]], samplers[sm.sampler_idx], uvn, frame.renscale.x)";
     assert!(
         src.contains(layer_sample),
         "each layer normal must be sampled at its own uv"
@@ -8283,10 +8323,11 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
     // them alone looks right.
     let src = include_str!("mod.rs");
     for (offset, payload) in [
-        ("bind_size - 64", "cast_slice(&matdbg)"),
-        ("bind_size - 48", "cast_slice(&self.water_anim)"),
-        ("bind_size - 32", "cast_slice(&relief)"),
-        ("bind_size - 16", "cast_slice(&self.fog_far)"),
+        ("bind_size - 80", "cast_slice(&matdbg)"),
+        ("bind_size - 64", "cast_slice(&self.water_anim)"),
+        ("bind_size - 48", "cast_slice(&relief)"),
+        ("bind_size - 32", "cast_slice(&self.fog_far)"),
+        ("bind_size - 16", "cast_slice(&self.render_scale_lane)"),
     ] {
         let at = src
             .find(offset)
@@ -8306,8 +8347,14 @@ fn normal_relief_knobs_reach_the_shader_and_the_game_log() {
         .expect("wateranim lane");
     let relief_at = frame.find("    relief: vec4<f32>,").expect("relief lane");
     let fogfar_at = frame.find("    fogfar: vec4<f32>,").expect("fogfar lane");
+    let renscale_at = frame
+        .find("    renscale: vec4<f32>,")
+        .expect("renscale lane");
     assert!(
-        matdbg_at < water_at && water_at < relief_at && relief_at < fogfar_at,
+        matdbg_at < water_at
+            && water_at < relief_at
+            && relief_at < fogfar_at
+            && fogfar_at < renscale_at,
         "the WGSL lane order must match the upload offsets"
     );
     // Defaults: both ON, because both are constructed so they cannot brighten anything — the

@@ -1369,7 +1369,7 @@ fn vs_grass_far(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
 // pipelines, one shading function, no penalty on the default path.
 @fragment
 fn fs_grass_cards(in: VsOut) -> @location(0) vec4<f32> {
-    let cutout = textureSample(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z));
+    let cutout = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
     if (cutout.a < grass.cards.y) {
         discard;
     }
@@ -1442,7 +1442,7 @@ fn grass_shade(in: VsOut) -> vec4<f32> {
     // Photo veins can alias as sub-pixel blades move in the wind. A small
     // positive mip bias stabilises that fine detail while keeping it readable
     // at the close ranges where this near-LOD texture is actually visible.
-    let blade = textureSample(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z));
+    let blade = textureSampleBias(blade_tex, blade_samp, in.blade_uv.xy, i32(in.blade_uv.z), frame.renscale.x);
     // Alpha cut-out cards: the silhouette comes from the texture, not the quad,
     // which is what buys shape variety without more geometry. It costs the early-Z
     // the solid path enjoys, so it is a toggle and not the default -- measure

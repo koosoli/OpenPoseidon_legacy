@@ -594,6 +594,17 @@ pub struct Renderer {
     planar_div_hold: u32,
     planar_mips: PlanarMips,
     hdr_size: (u32, u32),
+    // REN-TEMP-001B: fraction of the swapchain size the 3D scene renders at (WGR_RENDER_SCALE,
+    // 0.5..=1.0; fixed at startup). Scene targets size to render_size(); swapchain, post chain
+    // and UI stay at config.width/height. At 1.0 no upscale target exists and the chain is
+    // bit-identical to the pre-split renderer.
+    render_scale: f32,
+    // Output-resolution single-sample HDR target the render-res scene is upscaled into before
+    // bloom/exposure/tonemap. None at 100% render scale.
+    hdr_upscaled: Option<(wgpu::Texture, wgpu::TextureView)>,
+    // Bilinear fullscreen blit used for that upscale (a diagnostic-grade spatial filter; the
+    // temporal upscaler replaces this pass, not the plumbing around it). Built lazily.
+    upscale_blitter: Option<wgpu::util::TextureBlitter>,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -1021,6 +1032,32 @@ impl Renderer {
         if hdr_enabled {
             log.log(log_level::INFO, "wgpu HDR path enabled (WGR_HDR)");
         }
+        // REN-TEMP-001B: 3D render scale (WGR_RENDER_SCALE, percent). The scene renders at
+        // render_size() and is upscaled to the swapchain size before bloom/exposure/tonemap;
+        // the UI phase is untouched. Requires the HDR path — the LDR-direct path draws straight
+        // to the swapchain and has no resolve to rescale. 100 is bit-identical to the old chain.
+        let render_scale = std::env::var("WGR_RENDER_SCALE")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|pct| pct.clamp(50, 100))
+            .unwrap_or(100) as f32
+            / 100.0;
+        if render_scale < 1.0 {
+            if hdr_enabled {
+                log.log(
+                    log_level::INFO,
+                    &format!(
+                        "wgpu render scale {:.0}% (WGR_RENDER_SCALE): 3D at reduced resolution, UI native",
+                        render_scale * 100.0
+                    ),
+                );
+            } else {
+                log.log(
+                    log_level::WARN,
+                    "WGR_RENDER_SCALE ignored: requires the HDR path (WGR_HDR=1)",
+                );
+            }
+        }
         if !prepass_enabled {
             log.log(
                 log_level::INFO,
@@ -1277,6 +1314,9 @@ impl Renderer {
             planar_div_hold: 0,
             planar_mips,
             hdr_size: (0, 0),
+            render_scale: if hdr_enabled { render_scale } else { 1.0 },
+            hdr_upscaled: None,
+            upscale_blitter: None,
             sample_count,
             tonemap,
             underwater,
@@ -1652,7 +1692,9 @@ impl Renderer {
         let cloud_map = self.sky.cloud_shadow_mapping_current();
         let mask = self.terrain.shadow_mask_view();
         let csm = self.gfx3d.shadow_sample_view().clone();
-        let (width, height) = (self.config.width, self.config.height);
+        // God rays march at the SCENE resolution: they composite into the render-res HDR
+        // target and read the render-res depth resolve.
+        let (width, height) = self.render_size();
         // Disjoint field borrows: the pass owns none of the resources it reads.
         let device = &self.device;
         let queue = &self.queue;
@@ -1723,7 +1765,8 @@ impl Renderer {
             // The compositor reads a single-sample reversed-Z depth target, including
             // when the HDR scene colour was MSAA-resolved above.
             self.ensure_far_depth_resolve(encoder);
-            self.ensure_underwater_target(self.config.width, self.config.height);
+            let (rw, rh) = self.render_size();
+            self.ensure_underwater_target(rw, rh);
             let target = &self
                 .underwater_target
                 .as_ref()
@@ -1749,8 +1792,29 @@ impl Renderer {
         // Depth of field, between the god-ray composite and bloom. Returns `post_source`
         // untouched when Picture Mode has not enabled it.
         let (post_source, dof_applied) = self.run_depth_of_field(encoder, &post_source);
+        // REN-TEMP-001B: upscale the finished render-resolution HDR frame (scene + god rays +
+        // underwater + DoF, all of which read render-res depth) to the output resolution the
+        // post chain runs at. Bilinear, deliberately minimal — this pass is what a temporal
+        // upscaler replaces. When scaling, bloom/exposure/tonemap are permanently bound to
+        // `hdr_upscaled` (see ensure_hdr) and the source-swap rebind below must not run: the
+        // swap happens on the blit's INPUT instead.
+        let post_source = if let Some((_, up_view)) = self.hdr_upscaled.as_ref() {
+            let blitter = self.upscale_blitter.get_or_insert_with(|| {
+                wgpu::util::TextureBlitterBuilder::new(&self.device, HDR_FORMAT)
+                    .sample_type(wgpu::FilterMode::Linear)
+                    .build()
+            });
+            encoder.push_debug_group("wgr_upscale");
+            blitter.copy(&self.device, encoder, &post_source, up_view);
+            encoder.pop_debug_group();
+            up_view.clone()
+        } else {
+            post_source
+        };
         let underwater = underwater_time.is_some();
-        if self.post_source_underwater != underwater || self.post_source_dof != dof_applied {
+        if self.hdr_upscaled.is_none()
+            && (self.post_source_underwater != underwater || self.post_source_dof != dof_applied)
+        {
             let bloom_view = self
                 .bloom
                 .as_ref()
@@ -1839,6 +1903,19 @@ impl Renderer {
         self.surface.configure(&self.device, &self.config);
     }
 
+    // REN-TEMP-001B: the resolution the 3D scene renders at. Everything the scene phase owns
+    // (HDR colour, depth/normals, GTAO, planar, god rays, clouds, water snapshot, DoF,
+    // underwater) sizes to this; the swapchain, post chain, screenshots and UI stay at
+    // config.width/height. LOD metrics also stay on config — LOD is about perceived size on
+    // the DISPLAY, and letting it follow render scale would coarsen geometry on top of the
+    // resolution drop and corrupt every A/B.
+    fn render_size(&self) -> (u32, u32) {
+        (
+            ((self.config.width as f32 * self.render_scale).round() as u32).max(1),
+            ((self.config.height as f32 * self.render_scale).round() as u32).max(1),
+        )
+    }
+
     // Mirrors the engine's SDL swap interval contract. Presentation is reconfigured
     // immediately, so Options -> Graphics changes take effect without a restart.
     fn set_present_mode(&mut self, interval: i32) -> bool {
@@ -1875,7 +1952,16 @@ impl Renderer {
         if !self.hdr_enabled || width == 0 || height == 0 {
             return;
         }
-        if self.hdr.is_some() && self.hdr_size == (width, height) {
+        // Early-out only when BOTH sizes still match: the scene size (hdr_size) and, under
+        // render scale, the output size the upscale target was built for. Rounding can keep
+        // the render size identical across an output resize, so the scene size alone is not
+        // enough to prove the upscale target is current.
+        let out = (self.config.width, self.config.height);
+        let upscaled_current = match self.hdr_upscaled.as_ref() {
+            Some((t, _)) => (width, height) != out && (t.width(), t.height()) == out,
+            None => (width, height) == out,
+        };
+        if self.hdr.is_some() && self.hdr_size == (width, height) && upscaled_current {
             return;
         }
         let msaa = self.sample_count > 1;
@@ -1943,30 +2029,67 @@ impl Renderer {
         });
         let water_scene_view =
             water_scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // REN-TEMP-001B: when the scene renders below output resolution, the post chain
+        // (bloom/exposure/tonemap) reads an output-resolution target the scene is upscaled
+        // into, not the render-resolution resolve. At 100% no such target exists and the
+        // chain reads the resolve directly — the pre-split behaviour, byte for byte.
+        let (out_w, out_h) = (self.config.width, self.config.height);
+        self.hdr_upscaled = ((width, height) != (out_w, out_h)).then(|| {
+            let t = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_hdr_upscaled"),
+                size: wgpu::Extent3d {
+                    width: out_w,
+                    height: out_h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: HDR_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+            let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+            (t, v)
+        });
         // The single-sample view the post-processing chain reads (resolve target under MSAA,
         // else the scene target directly).
         let sample_view = resolve.as_ref().map(|(_, v)| v).unwrap_or(&view).clone();
+        // What bloom/exposure/tonemap bind to: the upscaled output-res target when scaling,
+        // else the render-res resolve. They must also SIZE to the output resolution — the
+        // pyramid bases derive from the texture they read.
+        let post_view = self
+            .hdr_upscaled
+            .as_ref()
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| sample_view.clone());
+        let (post_w, post_h) = if self.hdr_upscaled.is_some() {
+            (out_w, out_h)
+        } else {
+            (width, height)
+        };
         // Rebuild the bloom pyramid for the new size, then point the resolve at both
         // the HDR target and the bloom mip0. A 1x1 fallback keeps set_source valid if
         // the pyramid somehow has no mips.
         if let Some(bloom) = self.bloom.as_mut() {
-            bloom.resize(&self.device, width, height, HDR_FORMAT, &sample_view);
+            bloom.resize(&self.device, post_w, post_h, HDR_FORMAT, &post_view);
         }
         if let Some(exposure) = self.exposure.as_mut() {
-            exposure.resize(&self.device, width, height, &sample_view);
+            exposure.resize(&self.device, post_w, post_h, &post_view);
         }
         if let Some(tonemap) = self.tonemap.as_mut() {
             let bloom_view = self
                 .bloom
                 .as_ref()
                 .and_then(|b| b.view())
-                .unwrap_or(&sample_view);
+                .unwrap_or(&post_view);
             let scale_view = self
                 .exposure
                 .as_ref()
                 .map(|e| e.scale_view())
-                .unwrap_or(&sample_view);
-            tonemap.set_source(&self.device, &sample_view, bloom_view, scale_view);
+                .unwrap_or(&post_view);
+            tonemap.set_source(&self.device, &post_view, bloom_view, scale_view);
         }
         self.hdr = Some((texture, view));
         self.hdr_resolve = resolve;
@@ -2070,12 +2193,14 @@ impl Renderer {
             };
             self.dof = Some(DepthOfField::new(&self.device, format));
         }
-        self.ensure_dof_target(self.config.width, self.config.height);
+        let (rw, rh) = self.render_size();
+        self.ensure_dof_target(rw, rh);
         let Some((_, target)) = self.dof_target.as_ref().map(|(t, v)| (t, v.clone())) else {
             return (source.clone(), false);
         };
         let settings = self.dof_settings;
-        let height = self.config.height;
+        // CoC scaling is in pixels of the pass' own target, which is render-resolution.
+        let height = rh;
         if let Some(dof) = self.dof.as_ref() {
             dof.upload(&self.queue, &settings, height);
             dof.render(&self.device, encoder, source, &depth, &target);
@@ -2085,11 +2210,10 @@ impl Renderer {
 
     fn ensure_planar_target(&mut self) {
         // Divisor, not a fixed half: it tracks how much water is on screen (see PlanarConfig).
+        // Based on the RENDER resolution — the reflection is sampled by the render-res water pass.
         let div = self.planar_div.max(1);
-        let size = (
-            (self.config.width.max(2) + div - 1) / div,
-            (self.config.height.max(2) + div - 1) / div,
-        );
+        let (rw, rh) = self.render_size();
+        let size = ((rw.max(2) + div - 1) / div, (rh.max(2) + div - 1) / div);
         if self.planar.as_ref().is_some_and(|p| p.size == size) {
             return;
         }
@@ -2246,7 +2370,12 @@ impl Renderer {
         self.gfx2d
             .prepare_overlay(&self.device, &self.queue, overlay_verts, overlay_indices);
         self.gfx3d
-            .ensure_depth(&self.device, self.config.width, self.config.height);
+            .ensure_depth(&self.device, self.render_size().0, self.render_size().1);
+        // The post-tonemap UI composites to the swapchain, so its 1x depth is OUTPUT-sized.
+        self.gfx3d
+            .ensure_ui_depth(&self.device, self.config.width, self.config.height);
+        // REN-TEMP-001D: render-scale-aware mip bias for every material sample this frame.
+        self.gfx3d.set_render_scale_lane(self.render_scale);
         // Rebuild the bindless object-texture array if any texture was created/destroyed
         // since last frame (no-op on churn-free frames), so this frame's draws index a
         // current array.
@@ -2361,7 +2490,7 @@ impl Renderer {
         // asynchronous depth-tested water query is available, it is the tighter upper bound.
         let water_coverage = self
             .water_visibility
-            .coverage(self.config.width, self.config.height, self.sample_count)
+            .coverage(self.render_size().0, self.render_size().1, self.sample_count)
             .map(|visible| visible.min(cpu_water_coverage))
             .unwrap_or(cpu_water_coverage);
         let planar_cfg = *PLANAR_CFG.get_or_init(PlanarConfig::from_env);
@@ -2526,7 +2655,7 @@ impl Renderer {
                 self.planar_div as f32 * self.planar_reflection_pad,
             );
         }
-        self.ensure_hdr(self.config.width, self.config.height);
+        self.ensure_hdr(self.render_size().0, self.render_size().1);
         // The compositor resolves a water path per pixel, so it also runs while the eye is just
         // above the surface. Pixels whose rays never enter water return the untouched scene;
         // downward rays begin extinction only after crossing the local water plane.
@@ -2644,7 +2773,8 @@ impl Renderer {
                 caustic_gain: underwater_tuning.3,
             });
         if underwater_time.is_some() && !self.hdr_enabled {
-            self.ensure_underwater_target(self.config.width, self.config.height);
+            let (rw, rh) = self.render_size();
+            self.ensure_underwater_target(rw, rh);
         }
 
         let Some(frame) = self.acquire()? else {
@@ -4037,8 +4167,10 @@ impl Renderer {
                                 aspect: wgpu::TextureAspect::All,
                             },
                             wgpu::Extent3d {
-                                width: self.config.width,
-                                height: self.config.height,
+                                // Scene-target size, which under render scale is NOT the
+                                // swapchain size.
+                                width: self.hdr_size.0,
+                                height: self.hdr_size.1,
                                 depth_or_array_layers: 1,
                             },
                         );
@@ -4149,8 +4281,8 @@ impl Renderer {
                         &self.device,
                         &mut encoder,
                         &depth_view,
-                        self.config.width,
-                        self.config.height,
+                        self.render_size().0,
+                        self.render_size().1,
                     );
                     self.gpu_timers.end(&mut encoder, TimerRegion::CloudMarch);
                     self.gpu_timers

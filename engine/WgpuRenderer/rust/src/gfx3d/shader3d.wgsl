@@ -738,8 +738,9 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         }
     }
 
-    let base = textureSample(textures[packed >> 3u], samplers[packed & 7u], uv);
-    let normal_sample = textureSample(textures[normal_packed >> 3u], samplers[normal_packed & 7u], uv);
+    // REN-TEMP-001D: material samples take the render-scale mip bias (0 at native scale).
+    let base = textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], uv, frame.renscale.x);
+    let normal_sample = textureSampleBias(textures[normal_packed >> 3u], samplers[normal_packed & 7u], uv, frame.renscale.x);
     var normal_ts_xy = vec2<f32>(normal_sample.a, normal_sample.g) * 2.0 - vec2<f32>(1.0);
     if ((material_flags(material) & MATFLAG_INVERT_NORMAL_Y) != 0u) {
         normal_ts_xy.y = -normal_ts_xy.y;
@@ -928,7 +929,7 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
     if (alpha_ref > 0.0) {
         let packed = bitcast<u32>(materials[in.instance].emissive.w);
         let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
-        let a = mip_alpha_boost(textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a, in.uv, dims0,
+        let a = mip_alpha_boost(textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], in.uv, frame.renscale.x).a, in.uv, dims0,
                                 cutout_mip_alpha);
         if (a < alpha_ref) {
             discard;
@@ -949,7 +950,7 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
 fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     let packed = bitcast<u32>(materials[in.instance].emissive.w);
     let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
-    let alpha = mip_alpha_boost(textureSample(textures[packed >> 3u], samplers[packed & 7u], in.uv).a, in.uv, dims0,
+    let alpha = mip_alpha_boost(textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], in.uv, frame.renscale.x).a, in.uv, dims0,
                                 cutout_mip_alpha);
     let cov = a2c_coverage(alpha, alpha_ref);
     if (cov <= 0.0) {
