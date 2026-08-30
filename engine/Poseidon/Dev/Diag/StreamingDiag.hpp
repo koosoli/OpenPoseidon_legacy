@@ -148,12 +148,40 @@ struct FileServerSnapshot
     uint64_t missUsMax = 0;
 };
 
+// What the resident set actually COSTS on the GPU, next to how many objects it is
+// (roadmap Phase 7: "use CPU and GPU memory budgets rather than arbitrary item-count
+// limits"). The object residency budget is an item count today -- 20,000 placements --
+// and nothing reported what that count is worth in bytes, so nobody could set a byte
+// budget or say whether the count is generous or ruinous on a given world. These
+// numbers are the missing denominator; `bytesPerResidentObject` is the one to watch
+// across corpora, because it is what a byte budget would have to be divided by.
+//
+// Source: Engine::GetGpuMemoryStats (the renderer's own tracked totals; portable
+// payload lower bounds, no driver metadata). `valid` is false on backends that do not
+// report them (GL33) or with no renderer up.
+struct GpuResidencySnapshot
+{
+    bool valid = false;
+    uint64_t trackedBytes = 0;          // textures + geometry the renderer tracks
+    uint64_t budgetBytes = 0;           // WGR_DYNAMIC_VRAM_MB (a FIXED default today, not the device's VRAM)
+    uint64_t objectTextureBytes = 0;
+    uint64_t geometryLiveBytes = 0;
+    uint64_t geometryCapacityBytes = 0; // pool capacity, i.e. what is actually allocated
+    uint64_t geometryRetiredBytes = 0;
+    unsigned objectTextureCount = 0;
+    bool overBudget = false;
+    // trackedBytes / resident objects, 0 when nothing is resident. The headline figure:
+    // multiply by the item budget to see what that budget promises to cost.
+    uint64_t bytesPerResidentObject = 0;
+};
+
 struct StreamingSnapshot
 {
     TextureStreamSnapshot tex;
     FileServerSnapshot fileserver;
     render::PreparedTextureStore::Stats store;
     ObjectStreamResidencyCounters residency;
+    GpuResidencySnapshot gpu;
 };
 
 // Assembles the three sources. Cheap (two brief mutex hops); main thread.

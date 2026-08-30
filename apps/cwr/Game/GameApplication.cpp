@@ -316,6 +316,24 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(prep, "tex_unreadable", (double)p.texUnreadable);
             cJSON_AddNumberToObject(prep, "tex_ms", p.texMs);
         }
+        // What the resident set costs (Phase 7): the item budget in bytes. `per_object_kb`
+        // is the figure a byte budget would be divided by; it is also how you tell a
+        // geometry-heavy corpus from a texture-heavy one at a glance.
+        cJSON* gpu = cJSON_AddObjectToObject(streaming, "gpu_residency");
+        cJSON_AddBoolToObject(gpu, "valid", s.gpu.valid);
+        if (s.gpu.valid)
+        {
+            const auto& g = s.gpu;
+            cJSON_AddNumberToObject(gpu, "tracked_mb", g.trackedBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "budget_mb", g.budgetBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "object_texture_mb", g.objectTextureBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "geometry_live_mb", g.geometryLiveBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "geometry_capacity_mb", g.geometryCapacityBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "geometry_retired_mb", g.geometryRetiredBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(gpu, "object_textures", g.objectTextureCount);
+            cJSON_AddBoolToObject(gpu, "over_budget", g.overBudget);
+            cJSON_AddNumberToObject(gpu, "per_object_kb", g.bytesPerResidentObject / 1024.0);
+        }
         cJSON* res = cJSON_AddObjectToObject(streaming, "residency");
         cJSON_AddBoolToObject(res, "valid", s.residency.valid);
         if (s.residency.valid)

@@ -143,6 +143,18 @@ void DrawStreamingTab()
     if (ImGui::BeginTable("res", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
         Row("resident / budget", "%llu / %llu", (unsigned long long)r.residentObjects, (unsigned long long)r.budget);
+        // Phase 7: the item budget, in bytes. `per obj` is what a byte budget would be
+        // divided by; `budget` here is WGR_DYNAMIC_VRAM_MB, a fixed default, NOT the
+        // device's VRAM -- read "over" with that in mind.
+        if (s.gpu.valid)
+        {
+            Row("gpu tracked / budget", "%.0f / %.0f MB%s", s.gpu.trackedBytes / (1024.0 * 1024.0),
+                s.gpu.budgetBytes / (1024.0 * 1024.0), s.gpu.overBudget ? "  OVER" : "");
+            Row("gpu tex / geom live / geom cap", "%.0f / %.0f / %.0f MB",
+                s.gpu.objectTextureBytes / (1024.0 * 1024.0), s.gpu.geometryLiveBytes / (1024.0 * 1024.0),
+                s.gpu.geometryCapacityBytes / (1024.0 * 1024.0));
+            Row("gpu per resident object", "%.0f KB", s.gpu.bytesPerResidentObject / 1024.0);
+        }
         Row("shape cache", "%llu/%llu held, hits %llu, ins %llu, drops %llu", (unsigned long long)r.shapeCacheSize,
             (unsigned long long)r.shapeCacheLimit, (unsigned long long)r.shapeCacheHits,
             (unsigned long long)r.shapeCacheInserts, (unsigned long long)r.shapeCacheDrops);

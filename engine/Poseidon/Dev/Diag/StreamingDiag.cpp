@@ -5,6 +5,7 @@
 
 #include <Poseidon/Dev/Diag/PerfTrace.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -57,10 +58,33 @@ StreamingSnapshot CollectStreamingSnapshot()
 
     out.store = render::PreparedTextureStore::Instance().SnapshotStats();
 
+    // GPU residency, so the item-count budget can finally be read in bytes (Phase 7).
+    if (GEngine)
+    {
+        Engine::GpuMemoryStatsOut mem;
+        if (GEngine->GetGpuMemoryStats(mem))
+        {
+            out.gpu.valid = true;
+            out.gpu.trackedBytes = mem.trackedBytes;
+            out.gpu.budgetBytes = mem.budgetBytes;
+            out.gpu.objectTextureBytes = mem.objectTextureBytes;
+            out.gpu.geometryLiveBytes = mem.geometryLiveBytes;
+            out.gpu.geometryCapacityBytes = mem.geometryCapacityBytes;
+            out.gpu.geometryRetiredBytes = mem.geometryRetiredBytes;
+            out.gpu.objectTextureCount = mem.objectTextureCount;
+            out.gpu.overBudget = mem.overBudget;
+        }
+    }
+
     if (GLandscape)
     {
         GLandscape->SnapshotObjectStreamDiag(out.residency);
     }
+    // Derive AFTER residency is filled: the whole point is bytes-per-object, and the
+    // object count comes from the landscape block below the GPU block above.
+    if (out.gpu.valid && out.residency.valid && out.residency.residentObjects > 0)
+        out.gpu.bytesPerResidentObject = out.gpu.trackedBytes / out.residency.residentObjects;
+
     return out;
 }
 
