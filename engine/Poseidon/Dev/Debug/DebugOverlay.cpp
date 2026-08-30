@@ -4712,17 +4712,37 @@ void DrawTemporalTab()
             const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
             GraphicsConfig cfg;
             cfg.Load(cfgPath);
-            cfg.dlssMode = t.dlssOn ? -1 : 0;
+            // The COMPLETE panel state, mapped onto the Options-menu semantics so both
+            // surfaces stay coupled: upscaler choice from the DLSS/FSR switches,
+            // sub-100% scale into upscalerQuality vs SSAA into renderScale, plus
+            // sharpness and the DLSS sharpen pass.
+            cfg.dlssMode = t.dlssOn && t.fsrOn ? -1 : t.dlssOn ? 1 : t.fsrOn ? 2 : 0;
             const int samplesForChoice[] = {0, 2, 4, 8};
             cfg.msaaSamples = samplesForChoice[msaaChoice];
-            cfg.renderScale = t.renderScalePct == 100 ? 1.0f : t.renderScalePct / 100.0f;
+            if (t.renderScalePct < 100)
+            {
+                cfg.upscalerQuality = t.renderScalePct;
+                cfg.renderScale = 1.0f;
+            }
+            else
+            {
+                cfg.upscalerQuality = -1;
+                cfg.renderScale = t.renderScalePct == 100 ? 1.0f : t.renderScalePct / 100.0f;
+            }
+            cfg.fsrSharpness = t.fsrSharpness;
+            cfg.dlssSharpen = t.dlssSharpen ? 1 : 0;
             if (cfg.Save(cfgPath))
-                LOG_INFO(Graphics, "Dev panel: graphics.cfg saved (dlssMode={}, msaa={}, renderScale={:.2f})",
-                         cfg.dlssMode, cfg.msaaSamples, cfg.renderScale);
+                LOG_INFO(Graphics,
+                         "Dev panel: graphics.cfg saved (dlssMode={}, quality={}, msaa={}, renderScale={:.2f}, "
+                         "sharpness={:.2f}, dlssSharpen={})",
+                         cfg.dlssMode, cfg.upscalerQuality, cfg.msaaSamples, cfg.renderScale, cfg.fsrSharpness,
+                         cfg.dlssSharpen);
             else
                 LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
         }
-        Dev::PanelTooltip("Writes DLSS on/off, MSAA and render scale to graphics.cfg - applied on every launch.");
+        Dev::PanelTooltip("Writes the whole tab (upscaler, quality, MSAA, scale, sharpness, DLSS sharpen) to
+"
+                          "graphics.cfg - the same file the Options menu edits - applied on every launch.");
     }
 
     Dev::PanelSeparator();
