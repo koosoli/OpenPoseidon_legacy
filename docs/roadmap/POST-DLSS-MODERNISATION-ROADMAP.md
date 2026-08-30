@@ -565,6 +565,17 @@ size: ShapeAdapter on the main thread (4.0 s — blocked on GlobLoadTexture /
 GTexMaterialBank / NewProxyObject thread-affinity), mesh+section residual (~2.2 s),
 and a disk cache for bake volumes (§3d).
 
+**Update, same day: the adapter now runs on the workers** (`91226a65..52ffa8dc`).
+The thread-affinity blockers were removed one commit at a time — the RStringB bank
+and the fast allocator's chunk lists took locks, the bank lookups moved into
+main-thread-resolved tables (`BuildAdapterBankTables`), proxy creation split out
+(`CreateAdapterProxies`), and the preparer grew a convert stage
+(`SubmitConvert`/`TakeConverted`, `WGR_OBJECT_STREAM_ASYNC_ADAPT=0` reverts).
+Result on the same traverse: cold admission **20.8 s → 3.7 s** across the session
+(avg 28.4 → 5.1 ms per model, worst stall 227 → 86 ms); the main-thread adapt
+bucket reads 0.0. The remaining per-model cost is registration data marshalling +
+vertex-buffer build — Phase 6's upload-budget line.
+
 Do not copy the other fork's polling filesystem worker pool directly. Build a staged
 pipeline around a dedicated I/O service, the existing enkiTS compute workers and a
 budgeted renderer upload queue:
