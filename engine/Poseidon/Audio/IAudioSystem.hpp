@@ -239,6 +239,24 @@ class IAudioSystem // whole playing system
 	virtual void SetSimulationRunning( bool running ) {}
 	virtual void SetEnvironment( const SoundEnvironment &env ) {}
 	virtual bool IsReady() const { return true; }
+
+	// HRTF headphone rendering (ALC_SOFT_HRTF), roadmap Phase 1.4. `Auto` leaves the
+	// decision to the device (OpenAL Soft engages HRTF when the output looks like
+	// headphones), `On`/`Off` force it. The mode is persisted in audio.cfg; the status
+	// reports what the device actually did, which is the only trustworthy readout --
+	// a forced `On` can still fail on a device with no dataset. Default no-ops so the
+	// Dummy/Text/Capture backends and the dedicated server report Unsupported.
+	enum class HrtfMode { Off = 0, Auto = 1, On = 2 };
+	struct HrtfStatus
+	{
+		bool supported = false;   // ALC_SOFT_HRTF present on the playback device
+		bool active = false;      // rendering through HRTF right now
+		std::string specifier;    // dataset name when active, empty otherwise
+	};
+	virtual bool SetHrtfMode( HrtfMode ) { return false; }
+	virtual HrtfMode GetHrtfMode() const { return HrtfMode::Auto; }
+	virtual HrtfStatus GetHrtfStatus() const { return {}; }
+
 	virtual ~IAudioSystem(){}
 
 	virtual float GetCDVolume() const = 0;

@@ -31,6 +31,9 @@ const AudioRowText kAudioRows[] = {
     {"STR_DISP_MAIN_OPT_AUDIO_EFFECTS", "STR_DISP_MAIN_OPT_AUDIO_EFFECTS_DESC"},
     {"STR_DISP_MAIN_OPT_AUDIO_SPEECH", "STR_DISP_MAIN_OPT_AUDIO_SPEECH_DESC"},
     {"STR_DISP_MAIN_OPT_AUDIO_EAX", "STR_DISP_MAIN_OPT_AUDIO_EAX_DESC"},
+    // HRTF row: the key is new and ships in no stringtable yet, so RowLabel/
+    // RowDescription special-case it through LocalizeStringWithFallback below.
+    {"STR_DISP_MAIN_OPT_AUDIO_HRTF", "STR_DISP_MAIN_OPT_AUDIO_HRTF_DESC"},
     {"STR_DISP_MAIN_OPT_AUDIO_MICROPHONE", "STR_DISP_MAIN_OPT_AUDIO_MICROPHONE_DESC"},
     {"STR_DISP_MAIN_OPT_AUDIO_INPUT_LEVEL", "STR_DISP_MAIN_OPT_AUDIO_INPUT_LEVEL_DESC"},
     {"STR_DISP_MAIN_OPT_AUDIO_TEST_MIC", "STR_DISP_MAIN_OPT_AUDIO_TEST_MIC_DESC"},
@@ -71,6 +74,8 @@ void AudioPage::OnReshown(OptionsShell& shell)
 const char* AudioPage::AudioProvider::RowLabel(int row) const
 {
     static_assert(sizeof(kAudioRows) / sizeof(kAudioRows[0]) == kRowCount, "AudioRow table out of sync with kRowCount");
+    if (row == kRowHrtf)
+        return LocalizeStringWithFallback(kAudioRows[row].label, "3D Headphone Audio (HRTF)");
     if (row >= 0 && row < kRowCount)
         return LocalizeString(kAudioRows[row].label);
     return "";
@@ -78,6 +83,10 @@ const char* AudioPage::AudioProvider::RowLabel(int row) const
 
 const char* AudioPage::AudioProvider::RowDescription(int row) const
 {
+    if (row == kRowHrtf)
+        return LocalizeStringWithFallback(
+            kAudioRows[row].desc,
+            "Binaural rendering for headphones. Auto lets the audio device decide; On forces it; Off disables it.");
     if (row >= 0 && row < kRowCount)
         return LocalizeString(kAudioRows[row].desc);
     return "";
@@ -167,6 +176,8 @@ int AudioPage::AudioProvider::RowValue(int row) const
             }
             case kRowEax:
                 return GSoundsys->GetEAX() ? 1 : 0;
+            case kRowHrtf:
+                return static_cast<int>(GSoundsys->GetHrtfMode());
         }
     }
     if (row == kRowMicDev)
@@ -270,6 +281,11 @@ void AudioPage::AudioProvider::SetRowValue(int row, int v)
                 // Restart the preview so the user hears wet vs dry the
                 // instant they flip the toggle.
                 GSoundsys->StartEAXPreview();
+                return;
+            case kRowHrtf:
+                GSoundsys->SetHrtfMode(static_cast<IAudioSystem::HrtfMode>(std::clamp(v, 0, 2)));
+                // A 3D effect sample makes the binaural difference audible immediately.
+                GSoundsys->StartCategoryPreview(WaveEffect);
                 return;
         }
     }
@@ -456,6 +472,8 @@ OptionsScrollList::RowDef AudioPage::AudioProvider::RowFor(int row) const
             return {532, nullptr, -1};
         case kRowEax:
             return {542, m_toggleOptions.data(), 2};
+        case kRowHrtf:
+            return {547, m_hrtfOptions.data(), 3};
         case kRowMicDev:
         {
             if (m_inputDevs.empty())
@@ -475,6 +493,12 @@ void AudioPage::AudioProvider::RefreshToggleTexts() const
     m_toggleText[1] = LocalizeString("STR_ENABLED");
     m_toggleOptions[0] = m_toggleText[0].c_str();
     m_toggleOptions[1] = m_toggleText[1].c_str();
+    m_hrtfText[0] = LocalizeStringWithFallback("STR_DISP_OFF", "Off");
+    m_hrtfText[1] = LocalizeStringWithFallback("STR_DISP_AUTO", "Auto");
+    m_hrtfText[2] = LocalizeStringWithFallback("STR_DISP_ON", "On");
+    m_hrtfOptions[0] = m_hrtfText[0].c_str();
+    m_hrtfOptions[1] = m_hrtfText[1].c_str();
+    m_hrtfOptions[2] = m_hrtfText[2].c_str();
 }
 
 void AudioPage::AudioProvider::TickMeter(int /*row*/, float& outLevel, float& outPeak)

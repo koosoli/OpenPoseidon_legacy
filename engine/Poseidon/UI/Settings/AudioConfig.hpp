@@ -41,6 +41,7 @@ public:
 	int          effectsVolume = 80;          // 0..100
 	int          speechVolume  = 80;          // 0..100
 	bool         eaxEnabled    = false;
+	int          hrtfMode      = 1;           // 0=Off 1=Auto 2=On (IAudioSystem::HrtfMode)
 	std::string  outputDevice;                // "" → system default
 	std::string  inputDevice;                 // "" → system default
 

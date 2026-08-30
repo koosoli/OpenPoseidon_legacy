@@ -64,10 +64,11 @@ private:
 			kRowEffects   = 2,
 			kRowSpeech    = 3,
 			kRowEax       = 4,
-			kRowMicDev    = 5,
-			kRowInputLvl  = 6,
-			kRowTestMic   = 7,
-			kRowCount     = 8,
+			kRowHrtf      = 5, // ALC_SOFT_HRTF headphone mode: Off / Auto / On (roadmap 1.4)
+			kRowMicDev    = 6,
+			kRowInputLvl  = 7,
+			kRowTestMic   = 8,
+			kRowCount     = 9,
 		};
 
 		int  RowCount() const override         { return kRowCount; }
@@ -118,11 +119,13 @@ private:
 		// Volume rows (Music / Effects / Speech) read/write GSoundsys
 		// live, no local cache.  Only the device pickers keep state
 		// here for unwired-row fallback when GSoundsys is null.
-		int m_values[kRowCount] = {0, 0, 0, 0, 0, 1, 0, 0};
+		int m_values[kRowCount] = {0, 0, 0, 0, 0, 1, 1, 0, 0};
 
 		VoNCapture* m_capture = nullptr;
 		mutable std::array<std::string, 2> m_toggleText;
 		mutable std::array<const char*, 2> m_toggleOptions{};
+		mutable std::array<std::string, 3> m_hrtfText;
+		mutable std::array<const char*, 3> m_hrtfOptions{};
 
 		// Output / input device lists cached at Mount.  Entry 0 is
 		// always "System default" (mapping to nullptr in the AL call).

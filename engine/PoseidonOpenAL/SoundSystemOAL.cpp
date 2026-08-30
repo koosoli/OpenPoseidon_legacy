@@ -11,6 +11,10 @@
 #include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/UI/Settings/AudioConfig.hpp>
 #include <PoseidonOpenAL/OpenALRuntime.hpp>
+// ALC_SOFT_HRTF enums + the LPALCRESETDEVICESOFT typedef. Only the typedef and the
+// constants are used; the extension entry point itself is resolved per device via
+// alcGetProcAddress (a SOFT pointer from one device is not valid on another).
+#include <AL/alext.h>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/ParamFileExt.hpp>
 #include <Poseidon/Audio/Voice/VonCapture.hpp>
@@ -148,6 +152,11 @@ bool SoundSystemOAL::Init()
     // Check EFX extension availability (DX8 parity: soundDX8.cpp:2108-2114)
     _canEAX = alcIsExtensionPresent(static_cast<ALCdevice*>(_device), "ALC_EXT_EFX") == ALC_TRUE;
     LOG_INFO(Audio, "EFX extension: {}", _canEAX ? "available" : "not available");
+
+    // HRTF capability (roadmap 1.4). Probe only; the persisted mode is applied by
+    // LoadConfig below, so a forced On/Off survives a restart without a flash of the
+    // wrong rendering.
+    ProbeHrtf();
 
     // Set distance model for 3D audio
     alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
@@ -671,6 +680,83 @@ struct LiveAudioEnv : AudioConfig::Environment
 };
 } // namespace
 
+void SoundSystemOAL::ProbeHrtf()
+{
+    _canHrtf = false;
+    _alcResetDeviceSOFT = nullptr;
+    if (!_device)
+        return;
+    ALCdevice* device = static_cast<ALCdevice*>(_device);
+    if (alcIsExtensionPresent(device, "ALC_SOFT_HRTF") != ALC_TRUE)
+    {
+        LOG_INFO(Audio, "HRTF: ALC_SOFT_HRTF not available on this device");
+        return;
+    }
+    _alcResetDeviceSOFT = reinterpret_cast<void*>(alcGetProcAddress(device, "alcResetDeviceSOFT"));
+    if (!_alcResetDeviceSOFT)
+    {
+        LOG_WARN(Audio, "HRTF: extension present but alcResetDeviceSOFT did not resolve");
+        return;
+    }
+    _canHrtf = true;
+    ALCint count = 0;
+    alcGetIntegerv(device, ALC_NUM_HRTF_SPECIFIERS_SOFT, 1, &count);
+    LOG_INFO(Audio, "HRTF: supported, {} dataset(s) on this device", count);
+}
+
+bool SoundSystemOAL::ApplyHrtfMode()
+{
+    if (!_canHrtf || !_device)
+        return false;
+    // alcResetDeviceSOFT reconfigures the device IN PLACE -- sources, buffers and the
+    // context survive -- but the mixer restarts, so hold _audioMutex the way
+    // SwitchOutputDevice does: the streaming pump must not upload into a device that
+    // is mid-reset.
+    std::lock_guard<std::recursive_mutex> lk(_audioMutex);
+    const ALCint want = _hrtfMode == HrtfMode::On    ? ALC_TRUE
+                        : _hrtfMode == HrtfMode::Off ? ALC_FALSE
+                                                     : ALC_DONT_CARE_SOFT;
+    const ALCint attrs[] = {ALC_HRTF_SOFT, want, 0};
+    ALCdevice* device = static_cast<ALCdevice*>(_device);
+    auto reset = reinterpret_cast<LPALCRESETDEVICESOFT>(_alcResetDeviceSOFT);
+    if (reset(device, attrs) == ALC_FALSE)
+    {
+        LOG_WARN(Audio, "HRTF: alcResetDeviceSOFT refused mode {}", int(_hrtfMode));
+        return false;
+    }
+    const HrtfStatus status = GetHrtfStatus();
+    LOG_INFO(Audio, "HRTF: mode {} applied, now {} ({})",
+             _hrtfMode == HrtfMode::On ? "On" : (_hrtfMode == HrtfMode::Off ? "Off" : "Auto"),
+             status.active ? "ACTIVE" : "inactive",
+             status.specifier.empty() ? "no dataset" : status.specifier.c_str());
+    return true;
+}
+
+bool SoundSystemOAL::SetHrtfMode(HrtfMode mode)
+{
+    _hrtfMode = mode;
+    return ApplyHrtfMode();
+}
+
+IAudioSystem::HrtfStatus SoundSystemOAL::GetHrtfStatus() const
+{
+    HrtfStatus status;
+    status.supported = _canHrtf;
+    if (!_canHrtf || !_device)
+        return status;
+    ALCdevice* device = static_cast<ALCdevice*>(_device);
+    ALCint active = ALC_FALSE;
+    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &active);
+    status.active = active == ALC_TRUE;
+    if (status.active)
+    {
+        const char* name = alcGetString(device, ALC_HRTF_SPECIFIER_SOFT);
+        if (name)
+            status.specifier = name;
+    }
+    return status;
+}
+
 void SoundSystemOAL::LoadConfig()
 {
     const std::string path = AudioConfigPath();
@@ -702,6 +788,9 @@ void SoundSystemOAL::LoadConfig()
     SetSpeechVolume(cfg.speechVolume / 10.0f);
     if (cfg.eaxEnabled && _canEAX)
         EnableEAX(true);
+    _hrtfMode = static_cast<HrtfMode>(std::clamp(cfg.hrtfMode, 0, 2));
+    if (_canHrtf)
+        ApplyHrtfMode();
 
     if (!cfg.outputDevice.empty())
         SwitchOutputDevice(cfg.outputDevice.c_str());
@@ -724,6 +813,7 @@ void SoundSystemOAL::SaveConfig()
     cfg.effectsVolume = (int)(GetWaveVolume() * 10.0f + 0.5f);
     cfg.speechVolume = (int)(GetSpeechVolume() * 10.0f + 0.5f);
     cfg.eaxEnabled = _eaxEnabled;
+    cfg.hrtfMode = static_cast<int>(_hrtfMode);
     cfg.outputDevice = _selectedDevice;
     cfg.inputDevice = _selectedInputDevice;
 
@@ -860,6 +950,11 @@ bool SoundSystemOAL::SwitchOutputDevice(const char* name)
 
     // EAX availability tracks the new device.
     _canEAX = alcIsExtensionPresent(static_cast<ALCdevice*>(_device), "ALC_EXT_EFX") == ALC_TRUE;
+    // HRTF capability and the reset entry point track the new device too; re-apply
+    // the persisted mode so a forced On/Off follows the user across devices.
+    ProbeHrtf();
+    if (_canHrtf)
+        ApplyHrtfMode();
 
     alDistanceModel(AL_INVERSE_DISTANCE_CLAMPED);
     alDopplerFactor(1.0f);

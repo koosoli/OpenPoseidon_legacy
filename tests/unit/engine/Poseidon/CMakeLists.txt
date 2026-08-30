@@ -333,6 +333,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Audio/test_wave_file.cpp
     Audio/test_wss_loader.cpp
     Audio/test_audio_init.cpp
+    Audio/test_hrtf_mode.cpp
     Audio/test_volume_pipeline.cpp
     Audio/test_audio_math.cpp
     Audio/test_dx8_reference.cpp

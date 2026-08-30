@@ -57,6 +57,7 @@ namespace OpenALRuntime
     X(alcCreateContext)                                                                                                 \
     X(alcDestroyContext)                                                                                                \
     X(alcGetIntegerv)                                                                                                   \
+    X(alcGetProcAddress)                                                                                                \
     X(alcGetString)                                                                                                     \
     X(alcIsExtensionPresent)                                                                                            \
     X(alcMakeContextCurrent)                                                                                            \
@@ -260,6 +261,7 @@ inline const Api& GetApi()
 #define alcCreateContext OpenALRuntime::GetApi().alcCreateContext
 #define alcDestroyContext OpenALRuntime::GetApi().alcDestroyContext
 #define alcGetIntegerv OpenALRuntime::GetApi().alcGetIntegerv
+#define alcGetProcAddress OpenALRuntime::GetApi().alcGetProcAddress
 #define alcGetString OpenALRuntime::GetApi().alcGetString
 #define alcIsExtensionPresent OpenALRuntime::GetApi().alcIsExtensionPresent
 #define alcMakeContextCurrent OpenALRuntime::GetApi().alcMakeContextCurrent

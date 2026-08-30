@@ -44,6 +44,14 @@ bool AudioConfig::Normalize(const Environment& env)
     clampField(effectsVolume);
     clampField(speechVolume);
 
+    // 0=Off 1=Auto 2=On (IAudioSystem::HrtfMode). Out-of-range means a hand-edited
+    // file; fall back to Auto, the mode that defers to the device.
+    if (hrtfMode < 0 || hrtfMode > 2)
+    {
+        hrtfMode = 1;
+        changed = true;
+    }
+
     // Device fields: empty string is always valid (system default).
     // A non-empty value must appear in the live device list.
     if (!outputDevice.empty() && !DeviceListed(outputDevice, env.ListOutputDevices()))
@@ -77,6 +85,8 @@ bool AudioConfig::Load(const std::string& path)
         speechVolume = (int)*e;
     if (auto* e = cfg.FindEntry("eaxEnabled"))
         eaxEnabled = (bool)*e;
+    if (auto* e = cfg.FindEntry("hrtfMode"))
+        hrtfMode = (int)*e;
     if (auto* e = cfg.FindEntry("outputDevice"))
         outputDevice = ((RString)*e).Data();
     if (auto* e = cfg.FindEntry("inputDevice"))
@@ -92,6 +102,7 @@ bool AudioConfig::Save(const std::string& path) const
     cfg.Add("effectsVolume", effectsVolume);
     cfg.Add("speechVolume", speechVolume);
     cfg.Add("eaxEnabled", eaxEnabled);
+    cfg.Add("hrtfMode", hrtfMode);
     cfg.Add("outputDevice", RString(outputDevice.c_str()));
     cfg.Add("inputDevice", RString(inputDevice.c_str()));
 

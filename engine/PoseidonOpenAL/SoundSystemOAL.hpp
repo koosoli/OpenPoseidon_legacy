@@ -53,6 +53,19 @@ class SoundSystemOAL : public IAudioSystem
     float _cdVolume = 5.0f;
     bool _hwAccel = false;
 
+    // HRTF (ALC_SOFT_HRTF, roadmap Phase 1.4). `_alcResetDeviceSOFT` is resolved per
+    // DEVICE via alcGetProcAddress and re-resolved on every device switch -- a SOFT
+    // entry point from one device is not guaranteed valid on another. Applying a mode
+    // uses alcResetDeviceSOFT, which reconfigures the device IN PLACE: no context
+    // rebuild, no wave unload, so the delicate SwitchOutputDevice sequence stays
+    // untouched. Unsupported devices keep _canHrtf false and SetHrtfMode returns
+    // false without touching anything.
+    HrtfMode _hrtfMode = HrtfMode::Auto;
+    bool _canHrtf = false;
+    void* _alcResetDeviceSOFT = nullptr;
+    void ProbeHrtf();          // sets _canHrtf + resolves the reset entry point
+    bool ApplyHrtfMode();      // pushes _hrtfMode to the device; logs the outcome
+
     // EAX/EFX state (DX8 parity: soundDX8.hpp:349-351,374-375)
     bool _eaxEnabled = false;
     bool _canEAX = false;
@@ -186,6 +199,10 @@ class SoundSystemOAL : public IAudioSystem
     AudioCounters GetCounters() const override;
     void SetVoiceBudgetCounters(int evictedThisFrame, int pausedThisFrame) override;
     void FlushBank(QFBank*) override {}
+
+    bool SetHrtfMode(HrtfMode mode) override;
+    HrtfMode GetHrtfMode() const override { return _hrtfMode; }
+    HrtfStatus GetHrtfStatus() const override;
 
     bool EnableHWAccel(bool v) override;
     bool EnableEAX(bool val) override;
