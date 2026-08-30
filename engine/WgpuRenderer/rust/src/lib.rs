@@ -632,6 +632,10 @@ pub struct Renderer {
     // FSR 1 backend switches (live; env-seeded). Sharpness in RCAS stops.
     fsr_runtime_on: bool,
     fsr_sharpness: f32,
+    // Optional RCAS pass over the DLSS output (NVIDIA removed DLSS's own sharpening;
+    // this is the standard external answer). Uses fsr_sharpness for strength.
+    dlss_sharpen: bool,
+    rcas_sharpener: upscaler::RcasSharpener,
     // Which backend produced the last upscaled frame (ffi::WgrTemporalInfo values).
     last_upscaler: u32,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
@@ -1519,6 +1523,10 @@ impl Renderer {
                 .unwrap_or(false),
             dlss_active_frame: false,
             dlss_last_quality: -1,
+            dlss_sharpen: std::env::var("WGR_DLSS_SHARPEN")
+                .map(|v| v != "0")
+                .unwrap_or(false),
+            rcas_sharpener: upscaler::RcasSharpener::new(),
             fsr_runtime_on: std::env::var("WGR_FSR").map(|v| v != "0").unwrap_or(true),
             fsr_sharpness: std::env::var("WGR_FSR_SHARPNESS")
                 .ok()
@@ -2184,6 +2192,21 @@ impl Renderer {
             if let Some(("DLSS", q)) = winner {
                 self.dlss_active_frame = true;
                 self.dlss_last_quality = q;
+                if self.dlss_sharpen {
+                    let (tex, view) = self
+                        .hdr_upscaled
+                        .as_ref()
+                        .map(|(t, v)| (t.clone(), v.clone()))
+                        .expect("DLSS ran, so the upscale target exists");
+                    self.rcas_sharpener.sharpen(
+                        &self.device,
+                        &self.queue,
+                        encoder,
+                        &tex,
+                        &view,
+                        self.fsr_sharpness,
+                    );
+                }
             }
             self.last_upscaler = match winner {
                 Some(("DLSS", _)) => 1,
@@ -2319,6 +2342,7 @@ impl Renderer {
         self.dlss_mv_render_space = t.flags & 4 != 0;
         self.dlss_mv_flip = t.flags & 8 != 0;
         self.fsr_runtime_on = t.flags & 16 != 0;
+        self.dlss_sharpen = t.flags & 32 != 0;
         self.fsr_sharpness = t.fsr_sharpness.clamp(0.0, 2.0);
     }
 
@@ -2500,10 +2524,12 @@ impl Renderer {
                 dimension: wgpu::TextureDimension::D2,
                 format: HDR_FORMAT,
                 // STORAGE: DLSS writes its output as a storage image (REN-TEMP-001M);
-                // harmless on the plain bilinear path.
+                // COPY_SRC: the optional RCAS sharpen pass copies it aside first.
+                // Both harmless on the plain bilinear path.
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::STORAGE_BINDING,
+                    | wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
                 view_formats: &[],
             });
             let v = t.create_view(&wgpu::TextureViewDescriptor::default());

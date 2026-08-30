@@ -6168,7 +6168,8 @@ void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
     w.reactive_sky = std::clamp(t.reactiveSky, 0.0f, 1.0f);
     w.reactive_water = std::clamp(t.reactiveWater, 0.0f, 1.0f);
     w.flags = (t.dlssAutoExposure ? 1u : 0u) | (t.jitterYFlip ? 2u : 0u) |
-              (t.mvRenderSpace ? 4u : 0u) | (t.mvFlip ? 8u : 0u) | (t.fsrOn ? 16u : 0u);
+              (t.mvRenderSpace ? 4u : 0u) | (t.mvFlip ? 8u : 0u) | (t.fsrOn ? 16u : 0u) |
+              (t.dlssSharpen ? 32u : 0u);
     w.fsr_sharpness = std::clamp(t.fsrSharpness, 0.0f, 2.0f);
     wgr_set_temporal_tuning(_renderer, &w);
 }

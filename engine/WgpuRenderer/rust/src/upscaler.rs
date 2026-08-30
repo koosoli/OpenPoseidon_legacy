@@ -368,6 +368,179 @@ impl TemporalUpscaler for FsrUpscaler {
 }
 
 // ---------------------------------------------------------------------------------
+// Standalone RCAS sharpener — the post-DLSS "sharpness" pass (NVIDIA removed DLSS's
+// own sharpening in 2.5, the industry answer is an external CAS/RCAS pass). Copies
+// the upscaled HDR target aside, then RCAS-sharpens it back in place through the
+// SRTM domain wrapper (fsr1.wgsl `rcas_hdr`).
+
+pub struct RcasSharpener {
+    pipeline: Option<(wgpu::ComputePipeline, wgpu::BindGroupLayout, wgpu::Buffer, wgpu::Sampler)>,
+    scratch: Option<(wgpu::Texture, wgpu::TextureView)>,
+}
+
+impl RcasSharpener {
+    pub fn new() -> Self {
+        RcasSharpener {
+            pipeline: None,
+            scratch: None,
+        }
+    }
+
+    pub fn sharpen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target_tex: &wgpu::Texture,
+        target_view: &wgpu::TextureView,
+        sharpness_stops: f32,
+    ) {
+        let size = (target_tex.width(), target_tex.height());
+        if self
+            .scratch
+            .as_ref()
+            .map(|(t, _)| (t.width(), t.height()) != size)
+            .unwrap_or(true)
+        {
+            let t = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_rcas_scratch"),
+                size: wgpu::Extent3d {
+                    width: size.0,
+                    height: size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+            self.scratch = Some((t, v));
+        }
+        if self.pipeline.is_none() {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("wgr_rcas_sharpen"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("fsr1.wgsl").into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_rcas_sharpen"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(80),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_rcas_sharpen"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("rcas_hdr"),
+                layout: Some(&pl),
+                module: &module,
+                entry_point: Some("rcas_hdr"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
+            let params = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_rcas_sharpen_params"),
+                size: 80,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("wgr_rcas_sharpen"),
+                ..Default::default()
+            });
+            self.pipeline = Some((pipeline, layout, params, sampler));
+        }
+        let (pipeline, layout, params, sampler) = self.pipeline.as_ref().expect("built above");
+        let mut data = [0f32; 20];
+        data[16] = (-sharpness_stops.clamp(0.0, 2.0)).exp2();
+        queue.write_buffer(params, 0, bytemuck::cast_slice(&data));
+        let (scratch_tex, scratch_view) = self.scratch.as_ref().expect("ensured above");
+        encoder.copy_texture_to_texture(
+            target_tex.as_image_copy(),
+            scratch_tex.as_image_copy(),
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+        let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_rcas_sharpen"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(scratch_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(target_view),
+                },
+            ],
+        });
+        encoder.push_debug_group("wgr_rcas_sharpen");
+        {
+            let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("wgr_rcas_sharpen"),
+                timestamp_writes: None,
+            });
+            cp.set_pipeline(pipeline);
+            cp.set_bind_group(0, &bind, &[]);
+            cp.dispatch_workgroups(size.0.div_ceil(8), size.1.div_ceil(8), 1);
+        }
+        encoder.pop_debug_group();
+    }
+}
+
+// ---------------------------------------------------------------------------------
 // DLSS Super Resolution over NGX Vulkan (dlss builds only). Owns every NGX object and
 // the raw device handles; nothing NGX-shaped escapes this impl.
 

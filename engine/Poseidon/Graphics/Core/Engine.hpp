@@ -1697,7 +1697,9 @@ class Engine : public IGraphicsEngine
         // FSR 1 (EASU+RCAS): the license-clean upscaler that ships in every build;
         // active when DLSS is off/unavailable and render scale < 100 %.
         bool fsrOn = true;
-        float fsrSharpness = 0.25f; // RCAS stops: 0 = sharpest, 2 = mildest      // convention A/B arms — leave alone unless probing
+        float fsrSharpness = 0.25f; // RCAS stops: 0 = sharpest, 2 = mildest
+        // RCAS sharpen pass over the DLSS output (strength = fsrSharpness).
+        bool dlssSharpen = false;      // convention A/B arms — leave alone unless probing
         bool mvRenderSpace = false;
         bool mvFlip = false;
     };

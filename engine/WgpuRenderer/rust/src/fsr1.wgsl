@@ -231,6 +231,37 @@ fn easu(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const RCAS_LIMIT: f32 = 0.25 - (1.0 / 16.0);
 
+// Sharpen-only variant for the post-DLSS pass: the input is LINEAR HDR (not the
+// EASU intermediate), so every tap is SRTM-tonemapped on load and the result is
+// inverted on store — same maths, different domain wrapper.
+@compute @workgroup_size(8, 8)
+fn rcas_hdr(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let out_dims = textureDimensions(dst);
+    if (gid.x >= out_dims.x || gid.y >= out_dims.y) {
+        return;
+    }
+    let sp = vec2<i32>(gid.xy);
+    let dims = vec2<i32>(textureDimensions(src));
+    let cb = clamp(sp + vec2(0, -1), vec2(0), dims - 1);
+    let cd = clamp(sp + vec2(-1, 0), vec2(0), dims - 1);
+    let cf = clamp(sp + vec2(1, 0), vec2(0), dims - 1);
+    let ch = clamp(sp + vec2(0, 1), vec2(0), dims - 1);
+    let b = srtm(textureLoad(src, cb, 0).rgb);
+    let d = srtm(textureLoad(src, cd, 0).rgb);
+    let e = srtm(textureLoad(src, sp, 0).rgb);
+    let f = srtm(textureLoad(src, cf, 0).rgb);
+    let h = srtm(textureLoad(src, ch, 0).rgb);
+    let mn4 = min(min3v(b, d, f), h);
+    let mx4 = max(max3v(b, d, f), h);
+    let hit_min = mn4 / (4.0 * mx4);
+    let hit_max = (vec3(1.0) - mx4) / (4.0 * mn4 - 4.0);
+    let lobe3 = max(-hit_min, hit_max);
+    let lobe = max(-RCAS_LIMIT, min(max3(lobe3.r, lobe3.g, lobe3.b), 0.0)) * params.rcas.x;
+    let rcp_l = prx_med_rcp(4.0 * lobe + 1.0);
+    let pix = (lobe * b + lobe * d + lobe * h + lobe * f + e) * vec3(rcp_l);
+    textureStore(dst, sp, vec4(srtm_inv(pix), 1.0));
+}
+
 @compute @workgroup_size(8, 8)
 fn rcas(@builtin(global_invocation_id) gid: vec3<u32>) {
     let out_dims = textureDimensions(dst);

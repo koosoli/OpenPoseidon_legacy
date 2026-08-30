@@ -4641,18 +4641,22 @@ void DrawTemporalTab()
     Dev::PanelTooltip("Needs the NGX route (NVIDIA, detected at launch). Off/unavailable -> FSR 1 takes over.");
     changed |= Dev::Checkbox("FSR 1 (vendor-neutral upscaler)", &t.fsrOn);
     Dev::PanelTooltip("AMD FidelityFX EASU+RCAS (MIT-licensed, runs on any GPU). Active when DLSS is off.\nBoth off = soft bilinear.");
-    // The sharpness knob is an FSR-only input; greyed while another backend runs so
-    // nobody wiggles it under DLSS and concludes it is broken (owner did exactly that).
-    const bool fsrActive = info.activeUpscaler == 2;
-    if (!fsrActive)
+    changed |= Dev::Checkbox("Sharpen DLSS output (RCAS)", &t.dlssSharpen);
+    Dev::PanelTooltip("Runs the RCAS sharpener over the DLSS result (NVIDIA removed DLSS's own\n"
+                      "sharpening; an external pass is the standard answer). Strength = the slider below.");
+    // The knob feeds FSR's RCAS and the optional post-DLSS RCAS; grey it when neither
+    // consumer is live so nobody wiggles a dead slider (owner did exactly that).
+    const bool sharpnessLive = info.activeUpscaler == 2 || (info.activeUpscaler == 1 && t.dlssSharpen);
+    if (!sharpnessLive)
         ImGui::BeginDisabled();
-    changed |= Dev::SliderFloat("FSR sharpness (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
-    if (!fsrActive)
+    changed |= Dev::SliderFloat("Sharpness (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
+    if (!sharpnessLive)
     {
         ImGui::EndDisabled();
-        Dev::PanelHelp("  (inactive - FSR 1 is not the current upscaler)");
+        Dev::PanelHelp("  (inactive - needs FSR 1, or DLSS with \"Sharpen DLSS output\")");
     }
-    Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest. Only affects FSR 1.");
+    Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest.\n"
+                      "Applies to FSR 1 and, when enabled above, to the DLSS output.");
     changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
     Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
     if (ImGui::Button("Native (everything off)"))

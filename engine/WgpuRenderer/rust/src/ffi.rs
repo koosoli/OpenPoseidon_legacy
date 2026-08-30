@@ -1655,7 +1655,7 @@ pub struct WgrTemporalTuning {
     pub reactive_sky: f32,
     pub reactive_water: f32,
     // bit0 = DLSS auto-exposure, bit1 = jitter-Y flip, bit2 = MV render-space,
-    // bit3 = MV flip, bit4 = FSR1 enabled.
+    // bit3 = MV flip, bit4 = FSR1 enabled, bit5 = RCAS sharpen over DLSS output.
     pub flags: u32,
     /// RCAS sharpness in stops (0 = sharpest, 2 = mildest).
     pub fsr_sharpness: f32,
