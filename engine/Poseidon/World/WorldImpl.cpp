@@ -1146,7 +1146,17 @@ void World::PerformSound(Entity* inside, float deltaT)
     GeographyInfo geogr = GLandscape->GetGeography(x, z);
     float sy = GLandscape->SurfaceYAboveWater(pos.X(), pos.Z());
 #define SHOW_ENV 0
-    // SERoom finally has a producer (roadmap 1.4): the classifier covered forest, city,
+    // EXPERIMENTAL (POSEIDON_EXPERIMENTAL_EAX=1, default OFF): the owner's verdict on
+    // the first audible version was "klingt nicht richtig und nicht gut", so the SERoom
+    // producer below and the EFX parameter blending in SoundSystemOAL are parked behind
+    // this flag until the tuning pass happens. Off = the shipped EAX behaviour is
+    // EXACTLY the pre-2026-08-30 path: four environments, hard preset switches.
+    static const bool experimentalEax = []
+    {
+        const char* v = std::getenv("POSEIDON_EXPERIMENTAL_EAX");
+        return v != nullptr && v[0] != ' ' && v[0] != '0';
+    }();
+    // SERoom producer (roadmap 1.4): the classifier covered forest, city,
     // mountains and plain since 2001, and the fifth environment the backend ships was
     // reachable only from the Audio screen's EAX preview. IndoorRoomAt is the strict
     // test -- true only inside a building's fire-geometry room -- NOT IsSheltered, whose
@@ -1162,7 +1172,7 @@ void World::PerformSound(Entity* inside, float deltaT)
     static bool sRoomInside = false;
     static float sRoomSize = 4.0f;
     const float now = Glob.time.toFloat();
-    if (now >= sRoomNextQuery || now < sRoomNextQuery - 1.0f)
+    if (experimentalEax && (now >= sRoomNextQuery || now < sRoomNextQuery - 1.0f))
     {
         sRoomNextQuery = now + 0.25f;
         int listenerRoom = -1;

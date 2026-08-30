@@ -582,11 +582,19 @@ void SoundSystemOAL::DoSetEAXEnvironment()
     if (!ComputeEFXTarget(_eaxEnv.type, size, target))
         return;
     _efxBlend->target = target;
-    if (!_efxBlend->valid)
+    // EXPERIMENTAL (POSEIDON_EXPERIMENTAL_EAX=1, default OFF): the parameter blending is
+    // parked with the SERoom producer after the owner's "does not sound right" verdict.
+    // Off, every environment change SNAPS -- byte-for-byte the pre-2026-08-30 behaviour.
+    static const bool experimentalEax = []
     {
-        // First application since EFX came up: nothing plausible to blend FROM, and a
-        // fade-in from another preset would itself be a wrong sound. Snap, exactly the
-        // old behaviour.
+        const char* v = std::getenv("POSEIDON_EXPERIMENTAL_EAX");
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
+    }();
+    if (!experimentalEax || !_efxBlend->valid)
+    {
+        // First application since EFX came up (or blending parked): nothing plausible to
+        // blend FROM, and a fade-in from another preset would itself be a wrong sound.
+        // Snap, exactly the old behaviour.
         _efxBlend->current = target;
         _efxBlend->valid = true;
         _efxBlend->settled = true;

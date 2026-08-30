@@ -243,8 +243,12 @@ attrs = DONT_CARE). EFX: `SERoom` finally has a producer — inside a building r
 (`IndoorRoomAt` at the camera, deliberately not the cruder `IsSheltered`) with size
 from room clearance — and environment changes ease over a ~0.6 s time constant
 instead of hard-cutting (all 23 reverb parameters, settled state costs one bool per
-frame). Whether it *sounds* right on headphones is the owner's A/B; nothing gates
-on it.
+frame). The owner's A/B verdict on the EFX half was negative ("klingt nicht
+richtig und nicht gut"), so the SERoom producer and the parameter blending are
+PARKED behind `POSEIDON_EXPERIMENTAL_EAX=1` (default OFF = the pre-existing EAX
+behaviour exactly); they need a tuning pass with ears before shipping. The HRTF
+half stands -- a hardware probe showed HRTF was already auto-active on the
+owner's device before the feature, so the new modes only add control.
 
 ### 1.4 Small audio wins
 
