@@ -2638,7 +2638,10 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     const bool uploaded = UploadIfNeeded(land);
     if (camera != nullptr)
     {
-        GLandscape->UpdateModernObjectResidency(camera->Position());
+        // RenderSnapshot S4: the residency update -- a WORLD-STATE MUTATION -- no longer
+        // runs from inside the terrain draw. World::SimulateAndDraw calls it on the
+        // simulation side of the frame, which also stops object streaming from billing
+        // its CPU cost to the land:gnd phase.
         UpdateGroundTexturePages(land, *camera, uploaded);
         // The object working set is a memory policy, so its cost has to be readable in the
         // same log as its counts -- otherwise "the world loads more now" is an unpriced claim.

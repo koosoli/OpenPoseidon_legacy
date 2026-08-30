@@ -1498,6 +1498,24 @@ void World::Simulate(float deltaT, bool& enableDraw)
             color = PackedColor(Color(0.18f, 0.18f, 0.20f, 1.0f));
         if (suppressWorld)
             color = PackedColor(Color(0.0f, 0.0f, 0.0f, 1.0f));
+        // RenderSnapshot S4: the streamed-object residency update is world-state
+        // mutation and belongs on the simulation side of the frame, not inside
+        // TerrainWgpu::DrawTerrain where it lived (and billed object streaming to the
+        // land:gnd CPU phase). The gate mirrors the old call site's exact reach: only
+        // the WGPU engine ever ran it, and GetObjectStats is the existing capability
+        // probe that answers true precisely for that engine. Renderer fixed at boot,
+        // so probing once is safe.
+        if (GLandscape && GEngine)
+        {
+            static const bool modernObjectsEngine = []
+            {
+                Engine::ObjectStatsOut probe;
+                return GEngine->GetObjectStats(probe);
+            }();
+            Camera* residencyCamera = _scene.GetCamera();
+            if (modernObjectsEngine && residencyCamera)
+                GLandscape->UpdateModernObjectResidency(residencyCamera->Position());
+        }
         GEngine->InitDraw(clear, color);
     }
 

@@ -197,10 +197,10 @@ bool WriteCaptureMetrics(const std::string& path)
     // sitting at the keyboard. That is why a world can be 90% CPU-bound and have
     // every recorded capture show only GPU numbers.
     //
-    // Read the phase names, not the indices: object streaming currently bills to
-    // `land:gnd` (UpdateModernObjectResidency is called from TerrainWgpu::DrawTerrain,
-    // inside the terrain phase), so a large `land:gnd` on a heavy world is object
-    // work, not terrain work.
+    // Read the phase names, not the indices. (Object streaming used to bill to
+    // `land:gnd` because UpdateModernObjectResidency ran inside TerrainWgpu::DrawTerrain;
+    // since RenderSnapshot S4 it runs pre-draw in World::SimulateAndDraw, so its cost
+    // lands ahead of the draw phases instead of inside the terrain one.)
     {
         const Poseidon::Dev::FrameProfiler& profiler = Poseidon::Dev::GFrameProfiler();
         if (profiler.FrameCount() > 0)
