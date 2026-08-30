@@ -319,6 +319,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Terrain/test_terrain_surface_catalog.cpp
     World/test_terrain_gpu_interp.cpp
     World/test_terrain_cdlod.cpp
+    World/test_object_animated_bounds.cpp
     World/test_landscape_object_ids.cpp
     World/test_occlusion_contour.cpp
     World/test_occlusion_sphere_edge.cpp
@@ -460,6 +461,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Network/test_wire_format.cpp
     Network/test_transport_io.cpp
     Network/test_encoded_matrix3.cpp
+    Network/test_rot8b.cpp
     Network/test_chat_utf8_wire.cpp
     Network/Legacy/test_network_channel.cpp
     Network/Legacy/test_network_message.cpp
