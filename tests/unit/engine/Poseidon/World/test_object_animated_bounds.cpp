@@ -22,6 +22,15 @@ class CountingObject : public ObjectPlain
   public:
     CountingObject(LODShapeWithShadow* shape, int id) : ObjectPlain(shape, id) {}
 
+    // ObjectPlain uses the class-keyed fixed-slot fast allocator
+    // (DEFINE_FAST_ALLOCATOR(ObjectPlain), slot = sizeof(ObjectPlain)); this subclass is
+    // LARGER, and inheriting that operator new writes _animateCalls past the slot --
+    // freelist corruption that SEGVed the NEXT test to allocate an ObjectPlain (found
+    // the hard way: suite crashed in test_landscape_object_ids). Same rule the header
+    // states for ObjectColored subclasses. Plain heap for the test double.
+    static void* operator new(size_t size) { return ::operator new(size); }
+    static void operator delete(void* p) { ::operator delete(p); }
+
     void Animate(int level) override
     {
         ++_animateCalls;
