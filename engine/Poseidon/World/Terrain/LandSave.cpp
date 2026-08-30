@@ -3544,6 +3544,8 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 _modernObjectColdMeshCreateMs += admitProfile.meshCreateMs;
                 _modernObjectColdSectionMs += admitProfile.sectionMs;
                 _modernObjectColdModelFfiMs += admitProfile.modelRegisterMs;
+                _modernObjectColdTexHeaderMs += admitProfile.texHeaderLoadMs;
+                _modernObjectColdTexHeaderLoads += admitProfile.texHeaderLoads;
                 _modernObjectColdTexReadMs += admitProfile.textureReadMs;
                 _modernObjectColdTexCreateMs += admitProfile.textureCreateMs;
                 _modernObjectColdTexFallbackMs += admitProfile.textureFallbackMs;
@@ -3574,14 +3576,15 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                          "Object stream cold model: {} mode={} parse={:.1f} adapt={:.1f} opt={:.1f} create={:.1f} "
                          "[reg={:.1f} mesh={:.1f} sect={:.1f} tex={:.1f} (read={:.1f} create={:.1f} fb={:.1f} "
                          "alpha={:.1f} up={} prep={}) ffi={:.1f} prox={:.1f} other={:.1f} park={}] "
-                         "total={:.1f} ms{}",
+                         "texhdr={:.1f}/{} total={:.1f} ms{}",
                          (const char*)modelName, timing.preparsed ? "async" : (asyncOn ? "sync-fallback" : "sync"),
                          timing.parseMs, timing.adaptMs, timing.optimizeMs, createMs, admitProfile.registerMs,
                          meshMs, sectOnlyMs, texMs, admitProfile.textureReadMs, admitProfile.textureCreateMs,
                          admitProfile.textureFallbackMs, admitProfile.alphaScanMs, admitProfile.textureUploads,
                          admitProfile.texturePrepared, admitProfile.modelRegisterMs, admitProfile.proxiesMs,
                          otherMs,
-                         admitProfile.parkHits ? "hit" : (admitProfile.parkStale ? "stale" : "miss"), totalMs,
+                         admitProfile.parkHits ? "hit" : (admitProfile.parkStale ? "stale" : "miss"),
+                         admitProfile.texHeaderLoadMs, admitProfile.texHeaderLoads, totalMs,
                          timing.canonical ? "" : " (legacy loader)");
             }
             else
@@ -3731,6 +3734,8 @@ void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCou
     out.coldAdaptMs = _modernObjectColdAdaptMs;
     out.coldOptimizeMs = _modernObjectColdOptimizeMs;
     out.coldCreateMs = _modernObjectColdCreateMs;
+    out.coldTexHeaderMs = _modernObjectColdTexHeaderMs;
+    out.coldTexHeaderLoads = _modernObjectColdTexHeaderLoads;
     out.coldTexReadMs = _modernObjectColdTexReadMs;
     out.coldTexCreateMs = _modernObjectColdTexCreateMs;
     out.coldTexFallbackMs = _modernObjectColdTexFallbackMs;

@@ -735,6 +735,8 @@ class Landscape : public SerializeClass
     double _modernObjectColdMeshCreateMs = 0.0;
     double _modernObjectColdSectionMs = 0.0;
     double _modernObjectColdModelFfiMs = 0.0;
+    double _modernObjectColdTexHeaderMs = 0.0; // TextureBankWgpu::Load misses: header opens via GFileServer
+    uint64_t _modernObjectColdTexHeaderLoads = 0;
     double _modernObjectColdTexReadMs = 0.0;
     double _modernObjectColdTexCreateMs = 0.0;
     double _modernObjectColdTexFallbackMs = 0.0;

@@ -1,8 +1,11 @@
 #include "TextureBankWgpu.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <cstdlib>
+
+#include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
@@ -174,7 +177,23 @@ Ref<Texture> TextureBankWgpu::Load(RStringB name)
     // verbatim, so the two share one interned buffer, and this cannot drift if that
     // ever stops being true.
     _textureByName.emplace(texture->GetName(), iFree);
-    texture->Init();
+    // Admission attribution: Init() opens the file through GFileServer to parse the PAA
+    // header. Timed only while an admit scope is open (one bool load otherwise), because
+    // whether a cold model's `adapt` milliseconds are these opens or geometry work is the
+    // question the split exists to answer.
+    render::ObjectAdmitProfile& admit = render::GObjectAdmitProfile;
+    if (admit.active)
+    {
+        const auto began = std::chrono::steady_clock::now();
+        texture->Init();
+        admit.texHeaderLoadMs +=
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+        ++admit.texHeaderLoads;
+    }
+    else
+    {
+        texture->Init();
+    }
     return texture;
 }
 

@@ -317,6 +317,8 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(res, "cold_adapt_ms", r.coldAdaptMs);
             cJSON_AddNumberToObject(res, "cold_optimize_ms", r.coldOptimizeMs);
             cJSON_AddNumberToObject(res, "cold_create_ms", r.coldCreateMs);
+            cJSON_AddNumberToObject(res, "cold_tex_header_ms", r.coldTexHeaderMs);
+            cJSON_AddNumberToObject(res, "cold_tex_header_loads", (double)r.coldTexHeaderLoads);
             cJSON_AddNumberToObject(res, "cold_tex_read_ms", r.coldTexReadMs);
             cJSON_AddNumberToObject(res, "cold_tex_create_ms", r.coldTexCreateMs);
             cJSON_AddNumberToObject(res, "cold_tex_fallback_ms", r.coldTexFallbackMs);

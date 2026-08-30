@@ -44,6 +44,15 @@ struct ObjectAdmitProfile
     double modelRegisterMs = 0.0; // wgr_model_register FFI
     // Inside the section loop, from TextureWgpu (real uploads only; the resident fast path
     // costs nothing here):
+    // TextureBankWgpu::Load misses during the admission, at ANY point (the adapter's face
+    // texture resolution AND the section loop's material stages): each is a TextureWgpu
+    // allocation + Init(), and Init opens the file through GFileServer to parse the PAA
+    // header/mip table. With the mip-chain READS now worker-prepared, this header open is
+    // the file-server touch left on the admission path -- and whether the church-sized
+    // `adapt` numbers are these opens or real geometry work is exactly what this bucket
+    // answers.
+    double texHeaderLoadMs = 0.0;
+    uint32_t texHeaderLoads = 0;
     double textureReadMs = 0.0;     // ITextureSource::GetMipmapChain (file open + read + LZO)
     double textureCreateMs = 0.0;   // wgr_texture_create (staging copy + write_texture)
     double textureFallbackMs = 0.0; // whole-file RGBA8 decode path (non-block formats)

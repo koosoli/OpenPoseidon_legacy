@@ -110,6 +110,8 @@ struct ObjectStreamResidencyCounters
     double coldAdaptMs = 0.0;
     double coldOptimizeMs = 0.0;
     double coldCreateMs = 0.0;
+    double coldTexHeaderMs = 0.0; // header opens (TextureBankWgpu::Load misses) during admission
+    uint64_t coldTexHeaderLoads = 0;
     double coldTexReadMs = 0.0;
     double coldTexCreateMs = 0.0;
     double coldTexFallbackMs = 0.0;

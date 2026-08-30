@@ -139,6 +139,7 @@ void DrawStreamingTab()
             r.coldOptimizeMs, r.coldCreateMs);
         Row("cold tex read/create/fb/alpha", "%.0f / %.0f / %.0f / %.0f ms", r.coldTexReadMs, r.coldTexCreateMs,
             r.coldTexFallbackMs, r.coldAlphaMs);
+        Row("cold tex header opens", "%llu, %.0f ms", (unsigned long long)r.coldTexHeaderLoads, r.coldTexHeaderMs);
         Row("cold tex uploads", "%llu (%llu from workers)", (unsigned long long)r.coldTexUploads,
             (unsigned long long)r.coldTexPrepared);
         Row("model park hits / stale", "%llu / %llu", (unsigned long long)r.parkHits,
