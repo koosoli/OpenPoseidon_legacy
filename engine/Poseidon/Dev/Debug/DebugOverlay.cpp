@@ -45,6 +45,7 @@
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
+#include <Poseidon/Dev/Diag/StreamingTab.hpp>
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
@@ -6356,6 +6357,12 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Perf"))
         {
             DrawPerfTab();
+            ImGui::EndTabItem();
+        }
+        // Body in StreamingTab.cpp, same arrangement as Ballistics/Weather.
+        if (Dev::PanelTabItem("Streaming"))
+        {
+            Poseidon::Dev::DrawStreamingTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Font"))

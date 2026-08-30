@@ -42,6 +42,7 @@ extern void SDLGamepad_PlayRamp(float beg, float end, float dur);
 #include <Poseidon/Dev/Debug/DebugCheats.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 
 #include <Poseidon/Dev/Diag/DiagModes.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
@@ -1854,6 +1855,8 @@ void World::Simulate(float deltaT, bool& enableDraw)
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
     Poseidon::gPerfDrawCalls = 0;
+    // Streaming gauges as Perfetto counter tracks; a no-op unless --perf-trace is active.
+    Dev::PushStreamingTraceCounters();
 
 #if _ENABLE_CHEATS
 #ifndef _DEBUG

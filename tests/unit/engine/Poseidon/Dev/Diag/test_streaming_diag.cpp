@@ -1,0 +1,72 @@
+// Streaming observability: the shared counters actually reach the snapshot both consumers
+// read, and the cold-model preparer's request->residency latency is really measured.
+//
+// The second test drives a REAL ObjectStreamPreparer over a fixture model rather than
+// poking counters directly, because the latency fields are written inside the worker /
+// Take() paths -- a test that bypassed them would pass with the stamps never taken.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>
+#include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+
+#include "../../test_fixtures.hpp"
+
+#include <chrono>
+#include <string>
+#include <thread>
+
+TEST_CASE("StreamingDiag: texture counters round-trip into the snapshot", "[streaming][diag]")
+{
+    Poseidon::Dev::TextureStreamCounters& c = Poseidon::Dev::GTextureStreamCounters();
+    const uint64_t uploadsBefore = c.uploads.load(std::memory_order_relaxed);
+    const uint64_t readBefore = c.readUs.load(std::memory_order_relaxed);
+
+    c.uploads.fetch_add(3, std::memory_order_relaxed);
+    c.readUs.fetch_add(1500, std::memory_order_relaxed);
+
+    const Poseidon::Dev::StreamingSnapshot s = Poseidon::Dev::CollectStreamingSnapshot();
+    CHECK(s.tex.uploads == uploadsBefore + 3);
+    CHECK(s.tex.readUs == readBefore + 1500);
+    // No world in a unit test: the residency section must say so rather than emit zeros.
+    CHECK_FALSE(s.residency.valid);
+}
+
+TEST_CASE("ObjectStreamPreparer: request->ready and request->taken latency are recorded",
+          "[streaming][diag][preparer]")
+{
+    if (!Poseidon::ObjectStreamPreparer::AsyncEnabled())
+    {
+        SKIP("WGR_OBJECT_STREAM_ASYNC=0 in this environment");
+    }
+
+    Poseidon::ObjectStreamPreparer preparer;
+    const std::string path = TestFixtures::GetTestFixturePath("p3d/complex_vehicle.p3d");
+    preparer.Reset(&path, 1);
+    REQUIRE(preparer.Running());
+    REQUIRE(preparer.Request(0));
+
+    // The worker parses a small fixture in well under a second; poll rather than sleep a
+    // fixed time so the test is fast on a warm machine and tolerant on a loaded one.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (preparer.Query(0) != Poseidon::ObjectStreamPreparer::State::Ready)
+    {
+        REQUIRE(std::chrono::steady_clock::now() < deadline);
+        REQUIRE(preparer.Query(0) != Poseidon::ObjectStreamPreparer::State::Failed);
+        REQUIRE(preparer.Query(0) != Poseidon::ObjectStreamPreparer::State::NotLoose);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    auto model = preparer.Take(0);
+    REQUIRE(model != nullptr);
+
+    const Poseidon::ObjectStreamPreparer::Stats stats = preparer.SnapshotStats();
+    CHECK(stats.requested == 1);
+    CHECK(stats.prepared == 1);
+    CHECK(stats.taken == 1);
+    CHECK(stats.readyLatencyUsTotal > 0);
+    CHECK(stats.readyLatencyUsMax >= stats.readyLatencyUsTotal / stats.prepared);
+    // Take happens after Ready, so its latency can never be the smaller one.
+    CHECK(stats.takeLatencyUsTotal >= stats.readyLatencyUsTotal);
+    CHECK(stats.takeLatencyUsMax >= stats.readyLatencyUsMax);
+}

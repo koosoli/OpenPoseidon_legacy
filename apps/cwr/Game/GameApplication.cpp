@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 #include "GameApplication.hpp"
 #include <Poseidon/Foundation/Platform/InitBridge.hpp>
@@ -223,6 +224,103 @@ bool WriteCaptureMetrics(const std::string& path)
                 cJSON_AddNumberToObject(entry, "p95", s.p95Ms);
                 cJSON_AddNumberToObject(entry, "max", s.maxMs);
             }
+        }
+    }
+
+    // Streaming/asset counters (roadmap Phase 3): the texture-upload split, the
+    // worker->main prepared-texture store, the cold-model preparer and the residency
+    // system's admission counters. All cumulative since world load (texture rows: since
+    // process start) -- these attribute the whole fill-in, not one frame. Sourced from the
+    // same CollectStreamingSnapshot the dev panel's Streaming tab reads, so the two
+    // surfaces cannot disagree.
+    {
+        const Poseidon::Dev::StreamingSnapshot s = Poseidon::Dev::CollectStreamingSnapshot();
+        cJSON* streaming = cJSON_AddObjectToObject(root, "streaming");
+        cJSON* tex = cJSON_AddObjectToObject(streaming, "texture");
+        cJSON_AddNumberToObject(tex, "uploads", (double)s.tex.uploads);
+        cJSON_AddNumberToObject(tex, "prepared_hits", (double)s.tex.preparedHits);
+        cJSON_AddNumberToObject(tex, "block_mb", s.tex.blockBytes / (1024.0 * 1024.0));
+        cJSON_AddNumberToObject(tex, "read_ms", s.tex.readUs / 1000.0);
+        cJSON_AddNumberToObject(tex, "create_ms", s.tex.createUs / 1000.0);
+        cJSON_AddNumberToObject(tex, "fallbacks", (double)s.tex.fallbacks);
+        cJSON_AddNumberToObject(tex, "fallback_ms", s.tex.fallbackUs / 1000.0);
+        cJSON_AddNumberToObject(tex, "alpha_scans", (double)s.tex.alphaScans);
+        cJSON_AddNumberToObject(tex, "alpha_ms", s.tex.alphaUs / 1000.0);
+        cJSON* store = cJSON_AddObjectToObject(streaming, "prepared_store");
+        cJSON_AddNumberToObject(store, "puts", (double)s.store.puts);
+        cJSON_AddNumberToObject(store, "put_mb", s.store.putBytes / (1024.0 * 1024.0));
+        cJSON_AddNumberToObject(store, "takes", (double)s.store.takes);
+        cJSON_AddNumberToObject(store, "misses", (double)s.store.misses);
+        cJSON_AddNumberToObject(store, "rejected_dup", (double)s.store.rejectedDup);
+        cJSON_AddNumberToObject(store, "rejected_full", (double)s.store.rejectedFull);
+        cJSON_AddNumberToObject(store, "expired", (double)s.store.expired);
+        cJSON_AddNumberToObject(store, "entries", (double)s.store.entries);
+        cJSON_AddNumberToObject(store, "mb", s.store.bytes / (1024.0 * 1024.0));
+        cJSON* prep = cJSON_AddObjectToObject(streaming, "preparer");
+        cJSON_AddBoolToObject(prep, "valid", s.residency.prepValid);
+        if (s.residency.prepValid)
+        {
+            const auto& p = s.residency.prep;
+            cJSON_AddNumberToObject(prep, "workers", p.workers);
+            cJSON_AddNumberToObject(prep, "requested", (double)p.requested);
+            cJSON_AddNumberToObject(prep, "rejected_full", (double)p.rejectedFull);
+            cJSON_AddNumberToObject(prep, "prepared", (double)p.prepared);
+            cJSON_AddNumberToObject(prep, "taken", (double)p.taken);
+            cJSON_AddNumberToObject(prep, "not_loose", (double)p.notLoose);
+            cJSON_AddNumberToObject(prep, "failed", (double)p.failed);
+            cJSON_AddNumberToObject(prep, "dropped", (double)p.dropped);
+            cJSON_AddNumberToObject(prep, "queued", (double)p.queued);
+            cJSON_AddNumberToObject(prep, "ready", (double)p.ready);
+            cJSON_AddNumberToObject(prep, "worker_ms", p.workerMs);
+            cJSON_AddNumberToObject(prep, "worker_max_ms", p.workerMaxMs);
+            // Request->ready / request->installed wall time: the "time from request to
+            // residency" figure for the one asset path that is asynchronous today.
+            if (p.prepared > 0)
+            {
+                cJSON_AddNumberToObject(prep, "ready_latency_avg_ms",
+                                        p.readyLatencyUsTotal / 1000.0 / (double)p.prepared);
+                cJSON_AddNumberToObject(prep, "ready_latency_max_ms", p.readyLatencyUsMax / 1000.0);
+            }
+            if (p.taken > 0)
+            {
+                cJSON_AddNumberToObject(prep, "take_latency_avg_ms",
+                                        p.takeLatencyUsTotal / 1000.0 / (double)p.taken);
+                cJSON_AddNumberToObject(prep, "take_latency_max_ms", p.takeLatencyUsMax / 1000.0);
+            }
+            cJSON_AddNumberToObject(prep, "tex_prepared", (double)p.texPrepared);
+            cJSON_AddNumberToObject(prep, "tex_prepared_mb", p.texPreparedBytes / (1024.0 * 1024.0));
+            cJSON_AddNumberToObject(prep, "tex_skipped", (double)p.texSkipped);
+            cJSON_AddNumberToObject(prep, "tex_unreadable", (double)p.texUnreadable);
+            cJSON_AddNumberToObject(prep, "tex_ms", p.texMs);
+        }
+        cJSON* res = cJSON_AddObjectToObject(streaming, "residency");
+        cJSON_AddBoolToObject(res, "valid", s.residency.valid);
+        if (s.residency.valid)
+        {
+            const auto& r = s.residency;
+            cJSON_AddNumberToObject(res, "resident", (double)r.residentObjects);
+            cJSON_AddNumberToObject(res, "budget", (double)r.budget);
+            cJSON_AddNumberToObject(res, "shape_cache_held", (double)r.shapeCacheSize);
+            cJSON_AddNumberToObject(res, "shape_cache_limit", (double)r.shapeCacheLimit);
+            cJSON_AddNumberToObject(res, "shape_cache_hits", (double)r.shapeCacheHits);
+            cJSON_AddNumberToObject(res, "shape_cache_inserts", (double)r.shapeCacheInserts);
+            cJSON_AddNumberToObject(res, "shape_cache_drops", (double)r.shapeCacheDrops);
+            cJSON_AddNumberToObject(res, "admits_async", (double)r.asyncInstalled);
+            cJSON_AddNumberToObject(res, "admits_waited", (double)r.asyncWaited);
+            cJSON_AddNumberToObject(res, "admits_sync_cold", (double)r.syncCold);
+            cJSON_AddNumberToObject(res, "cold_models", (double)r.coldModels);
+            cJSON_AddNumberToObject(res, "cold_parse_ms", r.coldParseMs);
+            cJSON_AddNumberToObject(res, "cold_adapt_ms", r.coldAdaptMs);
+            cJSON_AddNumberToObject(res, "cold_optimize_ms", r.coldOptimizeMs);
+            cJSON_AddNumberToObject(res, "cold_create_ms", r.coldCreateMs);
+            cJSON_AddNumberToObject(res, "cold_tex_read_ms", r.coldTexReadMs);
+            cJSON_AddNumberToObject(res, "cold_tex_create_ms", r.coldTexCreateMs);
+            cJSON_AddNumberToObject(res, "cold_tex_fallback_ms", r.coldTexFallbackMs);
+            cJSON_AddNumberToObject(res, "cold_alpha_ms", r.coldAlphaMs);
+            cJSON_AddNumberToObject(res, "cold_tex_uploads", (double)r.coldTexUploads);
+            cJSON_AddNumberToObject(res, "cold_tex_prepared", (double)r.coldTexPrepared);
+            cJSON_AddNumberToObject(res, "park_hits", (double)r.parkHits);
+            cJSON_AddNumberToObject(res, "park_stale", (double)r.parkStale);
         }
     }
 

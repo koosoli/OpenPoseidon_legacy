@@ -110,6 +110,16 @@ struct ObjectStreamPreparer::Impl
     std::vector<ModelPtr> models;
     std::deque<uint32_t> queue;
     Stats stats;
+    // Per model index: when Request() enqueued it, for the request->ready / request->taken
+    // latency figures. Written under the mutex; a DropStale->re-Request simply restamps.
+    std::vector<uint64_t> requestedAtUs;
+
+    static uint64_t NowUs()
+    {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch())
+                                         .count());
+    }
 
     State Get(uint32_t index) const
     {
@@ -280,6 +290,12 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             Set(index, State::Ready);
             ++stats.prepared;
             ++stats.ready;
+            if (index < requestedAtUs.size() && requestedAtUs[index] != 0)
+            {
+                const uint64_t latency = NowUs() - requestedAtUs[index];
+                stats.readyLatencyUsTotal += latency;
+                stats.readyLatencyUsMax = std::max(stats.readyLatencyUsMax, latency);
+            }
         }
         else if (!opened)
         {
@@ -347,6 +363,7 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
             if (m)
                 freeLater.push_back(std::move(m));
         _impl->models.assign(modelCount, nullptr);
+        _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
         _impl->count = modelCount;
         _impl->states = modelCount > 0 ? std::make_unique<std::atomic<uint8_t>[]>(modelCount) : nullptr;
@@ -380,6 +397,8 @@ bool ObjectStreamPreparer::Request(uint32_t index)
     }
     _impl->Set(index, State::Queued);
     _impl->queue.push_back(index);
+    if (index < _impl->requestedAtUs.size())
+        _impl->requestedAtUs[index] = Impl::NowUs();
     ++_impl->stats.queued;
     ++_impl->stats.requested;
     _impl->cv.notify_one();
@@ -401,6 +420,13 @@ std::shared_ptr<Model::Model> ObjectStreamPreparer::Take(uint32_t index)
     std::shared_ptr<Model::Model> model = std::move(_impl->models[index]);
     _impl->models[index].reset();
     _impl->Set(index, State::Unknown);
+    if (index < _impl->requestedAtUs.size() && _impl->requestedAtUs[index] != 0)
+    {
+        const uint64_t latency = Impl::NowUs() - _impl->requestedAtUs[index];
+        _impl->stats.takeLatencyUsTotal += latency;
+        _impl->stats.takeLatencyUsMax = std::max(_impl->stats.takeLatencyUsMax, latency);
+        _impl->requestedAtUs[index] = 0;
+    }
     ++_impl->stats.taken;
     --_impl->stats.ready;
     // Room in the ready set: wake a worker parked on the ready-limit predicate.

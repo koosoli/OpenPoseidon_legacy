@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp>     // worker-prepared mip chains
 #include <Poseidon/Graphics/Textures/ProceduralTexture.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // per-admission split timers
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // shared streaming counters (panel + capture)
 #include <Poseidon/Foundation/Framework/Log.hpp>
 #include <Poseidon/Foundation/Containers/StaticArray.hpp>
 #include <Poseidon/IO/FileServer.hpp>
@@ -804,34 +805,26 @@ thread_local TopMipHandoff GTopMipHandoff;
 // whole fill-in, how much was texture work", which a per-frame timer cannot answer once the
 // frames stop being interesting.
 //
-// WGR_TEXTURE_STREAM_STATS=1 turns it on. Off, this costs one relaxed atomic load per upload
-// and no clock reads at all: an unconditional steady_clock::now() pair per upload would be
-// measuring the measurement on a path this hot.
-struct TextureStreamStats
-{
-    std::atomic<uint64_t> uploads{0};       // EnsureUploaded calls that reached a real load
-    std::atomic<uint64_t> blockBytes{0};    // mip-chain bytes read as compressed blocks
-    std::atomic<uint64_t> readUs{0};        // ...and microseconds spent reading them
-    std::atomic<uint64_t> createUs{0};      // microseconds inside wgr_texture_create
-    std::atomic<uint64_t> fallbacks{0};     // whole-file RGBA8 decodes (block path unavailable)
-    std::atomic<uint64_t> fallbackUs{0};
-    std::atomic<uint64_t> alphaScans{0};    // top-mip decodes done only to classify alpha
-    std::atomic<uint64_t> alphaUs{0};
-    // Of those scans: how many read alpha off the compressed blocks instead of decoding a
-    // full RGBA8 image, and how many of THOSE needed no file access at all because the
-    // upload had just inflated the level. The two together say whether the cost that is
-    // left is decode or I/O, which a single total cannot.
-    std::atomic<uint64_t> alphaBlockScans{0};
-    std::atomic<uint64_t> alphaHandoffs{0};
-};
-
-TextureStreamStats GTextureStreamStats;
+// ON by default since the counters started feeding the dev panel's Streaming tab and the
+// --capture-metrics sidecar (they used to be a log row only); WGR_TEXTURE_STREAM_STATS=0
+// opts out. The cost when on is a steady_clock pair per REAL upload -- tens of nanoseconds
+// against a call that just did file I/O and a GPU upload; the resident fast path still pays
+// nothing because it returns before any of this.
+//
+// Storage lives in Poseidon::Dev (StreamingDiag.hpp) so the panel and the capture writer
+// can read it without a link edge back into this library; the fields and semantics are
+// unchanged from the file-local struct this replaces.
+Poseidon::Dev::TextureStreamCounters& GTextureStreamStats = Poseidon::Dev::GTextureStreamCounters();
 
 bool TextureStreamStatsEnabled()
 {
     // getenv walks the process environment block and costs ~2.1 us per call — measured on
     // this machine, and the reason WGR_DRAW_SECTION_ENV_CACHE exists. Read once.
-    static const bool enabled = std::getenv("WGR_TEXTURE_STREAM_STATS") != nullptr;
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_TEXTURE_STREAM_STATS");
+        return !(v && *v == '0');
+    }();
     return enabled;
 }
 
@@ -1406,6 +1399,8 @@ uint64_t TextureWgpu::EnsureUploaded()
         {
             GTextureStreamStats.readUs.fetch_add(NowUs() - readBegan, std::memory_order_relaxed);
             GTextureStreamStats.blockBytes.fetch_add(total, std::memory_order_relaxed);
+            if (fromPrepared)
+                GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
         }
         if (profiled)
         {

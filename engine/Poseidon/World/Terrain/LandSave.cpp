@@ -42,6 +42,7 @@
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // SnapshotObjectStreamDiag fills its counters
 #include <Poseidon/Asset/Formats/Material/ShaderSchema.hpp>
 #include <stdexcept>
 #include <Poseidon/World/Terrain/WrpReader.hpp>
@@ -3656,6 +3657,42 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                  texStore.entries, texStore.bytes / (1024.0 * 1024.0), texStore.expired,
                  _modernObjectColdParkHits, _modernObjectColdParkStale);
     }
+}
+
+void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCounters& out) const
+{
+    // The same members the two "Modern object residency" log rows print, as data. A world
+    // without authored placements has no streaming system; `valid` false says "no streamed
+    // world" rather than a screen of zeros.
+    out.valid = !_modernObjectPlacements.empty();
+    if (!out.valid)
+        return;
+    out.residentObjects = _modernResidentObjectCount;
+    out.budget = _modernObjectBudget;
+    out.shapeCacheSize = _modernObjectShapeCache.size();
+    out.shapeCacheLimit = _modernObjectShapeCacheLimit;
+    out.shapeCacheHits = _modernObjectShapeCacheHits;
+    out.shapeCacheInserts = _modernObjectShapeCacheInserts;
+    out.shapeCacheDrops = _modernObjectShapeCacheDrops;
+    out.asyncInstalled = _modernObjectAsyncInstalled;
+    out.asyncWaited = _modernObjectAsyncWaited;
+    out.syncCold = _modernObjectSyncCold;
+    out.coldModels = _modernObjectColdModels;
+    out.coldParseMs = _modernObjectColdParseMs;
+    out.coldAdaptMs = _modernObjectColdAdaptMs;
+    out.coldOptimizeMs = _modernObjectColdOptimizeMs;
+    out.coldCreateMs = _modernObjectColdCreateMs;
+    out.coldTexReadMs = _modernObjectColdTexReadMs;
+    out.coldTexCreateMs = _modernObjectColdTexCreateMs;
+    out.coldTexFallbackMs = _modernObjectColdTexFallbackMs;
+    out.coldAlphaMs = _modernObjectColdAlphaMs;
+    out.coldTexUploads = _modernObjectColdTexUploads;
+    out.coldTexPrepared = _modernObjectColdTexPrepared;
+    out.parkHits = _modernObjectColdParkHits;
+    out.parkStale = _modernObjectColdParkStale;
+    out.prepValid = _modernObjectPreparer && _modernObjectPreparer->Running();
+    if (out.prepValid)
+        out.prep = _modernObjectPreparer->SnapshotStats();
 }
 
 void Landscape::SaveOptimized(QOStream& f)

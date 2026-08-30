@@ -370,6 +370,9 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Ballistics diagnostic: trajectory store, ring eviction, pause gate
     Dev/Diag/test_ballistics_recorder.cpp
 
+    # Streaming observability: counter snapshot + preparer request->residency latency
+    Dev/Diag/test_streaming_diag.cpp
+
     # Mission introspection
     Game/Mission/test_mission_info.cpp
 

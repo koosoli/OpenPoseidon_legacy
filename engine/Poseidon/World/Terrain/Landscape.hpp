@@ -18,6 +18,10 @@ namespace Poseidon
 {
 class TaskPool;
 }
+namespace Poseidon::Dev
+{
+struct ObjectStreamResidencyCounters;
+}
 namespace Poseidon
 {
 using Poseidon::TaskPool;
@@ -796,6 +800,12 @@ class Landscape : public SerializeClass
     // residency window streams from, and must not be able to disturb them.
     const std::vector<ModernObjectPlacement>& ModernObjectPlacements() const { return _modernObjectPlacements; }
     const std::vector<RStringB>& ModernObjectModels() const { return _modernObjectModels; }
+
+    // Streaming observability (dev-panel "Streaming" tab, --capture-metrics): fill the
+    // cumulative residency/admission counters that otherwise reach only the log rows.
+    // Main thread; cheap (one preparer mutex hop). Defined in LandSave.cpp beside the
+    // residency system whose members it reads.
+    void SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCounters& out) const;
 
   protected:
     void SetLandGrid(float grid);

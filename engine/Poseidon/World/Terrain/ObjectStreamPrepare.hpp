@@ -91,6 +91,16 @@ class ObjectStreamPreparer
         uint64_t dropped = 0;    // requests / Ready IRs discarded by DropStale, Reset, or a stale generation
         double workerMs = 0.0;   // wall time workers spent inside LoadLooseFile, cumulative
         double workerMaxMs = 0.0; // the single slowest parse
+        // Request() -> Ready and Request() -> Take() wall time: cumulative microseconds and
+        // the single slowest, over `prepared` / `taken` respectively. This preparer is the
+        // one asset path that is asynchronous today, so this is the one place "time from
+        // request to residency" (roadmap Phase 3) is a real queue measurement rather than
+        // the duration of a synchronous call. Includes queue wait by design -- that is the
+        // number an admit loop experiences.
+        uint64_t readyLatencyUsTotal = 0;
+        uint64_t readyLatencyUsMax = 0;
+        uint64_t takeLatencyUsTotal = 0;
+        uint64_t takeLatencyUsMax = 0;
         size_t queued = 0;       // current queue depth
         size_t ready = 0;        // current Ready-and-not-taken count
         uint32_t workers = 0;
