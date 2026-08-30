@@ -17,6 +17,7 @@
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/Frame/WorldFrameObserver.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp>
 #include <Poseidon/Audio/Speaker.hpp>
 #include <stdint.h>
 #include <cmath>
@@ -1516,6 +1517,10 @@ void World::Simulate(float deltaT, bool& enableDraw)
             if (modernObjectsEngine && residencyCamera)
                 GLandscape->UpdateModernObjectResidency(residencyCamera->Position());
         }
+        // RenderSnapshot Phase 5 step 1: simulation publishes the frame's presentation
+        // snapshot at its own draw boundary; the renderer only consumes it. InitDraw
+        // keeps a capture-if-stale fallback for frames no world drives (menu, tools).
+        render::frame::CapturePresentationSnapshot();
         GEngine->InitDraw(clear, color);
     }
 

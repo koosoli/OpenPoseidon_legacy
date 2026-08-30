@@ -221,11 +221,28 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
     snap.valid = true;
 }
 
+// True between a capture and the frame's RetirePresentationSnapshot(). Lets the
+// renderer's InitDraw fallback tell "the world already published this frame's
+// snapshot" from "nobody has" without a frame counter. Main thread only.
+static bool GSnapshotFresh = false;
+
 void CapturePresentationSnapshot()
 {
     PresentationSnapshot snap; // defaults = the values the consuming sites used with no world up
     FillPresentationSnapshot(snap);
     GPresentationSnapshot() = snap;
+    GSnapshotFresh = true;
+}
+
+void CapturePresentationSnapshotIfStale()
+{
+    if (!GSnapshotFresh)
+        CapturePresentationSnapshot();
+}
+
+void RetirePresentationSnapshot()
+{
+    GSnapshotFresh = false;
 }
 
 // POSEIDON_SNAPSHOT_VALIDATE=1 — the correctness oracle the design doc's validation

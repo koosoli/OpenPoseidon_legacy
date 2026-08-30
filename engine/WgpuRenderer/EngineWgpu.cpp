@@ -1524,12 +1524,12 @@ bool ShadowForceNoCpuCastersEnabled()
 
 void EngineWgpu::InitDraw(bool clear, PackedColor color)
 {
-    // RenderSnapshot S1: capture the frame's environment block ONCE, before anything
-    // draws (Landscape::Draw runs after InitDraw, so terrain/water read the same
-    // frame's values). Every former mid-frame pull of GScene/Glob/GWind/GRain/
-    // GLandscape weather below now consumes this value; moving this call into
-    // World::SimulateAndDraw is the next slice and touches only this line.
-    render::frame::CapturePresentationSnapshot();
+    // RenderSnapshot S1 / Phase 5 step 1: the WORLD publishes the frame's environment
+    // block at its simulation/draw boundary (World::Simulate, right before it calls
+    // InitDraw). This is only the FALLBACK for frames no world drives (main menu
+    // without a world, tools) — it captures solely when nothing has since the last
+    // FinishDraw, so a dead world's values never leak into a later frame.
+    render::frame::CapturePresentationSnapshotIfStale();
     _verts.clear();
     _batches.clear();
     _draws3d.clear();
@@ -1581,6 +1581,9 @@ void EngineWgpu::FinishDraw()
     // snapshot promises to be constant over; the re-read happens here, after every
     // consumer has run. No-op unless the env var is set.
     render::frame::ValidatePresentationSnapshot();
+    // The frame's snapshot is consumed; next frame re-captures (world-side, or the
+    // InitDraw fallback above).
+    render::frame::RetirePresentationSnapshot();
     if (_wbank)
     {
         _wbank->FinishFrame();

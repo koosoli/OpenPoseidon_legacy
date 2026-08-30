@@ -132,7 +132,19 @@ PresentationSnapshot& GPresentationSnapshot();
 
 // Fill the instance from live globals. Null-safe: with no world/scene up, the has*
 // flags stay false and every field keeps the default the consuming sites used.
+// Phase 5 step 1: the WORLD calls this at the simulation/draw boundary
+// (World::Simulate, right before GEngine->InitDraw) — simulation publishes,
+// the renderer consumes.
 void CapturePresentationSnapshot();
+
+// Renderer-side fallback for frames the world does not drive (main menu with no
+// world, tools): captures only when no capture has happened since the last
+// RetirePresentationSnapshot(). Called by EngineWgpu::InitDraw.
+void CapturePresentationSnapshotIfStale();
+
+// Marks the frame's snapshot consumed; the next InitDraw with no world-side capture
+// re-captures instead of serving a previous frame's values. Called at FinishDraw.
+void RetirePresentationSnapshot();
 
 // POSEIDON_SNAPSHOT_VALIDATE=1: re-read the live values at end of draw and log every
 // field that changed since capture — the intra-frame-constancy oracle. No-op when the
