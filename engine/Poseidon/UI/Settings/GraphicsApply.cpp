@@ -233,7 +233,12 @@ std::string DlssRuntimeVersionString()
         if (!VerQueryValueA(blob.data(), "\\", reinterpret_cast<void**>(&ffi), &len) || !ffi)
             return {};
         char out[48];
-        snprintf(out, sizeof(out), "%u.%u.%u", HIWORD(ffi->dwFileVersionMS), LOWORD(ffi->dwFileVersionMS),
+        // Marketing generation in front of the file version: 300+ file versions are
+        // the DLSS 4 transformer generation, 3xx below that the DLSS 3 line - the
+        // owner reasonably asked "which DLSS is 310.7.0?".
+        const unsigned major = HIWORD(ffi->dwFileVersionMS);
+        const char* gen = major >= 300 ? "4" : major >= 200 ? "3" : "2";
+        snprintf(out, sizeof(out), "%s (%u.%u.%u)", gen, major, LOWORD(ffi->dwFileVersionMS),
                  HIWORD(ffi->dwFileVersionLS));
         return out;
     }();
