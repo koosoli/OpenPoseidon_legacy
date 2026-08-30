@@ -260,6 +260,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/Enfusion/test_xob_collision.cpp
     Foundation/Algorithms/test_lzo1x.cpp
     Foundation/Algorithms/test_lz4block.cpp
+    Foundation/Algorithms/test_radixsort.cpp
     Foundation/Algorithms/test_sha256.cpp
     Asset/Cache/test_derived_asset_key.cpp
     Asset/Formats/Material/test_rv_material_source.cpp

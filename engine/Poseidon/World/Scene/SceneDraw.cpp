@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Application.hpp>
+#include <Poseidon/Foundation/Algorithms/RadixSort.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -260,61 +261,26 @@ static void RadixSortByFloatDesc(ListT& list, KeyFn key)
     {
         return;
     }
-    struct RadixItem
-    {
-        uint32_t key;
-        SortObject* obj;
-    };
-    // Render-thread-only scratch, reused across frames (ping-pong buffers; one static
-    // pair per instantiation, i.e. per (list type, key function)).
-    static AutoArray<RadixItem> bufA;
-    static AutoArray<RadixItem> bufB;
-    bufA.Resize(n);
-    bufB.Resize(n);
+    // Delegate to the shared Foundation algorithm (CWR upstream 8f3de01c/816e615d).
+    // The previous inline copy sorted ascending and then read the array BACKWARDS to
+    // produce descending order -- which also reverses the relative order of EQUAL keys,
+    // i.e. it silently un-stabilised a stable sort. The shared version inverts the key
+    // before the stable ascending passes instead, so equal keys keep their input order,
+    // and it carries the equal-key regression test this copy never had.
+    //
+    // Render-thread-only scratch, reused across frames (one pair per instantiation,
+    // i.e. per (list type, key function)).
+    static Foundation::RadixSortBuffers<SortObject*> buffers;
+    static AutoArray<SortObject*> scratch;
+    scratch.Resize(n);
     for (int i = 0; i < n; i++)
     {
-        SortObject* o = list[i];
-        // Map the float to an order-preserving uint32. Raw IEEE-754 bits are already
-        // monotonic for values >= 0, but apply the standard branchless transform so any
-        // stray -0/negative still sorts correctly: sign set -> invert all bits, else set
-        // only the sign bit.
-        uint32_t u;
-        float d = key(o);
-        memcpy(&u, &d, sizeof(u));
-        u ^= (uint32_t(0x80000000) | (uint32_t(0) - (u >> 31)));
-        bufA[i].key = u;
-        bufA[i].obj = o;
+        scratch[i] = list[i];
     }
-    // Four passes of 8 bits, counting sort, ping-pong between the buffers.
-    RadixItem* in = bufA.Data();
-    RadixItem* out = bufB.Data();
-    for (int shift = 0; shift < 32; shift += 8)
-    {
-        int count[256] = {0};
-        for (int i = 0; i < n; i++)
-        {
-            count[(in[i].key >> shift) & 0xFF]++;
-        }
-        int sum = 0;
-        for (int b = 0; b < 256; b++)
-        {
-            int c = count[b];
-            count[b] = sum;
-            sum += c;
-        }
-        for (int i = 0; i < n; i++)
-        {
-            out[count[(in[i].key >> shift) & 0xFF]++] = in[i];
-        }
-        RadixItem* tmp = in;
-        in = out;
-        out = tmp;
-    }
-    // `in` now holds ascending key (near-to-far) order. Write back farthest-first
-    // (descending) to match the comparison-sort order the callers expect.
+    Foundation::RadixSortByFloatDesc(scratch.Data(), n, key, buffers);
     for (int i = 0; i < n; i++)
     {
-        list[i].SetRef(in[n - 1 - i].obj);
+        list[i].SetRef(scratch[i]);
     }
 }
 
