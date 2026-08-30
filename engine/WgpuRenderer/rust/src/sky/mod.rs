@@ -2704,9 +2704,10 @@ mod cirrus_puffiness_tests {
                 name
             );
         }
-        // The midpoint is only the shipped value because the slider's default IS the midpoint and
-        // the mapping hits its middle knot exactly there.
-        assert_eq!(CIRRUS_PUFF_DEFAULT, 0.5);
+        // The mapping's middle knot IS the shipped value, but the DEFAULT is no longer the
+        // midpoint: 7236fa2f set full puffiness on owner request ("match the deck, full
+        // puffiness, full wander"). Pin the deliberate default and keep the knot contract.
+        assert_eq!(CIRRUS_PUFF_DEFAULT, 1.0);
         assert!(
             src.contains(
                 "return select(mix(fibre, shipped, t), mix(shipped, puffy, t - 1.0), puff > 0.5);"
@@ -2833,10 +2834,11 @@ mod cirrus_puffiness_tests {
             src.contains("cirrus_layer(pos, dir, sun, radiance, color, 0.0, 1e12)"),
             "the env bake must march the cirrus shell without jitter"
         );
-        // The defaults are neutral by construction: AMOUNT's midpoint knot IS the old CIRRUS_COVER
-        // constant, and MATCH's default is the bottom of its range, so `mix(x, _, 0)` is x.
+        // AMOUNT's midpoint knot IS the old CIRRUS_COVER constant and stays the default;
+        // MATCH defaults to the TOP of its range since 7236fa2f (owner request: the second
+        // layer matches the deck).
         assert_eq!(CIRRUS_AMOUNT_DEFAULT, 0.5);
-        assert_eq!(CIRRUS_MATCH_DEFAULT, 0.0);
+        assert_eq!(CIRRUS_MATCH_DEFAULT, 1.0);
     }
 
     // MATCH must never drop the second layer into the first. The shader clamps the matched
@@ -2916,19 +2918,22 @@ mod cirrus_puffiness_tests {
                 assert_eq!(cirrus_puff_target(base, 0.0, 0.0, drift), base);
             }
         }
-        // And the default variation is small enough that the default look stays recognisable:
-        // the slider's midpoint IS the shipped look, so the excursion is what the owner sees.
+        // The default is full puffiness with full wander (7236fa2f, owner request), so the
+        // excursion legitimately spans the mapping's range. What must still hold: the target
+        // stays inside [0,1] and actually REACHES near both the wandered floor and the base
+        // (a variation that collapsed to a constant would make the slider a no-op).
         let mut lo = 1.0f32;
         let mut hi = 0.0f32;
         for i in 0..20000 {
             let d = i as f32 * (CIRRUS_VAR_WRAP / 20000.0);
             let t = cirrus_puff_target(CIRRUS_PUFF_DEFAULT, CIRRUS_PUFF_VAR_DEFAULT, 0.0, d);
+            assert!((0.0..=1.0).contains(&t), "puff target left [0,1]: {}", t);
             lo = lo.min(t);
             hi = hi.max(t);
         }
         assert!(
-            lo > 0.3 && hi < 0.7,
-            "the default variation must stay near the shipped look, got {}..{}",
+            hi > 0.9 && lo < hi - 0.3,
+            "full variation must wander over a real range up to the base, got {}..{}",
             lo,
             hi
         );

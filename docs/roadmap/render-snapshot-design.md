@@ -75,6 +75,15 @@ Executable slices, each independently buildable and testable:
 - **S5 Draw-context globals** — fold `GCurrentConformPlane`/`GCurrentIsVegetation`/
   `GCurrentFoliageKind` into the push path (they are per-draw parameters wearing
   global clothes).
+  **Disposition 2026-08-30:** the renderer already BAKES all three into the per-draw
+  record at record time (`WgrDraw3D`: the conform fields and `mat_sun_ambient.w`;
+  the vegetation gate resolves into the draw's shader inputs) — so the pushed frame
+  carries the values, and only the world→renderer HANDOFF is a same-thread transient
+  global with save/restore nesting (Object::Draw, ForestPlain, SceneShadowPass).
+  Making the handoff a parameter means threading it through the `Shape::Draw`
+  override fan-out across both backends for no behavioural change today; that churn
+  is deferred to the render-thread step (Phase 5 step 6), where recording draws off
+  the main thread forces exactly this plumbing anyway.
 
 Validation: a debug mode that, for N frames, reads both snapshot and live values and
 asserts equality — the same post-hoc-observer pattern `render::frame::SceneInputs`

@@ -448,7 +448,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 48);
+        assert_eq!(REGION_COUNT, 58);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -460,6 +460,8 @@ mod tests {
         assert_eq!(WATER_REGION_COUNT, 19);
         assert_eq!(Region::GrassPlaceNear as u32, WATER_REGION_COUNT as u32);
         assert_eq!(Region::GrassShadow as u32, 24);
+        assert_eq!(Region::CloudMarch as u32, 48);
+        assert_eq!(Region::Ui2d as u32, 57);
         assert_eq!(Region::FrameTotal as u32, 25);
         // LIT-020 appended AFTER FrameTotal's index rather than renumbering it: these are FFI
         // slot numbers mirrored in wgpu_renderer.hpp, so an insert would silently relabel every
