@@ -1092,18 +1092,17 @@ impl Renderer {
                 env_on
             }
         };
-        // 2026-08-30 evening, owner report on the default-on build: heavy sky
-        // ghosting, stripes and wall-texture flicker under motion — the skinned
-        // velocity pass consumes the bake OUTPUT, and that content was never
-        // validated (the draw-side probes only proved the draws read the wrong
-        // memory; garbage baked positions rasterise garbage motion vectors, which
-        // is exactly this symptom set). OFF until a readback test pins the bake
-        // content; skinned characters ride rigid/camera velocity, the state every
-        // owner-validated session ran.
-        let _ = temporal_will_run;
+        // The 2026-08-30 corruption saga ended at a STRIDE: skin_bake.wgsl was
+        // written (and validated) for the 9-word WgrMeshVertex and never updated when
+        // the vertex grew to 17 words for the Multi material stages — every reader
+        // then de-interleaved garbage (shattered draws, alien velocity triangles, the
+        // owner's sky ghosting). Fixed in the shader (17-word verts, tangent frame
+        // skinned too) and guarded by tests; the bake again feeds BOTH the draw passes
+        // (identity-world routing) and the temporal velocity pass, and defaults on
+        // with the temporal path. WGR_SKIN_BAKE pins either way.
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(false);
+            .unwrap_or(temporal_will_run);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance

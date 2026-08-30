@@ -4462,17 +4462,15 @@ impl Gfx3d {
 
     // The baked-vertex offset for a skinned draw/caster, or None when the skin bake is
     // off or this slot isn't skinned (docs/compute-skin-bake-plan.md). When Some, the
-    // 2026-08-30: the bake output feeds ONLY the temporal velocity pass. It was
-    // originally also meant to replace VS skinning in the colour/prepass/shadow draws
-    // (identity world + base_vertex into skinned_vbuf), but that routing renders the
-    // palette draws as full-screen triangle shards (kill-door probes in
-    // .tmp-farfield-bench/final-matrix/probe-*, incl. a rest-pose passthrough bake that
-    // STILL shattered - the draw side reads something other than what the bake wrote).
-    // The VS path costs ~nothing on OFP characters, so the draws keep it and this
-    // helper answers None for draw routing; root-causing the draw-side read lives in a
-    // follow-up task. The velocity pass reads the buffers as SSBOs and is unaffected.
-    fn baked_draw_base(&self, _palette_slot: u32, _mesh: u64) -> Option<u32> {
-        None
+    // Draw-side routing: colour/prepass/shadow draws of baked skinned meshes read the
+    // bake output through the rigid pipelines (identity world + base_vertex slice).
+    // This was disconnected for half a day on 2026-08-30 while its "corruption" was
+    // hunted — the actual bug was skin_bake.wgsl still writing the historical 9-word
+    // vertex into a world of 17-word readers (see WORDS_PER_VERT there). Kept as a
+    // separate seam from baked_base_vertex so the two consumers (draws vs velocity)
+    // can be split again in one line if that ever needs re-testing.
+    fn baked_draw_base(&self, palette_slot: u32, mesh: u64) -> Option<u32> {
+        self.baked_base_vertex(palette_slot, mesh)
     }
 
     // Velocity-pass association only (collect_skin_bases + render_object_velocity).
@@ -9144,4 +9142,28 @@ fn velocity_obj_pipelines_build_on_a_real_device() {
     };
     let _pass = VelocityObjPass::new(&device);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+// The 2026-08-30 lesson, pinned: skin_bake.wgsl and velocity_obj.wgsl hard-code the
+// WgrMeshVertex word count in WGSL, where no compiler can check it against the Rust
+// struct. When the vertex grew 9 -> 17 words, the bake silently wrote interleaved
+// garbage for months of commits (default-off hid it), and the hunt cost a day. Any
+// future vertex-layout change now fails HERE first, naming both files to update.
+#[cfg(test)]
+mod baked_vertex_stride_guard {
+    #[test]
+    fn wgsl_strides_match_the_rust_vertex() {
+        let words = std::mem::size_of::<crate::ffi::WgrMeshVertex>() / 4;
+        let tag = format!("WORDS_PER_VERT: u32 = {words}u");
+        assert!(
+            include_str!("skin_bake.wgsl").contains(&tag),
+            "skin_bake.wgsl WORDS_PER_VERT != WgrMeshVertex ({words} words) — update the \
+             shader's layout (positions/normals/uv/conform/tangent/binormal/uv1) too"
+        );
+        let vel_tag = format!("* {words}u");
+        assert!(
+            include_str!("velocity_obj.wgsl").contains(&vel_tag),
+            "velocity_obj.wgsl prev_baked stride != WgrMeshVertex ({words} words)"
+        );
+    }
 }

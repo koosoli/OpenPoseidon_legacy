@@ -13,8 +13,12 @@
 // block, rather than #importing skin.wgsl, whose palette is the fallback VS path's
 // dynamic-offset UBO.
 
-// One WgrMeshVertex = 9 u32: [pos.xyz, norm.xyz, uv.xy, conform].
-const WORDS_PER_VERT: u32 = 9u;
+// One WgrMeshVertex = 17 u32: [pos.xyz, norm.xyz, uv.xy, conform, tangent.xyz,
+// binormal.xyz, uv1.xy]. THE STRIDE IS THE WHOLE BUG CLASS: this shader was written
+// (and validated) when the vertex was 9 words, the vertex later grew to 17 for the
+// Multi material stages, and the packed 9-word output it kept writing is exactly the
+// interleaved garbage every 17-word reader then shattered on (2026-08-30 hunt).
+const WORDS_PER_VERT: u32 = 17u;
 // The engine's bone-palette cap (skin.wgsl: MATRIX_4_ARRAY(matrix, 128)).
 const PALETTE_BLOCK: u32 = 128u;
 
@@ -82,6 +86,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         + weights.z * (palette[base + bones.z] * n).xyz
         + weights.w * (palette[base + bones.w] * n).xyz;
 
+    // Tangent frame: skinned with the same palette blend as the normal (w = 0
+    // directions, no inverse-transpose - behaviour-preserving vs the VS path).
+    let tan = vec3<f32>(bitcast<f32>(in_v[i + 9u]), bitcast<f32>(in_v[i + 10u]), bitcast<f32>(in_v[i + 11u]));
+    let bin = vec3<f32>(bitcast<f32>(in_v[i + 12u]), bitcast<f32>(in_v[i + 13u]), bitcast<f32>(in_v[i + 14u]));
+    let t4 = vec4<f32>(tan, 0.0);
+    let st = weights.x * (palette[base + bones.x] * t4).xyz
+        + weights.y * (palette[base + bones.y] * t4).xyz
+        + weights.z * (palette[base + bones.z] * t4).xyz
+        + weights.w * (palette[base + bones.w] * t4).xyz;
+    let b4 = vec4<f32>(bin, 0.0);
+    let sb = weights.x * (palette[base + bones.x] * b4).xyz
+        + weights.y * (palette[base + bones.y] * b4).xyz
+        + weights.z * (palette[base + bones.z] * b4).xyz
+        + weights.w * (palette[base + bones.w] * b4).xyz;
+
     let o = (gp.out_base_vertex + inst * gp.vert_count + v) * WORDS_PER_VERT;
     out_v[o] = bitcast<u32>(sp.x);
     out_v[o + 1u] = bitcast<u32>(sp.y);
@@ -92,4 +111,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     out_v[o + 6u] = in_v[i + 6u]; // uv.x passthrough (bit-exact)
     out_v[o + 7u] = in_v[i + 7u]; // uv.y passthrough
     out_v[o + 8u] = in_v[i + 8u]; // conform passthrough
+    out_v[o + 9u] = bitcast<u32>(st.x);
+    out_v[o + 10u] = bitcast<u32>(st.y);
+    out_v[o + 11u] = bitcast<u32>(st.z);
+    out_v[o + 12u] = bitcast<u32>(sb.x);
+    out_v[o + 13u] = bitcast<u32>(sb.y);
+    out_v[o + 14u] = bitcast<u32>(sb.z);
+    out_v[o + 15u] = in_v[i + 15u]; // uv1.x passthrough
+    out_v[o + 16u] = in_v[i + 16u]; // uv1.y passthrough
 }
