@@ -700,6 +700,14 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("WGR_DLSS", "0", 1);
 #endif
     }
+    if (cfg.dlssSharpen == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("WGR_DLSS_SHARPEN", "0");
+#else
+        setenv("WGR_DLSS_SHARPEN", "0", 1);
+#endif
+    }
     // Explicit upscaler quality (or FSR's Quality default) as the boot scale;
     // GraphicsApply re-applies the same value live once the engine is up.
     {

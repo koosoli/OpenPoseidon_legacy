@@ -163,6 +163,7 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
             t.dlssOn = (cfg.dlssMode == -1 || cfg.dlssMode == 1);
             t.fsrOn = (cfg.dlssMode == -1 || cfg.dlssMode == 2);
             t.fsrSharpness = std::clamp(cfg.fsrSharpness, 0.0f, 2.0f);
+            t.dlssSharpen = cfg.dlssSharpen != 0;
             const bool ssaaPinned = cfg.renderScale > 1.01f;
             if (!ssaaPinned)
             {

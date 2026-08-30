@@ -94,8 +94,11 @@ public:
 	// upscaler is active), else 50/58/67. Distinct from renderScale, which stays
 	// the legacy SSAA (>100%) control.
 	int       upscalerQuality  = -1;
-	// FSR RCAS sharpness in stops (0 = sharpest, 2 = mildest).
+	// RCAS sharpness in stops (0 = sharpest, 2 = mildest); drives FSR 1 and the
+	// post-DLSS sharpen pass alike.
 	float     fsrSharpness     = 0.25f;
+	// RCAS pass over the DLSS output (owner default: on).
+	int       dlssSharpen      = 1;
 	float     renderScale      = 1.0f;          // 1.0 = AUTO (renderer default, incl. DLSS Quality).
 	                                            // <1 upscaling pin, >1 SSAA pin; live on wgpu.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for
