@@ -29,7 +29,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 6u
+#define WGR_ABI_VERSION 7u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1850,7 +1850,12 @@ extern "C"
 
     /* Add a static retained instance; returns its stable slot (recycled from removed
      * slots). Update it in place with wgr_instance_update (a move, or a destruction-
-     * phase change), remove it with wgr_instance_remove. */
+     * phase change), remove it with wgr_instance_remove.
+     *
+     * ABI v7: the returned u32 is an opaque HANDLE (generation-checked on the Rust
+     * side), not a raw slot index. 0 = failure, unambiguously. A handle kept past its
+     * instance's removal is refused (and counted) instead of addressing whatever
+     * reused the slot -- treat it as a value, never do arithmetic on it. */
     WGR_API uint32_t wgr_instance_add(WgrRenderer* renderer, const WgrInstance* inst);
     WGR_API void wgr_instance_update(WgrRenderer* renderer, uint32_t slot, const WgrInstance* inst);
     WGR_API void wgr_instance_remove(WgrRenderer* renderer, uint32_t slot);

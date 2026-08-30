@@ -1600,9 +1600,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(6)
+            .unwrap_or(7)
     } else {
-        6
+        7
     }
 }
 
@@ -1776,7 +1776,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 6);
+        assert_eq!(super::wgr_abi_version(), 7);
     }
 
     #[test]

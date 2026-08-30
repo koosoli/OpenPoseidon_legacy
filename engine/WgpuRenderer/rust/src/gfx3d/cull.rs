@@ -349,6 +349,14 @@ pub struct CullState {
     // dynamic region re-copied every frame. A removed static slot has model = INVALID_MODEL.
     static_instances: Vec<InstanceGpu>,
     free_slots: Vec<u32>,
+    // Per-slot generation (ID-2, render-snapshot design section 4): the public
+    // instance handle is (slot+1) | generation<<24, so a handle kept past its
+    // instance's removal addresses NOTHING instead of whatever reused the slot.
+    // 8 bits of generation = a stale handle only aliases after 256 reuse cycles
+    // of one slot; before this there was no protection at all. Handle 0 = invalid,
+    // which also disambiguates the FFI's 0-on-error return from a real first slot.
+    generations: Vec<u8>,
+    stale_instance_ops: u64,
     static_dirty: Option<(u32, u32)>, // inclusive min..=max changed static slot this frame
     dynamic: Vec<InstanceGpu>,
     // Static region length uploaded last frame, so a grown static region re-copies the
@@ -618,6 +626,8 @@ impl CullState {
             tables_dirty: false,
             static_instances: Vec::new(),
             free_slots: Vec::new(),
+            generations: Vec::new(),
+            stale_instance_ops: 0,
             static_dirty: None,
             dynamic: Vec::new(),
             uploaded_static_len: 0,
@@ -840,20 +850,50 @@ impl CullState {
         }
     }
 
-    // Add a static instance; returns its stable slot (reused from the free-list if any).
+    fn instance_handle(slot: u32, generation: u8) -> u32 {
+        debug_assert!(slot < 0x00FF_FFFE, "instance slot space exhausted");
+        (slot + 1) | ((generation as u32) << 24)
+    }
+
+    // Decode a handle; None for handle 0 (invalid) or a generation mismatch (stale).
+    fn instance_slot(&mut self, handle: u32) -> Option<u32> {
+        let biased = handle & 0x00FF_FFFF;
+        if biased == 0 {
+            return None;
+        }
+        let slot = biased - 1;
+        let generation = (handle >> 24) as u8;
+        match self.generations.get(slot as usize) {
+            Some(&current) if current == generation => Some(slot),
+            _ => {
+                self.stale_instance_ops += 1;
+                if self.stale_instance_ops <= 8 {
+                    eprintln!(
+                        "[wgr] stale instance handle {:#010x} (slot {} gen {} vs current {:?}) -- ignored",
+                        handle, slot, generation, self.generations.get(slot as usize)
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    // Add a static instance; returns its HANDLE (slot + generation; see `generations`).
     pub fn instance_add(&mut self, inst: InstanceGpu) -> u32 {
         let slot = if let Some(s) = self.free_slots.pop() {
             self.static_instances[s as usize] = inst;
             s
         } else {
             self.static_instances.push(inst);
+            self.generations.push(0);
             (self.static_instances.len() - 1) as u32
         };
         self.mark_static_dirty(slot);
-        slot
+        Self::instance_handle(slot, self.generations[slot as usize])
     }
 
-    pub fn instance_update(&mut self, slot: u32, inst: InstanceGpu) {
+    pub fn instance_update(&mut self, handle: u32, inst: InstanceGpu) {
+        let Some(slot) = self.instance_slot(handle) else { return };
         if let Some(e) = self.static_instances.get_mut(slot as usize) {
             *e = inst;
             self.mark_static_dirty(slot);
@@ -861,10 +901,13 @@ impl CullState {
     }
 
     // Remove a static instance: mark its slot a free-list hole (model = INVALID_MODEL, so
-    // the compute skips it) and recycle the slot.
-    pub fn instance_remove(&mut self, slot: u32) {
+    // the compute skips it), BUMP its generation so every outstanding handle dies with it,
+    // and recycle the slot.
+    pub fn instance_remove(&mut self, handle: u32) {
+        let Some(slot) = self.instance_slot(handle) else { return };
         if let Some(e) = self.static_instances.get_mut(slot as usize) {
             e.model = INVALID_MODEL;
+            self.generations[slot as usize] = self.generations[slot as usize].wrapping_add(1);
             self.free_slots.push(slot);
             self.mark_static_dirty(slot);
         }
@@ -2628,6 +2671,12 @@ pub(crate) mod tests {
     // End-to-end: register a model, add three instances (one visible, one behind the
     // camera, one past the draw distance), run the compute, and assert exactly the visible
     // one produced an indirect draw for its chosen LOD's section.
+    // ID-2: instance_add returns a generation-carrying HANDLE; the GPU buffers speak raw
+    // slot indices. Tests that assert against GPU records decode with this.
+    fn raw_slot(handle: u32) -> u32 {
+        (handle & 0x00FF_FFFF) - 1
+    }
+
     #[test]
     #[allow(deprecated)] // glam look_at_rh / perspective_infinite_reverse_rh, test-only
     fn cull_compute_end_to_end() {
@@ -2723,7 +2772,7 @@ pub(crate) mod tests {
         let recs = read_u32s(&device, &queue, cull.out_records().unwrap(), slots * 2);
         assert_eq!(
             recs[rec_slot as usize * 2],
-            front,
+            raw_slot(front),
             "record.instance == visible slot"
         );
         assert_eq!(
@@ -2844,7 +2893,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             recs[rec_slot as usize * 2],
-            front,
+            raw_slot(front),
             "shadow record.instance == front slot"
         );
         assert_eq!(
@@ -2972,7 +3021,7 @@ pub(crate) mod tests {
         let recs = read_u32s(&device, &queue, cull.sky_out_records(0).unwrap(), slots * 2);
         assert_eq!(
             recs[rec_slot as usize * 2],
-            under,
+            raw_slot(under),
             "the surviving record is the instance under the camera"
         );
 
@@ -3435,8 +3484,10 @@ pub(crate) mod tests {
             .iter()
             .find(|a| a[2] == 0)
             .expect("section 0 arg (3 collapsed)");
-        let base_far = check(a_far, 5, 3, 1, &far_slots);
-        let base_near = check(a_near, 3, 0, 0, &near_slots);
+        let far_raw: Vec<u32> = far_slots.iter().map(|h| raw_slot(*h)).collect();
+        let near_raw: Vec<u32> = near_slots.iter().map(|h| raw_slot(*h)).collect();
+        let base_far = check(a_far, 5, 3, 1, &far_raw);
+        let base_near = check(a_near, 3, 0, 0, &near_raw);
         // Runs are disjoint (contiguous carving, no overlap).
         assert!(
             base_far + 5 <= base_near || base_near + 3 <= base_far,
