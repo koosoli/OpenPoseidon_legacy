@@ -99,5 +99,9 @@ tests so routing and packing cannot disagree silently again. Verified on the
 visible, rifle in hand, shadow present, with the bake ON. The `WGR_SKIN_BAKE`
 default is back to `temporal_will_run`.
 
-Still open: re-test the owner's 2026-08-30 "night ground artifacts under DLSS"
-(chip `task_c060eaf7`) — possibly related, possibly separate.
+Owner verified 2026-08-31: soldiers are correct again in the campaign.
+
+The night lit-ground artifacts under DLSS are a **separate, still-open** defect —
+owner re-tested on the fixed build and they persist; parked again by owner
+decision (chip `task_c060eaf7`). So REN-TEMP-002 is closed and the night
+artifacts keep their own track.
