@@ -1395,12 +1395,16 @@ uint64_t TextureWgpu::EnsureUploaded()
             }
             ok = _src->GetMipmapChain(reads.data(), levelCount);
         }
+        // The frame BYTE accumulator is unconditional: the admission loop's per-frame upload
+        // budget (WGR_OBJECT_STREAM_UPLOAD_MB) reads it, and a diagnostics opt-out
+        // (WGR_TEXTURE_STREAM_STATS=0) must not silently disarm a throttle. One relaxed
+        // fetch_add per real upload; only the CLOCK reads stay behind `timed`.
+        GTextureStreamStats.frameUploadBytes.fetch_add(total, std::memory_order_relaxed);
         if (timed)
         {
             const uint64_t readDelta = NowUs() - readBegan;
             GTextureStreamStats.readUs.fetch_add(readDelta, std::memory_order_relaxed);
             GTextureStreamStats.blockBytes.fetch_add(total, std::memory_order_relaxed);
-            GTextureStreamStats.frameUploadBytes.fetch_add(total, std::memory_order_relaxed);
             GTextureStreamStats.frameUploadUs.fetch_add(readDelta, std::memory_order_relaxed);
             if (fromPrepared)
                 GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
@@ -1484,6 +1488,7 @@ uint64_t TextureWgpu::EnsureUploaded()
                                                 static_cast<uint32_t>(img.rgba.size()));
                 _w = img.width;
                 _h = img.height;
+                GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
             }
         }
         if (timed)
@@ -1503,9 +1508,9 @@ uint64_t TextureWgpu::EnsureUploaded()
     {
         LOG_WARN(Graphics, "Wgpu: failed to upload texture {}", Name());
     }
+    GTextureStreamStats.frameUploads.fetch_add(1, std::memory_order_relaxed);
     if (timed)
     {
-        GTextureStreamStats.frameUploads.fetch_add(1, std::memory_order_relaxed);
         ReportTextureStreamStats(GTextureStreamStats.uploads.fetch_add(1, std::memory_order_relaxed) + 1);
     }
     // Success or failure, this name has had its one upload attempt: a worker must not spend

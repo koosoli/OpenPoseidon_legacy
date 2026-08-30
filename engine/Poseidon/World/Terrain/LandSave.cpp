@@ -2653,6 +2653,36 @@ static float ObjectStreamCeilingMs()
     return ms;
 }
 
+// (c2) THE PER-FRAME UPLOAD BYTE CEILING.
+//
+// WGR_OBJECT_STREAM_UPLOAD_MB. The wall-clock ceiling above bounds ADMISSIONS, but one
+// admitted object can carry dozens of textures: measured on the 30 m/s Everon traverse
+// (2026-08-30, capture asset-obs-vehicle30-r2), the worst single frame paid 36.2 MB /
+// 73.3 ms of texture upload work with the 16 ms ceiling active. This ceiling reads the
+// frame's cumulative upload bytes (Dev::TextureStreamCounters::frameUploadBytes, rolled by
+// StreamingFrameRoll each frame -- deliberately including uploads that happened OUTSIDE
+// admission, because the frame does not care who spent the bytes) and stops admitting once
+// they are over budget. Same guarantees as the wall-clock ceiling: it may cut the floor
+// short, at least one object is always attempted so the fill terminates, and the residual
+// tail is `budget + one object's textures`.
+//
+// 16 MB is chosen against the measured 36.2 MB worst frame: it roughly halves the spike
+// while staying far above the per-object median, so fill time should be barely touched.
+// The A/B is this lever vs 0 (off, exactly the previous behaviour) on the same traverse;
+// `streaming.texture.frame_peak_*` in the capture is the readout.
+static uint64_t ObjectStreamUploadBudgetBytes()
+{
+    static const uint64_t bytes = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_UPLOAD_MB");
+        const double parsedMb = v ? std::atof(v) : 16.0;
+        if (!(parsedMb > 0.0))
+            return static_cast<uint64_t>(0); // 0 or nonsense = ceiling off
+        return static_cast<uint64_t>(parsedMb * 1024.0 * 1024.0);
+    }();
+    return bytes;
+}
+
 // (a) WGR_OBJECT_STREAM_EVICT_CACHE: how many recently-vacated MODEL SHAPES to keep alive so a
 // returning camera re-admits instead of rebuilding. See the long note on the members in
 // Landscape.hpp. 0 disables the cache entirely and restores today's destructive eviction.
@@ -3327,9 +3357,22 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // (c) THE CEILING THAT MAKES THE FLOOR YIELD. See ObjectStreamCeilingMs for the reasoning
     // and for why this is not simply a lower floor.
     const float admitCeilingMs = ObjectStreamCeilingMs();
+    // (c2) The upload byte ceiling, same standing as the wall-clock ceiling: it may cut the
+    // floor short, and `attempted > 0` keeps the one-object-per-update termination guarantee.
+    // Reads the FRAME's cumulative upload bytes, so uploads outside this loop (terrain, UI
+    // first-binds) count against the same budget -- the frame does not care who spent them.
+    const uint64_t admitUploadBudgetBytes = ObjectStreamUploadBudgetBytes();
+    auto uploadBudgetSpent = [&]
+    {
+        return admitUploadBudgetBytes > 0 && attempted > 0 &&
+               Poseidon::Dev::GTextureStreamCounters().frameUploadBytes.load(std::memory_order_relaxed) >=
+                   admitUploadBudgetBytes;
+    };
     auto admitBudgetSpent = [&]
     {
         if (attempted >= admitCap)
+            return true;
+        if (uploadBudgetSpent())
             return true;
         const auto elapsed = std::chrono::steady_clock::now() - admitStart;
         const float elapsedMs = std::chrono::duration<float, std::milli>(elapsed).count();
