@@ -1577,6 +1577,10 @@ void EngineWgpu::Clear(bool clearZ, bool clearColor, PackedColor color)
 
 void EngineWgpu::FinishDraw()
 {
+    // POSEIDON_SNAPSHOT_VALIDATE=1: end-of-draw is the far edge of the interval the
+    // snapshot promises to be constant over; the re-read happens here, after every
+    // consumer has run. No-op unless the env var is set.
+    render::frame::ValidatePresentationSnapshot();
     if (_wbank)
     {
         _wbank->FinishFrame();

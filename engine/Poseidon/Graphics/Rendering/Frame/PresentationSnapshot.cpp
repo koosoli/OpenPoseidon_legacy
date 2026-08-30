@@ -11,7 +11,10 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 
+#include <Poseidon/Foundation/Framework/Log.hpp>
+
 #include <algorithm>
+#include <cstdlib>
 #include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
@@ -26,9 +29,10 @@ PresentationSnapshot& GPresentationSnapshot()
     return snapshot;
 }
 
-void CapturePresentationSnapshot()
+// The one place live global state is read. Shared by the per-frame capture and by the
+// validation re-read below, so the two can never diverge in WHAT they read.
+static void FillPresentationSnapshot(PresentationSnapshot& snap)
 {
-    PresentationSnapshot snap; // defaults = the values the consuming sites used with no world up
 
     if (GScene)
     {
@@ -215,7 +219,86 @@ void CapturePresentationSnapshot()
     }
 
     snap.valid = true;
+}
+
+void CapturePresentationSnapshot()
+{
+    PresentationSnapshot snap; // defaults = the values the consuming sites used with no world up
+    FillPresentationSnapshot(snap);
     GPresentationSnapshot() = snap;
+}
+
+// POSEIDON_SNAPSHOT_VALIDATE=1 — the correctness oracle the design doc's validation
+// note asks for (render-snapshot-design.md §3): at end of draw, re-read every live
+// value the snapshot captured at InitDraw and log any field that changed WITHIN the
+// frame. A hit means some draw-side code mutated environment state after capture —
+// exactly the class of bug the snapshot exists to make impossible to miss. Off by
+// default; one env probe when off.
+//
+// Measured baseline (60 s Everon traverse, 2026-08-30): during world/mission LOAD the
+// whole block legitimately swaps (menu world -> test world, hour applied, camera
+// teleport). In steady state the ONLY intra-frame mutator is lodInvWidth — Pass1's
+// framerate governor adjusts it mid-draw by design, which is why PushSceneCamera
+// consumes the snapshot value. Any OTHER field appearing here is a new bug.
+void ValidatePresentationSnapshot()
+{
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("POSEIDON_SNAPSHOT_VALIDATE");
+        return v && v[0] != '\0' && v[0] != '0';
+    }();
+    if (!enabled)
+        return;
+    const PresentationSnapshot& cap = GPresentationSnapshot();
+    if (!cap.valid)
+        return;
+    PresentationSnapshot now;
+    FillPresentationSnapshot(now);
+
+    static int budget = 200; // total mismatch lines per session; enough to name the culprits
+    if (budget <= 0)
+        return;
+    auto report = [&](const char* field, float was, float is)
+    {
+        if (budget <= 0)
+            return;
+        --budget;
+        LOG_INFO(Graphics, "Snapshot validate: {} changed mid-frame: captured={:.6f} live={:.6f}", field, was, is);
+    };
+    auto checkF = [&](const char* field, float a, float b)
+    {
+        if (a != b)
+            report(field, a, b);
+    };
+    auto checkV = [&](const char* field, const Vector3& a, const Vector3& b)
+    {
+        if (a.X() != b.X() || a.Y() != b.Y() || a.Z() != b.Z())
+            report(field, a.Distance(b), 0.0f);
+    };
+
+    checkF("fogMinRange", cap.fogMinRange, now.fogMinRange);
+    checkF("fogMaxRange", cap.fogMaxRange, now.fogMaxRange);
+    checkF("objectDrawDistance", cap.objectDrawDistance, now.objectDrawDistance);
+    checkF("lodInvWidth", cap.lodInvWidth, now.lodInvWidth);
+    checkV("cameraPos", cap.cameraPos, now.cameraPos);
+    checkV("cameraDir", cap.cameraDir, now.cameraDir);
+    checkF("nightEffect", cap.nightEffect, now.nightEffect);
+    checkV("sunTravelDir", cap.sunTravelDir, now.sunTravelDir);
+    checkF("moonLightAmount", cap.moonLightAmount, now.moonLightAmount);
+    checkF("timeSeconds", cap.timeSeconds, now.timeSeconds);
+    checkF("timeOfDay", cap.timeOfDay, now.timeOfDay);
+    checkF("overcast", cap.overcast, now.overcast);
+    checkF("seaLevel", cap.seaLevel, now.seaLevel);
+    checkF("landscapeRainDensity", cap.landscapeRainDensity, now.landscapeRainDensity);
+    checkF("rainEffectiveDensity", cap.rainEffectiveDensity, now.rainEffectiveDensity);
+    checkF("seaRippleGain", cap.seaRippleGain, now.seaRippleGain);
+    checkF("windSpeed", cap.windSpeed, now.windSpeed);
+    checkF("windDirectionRad", cap.windDirectionRad, now.windDirectionRad);
+    checkF("windGustFraction", cap.windGustFraction, now.windGustFraction);
+    checkF("lightCount", float(cap.lightCount), float(now.lightCount));
+    checkF("lightCandidates", float(cap.lightCandidates), float(now.lightCandidates));
+    checkF("rotorSourceCount", float(cap.rotorSourceCount), float(now.rotorSourceCount));
+    checkV("interactorPos", cap.interactorPos, now.interactorPos);
 }
 
 } // namespace Poseidon::render::frame

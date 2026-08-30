@@ -134,4 +134,9 @@ PresentationSnapshot& GPresentationSnapshot();
 // flags stay false and every field keeps the default the consuming sites used.
 void CapturePresentationSnapshot();
 
+// POSEIDON_SNAPSHOT_VALIDATE=1: re-read the live values at end of draw and log every
+// field that changed since capture — the intra-frame-constancy oracle. No-op when the
+// env var is unset. Called by the renderer's FinishDraw.
+void ValidatePresentationSnapshot();
+
 } // namespace Poseidon::render::frame
