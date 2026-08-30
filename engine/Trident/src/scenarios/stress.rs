@@ -848,8 +848,6 @@ async fn run_script_action_batch(
     instances: &mut [RunningInstance],
 ) -> Result<()> {
     let mut handles = Vec::new();
-    let barriers = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-    let role_count = actions.len();
 
     for action in actions {
         let script = action.script.as_ref().with_context(|| {
@@ -869,9 +867,6 @@ async fn run_script_action_batch(
         let client = instance.game.take_client();
         let role_name = action.role.clone();
         let scenario_name = scenario_name.to_string();
-        let deadline = Instant::now() + timeout;
-        let progress = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
-        let barriers = std::sync::Arc::clone(&barriers);
 
         handles.push(tokio::spawn(async move {
             let (client, failure) = super::multi::run_role_script(
@@ -879,12 +874,8 @@ async fn run_script_action_batch(
                 &role_name,
                 client,
                 &statements,
-                deadline,
+                timeout,
                 poll_interval,
-                progress,
-                barriers,
-                role_count,
-                std::sync::Arc::new(Vec::new()),
             )
             .await?;
             Ok::<_, anyhow::Error>((role_name, client, failure))
@@ -970,12 +961,8 @@ async fn run_script_for_instance(
         role_name,
         client,
         &statements,
-        Instant::now() + timeout,
+        timeout,
         poll_interval,
-        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        1,
-        std::sync::Arc::new(Vec::new()),
     )
     .await?;
     game.restore_client(client);
