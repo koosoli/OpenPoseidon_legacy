@@ -114,6 +114,15 @@ larger ownership and concurrency projects begin.
   dominated by adapter + registration, as above. The 390 fallback decodes were
   identified as converter-written PacARGB8888 `*_mask.paa` files; the DXT exporter
   fix is filed separately.
+- **Per-object attribution closed the texture-path chapter (commit `7828cd3b`).**
+  A `texhdr` bucket timed the one file-server touch left on admission (PAA header
+  opens in `TextureBankWgpu::Load`): 2,515 opens cost 396 ms total — church_01's
+  5.5 ms of its 128 ms `adapt`. So `adapt` is real conversion work, not I/O, and the
+  remaining per-object cost (`create` avg fell 30.9 → 20.8 ms/model with the
+  worker-prepared stage textures — a 33% per-object improvement the frame-time noise
+  hid) is ShapeAdapter + GPU registration on the main thread. **The low-hanging
+  texture-path work is done; the residual is the Phase-6 asynchronous-admission
+  item by measurement, not assumption.**
 
 ### 1.1 Generic upscaler boundary
 
