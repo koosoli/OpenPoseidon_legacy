@@ -4553,7 +4553,7 @@ void DrawRenderTab()
     // MSAA + render scale moved to the Graphics tab (2026-08-30) — this tab carried
     // the GL33-era controls, and once the wgpu engine actually honoured the setters
     // both tabs showed competing knobs for the same state.
-    Dev::PanelHelp("MSAA und Render scale: -> Tab \"Graphics\"");
+    Dev::PanelHelp("MSAA and render scale moved to the \"Graphics\" tab");
 
     bool a2c = GEngine->GetAlphaToCoverage();
     if (Dev::Checkbox("Alpha-to-coverage (cutout AA; needs MSAA)", &a2c))
@@ -4625,8 +4625,8 @@ void DrawTemporalTab()
     Dev::PanelHelp("temporal %s | DLSS route %s | DLSS %s (quality %d)",
                    info.temporalActive ? "on" : "off", info.dlssRoute ? "up" : "down",
                    info.dlssActive ? "active" : "inactive", info.dlssQuality);
-    static const char* kUpscalerNames[] = {"nativ (kein Upscaler)", "DLSS", "FSR 1", "Bilinear"};
-    Dev::PanelHelp("aktiver Upscaler: %s",
+    static const char* kUpscalerNames[] = {"native (no upscaler)", "DLSS", "FSR 1", "bilinear"};
+    Dev::PanelHelp("active upscaler: %s",
                    kUpscalerNames[info.activeUpscaler >= 0 && info.activeUpscaler <= 3 ? info.activeUpscaler : 0]);
     Dev::PanelHelp("jitter (%.3f, %.3f) px | mip bias %.3f%s", info.jitterX, info.jitterY,
                    info.mipBiasEffective, info.resetThisFrame ? " | HISTORY RESET" : "");
@@ -4638,44 +4638,44 @@ void DrawTemporalTab()
     bool changed = false;
     changed |= Dev::Checkbox("Temporal (jitter + motion vectors)", &t.temporalOn);
     changed |= Dev::Checkbox("DLSS Super Resolution", &t.dlssOn);
-    Dev::PanelTooltip("Braucht die NGX-Route (NVIDIA, beim Start erkannt). Aus/nicht verfuegbar -> FSR 1 uebernimmt.");
-    changed |= Dev::Checkbox("FSR 1 (freier Fallback-Upscaler)", &t.fsrOn);
-    Dev::PanelTooltip("AMD FidelityFX EASU+RCAS (MIT-Lizenz, laeuft auf jeder GPU). Greift wenn DLSS aus ist.\nBeide aus = weiches Bilinear.");
-    changed |= Dev::SliderFloat("FSR Schaerfe (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
-    Dev::PanelTooltip("RCAS-Schaerfung in Blendenstufen: 0 = schaerfste Stufe, 2 = mildeste.");
+    Dev::PanelTooltip("Needs the NGX route (NVIDIA, detected at launch). Off/unavailable -> FSR 1 takes over.");
+    changed |= Dev::Checkbox("FSR 1 (vendor-neutral upscaler)", &t.fsrOn);
+    Dev::PanelTooltip("AMD FidelityFX EASU+RCAS (MIT-licensed, runs on any GPU). Active when DLSS is off.\nBoth off = soft bilinear.");
+    changed |= Dev::SliderFloat("FSR sharpness (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest.");
     changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
     Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
-    if (ImGui::Button("Native (alles aus)"))
+    if (ImGui::Button("Native (everything off)"))
     {
         t.temporalOn = false;
         t.dlssOn = false;
         t.renderScalePct = 100;
         changed = true;
     }
-    Dev::PanelTooltip("Ein Klick: Temporal + DLSS aus, Scale 100%% - das unangetastete native Rendering.");
+    Dev::PanelTooltip("One click: temporal + DLSS off, scale 100%% - the untouched native pipeline.");
 
     {
         const int active = info.msaaSamples <= 1 ? 0 : info.msaaSamples;
         static int msaaChoice = -1;
         if (msaaChoice < 0)
             msaaChoice = active == 0 ? 0 : active == 2 ? 1 : active == 4 ? 2 : 3;
-        if (ImGui::Combo("MSAA (Neustart)", &msaaChoice, "Off\0" "2x\0" "4x\0" "8x\0"))
+        if (ImGui::Combo("MSAA (restart)", &msaaChoice, "Off\0" "2x\0" "4x\0" "8x\0"))
         {
             const int samples[] = {0, 2, 4, 8};
             GEngine->SetMsaaSamples(samples[msaaChoice]);
         }
         const int chosen[] = {0, 2, 4, 8};
         if (chosen[msaaChoice] != active)
-            Dev::PanelHelp("MSAA %s greift beim naechsten Start (aktiv: %dx)",
+            Dev::PanelHelp("MSAA %s applies on the next launch (active: %dx)",
                            msaaChoice == 0 ? "Off" : chosen[msaaChoice] == 2 ? "2x" : chosen[msaaChoice] == 4 ? "4x" : "8x",
                            active);
-        Dev::PanelTooltip("Wird in graphics.cfg gespeichert (auch im Optionen-Menue einstellbar); die Renderer-Pipelines sind pro Start fix.");
+        Dev::PanelTooltip("Stored in graphics.cfg (also settable in the Options menu); the renderer pipelines are fixed per launch.");
 
         // Persist the panel's graphics choices so they survive a restart — the same
         // file the Options page writes. DLSS off is remembered (dlssMode 0 seeds
         // WGR_DLSS=0 at boot); scale 100% persists as AUTO (the renderer may then
         // still pick its DLSS default), any other scale as an explicit pin.
-        if (ImGui::Button("Als Standard speichern"))
+        if (ImGui::Button("Save as default"))
         {
             const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
             GraphicsConfig cfg;
@@ -4690,7 +4690,7 @@ void DrawTemporalTab()
             else
                 LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
         }
-        Dev::PanelTooltip("Schreibt DLSS an/aus, MSAA und Render scale in graphics.cfg - gilt dann bei jedem Start.");
+        Dev::PanelTooltip("Writes DLSS on/off, MSAA and render scale to graphics.cfg - applied on every launch.");
     }
 
     Dev::PanelSeparator();
