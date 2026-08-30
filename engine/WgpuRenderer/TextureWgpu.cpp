@@ -1498,6 +1498,20 @@ uint64_t TextureWgpu::EnsureUploaded()
             GTextureStreamStats.fallbackUs.fetch_add(fallbackDelta, std::memory_order_relaxed);
             GTextureStreamStats.frameUploadUs.fetch_add(fallbackDelta, std::memory_order_relaxed);
         }
+        // The traverse capture counted 390 of these decodes costing 1.1 s and nothing said
+        // WHICH textures or WHY the block path refused them (non-DXT format? no source? a
+        // failed block upload?). Bounded: the first 24 name the culprits, which is enough to
+        // classify the population without turning a fill-in into a log flood.
+        {
+            static std::atomic<uint32_t> loggedFallback{0};
+            if (loggedFallback.fetch_add(1, std::memory_order_relaxed) < 24)
+            {
+                LOG_INFO(Graphics,
+                         "Wgpu texture fallback decode: {} (format={} bc={} src={} {}x{} mips={} -> {})",
+                         Name() ? Name() : "<unnamed>", int(dst), bcFormat, _src ? "yes" : "no", _w, _h, _nMipmaps,
+                         _gpuHandle ? "uploaded" : "FAILED");
+            }
+        }
         if (profiled)
         {
             admit.textureFallbackMs += (NowUs() - began) / 1000.0;

@@ -3,6 +3,7 @@
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
 
+#include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp> // ReadEmatFileLoose (pure, worker-safe)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Threads/PoThread.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
@@ -227,6 +228,29 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 if (std::find(names.begin(), names.end(), key) == names.end())
                     names.push_back(std::move(key));
             };
+            // Materials the IR names by PATH (.emat) get their stage textures included.
+            // Measured before this existed (asset-obs-vehicle30-r2): 1,797 of the store's
+            // takes MISSED because registration-time stage textures (normal/detail maps)
+            // are not in the IR's texturePath fields -- two thirds of the uploads paid the
+            // main-thread file read anyway. The worker parses the .emat itself, but ONLY
+            // as a loose file (ReadEmatFileLoose: plain ifstream + the deploy roots); the
+            // resolver route is main-thread-only, and a bank-resident material simply
+            // misses here and behaves exactly as before. RVMATs are not attempted: their
+            // parser runs through ParamFile + QIFStreamB, neither of which a worker may
+            // touch. Every collected value still passes noteName's .paa/.pac gate, so an
+            // Enfusion-native reference that never became a PAA costs nothing.
+            auto noteEmatTextures = [&](const std::string& materialPath)
+            {
+                if (materialPath.empty() || !Asset::Material::IsEmatMaterialPath(materialPath))
+                    return;
+                Asset::Material::EmatMaterial emat;
+                if (!Asset::Material::ReadEmatFileLoose(materialPath, emat))
+                    return;
+                for (const Asset::Material::EmatProperty& property : emat.properties)
+                    for (const Asset::Material::EmatValue& value : property.values)
+                        if (value.isTexture())
+                            noteName(value.text);
+            };
             for (const Model::LODLevel& level : model->lodLevels)
             {
                 for (const Model::Material& material : level.mesh.materials)
@@ -234,6 +258,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                     noteName(material.texturePath);
                     for (const Model::MaterialStage& stage : material.embeddedStages)
                         noteName(stage.texturePath);
+                    noteEmatTextures(material.materialPath);
                 }
             }
             for (const std::string& key : names)

@@ -9,6 +9,8 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <sstream>
 #include <initializer_list>
 #include <stdexcept>
 #include <string>
@@ -187,6 +189,24 @@ inline bool IsUnderEmatDeployRoot(std::string_view path)
     return false;
 }
 
+// WORKER-SAFE loose-file read: plain std::ifstream, no QIFStreamB, no banks. The
+// object-stream preparer's workers may not touch the file server (FileCache is an
+// unlocked MRU array; QFBank compiles MT_SAFE out), and the converter-deployed `.emat`s
+// they want ARE loose files under the deploy roots, so the pure read covers exactly the
+// population a worker can help with. A material that only resolves through a bank
+// simply misses here and takes the main-thread path as before. Mirrors ReadEmatText's
+// lookup order: the path as written first, then the deployed spelling under each root.
+inline bool ReadEmatTextLooseExact(const std::string& path, std::string& out)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+        return false;
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    out = buffer.str();
+    return !out.empty();
+}
+
 // Reads a file through the same resolver model loading uses, so an addon-bank path
 // resolves the way an RVMAT reference does. Returns false when the file is absent --
 // which is the ordinary case for every non-DayZ material and must not be an error.
@@ -222,6 +242,35 @@ inline bool ReadEmatText(const std::string& path, std::string& out)
         if (ReadEmatTextExact(DeployedEmatPath(root, path), out))
             return true;
     return false;
+}
+
+inline bool ReadEmatTextLoose(const std::string& path, std::string& out)
+{
+    if (ReadEmatTextLooseExact(path, out))
+        return true;
+    if (path.empty() || IsUnderEmatDeployRoot(path))
+        return false;
+    if (path[0] == '\\' || path[0] == '/' || (path.size() > 1 && path[1] == ':'))
+        return false;
+    for (const std::string& root : EmatDeployRoots())
+        if (ReadEmatTextLooseExact(DeployedEmatPath(root, path), out))
+            return true;
+    return false;
+}
+
+// ReadEmatFile with the loose reader end to end -- inheritance resolution included,
+// through the same pure route, so a worker never opens a bank for a parent either.
+inline bool ReadEmatFileLoose(const std::string& path, EmatMaterial& out)
+{
+    std::string text;
+    if (!ReadEmatTextLoose(path, text))
+        return false;
+    out = ParseEmat(text);
+    if (!out.valid())
+        return false;
+    ResolveEmatInheritance(
+        out, [](const std::string& parent, std::string& text) { return ReadEmatTextLoose(parent, text); });
+    return true;
 }
 
 inline bool ReadEmatFile(const std::string& path, EmatMaterial& out)

@@ -217,7 +217,7 @@ inline RvMaterialSource ParseArmaRapMaterial(const std::vector<uint8_t>& bytes, 
                 return fallback;
             char* end = nullptr;
             const long v = std::strtol(t.c_str(), &end, 10);
-            return end && *end == ' ' ? static_cast<int>(v) : fallback;
+            return end && *end == '\0' ? static_cast<int>(v) : fallback;
         }
         return fallback;
     };
