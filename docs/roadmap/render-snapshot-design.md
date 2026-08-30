@@ -1,5 +1,14 @@
 # RenderSnapshot — design from the measured read surface (Phase 5 prep)
 
+> **Status 2026-08-30: S1–S4 are implemented and verified** (commits `603620fc`,
+> `151446d8`, `4f93443a`, `7b07f656`, `fcb1764d`). `PresentationSnapshot` captures the
+> environment block, the interactors/rotor sources and the scored light set once per
+> frame; the residency mutation runs world-side. Verification: pixel triangulation
+> against same-binary run noise for the visuals, the night-survey 12/12 light trace for
+> S3, and the 30 m/s traverse (resident 19992, fps unchanged) for S4. Open: S5
+> (per-draw context globals), the camera pulls inside push-side `PushSceneCamera`,
+> load-time latches — and §4's stable IDs, which are the next milestone.
+
 **Status:** design grounded in a complete inventory of what the WGPU renderer reads
 from live state today (2026-08-30, `asset-obs-001`; all citations verified there).
 Companion to [ownership-authority.md](ownership-authority.md). This document exists so
