@@ -103,6 +103,17 @@ larger ownership and concurrency projects begin.
   42.3 s at 30 m/s, with 415 queue-full refusals and 21,001 skipped admission
   attempts — the preparer saturates far below this camera speed. Any Phase 6/7
   streaming work has its baseline.
+- **Follow-up shipped (commit `1f46625a`): workers now prepare `.emat` stage
+  textures** (the IR carries `materialPath`; converter-deployed materials are loose
+  files, so a pure-ifstream reader keeps the worker off the file server). Same
+  traverse: store misses 1,797 → 278, worker-prepared uploads 866 → 2,419 of ~3,090,
+  and **main-thread texture file reads during cold admission fell 2,542 ms → 9 ms**;
+  request→installed latency improved ~20%. Frame-time effect is inside run-to-run
+  noise (best repeats 40.6 vs 39.0 fps against an intra-arm spread of 31.8–39.0) —
+  the win is structural, not yet a measured fps win, because per-object cost is
+  dominated by adapter + registration, as above. The 390 fallback decodes were
+  identified as converter-written PacARGB8888 `*_mask.paa` files; the DXT exporter
+  fix is filed separately.
 
 ### 1.1 Generic upscaler boundary
 
