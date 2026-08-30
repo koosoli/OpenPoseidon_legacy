@@ -126,7 +126,13 @@ TEST_CASE("GraphicsPage anti-aliasing rows round-trip through the provider", "[U
     TestableGraphicsPage page;
     auto& p = page.Provider();
 
+    // The provider reads the LIVE GraphicsConfig, which on a developer machine
+    // carries whatever graphics.cfg says (MSAA 4x here read as index 2 and failed a
+    // bare ==0 for months). Round-trip explicit values in both directions instead of
+    // assuming this machine's defaults.
+    p.SetRowValue(11, 0);
     CHECK(p.RowValue(11) == 0);
+    p.SetRowValue(12, 0);
     CHECK(p.RowValue(12) == 0);
 
     p.SetRowValue(11, 2);

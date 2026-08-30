@@ -4668,9 +4668,9 @@ void DrawTemporalTab()
     }
     Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest.\n"
                       "Applies to FSR 1 and, when enabled above, to the DLSS output.");
-    changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
+    changed |= Dev::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
     Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
-    if (ImGui::Button("Native (everything off)"))
+    if (Dev::Button("Native (everything off)"))
     {
         t.temporalOn = false;
         t.dlssOn = false;
@@ -4682,7 +4682,7 @@ void DrawTemporalTab()
                       "Applies INSTANTLY, no restart. MSAA is classic anti-aliasing, not upscaling,\n"
                       "and stays as set above. Watch the \"active upscaler\" line flip to native.");
     Dev::PanelSameLine();
-    if (ImGui::Button("Auto defaults"))
+    if (Dev::Button("Auto defaults"))
     {
         // Fresh shipped defaults: DLSS-if-supported (else FSR), Quality scale, all
         // the owner-validated tuning values.
@@ -4697,7 +4697,7 @@ void DrawTemporalTab()
         static int msaaChoice = -1;
         if (msaaChoice < 0)
             msaaChoice = active == 0 ? 0 : active == 2 ? 1 : active == 4 ? 2 : 3;
-        if (ImGui::Combo("MSAA (restart)", &msaaChoice, "Off\0" "2x\0" "4x\0" "8x\0"))
+        if (Dev::Combo("MSAA (restart)", &msaaChoice, "Off\0" "2x\0" "4x\0" "8x\0"))
         {
             const int samples[] = {0, 2, 4, 8};
             GEngine->SetMsaaSamples(samples[msaaChoice]);
@@ -4713,7 +4713,7 @@ void DrawTemporalTab()
         // file the Options page writes. DLSS off is remembered (dlssMode 0 seeds
         // WGR_DLSS=0 at boot); scale 100% persists as AUTO (the renderer may then
         // still pick its DLSS default), any other scale as an explicit pin.
-        if (ImGui::Button("Save as default"))
+        if (Dev::Button("Save as default"))
         {
             const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
             GraphicsConfig cfg;
@@ -4761,7 +4761,7 @@ void DrawTemporalTab()
     changed |= Dev::SliderFloat("Reactive: sky/clouds", &t.reactiveSky, 0.0f, 1.0f, "%.2f");
     changed |= Dev::SliderFloat("Reactive: water", &t.reactiveWater, 0.0f, 1.0f, "%.2f");
     int phases = t.jitterPhases;
-    if (ImGui::SliderInt("Jitter phases (0 = auto)", &phases, 0, 64))
+    if (Dev::SliderInt("Jitter phases (0 = auto)", &phases, 0, 64))
     {
         t.jitterPhases = phases;
         changed = true;

@@ -17,6 +17,8 @@ std::string PackageStringtablePath(const char* package)
 
 void CheckMpVersionMessage(const char* package)
 {
+    if (!std::filesystem::is_regular_file(PackageStringtablePath(package)))
+        SKIP("packages/" << package << " not staged on this machine");
     Poseidon::ClearStringtable();
     GLanguage = "German";
     Poseidon::LoadStringtable("global", PackageStringtablePath(package).c_str(), 0, true);

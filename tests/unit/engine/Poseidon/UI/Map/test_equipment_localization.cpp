@@ -108,6 +108,8 @@ TEST_CASE("STRINGTABLE_EQUIPMENT.utf8.csv ships M16 keys for all 8 languages",
 {
     const std::filesystem::path csvPath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "packages" /
                                           "Remaster" / "BIN" / "STRINGTABLE_EQUIPMENT.utf8.csv";
+    if (!std::filesystem::is_regular_file(csvPath))
+        SKIP("packages/Remaster not staged on this machine: " + csvPath.string());
     const std::string src = ReadTextFile(csvPath);
     CAPTURE(csvPath.string());
     REQUIRE_FALSE(src.empty());
@@ -162,6 +164,8 @@ TEST_CASE("equipment.utf8.html lives loose and references STR_EQ_M16 tokens",
 {
     const std::filesystem::path htmlPath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "packages" /
                                            "Remaster" / "dtaExt" / "equip" / "equipment.utf8.html";
+    if (!std::filesystem::is_regular_file(htmlPath))
+        SKIP("packages/Remaster not staged on this machine: " + htmlPath.string());
     const std::string src = ReadTextFile(htmlPath);
     CAPTURE(htmlPath.string());
     REQUIRE_FALSE(src.empty());
@@ -186,6 +190,8 @@ TEST_CASE("equipment.utf8.html line endings are clean CRLF (no doubled CR)",
     // Pin the byte sequence so that regression can't reappear.
     const std::filesystem::path htmlPath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "packages" /
                                            "Remaster" / "dtaExt" / "equip" / "equipment.utf8.html";
+    if (!std::filesystem::is_regular_file(htmlPath))
+        SKIP("packages/Remaster not staged on this machine: " + htmlPath.string());
     std::ifstream f(htmlPath, std::ios::binary);
     REQUIRE(f.is_open());
     std::vector<char> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -210,6 +216,8 @@ TEST_CASE("equipment.utf8.html preserves every EQ_ anchor and weapon image",
     // the inventory page renders pictures for every weapon.
     const std::filesystem::path htmlPath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "packages" /
                                            "Remaster" / "dtaExt" / "equip" / "equipment.utf8.html";
+    if (!std::filesystem::is_regular_file(htmlPath))
+        SKIP("packages/Remaster not staged on this machine: " + htmlPath.string());
     const std::string src = ReadTextFile(htmlPath);
     REQUIRE_FALSE(src.empty());
 

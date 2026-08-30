@@ -84,6 +84,8 @@ TEST_CASE("STRINGTABLE_MAP.utf8.csv ships both legend keys with English fallback
     // language column is blank — so English is the floor).
     const std::filesystem::path csvPath = std::filesystem::path(TESTS_ROOT_DIR).parent_path() / "packages" /
                                           "Remaster" / "BIN" / "STRINGTABLE_MAP.utf8.csv";
+    if (!std::filesystem::is_regular_file(csvPath))
+        SKIP("packages/Remaster not staged on this machine: " + csvPath.string());
     const std::string src = ReadTextFile(csvPath);
     CAPTURE(csvPath.string());
     REQUIRE_FALSE(src.empty());
