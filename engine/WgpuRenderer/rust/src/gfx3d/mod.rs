@@ -7229,6 +7229,22 @@ impl Gfx3d {
         if ranges.is_empty() || lo[0] > hi[0] {
             return;
         }
+        // A volume whose every voxel sees the sky is identical to no volume, and a
+        // bush or roadside rock has no interior a 16k-voxel bake can discover — but it
+        // costs exactly as much as a church. Models below this bounding-box volume are
+        // not baked (they read as fully open sky, which is what their surfaces see).
+        // WGR_SKY_BAKE_MIN_VOLUME_M3 overrides; 0 restores bake-everything.
+        static MIN_VOLUME_M3: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+        let min_volume = *MIN_VOLUME_M3.get_or_init(|| {
+            std::env::var("WGR_SKY_BAKE_MIN_VOLUME_M3")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(4.0)
+        });
+        let volume = (hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]);
+        if volume < min_volume {
+            return;
+        }
         let bake = self
             .sky_bake
             .get_or_insert_with(|| sky_bake::SkyBake::new(device, BAKED_VERT_SIZE));
