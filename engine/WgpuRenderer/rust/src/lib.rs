@@ -1523,9 +1523,11 @@ impl Renderer {
                 .unwrap_or(false),
             dlss_active_frame: false,
             dlss_last_quality: -1,
+            // Default ON (owner verdict 2026-08-30: DLSS Quality alone reads softer
+            // than native; RCAS at the 0.25-stop default closes the gap).
             dlss_sharpen: std::env::var("WGR_DLSS_SHARPEN")
                 .map(|v| v != "0")
-                .unwrap_or(false),
+                .unwrap_or(true),
             rcas_sharpener: upscaler::RcasSharpener::new(),
             fsr_runtime_on: std::env::var("WGR_FSR").map(|v| v != "0").unwrap_or(true),
             fsr_sharpness: std::env::var("WGR_FSR_SHARPNESS")

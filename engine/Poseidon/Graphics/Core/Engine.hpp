@@ -1699,7 +1699,8 @@ class Engine : public IGraphicsEngine
         bool fsrOn = true;
         float fsrSharpness = 0.25f; // RCAS stops: 0 = sharpest, 2 = mildest
         // RCAS sharpen pass over the DLSS output (strength = fsrSharpness).
-        bool dlssSharpen = false;      // convention A/B arms — leave alone unless probing
+        // Default ON — the owner's pick: DLSS + 0.25-stop RCAS beats plain DLSS.
+        bool dlssSharpen = true;      // convention A/B arms — leave alone unless probing
         bool mvRenderSpace = false;
         bool mvFlip = false;
     };
