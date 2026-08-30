@@ -64,8 +64,8 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER_QUALITY", "STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER_QUALITY_DESC", "Upscaler Quality",
      "Internal render resolution when an upscaler is active. Quality (67%) is the recommended sweet spot; "
      "Performance trades sharpness for the highest frame rate."},
-    {"STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS", "STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS_DESC", "Sharpness (FSR)",
-     "FSR sharpening strength. Left = sharpest, right = mildest. Has no effect while DLSS is the active upscaler."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS", "STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS_DESC", "Sharpness",
+     "Image sharpening strength (RCAS), applied by FSR 1 and on top of DLSS. Left = sharpest, right = mildest."},
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
