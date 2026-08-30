@@ -74,7 +74,10 @@ private:
 			kRowAntiAliasing   = 11,
 			kRowSupersampling  = 12,
 			kRowMultitexturing = 13,
-			kRowCount          = 14,
+			kRowUpscaler       = 14,
+			kRowUpscalerQuality = 15,
+			kRowSharpness      = 16,
+			kRowCount          = 17,
 		};
 
 		void SetPage(class GraphicsPage* page) { m_page = page; }
@@ -115,6 +118,10 @@ private:
 	std::array<const char*, 4>      m_msaaCStrs{};
 	std::array<std::string, 5>      m_renderScaleLabels;
 	std::array<const char*, 5>      m_renderScaleCStrs{};
+	std::array<std::string, 4>      m_upscalerLabels;
+	std::array<const char*, 4>      m_upscalerCStrs{};
+	std::array<std::string, 4>      m_upscalerQualityLabels;
+	std::array<const char*, 4>      m_upscalerQualityCStrs{};
 	std::array<std::string, 2>      m_offOnLabels;
 	std::array<const char*, 2>      m_offOnCStrs{};
 	std::array<std::string, 3>      m_vsyncLabels;

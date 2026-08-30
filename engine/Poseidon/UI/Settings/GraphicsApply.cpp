@@ -150,6 +150,38 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
         GEngine->SetAlphaToCoverage(cfg.alphaToCoverage);
         GEngine->SetRenderScale(cfg.renderScale);
         GEngine->SetMsaaSamples(cfg.msaaSamples);
+        // Upscaler rows (REN-TEMP-001): live through the temporal tuning. Auto =
+        // DLSS when its route is up, else FSR 1 at Quality; Off = pure native.
+        // The legacy SSAA row (renderScale > 1) owns the scale when pinned.
+        if (GEngine->SupportsTemporalTuning())
+        {
+            Engine::TemporalSettings t = GEngine->GetTemporalTuning();
+            const Engine::TemporalInfo info = GEngine->GetTemporalInfo();
+            t.dlssOn = (cfg.dlssMode == -1 || cfg.dlssMode == 1);
+            t.fsrOn = (cfg.dlssMode == -1 || cfg.dlssMode == 2);
+            t.fsrSharpness = std::clamp(cfg.fsrSharpness, 0.0f, 2.0f);
+            const bool ssaaPinned = cfg.renderScale > 1.01f;
+            if (!ssaaPinned)
+            {
+                if (cfg.dlssMode == 0)
+                {
+                    t.temporalOn = false;
+                    t.renderScalePct = 100;
+                }
+                else if (cfg.upscalerQuality >= 50 && cfg.upscalerQuality <= 100)
+                {
+                    t.renderScalePct = cfg.upscalerQuality;
+                }
+                else if (cfg.dlssMode == 2 || (cfg.dlssMode == -1 && !info.dlssRoute))
+                {
+                    // FSR chosen (or Auto without DLSS): Quality point.
+                    t.renderScalePct = 67;
+                }
+                if (cfg.dlssMode == 1 || (cfg.dlssMode == -1 && info.dlssRoute))
+                    t.temporalOn = true;
+            }
+            GEngine->SetTemporalTuning(t);
+        }
         GEngine->SetMultitexturing(cfg.multitexturing);
     }
     gUserFpsCap = cfg.fpsCap;

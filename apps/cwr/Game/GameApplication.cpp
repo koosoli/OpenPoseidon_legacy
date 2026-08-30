@@ -689,15 +689,35 @@ void SeedRendererEnvFromGraphicsConfig()
         setenv("WGR_MSAA", buf, 1);
 #endif
     }
-    // The user turned DLSS off (dev panel save / options): honour it from boot, or
-    // the renderer would flash a DLSS frame before the config could catch up.
-    if (cfg.dlssMode == 0)
+    // The user turned DLSS off, or picked FSR explicitly (dev panel save /
+    // options): honour it from boot, or the renderer would flash a DLSS frame
+    // before the config could catch up.
+    if (cfg.dlssMode == 0 || cfg.dlssMode == 2)
     {
 #ifdef _WIN32
         _putenv_s("WGR_DLSS", "0");
 #else
         setenv("WGR_DLSS", "0", 1);
 #endif
+    }
+    // Explicit upscaler quality (or FSR's Quality default) as the boot scale;
+    // GraphicsApply re-applies the same value live once the engine is up.
+    {
+        int pct = 0;
+        if (cfg.dlssMode != 0 && cfg.upscalerQuality >= 50 && cfg.upscalerQuality <= 100)
+            pct = cfg.upscalerQuality;
+        else if (cfg.dlssMode == 2)
+            pct = 67;
+        if (pct != 0)
+        {
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d", pct);
+#ifdef _WIN32
+            _putenv_s("WGR_RENDER_SCALE", buf);
+#else
+            setenv("WGR_RENDER_SCALE", buf, 1);
+#endif
+        }
     }
     // renderScale 1.0 = AUTO: no env pin, the renderer keeps its own default (DLSS
     // Quality when available). Any other value is the user's explicit pin.

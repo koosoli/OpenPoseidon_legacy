@@ -58,6 +58,14 @@ const GraphicsRowText kRows[] = {
     {"STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING", "STR_DISP_MAIN_OPT_GRAPHICS_MULTITEXTURING_DESC", "Multitexturing",
      "Detail and specular texture stages on terrain and objects. Off falls back to the base texture like the "
      "original compatibility switch."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER", "STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER_DESC", "Upscaler",
+     "Renders the 3D scene below window resolution and reconstructs it for large FPS gains. Auto picks DLSS on "
+     "supported NVIDIA cards, otherwise FSR 1. Off renders every pixel natively."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER_QUALITY", "STR_DISP_MAIN_OPT_GRAPHICS_UPSCALER_QUALITY_DESC", "Upscaler Quality",
+     "Internal render resolution when an upscaler is active. Quality (67%) is the recommended sweet spot; "
+     "Performance trades sharpness for the highest frame rate."},
+    {"STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS", "STR_DISP_MAIN_OPT_GRAPHICS_SHARPNESS_DESC", "Sharpness (FSR)",
+     "FSR sharpening strength. Left = sharpest, right = mildest. Has no effect while DLSS is the active upscaler."},
 };
 constexpr int kFpsCapValues[] = {0, 30, 60, 90, 120, 144, 240};
 constexpr int kMsaaValues[] = {0, 2, 4, 8};
@@ -233,6 +241,12 @@ OptionsScrollList::RowDef GraphicsPage::GraphicsProvider::RowFor(int row) const
             return {612, m_page->m_renderScaleCStrs.data(), 5};
         case kRowMultitexturing:
             return {622, m_page->m_offOnCStrs.data(), 2};
+        case kRowUpscaler:
+            return {642, m_page->m_upscalerCStrs.data(), 4};
+        case kRowUpscalerQuality:
+            return {652, m_page->m_upscalerQualityCStrs.data(), 4};
+        case kRowSharpness:
+            return {662, nullptr, -1}; // slider
     }
     return {-1, nullptr, 0};
 }
@@ -288,6 +302,13 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
             return GraphicsPage::RenderScaleToIndex(c.renderScale);
         case kRowMultitexturing:
             return c.multitexturing ? 1 : 0;
+        case kRowUpscaler:
+            // Auto(-1)->0, Off(0)->1, DLSS(1)->2, FSR(2)->3.
+            return c.dlssMode >= 0 && c.dlssMode <= 2 ? c.dlssMode + 1 : 0;
+        case kRowUpscalerQuality:
+            return c.upscalerQuality == 67 ? 1 : c.upscalerQuality == 58 ? 2 : c.upscalerQuality == 50 ? 3 : 0;
+        case kRowSharpness:
+            return FloatToSlider(c.fsrSharpness, 0.0f, 2.0f);
         case kRowVsync:
             return (int)c.vsync;
         case kRowFpsCap:
@@ -304,12 +325,15 @@ int GraphicsPage::GraphicsProvider::RowValue(int row) const
 // the bar carries the position in the range.
 const char* GraphicsPage::GraphicsProvider::SliderValueText(int row) const
 {
-    if (!m_page || (row != kRowBrightness && row != kRowGamma))
+    if (!m_page || (row != kRowBrightness && row != kRowGamma && row != kRowSharpness))
         return nullptr;
 
     const GraphicsConfig& c = m_page->m_cfg;
     char buffer[16];
-    snprintf(buffer, sizeof(buffer), "%.1f", row == kRowBrightness ? c.brightness : c.gamma);
+    snprintf(buffer, sizeof(buffer), row == kRowSharpness ? "%.2f" : "%.1f",
+             row == kRowSharpness ? c.fsrSharpness
+             : row == kRowBrightness ? c.brightness
+                                     : c.gamma);
     m_sliderValueText = buffer;
     return m_sliderValueText.c_str();
 }
@@ -388,6 +412,21 @@ void GraphicsPage::GraphicsProvider::SetRowValue(int row, int v)
             break;
         case kRowMultitexturing:
             c.multitexturing = v != 0;
+            break;
+        case kRowUpscaler:
+            // 0 Auto, 1 Off, 2 DLSS, 3 FSR 1.
+            if (v >= 0 && v <= 3)
+                c.dlssMode = v - 1;
+            break;
+        case kRowUpscalerQuality:
+        {
+            static const int kQuality[] = {-1, 67, 58, 50};
+            if (v >= 0 && v < 4)
+                c.upscalerQuality = kQuality[v];
+            break;
+        }
+        case kRowSharpness:
+            c.fsrSharpness = SliderToFloat(v, 0.0f, 2.0f);
             break;
         case kRowVsync:
             if (v >= 0 && v <= 2)
@@ -499,6 +538,20 @@ void GraphicsPage::RefreshLocalizedChoices()
     m_renderScaleLabels[4] = "200%";
     for (size_t i = 0; i < m_renderScaleLabels.size(); ++i)
         m_renderScaleCStrs[i] = m_renderScaleLabels[i].c_str();
+
+    m_upscalerLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_AUTO", "Auto");
+    m_upscalerLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
+    m_upscalerLabels[2] = "DLSS";
+    m_upscalerLabels[3] = "FSR 1";
+    for (size_t i = 0; i < m_upscalerLabels.size(); ++i)
+        m_upscalerCStrs[i] = m_upscalerLabels[i].c_str();
+
+    m_upscalerQualityLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_AUTO", "Auto");
+    m_upscalerQualityLabels[1] = "Quality (67%)";
+    m_upscalerQualityLabels[2] = "Balanced (58%)";
+    m_upscalerQualityLabels[3] = "Performance (50%)";
+    for (size_t i = 0; i < m_upscalerQualityLabels.size(); ++i)
+        m_upscalerQualityCStrs[i] = m_upscalerQualityLabels[i].c_str();
 
     m_offOnLabels[0] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
     m_offOnLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_ON");

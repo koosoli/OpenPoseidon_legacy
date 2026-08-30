@@ -85,10 +85,17 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
-	// DLSS/temporal upscaling: -1 = AUTO (on when the driver supports it — the
-	// renderer's own default), 0 = user said off (persisted; seeds WGR_DLSS=0 at
-	// boot), 1 = force-request. Tolerated as absent in old files (stays -1).
+	// Upscaler choice: -1 = AUTO (DLSS when the driver supports it, else FSR 1),
+	// 0 = off (pure native), 1 = DLSS, 2 = FSR 1. Persisted; seeds WGR_DLSS /
+	// WGR_RENDER_SCALE at boot and live-applies through the temporal tuning.
+	// Tolerated as absent in old files (stays -1). Key name kept for compat.
 	int       dlssMode         = -1;
+	// Upscaler quality = internal render scale in percent: -1 = AUTO (67 when an
+	// upscaler is active), else 50/58/67. Distinct from renderScale, which stays
+	// the legacy SSAA (>100%) control.
+	int       upscalerQuality  = -1;
+	// FSR RCAS sharpness in stops (0 = sharpest, 2 = mildest).
+	float     fsrSharpness     = 0.25f;
 	float     renderScale      = 1.0f;          // 1.0 = AUTO (renderer default, incl. DLSS Quality).
 	                                            // <1 upscaling pin, >1 SSAA pin; live on wgpu.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for
