@@ -675,8 +675,10 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
         // conversion. Only the bank work it deferred remains -- proxies here, cache
         // insert + optimize below, all main-thread.
         shape = preadapted;
+        // The worker stopped before the ODOL tail; run it here, in order (proxies
+        // first, then OptimizeShapes and the rest), before OptimizeOneShape below.
         if (preparsed)
-            Poseidon::Model::ShapeAdapter::CreateAdapterProxies(shape, *preparsed);
+            Poseidon::Model::ShapeAdapter::FinishOdolAdapterTail(shape, *preparsed, reversed);
         if (timing)
         {
             timing->preparsed = true;

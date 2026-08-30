@@ -626,8 +626,160 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
     }
 }
 
+// The ODOL adapter TAIL: proxy creation plus everything that must run AFTER it in
+// Shape::SerializeBin order (the MAT-044 proxy-marker patching, the selections
+// retrofit, OptimizeShapes/ScanShapes, mass, convex components, view density,
+// reverse). MAIN THREAD ONLY - CreateAdapterProxies probes the config and file
+// table and recurses into ShapeBank::New, and OptimizeShapes must see the proxies
+// (REN-TEMP-002 taught the hard way what binding proxies AFTER the optimisation
+// does to skinning). A worker-side conversion (finishTail=false) stops before this
+// point; the main-thread install runs it before OptimizeOneShape.
+void FinishOdolAdapterTail(LODShapeWithShadow* shape, const Poseidon::Model::Model& model, bool reversed)
+{
+    if (model.sourceFormat != "ODOL")
+        return; // the MLOD tail has no proxies and stays inside the conversion
+    const int lodCount = static_cast<int>(model.lodLevels.size());
+    (void)lodCount;
+    // Proxies first: OptimizeShapes below reorders/compacts vertices and
+    // selections, and a proxy created afterwards binds to the wrong skinning
+    // data (2026-08-30, soldiers' rifles floating beside them).
+    CreateAdapterProxies(shape, model);
+
+    // Oxygen creates sections before marking proxy faces hidden, so section hints
+    // lack IsHiddenProxy. Patch any section containing a proxy face selection.
+    for (int li = 0; li < lodCount; li++)
+    {
+        Shape* lod = shape->_lods[li];
+        if (!lod)
+            continue;
+        const auto& irSelections = model.lodLevels[li].mesh.selections;
+        for (int si = 0; si < lod->NNamedSel(); si++)
+        {
+            const ::NamedSelection& sel = lod->NamedSel(si);
+            if (strncmp(sel.Name(), "proxy:", 6) != 0)
+                continue;
+
+            // MAT-044: mark by the selection's OWN section list when the face list is
+            // empty.
+            //
+            // The face route below matches `selectedFaces` against a rebuilt byte-offset
+            // table (ODOLLoader), which only works while the table's stride matches the
+            // file's. On the Arma 2 family it evidently does not, so `triangleIndices`
+            // comes through empty and this patch used to give up -- leaving the section
+            // with hints 0, so neither Shape::Draw nor RegisterGpuModel's
+            // IsHidden|IsHiddenProxy skip could fire, and one untextured triangle per
+            // proxy was drawn as ordinary geometry. Measured on Takistan: 40 of 513
+            // models, 1,898 markers on visual LODs.
+            //
+            // ODOL named selections carry an explicit `sections` array (the IR's
+            // `sectionIndices`) alongside the face list -- the pre-computed mapping the
+            // format already provides. Using it needs no offset arithmetic at all, so it
+            // is immune to the stride question rather than depending on its answer.
+            bool marked = false;
+            if (sel.Faces().Size() < 1 && si < static_cast<int>(irSelections.size()) &&
+                irSelections[si].name == sel.Name())
+            {
+                for (uint32_t secIdx : irSelections[si].sectionIndices)
+                {
+                    if (secIdx >= static_cast<uint32_t>(lod->NSections()))
+                        continue;
+                    ShapeSection& sec = lod->GetSection(static_cast<int>(secIdx));
+                    sec.properties.OrSpecial(IsHiddenProxy);
+                    sec.properties.SetTexture(nullptr);
+                    marked = true;
+                }
+            }
+            if (marked)
+                continue;
+
+            if (sel.Faces().Size() < 1)
+            {
+                // MAT-044: this early-out is why Arma 2 houses bake their proxy-marker
+                // section as untextured geometry. The section keeps hints 0, so neither
+                // Shape::Draw nor RegisterGpuModel's IsHidden|IsHiddenProxy skip fires,
+                // and one triangle per proxy is drawn with no texture and no RVMAT.
+                // Measured: section 0's triangle count equals the proxy count exactly on
+                // house_k_1 (14), house_k_3 (29), house_k_5 (17) and house_l_3 (12).
+                // Whether the face list is empty because the A2 reader drops it or because
+                // the source selects only vertices is the open question -- say which.
+                if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT");
+                    trace && std::strcmp(trace, "__trace__") == 0)
+                {
+                    LOG_INFO(Graphics,
+                             "ShapeAdapter proxy patch SKIPPED: model={} lod={} selection={} points={} "
+                             "faces={} irSections={} sections={}",
+                             model.sourcePath, li, sel.Name(), sel.Size(), sel.Faces().Size(),
+                             si < static_cast<int>(irSelections.size())
+                                 ? static_cast<int>(irSelections[si].sectionIndices.size())
+                                 : -1,
+                             lod->NSections());
+                }
+                continue;
+            }
+            int faceIdx = sel.Faces()[0];
+            Offset faceOfs = lod->Faces().Find(faceIdx);
+            for (int s = 0; s < lod->NSections(); s++)
+            {
+                ShapeSection& sec = lod->GetSection(s);
+                if (faceOfs >= sec.beg && faceOfs < sec.end)
+                {
+                    sec.properties.OrSpecial(IsHiddenProxy);
+                    sec.properties.SetTexture(nullptr);
+                    break;
+                }
+            }
+        }
+    }
+
+    // LODShape::SerializeBin IsLoading block
+    shape->OptimizeShapes();
+    // COL-001: OptimizeShapes ends in ScanShapes only when GApp exists, and
+    // that scan is what turns the resolutions into _geometry / _landContact /
+    // _roadway once the LOD list has been compacted. Run it explicitly so the
+    // shape is the same object in a tool or a test as it is in the game.
+    shape->ScanShapes();
+    shape->CheckForcedProperties();
+    // A file whose mass total is zero while its per-point table is not was
+    // binarised without one; derive it the way the MLOD loader would.
+    if (!(shape->_mass > 0.0f) && shape->_massArray.Size() > 0)
+    {
+        Shape* geom = shape->GeometryLevel();
+        if (geom && geom->_pointToVertex.Size() <= shape->_massArray.Size())
+            shape->CalculateMass();
+    }
+    if (SynthesizeBoxGeometryIfRequested(shape, model.sourcePath.c_str()))
+    {
+        Shape* geom = shape->GeometryLevel();
+        if (geom)
+            SynthesizeBoxGeometryMass(shape, geom, shape->_massArray, shape->_mass, shape->_invMass,
+                                      geom->_pointToVertex, geom->_vertexToPoint);
+    }
+    shape->InitConvexComponents();
+    shape->_propertyClass = shape->PropertyValue("class");
+    shape->_propertyDammage = shape->PropertyValue("dammage");
+    LogCollisionStats(shape, model);
+
+    // shapeFile.cpp:588-598
+    {
+        float alpha = shape->_color.A8() * (1.0f / 255.0f);
+        float transparency = 1.0f - alpha * 1.5f;
+        if (transparency >= 0.99f)
+            shape->_viewDensity = 0;
+        if (transparency > 0.01f)
+            shape->_viewDensity = std::log(transparency) * 4.0f;
+        else
+            shape->_viewDensity = -10;
+    }
+
+    if (reversed)
+    {
+        shape->Reverse();
+        shape->SetRemarks(shape->Remarks() | REM_REVERSED);
+    }
+}
+
 LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
-                                      const AdapterBankTables* tables, bool proxiesInline)
+                                      const AdapterBankTables* tables, bool finishTail)
 {
     // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
     // Accumulated across LODs, logged once per model when the total is worth reading.
@@ -1348,147 +1500,12 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_paths = model.pathsIdx;
         shape->_hitpoints = model.hitpointsIdx;
 
-        // Proxies MUST be created HERE, before the tail below reaches
-        // OptimizeShapes: the optimisation reorders/compacts vertices and
-        // selections, and a proxy created afterwards binds to the wrong
-        // skinning data (owner report 2026-08-30: soldiers' rifles floating
-        // beside them). `proxiesInline=false` is ONLY for the worker-side
-        // conversion, whose result is incomplete until the tail split lands
-        // -- which is why WGR_OBJECT_STREAM_ASYNC_ADAPT defaults OFF.
-        if (proxiesInline)
-            CreateAdapterProxies(shape, model);
-
-        // Oxygen creates sections before marking proxy faces hidden, so section hints
-        // lack IsHiddenProxy. Patch any section containing a proxy face selection.
-        for (int li = 0; li < lodCount; li++)
-        {
-            Shape* lod = shape->_lods[li];
-            if (!lod)
-                continue;
-            const auto& irSelections = model.lodLevels[li].mesh.selections;
-            for (int si = 0; si < lod->NNamedSel(); si++)
-            {
-                const ::NamedSelection& sel = lod->NamedSel(si);
-                if (strncmp(sel.Name(), "proxy:", 6) != 0)
-                    continue;
-
-                // MAT-044: mark by the selection's OWN section list when the face list is
-                // empty.
-                //
-                // The face route below matches `selectedFaces` against a rebuilt byte-offset
-                // table (ODOLLoader), which only works while the table's stride matches the
-                // file's. On the Arma 2 family it evidently does not, so `triangleIndices`
-                // comes through empty and this patch used to give up -- leaving the section
-                // with hints 0, so neither Shape::Draw nor RegisterGpuModel's
-                // IsHidden|IsHiddenProxy skip could fire, and one untextured triangle per
-                // proxy was drawn as ordinary geometry. Measured on Takistan: 40 of 513
-                // models, 1,898 markers on visual LODs.
-                //
-                // ODOL named selections carry an explicit `sections` array (the IR's
-                // `sectionIndices`) alongside the face list -- the pre-computed mapping the
-                // format already provides. Using it needs no offset arithmetic at all, so it
-                // is immune to the stride question rather than depending on its answer.
-                bool marked = false;
-                if (sel.Faces().Size() < 1 && si < static_cast<int>(irSelections.size()) &&
-                    irSelections[si].name == sel.Name())
-                {
-                    for (uint32_t secIdx : irSelections[si].sectionIndices)
-                    {
-                        if (secIdx >= static_cast<uint32_t>(lod->NSections()))
-                            continue;
-                        ShapeSection& sec = lod->GetSection(static_cast<int>(secIdx));
-                        sec.properties.OrSpecial(IsHiddenProxy);
-                        sec.properties.SetTexture(nullptr);
-                        marked = true;
-                    }
-                }
-                if (marked)
-                    continue;
-
-                if (sel.Faces().Size() < 1)
-                {
-                    // MAT-044: this early-out is why Arma 2 houses bake their proxy-marker
-                    // section as untextured geometry. The section keeps hints 0, so neither
-                    // Shape::Draw nor RegisterGpuModel's IsHidden|IsHiddenProxy skip fires,
-                    // and one triangle per proxy is drawn with no texture and no RVMAT.
-                    // Measured: section 0's triangle count equals the proxy count exactly on
-                    // house_k_1 (14), house_k_3 (29), house_k_5 (17) and house_l_3 (12).
-                    // Whether the face list is empty because the A2 reader drops it or because
-                    // the source selects only vertices is the open question -- say which.
-                    if (const char* trace = std::getenv("WGR_MATERIAL_DEBUG_RVMAT");
-                        trace && std::strcmp(trace, "__trace__") == 0)
-                    {
-                        LOG_INFO(Graphics,
-                                 "ShapeAdapter proxy patch SKIPPED: model={} lod={} selection={} points={} "
-                                 "faces={} irSections={} sections={}",
-                                 model.sourcePath, li, sel.Name(), sel.Size(), sel.Faces().Size(),
-                                 si < static_cast<int>(irSelections.size())
-                                     ? static_cast<int>(irSelections[si].sectionIndices.size())
-                                     : -1,
-                                 lod->NSections());
-                    }
-                    continue;
-                }
-                int faceIdx = sel.Faces()[0];
-                Offset faceOfs = lod->Faces().Find(faceIdx);
-                for (int s = 0; s < lod->NSections(); s++)
-                {
-                    ShapeSection& sec = lod->GetSection(s);
-                    if (faceOfs >= sec.beg && faceOfs < sec.end)
-                    {
-                        sec.properties.OrSpecial(IsHiddenProxy);
-                        sec.properties.SetTexture(nullptr);
-                        break;
-                    }
-                }
-            }
-        }
-
-        // LODShape::SerializeBin IsLoading block
-        shape->OptimizeShapes();
-        // COL-001: OptimizeShapes ends in ScanShapes only when GApp exists, and
-        // that scan is what turns the resolutions into _geometry / _landContact /
-        // _roadway once the LOD list has been compacted. Run it explicitly so the
-        // shape is the same object in a tool or a test as it is in the game.
-        shape->ScanShapes();
-        shape->CheckForcedProperties();
-        // A file whose mass total is zero while its per-point table is not was
-        // binarised without one; derive it the way the MLOD loader would.
-        if (!(shape->_mass > 0.0f) && shape->_massArray.Size() > 0)
-        {
-            Shape* geom = shape->GeometryLevel();
-            if (geom && geom->_pointToVertex.Size() <= shape->_massArray.Size())
-                shape->CalculateMass();
-        }
-        if (SynthesizeBoxGeometryIfRequested(shape, model.sourcePath.c_str()))
-        {
-            Shape* geom = shape->GeometryLevel();
-            if (geom)
-                SynthesizeBoxGeometryMass(shape, geom, shape->_massArray, shape->_mass, shape->_invMass,
-                                          geom->_pointToVertex, geom->_vertexToPoint);
-        }
-        shape->InitConvexComponents();
-        shape->_propertyClass = shape->PropertyValue("class");
-        shape->_propertyDammage = shape->PropertyValue("dammage");
-        LogCollisionStats(shape, model);
-
-        // shapeFile.cpp:588-598
-        {
-            float alpha = shape->_color.A8() * (1.0f / 255.0f);
-            float transparency = 1.0f - alpha * 1.5f;
-            if (transparency >= 0.99f)
-                shape->_viewDensity = 0;
-            if (transparency > 0.01f)
-                shape->_viewDensity = std::log(transparency) * 4.0f;
-            else
-                shape->_viewDensity = -10;
-        }
-
-        if (reversed)
-        {
-            shape->Reverse();
-            shape->SetRemarks(shape->Remarks() | REM_REVERSED);
-        }
+        // The tail (proxies + optimize + scan + mass + convex) runs here on the
+        // normal inline path; a worker-side conversion (finishTail=false) leaves it
+        // for the main-thread install (FinishOdolAdapterTail), preserving the
+        // proxies-before-OptimizeShapes order either way.
+        if (finishTail)
+            FinishOdolAdapterTail(shape, model, reversed);
     }
     else
     {

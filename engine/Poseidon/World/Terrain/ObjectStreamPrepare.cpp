@@ -188,7 +188,7 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             try
             {
                 shape = Model::ShapeAdapter::convertToLODShape(*job.model, false, job.tables.get(),
-                                                               /*proxiesInline=*/false);
+                                                               /*finishTail=*/false);
             }
             catch (...)
             {

@@ -51,8 +51,15 @@ namespace ShapeAdapter
     // `proxiesInline=false`, and such a shape is INCOMPLETE (no proxies, and the
     // tail ran without them) until the tail split lands. That is why the async
     // adapt path is opt-in.
+    // `finishTail=false` (worker-side conversion only): stop before the ODOL tail
+    // (proxies + OptimizeShapes + everything ordered after them); the main-thread
+    // install MUST then run FinishOdolAdapterTail before OptimizeOneShape.
     LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false,
-                                          const AdapterBankTables* tables = nullptr, bool proxiesInline = true);
+                                          const AdapterBankTables* tables = nullptr, bool finishTail = true);
+
+    // MAIN THREAD ONLY. No-op for non-ODOL models (their tail has no proxies and
+    // completes inside the conversion).
+    void FinishOdolAdapterTail(LODShapeWithShadow* shape, const Model& model, bool reversed);
 
     // MAIN THREAD ONLY (config probe, file table, recursive ShapeBank::New).
     // The conversion runs this itself at the correct point (before its tail's
