@@ -87,7 +87,19 @@ bool ResolvePreviewSoundArray(const char* entryName, SoundPars& pars)
 }
 } // namespace
 
-SoundSystemOAL::SoundSystemOAL()
+// The applied and the wanted reverb parameter sets. `valid` says `current` is what the
+// effect slot last received; `settled` short-circuits the per-frame tick once the two
+// converge, so a static environment costs one bool load per Commit and no AL calls.
+struct SoundSystemOAL::EfxBlendState
+{
+    EFXEAXREVERBPROPERTIES current{};
+    EFXEAXREVERBPROPERTIES target{};
+    bool valid = false;
+    bool settled = true;
+    uint32_t lastTickMs = 0;
+};
+
+SoundSystemOAL::SoundSystemOAL() : _efxBlend(std::make_unique<EfxBlendState>())
 {
     // Surface the decoded-PCM cache (64 MB LRU) in the memory-budget panel and
     // let the global pressure path evict it. Priority is low — PCM re-decodes
@@ -349,6 +361,9 @@ void SoundSystemOAL::Commit()
     }
 
     ProcessPreview();
+    // Reverb transitions ease toward their target here, once per frame; costs one bool
+    // load when the environment is settled.
+    TickEnvironmentBlend();
 }
 
 void SoundSystemOAL::Activate(bool active)
@@ -458,6 +473,10 @@ void SoundSystemOAL::DeinitEFX()
         alDeleteAuxiliaryEffectSlots(1, &_efxSlot);
         _efxSlot = 0;
     }
+    // The next InitEFX starts against a fresh effect object; a blend FROM the stale
+    // `current` would fade in from whatever the old device last heard.
+    _efxBlend->valid = false;
+    _efxBlend->settled = true;
 }
 
 static void ApplyEFXProperties(ALuint efxEffect, ALuint efxSlot, const EFXEAXREVERBPROPERTIES& preset)
@@ -489,12 +508,16 @@ static void ApplyEFXProperties(ALuint efxEffect, ALuint efxSlot, const EFXEAXREV
     alAuxiliaryEffectSloti(efxSlot, AL_EFFECTSLOT_EFFECT, efxEffect);
 }
 
-void SoundSystemOAL::ApplyEFXPreset(float envSize)
+// The scaled reverb parameter set for `type` at `envSize` -- computed, not applied.
+// This is the old ApplyEFXPreset with the application cut off: DoSetEAXEnvironment
+// feeds the result to the blend as a target, and TickEnvironmentBlend is the only
+// place the effect slot is written from the environment path.
+static bool ComputeEFXTarget(SoundEnvironmentType type, float envSize, EFXEAXREVERBPROPERTIES& out)
 {
     // Select preset from registry based on environment type
     // 1:1 with DX8 DoSetEAXEnvironment switch (soundDX8.cpp:2570-2578)
     const char* presetName = "generic";
-    switch (_eaxEnv.type)
+    switch (type)
     {
         case SEPlain:
             presetName = "plain";
@@ -518,7 +541,7 @@ void SoundSystemOAL::ApplyEFXPreset(float envSize)
 
     const auto* entry = EFX::FindPreset(presetName);
     if (!entry)
-        return;
+        return false;
 
     EFXEAXREVERBPROPERTIES preset = entry->props;
     float presetDefaultSize = entry->defaultSize;
@@ -539,7 +562,8 @@ void SoundSystemOAL::ApplyEFXPreset(float envSize)
     if (preset.flDensity > AL_EAXREVERB_MAX_DENSITY)
         preset.flDensity = AL_EAXREVERB_MAX_DENSITY;
 
-    ApplyEFXProperties(_efxEffect, _efxSlot, preset);
+    out = preset;
+    return true;
 }
 
 void SoundSystemOAL::DoSetEAXEnvironment()
@@ -554,9 +578,88 @@ void SoundSystemOAL::DoSetEAXEnvironment()
     if (size > 100.f)
         size = 100.f;
 
-    ApplyEFXPreset(size);
+    EFXEAXREVERBPROPERTIES target;
+    if (!ComputeEFXTarget(_eaxEnv.type, size, target))
+        return;
+    _efxBlend->target = target;
+    if (!_efxBlend->valid)
+    {
+        // First application since EFX came up: nothing plausible to blend FROM, and a
+        // fade-in from another preset would itself be a wrong sound. Snap, exactly the
+        // old behaviour.
+        _efxBlend->current = target;
+        _efxBlend->valid = true;
+        _efxBlend->settled = true;
+        ApplyEFXProperties(_efxEffect, _efxSlot, target);
+    }
+    else
+    {
+        _efxBlend->settled = false;
+        _efxBlend->lastTickMs = GlobalTickCount();
+    }
 
     LOG_DEBUG(Audio, "EFX: environment type={} size={}", static_cast<int>(_eaxEnv.type), size);
+}
+
+void SoundSystemOAL::TickEnvironmentBlend()
+{
+    EfxBlendState& blend = *_efxBlend;
+    if (!_eaxEnabled || !_efxSlot || !_efxEffect || !blend.valid || blend.settled)
+        return;
+
+    const uint32_t now = GlobalTickCount();
+    float dt = (now - blend.lastTickMs) / 1000.0f;
+    blend.lastTickMs = now;
+    // A paused/hitched frame must not teleport the blend; a 0 dt must not divide.
+    dt = std::clamp(dt, 0.0f, 0.25f);
+    // ~0.6 s time constant: walking through a door settles in about two seconds --
+    // audible as a transition, not as a filter sweep, and far from the hard cut the
+    // old path produced (the roadmap's "blend changes over time" requirement).
+    const float k = 1.0f - std::exp(-dt / 0.6f);
+
+    bool close = true;
+    auto ease = [&](float& cur, const float tgt)
+    {
+        cur += (tgt - cur) * k;
+        if (std::fabs(tgt - cur) > 0.001f + 0.005f * std::fabs(tgt))
+            close = false;
+    };
+    EFXEAXREVERBPROPERTIES& c = blend.current;
+    const EFXEAXREVERBPROPERTIES& t = blend.target;
+    ease(c.flDensity, t.flDensity);
+    ease(c.flDiffusion, t.flDiffusion);
+    ease(c.flGain, t.flGain);
+    ease(c.flGainHF, t.flGainHF);
+    ease(c.flGainLF, t.flGainLF);
+    ease(c.flDecayTime, t.flDecayTime);
+    ease(c.flDecayHFRatio, t.flDecayHFRatio);
+    ease(c.flDecayLFRatio, t.flDecayLFRatio);
+    ease(c.flReflectionsGain, t.flReflectionsGain);
+    ease(c.flReflectionsDelay, t.flReflectionsDelay);
+    ease(c.flLateReverbGain, t.flLateReverbGain);
+    ease(c.flLateReverbDelay, t.flLateReverbDelay);
+    ease(c.flEchoTime, t.flEchoTime);
+    ease(c.flEchoDepth, t.flEchoDepth);
+    ease(c.flModulationTime, t.flModulationTime);
+    ease(c.flModulationDepth, t.flModulationDepth);
+    ease(c.flAirAbsorptionGainHF, t.flAirAbsorptionGainHF);
+    ease(c.flHFReference, t.flHFReference);
+    ease(c.flLFReference, t.flLFReference);
+    ease(c.flRoomRolloffFactor, t.flRoomRolloffFactor);
+    for (int i = 0; i < 3; ++i)
+    {
+        ease(c.flReflectionsPan[i], t.flReflectionsPan[i]);
+        ease(c.flLateReverbPan[i], t.flLateReverbPan[i]);
+    }
+    // The one integer is a limiter flag, not a continuum: take the target's value.
+    c.iDecayHFLimit = t.iDecayHFLimit;
+
+    if (close)
+    {
+        c = t;
+        blend.settled = true;
+    }
+    ApplyEFXProperties(_efxEffect, _efxSlot, c);
 }
 
 void SoundSystemOAL::SetEnvironment(const SoundEnvironment& env)

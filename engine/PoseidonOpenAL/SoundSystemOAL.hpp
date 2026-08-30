@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -152,7 +153,14 @@ class SoundSystemOAL : public IAudioSystem
     bool InitEFX();
     void DeinitEFX();
     void DoSetEAXEnvironment();
-    void ApplyEFXPreset(float envSize);
+    // Per-frame (Commit): eases the applied reverb toward the target parameter set with
+    // a ~0.6 s time constant, so a Plain->Room transition fades instead of hard-cutting.
+    // The target itself is computed by a file-local helper in the .cpp
+    // (EFXEAXREVERBPROPERTIES is an anonymous-struct typedef and cannot be forward
+    // declared); all blend state lives behind this pointer so the header stays AL-free.
+    struct EfxBlendState;
+    std::unique_ptr<EfxBlendState> _efxBlend;
+    void TickEnvironmentBlend();
 
   public:
     SoundSystemOAL();

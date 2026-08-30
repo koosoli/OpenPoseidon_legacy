@@ -13,6 +13,8 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
+#include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // IndoorRoomAt/IndoorClearanceAt: the SERoom producer
+#include <algorithm>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
@@ -789,7 +791,7 @@ void World::SimulateCloudlets(float deltaT)
             // below tells you where it went so the camera can be aimed there on
             // the next run.
             const char* houseEnv = std::getenv("POSEIDON_TEST_SMOKE_HOUSE");
-            const bool wantHouse = houseEnv != nullptr && houseEnv[0] != ' ' && houseEnv[0] != '0';
+            const bool wantHouse = houseEnv != nullptr && houseEnv[0] != '\0' && houseEnv[0] != '0';
             if (wantHouse && GLandscape != nullptr)
             {
                 const Object* best = nullptr;
@@ -1144,7 +1146,28 @@ void World::PerformSound(Entity* inside, float deltaT)
     GeographyInfo geogr = GLandscape->GetGeography(x, z);
     float sy = GLandscape->SurfaceYAboveWater(pos.X(), pos.Z());
 #define SHOW_ENV 0
-    if (geogr.u.forestInner || geogr.u.forestOuter)
+    // SERoom finally has a producer (roadmap 1.4): the classifier covered forest, city,
+    // mountains and plain since 2001, and the fifth environment the backend ships was
+    // reachable only from the Audio screen's EAX preview. IndoorRoomAt is the strict
+    // test -- true only inside a building's fire-geometry room -- NOT IsSheltered, whose
+    // documented crudeness (bridges and tree canopy read sheltered) would put a forest
+    // canopy into a room reverb. Room size from the clearance to the nearest boundary:
+    // a stairwell and a barn hall should not share a decay time. One query per frame at
+    // the camera; the same probe the rain occlusion path already leans on.
+    int listenerRoom = -1;
+    if (GSmokeWorldQuery().IndoorRoomAt(pos, listenerRoom))
+    {
+        SoundEnvironment env;
+        env.type = SERoom;
+        const float clearance = GSmokeWorldQuery().IndoorClearanceAt(pos, listenerRoom, 15.0f);
+        env.size = clearance > 0.0f ? std::clamp(clearance * 2.0f, 2.0f, 30.0f) : 4.0f;
+        env.density = 0.5;
+        GSoundsys->SetEnvironment(env);
+#if SHOW_ENV
+        GlobalShowMessage(100, "Room %.1f %.1f", env.size, env.density);
+#endif
+    }
+    else if (geogr.u.forestInner || geogr.u.forestOuter)
     {
         SoundEnvironment env;
         env.type = SEForest;
