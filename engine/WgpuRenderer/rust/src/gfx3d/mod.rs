@@ -342,6 +342,43 @@ const IDENTITY_MAT4: WgrMat4 = [
     0.0, 0.0, 0.0, 1.0,
 ];
 
+// The per-draw entry for the world SSBO (REN-TEMP-002). A draw the skin bake covers
+// (bake is on AND prepare_skin_bake planned this (palette_slot, mesh)) MUST pack an
+// identity world + no conform: the C++ side folds the camera-relative world into every
+// palette matrix (EngineWgpu.cpp BeginMeshTL), so the baked vertices are already
+// world-transformed, and the rigid pipeline the baked draw routes through applies
+// objects[instance].world on top of them. Packing the real world here applies the
+// world TWICE and moves every skinned character far off-screen — the "invisible
+// soldiers, floating rigid weapon proxies" DLSS symptom. The predicate must mirror
+// baked_draw_base exactly (same map, same key), or draw routing and world packing
+// disagree — which is precisely how the bug shipped: 728f4035 disconnected routing and
+// (consistently) disabled this identity pack; 60c9d63c reconnected routing but not the
+// pack. Free function so the seam is testable without a device (see
+// baked_world_packing tests).
+fn object_gpu_for_draw(
+    d: &WgrDraw3D,
+    bake_on: bool,
+    base_map: &FxHashMap<(u32, u64), u32>,
+) -> ObjectGpu {
+    let baked =
+        bake_on && d.palette_slot != NO_PALETTE && base_map.contains_key(&(d.palette_slot, d.mesh));
+    if baked {
+        ObjectGpu {
+            world: IDENTITY_MAT4,
+            conform0: [0.0; 4],
+            conform1: [0.0; 4],
+            conform2: [0.0; 4],
+        }
+    } else {
+        ObjectGpu {
+            world: d.world,
+            conform0: d.conform0,
+            conform1: d.conform1,
+            conform2: d.conform2,
+        }
+    }
+}
+
 // One compute-skin-bake dispatch (docs/compute-skin-bake-plan.md): all instances of one
 // skinned mesh, baked into `skinned_vbuf` starting at `out_base_vertex`. Phase 1 always
 // has instance_count == 1 (one dispatch per distinct palette_slot); Phase 2 flattens
@@ -6336,26 +6373,9 @@ impl Gfx3d {
                         let (chunks, _rem) = view.slice(..).into_chunks::<OBJ_SZ>();
                         chunks.write_iter(order.iter().map(|&i| {
                             let d = &draws[i as usize];
-                            // Draw routing is decoupled from the bake (see
-                            // baked_draw_base): draws always carry their REAL world.
-                            let baked = false && bake_on
-                                && d.palette_slot != NO_PALETTE
-                                && base_map.contains_key(&(d.palette_slot, d.mesh));
-                            let obj = if baked {
-                                ObjectGpu {
-                                    world: IDENTITY_MAT4,
-                                    conform0: [0.0; 4],
-                                    conform1: [0.0; 4],
-                                    conform2: [0.0; 4],
-                                }
-                            } else {
-                                ObjectGpu {
-                                    world: d.world,
-                                    conform0: d.conform0,
-                                    conform1: d.conform1,
-                                    conform2: d.conform2,
-                                }
-                            };
+                            // REN-TEMP-002: identity world for bake-covered draws —
+                            // the whole WHY lives on object_gpu_for_draw.
+                            let obj = object_gpu_for_draw(d, bake_on, base_map);
                             bytemuck::cast::<ObjectGpu, [u8; OBJ_SZ]>(obj)
                         }));
                     }
@@ -9655,5 +9675,81 @@ fn sky_bake_cache_write(path: &std::path::Path, vis: &[[f32; 4]], bmin: &[f32; 3
     let tmp = path.with_extension("tmp");
     if std::fs::write(&tmp, &data).is_ok() {
         let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+// REN-TEMP-002, pinned: a bake-covered draw routes through the RIGID pipeline whose
+// vertices are ALREADY world-transformed (the C++ palette premultiply), so its world
+// SSBO entry must be identity. This decision lived inline in prepare() and was once
+// left disabled (`false && bake_on`) when the draw routing it must mirror was
+// reconnected — draws applied the world twice and every skinned character vanished
+// off-screen under DLSS. These tests hold the seam so routing and packing cannot
+// disagree silently again.
+#[cfg(test)]
+mod baked_world_packing {
+    use super::*;
+
+    fn draw(mesh: u64, palette_slot: u32) -> WgrDraw3D {
+        // WgrDraw3D is ABI-frozen plain data; zeroed + the fields under test.
+        let mut d: WgrDraw3D = unsafe { std::mem::zeroed() };
+        d.mesh = mesh;
+        d.palette_slot = palette_slot;
+        d.world = [
+            2.0, 0.0, 0.0, 0.0, //
+            0.0, 2.0, 0.0, 0.0, //
+            0.0, 0.0, 2.0, 0.0, //
+            5.0, 6.0, 7.0, 1.0,
+        ];
+        d.conform0 = [1.0, 2.0, 3.0, 4.0];
+        d
+    }
+
+    fn base_map(entries: &[(u32, u64)]) -> FxHashMap<(u32, u64), u32> {
+        entries.iter().map(|&(s, m)| ((s, m), 0u32)).collect()
+    }
+
+    #[test]
+    fn a_bake_covered_draw_packs_identity_world_and_no_conform() {
+        let d = draw(7, 3);
+        let obj = object_gpu_for_draw(&d, true, &base_map(&[(3, 7)]));
+        assert_eq!(obj.world, IDENTITY_MAT4, "baked verts already carry the world");
+        assert_eq!(obj.conform0, [0.0; 4], "conform is folded pre-bake too");
+    }
+
+    #[test]
+    fn an_uncovered_skinned_draw_keeps_its_real_world() {
+        // Skinned but not planned by prepare_skin_bake (e.g. bake map miss): the
+        // VS-skinning fallback ignores the object world, but routing (baked_draw_base)
+        // answers None for it, so the SSBO entry must stay the draw's own.
+        let d = draw(7, 3);
+        let obj = object_gpu_for_draw(&d, true, &base_map(&[(3, 8)]));
+        assert_eq!(obj.world, d.world);
+        assert_eq!(obj.conform0, d.conform0);
+    }
+
+    #[test]
+    fn bake_off_packs_the_real_world_even_with_a_stale_map() {
+        let d = draw(7, 3);
+        let obj = object_gpu_for_draw(&d, false, &base_map(&[(3, 7)]));
+        assert_eq!(obj.world, d.world);
+    }
+
+    #[test]
+    fn a_rigid_draw_is_never_treated_as_baked() {
+        let d = draw(7, NO_PALETTE);
+        let obj = object_gpu_for_draw(&d, true, &base_map(&[(NO_PALETTE, 7)]));
+        assert_eq!(obj.world, d.world);
+    }
+
+    // The key is (palette_slot, mesh), not palette_slot alone: one skeleton pose is
+    // drawn as several sibling meshes, and keying by slot only once corrupted every
+    // sibling (see prepare_skin_bake). Pin the compound key.
+    #[test]
+    fn sibling_meshes_on_one_palette_slot_are_keyed_independently() {
+        let body = draw(7, 3);
+        let head = draw(9, 3);
+        let map = base_map(&[(3, 7)]);
+        assert_eq!(object_gpu_for_draw(&body, true, &map).world, IDENTITY_MAT4);
+        assert_eq!(object_gpu_for_draw(&head, true, &map).world, head.world);
     }
 }
