@@ -232,6 +232,20 @@ Before replacing the complete asset pipeline:
 - display placeholders instead of blocking simulation where content permits;
 - cancel requests that are no longer relevant before expensive later stages begin.
 
+**Implemented 2026-08-30** (commits `5ec08e32`, `c2ade293`, branch `asset-obs-001`):
+both bounded audio slices below are in. HRTF: ALC_SOFT_HRTF probe, Off/Auto/On modes
+via `alcResetDeviceSOFT` (in-place device reconfigure — the safe device-switch
+sequence is untouched and re-applies the mode afterwards), persisted `hrtfMode` in
+audio.cfg, a 3-way Audio-options row, and a `[.device]`-tagged test that verified
+On→ACTIVE/Off→inactive on real hardware; in-game boot log shows `Auto → ACTIVE
+(Built-In HRTF)`, which matches the pre-change implicit default (nullptr context
+attrs = DONT_CARE). EFX: `SERoom` finally has a producer — inside a building room
+(`IndoorRoomAt` at the camera, deliberately not the cruder `IsSheltered`) with size
+from room clearance — and environment changes ease over a ~0.6 s time constant
+instead of hard-cutting (all 23 reverb parameters, settled state costs one bool per
+frame). Whether it *sounds* right on headphones is the owner's A/B; nothing gates
+on it.
+
 ### 1.4 Small audio wins
 
 The current OpenAL backend is already a suitable foundation. Do not replace it merely
