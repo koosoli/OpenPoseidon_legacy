@@ -3,7 +3,9 @@
 **Date:** 2026-08-31
 **Status:** FIXED (identity-world pack restored, bake default back ON; see Resolution)
 **Affects:** every skinned character (soldiers, crew) whenever DLSS is active
-**Fixed builds:** `21da5262` and later (deploy stamp 2026-08-31_00:17)
+**Commits:** mitigated (bake default OFF) in `21da5262`; root cause fixed in
+`30860779`; bake restored to its default in `df7713d1`. Owner-verified fixed on the
+`32900507` deploy (2026-08-31_01:22) — a build must contain `30860779` to be correct.
 
 ## Symptom
 
