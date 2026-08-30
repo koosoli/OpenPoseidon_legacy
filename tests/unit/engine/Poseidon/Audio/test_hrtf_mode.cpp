@@ -11,6 +11,9 @@
 #include <Poseidon/UI/Settings/AudioConfig.hpp>
 #include <PoseidonOpenAL/SoundSystemOAL.hpp>
 
+#include <AL/alc.h>
+#include <AL/alext.h>
+
 #include <cstdio>
 #include <string>
 
@@ -74,4 +77,45 @@ TEST_CASE("OpenAL backend: HRTF mode reaches the device when supported", "[audio
     CHECK_FALSE(sys->GetHrtfStatus().active);
     CHECK(sys->SetHrtfMode(Poseidon::IAudioSystem::HrtfMode::Auto));
     delete sys;
+}
+
+TEST_CASE("OpenAL: Auto (DONT_CARE reset) must equal an untouched device", "[audio][hrtf][.device]")
+{
+    // The root-cause probe for the 2026-08-30 owner report (too much reverb, no
+    // Auto-vs-On difference, slightly lower fps): if resetting the device with
+    // ALC_DONT_CARE_SOFT ENGAGES HRTF where a plain nullptr-attrs context leaves it
+    // off, then shipping Auto-applies-at-boot silently turned HRTF on for everyone,
+    // and "Auto" must mean "do not touch the device" instead.
+    ALCdevice* device = alcOpenDevice(nullptr);
+    if (!device)
+    {
+        SKIP("no playback device");
+    }
+    ALCcontext* context = alcCreateContext(device, nullptr);
+    REQUIRE(context);
+    alcMakeContextCurrent(context);
+
+    if (alcIsExtensionPresent(device, "ALC_SOFT_HRTF") != ALC_TRUE)
+    {
+        alcMakeContextCurrent(nullptr);
+        alcDestroyContext(context);
+        alcCloseDevice(device);
+        SKIP("ALC_SOFT_HRTF unsupported");
+    }
+    ALCint untouched = -1;
+    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &untouched);
+
+    auto reset = reinterpret_cast<LPALCRESETDEVICESOFT>(alcGetProcAddress(device, "alcResetDeviceSOFT"));
+    REQUIRE(reset != nullptr);
+    const ALCint attrs[] = {ALC_HRTF_SOFT, ALC_DONT_CARE_SOFT, 0};
+    REQUIRE(reset(device, attrs) == ALC_TRUE);
+    ALCint afterDontCare = -1;
+    alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &afterDontCare);
+
+    INFO("untouched=" << untouched << " afterDontCare=" << afterDontCare);
+    CHECK(afterDontCare == untouched);
+
+    alcMakeContextCurrent(nullptr);
+    alcDestroyContext(context);
+    alcCloseDevice(device);
 }
