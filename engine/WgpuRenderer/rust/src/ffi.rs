@@ -1600,9 +1600,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(7)
+            .unwrap_or(8)
     } else {
-        7
+        8
     }
 }
 
@@ -1776,7 +1776,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 7);
+        assert_eq!(super::wgr_abi_version(), 8);
     }
 
     #[test]
@@ -2080,6 +2080,7 @@ pub unsafe extern "C" fn wgr_model_register(
     lods: WgrSlice<WgrModelLod>,
     sections: WgrSlice<WgrModelSection>,
     materials: WgrSlice<WgrModelMaterial>,
+    name: *const std::os::raw::c_char,
 ) -> u32 {
     if renderer.is_null() {
         return WGR_INVALID_MODEL;
@@ -2089,7 +2090,12 @@ pub unsafe extern "C" fn wgr_model_register(
         let lods = unsafe { lods.as_slice() };
         let sections = unsafe { sections.as_slice() };
         let materials = unsafe { materials.as_slice() };
-        renderer.model_register(bounding_sphere, lods, sections, materials)
+        let name = if name.is_null() {
+            None
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(name) }.to_str().ok()
+        };
+        renderer.model_register(bounding_sphere, lods, sections, materials, name)
     }))
     .unwrap_or(WGR_INVALID_MODEL)
 }

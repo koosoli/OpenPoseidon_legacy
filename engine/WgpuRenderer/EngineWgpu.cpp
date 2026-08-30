@@ -5703,7 +5703,8 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         model =
             wgr_model_register(_renderer, shape->BoundingSphere(), WgrSlice<WgrModelLod>{lods.data(), U32(lods.size())},
                                WgrSlice<WgrModelSection>{sections.data(), U32(sections.size())},
-                               WgrSlice<WgrModelMaterial>{materials.data(), U32(materials.size())});
+                               WgrSlice<WgrModelMaterial>{materials.data(), U32(materials.size())},
+                               static_cast<const char*>(shape->Name()));
     }
     _gpuModels[shape] = model;
     // Cache coverage so SceneObjectCreated can tag each instance and GpuDrivenCoverage can tell

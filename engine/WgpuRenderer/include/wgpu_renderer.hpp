@@ -29,7 +29,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 7u
+#define WGR_ABI_VERSION 8u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -1837,8 +1837,12 @@ extern "C"
      * `sections` relative to this model. Section mesh handles are resolved to the
      * shared geometry pool. Returns the model id (for wgr_instance_add) or
      * WGR_INVALID_MODEL on error. Call once per shape. */
+    /* `name` (nullable, UTF-8, borrowed for the call): a stable identity for the model,
+     * used to key the on-disk sky-visibility bake cache. Passing null only disables the
+     * cache for this model. */
     WGR_API uint32_t wgr_model_register(WgrRenderer* renderer, float bounding_sphere, WgrSlice<WgrModelLod> lods,
-                                        WgrSlice<WgrModelSection> sections, WgrSlice<WgrModelMaterial> materials);
+                                        WgrSlice<WgrModelSection> sections, WgrSlice<WgrModelMaterial> materials,
+                                        const char* name);
 
     /* Register a batch of per-tree crown centres (MODEL space) into the global crown-centre
      * table and return the base index of this batch (foliage-translucency-plan.md §9 Approach A).

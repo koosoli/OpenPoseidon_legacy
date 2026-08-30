@@ -3334,7 +3334,7 @@ pub struct Gfx3d {
     // Bakes submitted at registration whose readback has not completed yet; drained by
     // collect_sky_bakes() each frame. A model without its volume yet simply reads as
     // fully open sky — the pre-bake behaviour — until the result lands a frame or two later.
-    sky_bakes_pending: Vec<(u32, sky_bake::PendingBake)>,
+    sky_bakes_pending: Vec<(u32, sky_bake::PendingBake, Option<std::path::PathBuf>)>,
     sky_bake: Option<sky_bake::SkyBake>,
     // model index -> (volume, padded model-space AABB). CPU-side for now; the GPU atlas + the
     // per-fragment sample are the next step.
@@ -7079,6 +7079,7 @@ impl Gfx3d {
         sections: &[WgrModelSection],
         materials: &[WgrModelMaterial],
         textures: &SharedTextures,
+        name: Option<&str>,
     ) -> u32 {
         let gpu_lods: Vec<cull::LodGpu> = lods
             .iter()
@@ -7177,7 +7178,7 @@ impl Gfx3d {
         let model =
             self.cull
                 .register_model(bounding_sphere, &gpu_lods, &gpu_sections, &gpu_materials);
-        self.bake_model_sky_visibility(device, queue, model, lods, sections);
+        self.bake_model_sky_visibility(device, queue, model, lods, sections, name);
         model
     }
 
@@ -7199,6 +7200,7 @@ impl Gfx3d {
         model: u32,
         lods: &[WgrModelLod],
         sections: &[WgrModelSection],
+        name: Option<&str>,
     ) {
         if !self.sky_bake_enabled {
             return;
@@ -7245,6 +7247,18 @@ impl Gfx3d {
         if volume < min_volume {
             return;
         }
+        // Derived-data cache (roadmap Phase 6): the bake is deterministic in the model
+        // geometry, so a volume computed once is a volume forever. Keyed by the model
+        // NAME plus its lod0 bounding box (the box moves whenever the geometry the bake
+        // sees moves, which is the practical invalidation for repacked content) and a
+        // format version. WGR_SKY_BAKE_CACHE=0 disables both read and write.
+        let cache_path = name.and_then(|n| sky_bake_cache_path(n, &lo, &hi));
+        if let Some(path) = cache_path.as_deref() {
+            if let Some((vis, bmin, bmax)) = sky_bake_cache_read(path) {
+                self.finish_sky_bake(model, vis, bmin, bmax);
+                return;
+            }
+        }
         let bake = self
             .sky_bake
             .get_or_insert_with(|| sky_bake::SkyBake::new(device, BAKED_VERT_SIZE));
@@ -7267,7 +7281,7 @@ impl Gfx3d {
         };
         // Registration does NOT wait for the GPU round-trip (that wait was 61% of the
         // whole cold-model admission cost). collect_sky_bakes() picks the result up.
-        self.sky_bakes_pending.push((model, pending));
+        self.sky_bakes_pending.push((model, pending, cache_path));
     }
 
     // Drain completed sky bakes. Called once per frame after submit; the map callbacks
@@ -7280,7 +7294,7 @@ impl Gfx3d {
         let _ = device.poll(wgpu::PollType::Poll);
         let mut i = 0;
         while i < self.sky_bakes_pending.len() {
-            let (model, pending) = &self.sky_bakes_pending[i];
+            let (model, pending, _) = &self.sky_bakes_pending[i];
             let model = *model;
             match pending.try_take() {
                 None => {
@@ -7291,7 +7305,10 @@ impl Gfx3d {
                     self.sky_bakes_pending.swap_remove(i);
                 }
                 Some(Some((vis, bmin, bmax))) => {
-                    self.sky_bakes_pending.swap_remove(i);
+                    let (_, _, cache_path) = self.sky_bakes_pending.swap_remove(i);
+                    if let Some(path) = cache_path.as_deref() {
+                        sky_bake_cache_write(path, &vis, &bmin, &bmax);
+                    }
                     self.finish_sky_bake(model, vis, bmin, bmax);
                 }
             }
@@ -9548,5 +9565,95 @@ mod baked_vertex_stride_guard {
             include_str!("velocity_obj.wgsl").contains(&vel_tag),
             "velocity_obj.wgsl prev_baked stride != WgrMeshVertex ({words} words)"
         );
+    }
+}
+
+// ---- Sky-bake derived-data cache (module-level; no Gfx3d state) ---------------------------
+
+// Bump when the bake output format or semantics change; old files are simply misses.
+const SKY_BAKE_CACHE_VERSION: u32 = 1;
+
+fn sky_bake_cache_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("WGR_SKY_BAKE_CACHE").map(|v| v != "0").unwrap_or(true))
+}
+
+fn sky_bake_cache_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA")?;
+    let dir = std::path::Path::new(&base).join("OpenPoseidon").join("skybake");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
+fn sky_bake_cache_path(name: &str, lo: &[f32; 3], hi: &[f32; 3]) -> Option<std::path::PathBuf> {
+    if !sky_bake_cache_enabled() {
+        return None;
+    }
+    // FNV-1a over the lowered name + the lod0 bbox bits + the format version.
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |b: u8| {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for b in name.bytes() {
+        eat(b.to_ascii_lowercase());
+    }
+    for v in lo.iter().chain(hi.iter()) {
+        for b in v.to_le_bytes() {
+            eat(b);
+        }
+    }
+    for b in SKY_BAKE_CACHE_VERSION.to_le_bytes() {
+        eat(b);
+    }
+    Some(sky_bake_cache_dir()?.join(format!("{h:016x}.skv")))
+}
+
+fn sky_bake_cache_read(path: &std::path::Path) -> Option<(Vec<[f32; 4]>, [f32; 3], [f32; 3])> {
+    let data = std::fs::read(path).ok()?;
+    if data.len() < 16 || &data[0..4] != b"SKV1" {
+        return None;
+    }
+    let count = u32::from_le_bytes(data[4..8].try_into().ok()?) as usize;
+    let expected = 16 + 24 + count * 16;
+    if data.len() != expected {
+        return None;
+    }
+    let mut bmin = [0f32; 3];
+    let mut bmax = [0f32; 3];
+    let mut off = 16;
+    for v in bmin.iter_mut().chain(bmax.iter_mut()) {
+        *v = f32::from_le_bytes(data[off..off + 4].try_into().ok()?);
+        off += 4;
+    }
+    let mut vis = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut e = [0f32; 4];
+        for v in e.iter_mut() {
+            *v = f32::from_le_bytes(data[off..off + 4].try_into().ok()?);
+            off += 4;
+        }
+        vis.push(e);
+    }
+    Some((vis, bmin, bmax))
+}
+
+fn sky_bake_cache_write(path: &std::path::Path, vis: &[[f32; 4]], bmin: &[f32; 3], bmax: &[f32; 3]) {
+    let mut data = Vec::with_capacity(16 + 24 + vis.len() * 16);
+    data.extend_from_slice(b"SKV1");
+    data.extend_from_slice(&(vis.len() as u32).to_le_bytes());
+    data.extend_from_slice(&[0u8; 8]); // reserved
+    for v in bmin.iter().chain(bmax.iter()) {
+        data.extend_from_slice(&v.to_le_bytes());
+    }
+    for e in vis {
+        for v in e {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    // Write-then-rename so a crash mid-write can never leave a torn file a later run trusts.
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, &data).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
     }
 }

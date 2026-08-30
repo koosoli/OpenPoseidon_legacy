@@ -5296,6 +5296,7 @@ impl Renderer {
         lods: &[WgrModelLod],
         sections: &[WgrModelSection],
         materials: &[WgrModelMaterial],
+        name: Option<&str>,
     ) -> u32 {
         self.gfx3d.register_model(
             &self.device,
@@ -5305,6 +5306,7 @@ impl Renderer {
             sections,
             materials,
             &self.textures,
+            name,
         )
     }
 
