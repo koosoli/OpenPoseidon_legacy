@@ -20,9 +20,21 @@ TextureStreamCounters& GTextureStreamCounters()
     return counters;
 }
 
+FileServerCounters& GFileServerCounters()
+{
+    static FileServerCounters counters;
+    return counters;
+}
+
 StreamingSnapshot CollectStreamingSnapshot()
 {
     StreamingSnapshot out;
+
+    const FileServerCounters& f = GFileServerCounters();
+    out.fileserver.hits = f.hits.load(std::memory_order_relaxed);
+    out.fileserver.misses = f.misses.load(std::memory_order_relaxed);
+    out.fileserver.missUs = f.missUs.load(std::memory_order_relaxed);
+    out.fileserver.missUsMax = f.missUsMax.load(std::memory_order_relaxed);
 
     const TextureStreamCounters& c = GTextureStreamCounters();
     out.tex.uploads = c.uploads.load(std::memory_order_relaxed);

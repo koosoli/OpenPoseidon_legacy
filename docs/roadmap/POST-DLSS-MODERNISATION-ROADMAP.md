@@ -421,6 +421,16 @@ Prefer:
 
 ABI mismatches should fail loudly at startup rather than producing render corruption.
 
+**Status 2026-08-30: substantially already built.** The FFI is handle-based (uint64
+resource handles, no C++ object pointers cross), `WgrAbiCheck::layout_hash`
+(`WgrLayoutHash()`, wgpu_renderer.hpp) hashes every shared struct's layout so any size
+change invalidates the pair automatically at startup, and the header now states the
+threading contract (main-thread-only) explicitly. Remaining for this item: the layout
+hash trips on *layout* changes only — a semantic change with an unchanged layout still
+slips through (the DLSS work hit exactly this once); and per-struct `size`/`version`
+fields for *forward*-compatible evolution exist nowhere. Both belong to the
+`RenderSnapshot` boundary work rather than a standalone pass.
+
 ### 4.3 Deferred reclamation
 
 Resource destruction must be deferred until no published snapshot, worker job or

@@ -14,6 +14,8 @@
 #endif
 #include <Poseidon/IO/FileServerMT.hpp>
 #include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Dev/Diag/StreamingDiag.hpp> // file-cache hit/miss + miss-latency counters
+#include <chrono>
 
 #if _ENABLE_CHEATS
 #define ENABLE_OVERLAPPED_IO 0
@@ -99,9 +101,15 @@ int FileCache::Load(const char* name)
         {
             MoveToFront(index);
         }
+        Poseidon::Dev::GFileServerCounters().hits.fetch_add(1, std::memory_order_relaxed);
         return 0;
     }
-    // not cached yet
+    // not cached yet -- this branch is the real file read (open + decompress into the
+    // MRU), i.e. the "file-read latency" the roadmap's Phase 3 list asks for. Queue
+    // depth has no counter because there is no queue: the server is synchronous
+    // (ENABLE_OVERLAPPED_IO compiles out above), so depth is 0 by construction and the
+    // latency of a miss lands on whoever asked, on the main thread, immediately.
+    const auto missBegan = std::chrono::steady_clock::now();
     FileInCache* newEntry = new FileInCache(name);
     if (newEntry->_data.fail())
     {
@@ -116,6 +124,18 @@ int FileCache::Load(const char* name)
     // maintain size statistics
     _size += newEntry->_data.rest();
     Maintain();
+    {
+        Poseidon::Dev::FileServerCounters& c = Poseidon::Dev::GFileServerCounters();
+        const uint64_t us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - missBegan)
+                .count());
+        c.misses.fetch_add(1, std::memory_order_relaxed);
+        c.missUs.fetch_add(us, std::memory_order_relaxed);
+        uint64_t prev = c.missUsMax.load(std::memory_order_relaxed);
+        while (us > prev && !c.missUsMax.compare_exchange_weak(prev, us, std::memory_order_relaxed))
+        {
+        }
+    }
     return 0;
 }
 

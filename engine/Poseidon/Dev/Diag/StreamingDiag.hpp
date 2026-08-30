@@ -67,6 +67,22 @@ struct TextureStreamCounters
 
 TextureStreamCounters& GTextureStreamCounters();
 
+// FileCache (the synchronous file server's MRU of whole decompressed files): hits
+// share cached bytes, misses pay the open+decompress on the caller's thread -- the
+// main thread, always. missUs is therefore main-thread stall time by definition.
+// There is no queue-depth counter because there is no queue (ENABLE_OVERLAPPED_IO
+// compiles out); Phase 3's "file-read latency and queue depth" is answered by these
+// plus "depth = 0 by construction".
+struct FileServerCounters
+{
+    std::atomic<uint64_t> hits{0};
+    std::atomic<uint64_t> misses{0};
+    std::atomic<uint64_t> missUs{0};
+    std::atomic<uint64_t> missUsMax{0};
+};
+
+FileServerCounters& GFileServerCounters();
+
 // Plain-value copy of the above for consumers.
 struct TextureStreamSnapshot
 {
@@ -124,9 +140,18 @@ struct ObjectStreamResidencyCounters
     ObjectStreamPreparer::Stats prep;
 };
 
+struct FileServerSnapshot
+{
+    uint64_t hits = 0;
+    uint64_t misses = 0;
+    uint64_t missUs = 0;
+    uint64_t missUsMax = 0;
+};
+
 struct StreamingSnapshot
 {
     TextureStreamSnapshot tex;
+    FileServerSnapshot fileserver;
     render::PreparedTextureStore::Stats store;
     ObjectStreamResidencyCounters residency;
 };

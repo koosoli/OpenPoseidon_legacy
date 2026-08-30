@@ -68,6 +68,18 @@ void DrawStreamingTab()
         ImGui::EndTable();
     }
 
+    PanelHeading("File cache");
+    PanelHelp("synchronous server: every miss stalls the main thread; queue depth is 0 by construction");
+    if (ImGui::BeginTable("fs", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+    {
+        const uint64_t total = s.fileserver.hits + s.fileserver.misses;
+        Row("opens", "%llu (%.0f%% cache hits)", (unsigned long long)total,
+            total ? 100.0 * s.fileserver.hits / (double)total : 0.0);
+        Row("misses", "%llu, %.1f ms total, %.2f ms worst", (unsigned long long)s.fileserver.misses,
+            s.fileserver.missUs / 1000.0, s.fileserver.missUsMax / 1000.0);
+        ImGui::EndTable();
+    }
+
     PanelHeading("Prepared-texture store");
     PanelHelp("worker-read mip chains waiting for the main thread's upload");
     if (ImGui::BeginTable("store", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))

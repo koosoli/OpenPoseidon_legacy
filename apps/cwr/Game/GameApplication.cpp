@@ -262,6 +262,11 @@ bool WriteCaptureMetrics(const std::string& path)
         cJSON_AddNumberToObject(tex, "frame_peak_uploads", (double)s.tex.peakFrameUploads);
         cJSON_AddNumberToObject(tex, "frame_peak_mb", s.tex.peakFrameUploadBytes / (1024.0 * 1024.0));
         cJSON_AddNumberToObject(tex, "frame_peak_ms", s.tex.peakFrameUploadUs / 1000.0);
+        cJSON* fs = cJSON_AddObjectToObject(streaming, "fileserver");
+        cJSON_AddNumberToObject(fs, "hits", (double)s.fileserver.hits);
+        cJSON_AddNumberToObject(fs, "misses", (double)s.fileserver.misses);
+        cJSON_AddNumberToObject(fs, "miss_ms", s.fileserver.missUs / 1000.0);
+        cJSON_AddNumberToObject(fs, "miss_max_ms", s.fileserver.missUsMax / 1000.0);
         cJSON* store = cJSON_AddObjectToObject(streaming, "prepared_store");
         cJSON_AddNumberToObject(store, "puts", (double)s.store.puts);
         cJSON_AddNumberToObject(store, "put_mb", s.store.putBytes / (1024.0 * 1024.0));
