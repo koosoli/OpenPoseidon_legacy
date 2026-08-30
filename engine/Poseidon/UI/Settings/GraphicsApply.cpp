@@ -1,4 +1,7 @@
 #include <Poseidon/UI/Settings/GraphicsApply.hpp>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp> // pulls Engine + extern GEngine
@@ -188,3 +191,55 @@ void ApplyGraphicsConfigToEngine(const GraphicsConfig& cfg)
 }
 
 } // namespace Poseidon
+
+namespace Poseidon
+{
+std::string DlssRuntimeVersionString()
+{
+#ifdef _WIN32
+    static std::string cached = []() -> std::string {
+        // Prefer the module NGX actually loaded; fall back to the file beside the exe
+        // (present before the first DLSS frame, and on boots where DLSS stays idle).
+        char path[MAX_PATH]{};
+        if (HMODULE m = GetModuleHandleA("nvngx_dlss.dll"))
+        {
+            if (!GetModuleFileNameA(m, path, MAX_PATH))
+                path[0] = 0;
+        }
+        if (!path[0])
+        {
+            char exe[MAX_PATH]{};
+            if (GetModuleFileNameA(nullptr, exe, MAX_PATH))
+            {
+                std::string p(exe);
+                const size_t slash = p.find_last_of("\\/");
+                p = (slash == std::string::npos ? std::string() : p.substr(0, slash + 1)) + "nvngx_dlss.dll";
+                if (p.size() < MAX_PATH)
+                    memcpy(path, p.c_str(), p.size() + 1);
+            }
+        }
+        if (!path[0])
+            return {};
+        DWORD handle = 0;
+        const DWORD size = GetFileVersionInfoSizeA(path, &handle);
+        if (!size)
+            return {};
+        std::string blob(size, '\0');
+        if (!GetFileVersionInfoA(path, 0, size, blob.data()))
+            return {};
+        VS_FIXEDFILEINFO* ffi = nullptr;
+        UINT len = 0;
+        if (!VerQueryValueA(blob.data(), "\\", reinterpret_cast<void**>(&ffi), &len) || !ffi)
+            return {};
+        char out[48];
+        snprintf(out, sizeof(out), "%u.%u.%u", HIWORD(ffi->dwFileVersionMS), LOWORD(ffi->dwFileVersionMS),
+                 HIWORD(ffi->dwFileVersionLS));
+        return out;
+    }();
+    return cached;
+#else
+    return {};
+#endif
+}
+} // namespace Poseidon
+

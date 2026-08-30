@@ -203,6 +203,17 @@ const char* GraphicsPage::GraphicsProvider::RowDescription(int row) const
 {
     if (row < 0 || row >= kRowCount)
         return "";
+    // The Upscaler row says which runtimes this install actually has, so a tester
+    // reading "Auto" can see what Auto resolves to on their machine.
+    if (row == kRowUpscaler)
+    {
+        static std::string s_upscalerDesc;
+        const std::string ver = DlssRuntimeVersionString();
+        s_upscalerDesc = std::string(LocalizeStringWithFallback(kRows[row].desc, kRows[row].descEn));
+        s_upscalerDesc += ver.empty() ? " Installed: FSR 1.0 (no DLSS runtime found)."
+                                      : " Installed: DLSS " + ver + " and FSR 1.0.";
+        return s_upscalerDesc.c_str();
+    }
     return LocalizeStringWithFallback(kRows[row].desc, kRows[row].descEn);
 }
 

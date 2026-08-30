@@ -74,6 +74,7 @@
 #include <Poseidon/AI/EntityAI.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <Poseidon/UI/Settings/GraphicsApply.hpp>
 #include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Evaluator/express.hpp>
 #include <filesystem>
@@ -4626,8 +4627,12 @@ void DrawTemporalTab()
                    info.temporalActive ? "on" : "off", info.dlssRoute ? "up" : "down",
                    info.dlssActive ? "active" : "inactive", info.dlssQuality);
     static const char* kUpscalerNames[] = {"native (no upscaler)", "DLSS", "FSR 1", "bilinear"};
-    Dev::PanelHelp("active upscaler: %s",
-                   kUpscalerNames[info.activeUpscaler >= 0 && info.activeUpscaler <= 3 ? info.activeUpscaler : 0]);
+    const std::string dlssVer = DlssRuntimeVersionString();
+    Dev::PanelHelp("active upscaler: %s%s%s%s",
+                   kUpscalerNames[info.activeUpscaler >= 0 && info.activeUpscaler <= 3 ? info.activeUpscaler : 0],
+                   dlssVer.empty() ? "" : "  (DLSS runtime ",
+                   dlssVer.c_str(),
+                   dlssVer.empty() ? "" : ", FSR 1.0)");
     Dev::PanelHelp("jitter (%.3f, %.3f) px | mip bias %.3f%s", info.jitterX, info.jitterY,
                    info.mipBiasEffective, info.resetThisFrame ? " | HISTORY RESET" : "");
     if (!info.dlssRoute)

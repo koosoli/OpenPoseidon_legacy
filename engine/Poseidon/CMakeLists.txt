@@ -277,7 +277,8 @@ if(WIN32)
     # WinInet directly — expose those in the public link interface so every
     # consumer of Poseidon picks them up automatically. CrashHandler uses
     # DbgHelp for shared Windows minidump + stack reporting.
-    target_link_libraries(Poseidon PUBLIC ws2_32 wininet dbghelp)
+    # `version` carries GetFileVersionInfo for the DLSS runtime-version readout.
+    target_link_libraries(Poseidon PUBLIC ws2_32 wininet dbghelp version)
 endif()
 
 find_package(cJSON CONFIG REQUIRED)
