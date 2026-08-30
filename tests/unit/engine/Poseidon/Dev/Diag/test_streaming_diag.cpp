@@ -32,6 +32,29 @@ TEST_CASE("StreamingDiag: texture counters round-trip into the snapshot", "[stre
     CHECK_FALSE(s.residency.valid);
 }
 
+TEST_CASE("StreamingDiag: frame roll moves accumulators to last/peak", "[streaming][diag]")
+{
+    Poseidon::Dev::TextureStreamCounters& c = Poseidon::Dev::GTextureStreamCounters();
+    Poseidon::Dev::StreamingFrameRoll(); // flush whatever earlier tests accumulated
+
+    c.frameUploads.fetch_add(2, std::memory_order_relaxed);
+    c.frameUploadBytes.fetch_add(4096, std::memory_order_relaxed);
+    c.frameUploadUs.fetch_add(700, std::memory_order_relaxed);
+    Poseidon::Dev::StreamingFrameRoll();
+
+    Poseidon::Dev::StreamingSnapshot s = Poseidon::Dev::CollectStreamingSnapshot();
+    CHECK(s.tex.lastFrameUploads == 2);
+    CHECK(s.tex.lastFrameUploadBytes == 4096);
+    CHECK(s.tex.lastFrameUploadUs == 700);
+    CHECK(s.tex.peakFrameUploadBytes >= 4096);
+
+    // A quiet frame resets "last" but the peak survives it.
+    Poseidon::Dev::StreamingFrameRoll();
+    s = Poseidon::Dev::CollectStreamingSnapshot();
+    CHECK(s.tex.lastFrameUploads == 0);
+    CHECK(s.tex.peakFrameUploadBytes >= 4096);
+}
+
 TEST_CASE("ObjectStreamPreparer: request->ready and request->taken latency are recorded",
           "[streaming][diag][preparer]")
 {

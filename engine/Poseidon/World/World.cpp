@@ -1855,8 +1855,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
     perf.Mark(Dev::FrameProfiler::PhaseSwap);
     perf.EndFrame(Poseidon::gPerfDrawCalls);
     Poseidon::gPerfDrawCalls = 0;
-    // Streaming gauges as Perfetto counter tracks; a no-op unless --perf-trace is active.
-    Dev::PushStreamingTraceCounters();
+    // Per-frame streaming upload figures roll here; also emits Perfetto counter tracks
+    // when --perf-trace is active.
+    Dev::StreamingFrameRoll();
 
 #if _ENABLE_CHEATS
 #ifndef _DEBUG

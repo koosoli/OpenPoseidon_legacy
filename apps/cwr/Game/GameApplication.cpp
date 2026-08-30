@@ -246,6 +246,10 @@ bool WriteCaptureMetrics(const std::string& path)
         cJSON_AddNumberToObject(tex, "fallback_ms", s.tex.fallbackUs / 1000.0);
         cJSON_AddNumberToObject(tex, "alpha_scans", (double)s.tex.alphaScans);
         cJSON_AddNumberToObject(tex, "alpha_ms", s.tex.alphaUs / 1000.0);
+        // Worst single frame's upload load: the GPU-upload-budget decision reads this.
+        cJSON_AddNumberToObject(tex, "frame_peak_uploads", (double)s.tex.peakFrameUploads);
+        cJSON_AddNumberToObject(tex, "frame_peak_mb", s.tex.peakFrameUploadBytes / (1024.0 * 1024.0));
+        cJSON_AddNumberToObject(tex, "frame_peak_ms", s.tex.peakFrameUploadUs / 1000.0);
         cJSON* store = cJSON_AddObjectToObject(streaming, "prepared_store");
         cJSON_AddNumberToObject(store, "puts", (double)s.store.puts);
         cJSON_AddNumberToObject(store, "put_mb", s.store.putBytes / (1024.0 * 1024.0));

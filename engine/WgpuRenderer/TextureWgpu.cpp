@@ -1397,8 +1397,11 @@ uint64_t TextureWgpu::EnsureUploaded()
         }
         if (timed)
         {
-            GTextureStreamStats.readUs.fetch_add(NowUs() - readBegan, std::memory_order_relaxed);
+            const uint64_t readDelta = NowUs() - readBegan;
+            GTextureStreamStats.readUs.fetch_add(readDelta, std::memory_order_relaxed);
             GTextureStreamStats.blockBytes.fetch_add(total, std::memory_order_relaxed);
+            GTextureStreamStats.frameUploadBytes.fetch_add(total, std::memory_order_relaxed);
+            GTextureStreamStats.frameUploadUs.fetch_add(readDelta, std::memory_order_relaxed);
             if (fromPrepared)
                 GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
         }
@@ -1423,7 +1426,9 @@ uint64_t TextureWgpu::EnsureUploaded()
                                             static_cast<uint32_t>(blocks.size()));
             if (timed)
             {
-                GTextureStreamStats.createUs.fetch_add(NowUs() - createBegan, std::memory_order_relaxed);
+                const uint64_t createDelta = NowUs() - createBegan;
+                GTextureStreamStats.createUs.fetch_add(createDelta, std::memory_order_relaxed);
+                GTextureStreamStats.frameUploadUs.fetch_add(createDelta, std::memory_order_relaxed);
             }
             if (profiled)
             {
@@ -1483,8 +1488,10 @@ uint64_t TextureWgpu::EnsureUploaded()
         }
         if (timed)
         {
+            const uint64_t fallbackDelta = NowUs() - began;
             GTextureStreamStats.fallbacks.fetch_add(1, std::memory_order_relaxed);
-            GTextureStreamStats.fallbackUs.fetch_add(NowUs() - began, std::memory_order_relaxed);
+            GTextureStreamStats.fallbackUs.fetch_add(fallbackDelta, std::memory_order_relaxed);
+            GTextureStreamStats.frameUploadUs.fetch_add(fallbackDelta, std::memory_order_relaxed);
         }
         if (profiled)
         {
@@ -1498,6 +1505,7 @@ uint64_t TextureWgpu::EnsureUploaded()
     }
     if (timed)
     {
+        GTextureStreamStats.frameUploads.fetch_add(1, std::memory_order_relaxed);
         ReportTextureStreamStats(GTextureStreamStats.uploads.fetch_add(1, std::memory_order_relaxed) + 1);
     }
     // Success or failure, this name has had its one upload attempt: a worker must not spend

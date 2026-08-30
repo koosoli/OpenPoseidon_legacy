@@ -48,6 +48,21 @@ struct TextureStreamCounters
     // Uploads whose mip chain came out of the PreparedTextureStore (a worker read+inflated
     // it ahead of time) vs. read from the file on the main thread.
     std::atomic<uint64_t> preparedHits{0};
+
+    // Per-frame upload accounting, the evidence a GPU-upload budget decision needs
+    // (roadmap 1.3): accumulated during the frame by EnsureUploaded, rolled by
+    // StreamingFrameRoll into lastFrame*/peakFrame* and zeroed. The cumulative totals
+    // above answer "how much of the fill-in was texture work"; these answer "did one
+    // frame pay for too much of it at once" -- which only a per-frame figure can.
+    std::atomic<uint64_t> frameUploads{0};
+    std::atomic<uint64_t> frameUploadBytes{0};
+    std::atomic<uint64_t> frameUploadUs{0}; // read + create + fallback time this frame
+    uint64_t lastFrameUploads = 0;          // written only by StreamingFrameRoll (main thread)
+    uint64_t lastFrameUploadBytes = 0;
+    uint64_t lastFrameUploadUs = 0;
+    uint64_t peakFrameUploads = 0;
+    uint64_t peakFrameUploadBytes = 0;
+    uint64_t peakFrameUploadUs = 0;
 };
 
 TextureStreamCounters& GTextureStreamCounters();
@@ -66,6 +81,12 @@ struct TextureStreamSnapshot
     uint64_t alphaBlockScans = 0;
     uint64_t alphaHandoffs = 0;
     uint64_t preparedHits = 0;
+    uint64_t lastFrameUploads = 0;
+    uint64_t lastFrameUploadBytes = 0;
+    uint64_t lastFrameUploadUs = 0;
+    uint64_t peakFrameUploads = 0;
+    uint64_t peakFrameUploadBytes = 0;
+    uint64_t peakFrameUploadUs = 0;
 };
 
 // The Landscape residency system's cumulative counters (the `_modernObject*` family that
@@ -111,8 +132,9 @@ struct StreamingSnapshot
 // Assembles the three sources. Cheap (two brief mutex hops); main thread.
 StreamingSnapshot CollectStreamingSnapshot();
 
-// Emits the headline gauges as Perfetto counter (C) events. No-op unless --perf-trace is
-// active. Called once per frame from World::SimulateAndDraw next to FrameProfiler::EndFrame.
-void PushStreamingTraceCounters();
+// Frame boundary: rolls the frame upload accumulators into lastFrame*/peakFrame* and, when
+// --perf-trace is active, emits the headline gauges as Perfetto counter (C) events. Called
+// once per frame from World::SimulateAndDraw next to FrameProfiler::EndFrame.
+void StreamingFrameRoll();
 
 } // namespace Poseidon::Dev

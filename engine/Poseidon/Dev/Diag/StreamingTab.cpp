@@ -57,6 +57,14 @@ void DrawStreamingTab()
             s.tex.alphaUs / 1000.0);
         Row("texture total", "%.1f ms",
             (s.tex.readUs + s.tex.createUs + s.tex.fallbackUs + s.tex.alphaUs) / 1000.0);
+        // The per-frame pair is the GPU-upload-budget evidence (roadmap 1.3): a large peak
+        // says one frame paid for many megabytes of upload at once; a small one says the
+        // admit ceiling already bounds this and a byte budget would be a lever without a
+        // measured problem.
+        Row("last frame", "%llu uploads, %.2f MB, %.2f ms", (unsigned long long)s.tex.lastFrameUploads,
+            s.tex.lastFrameUploadBytes / kMb, s.tex.lastFrameUploadUs / 1000.0);
+        Row("peak frame", "%llu uploads, %.2f MB, %.2f ms", (unsigned long long)s.tex.peakFrameUploads,
+            s.tex.peakFrameUploadBytes / kMb, s.tex.peakFrameUploadUs / 1000.0);
         ImGui::EndTable();
     }
 

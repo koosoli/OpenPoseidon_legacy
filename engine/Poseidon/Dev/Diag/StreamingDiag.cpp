@@ -6,6 +6,7 @@
 #include <Poseidon/Dev/Diag/PerfTrace.hpp>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
+#include <algorithm>
 #include <chrono>
 
 namespace Poseidon::Dev
@@ -35,6 +36,12 @@ StreamingSnapshot CollectStreamingSnapshot()
     out.tex.alphaBlockScans = c.alphaBlockScans.load(std::memory_order_relaxed);
     out.tex.alphaHandoffs = c.alphaHandoffs.load(std::memory_order_relaxed);
     out.tex.preparedHits = c.preparedHits.load(std::memory_order_relaxed);
+    out.tex.lastFrameUploads = c.lastFrameUploads;
+    out.tex.lastFrameUploadBytes = c.lastFrameUploadBytes;
+    out.tex.lastFrameUploadUs = c.lastFrameUploadUs;
+    out.tex.peakFrameUploads = c.peakFrameUploads;
+    out.tex.peakFrameUploadBytes = c.peakFrameUploadBytes;
+    out.tex.peakFrameUploadUs = c.peakFrameUploadUs;
 
     out.store = render::PreparedTextureStore::Instance().SnapshotStats();
 
@@ -45,8 +52,19 @@ StreamingSnapshot CollectStreamingSnapshot()
     return out;
 }
 
-void PushStreamingTraceCounters()
+void StreamingFrameRoll()
 {
+    // Frame boundary for the per-frame upload figures. exchange() rather than load+store:
+    // an upload between the two would be lost, and a lost 4 MB spike is exactly the datum
+    // this exists to keep.
+    TextureStreamCounters& c = GTextureStreamCounters();
+    c.lastFrameUploads = c.frameUploads.exchange(0, std::memory_order_relaxed);
+    c.lastFrameUploadBytes = c.frameUploadBytes.exchange(0, std::memory_order_relaxed);
+    c.lastFrameUploadUs = c.frameUploadUs.exchange(0, std::memory_order_relaxed);
+    c.peakFrameUploads = std::max(c.peakFrameUploads, c.lastFrameUploads);
+    c.peakFrameUploadBytes = std::max(c.peakFrameUploadBytes, c.lastFrameUploadBytes);
+    c.peakFrameUploadUs = std::max(c.peakFrameUploadUs, c.lastFrameUploadUs);
+
     if (!Perf::Trace::IsEnabled())
     {
         return;
@@ -59,6 +77,8 @@ void PushStreamingTraceCounters()
     // set, store bytes, resident objects) are the ones that show streaming pressure over
     // time, which is what a trace is for.
     Perf::Trace::PushCounter("Streaming", "texture uploads", ts, static_cast<int64_t>(s.tex.uploads));
+    Perf::Trace::PushCounter("Streaming", "frame upload bytes", ts,
+                             static_cast<int64_t>(s.tex.lastFrameUploadBytes));
     Perf::Trace::PushCounter("Streaming", "prepared store bytes", ts, static_cast<int64_t>(s.store.bytes));
     if (s.residency.prepValid)
     {
