@@ -1,0 +1,563 @@
+[2026-08-30 15:20:27.733] [app-2618] [INFO] [CORE]    TaskPool initialised: 8 task threads (16 logical cores)
+[2026-08-30 15:20:27.738] [app-2618] [INFO] [CORE]    Command-line parsing complete
+[2026-08-30 15:20:27.738] [app-2618] [INFO] [CORE]      user_dir:  C:\Users\mail\AppData\Roaming\CWR/
+[2026-08-30 15:20:27.738] [app-2618] [INFO] [CORE]      user_content_dir: C:\Users\mail\OneDrive\Documents\Cold War Assault/
+[2026-08-30 15:20:27.738] [app-2618] [INFO] [CORE]      cache_dir: C:\Users\mail\AppData\Local\CWR/
+[2026-08-30 15:20:27.738] [app-2618] [INFO] [CORE]      temp_dir:  C:\Users\mail\AppData\Local\Temp\cwr/
+[2026-08-30 15:20:27.739] [app-2618] [INFO] [CORE]    Game starting: version 3.05-04f0f37-dev
+[2026-08-30 15:20:27.739] [app-2618] [INFO] [CONFIG]  Initializing configuration system...
+[2026-08-30 15:20:27.739] [app-2618] [INFO] [CONFIG]  Configuration system ready
+[2026-08-30 15:20:27.739] [app-2618] [INFO] [CONFIG]  Initializing game configuration (language, stringtables, config files)...
+[2026-08-30 15:20:27.739] [app-2618] [INFO] [CONFIG]    Language: English
+[2026-08-30 15:20:27.753] [app-2618] [WARN] [CORE]    [i18n] key 'STR_USRACT_MAP_ZOOM_IN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.754] [app-2618] [WARN] [CORE]    [i18n] key 'STR_USRACT_MAP_ZOOM_OUT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.754] [app-2618] [WARN] [CORE]    [i18n] key 'STR_USRACT_CHEAT_ENTRY' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.754] [app-2618] [WARN] [CORE]    [i18n] key 'STR_USRACT_VOICE_OVER_NET_PUSH_TO_TALK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.755] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_ESCAPE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.755] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_1' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.756] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_2' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.756] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_3' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.756] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_4' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.757] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_5' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.757] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_6' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.758] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_7' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.758] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_8' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.758] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_9' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.758] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_0' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MINUS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_EQUALS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_BACKSPACE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_TAB' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_Q' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_W' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_E' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_R' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.759] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_T' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_Y' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_U' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_I' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_O' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_P' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LEFTBRACKET' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.760] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RIGHTBRACKET' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RETURN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LCTRL' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_A' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_S' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_D' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_G' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_H' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.761] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_J' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_K' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_L' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_SEMICOLON' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_APOSTROPHE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_GRAVE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LSHIFT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.762] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_BACKSLASH' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_Z' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_X' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_C' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_V' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_B' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_N' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_M' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_COMMA' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_PERIOD' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_SLASH' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.763] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RSHIFT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_MULTIPLY' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LALT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_SPACE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_CAPSLOCK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F1' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F2' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F3' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F4' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F5' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.764] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F6' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F7' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F8' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F9' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F10' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_NUMLOCKCLEAR' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_SCROLLLOCK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_7' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_8' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_9' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_MINUS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.765] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_4' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_5' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_6' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_PLUS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_1' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_2' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_3' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_0' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_PERIOD' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_NONUSBACKSLASH' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.766] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F11' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F12' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F13' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F14' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_F15' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL2' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL6' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL4' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL5' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL3' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.767] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL7' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_EQUALS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_PREVIOUS_TRACK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL8' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INTERNATIONAL9' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LANG3' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LANG2' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_STOP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LANG6' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.768] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LANG7' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_NEXT_TRACK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_ENTER' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RCTRL' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MUTE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_PLAY_PAUSE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_STOP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_VOLUMEDOWN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_VOLUMEUP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_HOME' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.769] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_COMMA' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_KP_DIVIDE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_PRINTSCREEN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RALT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_PAUSE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_HOME' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_UP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_PAGEUP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LEFT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.770] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RIGHT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_END' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_DOWN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_PAGEDOWN' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_INSERT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_DELETE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_LGUI' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_RGUI' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_APPLICATION' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_POWER' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_SLEEP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.771] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_WAKE' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_SEARCH' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_BOOKMARKS' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_REFRESH' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_STOP' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_FORWARD' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_AC_BACK' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_SDL_SCANCODE_MEDIA_SELECT' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_MP_LOCKED' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.772] [app-2618] [WARN] [CORE]    [i18n] key 'STR_MP_UNLOCKED' not found in stringtable; callers will get empty string
+[2026-08-30 15:20:27.793] [app-2618] [INFO] [CONFIG]  ParseResource: merged bin/resource-extra.cpp into Res
+[2026-08-30 15:20:27.794] [app-2618] [INFO] [CONFIG]  Game configuration initialized successfully
+[2026-08-30 15:20:27.794] [app-2618] [INFO] [CONFIG]  Game configuration initialized (stringtables, modules, configs loaded)
+[2026-08-30 15:20:28.424] [app-2618] [INFO] [MEMORY]  Process memory: 16237 MB physical, soft=4096 MB hard=8192 MB (auto)
+[2026-08-30 15:20:28.468] [app-2618] [INFO] [GRAPHICS]  GL33: Initializing engine — bootstrap 1600x900 32bpp windowed before display.cfg/user overrides
+[2026-08-30 15:20:28.707] [app-2618] [INFO] [GRAPHICS]  DebugOverlay: ImGui initialized (press Ctrl+` / Ctrl+; to toggle)
+[2026-08-30 15:20:28.708] [app-2618] [INFO] [GRAPHICS]  GL33: KHR_debug callback wired (synchronous)
+[2026-08-30 15:20:28.708] [app-2618] [INFO] [GRAPHICS]  GL33: OpenGL 3.3.0 NVIDIA 595.79 — NVIDIA Corporation — NVIDIA GeForce RTX 3070/PCIe/SSE2
+[2026-08-30 15:20:28.708] [app-2618] [INFO] [GRAPHICS]  GL33: surface resolved to 1600x900 windowed
+[2026-08-30 15:20:28.709] [app-2618] [INFO] [GRAPHICS]  GL33: InitGL — initializing shaders
+[2026-08-30 15:20:28.740] [app-2618] [INFO] [GRAPHICS]  GL33: shader cache hit (72 entries) — 'C:\Users\mail\AppData\Local\CWR/gl33_shaders.bin'
+[2026-08-30 15:20:28.766] [app-2618] [INFO] [GRAPHICS]  RenderDoc not loaded — capture API unavailable
+[2026-08-30 15:20:28.766] [app-2618] [INFO] [GRAPHICS]  GL[LOW type=0x8251 id=131169]: Framebuffer detailed info: The driver allocated storage for renderbuffer 1.
+[2026-08-30 15:20:28.768] [app-2618] [INFO] [GRAPHICS]  GL33: frame target 1600x900 (0x MSAA, render scale 1), window 1600x900
+[2026-08-30 15:20:28.769] [app-2618] [INFO] [GRAPHICS]  LoadDisplayConfig: applied explicit CLI display overrides
+[2026-08-30 15:20:28.770] [app-2618] [INFO] [GRAPHICS]  Aspect: viewport=1600x900 style=0 clamp=1 override=0 -> leftFOV=1.333 topFOV=0.750 uiX=[0.000..1.000] uiY=[0.000..1.000] world=[0.000..1.000]x[0.000..1.000]
+[2026-08-30 15:20:28.773] [app-2618] [INFO] [GRAPHICS]  moon: ephemeris=on sun=off lighting=on manual=off (135.0az/30.0el) phaseOverride=-1.00 size=1.00 bright=1.00 intensity=0.0600 envOverrides=no
+[2026-08-30 15:20:28.777] [app-2618] [INFO] [GRAPHICS]  GL[LOW type=0x8251 id=131204]: Texture state usage warning: The texture object (0) bound to texture image unit 2 does not have a defined base level and cannot be used for texture mapping.
+[2026-08-30 15:20:28.804] [app-2618] [INFO] [GRAPHICS]  GL33: frame target 1600x900 (4x MSAA, render scale 1), window 1600x900
+[2026-08-30 15:20:28.805] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\obloha.p3d
+[2026-08-30 15:20:28.806] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stars.p3d
+[2026-08-30 15:20:28.806] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\horizont.p3d
+[2026-08-30 15:20:28.807] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sunhalo.p3d
+[2026-08-30 15:20:28.807] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sun.p3d
+[2026-08-30 15:20:28.807] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\moon.p3d
+[2026-08-30 15:20:28.813] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les ctverec mlazi.p3d
+[2026-08-30 15:20:28.814] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les trojuhelnik.p3d
+[2026-08-30 15:20:28.815] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les trojuhelnik pruchozi.p3d
+[2026-08-30 15:20:28.816] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les ctverec.p3d
+[2026-08-30 15:20:28.817] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les ctverec pruchozi_t1.p3d
+[2026-08-30 15:20:28.819] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les ctverec pruchozi_t2.p3d
+[2026-08-30 15:20:28.869] [app-2618] [WARN] [GRAPHICS]  GL33: Cannot load texture biscamel\icamel2.paa
+[2026-08-30 15:20:28.874] [app-2618] [INFO] [CORE]    World initialized successfully
+[2026-08-30 15:20:28.875] [app-2618] [INFO] [WORLD]   Sea level: tidal=true tide=0.107 (sun 0.063 moon 0.151) -> 0.53 m
+[2026-08-30 15:20:29.351] [app-2618] [INFO] [AUDIO]   EFX extension: available
+[2026-08-30 15:20:29.362] [app-2618] [INFO] [AUDIO]   HRTF: supported, 1 dataset(s) on this device
+[2026-08-30 15:20:29.808] [app-2618] [INFO] [AUDIO]   HRTF: mode Auto applied, now ACTIVE (Built-In HRTF)
+[2026-08-30 15:20:29.808] [app-2618] [INFO] [AUDIO]   Init OK: OpenAL Soft
+[2026-08-30 15:20:30.251] [app-2618] [INFO] [AUDIO]   HRTF: mode Auto applied, now ACTIVE (Built-In HRTF)
+[2026-08-30 15:20:30.252] [app-2618] [INFO] [GRAPHICS]  FontSystem initialized (5 fonts in slot 0)
+[2026-08-30 15:20:30.253] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krater.p3d
+[2026-08-30 15:20:30.253] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for misc\krvava_skvrna.p3d
+[2026-08-30 15:20:30.253] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cl_basic.p3d
+[2026-08-30 15:20:30.254] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cl_fire.p3d
+[2026-08-30 15:20:30.255] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cl_water.p3d
+[2026-08-30 15:20:30.255] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kino.p3d
+[2026-08-30 15:20:30.256] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cobrasvetlo.p3d
+[2026-08-30 15:20:30.256] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\koulesvetlo.p3d
+[2026-08-30 15:20:30.257] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\halflight.p3d
+[2026-08-30 15:20:30.258] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\obrysove svetlo.p3d
+[2026-08-30 15:20:30.259] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stopa_l.p3d
+[2026-08-30 15:20:30.259] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stopa_p.p3d
+[2026-08-30 15:20:30.260] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\force.p3d
+[2026-08-30 15:20:30.261] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\koule.p3d
+[2026-08-30 15:20:30.262] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\rect.p3d
+[2026-08-30 15:20:30.262] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\mrak1.p3d
+[2026-08-30 15:20:30.262] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\mrak2.p3d
+[2026-08-30 15:20:30.263] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\mrak3.p3d
+[2026-08-30 15:20:30.263] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\mrak4.p3d
+[2026-08-30 15:20:30.263] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\colision.p3d
+[2026-08-30 15:20:30.263] [app-2618] [INFO] [GRAPHICS]  ScenePreloader initialized (20 slot classes)
+[2026-08-30 15:20:30.264] [app-2618] [INFO] [CORE]    Mission smoke check: initialization complete, continuing into mission startup
+[2026-08-30 15:20:30.268] [app-2618] [INFO] [CORE]    Test mission: D:\SteamLibrary\steamapps\common\ARMA Cold War Assault\dev-missions\devtest.abel -> C:/Users/mail/AppData/Local/Temp/cwr/mission-smoke/761c8bbc3fa8655b/Missions/devtest.abel/mission.sqm
+[2026-08-30 15:20:30.286] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sunhalo.p3d
+[2026-08-30 15:20:30.287] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sun.p3d
+[2026-08-30 15:20:30.287] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\moon.p3d
+[2026-08-30 15:20:30.294] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi3.p3d
+[2026-08-30 15:20:30.295] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str borovice.p3d
+[2026-08-30 15:20:30.296] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice25.p3d
+[2026-08-30 15:20:30.296] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice6konec.p3d
+[2026-08-30 15:20:30.297] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str borovice horska.p3d
+[2026-08-30 15:20:30.298] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ker trs travy.p3d
+[2026-08-30 15:20:30.298] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi_bigest.p3d
+[2026-08-30 15:20:30.299] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi4.p3d
+[2026-08-30 15:20:30.299] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_fikovnik_ker.p3d
+[2026-08-30 15:20:30.301] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar.p3d
+[2026-08-30 15:20:30.303] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_whiteskrin.p3d
+[2026-08-30 15:20:30.304] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_greenskrin.p3d
+[2026-08-30 15:20:30.304] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\barels.p3d
+[2026-08-30 15:20:30.305] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\barel4.p3d
+[2026-08-30 15:20:30.306] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_knihovna.p3d
+[2026-08-30 15:20:30.307] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_psacistul.p3d
+[2026-08-30 15:20:30.307] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_lampicka.p3d
+[2026-08-30 15:20:30.308] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_radio.p3d
+[2026-08-30 15:20:30.308] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_brownskrin.p3d
+[2026-08-30 15:20:30.309] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_kytka.p3d
+[2026-08-30 15:20:30.309] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hangar_lahve.p3d
+[2026-08-30 15:20:30.310] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krabice3.p3d
+[2026-08-30 15:20:30.310] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krabice2.p3d
+[2026-08-30 15:20:30.310] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krabice.p3d
+[2026-08-30 15:20:30.310] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\topeni.p3d
+[2026-08-30 15:20:30.312] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_liskac.p3d
+[2026-08-30 15:20:30.313] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi2.p3d
+[2026-08-30 15:20:30.313] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta10 100.p3d
+[2026-08-30 15:20:30.314] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ryb_domek.p3d
+[2026-08-30 15:20:30.314] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamna_bila.p3d
+[2026-08-30 15:20:30.315] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\skrin_dvojita.p3d
+[2026-08-30 15:20:30.315] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\televize.p3d
+[2026-08-30 15:20:30.316] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str jalovec.p3d
+[2026-08-30 15:20:30.316] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi_long.p3d
+[2026-08-30 15:20:30.317] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta6konec.p3d
+[2026-08-30 15:20:30.317] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta10 75.p3d
+[2026-08-30 15:20:30.317] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ker rakosi.p3d
+[2026-08-30 15:20:30.318] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plutek.p3d
+[2026-08-30 15:20:30.318] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\majak.p3d
+[2026-08-30 15:20:30.319] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\podesta_pod_majak.p3d
+[2026-08-30 15:20:30.319] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str briza.p3d
+[2026-08-30 15:20:30.320] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ker listnac.p3d
+[2026-08-30 15:20:30.320] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta10 25.p3d
+[2026-08-30 15:20:30.320] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta10 50.p3d
+[2026-08-30 15:20:30.321] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\krovi.p3d
+[2026-08-30 15:20:30.321] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta12.p3d
+[2026-08-30 15:20:30.321] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta6.p3d
+[2026-08-30 15:20:30.322] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_fikovnik2.p3d
+[2026-08-30 15:20:30.323] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_fikovnik.p3d
+[2026-08-30 15:20:30.323] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_pinie.p3d
+[2026-08-30 15:20:30.324] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cesta25.p3d
+[2026-08-30 15:20:30.324] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_briza_kriva.p3d
+[2026-08-30 15:20:30.325] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str krovisko vysoke.p3d
+[2026-08-30 15:20:30.325] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kaple.p3d
+[2026-08-30 15:20:30.326] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_briza_rovna.p3d
+[2026-08-30 15:20:30.326] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str habr.p3d
+[2026-08-30 15:20:30.326] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str osika.p3d
+[2026-08-30 15:20:30.327] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str buk.p3d
+[2026-08-30 15:20:30.328] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\oliva.p3d
+[2026-08-30 15:20:30.329] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\molo_drevo_end.p3d
+[2026-08-30 15:20:30.330] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\molo_drevo.p3d
+[2026-08-30 15:20:30.330] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str trnka.p3d
+[2026-08-30 15:20:30.331] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\bozi_muka.p3d
+[2026-08-30 15:20:30.332] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\skala.p3d
+[2026-08-30 15:20:30.332] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str_jablon.p3d
+[2026-08-30 15:20:30.332] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\jablon.p3d
+[2026-08-30 15:20:30.335] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hromada_beden.p3d
+[2026-08-30 15:20:30.335] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plechbud.p3d
+[2026-08-30 15:20:30.336] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sakura.p3d
+[2026-08-30 15:20:30.338] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les_su_trojuhelnik.p3d
+[2026-08-30 15:20:30.340] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les_su_ctver_pruhozi_t1.p3d
+[2026-08-30 15:20:30.341] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\les_su_ctver_pruhozi_t2.p3d
+[2026-08-30 15:20:30.346] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\str vrba.p3d
+[2026-08-30 15:20:30.347] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_provizorni.p3d
+[2026-08-30 15:20:30.349] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice10 100.p3d
+[2026-08-30 15:20:30.349] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice12.p3d
+[2026-08-30 15:20:30.350] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice10 25.p3d
+[2026-08-30 15:20:30.350] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice10 50.p3d
+[2026-08-30 15:20:30.351] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice10 75.p3d
+[2026-08-30 15:20:30.351] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\silnice6.p3d
+[2026-08-30 15:20:30.351] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_lapessagne_end.p3d
+[2026-08-30 15:20:30.352] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\deutshe_mini.p3d
+[2026-08-30 15:20:30.353] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\drez.p3d
+[2026-08-30 15:20:30.354] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\bouda2_vnitrek.p3d
+[2026-08-30 15:20:30.355] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\deutshe.p3d
+[2026-08-30 15:20:30.355] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\newplot2.p3d
+[2026-08-30 15:20:30.356] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_lapessagne.p3d
+[2026-08-30 15:20:30.357] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_hlavnil.p3d
+[2026-08-30 15:20:30.357] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka25.p3d
+[2026-08-30 15:20:30.358] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_asfaltka_cesta_t.p3d
+[2026-08-30 15:20:30.358] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka12.p3d
+[2026-08-30 15:20:30.359] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka6konec.p3d
+[2026-08-30 15:20:30.359] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_rust_cihlsloup.p3d
+[2026-08-30 15:20:30.360] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kostelik.p3d
+[2026-08-30 15:20:30.361] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\zvonice.p3d
+[2026-08-30 15:20:30.361] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_silnice_asfaltka_t.p3d
+[2026-08-30 15:20:30.362] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum_mesto.p3d
+[2026-08-30 15:20:30.362] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\zed_kamenna.p3d
+[2026-08-30 15:20:30.363] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum_rasovna.p3d
+[2026-08-30 15:20:30.364] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\skrin_opalena.p3d
+[2026-08-30 15:20:30.365] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamna_uhli.p3d
+[2026-08-30 15:20:30.365] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_stop.p3d
+[2026-08-30 15:20:30.365] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\lampazel.p3d
+[2026-08-30 15:20:30.366] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\bouda2.p3d
+[2026-08-30 15:20:30.366] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_pumpa.p3d
+[2026-08-30 15:20:30.366] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_10a.p3d
+[2026-08-30 15:20:30.367] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_10b.p3d
+[2026-08-30 15:20:30.367] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfatlka10 100.p3d
+[2026-08-30 15:20:30.368] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\fuelstation_new.p3d
+[2026-08-30 15:20:30.369] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfatlka10 25.p3d
+[2026-08-30 15:20:30.369] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka10 75.p3d
+[2026-08-30 15:20:30.369] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka10 50.p3d
+[2026-08-30 15:20:30.370] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_vigny.p3d
+[2026-08-30 15:20:30.370] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_vigny_end.p3d
+[2026-08-30 15:20:30.371] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_silnice_cesta_t.p3d
+[2026-08-30 15:20:30.371] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_pozorvedp.p3d
+[2026-08-30 15:20:30.371] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_prednost.p3d
+[2026-08-30 15:20:30.372] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_hlavnip.p3d
+[2026-08-30 15:20:30.372] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dumruina_mini.p3d
+[2026-08-30 15:20:30.373] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\statek_plot.p3d
+[2026-08-30 15:20:30.373] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\bouda3.p3d
+[2026-08-30 15:20:30.375] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_pozorvedl.p3d
+[2026-08-30 15:20:30.381] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\molo_drevo_bs.p3d
+[2026-08-30 15:20:30.382] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_40.p3d
+[2026-08-30 15:20:30.383] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_sterk.p3d
+[2026-08-30 15:20:30.383] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ohrada_sama.p3d
+[2026-08-30 15:20:30.384] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_asfaltka_asfaltka_t.p3d
+[2026-08-30 15:20:30.385] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum_mesto3.p3d
+[2026-08-30 15:20:30.386] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hruzdum.p3d
+[2026-08-30 15:20:30.388] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\zidle.p3d
+[2026-08-30 15:20:30.389] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_slepa.p3d
+[2026-08-30 15:20:30.389] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_04a.p3d
+[2026-08-30 15:20:30.391] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\ohrada_end.p3d
+[2026-08-30 15:20:30.392] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_goisse.p3d
+[2026-08-30 15:20:30.393] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_goisse_end.p3d
+[2026-08-30 15:20:30.394] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_04b.p3d
+[2026-08-30 15:20:30.395] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kopa_kameni2.p3d
+[2026-08-30 15:20:30.396] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_lariviere.p3d
+[2026-08-30 15:20:30.397] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\asfaltka6.p3d
+[2026-08-30 15:20:30.398] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_lariviere_end.p3d
+[2026-08-30 15:20:30.401] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kostel2.p3d
+[2026-08-30 15:20:30.402] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_zakaz_vjezdu.p3d
+[2026-08-30 15:20:30.403] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kasna.p3d
+[2026-08-30 15:20:30.404] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_zakruta.p3d
+[2026-08-30 15:20:30.408] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_hlavni_end.p3d
+[2026-08-30 15:20:30.408] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen5_zula.p3d
+[2026-08-30 15:20:30.409] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen3_zula.p3d
+[2026-08-30 15:20:30.410] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen4_zula.p3d
+[2026-08-30 15:20:30.410] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen2_zula.p3d
+[2026-08-30 15:20:30.411] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hrobecek2.p3d
+[2026-08-30 15:20:30.412] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_11b.p3d
+[2026-08-30 15:20:30.413] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_11c.p3d
+[2026-08-30 15:20:30.414] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_11a.p3d
+[2026-08-30 15:20:30.415] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen1_zula.p3d
+[2026-08-30 15:20:30.418] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_krizovatka.p3d
+[2026-08-30 15:20:30.422] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kopa_kameni.p3d
+[2026-08-30 15:20:30.426] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_hlavni.p3d
+[2026-08-30 15:20:30.428] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\pletivo.p3d
+[2026-08-30 15:20:30.428] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_rust_brank_o.p3d
+[2026-08-30 15:20:30.429] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stodola_open.p3d
+[2026-08-30 15:20:30.431] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stoh.p3d
+[2026-08-30 15:20:30.431] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\statek_kulna.p3d
+[2026-08-30 15:20:30.434] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_07b.p3d
+[2026-08-30 15:20:30.435] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_07a.p3d
+[2026-08-30 15:20:30.436] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_07c.p3d
+[2026-08-30 15:20:30.438] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_06b.p3d
+[2026-08-30 15:20:30.440] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_06c.p3d
+[2026-08-30 15:20:30.441] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_03c.p3d
+[2026-08-30 15:20:30.441] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_03a.p3d
+[2026-08-30 15:20:30.442] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_06a.p3d
+[2026-08-30 15:20:30.443] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_03b.p3d
+[2026-08-30 15:20:30.445] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen2_piskovec.p3d
+[2026-08-30 15:20:30.445] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen5_piskovec.p3d
+[2026-08-30 15:20:30.446] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum_mesto2l.p3d
+[2026-08-30 15:20:30.447] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen4_piskovec.p3d
+[2026-08-30 15:20:30.448] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen1_piskovec.p3d
+[2026-08-30 15:20:30.449] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kamen3_piskovec.p3d
+[2026-08-30 15:20:30.453] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_14a.p3d
+[2026-08-30 15:20:30.455] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_14b.p3d
+[2026-08-30 15:20:30.456] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_14c.p3d
+[2026-08-30 15:20:30.458] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cihlovej_dum_mini.p3d
+[2026-08-30 15:20:30.459] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sporak.p3d
+[2026-08-30 15:20:30.460] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\obrazek1.p3d
+[2026-08-30 15:20:30.461] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\truhla_stara.p3d
+[2026-08-30 15:20:30.462] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_cancon_end.p3d
+[2026-08-30 15:20:30.463] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_cancon.p3d
+[2026-08-30 15:20:30.464] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_zatacka_prava.p3d
+[2026-08-30 15:20:30.464] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_05a.p3d
+[2026-08-30 15:20:30.465] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_05b.p3d
+[2026-08-30 15:20:30.466] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_05c.p3d
+[2026-08-30 15:20:30.468] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_arudy.p3d
+[2026-08-30 15:20:30.468] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_arudy_end.p3d
+[2026-08-30 15:20:30.469] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\budova5.p3d
+[2026-08-30 15:20:30.470] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\paletyc.p3d
+[2026-08-30 15:20:30.472] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dumruina.p3d
+[2026-08-30 15:20:30.474] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_brank_o.p3d
+[2026-08-30 15:20:30.474] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_cihlsloup.p3d
+[2026-08-30 15:20:30.474] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_draty.p3d
+[2026-08-30 15:20:30.475] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_vrata.p3d
+[2026-08-30 15:20:30.475] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_smarie.p3d
+[2026-08-30 15:20:30.476] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_smarie_end.p3d
+[2026-08-30 15:20:30.477] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_rust_branka.p3d
+[2026-08-30 15:20:30.478] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum01.p3d
+[2026-08-30 15:20:30.479] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\pletivo_dira.p3d
+[2026-08-30 15:20:30.479] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\pletivo_wired_branal.p3d
+[2026-08-30 15:20:30.480] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\pletivo_wired_branap.p3d
+[2026-08-30 15:20:30.482] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_chapoi_end.p3d
+[2026-08-30 15:20:30.482] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_chapoi.p3d
+[2026-08-30 15:20:30.484] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cihlovej_dum.p3d
+[2026-08-30 15:20:30.487] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_01a.p3d
+[2026-08-30 15:20:30.488] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_13a.p3d
+[2026-08-30 15:20:30.489] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_13b.p3d
+[2026-08-30 15:20:30.490] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_13c.p3d
+[2026-08-30 15:20:30.491] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_larche.p3d
+[2026-08-30 15:20:30.491] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_larche_end.p3d
+[2026-08-30 15:20:30.506] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_rust_draty.p3d
+[2026-08-30 15:20:30.513] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_dourdan.p3d
+[2026-08-30 15:20:30.514] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_dourdan_end.p3d
+[2026-08-30 15:20:30.516] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum_mesto2.p3d
+[2026-08-30 15:20:30.518] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\zidlicka.p3d
+[2026-08-30 15:20:30.519] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\skrin_bar.p3d
+[2026-08-30 15:20:30.519] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stulsuplik_proxy.p3d
+[2026-08-30 15:20:30.520] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\lampa strop.p3d
+[2026-08-30 15:20:30.521] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\postel_manz_kov.p3d
+[2026-08-30 15:20:30.521] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\skrinkamini.p3d
+[2026-08-30 15:20:30.522] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\stolek_zasupovaci.p3d
+[2026-08-30 15:20:30.525] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_09b.p3d
+[2026-08-30 15:20:30.525] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_09c.p3d
+[2026-08-30 15:20:30.526] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_09a.p3d
+[2026-08-30 15:20:30.527] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_zatacka_leva.p3d
+[2026-08-30 15:20:30.528] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_slouis.p3d
+[2026-08-30 15:20:30.529] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_slouis_end.p3d
+[2026-08-30 15:20:30.529] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_02a.p3d
+[2026-08-30 15:20:30.530] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_houdan.p3d
+[2026-08-30 15:20:30.531] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_houdan_end.p3d
+[2026-08-30 15:20:30.531] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_branka.p3d
+[2026-08-30 15:20:30.532] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_02d.p3d
+[2026-08-30 15:20:30.533] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_silnicexsilnice.p3d
+[2026-08-30 15:20:30.533] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_02b.p3d
+[2026-08-30 15:20:30.535] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_02c.p3d
+[2026-08-30 15:20:30.536] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\budova3.p3d
+[2026-08-30 15:20:30.538] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\cihlovej_dum_in.p3d
+[2026-08-30 15:20:30.541] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_latrinitre.p3d
+[2026-08-30 15:20:30.541] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_latrinitre_end.p3d
+[2026-08-30 15:20:30.542] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_08.p3d
+[2026-08-30 15:20:30.543] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dum02.p3d
+[2026-08-30 15:20:30.545] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\afdum_mesto2.p3d
+[2026-08-30 15:20:30.548] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\hlaska.p3d
+[2026-08-30 15:20:30.549] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\garaz.p3d
+[2026-08-30 15:20:30.551] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\fuelstation_army.p3d
+[2026-08-30 15:20:30.553] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\repair_center.p3d
+[2026-08-30 15:20:30.558] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\pletivo_wired.p3d
+[2026-08-30 15:20:30.559] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_12b.p3d
+[2026-08-30 15:20:30.560] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_12a.p3d
+[2026-08-30 15:20:30.561] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kr_silnice_silnice_t.p3d
+[2026-08-30 15:20:30.562] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\malden_smer_12c.p3d
+[2026-08-30 15:20:30.564] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\budova1.p3d
+[2026-08-30 15:20:30.565] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\plot_green_vrat_o.p3d
+[2026-08-30 15:20:30.566] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\vrata_p.p3d
+[2026-08-30 15:20:30.567] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_leport.p3d
+[2026-08-30 15:20:30.568] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\znacka_leport_end.p3d
+[2026-08-30 15:20:30.569] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\budova4.p3d
+[2026-08-30 15:20:30.571] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\vez.p3d
+[2026-08-30 15:20:30.573] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\budova2.p3d
+[2026-08-30 15:20:30.574] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\molo_beton.p3d
+[2026-08-30 15:20:30.575] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\molo_krychle.p3d
+[2026-08-30 15:20:30.576] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\jezek kov.p3d
+[2026-08-30 15:20:30.578] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\fortress2.p3d
+[2026-08-30 15:20:30.580] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\strel_post_panel.p3d
+[2026-08-30 15:20:30.580] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\strel_post.p3d
+[2026-08-30 15:20:30.581] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\barbedwire.p3d
+[2026-08-30 15:20:30.583] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\garaz_bez_tanku.p3d
+[2026-08-30 15:20:30.585] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\garaz_s_tankem.p3d
+[2026-08-30 15:20:30.589] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\strazni_vez.p3d
+[2026-08-30 15:20:30.593] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\fortress1.p3d
+[2026-08-30 15:20:30.594] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\jehlan cs.p3d
+[2026-08-30 15:20:30.596] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\prolejzacka.p3d
+[2026-08-30 15:20:30.597] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\prebehlavka.p3d
+[2026-08-30 15:20:30.597] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\podlejzacka.p3d
+[2026-08-30 15:20:30.598] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\obihacka.p3d
+[2026-08-30 15:20:30.650] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\papauto.p3d
+[2026-08-30 15:20:30.654] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\mc vojakw2.p3d
+[2026-08-30 15:20:30.656] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\m16_proxy.p3d
+[2026-08-30 15:20:30.658] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\law_proxy.p3d
+[2026-08-30 15:20:30.659] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\flag_vojak.p3d
+[2026-08-30 15:20:30.660] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\dalekohled_proxy.p3d
+[2026-08-30 15:20:30.661] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\nvg_proxy.p3d
+[2026-08-30 15:20:30.697] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\shell.p3d
+[2026-08-30 15:20:30.698] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\nabojnice.p3d
+[2026-08-30 15:20:30.698] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\handgrenade.p3d
+[2026-08-30 15:20:30.699] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\optika_m16.p3d
+[2026-08-30 15:20:31.295] [app-2618] [INFO] [GRAPHICS]  ROAD_GPU_VB lever: OFF (WGR_ROAD_GPU_VB=<unset>, GPU terrain conform=0); OnSurface levels are denied (2001 behaviour) a vertex buffer
+[2026-08-30 15:20:31.343] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kompas.p3d
+[2026-08-30 15:20:31.344] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\kosei.p3d
+[2026-08-30 15:20:31.345] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\vysilacka.p3d
+[2026-08-30 15:20:31.347] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\blok.p3d
+[2026-08-30 15:20:31.357] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\karta.p3d
+[2026-08-30 15:20:31.359] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\gps.p3d
+[2026-08-30 15:20:37.942] [app-2618] [INFO] [CORE]    Screenshot test mode: waiting for mission to enter gameplay...
+[2026-08-30 15:20:38.053] [app-2618] [INFO] [CORE]    Mission smoke check: mission runtime entered (devtest.abel)
+[2026-08-30 15:20:38.054] [app-2618] [INFO] [CORE]    Mission smoke check: deferring exit for requested screenshot
+[2026-08-30 15:20:38.239] [app-2618] [INFO] [GRAPHICS]  ROAD_GPUPATH shape=0x4f49faef450 nv=15 buffer=1 tlAble=1 spec=0x100134 conform=0 origPos=0 first=1
+[2026-08-30 15:20:38.267] [app-2618] [WARN] [GRAPHICS]  GL[MEDIUM type=0x8250 id=131218]: Program/shader state performance warning: Vertex shader in program 40 is being recompiled based on GL state.
+[2026-08-30 15:20:38.268] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.268] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.291] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.291] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.302] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.302] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.311] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.312] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.321] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.321] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.345] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.346] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.370] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.371] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.391] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.391] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.413] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.413] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.435] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.435] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.458] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.458] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.480] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'medic' on data3d\mc vojakw2.p3d level 5: 15 faces [26404,26468,26212,26244,26500,26532,26564,26276,26308,26340,26372,26596,26628,26660,26436,], 2 sections [12,13,] (of 16 lod sections)
+[2026-08-30 15:20:38.480] [app-2618] [WARN] [GRAPHICS]  AnimationSection::Hide 'zasleh' on data3d\m16_proxy.p3d level 5: 16 faces [19624,19656,19688,19720,19752,19784,19816,19852,19888,19924,19960,19992,20024,20056,20088,20120,], 3 sections [5,6,7,] (of 8 lod sections)
+[2026-08-30 15:20:38.699] [app-2618] [WARN] [GRAPHICS]  GL[MEDIUM type=0x8250 id=131154]: Pixel-path performance warning: Pixel transfer is synchronized with 3D rendering.
+[2026-08-30 15:20:38.888] [app-2618] [INFO] [CORE]    Screenshot test: saved to C:\Users\mail\OneDrive\Documents\GitHub\CWR-CE-paavohuhtalafork-\.claude\worktrees\asset-obs\docs\roadmap\evidence\gl33-freeze\gl33-everon-day.png
+[2026-08-30 15:20:38.888] [app-2618] [INFO] [CORE]    AUTO-TEST SUCCESS
+[2026-08-30 15:20:38.899] [app-2618] [INFO] [CORE]    Shutdown: begin (exit code 0)
+[2026-08-30 15:20:38.899] [app-2618] [INFO] [CORE]    Shutdown: DDTerm
+[2026-08-30 15:20:38.906] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sunhalo.p3d
+[2026-08-30 15:20:38.906] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\sun.p3d
+[2026-08-30 15:20:38.907] [app-2618] [INFO] [GRAPHICS]  Shape loader: canonical ODOL adapter for data3d\moon.p3d
+[2026-08-30 15:20:38.980] [app-2618] [INFO] [AUDIO]   System shutdown
+[2026-08-30 15:20:38.994] [app-2618] [INFO] [GRAPHICS]  GL33: Destroying engine
+[2026-08-30 15:20:38.995] [app-2618] [INFO] [GRAPHICS]  GL33: ShutdownGL
+[2026-08-30 15:20:39.015] [app-2618] [INFO] [CORE]    Shutdown complete
