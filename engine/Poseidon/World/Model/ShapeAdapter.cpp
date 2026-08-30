@@ -627,7 +627,7 @@ void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Mode
 }
 
 LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
-                                      const AdapterBankTables* tables)
+                                      const AdapterBankTables* tables, bool proxiesInline)
 {
     // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
     // Accumulated across LODs, logged once per model when the total is worth reading.
@@ -1348,10 +1348,14 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_paths = model.pathsIdx;
         shape->_hitpoints = model.hitpointsIdx;
 
-        // Proxies: created inline on the legacy (no-tables) path only. With tables
-        // the conversion may be running on a worker, and proxy creation is bank
-        // work -- the caller runs CreateAdapterProxies on the main thread after.
-        if (!tables)
+        // Proxies MUST be created HERE, before the tail below reaches
+        // OptimizeShapes: the optimisation reorders/compacts vertices and
+        // selections, and a proxy created afterwards binds to the wrong
+        // skinning data (owner report 2026-08-30: soldiers' rifles floating
+        // beside them). `proxiesInline=false` is ONLY for the worker-side
+        // conversion, whose result is incomplete until the tail split lands
+        // -- which is why WGR_OBJECT_STREAM_ASYNC_ADAPT defaults OFF.
+        if (proxiesInline)
             CreateAdapterProxies(shape, model);
 
         // Oxygen creates sections before marking proxy faces hidden, so section hints

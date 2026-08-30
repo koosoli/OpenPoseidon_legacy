@@ -16,7 +16,7 @@
 
 namespace Poseidon { namespace Model { struct Model; namespace ShapeAdapter {
     struct AdapterBankTables;
-    class LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed, const AdapterBankTables* tables);
+    class LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed, const AdapterBankTables* tables, bool proxiesInline);
     void CreateAdapterProxies(class LODShapeWithShadow* shape, const Model& model);
 }}}
 namespace Poseidon
@@ -331,7 +331,7 @@ class Shape: public Poseidon::VertexTable
 {
 	friend class ::Object;
 	friend class LODShape;
-	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables);
+	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool proxiesInline);
 	friend void Poseidon::Model::ShapeAdapter::CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Model& model);
 	
  private:
@@ -737,7 +737,7 @@ class LODShape: public RefCountWithLinks
 {
 	friend class ::Object;
 	friend class LODShapeWithShadow;
-	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables);
+	friend class LODShapeWithShadow* Poseidon::Model::ShapeAdapter::convertToLODShape(const Poseidon::Model::Model& model, bool reversed, const Poseidon::Model::ShapeAdapter::AdapterBankTables* tables, bool proxiesInline);
 	friend void Poseidon::Model::ShapeAdapter::CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Model& model);
 
 	protected:

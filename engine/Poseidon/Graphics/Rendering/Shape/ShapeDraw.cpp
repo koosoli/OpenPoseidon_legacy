@@ -716,8 +716,6 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             Poseidon::Model::ShapeAdapter::AdapterBankTables tables;
             Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
             shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
-            // Bank work the tables-mode conversion defers; must precede optimize.
-            Poseidon::Model::ShapeAdapter::CreateAdapterProxies(shape, *model);
             if (timing)
                 timing->canonical = true;
         }

@@ -45,15 +45,18 @@ namespace ShapeAdapter
     // texture headers for non-ODOL models (the MLOD specials scan reads them).
     void BuildAdapterBankTables(const Model& model, AdapterBankTables& tables);
 
-    // With `tables`, the conversion performs NO bank calls (worker-safe except for
-    // proxy object creation, still done here). Without, it resolves the banks inline
-    // exactly as it always has.
+    // With `tables`, the conversion performs NO bank calls. Proxy creation stays
+    // INLINE by default (it must run before the tail's OptimizeShapes, which
+    // reorders skinning data) -- so a tables call is only worker-safe with
+    // `proxiesInline=false`, and such a shape is INCOMPLETE (no proxies, and the
+    // tail ran without them) until the tail split lands. That is why the async
+    // adapt path is opt-in.
     LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false,
-                                          const AdapterBankTables* tables = nullptr);
+                                          const AdapterBankTables* tables = nullptr, bool proxiesInline = true);
 
-    // MAIN THREAD ONLY (config probe, file table, recursive ShapeBank::New). The
-    // no-tables conversion runs this itself; a caller that passed tables MUST call
-    // it afterwards, before OptimizeOneShape.
+    // MAIN THREAD ONLY (config probe, file table, recursive ShapeBank::New).
+    // The conversion runs this itself at the correct point (before its tail's
+    // OptimizeShapes) unless proxiesInline=false was passed.
     void CreateAdapterProxies(LODShapeWithShadow* shape, const Model& model);
 
     // MAT-053 -- the bridged-vehicle pilot seat. A bridged A1/A2/A3 vehicle's crew

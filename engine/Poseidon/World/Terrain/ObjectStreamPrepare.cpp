@@ -187,7 +187,8 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
             LODShapeWithShadow* shape = nullptr;
             try
             {
-                shape = Model::ShapeAdapter::convertToLODShape(*job.model, false, job.tables.get());
+                shape = Model::ShapeAdapter::convertToLODShape(*job.model, false, job.tables.get(),
+                                                               /*proxiesInline=*/false);
             }
             catch (...)
             {
