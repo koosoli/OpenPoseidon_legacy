@@ -1058,6 +1058,17 @@ Likely target scenes include night-time towns, streetlights, vehicle lights and 
 overlapping explosions. It is not a prerequisite for `RenderSnapshot`, asset streaming
 or render/simulation overlap.
 
+**Measured 2026-08-30 (commit `92ebd1d8`): the gate stays closed.** The frame's light
+selection now publishes candidates/selected/cap to the Perf tab and the capture
+sidecar (`lights{}`), and `WGR_MAX_ACTIVE_LIGHTS` is the cost A/B (0 removes every
+local light). A full night flight across stock Everon read a constant
+**12 candidates / 12 selected** — the selection walks ALL scene lights, so that is
+the island-wide total of active local lights — and a Reforger-Everon night scene read
+0 with a GPU frame identical to the lights-off arm (24.49 vs 24.51 ms). Twelve lights
+in a flat loop are no workload for Forward+; the gate re-opens if content with
+hundreds of active lights appears, and any capture now reports the number that would
+show it.
+
 ### B.2 Expand indirect drawing
 
 Indirect drawing, GPU culling and GPU LOD selection are already substantially
