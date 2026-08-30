@@ -1112,9 +1112,17 @@ impl Renderer {
         // skinned too) and guarded by tests; the bake again feeds BOTH the draw passes
         // (identity-world routing) and the temporal velocity pass, and defaults on
         // with the temporal path. WGR_SKIN_BAKE pins either way.
+        // 2026-08-31: DEFAULT OFF. With the bake on, skinned characters do not draw
+        // AT ALL on the DLSS route (owner: invisible soldiers, rifles floating at
+        // the proxy bind position, campaign mission 1) while their rigid weapon
+        // proxies still render -- reproduced deterministically on 00Training.Abel,
+        // WGR_SKIN_BAKE=0 restores them with everything else unchanged. The stride
+        // fix below evidently did not cover this corpus. Until the bake is proven on
+        // OFP-generation skinned models it is opt-in (WGR_SKIN_BAKE=1); the cost of
+        // off is per-bone motion vectors for characters under the temporal path.
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(temporal_will_run);
+            .unwrap_or(false);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance
