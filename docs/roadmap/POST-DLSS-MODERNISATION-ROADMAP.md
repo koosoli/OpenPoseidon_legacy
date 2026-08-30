@@ -550,6 +550,21 @@ world state.
 
 ## Phase 6 — Asynchronous asset system
 
+**Status 2026-08-30 — the measured admission target moved.** The per-object
+main-thread admission cost this phase exists to remove was re-measured per bucket on
+the 30 m/s Everon traverse (734 cold models, `Object stream cold model:` rows). The
+dominant cost was NOT the adapter: 61% of the total (12.6 s of 20.8 s) was
+`wgr_model_register`, and inside it the load-time sky-visibility bake's *synchronous
+GPU readback* (`device.poll(wait_indefinitely)` per model). Two commits removed it:
+the bake is now submitted without waiting and collected 1–2 frames later
+(`84c3ee8a`), and models under 4 m³ bounding volume — bushes, rocks, with no
+interior a 16k-voxel volume can describe — skip the bake entirely (`32e07820`,
+`WGR_SKY_BAKE_MIN_VOLUME_M3`). Cold admission total: 20.8 s → 7.9 s (−62%), avg
+28.4 → 10.8 ms/model, worst ffi stall 173 → 30 ms. Remaining levers by measured
+size: ShapeAdapter on the main thread (4.0 s — blocked on GlobLoadTexture /
+GTexMaterialBank / NewProxyObject thread-affinity), mesh+section residual (~2.2 s),
+and a disk cache for bake volumes (§3d).
+
 Do not copy the other fork's polling filesystem worker pool directly. Build a staged
 pipeline around a dedicated I/O service, the existing enkiTS compute workers and a
 budgeted renderer upload queue:
