@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
+#include <Poseidon/Dev/Diag/ScopedTimer.hpp>
 #include <Poseidon/World/Model/Model.hpp>
 
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
@@ -421,6 +422,10 @@ static void SynthesizeBoxGeometryMass(LODShapeWithShadow* shape, Shape* geom, Au
 // Both paths are identical here — always cast vertex.flags to ClipFlags directly.
 LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed)
 {
+    // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
+    // Accumulated across LODs, logged once per model when the total is worth reading.
+    const auto adaptT0 = ::Poseidon::Dev::Perf::Now();
+    double tanMs = 0.0, texMs = 0.0, matMs = 0.0, proxyMs = 0.0, vfillMs = 0.0, faceMs = 0.0, areaMs = 0.0, tailMs = 0.0;
     auto shape = new LODShapeWithShadow();
 
     // Must match the lowered name used in ShapeBank::New
@@ -456,7 +461,9 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         int quadCount = static_cast<int>(mesh.quads.size());
         bool isODOL = (model.sourceFormat == "ODOL");
         std::vector<std::array<float, 3>> generatedBinormals;
+        const auto tanT0 = ::Poseidon::Dev::Perf::Now();
         const std::vector<std::array<float, 3>> generatedTangents = buildTangents(mesh, generatedBinormals);
+        tanMs += ::Poseidon::Dev::Perf::ElapsedMs(tanT0);
         bool hasGeneratedTangentFrame = false;
         for (size_t vertexIndex = 0; vertexIndex < generatedTangents.size(); ++vertexIndex)
         {
@@ -513,6 +520,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             anyUv1 = mesh.vertices[v].uv1.u != 0.0f || mesh.vertices[v].uv1.v != 0.0f;
         if (anyUv1)
             shape->_lods[i]->ResizeUV1(vertexCount);
+        const auto vfillT0 = ::Poseidon::Dev::Perf::Now();
         for (int v = 0; v < vertexCount; ++v)
         {
             const Vertex& vertex = mesh.vertices[v];
@@ -535,6 +543,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             }
             shape->_lods[i]->SetClip(v, c);
         }
+        vfillMs += ::Poseidon::Dev::Perf::ElapsedMs(vfillT0);
         shape->_lods[i]->SetHasTangentFrame(hasGeneratedTangentFrame);
 
         if (isODOL && !mesh.frames.empty())
@@ -579,6 +588,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_lods[i]->_areaOTex.Resize(nMaterials);
         std::vector<Texture*> materialIndexToTexture(mesh.materials.size(), nullptr);
 
+        const auto texT0 = ::Poseidon::Dev::Perf::Now();
         for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
         {
             const Material& mat = mesh.materials[matIdx];
@@ -600,7 +610,9 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 materialIndexToTexture[matIdx] = texture;
             }
         }
+        texMs += ::Poseidon::Dev::Perf::ElapsedMs(texT0);
 
+        const auto faceT0 = ::Poseidon::Dev::Perf::Now();
         struct FaceRef
         {
             bool isQuad;
@@ -882,16 +894,19 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 // base texture. Prefer that authored material over the legacy
                 // CfgTextureToMaterial lookup, which cannot recover the RVMAT
                 // once the common model IR has preserved it separately.
+                const auto matT0 = ::Poseidon::Dev::Perf::Now();
                 if (sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size() &&
                     !mesh.materials[sec.materialIndex].materialPath.empty())
                     shapeSections[s].surfMat = GTexMaterialBank.New(mesh.materials[sec.materialIndex].materialPath.c_str());
                 else
                     shapeSections[s].surfMat = GTexMaterialBank.TextureToMaterial(tex);
+                matMs += ::Poseidon::Dev::Perf::ElapsedMs(matT0);
                 for (int f = 0; f < facesPerSection[s]; ++f)
                     faceStream.Next(nativePos);
                 shapeSections[s].end = nativePos;
             }
             faceStream.SetSections(shapeSections.data(), nSections);
+            faceMs += ::Poseidon::Dev::Perf::ElapsedMs(faceT0) - 0.0;
             // Pair the explicit WGPU material trace with its model/LOD origin.
             // Shape itself carries no source path at draw time, so this is the
             // only reliable way to distinguish a visible LOD from its similarly
@@ -993,9 +1008,12 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
             }
         }
         shape->_lods[i]->_faceNormalsValid = true;
+        const auto areaT0 = ::Poseidon::Dev::Perf::Now();
         shape->_lods[i]->RecalculateAreas();
         shape->_lods[i]->StoreOriginalMinMax();
+        areaMs += ::Poseidon::Dev::Perf::ElapsedMs(areaT0);
     }
+    const auto tailT0 = ::Poseidon::Dev::Perf::Now();
 
     if (model.sourceFormat == "ODOL")
     {
@@ -1182,6 +1200,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     }
 
                     Ref<ProxyObject> po = new ProxyObject;
+                    const auto proxyT0 = ::Poseidon::Dev::Perf::Now();
                     if (GReplaceProxies)
                     {
                         RString proxyType = RString("Proxy") + modelName;
@@ -1192,6 +1211,7 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     {
                         po->obj = NewProxyObject(modelName);
                     }
+                    proxyMs += ::Poseidon::Dev::Perf::ElapsedMs(proxyT0);
                     if (!po->obj)
                         continue;
 
@@ -1471,6 +1491,17 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         LogCollisionStats(shape, model);
     }
 
+    // One row per model that cost real time; `other` is geometry/face conversion — the
+    // worker-safe part. tex/mat/proxy are the main-thread-affine banks.
+    tailMs = ::Poseidon::Dev::Perf::ElapsedMs(tailT0);
+    const double adaptTotal = ::Poseidon::Dev::Perf::ElapsedMs(adaptT0);
+    if (adaptTotal >= 5.0)
+    {
+        LOG_INFO(Graphics,
+                 "ShapeAdapter split: {} total={:.1f} [tan={:.1f} vfill={:.1f} face={:.1f} tex={:.1f} mat={:.1f} proxy={:.1f} area={:.1f} tail={:.1f} other={:.1f}]",
+                 model.sourcePath.c_str(), adaptTotal, tanMs, vfillMs, faceMs, texMs, matMs, proxyMs, areaMs, tailMs,
+                 adaptTotal - tanMs - vfillMs - faceMs - texMs - matMs - proxyMs - areaMs - tailMs);
+    }
     return shape;
 }
 

@@ -8,6 +8,7 @@
 
 #include <Poseidon/Foundation/Containers/CompactBuf.hpp>
 #include <Poseidon/Foundation/Containers/HashMap.hpp>
+#include <mutex>
 
 namespace Poseidon::Foundation
 {
@@ -214,6 +215,14 @@ class RStringBankT
 
     RStringBankType _bank;
 
+    // Guards _bank. Interning used to be main-thread-only; the streamed-model
+    // preparer is about to run ShapeAdapter conversion on workers, and every
+    // RStringB they create goes through this bank. Individual Get/Add locking
+    // would not be enough: the returned reference points INTO the map, which a
+    // concurrent Add may rehash - so the public operations copy the result out
+    // under the lock (GetOrAdd) or re-check liveness under it (Unregister).
+    mutable std::mutex _mtx;
+
     // Items are reference-counted; an item dropping to a single reference is unused
     // and gets removed on Compact().
 
@@ -226,8 +235,10 @@ class RStringBankT
     static bool NotNull(const RStringType& value) { return RStringBankType::NotNull(value); }
     static RStringType& Null() { return RStringBankType::Null(); }
 
-    const RStringType& Get(const char* t);
-    const RStringType& Add(const char* t);
+    // Look up or intern `t` in one critical section and return BY VALUE (the
+    // copy shares the atomically refcounted String, so it stays valid after the
+    // lock drops even if a concurrent Add rehashes the map).
+    RStringType GetOrAdd(const char* t);
 
     void Unregister(const char* str);
 
@@ -318,17 +329,9 @@ RStringBT<RStringType, GetBank>::RStringBT(const char* str)
     {
         return;
     }
-    const RStringType& rstr = GetBank().Get(str);
-    if (GetBank().NotNull(rstr))
-    {
-        RStringType::operator=(rstr);
-    }
-    else
-    {
-        const RStringType& rstr = GetBank().Add(str);
-        PoseidonAssert(GetBank().NotNull(rstr));
-        RStringType::operator=(rstr);
-    }
+    RStringType interned = GetBank().GetOrAdd(str);
+    PoseidonAssert(GetBank().NotNull(interned));
+    RStringType::operator=(interned);
 }
 
 template <class RStringType, RStringBankT<RStringType>& (*GetBank)()>
@@ -339,17 +342,9 @@ RStringBT<RStringType, GetBank>::RStringBT(RString str)
     {
         return;
     }
-    const RStringType& rstr = GetBank().Get(str);
-    if (GetBank().NotNull(rstr))
-    {
-        RStringType::operator=(rstr);
-    }
-    else
-    {
-        const RStringType& rstr = GetBank().Add(str);
-        PoseidonAssert(GetBank().NotNull(rstr));
-        RStringType::operator=(rstr);
-    }
+    RStringType interned = GetBank().GetOrAdd(str);
+    PoseidonAssert(GetBank().NotNull(interned));
+    RStringType::operator=(interned);
 }
 
 template <class RStringType, RStringBankT<RStringType>& (*GetBank)()>
@@ -358,17 +353,9 @@ RStringBT<RStringType, GetBank>::RStringBT(RStringType str)
     // search for string
     if (!str)
         return;
-    const RStringType& rstr = GetBank().Get(str);
-    if (RStringBankType::NotNull(rstr))
-    {
-        RStringType::operator=(rstr);
-    }
-    else
-    {
-        const RStringType& rstr = GetBank().Add(str);
-        PoseidonAssert(RStringBankType::NotNull(rstr));
-        RStringType::operator=(rstr);
-    }
+    RStringType interned = GetBank().GetOrAdd(str);
+    PoseidonAssert(RStringBankType::NotNull(interned));
+    RStringType::operator=(interned);
 }
 
 template <class RStringType, RStringBankT<RStringType>& (*GetBank)()>
@@ -419,15 +406,16 @@ RStringBankT<RStringType>::~RStringBankT()
 template <class RStringType>
 void RStringBankT<RStringType>::Clear()
 {
+    std::lock_guard<std::mutex> lock(_mtx);
     LOG_DEBUG(Core, "RStringBank clear");
     _bank.ForEach(CheckRefsWeak);
     _bank.Clear();
 }
 
 template <class RStringType>
-const RStringType& RStringBankT<RStringType>::Add(const char* t)
+RStringType RStringBankT<RStringType>::GetOrAdd(const char* t)
 {
-    // we are sure string is not in bank
+    std::lock_guard<std::mutex> lock(_mtx);
     const RStringType& str = _bank[t];
     if (NotNull(str))
     {
@@ -453,6 +441,7 @@ static void DeleteUnused(RStringType& str, RStringBankType* bank, void* context)
 template <class RStringType>
 void RStringBankT<RStringType>::Compact()
 {
+    std::lock_guard<std::mutex> lock(_mtx);
     _bank.ForEach(DeleteUnused);
 }
 
@@ -484,13 +473,17 @@ inline RString operator+(const RString& a, const RString& b)
 #endif
 
 template <class RStringType>
-inline const RStringType& RStringBankT<RStringType>::Get(const char* t)
-{
-    return _bank[t];
-}
-template <class RStringType>
 inline void RStringBankT<RStringType>::Unregister(const char* str)
 {
+    std::lock_guard<std::mutex> lock(_mtx);
+    // The caller probed the refcount OUTSIDE the lock (RStringBT::Free sees
+    // bank + self == 2). Another thread may have interned the same string in
+    // between; re-check liveness here so a live entry is never removed.
+    const RStringType& live = _bank[str];
+    if (NotNull(live) && live.GetRefCount() > 2)
+    {
+        return;
+    }
     _bank.Remove(str);
 }
 
