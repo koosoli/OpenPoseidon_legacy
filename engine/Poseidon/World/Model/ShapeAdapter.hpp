@@ -1,6 +1,15 @@
 #pragma once
 
 #include <string>
+#include <vector>
+
+#include <Poseidon/Foundation/Types/Pointers.hpp>
+
+namespace Poseidon
+{
+class Texture;
+class TexMaterial;
+} // namespace Poseidon
 
 namespace Poseidon { class LODShapeWithShadow; }
 using Poseidon::LODShapeWithShadow;
@@ -19,7 +28,28 @@ namespace ShapeAdapter
     };
 
     ProxyModelName normalizeProxyModelName(const std::string& selectionName);
-    LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false);
+
+    // Everything convertToLODShape needs from the MAIN-THREAD-ONLY banks, resolved
+    // ahead of the conversion. This is the Phase-6 split: resolving these tables is
+    // <100 ms across a whole traverse (measured), while the conversion they feed is
+    // 3+ s -- so the tables are built on the main thread and the conversion can move
+    // to a worker. Indices are parallel to the IR: textures[lod][materialIndex],
+    // surfMats[lod][sectionIndex].
+    struct AdapterBankTables
+    {
+        std::vector<std::vector<Ref<Poseidon::Texture>>> textures;
+        std::vector<std::vector<Ref<Poseidon::TexMaterial>>> surfMats;
+    };
+
+    // MAIN THREAD ONLY: touches the global texture bank and material bank, and loads
+    // texture headers for non-ODOL models (the MLOD specials scan reads them).
+    void BuildAdapterBankTables(const Model& model, AdapterBankTables& tables);
+
+    // With `tables`, the conversion performs NO bank calls (worker-safe except for
+    // proxy object creation, still done here). Without, it resolves the banks inline
+    // exactly as it always has.
+    LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false,
+                                          const AdapterBankTables* tables = nullptr);
 
     // MAT-053 -- the bridged-vehicle pilot seat. A bridged A1/A2/A3 vehicle's crew
     // proxies point at Arma-era placeholder models that exist neither as files nor

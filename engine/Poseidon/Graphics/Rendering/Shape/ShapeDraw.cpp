@@ -11,6 +11,8 @@
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/World/Model/ModelCache.hpp>
 #include <Poseidon/World/Model/ShapeAdapter.hpp>
+// AdapterBankTables holds Ref<TexMaterial>; its destruction here needs the full type.
+#include <Poseidon/Graphics/Rendering/Lighting/Material.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/World/Simulation/Animation/Animation.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
@@ -690,7 +692,12 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
             // ShapeAdapter sets shape name from model.sourcePath — must use
             // the original backslash path to match ShapeBank lookup key
             model->sourcePath = lowName;
-            shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed);
+            // The banks resolve first, into tables the conversion consumes -- the
+            // same call order the worker-side conversion will use, so this path
+            // and that one cannot drift apart.
+            Poseidon::Model::ShapeAdapter::AdapterBankTables tables;
+            Poseidon::Model::ShapeAdapter::BuildAdapterBankTables(*model, tables);
+            shape = Poseidon::Model::ShapeAdapter::convertToLODShape(*model, reversed, &tables);
             if (timing)
                 timing->canonical = true;
         }

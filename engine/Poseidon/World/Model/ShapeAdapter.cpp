@@ -420,7 +420,53 @@ static void SynthesizeBoxGeometryMass(LODShapeWithShadow* shape, Shape* geom, Au
 //   MLOD: MLODLoader converts raw POINT_* flags (data3d.h) to ClipFlags, encodes
 //         materials into ClipUserMask, then stores in vertex.flags.
 // Both paths are identical here — always cast vertex.flags to ClipFlags directly.
-LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed)
+void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTables& tables)
+{
+    const bool isODOL = (model.sourceFormat == "ODOL");
+    const int lodCount = static_cast<int>(model.lodLevels.size());
+    tables.textures.resize(lodCount);
+    tables.surfMats.resize(lodCount);
+    for (int i = 0; i < lodCount; ++i)
+    {
+        const Mesh& mesh = model.lodLevels[i].mesh;
+        auto& texRow = tables.textures[i];
+        texRow.resize(mesh.materials.size());
+        for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
+        {
+            const Material& mat = mesh.materials[matIdx];
+            if (mat.texturePath.empty())
+                continue;
+            std::string texPath = mat.texturePath;
+            for (char& c : texPath)
+            {
+                if (c >= 'A' && c <= 'Z')
+                    c = c - 'A' + 'a';
+            }
+            texRow[matIdx] = GlobLoadTexture(texPath.c_str());
+            // The MLOD specials scans read IsAlpha/IsTransparent/IsAnimated, which
+            // need the headers; load them here so the conversion never has to.
+            if (!isODOL && texRow[matIdx])
+                texRow[matIdx]->LoadHeaders();
+        }
+        auto& matRow = tables.surfMats[i];
+        matRow.resize(mesh.sections.size());
+        for (size_t s = 0; s < mesh.sections.size(); ++s)
+        {
+            const auto& sec = mesh.sections[s];
+            Texture* tex = nullptr;
+            if (sec.materialIndex != UINT32_MAX && sec.materialIndex < texRow.size())
+                tex = texRow[sec.materialIndex];
+            if (sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size() &&
+                !mesh.materials[sec.materialIndex].materialPath.empty())
+                matRow[s] = GTexMaterialBank.New(mesh.materials[sec.materialIndex].materialPath.c_str());
+            else
+                matRow[s] = GTexMaterialBank.TextureToMaterial(tex);
+        }
+    }
+}
+
+LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
+                                      const AdapterBankTables* tables)
 {
     // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
     // Accumulated across LODs, logged once per model when the total is worth reading.
@@ -589,25 +635,40 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         std::vector<Texture*> materialIndexToTexture(mesh.materials.size(), nullptr);
 
         const auto texT0 = ::Poseidon::Dev::Perf::Now();
-        for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
+        if (tables)
         {
-            const Material& mat = mesh.materials[matIdx];
-
-            if (mat.texturePath.empty())
+            const auto& texRow = static_cast<size_t>(i) < tables->textures.size()
+                                     ? tables->textures[i]
+                                     : std::vector<Ref<Texture>>{};
+            for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
             {
-                shape->_lods[i]->_textures[static_cast<int>(matIdx)] = nullptr;
-            }
-            else
-            {
-                std::string texPath = mat.texturePath;
-                for (char& c : texPath)
-                {
-                    if (c >= 'A' && c <= 'Z')
-                        c = c - 'A' + 'a';
-                }
-                Ref<Texture> texture = GlobLoadTexture(texPath.c_str());
+                Texture* texture = matIdx < texRow.size() ? texRow[matIdx].GetRef() : nullptr;
                 shape->_lods[i]->_textures[static_cast<int>(matIdx)] = texture;
                 materialIndexToTexture[matIdx] = texture;
+            }
+        }
+        else
+        {
+            for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
+            {
+                const Material& mat = mesh.materials[matIdx];
+
+                if (mat.texturePath.empty())
+                {
+                    shape->_lods[i]->_textures[static_cast<int>(matIdx)] = nullptr;
+                }
+                else
+                {
+                    std::string texPath = mat.texturePath;
+                    for (char& c : texPath)
+                    {
+                        if (c >= 'A' && c <= 'Z')
+                            c = c - 'A' + 'a';
+                    }
+                    Ref<Texture> texture = GlobLoadTexture(texPath.c_str());
+                    shape->_lods[i]->_textures[static_cast<int>(matIdx)] = texture;
+                    materialIndexToTexture[matIdx] = texture;
+                }
             }
         }
         texMs += ::Poseidon::Dev::Perf::ElapsedMs(texT0);
@@ -730,7 +791,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 Texture* tex = poly.GetTexture();
                 if (tex)
                 {
-                    tex->LoadHeaders();
+                    if (!tables)
+                        tex->LoadHeaders(); // with tables the headers are pre-loaded
                     int spec = poly.Special();
                     if (tex->IsAlpha())
                         spec |= IsAlpha | IsAlphaOrdered;
@@ -895,8 +957,14 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                 // CfgTextureToMaterial lookup, which cannot recover the RVMAT
                 // once the common model IR has preserved it separately.
                 const auto matT0 = ::Poseidon::Dev::Perf::Now();
-                if (sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size() &&
-                    !mesh.materials[sec.materialIndex].materialPath.empty())
+                if (tables)
+                {
+                    if (static_cast<size_t>(i) < tables->surfMats.size() &&
+                        static_cast<size_t>(s) < tables->surfMats[i].size())
+                        shapeSections[s].surfMat = tables->surfMats[i][s];
+                }
+                else if (sec.materialIndex != UINT32_MAX && sec.materialIndex < mesh.materials.size() &&
+                         !mesh.materials[sec.materialIndex].materialPath.empty())
                     shapeSections[s].surfMat = GTexMaterialBank.New(mesh.materials[sec.materialIndex].materialPath.c_str());
                 else
                     shapeSections[s].surfMat = GTexMaterialBank.TextureToMaterial(tex);
@@ -980,7 +1048,8 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
                     Texture* tex = lod->GetSection(s).properties.GetTexture();
                     if (tex)
                     {
-                        tex->LoadHeaders();
+                        if (!tables)
+                            tex->LoadHeaders(); // with tables the headers are pre-loaded
                         if (tex->IsAlpha())
                             spec |= IsAlpha | IsAlphaOrdered;
                         if (tex->IsTransparent())
