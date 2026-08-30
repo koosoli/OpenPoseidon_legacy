@@ -1154,20 +1154,37 @@ void World::PerformSound(Entity* inside, float deltaT)
     // canopy into a room reverb. Room size from the clearance to the nearest boundary:
     // a stairwell and a barn hall should not share a decay time. One query per frame at
     // the camera; the same probe the rain occlusion path already leans on.
-    int listenerRoom = -1;
-    if (GSmokeWorldQuery().IndoorRoomAt(pos, listenerRoom))
+    // Rate-limited to 4 Hz: IndoorRoomAt walks nearby building interiors, and running
+    // it every frame was measurable on the bench (part of a reproducible -0.8 fps on
+    // the abel arm). A listener does not cross a doorway in a quarter second the ear
+    // can resolve, and the EFX blend smooths the transition anyway.
+    static float sRoomNextQuery = -1.0f;
+    static bool sRoomInside = false;
+    static float sRoomSize = 4.0f;
+    const float now = Glob.time.toFloat();
+    if (now >= sRoomNextQuery || now < sRoomNextQuery - 1.0f)
+    {
+        sRoomNextQuery = now + 0.25f;
+        int listenerRoom = -1;
+        sRoomInside = GSmokeWorldQuery().IndoorRoomAt(pos, listenerRoom);
+        if (sRoomInside)
+        {
+            // The env size is in the EAX preset's own scale, NOT metres: ApplyEFXPreset
+            // multiplies the preset decay by size/defaultSize, and the "room" preset's
+            // default is 1.9. The first version fed clearance*2 (up to 30) straight in,
+            // which scaled a 0.4 s room decay toward the 20 s ceiling -- a cathedral in
+            // every barn, and exactly the owner's "unrealistically much reverb" report.
+            // Map clearance to a modest band instead: a 1 m stairwell ~2.0, a 10 m hall
+            // ~6.5, capped at 8 (decay x4.2) so no interior ever exceeds a church.
+            const float clearance = GSmokeWorldQuery().IndoorClearanceAt(pos, listenerRoom, 15.0f);
+            sRoomSize = std::clamp(1.5f + clearance * 0.5f, 1.9f, 8.0f);
+        }
+    }
+    if (sRoomInside)
     {
         SoundEnvironment env;
         env.type = SERoom;
-        // The env size is in the EAX preset's own scale, NOT metres: ApplyEFXPreset
-        // multiplies the preset decay by size/defaultSize, and the "room" preset's
-        // default is 1.9. The first version fed clearance*2 (up to 30) straight in,
-        // which scaled a 0.4 s room decay toward the 20 s ceiling -- a cathedral in
-        // every barn, and exactly the owner's "unrealistically much reverb" report.
-        // Map clearance to a modest band instead: a 1 m stairwell ~2.0, a 10 m hall
-        // ~6.5, capped at 8 (decay x4.2) so no interior ever exceeds a church.
-        const float clearance = GSmokeWorldQuery().IndoorClearanceAt(pos, listenerRoom, 15.0f);
-        env.size = std::clamp(1.5f + clearance * 0.5f, 1.9f, 8.0f);
+        env.size = sRoomSize;
         env.density = 0.5;
         GSoundsys->SetEnvironment(env);
 #if SHOW_ENV
