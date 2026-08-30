@@ -4641,8 +4641,18 @@ void DrawTemporalTab()
     Dev::PanelTooltip("Needs the NGX route (NVIDIA, detected at launch). Off/unavailable -> FSR 1 takes over.");
     changed |= Dev::Checkbox("FSR 1 (vendor-neutral upscaler)", &t.fsrOn);
     Dev::PanelTooltip("AMD FidelityFX EASU+RCAS (MIT-licensed, runs on any GPU). Active when DLSS is off.\nBoth off = soft bilinear.");
+    // The sharpness knob is an FSR-only input; greyed while another backend runs so
+    // nobody wiggles it under DLSS and concludes it is broken (owner did exactly that).
+    const bool fsrActive = info.activeUpscaler == 2;
+    if (!fsrActive)
+        ImGui::BeginDisabled();
     changed |= Dev::SliderFloat("FSR sharpness (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
-    Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest.");
+    if (!fsrActive)
+    {
+        ImGui::EndDisabled();
+        Dev::PanelHelp("  (inactive - FSR 1 is not the current upscaler)");
+    }
+    Dev::PanelTooltip("RCAS sharpening in stops: 0 = sharpest, 2 = mildest. Only affects FSR 1.");
     changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
     Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
     if (ImGui::Button("Native (everything off)"))
