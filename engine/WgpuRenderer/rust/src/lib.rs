@@ -3038,6 +3038,11 @@ impl Renderer {
         // object-velocity subset at tonemap time (and next frame's previous worlds).
         self.temporal.ingest_draws(draws3d);
         self.dlss_active_frame = false;
+        // The "active upscaler" readout: default to native every frame; the upscale
+        // chain overwrites it when it actually runs. Without this the panel kept
+        // showing the LAST backend after switching to native (owner report - no
+        // feedback that "everything off" took effect).
+        self.last_upscaler = 0;
         // REN-TEMP-001I: (object, mesh) -> baked base_vertex — the cross-frame identity
         // palette slots cannot provide. prepare_skin_bake already ran above.
         if self.temporal.enabled {

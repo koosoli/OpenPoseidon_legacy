@@ -4649,10 +4649,23 @@ void DrawTemporalTab()
     {
         t.temporalOn = false;
         t.dlssOn = false;
+        t.fsrOn = false;
         t.renderScalePct = 100;
         changed = true;
     }
-    Dev::PanelTooltip("One click: temporal + DLSS off, scale 100%% - the untouched native pipeline.");
+    Dev::PanelTooltip("Temporal + DLSS + FSR off, scale 100%% - the untouched native pipeline.\n"
+                      "Applies INSTANTLY, no restart. MSAA is classic anti-aliasing, not upscaling,\n"
+                      "and stays as set above. Watch the \"active upscaler\" line flip to native.");
+    Dev::PanelSameLine();
+    if (ImGui::Button("Auto defaults"))
+    {
+        // Fresh shipped defaults: DLSS-if-supported (else FSR), Quality scale, all
+        // the owner-validated tuning values.
+        t = Engine::TemporalSettings{};
+        changed = true;
+    }
+    Dev::PanelTooltip("Back to the shipped automatic setup: DLSS on (when the route is up, else FSR 1),\n"
+                      "render scale 67%%, default sharpness/bias. Applies instantly.");
 
     {
         const int active = info.msaaSamples <= 1 ? 0 : info.msaaSamples;
