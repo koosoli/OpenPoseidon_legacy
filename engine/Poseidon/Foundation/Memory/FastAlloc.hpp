@@ -10,7 +10,6 @@
 #include <Poseidon/Foundation/Containers/CacheList.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
 #include <cstdint>
-#include <mutex>
 
 
 namespace Poseidon::Foundation
@@ -123,14 +122,6 @@ class FastAlloc
 
     virtual void FreeChunks();
 
-    // Guards the chunk lists and per-chunk free links. Fast-allocated classes were
-    // main-thread-only until the streamed-model preparer started converting shapes
-    // on workers (Phase 6); the pools are per CLASS, so the lock is only ever
-    // contended between threads allocating the same class, and uncontended
-    // otherwise. Recursion note: Grow/ChunkRemove/FreeChunks allocate/free CHUNKS
-    // through the parent manager (plain operator new/delete), not through this
-    // allocator, so holding the lock across them cannot re-enter it.
-    std::mutex _mtx;
     CLList<Chunk> chunksFree; // some Link in chunk is free
     CLList<Chunk> chunksBusy; // all Links busy
     const char* _name;        // for debugging purposes
