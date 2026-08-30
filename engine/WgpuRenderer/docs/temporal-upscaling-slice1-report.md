@@ -307,6 +307,25 @@ Balanced on this box. (3) DLAA costs 6–10 % vs native for the best image of th
 (4) Every capture of every arm was eyeballed clean; this same table photographed the
 skin-bake regression before the rerun, which is why the PNG review is not optional.
 
+## 2026-08-30 endgame: Graphics tab, hardware gate, skinned MVs live (728f4035)
+
+- **Tester fallback fixed**: the NGX route now asks the driver (GetFeatureRequirements)
+  whether DLSS is really supported BEFORE the defaults flip on — AMD/Intel boxes got the
+  generic Vulkan extensions and booted into a jittering 67 % bilinear. A runtime death
+  of the backend also rolls its auto-defaults back. Fallback = untouched native, always.
+- **Dev panel "Graphics"** (renamed from Temporal): one-click native, scale to 200 %
+  (SSAA; DLSS skips above 100 %), MSAA Off/2x/4x/8x (next launch), "Als Standard
+  speichern" → graphics.cfg (dlssMode/msaa/scale). The Options page's AA row works for
+  the first time (pre-engine env seed; SetMsaaSamples/SetRenderScale were no-ops).
+- **Skin-bake shatter root-caused enough to ship**: kill-door probes proved the shards
+  are the PALETTE draws under bake-as-draw-source routing (a rest-pose passthrough bake
+  still shattered → the draw side reads something other than what the bake writes), and
+  the visible weapon is CPU-skinned and never needed the bake. Draws keep VS skinning;
+  the bake now feeds ONLY the velocity pass, keyed (palette_slot, mesh); default-on with
+  temporal. Boot log proves the path: "skinned velocity live: 2 skinned draw(s)".
+  The dead draw-side read remains a filed follow-up (bake-as-draw-source is disconnected,
+  not deleted).
+
 ## Definition of Done — reconciliation
 
 | Plan item | State |
