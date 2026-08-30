@@ -6210,28 +6210,22 @@ void EngineWgpu::SetRenderScale(float scale)
 
 uint32_t EngineWgpu::CurrentDrawObjectId()
 {
+    // ID-1 (render-snapshot design §4): the identity lives ON the Object now -- one
+    // field read instead of the unordered_map probe this function used to be, and a
+    // recycled Object* can no longer inherit a dead object's motion history, because
+    // the id dies with the object rather than with an erase call. The draw-object hint
+    // is always the Object the scene's DrawObjectGuard bracketed (SceneDraw.cpp).
+    //
+    // The wire lane in WgrDraw3D.misc is 16 bits with 0 reserved; map the 32-bit id
+    // onto 1..65535. Two LIVE objects 65535 ids apart can alias a history slot -- the
+    // same wrap window the old allocator had, now bounded by object-creation volume
+    // instead of map churn, and removed for good only when the ABI grows a wider lane.
     const void* obj = GetDrawObject();
     if (!obj)
     {
         return 0;
     }
-    if (obj == _lastDrawObjectPtr)
-    {
-        return _lastDrawObjectId;
-    }
-    auto [it, inserted] = _drawObjectIds.try_emplace(obj, 0u);
-    if (inserted)
-    {
-        uint32_t id = _nextDrawObjectId++ & 0xFFFFu;
-        if (id == 0)
-        {
-            id = _nextDrawObjectId++ & 0xFFFFu;
-        }
-        it->second = id;
-    }
-    _lastDrawObjectPtr = obj;
-    _lastDrawObjectId = it->second;
-    return it->second;
+    return (static_cast<const Object*>(obj)->RenderId() % 0xFFFFu) + 1u;
 }
 
 void EngineWgpu::SceneObjectRemoved(Object* obj)
@@ -6240,14 +6234,8 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
     {
         return;
     }
-    // REN-TEMP-001H: drop the draw-object identity with the object, so a recycled
-    // address gets a FRESH id instead of inheriting the dead object's motion history.
-    _drawObjectIds.erase(obj);
-    if (_lastDrawObjectPtr == obj)
-    {
-        _lastDrawObjectPtr = nullptr;
-        _lastDrawObjectId = 0;
-    }
+    // (The draw-object identity used to be erased here; since ID-1 it lives on the
+    // Object itself and dies with it -- nothing to clean up.)
     RemoveGpuProxies(obj); // §12d: drop the object's furniture child instances (no-op if none)
     auto it = _gpuInstances.find(obj);
     if (it == _gpuInstances.end())

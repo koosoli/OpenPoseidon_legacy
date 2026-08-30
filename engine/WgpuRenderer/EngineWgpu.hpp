@@ -657,18 +657,12 @@ class EngineWgpu : public EngineDummy
     };
     // Objects handed to the GPU path -> their model + retained instance slot.
     std::unordered_map<const Object*, GpuInstance> _gpuInstances;
-    // REN-TEMP-001H: draw-object identity for motion vectors. The scene draw loop
-    // brackets each object via Engine::SetDrawObject; DrawSectionTL maps that pointer to
-    // a stable 16-bit id (bits 16-31 of WgrDraw3D::misc; 0 = none). Entries are erased
-    // by SceneObjectRemoved, which also protects against address recycling for scene
-    // objects; a recycled DYNAMIC entity address inside the id's lifetime would
-    // mis-attribute one frame of motion, which the velocity pass's depth test bounds.
+    // REN-TEMP-001H / ID-1: draw-object identity for motion vectors. The scene draw
+    // loop brackets each object via Engine::SetDrawObject; the identity itself lives ON
+    // the Object (Object::RenderId, render-snapshot design §4) and is folded to the
+    // 16-bit wire lane (bits 16-31 of WgrDraw3D::misc; 0 = none) per draw.
     TemporalSettings _temporalTuning;
     int _msaaRequested = -1;
-    std::unordered_map<const void*, uint32_t> _drawObjectIds;
-    uint32_t _nextDrawObjectId = 1;
-    const void* _lastDrawObjectPtr = nullptr;
-    uint32_t _lastDrawObjectId = 0;
     uint32_t CurrentDrawObjectId();
     // §12d: interior furniture proxies moved to the GPU as CHILD instances. A proxy is a shared
     // ProxyObject on the parent shape at a reference LOD; its world = parentTransform *

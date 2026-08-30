@@ -88,3 +88,19 @@ TEST_CASE("Object caches undamaged land-clipped bounds", "[World][Object][Bounds
 // have (it SIGSEGVs) -- the invalidation itself is two assignments at the top of both
 // Move overloads (Object.cpp) and is exercised by every streamed world. A unit test for
 // it needs the landscape test scaffolding, not a bigger bare-object test.
+
+TEST_CASE("Object::RenderId is stable, unique and nonzero", "[World][Object][RenderId]")
+{
+    // ID-1 (render-snapshot design section 4): the render identity lives on the Object
+    // and dies with it. Assigned lazily, stable across calls, distinct between objects.
+    Ref<ObjectPlain> a = new ObjectPlain(nullptr, 100);
+    Ref<ObjectPlain> b = new ObjectPlain(nullptr, 101);
+
+    const uint32_t idA = a->RenderId();
+    REQUIRE(idA != 0);
+    REQUIRE(a->RenderId() == idA);
+
+    const uint32_t idB = b->RenderId();
+    REQUIRE(idB != 0);
+    REQUIRE(idB != idA);
+}

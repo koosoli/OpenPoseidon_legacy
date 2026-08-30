@@ -1741,6 +1741,21 @@ Object::Object(LODShapeWithShadow* shape, int id)
 
 Object::~Object() {}
 
+uint32_t Object::RenderId() const
+{
+    // Main-thread only (the draw path's identity bracket); no atomics by design.
+    static uint32_t nextRenderId = 0;
+    if (_renderId == 0)
+    {
+        if (++nextRenderId == 0)
+        {
+            ++nextRenderId; // 32-bit wrap after 4G objects: 0 stays "unassigned"
+        }
+        _renderId = nextRenderId;
+    }
+    return _renderId;
+}
+
 Object* Object::LoadRef(ParamArchive& ar)
 {
     int id;

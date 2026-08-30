@@ -274,7 +274,20 @@ class Object: public NetworkObject, public FrameBase, public IAnimator
 	// default for non-GPU-driven objects and survives the ClassIsMovableZeroed memset pattern.
 	unsigned char _gpuCoverage = 0;
 
+	// Stable per-object render identity (docs/roadmap/render-snapshot-design.md §4,
+	// slice ID-1): a process-monotonic 32-bit id, assigned on first use by the
+	// renderer's per-draw identity bracket. Object-resident for the same reason
+	// _gpuCoverage is -- the per-draw unordered_map probe it replaces was measured as
+	// real frame cost -- and, unlike that map, a recycled Object* can never inherit a
+	// dead object's id: the id dies with the object instead of depending on an erase
+	// in SceneObjectRemoved. 0 = not assigned yet. Main thread only.
+	mutable uint32_t _renderId = 0;
+
 	public:
+
+	// Assigns on first call; nonzero, unique per object within a session (32-bit
+	// monotonic; wraps after 4G objects, skipping 0).
+	uint32_t RenderId() const;
 
 	Object(LODShapeWithShadow *shape, int id);
 
