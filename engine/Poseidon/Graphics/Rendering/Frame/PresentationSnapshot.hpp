@@ -29,10 +29,15 @@ struct PresentationSnapshot
 {
     bool valid = false;
 
-    // GScene: distance fog.
+    // GScene: distance fog, plus the object-cull/LOD inputs PushSceneCamera feeds the
+    // GPU cull (Scene::LevelFromDistance2's shared values). Frame-constant; the camera
+    // matrices themselves stay live pulls because UpdateProjection() legitimately
+    // changes the projection mid-draw (MAT-052 cockpit zSpace).
     bool hasScene = false;
     float fogMinRange = 0.0f;
     float fogMaxRange = 0.0f;
+    float objectDrawDistance = 0.0f;
+    float lodInvWidth = 0.0f;
 
     // GScene->GetCamera(): the pose the environment passes key off (sky raymarch
     // origin, sun-glare focus). The pushed per-camera matrices are untouched.

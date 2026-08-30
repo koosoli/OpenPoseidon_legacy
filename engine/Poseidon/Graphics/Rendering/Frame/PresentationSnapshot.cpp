@@ -35,6 +35,8 @@ void CapturePresentationSnapshot()
         snap.hasScene = true;
         snap.fogMinRange = GScene->GetFogMinRange();
         snap.fogMaxRange = GScene->GetFogMaxRange();
+        snap.objectDrawDistance = GScene->GetObjectDrawDistance();
+        snap.lodInvWidth = GScene->GetLodInvWidth();
         if (Camera* camera = GScene->GetCamera())
         {
             snap.hasCamera = true;

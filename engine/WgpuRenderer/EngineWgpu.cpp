@@ -2492,8 +2492,13 @@ void EngineWgpu::PushSceneCamera()
             // accessor anchors the render cull to the fog max range, where fog is 1.0, and is
             // read by the CPU path (Scene::LevelFromDistance2) from the same place so the two
             // culls cannot drift. WGR_OBJECT_DISTANCE_SCALE=1 restores the legacy distance.
-            wgr_set_cull_params(_renderer, GScene->GetObjectDrawDistance(), static_cast<float>(camera->Left()),
-                                GScene->GetLodInvWidth(), 0.125f);
+            // Draw distance + lodInvWidth come from the presentation snapshot (captured at
+            // InitDraw): they are frame-constant scene state, unlike the camera pulls above,
+            // which UpdateProjection() legitimately re-reads mid-draw (MAT-052).
+            const auto& snap = render::frame::GPresentationSnapshot();
+            const float drawDistance = snap.hasScene ? snap.objectDrawDistance : GScene->GetObjectDrawDistance();
+            const float lodInvWidth = snap.hasScene ? snap.lodInvWidth : GScene->GetLodInvWidth();
+            wgr_set_cull_params(_renderer, drawDistance, static_cast<float>(camera->Left()), lodInvWidth, 0.125f);
         }
         if (_gpuDriven && _renderer)
         {
@@ -2541,8 +2546,11 @@ void EngineWgpu::PushSceneCamera()
             float nearCutoff = farTier.nearCutoff;
             if (nearCutoff < 0.0f)
             {
+                const auto& snapFar = render::frame::GPresentationSnapshot();
+                const float farDrawDistance =
+                    snapFar.hasScene ? snapFar.objectDrawDistance : GScene->GetObjectDrawDistance();
                 nearCutoff = farTier.complement ? FAR_TIER_HARD_FLOOR_M
-                                                : GScene->GetObjectDrawDistance() * FarTierNearCutoffFraction();
+                                                : farDrawDistance * FarTierNearCutoffFraction();
             }
             wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit, farTier.enabled ? 1u : 0u);
         }
