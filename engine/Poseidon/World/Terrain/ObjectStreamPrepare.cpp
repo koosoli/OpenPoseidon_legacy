@@ -2,6 +2,8 @@
 // thread-safety boundary; this file is the mechanism only.
 
 #include <Poseidon/World/Terrain/ObjectStreamPrepare.hpp>
+#include <Poseidon/World/Model/ShapeAdapter.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp> // ReadEmatFileLoose (pure, worker-safe)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -112,6 +114,19 @@ struct ObjectStreamPreparer::Impl
     std::unique_ptr<std::atomic<uint8_t>[]> states;
     std::vector<ModelPtr> models;
     std::deque<uint32_t> queue;
+    // Stage 3: conversion jobs and their results. `convertedShapes[i]` is owned here
+    // between the worker finishing and TakeConverted; Reset/DropStale delete stale
+    // ones OUTSIDE the mutex (a fresh shape holds no vertex buffers, so its
+    // destructor touches only refcounted textures and the locked fast allocator).
+    struct ConvertJob
+    {
+        uint32_t index = 0;
+        ModelPtr model;
+        std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables;
+    };
+    std::deque<ConvertJob> convertQueue;
+    std::vector<LODShapeWithShadow*> convertedShapes;
+    std::vector<ModelPtr> convertedModels;
     Stats stats;
     // Per model index: when Request() enqueued it, for the request->ready / request->taken
     // latency figures. Written under the mutex; a DropStale->re-Request simply restamps.
@@ -153,9 +168,64 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         // ahead, the right thing is to pause here until Take() makes room -- not to discard
         // the oldest Ready (the nearest, most-needed models) or the newest (parsed for
         // nothing). Take() and Reset() notify.
-        cv.wait(lock, [&] { return stop || (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit()); });
+        cv.wait(lock, [&] {
+            return stop || !convertQueue.empty() ||
+                   (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit());
+        });
         if (stop)
             return;
+        // Conversions first: each one unblocks an install the admit loop is waiting
+        // on, and the set is bounded by what the main thread submitted.
+        if (!convertQueue.empty())
+        {
+            ConvertJob job = std::move(convertQueue.front());
+            convertQueue.pop_front();
+            const uint64_t jobGen = generation.load(std::memory_order_relaxed);
+            lock.unlock();
+
+            const auto convStart = std::chrono::steady_clock::now();
+            LODShapeWithShadow* shape = nullptr;
+            try
+            {
+                shape = Model::ShapeAdapter::convertToLODShape(*job.model, false, job.tables.get());
+            }
+            catch (...)
+            {
+                shape = nullptr; // main thread will repeat synchronously via Failed-like fallback
+            }
+            const double convMs =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - convStart).count();
+
+            lock.lock();
+            if (jobGen != generation.load(std::memory_order_relaxed))
+            {
+                ++stats.dropped;
+                lock.unlock();
+                delete shape;
+                job.model.reset();
+                lock.lock();
+                continue;
+            }
+            stats.convertMs += convMs;
+            stats.convertMaxMs = std::max(stats.convertMaxMs, convMs);
+            if (shape && job.index < count)
+            {
+                convertedShapes[job.index] = shape;
+                convertedModels[job.index] = std::move(job.model);
+                Set(job.index, State::Converted);
+                ++stats.converted;
+            }
+            else
+            {
+                // Conversion failed: sticky Failed, the admit loop falls back to the
+                // synchronous path for this model exactly like a parse failure.
+                delete shape;
+                if (job.index < count)
+                    Set(job.index, State::Failed);
+                ++stats.failed;
+            }
+            continue;
+        }
         const uint32_t index = queue.front();
         queue.pop_front();
         --stats.queued;
@@ -408,6 +478,7 @@ size_t ObjectStreamPreparer::ModelCount() const
 void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
 {
     std::vector<Impl::ModelPtr> freeLater;
+    std::vector<LODShapeWithShadow*> freeShapes;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
         ++_impl->generation;
@@ -415,9 +486,21 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
         _impl->stats.queued = 0;
         _impl->stats.ready = 0;
         _impl->queue.clear();
+        _impl->convertQueue.clear();
         for (Impl::ModelPtr& m : _impl->models)
             if (m)
                 freeLater.push_back(std::move(m));
+        for (LODShapeWithShadow*& sh : _impl->convertedShapes)
+            if (sh)
+            {
+                freeShapes.push_back(sh);
+                sh = nullptr;
+            }
+        for (Impl::ModelPtr& m : _impl->convertedModels)
+            if (m)
+                freeLater.push_back(std::move(m));
+        _impl->convertedShapes.assign(modelCount, nullptr);
+        _impl->convertedModels.assign(modelCount, nullptr);
         _impl->models.assign(modelCount, nullptr);
         _impl->requestedAtUs.assign(modelCount, 0);
         _impl->paths.assign(paths, paths + modelCount);
@@ -437,6 +520,8 @@ void ObjectStreamPreparer::Reset(const std::string* paths, size_t modelCount)
     // Workers parked on the ready-limit predicate must re-evaluate: the ready set is empty now.
     _impl->cv.notify_all();
     freeLater.clear();
+    for (LODShapeWithShadow* sh : freeShapes)
+        delete sh;
 }
 
 bool ObjectStreamPreparer::Request(uint32_t index)
@@ -493,6 +578,7 @@ std::shared_ptr<Model::Model> ObjectStreamPreparer::Take(uint32_t index)
 size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uint32_t currentEpoch)
 {
     std::vector<Impl::ModelPtr> freeLater;
+    std::vector<LODShapeWithShadow*> freeShapes;
     size_t dropped = 0;
     {
         std::lock_guard<std::mutex> lock(_impl->mutex);
@@ -509,6 +595,18 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
                 _impl->models[i].reset();
                 _impl->Set(static_cast<uint32_t>(i), State::Unknown);
                 --_impl->stats.ready;
+                ++dropped;
+            }
+            else if (state == State::Converted)
+            {
+                if (_impl->convertedShapes[i])
+                {
+                    freeShapes.push_back(_impl->convertedShapes[i]);
+                    _impl->convertedShapes[i] = nullptr;
+                }
+                freeLater.push_back(std::move(_impl->convertedModels[i]));
+                _impl->convertedModels[i].reset();
+                _impl->Set(static_cast<uint32_t>(i), State::Unknown);
                 ++dropped;
             }
             else if (state == State::Queued)
@@ -534,7 +632,43 @@ size_t ObjectStreamPreparer::DropStale(const uint32_t* epochs, size_t count, uin
     if (dropped > 0)
         _impl->cv.notify_all(); // room in the ready set, or a shorter queue: let parked workers re-check
     freeLater.clear();
+    for (LODShapeWithShadow* sh : freeShapes)
+        delete sh;
     return dropped;
+}
+
+bool ObjectStreamPreparer::SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
+                                         std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables)
+{
+    if (!model || !tables)
+        return false;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (index >= _impl->count || _impl->workers.empty())
+        return false;
+    if (_impl->Get(index) != State::Unknown)
+        return false;
+    _impl->Set(index, State::Converting);
+    Impl::ConvertJob job;
+    job.index = index;
+    job.model = std::move(model);
+    job.tables = std::move(tables);
+    _impl->convertQueue.push_back(std::move(job));
+    _impl->cv.notify_one();
+    return true;
+}
+
+ObjectStreamPreparer::ConvertedShape ObjectStreamPreparer::TakeConverted(uint32_t index)
+{
+    ConvertedShape out;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    if (index >= _impl->count || _impl->Get(index) != State::Converted)
+        return out;
+    out.shape = _impl->convertedShapes[index];
+    _impl->convertedShapes[index] = nullptr;
+    out.model = std::move(_impl->convertedModels[index]);
+    _impl->convertedModels[index].reset();
+    _impl->Set(index, State::Unknown);
+    return out;
 }
 
 ObjectStreamPreparer::Stats ObjectStreamPreparer::SnapshotStats() const

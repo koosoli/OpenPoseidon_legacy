@@ -1197,8 +1197,14 @@ class ShapeBank
 	// Everything after the parse -- adapter, cache insert, vertex buffers -- happens here, on
 	// the calling (main) thread, because it touches the texture bank, the material bank, proxy
 	// object creation and GEngine. `timing` may be null.
+	// `preadapted`: the shape ALREADY converted from `model` by a preparer worker
+	// (tables-mode conversion, no proxies yet). Ownership transfers here: on the
+	// normal path this runs CreateAdapterProxies + cache insert + optimize; on a
+	// cache hit or in-flight cycle the redundant shape is deleted. When null,
+	// everything behaves exactly as before.
 	LODShapeWithShadow *NewFromModel(const char *name, bool reversed, bool shadow,
-	                                 std::shared_ptr<Model::Model> model, LoadTiming *timing);
+	                                 std::shared_ptr<Model::Model> model, LoadTiming *timing,
+	                                 LODShapeWithShadow *preadapted = nullptr);
 
 	void OptimizeAll();
 	// Build one shape's vertex buffers, for a shape that arrived after the bulk

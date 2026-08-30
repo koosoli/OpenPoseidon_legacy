@@ -601,7 +601,8 @@ LODShapeWithShadow* ShapeBank::New(const char* name, bool reversed, bool shadow)
 }
 
 LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, bool shadow,
-                                            std::shared_ptr<Model::Model> preparsed, LoadTiming* timing)
+                                            std::shared_ptr<Model::Model> preparsed, LoadTiming* timing,
+                                            LODShapeWithShadow* preadapted)
 {
     char lowName[128];
     char cacheKey[160];
@@ -621,6 +622,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     {
         if (timing)
             timing->cacheHit = true;
+        delete preadapted; // someone else installed it first; ours is redundant
         return existing;
     }
     // Proxy cycle: this key is already being loaded further up this call stack, so the miss
@@ -645,6 +647,7 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
                      "reference is dropped (empty shape). Nesting depth {}.",
                      lowName, GShapeLoadsInFlight.size());
         }
+        delete preadapted; // a cyclic-proxy load cannot adopt a shape from outside
         return new LODShapeWithShadow();
     }
     const ShapeLoadInFlightScope inFlight(cacheKey);
@@ -666,6 +669,21 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
     // both recognised P3D encodings through that path keeps test-model (and
     // normal-map smoke tests) from silently producing an empty mesh.
     LODShapeWithShadow* shape = nullptr;
+    if (preadapted)
+    {
+        // Stage 3 of the async admission: a preparer worker already ran the tables-mode
+        // conversion. Only the bank work it deferred remains -- proxies here, cache
+        // insert + optimize below, all main-thread.
+        shape = preadapted;
+        if (preparsed)
+            Poseidon::Model::ShapeAdapter::CreateAdapterProxies(shape, *preparsed);
+        if (timing)
+        {
+            timing->preparsed = true;
+            timing->canonical = true;
+        }
+    }
+    else
     {
         // The parse is the only stage of a cold load that does not touch engine globals, and
         // it is the stage a caller may have already done on a worker thread (Landscape's

@@ -1154,7 +1154,7 @@ void World::PerformSound(Entity* inside, float deltaT)
     static const bool experimentalEax = []
     {
         const char* v = std::getenv("POSEIDON_EXPERIMENTAL_EAX");
-        return v != nullptr && v[0] != ' ' && v[0] != '0';
+        return v != nullptr && v[0] != '\0' && v[0] != '0';
     }();
     // SERoom producer (roadmap 1.4): the classifier covered forest, city,
     // mountains and plain since 2001, and the fifth environment the backend ships was

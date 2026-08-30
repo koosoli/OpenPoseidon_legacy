@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <memory>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp> // ShapeBank::Find / NewFromModel (async admission)
+#include <Poseidon/World/Model/ShapeAdapter.hpp> // BuildAdapterBankTables (stage-3 async adapt)
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // the split of `create`
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // worker-prepared texture store (clear + stats)
 #include <Poseidon/World/Model/Model.hpp>              // the IR handed over by ObjectStreamPreparer
@@ -3442,6 +3443,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             // path, and the only one the preparer has anything to say about.
             const bool cold = Shapes.Find(modelName, false, true) == nullptr;
             std::shared_ptr<Model::Model> preparsed;
+            LODShapeWithShadow* preadapted = nullptr;
             if (cold && asyncOn)
             {
                 const ObjectStreamPreparer::State state = _modernObjectPreparer->Query(placement.modelIndex);
@@ -3457,11 +3459,62 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++scan;
                         continue;
                     }
+                    // Stage 3 (WGR_OBJECT_STREAM_ASYNC_ADAPT, default on): hand the IR
+                    // straight back with the main-thread bank tables and let a worker run
+                    // the conversion too -- measured 3+ s of the traverse's cold admission,
+                    // versus <100 ms for the table resolution that stays here.
+                    static const bool asyncAdapt = []
+                    {
+                        const char* v = std::getenv("WGR_OBJECT_STREAM_ASYNC_ADAPT");
+                        return !v || v[0] != '0';
+                    }();
+                    if (asyncAdapt && (preparsed->sourceFormat == "ODOL" || preparsed->sourceFormat == "MLOD"))
+                    {
+                        // The adapter names the shape from sourcePath, and the bank keys by
+                        // the lowercased name -- same lowering as BuildShapeCacheKey.
+                        std::string low(static_cast<const char*>(modelName));
+                        for (char& c : low)
+                            if (c >= 'A' && c <= 'Z')
+                                c = static_cast<char>(c - 'A' + 'a');
+                        preparsed->sourcePath = low;
+                        auto tables = std::make_shared<Model::ShapeAdapter::AdapterBankTables>();
+                        Model::ShapeAdapter::BuildAdapterBankTables(*preparsed, *tables);
+                        if (_modernObjectPreparer->SubmitConvert(placement.modelIndex, std::move(preparsed),
+                                                                std::move(tables)))
+                        {
+                            ++waited;
+                            ++scan;
+                            continue;
+                        }
+                        // Submit refused (workers gone): preparsed was consumed only on
+                        // success, but std::move may have emptied it -- reload defensively.
+                        if (!preparsed)
+                        {
+                            _modernObjectPreparer->Request(placement.modelIndex);
+                            ++waited;
+                            ++scan;
+                            continue;
+                        }
+                    }
+                }
+                else if (state == ObjectStreamPreparer::State::Converted)
+                {
+                    ObjectStreamPreparer::ConvertedShape conv =
+                        _modernObjectPreparer->TakeConverted(placement.modelIndex);
+                    if (!conv.shape)
+                    {
+                        ++waited;
+                        ++scan;
+                        continue;
+                    }
+                    preadapted = conv.shape;
+                    preparsed = std::move(conv.model);
                 }
                 else if (state != ObjectStreamPreparer::State::NotLoose && state != ObjectStreamPreparer::State::Failed)
                 {
-                    // Unknown (first sight, or dropped from the ready set), Queued or Parsing:
-                    // not ready. Ask (a no-op unless Unknown) and SKIP. Never wait.
+                    // Unknown (first sight, or dropped from the ready set), Queued, Parsing
+                    // or Converting: not ready. Ask (a no-op unless Unknown) and SKIP.
+                    // Never wait.
                     if (state == ObjectStreamPreparer::State::Unknown)
                         _modernObjectPreparer->Request(placement.modelIndex);
                     ++waited;
@@ -3505,7 +3558,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     // freshly built shape (refcount 0 out of the bank) cannot die between the
                     // two calls; the Object takes its own reference inside.
                     Ref<LODShapeWithShadow> installedShape =
-                        Shapes.NewFromModel(modelName, false, true, std::move(preparsed), &timing);
+                        Shapes.NewFromModel(modelName, false, true, std::move(preparsed), &timing, preadapted);
                     shapeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() -
                                                                         createStart)
                                   .count();

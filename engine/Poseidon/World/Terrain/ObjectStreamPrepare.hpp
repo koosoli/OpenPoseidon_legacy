@@ -62,9 +62,14 @@
 
 namespace Poseidon
 {
+class LODShapeWithShadow;
 namespace Model
 {
 struct Model;
+namespace ShapeAdapter
+{
+struct AdapterBankTables;
+}
 }
 
 class ObjectStreamPreparer
@@ -78,6 +83,8 @@ class ObjectStreamPreparer
         Ready,       // IR available; Take() hands it over
         NotLoose,    // sticky: not a loose file, the main thread must load it via the file server
         Failed,      // sticky: loose file exists but did not parse; main thread repeats the old path
+        Converting,  // stage 3: a worker is inside convertToLODShape for it
+        Converted,   // stage 3: shape available; TakeConverted() hands it over
     };
 
     struct Stats
@@ -113,6 +120,12 @@ class ObjectStreamPreparer
         uint64_t texSkipped = 0;    // ShouldPrepare said no (already uploaded/stored/full)
         uint64_t texUnreadable = 0; // named by the IR but not a readable loose DXT PAA
         double texMs = 0.0;         // wall time in ReadPAABlockChain + Put
+        // Shape conversion (stage 3): the ShapeAdapter geometry conversion (measured
+        // 3+ s per traverse on the main thread) runs on the same workers, fed by
+        // bank tables the main thread resolved. All still outside any lock.
+        uint64_t converted = 0;
+        double convertMs = 0.0;
+        double convertMaxMs = 0.0;
     };
 
     // WGR_OBJECT_STREAM_ASYNC. Read once.
@@ -149,6 +162,24 @@ class ObjectStreamPreparer
     // stamps, so the bounded ready set never fills with models nobody will Take. Returns how
     // many were dropped. Sticky NotLoose / Failed are left alone.
     size_t DropStale(const uint32_t* epochs, size_t count, uint32_t currentEpoch);
+    // Main thread. Stage 3: hand a taken IR back for worker-side ShapeAdapter
+    // conversion. `model->sourcePath` must already be the lowercased bank name, and
+    // `tables` the main-thread bank resolution for it (BuildAdapterBankTables).
+    // Returns false (caller converts synchronously) when workers are absent or the
+    // slot is not Unknown. On success the slot is Converting until the worker
+    // finishes, then Converted.
+    bool SubmitConvert(uint32_t index, std::shared_ptr<Model::Model> model,
+                       std::shared_ptr<const Model::ShapeAdapter::AdapterBankTables> tables);
+
+    struct ConvertedShape
+    {
+        LODShapeWithShadow* shape = nullptr; // ownership transfers to the caller
+        std::shared_ptr<Model::Model> model; // the IR it was converted from
+    };
+    // Main thread. If Converted, returns the shape + IR and returns the slot to
+    // Unknown; else {}. The caller MUST run CreateAdapterProxies + ShapeBank install.
+    ConvertedShape TakeConverted(uint32_t index);
+
     // Main thread. Snapshot of the counters (takes the mutex briefly).
     Stats SnapshotStats() const;
 
