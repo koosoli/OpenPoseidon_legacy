@@ -1901,8 +1901,8 @@ pub fn build_gpu_velocity_pipeline(
     composer: &mut naga_oil::compose::Composer,
     camera_layout: &wgpu::BindGroupLayout,
     group1_layout: &wgpu::BindGroupLayout,
+    bindless_layout: &wgpu::BindGroupLayout,
     vel_layout: &wgpu::BindGroupLayout,
-    sampler_layout: &wgpu::BindGroupLayout,
     conform_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let module = crate::shaders::make_module(
@@ -1917,8 +1917,8 @@ pub fn build_gpu_velocity_pipeline(
         bind_group_layouts: &[
             Some(camera_layout),
             Some(group1_layout),
+            Some(bindless_layout),
             Some(vel_layout),
-            Some(sampler_layout),
             Some(conform_layout),
         ],
         immediate_size: 0,
@@ -1928,6 +1928,11 @@ pub fn build_gpu_velocity_pipeline(
             format: wgpu::VertexFormat::Float32x3,
             offset: 0,
             shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x2,
+            offset: 24,
+            shader_location: 2,
         },
         wgpu::VertexAttribute {
             format: wgpu::VertexFormat::Uint32,

@@ -972,8 +972,10 @@ struct GpuVelParams {
     vmisc: vec4<f32>,      // x = depth-ratio tolerance for the visibility compare
 };
 
-@group(2) @binding(0) var<uniform> velp: GpuVelParams;
-@group(2) @binding(1) var vel_scene_depth: texture_depth_2d;
+// group(3) OVERLAYS the sampler-array slot: the velocity FS alpha-tests through
+// samplerless textureLoad, so samplers are the one group this variant never needs.
+@group(3) @binding(0) var<uniform> velp: GpuVelParams;
+@group(3) @binding(1) var vel_scene_depth: texture_depth_2d;
 
 fn veg_sway_prev_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
     let amp = velp.sway_prev.x;
@@ -1001,17 +1003,24 @@ struct VelVsOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) cur_clip: vec4<f32>,
     @location(1) prev_clip: vec4<f32>,
+    // Cutout alpha test (owner report: sway velocity bleeding onto pixels seen
+    // THROUGH a hedge): uv + the section index for alpha_ref / texture_slot.
+    @location(2) uv: vec2<f32>,
+    @location(3) @interpolate(flat) section: u32,
 };
 
 @vertex
 fn vs_gpu_velocity(
     @builtin(instance_index) rec_slot: u32,
     @location(0) pos: vec3<f32>,
+    @location(2) uv: vec2<f32>,
     @location(5) conform_sel: u32,
 ) -> VelVsOut {
     var out: VelVsOut;
     let rec = records[rec_slot];
     let inst = instances[rec.instance];
+    out.uv = uv;
+    out.section = rec.section;
     let canopy = inst.flags & (INST_CANOPY_BUSH | INST_CANOPY_TREE | INST_CANOPY_FOREST);
     if (canopy == 0u || frame.foliaged.x <= 0.0) {
         // Not swaying: the fullscreen camera reprojection is already exact. Collapse.
@@ -1064,6 +1073,18 @@ fn vs_gpu_velocity(
 
 @fragment
 fn fs_gpu_velocity(in: VelVsOut) -> @location(0) vec2<f32> {
+    // Cutout alpha test, samplerless (nearest texel, top mip): a transparent leaf
+    // texel must NOT stamp sway velocity onto whatever is visible through the gap.
+    let sm = section_materials[in.section];
+    if (sm.alpha_ref > 0.0) {
+        let dims = vec2<f32>(textureDimensions(textures[sm.texture_slot], 0u));
+        let tuv = fract(in.uv);
+        let tc = clamp(vec2<i32>(tuv * dims), vec2<i32>(0), vec2<i32>(dims) - 1);
+        let a = textureLoad(textures[sm.texture_slot], tc, 0).a;
+        if (a < sm.alpha_ref) {
+            discard;
+        }
+    }
     let frag = vec2<i32>(in.pos.xy);
     let scene_d = textureLoad(vel_scene_depth, frag, 0);
     if (in.pos.z < scene_d * (1.0 - velp.vmisc.x)) {

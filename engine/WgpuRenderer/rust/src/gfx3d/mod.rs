@@ -3896,8 +3896,8 @@ impl Gfx3d {
             composer,
             &cameras.layout,
             &gpu_group1_layout,
+            &textures.bindless_layout,
             &gpu_vel_layout,
-            &textures.sampler_array_layout,
             &conform.layout,
         );
         let (gpu_pipeline, gpu_prepass_pipeline) = cull::build_gpu_pipeline(
@@ -8432,8 +8432,8 @@ impl Gfx3d {
         pass.set_pipeline(&self.gpu_velocity_pipeline);
         pass.set_bind_group(0, camera_bind, &[cam_off]);
         pass.set_bind_group(1, group1, &[]);
-        pass.set_bind_group(2, self.gpu_vel_bind.as_ref().expect("built above"), &[]);
-        pass.set_bind_group(3, textures.sampler_array_bind(), &[]);
+        pass.set_bind_group(2, textures.bindless_bind(), &[]);
+        pass.set_bind_group(3, self.gpu_vel_bind.as_ref().expect("built above"), &[]);
         pass.set_bind_group(4, conform_bind, &[]);
         pass.set_vertex_buffer(0, self.pool.vbuf().slice(..));
         pass.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
