@@ -72,6 +72,7 @@ void FastAlloc::FreeChunks()
 
 void* FastAlloc::AllocCounted(size_t n)
 {
+    std::lock_guard<std::mutex> lock(_mtx);
     allocated++;
 
     PoseidonAssert(n <= esize);
@@ -109,6 +110,7 @@ void FastAlloc::FreeCounted(void* pAlloc, bool fast)
     {
         return;
     }
+    std::lock_guard<std::mutex> lock(_mtx);
 
     Chunk* ch = *(Chunk**)pAlloc;
 
@@ -189,6 +191,7 @@ FastAlloc* FastAlloc::WhichAllocator(void* pAlloc)
 
 void FastAlloc::CleanUp()
 {
+    std::lock_guard<std::mutex> lock(_mtx);
     // drop every empty free chunk; busy chunks can't be reclaimed, so skip them
     for (Chunk* ch = chunksFree.First(); ch;)
     {
