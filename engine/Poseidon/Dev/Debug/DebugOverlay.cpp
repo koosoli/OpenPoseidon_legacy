@@ -44,6 +44,7 @@
 #include <Poseidon/UI/Locale/MissionLanguageDetector.hpp>
 #include <Poseidon/UI/Locale/Stringtable/Stringtable.hpp>
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
 #include <Poseidon/Dev/Diag/StreamingTab.hpp>
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
@@ -4450,6 +4451,10 @@ void DrawPerfTab()
         ImGui::EndTable();
     }
     ImGui::Text("draw calls %.0f avg", perf.AvgDrawCalls());
+    {
+        const Dev::LightCounters& lights = Dev::GLightCounters();
+        ImGui::Text("local lights %u / %u candidates (cap %u)", lights.selected, lights.candidates, lights.cap);
+    }
     if (GEngine)
     {
         const int swapInterval = GEngine->GetSwapInterval();

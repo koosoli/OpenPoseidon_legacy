@@ -25,6 +25,7 @@
 #include <Poseidon/Asset/Formats/Material/MaterialChannels.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // streamed-admission split timers
+#include <Poseidon/Dev/Diag/LightingDiag.hpp> // per-frame local-light gauges (Forward+ gate evidence)
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
 #include <Poseidon/World/Scene/Object.hpp>                     // Object accessors (GPU-driven retained scene)
@@ -1845,15 +1846,33 @@ void EngineWgpu::NextFrame()
                 }
                 std::sort(candidates.begin(), candidates.end(),
                           [](const LightCandidate& a, const LightCandidate& b) { return a.score < b.score; });
-                const size_t selected = std::min(candidates.size(), size_t(WGR_MAX_LIGHTS));
+                // WGR_MAX_ACTIVE_LIGHTS: the A/B lever behind the Forward+ decision (B.1).
+                // 0 removes every local light from the flat loop, so the GPU frame delta on
+                // a night scene IS the lighting cost the roadmap's gate asks for. Default is
+                // the full fixed capacity -- today's behaviour.
+                static const size_t envCap = []
+                {
+                    const char* v = std::getenv("WGR_MAX_ACTIVE_LIGHTS");
+                    if (!v)
+                        return size_t(WGR_MAX_LIGHTS);
+                    return size_t(std::clamp<long>(std::strtol(v, nullptr, 10), 0, WGR_MAX_LIGHTS));
+                }();
+                const size_t selected = std::min(candidates.size(), envCap);
                 _lights.reserve(selected);
                 for (size_t i = 0; i < selected; ++i)
                     _lights.push_back(candidates[i].light);
+                Poseidon::Dev::GLightCounters().candidates = static_cast<uint32_t>(candidates.size());
+                Poseidon::Dev::GLightCounters().cap = static_cast<uint32_t>(envCap);
                 if (std::getenv("WGR_STATIC_LIGHT_TRACE"))
                     LOG_INFO(Graphics, "Wgpu local-light selection: candidates={} selected={} night={:.3f}",
                              candidates.size(), selected, night);
             }
         }
+        // Daytime frames skip the selection walk entirely; the gauges must still say so
+        // rather than exhibit last night's numbers.
+        Poseidon::Dev::GLightCounters().selected = static_cast<uint32_t>(_lights.size());
+        if (_lights.empty())
+            Poseidon::Dev::GLightCounters().candidates = 0;
         const float lightCount = static_cast<float>(_lights.size());
 
         // Cloud cover fades the cascade shadow toward none (in lockstep with the directional-sun

@@ -1,4 +1,5 @@
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
+#include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 #include "GameApplication.hpp"
@@ -227,6 +228,17 @@ bool WriteCaptureMetrics(const std::string& path)
         }
     }
 
+    // Local-light gauges (roadmap Phase 3 / the Forward+ gate B.1): how many point/spot
+    // lights the frame considered and how many reached the shader's flat loop. The cost
+    // half is an A/B: rerun the same scene with WGR_MAX_ACTIVE_LIGHTS=0 and read the GPU
+    // frame delta.
+    {
+        const Poseidon::Dev::LightCounters& lights = Poseidon::Dev::GLightCounters();
+        cJSON* l = cJSON_AddObjectToObject(root, "lights");
+        cJSON_AddNumberToObject(l, "candidates", lights.candidates);
+        cJSON_AddNumberToObject(l, "selected", lights.selected);
+        cJSON_AddNumberToObject(l, "cap", lights.cap);
+    }
     // Streaming/asset counters (roadmap Phase 3): the texture-upload split, the
     // worker->main prepared-texture store, the cold-model preparer and the residency
     // system's admission counters. All cumulative since world load (texture rows: since
