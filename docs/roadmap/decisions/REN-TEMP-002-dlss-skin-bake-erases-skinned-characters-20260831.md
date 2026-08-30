@@ -1,7 +1,7 @@
 # REN-TEMP-002 — The compute skin bake erases skinned characters on the DLSS route
 
 **Date:** 2026-08-31
-**Status:** Mitigated (bake default OFF, `21da5262`); real fix open (see Follow-up)
+**Status:** FIXED (identity-world pack restored, bake default back ON; see Resolution)
 **Affects:** every skinned character (soldiers, crew) whenever DLSS is active
 **Fixed builds:** `21da5262` and later (deploy stamp 2026-08-31_00:17)
 
@@ -79,10 +79,25 @@ in for debugging. Cost while off: characters fall back to VS skinning and provid
 no per-bone motion vectors to the temporal pass — slightly softer/ghostier moving
 characters under DLSS, which is a fair trade against invisible ones.
 
-## Follow-up (open)
+## Resolution (2026-08-31, same night)
 
-Fix the bake for OFP-generation skinned models (bone-weight format / vertex layout
-audit against `skin_bake.wgsl`), add a headless test with a real OFP skinned
-fixture, then restore the `temporal_will_run` default. Tracked as the
-"Compute-Skin-Bake für OFP-Modelle reparieren" task chip; suspected overlap with
-the night-artifact chip `task_c060eaf7`.
+A background agent audited the full baked-draw chain and found the true defect —
+not a shader/layout problem at all: the identity-world pack in `prepare()` was
+left disabled (`false && bake_on`). The C++ side premultiplies the camera-relative
+world into every palette matrix, so baked vertices leave `skin_bake.wgsl` already
+world-transformed; the rigid pipeline the baked draw routes through then applies
+`objects[instance].world` ON TOP. Commit `728f4035` had disconnected draw routing
+from the bake and (consistently) disabled the pack; `60c9d63c` reconnected the
+routing after the 17-word stride fix but never re-enabled the pack — so the world
+was applied twice and every skinned character landed off-screen. First-person
+hands stayed visible because their world is ≈ the camera (world² ≈ world).
+
+Fix: the decision now lives in `object_gpu_for_draw()` (gfx3d/mod.rs), a
+device-free seam mirroring `baked_draw_base`'s predicate exactly, pinned by unit
+tests so routing and packing cannot disagree silently again. Verified on the
+00Training repro with DLSS genuinely active (NGX teardown witness): instructor
+visible, rifle in hand, shadow present, with the bake ON. The `WGR_SKIN_BAKE`
+default is back to `temporal_will_run`.
+
+Still open: re-test the owner's 2026-08-30 "night ground artifacts under DLSS"
+(chip `task_c060eaf7`) — possibly related, possibly separate.
