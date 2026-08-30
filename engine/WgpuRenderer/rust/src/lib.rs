@@ -1092,7 +1092,9 @@ impl Renderer {
         // pins either way, and with the bake off skinned characters fall back to rigid/
         // camera velocity.
         let temporal_will_run = {
-            let env_on = std::env::var("WGR_TEMPORAL").map(|v| v != "0").unwrap_or(false);
+            let env_on = std::env::var("WGR_TEMPORAL")
+                .map(|v| v != "0")
+                .unwrap_or(false);
             #[cfg(feature = "dlss")]
             {
                 env_on || ngx_raw.is_some()
@@ -1203,18 +1205,16 @@ impl Renderer {
         // NGX route came up and the env did not pin a scale. The dev panel's Temporal tab
         // changes it live; a plain (non-dlss) build never reaches this.
         #[cfg(feature = "dlss")]
-        let (render_scale, render_scale_auto) = if ngx_raw.is_some()
-            && hdr_enabled
-            && std::env::var("WGR_RENDER_SCALE").is_err()
-        {
-            log.log(
-                log_level::INFO,
-                "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
-            );
-            (0.67, true)
-        } else {
-            (render_scale, false)
-        };
+        let (render_scale, render_scale_auto) =
+            if ngx_raw.is_some() && hdr_enabled && std::env::var("WGR_RENDER_SCALE").is_err() {
+                log.log(
+                    log_level::INFO,
+                    "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
+                );
+                (0.67, true)
+            } else {
+                (render_scale, false)
+            };
         #[cfg(not(feature = "dlss"))]
         let render_scale_auto = false;
         if !prepass_enabled {
@@ -2081,8 +2081,13 @@ impl Renderer {
         // resolved HDR frame along velocity. Diagnostic only; nothing downstream reads it.
         if self.temporal.enabled {
             let render_size = self.render_size();
-            self.temporal
-                .render_debug_resolve(&self.device, &self.queue, encoder, source, render_size);
+            self.temporal.render_debug_resolve(
+                &self.device,
+                &self.queue,
+                encoder,
+                source,
+                render_size,
+            );
         }
         // Volumetric sun shafts, added to the LINEAR HDR scene here: after the MSAA resolve (so
         // the blend costs one sample per pixel, not `sample_count`) and before bloom / eye
@@ -2236,7 +2241,8 @@ impl Renderer {
                 }
                 if self.render_scale_auto && (self.render_scale - 1.0).abs() > 1e-3 {
                     self.render_scale = 1.0;
-                    self.temporal.notify_reset("DLSS fallback: render scale back to 100%");
+                    self.temporal
+                        .notify_reset("DLSS fallback: render scale back to 100%");
                     self.log.log(
                         log_level::WARN,
                         "render scale back to 100% (was auto-set to 67% for DLSS)",
@@ -2357,8 +2363,14 @@ impl Renderer {
         // frame and under the UI phase, at output resolution.
         let output_size = (self.config.width, self.config.height);
         let dst_format = self.config.format;
-        self.temporal
-            .render_debug(&self.device, &self.queue, encoder, dst, dst_format, output_size);
+        self.temporal.render_debug(
+            &self.device,
+            &self.queue,
+            encoder,
+            dst,
+            dst_format,
+            output_size,
+        );
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -2381,16 +2393,16 @@ impl Renderer {
             let new_scale = pct as f32 / 100.0;
             if (new_scale - self.render_scale).abs() > 1e-3 {
                 self.render_scale = new_scale;
-                self.temporal.notify_reset("render-scale change (dev panel)");
+                self.temporal
+                    .notify_reset("render-scale change (dev panel)");
             }
         }
         self.temporal.jitter_phase_override = u64::from(t.jitter_phases);
         self.temporal.reactive_sky = t.reactive_sky.clamp(0.0, 1.0);
         self.temporal.reactive_water = t.reactive_water.clamp(0.0, 1.0);
         // mip_bias > 0 is the "auto" sentinel (real biases are <= 0).
-        self.gfx3d.set_mip_bias_override(
-            (t.mip_bias <= 0.0).then(|| t.mip_bias.clamp(-4.0, 0.0)),
-        );
+        self.gfx3d
+            .set_mip_bias_override((t.mip_bias <= 0.0).then(|| t.mip_bias.clamp(-4.0, 0.0)));
         self.dlss_auto_exposure = t.flags & 1 != 0;
         self.dlss_jy_flip = t.flags & 2 != 0;
         self.dlss_mv_render_space = t.flags & 4 != 0;
@@ -3026,7 +3038,11 @@ impl Renderer {
         // asynchronous depth-tested water query is available, it is the tighter upper bound.
         let water_coverage = self
             .water_visibility
-            .coverage(self.render_size().0, self.render_size().1, self.sample_count)
+            .coverage(
+                self.render_size().0,
+                self.render_size().1,
+                self.sample_count,
+            )
             .map(|visible| visible.min(cpu_water_coverage))
             .unwrap_or(cpu_water_coverage);
         let planar_cfg = *PLANAR_CFG.get_or_init(PlanarConfig::from_env);
@@ -4215,7 +4231,9 @@ impl Renderer {
         {
             static PLAN_TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             let on = *PLAN_TRACE.get_or_init(|| {
-                std::env::var("WGR_PLAN_TRACE").map(|v| v != "0").unwrap_or(false)
+                std::env::var("WGR_PLAN_TRACE")
+                    .map(|v| v != "0")
+                    .unwrap_or(false)
             });
             static PRINTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
             let interesting = ops
@@ -4659,7 +4677,8 @@ impl Renderer {
                 }
                 render_ops(self, &mut pass, ops_pre_water, display_2d, false, prepassed);
                 if time_segment {
-                    self.gpu_timers.end_pass(&mut pass, TimerRegion::OpsPreWater);
+                    self.gpu_timers
+                        .end_pass(&mut pass, TimerRegion::OpsPreWater);
                 }
                 // Debug cull-sphere wireframes (ImGui Culling tab) LAST in the sub-pass: their
                 // depth test is Always, but anything drawn after them (terrain in render_ops)
@@ -5162,6 +5181,9 @@ impl Renderer {
         // those superseded application-side handles; wgpu retains resources for
         // command buffers that are still executing on the GPU.
         self.gfx3d.frame_submitted();
+        // Same boundary for bindless texture slots: a slot freed by texture_destroy
+        // this frame may only be reused for creates in later frames.
+        self.textures.frame_submitted();
         frame.present();
         // REN-TEMP-001E: this frame's camera becomes the previous frame's history.
         self.temporal.end_frame();

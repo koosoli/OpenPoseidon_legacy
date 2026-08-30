@@ -233,9 +233,15 @@ pub struct SharedTextures {
     pub bindless_layout: wgpu::BindGroupLayout,
     bindless_bind: wgpu::BindGroup,
     // slot -> view (slot 0 = white fallback / holes). `bindless_free` recycles slots
-    // freed by destroy so the array stays dense.
+    // freed by destroy so the array stays dense. A destroyed texture's slot is NOT
+    // recycled within the frame that destroyed it: material buffers and encoded draws
+    // may still carry the slot index, and a same-frame create reusing it would make
+    // them sample the wrong texture instead of the white fallback. Destroy therefore
+    // parks the slot in `bindless_retired`; `frame_submitted()` (the same lifetime
+    // boundary GeometryPool uses) moves it to the free list.
     bindless_slots: Vec<Option<wgpu::TextureView>>,
     bindless_free: Vec<u32>,
+    bindless_retired: Vec<u32>,
     bindless_dirty: bool,
     object_cap: u32,
     partially_bound: bool,
@@ -542,6 +548,7 @@ impl SharedTextures {
             bindless_bind,
             bindless_slots,
             bindless_free: Vec::new(),
+            bindless_retired: Vec::new(),
             bindless_dirty: false,
             object_cap,
             partially_bound,
@@ -613,11 +620,18 @@ impl SharedTextures {
             let slot = t.slot;
             if slot != 0 && (slot as usize) < self.bindless_slots.len() {
                 self.bindless_slots[slot as usize] = None;
-                self.bindless_free.push(slot);
+                self.bindless_retired.push(slot);
                 self.bindless_dirty = true;
             }
         }
         self.registry.destroy(handle);
+    }
+
+    // Called immediately after the frame's queue submit — the point at which no
+    // encoded work can still reference a slot freed by destroy this frame. Slots
+    // parked by destroy become reusable here (mirrors GeometryPool::frame_submitted).
+    pub fn frame_submitted(&mut self) {
+        self.bindless_free.append(&mut self.bindless_retired);
     }
 
     // Dense bindless slot for `handle` (0 = white fallback for missing/zero handles).
@@ -788,4 +802,124 @@ fn downsample_rgba8(src: &[u8], sw: u32, sh: u32, nw: u32, nh: u32) -> Vec<u8> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shared(device: &wgpu::Device, queue: &wgpu::Queue) -> SharedTextures {
+        SharedTextures::new(
+            device,
+            queue,
+            false,
+            64,
+            false,
+            &crate::log::LogSink::none(),
+        )
+    }
+
+    // The bindless layout needs TEXTURE_BINDING_ARRAY, which the default headless
+    // device does not enable; request it explicitly (skip when unsupported).
+    fn headless_bindless() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        if !adapter
+            .features()
+            .contains(wgpu::Features::TEXTURE_BINDING_ARRAY)
+        {
+            return None;
+        }
+        let mut limits = wgpu::Limits::default();
+        limits.max_binding_array_elements_per_shader_stage = 64;
+        limits.max_binding_array_sampler_elements_per_shader_stage = 8;
+        let desc = wgpu::DeviceDescriptor {
+            required_features: wgpu::Features::TEXTURE_BINDING_ARRAY,
+            required_limits: limits,
+            ..Default::default()
+        };
+        pollster::block_on(adapter.request_device(&desc)).ok()
+    }
+
+    fn tex_1x1() -> [u8; 4] {
+        [255, 0, 0, 255]
+    }
+
+    // A destroyed texture's bindless slot must NOT be handed to a create within the
+    // same frame: material buffers and already-encoded draws still carry the slot
+    // index, and reuse would make them sample the new (wrong) texture instead of the
+    // white fallback. Only frame_submitted() makes the slot reusable.
+    #[test]
+    fn destroyed_slot_is_not_reused_until_frame_submitted() {
+        let Some((device, queue)) = headless_bindless() else {
+            return;
+        };
+        let mut st = shared(&device, &queue);
+        let bytes = tex_1x1();
+        let data = TextureData {
+            width: 1,
+            height: 1,
+            format: TextureFormat::Rgba8,
+            mip_count: 1,
+            gen_mips: false,
+            bytes: &bytes,
+        };
+        let a = st.create(&device, &queue, &data);
+        assert_ne!(a, 0);
+        let slot_a = st.texture_slot(a);
+        assert_ne!(slot_a, 0, "a real texture gets a non-fallback slot");
+
+        st.destroy(a);
+        let b = st.create(&device, &queue, &data);
+        assert_ne!(b, 0);
+        let slot_b = st.texture_slot(b);
+        assert_ne!(
+            slot_b, slot_a,
+            "same-frame create must not reuse the destroyed slot"
+        );
+
+        st.frame_submitted();
+        let c = st.create(&device, &queue, &data);
+        assert_ne!(c, 0);
+        assert_eq!(
+            st.texture_slot(c),
+            slot_a,
+            "after the submit boundary the retired slot is recycled"
+        );
+    }
+
+    // The registry handle itself stays generation-safe: a destroyed handle resolves
+    // to the fallback slot 0, never to whatever texture reused the storage.
+    #[test]
+    fn destroyed_handle_resolves_to_fallback() {
+        let Some((device, queue)) = headless_bindless() else {
+            return;
+        };
+        let mut st = shared(&device, &queue);
+        let bytes = tex_1x1();
+        let data = TextureData {
+            width: 1,
+            height: 1,
+            format: TextureFormat::Rgba8,
+            mip_count: 1,
+            gen_mips: false,
+            bytes: &bytes,
+        };
+        let a = st.create(&device, &queue, &data);
+        st.destroy(a);
+        st.frame_submitted();
+        let b = st.create(&device, &queue, &data);
+        assert_ne!(
+            a, b,
+            "slotmap keys are versioned; the handle is not reissued"
+        );
+        assert_eq!(st.texture_slot(a), 0, "stale handle falls back to white");
+        assert_ne!(st.texture_slot(b), 0);
+    }
 }
