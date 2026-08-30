@@ -58,6 +58,11 @@ class PreparedTextureStore
         uint64_t expired = 0;       // entries dropped by the TTL sweep
         uint64_t skippedUploaded = 0; // ShouldPrepare said no: main thread already uploaded it
         uint64_t uploadedMarks = 0; // names currently marked Uploaded
+        // The RGBA8 side (non-DXT PAAs -- the Reforger mask population): whole-file
+        // decodes done on a worker so the main thread's fallback path uploads instead
+        // of decoding. Counted separately because the byte shapes differ wildly.
+        uint64_t decodedPuts = 0;
+        uint64_t decodedTakes = 0;
         size_t entries = 0;         // current
         size_t bytes = 0;           // current
     };
@@ -84,6 +89,13 @@ class PreparedTextureStore
     bool Put(const std::string& key, PAABlockChain&& chain);
     // Main thread. Moves the entry out if present.
     bool Take(const std::string& key, PAABlockChain& out);
+
+    // The RGBA8 twin pair, for textures whose format has no DXT chain (the fallback
+    // decode population): a worker decodes the whole file with the pure DecodePAABuffer
+    // and stores the image; the main thread's fallback path takes it and only uploads.
+    // Same budget, TTL, dedup and Uploaded-mark rules as the chain entries.
+    bool PutDecoded(const std::string& key, DecodedImage&& image);
+    bool TakeDecoded(const std::string& key, DecodedImage& out);
 
     // Main thread. A texture reached a real upload attempt (success or failure): its bytes are
     // no longer wanted from a worker; also drops any pending entry for it.

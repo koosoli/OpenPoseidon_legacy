@@ -16,6 +16,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <cstring>
 #include <deque>
 #include <mutex>
@@ -273,7 +275,36 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
                 PAABlockChain chain;
                 if (!ReadPAABlockChain(key, chain))
                 {
-                    ++texUnreadable; // not loose, not DXT, or malformed: main thread's problem
+                    // Not a DXT chain. If it is still a READABLE loose PAA (the Reforger
+                    // corpus's PacARGB8888 *_mask.paa population -- 390 whole-file decodes
+                    // costing ~1.1 s of admission time on the Everon traverse), decode it
+                    // HERE with the pure buffer decoder and store the RGBA image, so the
+                    // main thread's fallback path uploads instead of decoding.
+                    std::ifstream file(key, std::ios::binary);
+                    if (!file)
+                    {
+                        ++texUnreadable; // not loose at all: main thread's problem
+                        continue;
+                    }
+                    std::vector<char> bytesIn((std::istreambuf_iterator<char>(file)),
+                                              std::istreambuf_iterator<char>());
+                    const bool isPaa = key.size() >= 4 && key.compare(key.size() - 4, 4, ".paa") == 0;
+                    DecodedImage image = DecodePAABuffer(bytesIn.data(), bytesIn.size(), isPaa);
+                    if (!image.valid())
+                    {
+                        ++texUnreadable; // malformed: main thread repeats and reports
+                        continue;
+                    }
+                    const size_t imageBytes = image.rgba.size();
+                    if (store.PutDecoded(key, std::move(image)))
+                    {
+                        ++texPrepared;
+                        texPreparedBytes += imageBytes;
+                    }
+                    else
+                    {
+                        ++texSkipped;
+                    }
                     continue;
                 }
                 const size_t bytes = chain.blocks.size();

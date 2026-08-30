@@ -1471,13 +1471,34 @@ uint64_t TextureWgpu::EnsureUploaded()
     }
 
     // Fallback (non-DXT formats, or a failed block upload): decode the whole file
-    // to RGBA8 via the shared PAA decoder
+    // to RGBA8 via the shared PAA decoder -- unless a worker already did exactly that
+    // (PreparedTextureStore::TakeDecoded), in which case only the upload remains.
     if (!_gpuHandle)
     {
         const uint64_t began = (timed || profiled) ? NowUs() : 0;
+        DecodedImage prepared;
+        if (render::PreparedTextureStore::Enabled() &&
+            render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(Name()), prepared))
+        {
+            _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
+                                            static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
+                                            WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
+                                            static_cast<uint32_t>(prepared.rgba.size()));
+            if (_gpuHandle)
+            {
+                _w = prepared.width;
+                _h = prepared.height;
+                GTextureStreamStats.frameUploadBytes.fetch_add(prepared.rgba.size(), std::memory_order_relaxed);
+                if (timed)
+                    GTextureStreamStats.preparedHits.fetch_add(1, std::memory_order_relaxed);
+                if (profiled)
+                    ++admit.texturePrepared;
+            }
+        }
         QIFStreamB stream;
-        stream.AutoOpen(Name());
-        const IFileBuffer* fb = stream.GetBuffer();
+        if (!_gpuHandle)
+            stream.AutoOpen(Name());
+        const IFileBuffer* fb = _gpuHandle ? nullptr : stream.GetBuffer();
         if (fb && !fb->GetError() && fb->GetSize() > 0)
         {
             DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(Name()));

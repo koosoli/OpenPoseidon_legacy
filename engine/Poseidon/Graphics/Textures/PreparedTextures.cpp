@@ -20,9 +20,11 @@ struct PreparedTextureStore::Impl
     struct Entry
     {
         std::string key;
-        PAABlockChain chain;
+        PAABlockChain chain;    // DXT mip chain...
+        DecodedImage image;     // ...OR a whole-file RGBA8 decode (image.valid() discriminates)
         Clock::time_point stored;
     };
+    static size_t EntryBytes(const Entry& entry) { return entry.chain.blocks.size() + entry.image.rgba.size(); }
     mutable std::mutex mutex;
     // Insertion order = production order = (through the preparer's queue) distance order, so
     // the front is the oldest and the TTL sweep walks from there and stops early.
@@ -32,12 +34,15 @@ struct PreparedTextureStore::Impl
     size_t bytes = 0;
     Stats stats;
 
-    void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto)
+    void EraseLocked(std::unordered_map<std::string, std::list<Entry>::iterator>::iterator it, PAABlockChain* takeInto,
+                     DecodedImage* takeImageInto = nullptr)
     {
         std::list<Entry>::iterator node = it->second;
-        bytes -= node->chain.blocks.size();
+        bytes -= EntryBytes(*node);
         if (takeInto)
             *takeInto = std::move(node->chain);
+        if (takeImageInto)
+            *takeImageInto = std::move(node->image);
         order.erase(node);
         byKey.erase(it);
         stats.entries = byKey.size();
@@ -65,7 +70,7 @@ struct PreparedTextureStore::Impl
                 EraseLocked(it, &gone);
             else
             {
-                bytes -= head.chain.blocks.size();
+                bytes -= EntryBytes(head);
                 gone = std::move(order.front().chain);
                 order.pop_front();
             }
@@ -182,7 +187,7 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
         else
         {
             const size_t size = chain.blocks.size();
-            _impl->order.push_back(Impl::Entry{key, std::move(chain), Impl::Clock::now()});
+            _impl->order.push_back(Impl::Entry{key, std::move(chain), DecodedImage{}, Impl::Clock::now()});
             _impl->byKey.emplace(key, std::prev(_impl->order.end()));
             _impl->bytes += size;
             ++_impl->stats.puts;
@@ -196,6 +201,61 @@ bool PreparedTextureStore::Put(const std::string& key, PAABlockChain&& chain)
     if (!stored)
         chain = PAABlockChain{};
     return stored;
+}
+
+bool PreparedTextureStore::PutDecoded(const std::string& key, DecodedImage&& image)
+{
+    if (!Enabled() || key.empty() || !image.valid())
+        return false;
+    std::vector<PAABlockChain> freeLater;
+    bool stored = false;
+    {
+        std::lock_guard<std::mutex> lock(_impl->mutex);
+        _impl->SweepLocked(freeLater);
+        if (_impl->uploaded.count(key))
+        {
+            ++_impl->stats.skippedUploaded;
+        }
+        else if (_impl->byKey.count(key))
+        {
+            ++_impl->stats.rejectedDup;
+        }
+        else if (_impl->bytes + image.rgba.size() > ByteBudget())
+        {
+            ++_impl->stats.rejectedFull;
+        }
+        else
+        {
+            const size_t size = image.rgba.size();
+            _impl->order.push_back(Impl::Entry{key, PAABlockChain{}, std::move(image), Impl::Clock::now()});
+            _impl->byKey.emplace(key, std::prev(_impl->order.end()));
+            _impl->bytes += size;
+            ++_impl->stats.decodedPuts;
+            _impl->stats.putBytes += size;
+            _impl->stats.entries = _impl->byKey.size();
+            _impl->stats.bytes = _impl->bytes;
+            stored = true;
+        }
+    }
+    freeLater.clear(); // outside the lock
+    if (!stored)
+        image = DecodedImage{};
+    return stored;
+}
+
+bool PreparedTextureStore::TakeDecoded(const std::string& key, DecodedImage& out)
+{
+    out = DecodedImage{};
+    if (!Enabled() || key.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(_impl->mutex);
+    auto it = _impl->byKey.find(key);
+    if (it == _impl->byKey.end() || !it->second->image.valid())
+        return false; // no miss counter: the fallback path asks opportunistically
+    _impl->EraseLocked(it, nullptr, &out);
+    ++_impl->stats.decodedTakes;
+    _impl->stats.takeBytes += out.rgba.size();
+    return out.valid();
 }
 
 bool PreparedTextureStore::Take(const std::string& key, PAABlockChain& out)
