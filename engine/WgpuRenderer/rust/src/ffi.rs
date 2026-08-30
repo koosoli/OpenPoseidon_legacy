@@ -1674,6 +1674,9 @@ pub struct WgrTemporalInfo {
     pub jitter_y: f32,
     pub mip_bias_effective: f32,
     pub reset_this_frame: u32,
+    /// Active MSAA sample count of the scene targets (1 = off). Startup-fixed; the
+    /// menu/panel setting applies on the next launch (WGR_MSAA is the channel).
+    pub msaa_samples: u32,
 }
 
 /// Push live temporal/upscaler tuning (dev panel). Null-safe.

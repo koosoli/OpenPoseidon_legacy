@@ -6161,7 +6161,7 @@ void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
     WgrTemporalTuning w{};
     w.temporal_on = t.temporalOn ? 1u : 0u;
     w.dlss_on = t.dlssOn ? 1u : 0u;
-    w.render_scale_pct = static_cast<uint32_t>(std::clamp(t.renderScalePct, 50, 100));
+    w.render_scale_pct = static_cast<uint32_t>(std::clamp(t.renderScalePct, 50, 200));
     w.jitter_phases = static_cast<uint32_t>(std::max(0, t.jitterPhases));
     // > 0 is the renderer's "auto" sentinel (real biases are <= 0).
     w.mip_bias = t.mipBiasAuto ? 1.0f : std::clamp(t.mipBias, -4.0f, 0.0f);
@@ -6191,7 +6191,40 @@ Engine::TemporalInfo EngineWgpu::GetTemporalInfo()
     out.jitterY = w.jitter_y;
     out.mipBiasEffective = w.mip_bias_effective;
     out.resetThisFrame = w.reset_this_frame != 0;
+    out.msaaSamples = static_cast<int>(w.msaa_samples);
     return out;
+}
+
+// The renderer builds every multisampled pipeline against a launch-time sample count,
+// so this cannot apply live. GameApplication seeds WGR_MSAA from graphics.cfg BEFORE
+// the engine exists; here we only record the wish and say when it lands.
+void EngineWgpu::SetMsaaSamples(int samples)
+{
+    if (samples != 0 && samples != 2 && samples != 4 && samples != 8)
+        return;
+    _msaaRequested = samples;
+    if (!_renderer)
+        return;
+    WgrTemporalInfo w{};
+    wgr_get_temporal_info(_renderer, &w);
+    const int active = static_cast<int>(w.msaa_samples) <= 1 ? 0 : static_cast<int>(w.msaa_samples);
+    if (active != samples)
+        LOG_INFO(Graphics, "Wgpu: MSAA {} requested (active {}); takes effect on the next launch",
+                 samples, active);
+}
+
+// graphics.cfg renderScale: 1.0 = AUTO — leave the renderer's own default alone
+// (which is DLSS Quality at 67% when the route is up, else native). Anything else is
+// an explicit pin, routed through the live temporal tuning like the dev panel does.
+void EngineWgpu::SetRenderScale(float scale)
+{
+    if (!_renderer || !_hdrEnabled)
+        return;
+    if (scale > 0.99f && scale < 1.01f)
+        return;
+    TemporalSettings t = _temporalTuning;
+    t.renderScalePct = std::clamp(static_cast<int>(scale * 100.0f + 0.5f), 50, 200);
+    SetTemporalTuning(t);
 }
 
 uint32_t EngineWgpu::CurrentDrawObjectId()

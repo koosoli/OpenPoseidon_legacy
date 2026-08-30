@@ -167,6 +167,10 @@ impl TemporalUpscaler for DlssUpscaler {
         }
         let render = ctx.render;
         let output = ctx.output;
+        // SSAA territory: DLSS only upscales; above 100% the bilinear pass downsamples.
+        if render.0 > output.0 || render.1 > output.1 {
+            return UpscaleOutcome::Skip;
+        }
         let scale = render.0 as f32 / output.0.max(1) as f32;
         let quality = if scale >= 0.99 {
             dlss::Quality::Dlaa

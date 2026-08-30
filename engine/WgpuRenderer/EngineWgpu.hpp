@@ -183,6 +183,13 @@ class EngineWgpu : public EngineDummy
     // the shipped defaults, so the panel never clobbers an env-tuned session until the
     // user actually moves a control.
     bool SupportsTemporalTuning() const override { return _renderer != nullptr && _hdrEnabled; }
+    // Options-menu graphics knobs that were engine-wide no-ops on wgpu until 2026-08-30.
+    // MSAA is startup-fixed in the renderer, so the setter only records the wish — the
+    // pre-engine env seed in GameApplication makes it real on the next launch.
+    void SetMsaaSamples(int samples) override;
+    // renderScale 1.0 = AUTO (the renderer's own default, incl. DLSS Quality). Any other
+    // value is an explicit pin, applied live through the temporal tuning path.
+    void SetRenderScale(float scale) override;
     TemporalSettings GetTemporalTuning() const override { return _temporalTuning; }
     void SetTemporalTuning(const TemporalSettings& t) override;
     TemporalInfo GetTemporalInfo() override;
@@ -661,6 +668,7 @@ class EngineWgpu : public EngineDummy
     // objects; a recycled DYNAMIC entity address inside the id's lifetime would
     // mis-attribute one frame of motion, which the velocity pass's depth test bounds.
     TemporalSettings _temporalTuning;
+    int _msaaRequested = -1;
     std::unordered_map<const void*, uint32_t> _drawObjectIds;
     uint32_t _nextDrawObjectId = 1;
     const void* _lastDrawObjectPtr = nullptr;

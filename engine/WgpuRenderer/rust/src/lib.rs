@@ -617,6 +617,10 @@ pub struct Renderer {
     // REN-TEMP-001E/F/G: temporal camera state, jitter, static-world velocity + debug view.
     // WGR_TEMPORAL=1 to enable (off by default — jitter with no accumulator is shimmer).
     temporal: temporal::Temporal,
+    // True when temporal / render scale were auto-enabled off the healthy DLSS route;
+    // rolled back if the DLSS backend dies so the fallback is truly native.
+    temporal_auto: bool,
+    render_scale_auto: bool,
     // REN-TEMP-001 §6.7: live tuning (dev panel). Seeded from env; the panel overwrites.
     dlss_runtime_on: bool,
     dlss_auto_exposure: bool,
@@ -973,7 +977,32 @@ impl Renderer {
                             log_level::INFO,
                             "wgpu device created via hal route with NGX extensions (WGR_DLSS)",
                         );
-                        ngx_raw = Some(raw);
+                        // The extension route proves nothing about DLSS itself — the
+                        // NGX extensions are generic Vulkan, so an AMD/Intel box gets
+                        // this far too. Ask the driver NOW whether Super Sampling is
+                        // actually supported; without this gate such a box boots into
+                        // the temporal defaults and shimmers through the bilinear
+                        // fallback at 67% (tester reports, 2026-08-30).
+                        match dlss::feature_requirements(raw.instance, raw.physical_device)
+                        {
+                            Ok(0) => {
+                                log.log(
+                                    log_level::INFO,
+                                    "driver reports DLSS Super Sampling supported",
+                                );
+                                ngx_raw = Some(raw);
+                            }
+                            Ok(bits) => log.log(
+                                log_level::WARN,
+                                &format!(
+                                    "DLSS unsupported on this GPU/driver (bits {bits:#x}); native path"
+                                ),
+                            ),
+                            Err(r) => log.log(
+                                log_level::WARN,
+                                &format!("DLSS support probe failed ({r:#x}); native path"),
+                            ),
+                        }
                         break 'dev (d, q);
                     }
                     Err(e) => log.log(
@@ -1040,18 +1069,27 @@ impl Renderer {
         let prepass_enabled = std::env::var("WGR_PREPASS")
             .map(|v| v != "0")
             .unwrap_or(true);
-        // Compute skin bake: OPT-IN, and currently BROKEN — enabling it explodes skinned
-        // geometry into full-screen triangle shards (probes 2026-08-30: shatter persists
-        // with DLSS off, temporal off AND gpu_driven off, so the corruption is in the
-        // bake/draw path itself, not in any temporal consumer; it predates the ping-pong
-        // since the swap alone cannot un-write a fully re-baked buffer). Until that is
-        // root-caused the default stays OFF even though the temporal path would love the
-        // baked output as per-limb motion vectors — skinned characters ride the rigid/
-        // camera velocity instead, which is the state every owner-validated session ran.
-        // WGR_SKIN_BAKE=1 re-enables it for debugging only.
+        // Compute skin bake. Since 2026-08-30 it feeds ONLY the temporal velocity pass
+        // (per-limb motion vectors for skinned characters); every draw pass VS-skins as
+        // it always did — the original bake-as-draw-source routing shattered the palette
+        // draws and is disconnected (see gfx3d::baked_draw_base). Defaults ON whenever
+        // the temporal path will run (that is what consumes the poses); WGR_SKIN_BAKE
+        // pins either way, and with the bake off skinned characters fall back to rigid/
+        // camera velocity.
+        let temporal_will_run = {
+            let env_on = std::env::var("WGR_TEMPORAL").map(|v| v != "0").unwrap_or(false);
+            #[cfg(feature = "dlss")]
+            {
+                env_on || ngx_raw.is_some()
+            }
+            #[cfg(not(feature = "dlss"))]
+            {
+                env_on
+            }
+        };
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(false);
+            .unwrap_or(temporal_will_run);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance
@@ -1113,13 +1151,16 @@ impl Renderer {
         // render_size() and is upscaled to the swapchain size before bloom/exposure/tonemap;
         // the UI phase is untouched. Requires the HDR path — the LDR-direct path draws straight
         // to the swapchain and has no resolve to rescale. 100 is bit-identical to the old chain.
+        // 50..100 = upscaling (DLSS/bilinear), 100 = native, 101..200 = SSAA (the scene
+        // renders ABOVE output resolution and the bilinear pass downsamples — the DLSS
+        // backend skips itself above 100%).
         let render_scale = std::env::var("WGR_RENDER_SCALE")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
-            .map(|pct| pct.clamp(50, 100))
+            .map(|pct| pct.clamp(50, 200))
             .unwrap_or(100) as f32
             / 100.0;
-        if render_scale < 1.0 {
+        if render_scale != 1.0 {
             if hdr_enabled {
                 log.log(
                     log_level::INFO,
@@ -1139,7 +1180,7 @@ impl Renderer {
         // NGX route came up and the env did not pin a scale. The dev panel's Temporal tab
         // changes it live; a plain (non-dlss) build never reaches this.
         #[cfg(feature = "dlss")]
-        let render_scale = if ngx_raw.is_some()
+        let (render_scale, render_scale_auto) = if ngx_raw.is_some()
             && hdr_enabled
             && std::env::var("WGR_RENDER_SCALE").is_err()
         {
@@ -1147,10 +1188,12 @@ impl Renderer {
                 log_level::INFO,
                 "wgpu render scale defaulting to 67% (DLSS route up; dev panel tunes it live)",
             );
-            0.67
+            (0.67, true)
         } else {
-            render_scale
+            (render_scale, false)
         };
+        #[cfg(not(feature = "dlss"))]
+        let render_scale_auto = false;
         if !prepass_enabled {
             log.log(
                 log_level::INFO,
@@ -1368,6 +1411,8 @@ impl Renderer {
             | (if hdr_enabled { 1 << 6 } else { 0 })
             | (if sample_count > 1 { 1 << 7 } else { 0 });
 
+        #[allow(unused_mut)]
+        let mut temporal_auto = false;
         Ok(Self {
             // 1.35 by default: enough to push the reflection-target edge outside a normal
             // grazing view, without giving away more angular resolution than the mip-filtered
@@ -1416,9 +1461,16 @@ impl Renderer {
                     // The NGX route is up and nothing said otherwise: DLSS is the
                     // default experience, and it needs the temporal contract.
                     t.enabled = true;
+                    temporal_auto = true;
                 }
                 t
             },
+            // True when temporal / the 67% scale were switched on purely because the
+            // DLSS route looked healthy. If the DLSS backend later dies, run_tonemap
+            // rolls exactly these back so the fallback is the untouched native path,
+            // not a jittering bilinear one.
+            temporal_auto,
+            render_scale_auto,
             ngx_route: {
                 #[cfg(feature = "dlss")]
                 {
@@ -2079,8 +2131,32 @@ impl Renderer {
             for n in &notes {
                 self.log.log(log_level::INFO, n);
             }
+            let mut dlss_died = false;
             for m in &disabled {
                 self.log.log(log_level::WARN, m);
+                if m.starts_with("DLSS ") {
+                    dlss_died = true;
+                }
+            }
+            // A dying DLSS backend takes its auto-defaults with it: jitter without an
+            // accumulator is shimmer, and 67% bilinear is not the native look anyone
+            // asked for. Explicit env pins and panel choices are left alone.
+            if dlss_died {
+                if self.temporal_auto && self.temporal.enabled {
+                    self.temporal.enabled = false;
+                    self.log.log(
+                        log_level::WARN,
+                        "temporal path disabled again (was auto-enabled for DLSS)",
+                    );
+                }
+                if self.render_scale_auto && (self.render_scale - 1.0).abs() > 1e-3 {
+                    self.render_scale = 1.0;
+                    self.temporal.notify_reset("DLSS fallback: render scale back to 100%");
+                    self.log.log(
+                        log_level::WARN,
+                        "render scale back to 100% (was auto-set to 67% for DLSS)",
+                    );
+                }
             }
             if let Some(("DLSS", q)) = winner {
                 self.dlss_active_frame = true;
@@ -2195,7 +2271,7 @@ impl Renderer {
         self.temporal.enabled = t.temporal_on != 0;
         self.dlss_runtime_on = t.dlss_on != 0;
         if self.hdr_enabled {
-            let pct = t.render_scale_pct.clamp(50, 100);
+            let pct = t.render_scale_pct.clamp(50, 200);
             let new_scale = pct as f32 / 100.0;
             if (new_scale - self.render_scale).abs() > 1e-3 {
                 self.render_scale = new_scale;
@@ -2231,6 +2307,7 @@ impl Renderer {
             jitter_y: self.temporal.jitter_px[1],
             mip_bias_effective: self.gfx3d.mip_bias_effective(),
             reset_this_frame: u32::from(self.temporal.reset_this_frame()),
+            msaa_samples: self.sample_count,
         }
     }
 

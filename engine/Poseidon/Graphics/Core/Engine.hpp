@@ -1686,7 +1686,7 @@ class Engine : public IGraphicsEngine
     {
         bool temporalOn = true;      // jitter + motion vectors + history
         bool dlssOn = true;          // request; effective only on a WGR_DLSS launch
-        int renderScalePct = 67;     // 50..100 (100 + DLSS = DLAA)
+        int renderScalePct = 67;     // 50..200 (<100 upscaling, 100+DLSS = DLAA, >100 SSAA)
         int jitterPhases = 0;        // 0 = auto (~8 x (out/render)^2)
         bool mipBiasAuto = true;     // auto = half log2(scale)
         float mipBias = -0.3f;       // used when !mipBiasAuto, clamped [-4, 0]
@@ -1710,6 +1710,9 @@ class Engine : public IGraphicsEngine
         float jitterX = 0.0f, jitterY = 0.0f;
         float mipBiasEffective = 0.0f;
         bool resetThisFrame = false;
+        // Active MSAA sample count of the scene targets (1 = off). Fixed at launch;
+        // SetMsaaSamples changes the NEXT launch.
+        int msaaSamples = 1;
     };
 
     struct TonemapSettings

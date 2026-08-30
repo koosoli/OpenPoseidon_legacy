@@ -668,6 +668,52 @@ void ConfigureWgpuUltraEnvironment()
 // Eager-write defaults (autodetected) if the file is missing, then
 // apply the cfg values to the live engine.  Normalize-but-don't-
 // persist mirrors AudioConfig + DisplayConfig.
+// The wgpu renderer fixes its MSAA sample count (and reads env pins) at creation,
+// which happens BEFORE LoadAndApplyGraphicsConfig can run — so the persisted choices
+// that must exist at creation time are seeded into the environment here, from a plain
+// config Load with no engine dependency. 2026-08-30: until this existed, the Options
+// page's Anti-aliasing row wrote a value nothing ever read (SetMsaaSamples was a
+// no-op), and the renderer always booted at its own 4x default.
+void SeedRendererEnvFromGraphicsConfig()
+{
+    GraphicsConfig cfg;
+    if (!cfg.Load(GraphicsConfigPath()))
+        return; // first boot: renderer defaults (4x) match the config default (4)
+    if (cfg.msaaSamples == 0 || cfg.msaaSamples == 2 || cfg.msaaSamples == 4 || cfg.msaaSamples == 8)
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", cfg.msaaSamples == 0 ? 1 : cfg.msaaSamples);
+#ifdef _WIN32
+        _putenv_s("WGR_MSAA", buf);
+#else
+        setenv("WGR_MSAA", buf, 1);
+#endif
+    }
+    // The user turned DLSS off (dev panel save / options): honour it from boot, or
+    // the renderer would flash a DLSS frame before the config could catch up.
+    if (cfg.dlssMode == 0)
+    {
+#ifdef _WIN32
+        _putenv_s("WGR_DLSS", "0");
+#else
+        setenv("WGR_DLSS", "0", 1);
+#endif
+    }
+    // renderScale 1.0 = AUTO: no env pin, the renderer keeps its own default (DLSS
+    // Quality when available). Any other value is the user's explicit pin.
+    if (cfg.renderScale < 0.99f || cfg.renderScale > 1.01f)
+    {
+        const int pct = std::clamp(static_cast<int>(cfg.renderScale * 100.0f + 0.5f), 50, 200);
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", pct);
+#ifdef _WIN32
+        _putenv_s("WGR_RENDER_SCALE", buf);
+#else
+        setenv("WGR_RENDER_SCALE", buf, 1);
+#endif
+    }
+}
+
 void LoadAndApplyGraphicsConfig()
 {
     const std::string path = GraphicsConfigPath();
@@ -957,6 +1003,8 @@ int GameApplication::RunAfterArgumentParsing()
         return 1;
     }
 
+    // Must precede engine creation: the wgpu renderer reads these once, at wgr_create.
+    SeedRendererEnvFromGraphicsConfig();
     if (!CreateAndSetGraphicsEngine())
     {
         Poseidon::Foundation::ShowStartupError(kStartupErrorTitle, "Failed to create the graphics engine.");

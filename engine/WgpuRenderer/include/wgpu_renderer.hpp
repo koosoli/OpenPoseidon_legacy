@@ -2100,6 +2100,9 @@ typedef struct WgrTemporalInfo
     float jitter_x, jitter_y;
     float mip_bias_effective;
     uint32_t reset_this_frame;
+    /// Active MSAA sample count of the scene targets (1 = off). Startup-fixed; the
+    /// menu/panel setting applies on the next launch (WGR_MSAA is the channel).
+    uint32_t msaa_samples;
 } WgrTemporalInfo;
 
 WGR_API void wgr_set_temporal_tuning(WgrRenderer* renderer, const WgrTemporalTuning* tuning);

@@ -74,6 +74,7 @@
 #include <Poseidon/AI/EntityAI.hpp>
 #include <Poseidon/Network/Network.hpp>
 #include <Poseidon/Foundation/Common/GamePaths.hpp>
+#include <Poseidon/UI/Settings/GraphicsConfig.hpp>
 #include <Evaluator/express.hpp>
 #include <filesystem>
 
@@ -4148,7 +4149,7 @@ void DrawAmbientOcclusionTab()
     Dev::PanelHelp("  Stage 2: light the ambient from the direction that is actually OPEN,");
     Dev::PanelHelp("  not from the surface normal. Changes where light comes from, not just");
     Dev::PanelHelp("  how much — this is the one that gives shaded surfaces form.");
-    changed |= Dev::Combo("Raw buffer view", &ao.debugMode, "Off (lit scene) AO (greyscale) Bent normal (RGB) ");
+    changed |= Dev::Combo("Raw buffer view", &ao.debugMode, "Off (lit scene)\0AO (greyscale)\0Bent normal (RGB)\0");
     Dev::PanelHelp("  Off        = the normal lit scene in colour, AO folded into ambient");
     Dev::PanelHelp("  AO         = the visibility buffer; white = open, dark = occluded");
     Dev::PanelHelp("  Bent normal= the direction light arrives from, as colour. Use this to");
@@ -4655,8 +4656,55 @@ void DrawTemporalTab()
     changed |= Dev::Checkbox("Temporal (jitter + motion vectors)", &t.temporalOn);
     changed |= Dev::Checkbox("DLSS Super Resolution", &t.dlssOn);
     Dev::PanelTooltip("Off = bilinear upscale fallback. Needs the NGX route (launch-time).");
-    changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 100);
-    Dev::PanelTooltip("100%% + DLSS = DLAA (max quality, no fps gain). 67%% ~ Quality, 58%% ~ Balanced, 50%% ~ Performance.");
+    changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
+    Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
+    if (ImGui::Button("Native (alles aus)"))
+    {
+        t.temporalOn = false;
+        t.dlssOn = false;
+        t.renderScalePct = 100;
+        changed = true;
+    }
+    Dev::PanelTooltip("Ein Klick: Temporal + DLSS aus, Scale 100%% - das unangetastete native Rendering.");
+
+    {
+        const int active = info.msaaSamples <= 1 ? 0 : info.msaaSamples;
+        static int msaaChoice = -1;
+        if (msaaChoice < 0)
+            msaaChoice = active == 0 ? 0 : active == 2 ? 1 : active == 4 ? 2 : 3;
+        if (ImGui::Combo("MSAA (Neustart)", &msaaChoice, "Off\0" "2x\0" "4x\0" "8x\0"))
+        {
+            const int samples[] = {0, 2, 4, 8};
+            GEngine->SetMsaaSamples(samples[msaaChoice]);
+        }
+        const int chosen[] = {0, 2, 4, 8};
+        if (chosen[msaaChoice] != active)
+            Dev::PanelHelp("MSAA %s greift beim naechsten Start (aktiv: %dx)",
+                           msaaChoice == 0 ? "Off" : chosen[msaaChoice] == 2 ? "2x" : chosen[msaaChoice] == 4 ? "4x" : "8x",
+                           active);
+        Dev::PanelTooltip("Wird in graphics.cfg gespeichert (auch im Optionen-Menue einstellbar); die Renderer-Pipelines sind pro Start fix.");
+
+        // Persist the panel's graphics choices so they survive a restart — the same
+        // file the Options page writes. DLSS off is remembered (dlssMode 0 seeds
+        // WGR_DLSS=0 at boot); scale 100% persists as AUTO (the renderer may then
+        // still pick its DLSS default), any other scale as an explicit pin.
+        if (ImGui::Button("Als Standard speichern"))
+        {
+            const std::string cfgPath = GamePaths::Instance().UserDir() + "graphics.cfg";
+            GraphicsConfig cfg;
+            cfg.Load(cfgPath);
+            cfg.dlssMode = t.dlssOn ? -1 : 0;
+            const int samplesForChoice[] = {0, 2, 4, 8};
+            cfg.msaaSamples = samplesForChoice[msaaChoice];
+            cfg.renderScale = t.renderScalePct == 100 ? 1.0f : t.renderScalePct / 100.0f;
+            if (cfg.Save(cfgPath))
+                LOG_INFO(Graphics, "Dev panel: graphics.cfg saved (dlssMode={}, msaa={}, renderScale={:.2f})",
+                         cfg.dlssMode, cfg.msaaSamples, cfg.renderScale);
+            else
+                LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
+        }
+        Dev::PanelTooltip("Schreibt DLSS an/aus, MSAA und Render scale in graphics.cfg - gilt dann bei jedem Start.");
+    }
 
     Dev::PanelSeparator();
     Dev::PanelHeading("Image tuning");
@@ -6292,7 +6340,7 @@ void DrawMainWindow()
             DrawMaterialDebugTab();
             ImGui::EndTabItem();
         }
-        if (Dev::PanelTabItem("Temporal"))
+        if (Dev::PanelTabItem("Graphics"))
         {
             DrawTemporalTab();
             ImGui::EndTabItem();

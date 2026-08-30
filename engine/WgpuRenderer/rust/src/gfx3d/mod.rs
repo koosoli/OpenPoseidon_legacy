@@ -140,7 +140,8 @@ pub(crate) fn road_pixel_lift() -> f32 {
 /// show through a rise in front of it. `WGR_ROAD_PIXEL_LIFT_MAX_FRAC` sweeps it without a
 /// rebuild, which is how the shipped value was chosen.
 pub(crate) fn road_pixel_lift_max_frac() -> f32 {
-    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.04).clamp(0.0005, 2.0)
+    // 0.0716: the owner's swept value (2026-08-30), up from the first-guess 0.04.
+    env_f32("WGR_ROAD_PIXEL_LIFT_MAX_FRAC", 0.0716).clamp(0.0005, 2.0)
 }
 
 /// Along-ray lift per metre of distance, before the grazing division. `WGR_ROAD_PIXEL_LIFT_PER_M`.
@@ -3268,7 +3269,12 @@ pub struct Gfx3d {
     // This frame's bake plan (one dispatch per distinct skinned mesh+pose) and the
     // draw/caster-side lookup palette_slot -> baked base_vertex. Rebuilt in prepare_skin_bake.
     bake_groups: Vec<BakeGroup>,
-    skin_base_vertex: FxHashMap<u32, u32>,
+    // Keyed by (palette_slot, mesh id): one skeleton (slot) is drawn as SEVERAL
+    // meshes (body, head, weapon...), and every one of them needs its own baked
+    // slice. The original slot-only key with first-seen-wins handed every sibling
+    // mesh the FIRST mesh's baked verts — the full-screen triangle-shard corruption
+    // that shipped (and was reverted) on 2026-08-30.
+    skin_base_vertex: FxHashMap<(u32, u64), u32>,
     // group(0) skin-bake bind ({vbuf, skin, palette_buf, skinned_vbuf}) cached by mesh.
     // palette_buf/skinned_vbuf are whole-buffer and vbuf/skin are per-mesh-constant, so a
     // mesh's bind is stable frame-to-frame — rebuilt only when palette_buf or skinned_vbuf
@@ -4456,13 +4462,25 @@ impl Gfx3d {
 
     // The baked-vertex offset for a skinned draw/caster, or None when the skin bake is
     // off or this slot isn't skinned (docs/compute-skin-bake-plan.md). When Some, the
-    // draw/caster routes through the RIGID pipeline with an identity world and this
-    // base_vertex into `skinned_vbuf` instead of re-skinning in the VS.
-    fn baked_base_vertex(&self, palette_slot: u32) -> Option<u32> {
+    // 2026-08-30: the bake output feeds ONLY the temporal velocity pass. It was
+    // originally also meant to replace VS skinning in the colour/prepass/shadow draws
+    // (identity world + base_vertex into skinned_vbuf), but that routing renders the
+    // palette draws as full-screen triangle shards (kill-door probes in
+    // .tmp-farfield-bench/final-matrix/probe-*, incl. a rest-pose passthrough bake that
+    // STILL shattered - the draw side reads something other than what the bake wrote).
+    // The VS path costs ~nothing on OFP characters, so the draws keep it and this
+    // helper answers None for draw routing; root-causing the draw-side read lives in a
+    // follow-up task. The velocity pass reads the buffers as SSBOs and is unaffected.
+    fn baked_draw_base(&self, _palette_slot: u32, _mesh: u64) -> Option<u32> {
+        None
+    }
+
+    // Velocity-pass association only (collect_skin_bases + render_object_velocity).
+    fn baked_base_vertex(&self, palette_slot: u32, mesh: u64) -> Option<u32> {
         if !self.skin_bake_enabled || palette_slot == NO_PALETTE {
             return None;
         }
-        self.skin_base_vertex.get(&palette_slot).copied()
+        self.skin_base_vertex.get(&(palette_slot, mesh)).copied()
     }
 
     // REN-TEMP-001I: this frame's (object id, mesh) -> baked base_vertex, for the skinned
@@ -4474,7 +4492,7 @@ impl Gfx3d {
             if id == 0 || d.palette_slot == NO_PALETTE {
                 continue;
             }
-            if let Some(base) = self.baked_base_vertex(d.palette_slot) {
+            if let Some(base) = self.baked_base_vertex(d.palette_slot, d.mesh) {
                 out.push((id, d.mesh, base));
             }
         }
@@ -4510,8 +4528,10 @@ impl Gfx3d {
         self.skinned_prev_valid = self.skinned_baked_this_frame && self.skinned_vbuf_prev.is_some();
         self.skinned_baked_this_frame = false;
 
-        // Collect distinct skinned instances by palette_slot. A palette block is one
-        // skeleton's skinning, so a slot maps to exactly one (mesh, pose): first-seen wins.
+        // Collect distinct skinned instances by (palette_slot, mesh). One palette
+        // block is one skeleton's POSE, but that skeleton is drawn as several meshes
+        // (body, head, weapon), each of which needs its own baked slice against the
+        // same block. Deduping by slot alone corrupts every sibling mesh.
         let mut out_base: u32 = 0;
         let mut consider = |mesh_id: u64, palette_slot: u32, this: &mut Self| {
             if palette_slot == NO_PALETTE {
@@ -4523,11 +4543,11 @@ impl Gfx3d {
             if mesh.skin.is_none() || mesh.vert_count == 0 {
                 return;
             }
-            if this.skin_base_vertex.contains_key(&palette_slot) {
+            if this.skin_base_vertex.contains_key(&(palette_slot, mesh_id)) {
                 return;
             }
             let key = KeyData::from_ffi(mesh_id).into();
-            this.skin_base_vertex.insert(palette_slot, out_base);
+            this.skin_base_vertex.insert((palette_slot, mesh_id), out_base);
             this.bake_groups.push(BakeGroup {
                 mesh: key,
                 palette_base: palette_slot,
@@ -4894,6 +4914,18 @@ impl Gfx3d {
             && self.skinned_prev_valid
             && self.skinned_vbuf.is_some()
             && self.skinned_vbuf_prev.is_some();
+        // One-shot proof the SKINNED velocity path went live (it never had before
+        // 2026-08-30: the bake it reads was default-off, and the gate above failed
+        // silently). Says so once in the capture stderr, then stays quiet.
+        if skin_ready {
+            static SKIN_LIVE: std::sync::Once = std::sync::Once::new();
+            SKIN_LIVE.call_once(|| {
+                eprintln!(
+                    "[wgr] skinned velocity live: {} skinned draw(s) this frame (bake ping-pong valid)",
+                    skin_subset.len()
+                );
+            });
+        }
         if subset.is_empty() && !skin_ready {
             return;
         }
@@ -5046,7 +5078,7 @@ impl Gfx3d {
                 if d.index_begin + d.index_count > mesh.index_count {
                     continue;
                 }
-                let Some(cur_base) = self.baked_base_vertex(d.palette_slot) else {
+                let Some(cur_base) = self.baked_base_vertex(d.palette_slot, d.mesh) else {
                     continue;
                 };
                 pass.set_vertex_buffer(0, cur_baked.slice(cur_base as u64 * BAKED_VERT_SIZE..));
@@ -5292,7 +5324,7 @@ impl Gfx3d {
                 // Baked casters (docs/compute-skin-bake-plan.md) route through the RIGID
                 // depth pipeline reading skinned_vbuf; `skinned` = the VS-skinning fallback.
                 let baked = if mesh.skin.is_some() {
-                    self.baked_base_vertex(caster.palette_slot)
+                    self.baked_draw_base(caster.palette_slot, caster.mesh)
                 } else {
                     None
                 };
@@ -5480,7 +5512,7 @@ impl Gfx3d {
                     // Baked casters route through the rigid pipeline reading skinned_vbuf at
                     // base_vertex (identity world in the SSBO); `skin` = the VS-skinning fallback.
                     let baked = if caster.palette_slot != NO_PALETTE {
-                        self.baked_base_vertex(caster.palette_slot)
+                        self.baked_draw_base(caster.palette_slot, caster.mesh)
                     } else {
                         None
                     };
@@ -6061,9 +6093,11 @@ impl Gfx3d {
                         let (chunks, _rem) = view.slice(..).into_chunks::<OBJ_SZ>();
                         chunks.write_iter(order.iter().map(|&i| {
                             let d = &draws[i as usize];
-                            let baked = bake_on
+                            // Draw routing is decoupled from the bake (see
+                            // baked_draw_base): draws always carry their REAL world.
+                            let baked = false && bake_on
                                 && d.palette_slot != NO_PALETTE
-                                && base_map.contains_key(&d.palette_slot);
+                                && base_map.contains_key(&(d.palette_slot, d.mesh));
                             let obj = if baked {
                                 ObjectGpu {
                                     world: IDENTITY_MAT4,
@@ -6169,11 +6203,11 @@ impl Gfx3d {
             }
         }
         // One dynamic-UBO slot per PALETTE_SIZE-matrix block. A block is exactly
-        // the UBO bind size, so slot s lives at s * stride. Skipped when the compute skin
-        // bake is on: it uploads the palette as a storage buffer (prepare_skin_bake) and
-        // no draw uses the VS-skinning path, so this UBO would be dead weight.
+        // the UBO bind size, so slot s lives at s * stride. Uploaded regardless of the
+        // compute bake: since 2026-08-30 the draws ALWAYS VS-skin (the bake feeds only
+        // the velocity pass), so this UBO is live whenever skinned draws exist.
         let slots = palette.len() / PALETTE_SIZE;
-        if slots > 0 && !self.skin_bake_enabled {
+        if slots > 0 {
             palette_grew = self.palette.ensure(device, slots);
             let buf = self.palette.buf.as_ref().unwrap();
             for s in 0..slots {
@@ -6231,7 +6265,7 @@ impl Gfx3d {
                 .is_some_and(|m| m.skin.is_some());
             // A baked draw draws through the RIGID pipeline (identity world + baked verts),
             // so build the plain variant for it, not the skinned one.
-            let baked = self.baked_base_vertex(d.palette_slot).is_some() && has_skin;
+            let baked = self.baked_draw_base(d.palette_slot, d.mesh).is_some() && has_skin;
             let skinned = d.palette_slot != NO_PALETTE && has_skin && !baked;
             let key = PipelineKey::from_draw(d, skinned);
             self.ensure_pipeline(device, key);
@@ -6485,7 +6519,7 @@ impl Gfx3d {
         // baked vertex buffer at `base_vertex`, so it is NOT `skinned` for pipeline/bind
         // selection. Only the true VS-skinning fallback (WGR_SKIN_BAKE=0) sets `skinned`.
         let baked = if mesh.skin.is_some() {
-            self.baked_base_vertex(d.palette_slot)
+            self.baked_draw_base(d.palette_slot, d.mesh)
         } else {
             None
         };

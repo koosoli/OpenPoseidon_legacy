@@ -85,10 +85,17 @@ public:
 	bool      alphaToCoverage  = true;          // MSAA alpha-to-coverage on cutout draws (fence wire,
 	                                             // foliage) — grades sub-pixel features instead of the
 	                                             // hard alpha-test keeping/killing whole pixels
-	float     renderScale      = 1.0f;          // SSAA: render at scale x window and downsample.
+	// DLSS/temporal upscaling: -1 = AUTO (on when the driver supports it — the
+	// renderer's own default), 0 = user said off (persisted; seeds WGR_DLSS=0 at
+	// boot), 1 = force-request. Tolerated as absent in old files (stays -1).
+	int       dlssMode         = -1;
+	float     renderScale      = 1.0f;          // 1.0 = AUTO (renderer default, incl. DLSS Quality).
+	                                            // <1 upscaling pin, >1 SSAA pin; live on wgpu.
 	                                             // 1.0 = off; up to 2.0.  The only general cure for
 	                                             // sub-pixel OPAQUE geometry sparkle (fence bars)
-	int       msaaSamples      = 0;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8
+	int       msaaSamples      = 4;             // MSAA on the frame target: 0 (off) / 2 / 4 / 8.
+	                                            // Matches the wgpu renderer's own default; startup-
+	                                            // fixed there, so changes apply on the next launch.
 	bool      multitexturing   = true;          // Detail-texture / specular second stage on terrain and
 	                                             // objects.  Off drops those draws to the base texture
 	float     brightness       = 1.6f;          // 0.4..1.8
