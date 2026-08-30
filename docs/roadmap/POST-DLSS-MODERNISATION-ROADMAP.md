@@ -86,12 +86,18 @@ larger ownership and concurrency projects begin.
   1797 store misses (registration-time `.rvmat` stages are not in the IR, as designed)
   and 390 whole-file RGBA8 fallback decodes costing 1.1 s — those, not dedup, are the
   next texture-path wins.
-- **GPU-upload frame budget: measured problem, confirmed.** Worst single frame paid
-  36.2 MB / 73.3 ms of texture upload work (43 uploads) — the admission ms-ceiling
-  bounds admissions, but one admitted object can carry dozens of textures, so a
-  per-frame upload byte/time budget (with the GL33-style demote-or-defer semantics
-  still to be designed for WGPU's all-or-nothing chain upload) has a real target.
-  `streaming.texture.frame_peak_*` in any capture is the regression gate.
+- **GPU-upload frame budget: implemented as a lever, then measured null — the spike is
+  one object.** Worst single frame paid 36.2 MB / 73.3 ms of texture upload work
+  (43 uploads). A per-frame upload byte ceiling on admission was implemented
+  (`WGR_OBJECT_STREAM_UPLOAD_MB`, commit `44e418d2`) and A/B'd on the same traverse:
+  it changed nothing (peak 36.4 vs 36.2 MB, 43 uploads in both arms), because the worst
+  frame is a SINGLE admitted object — `church_01.p3d`, 43 textures, 66 ms texture work
+  inside a 285 ms admission (adapt 120 ms + register 149 ms) — and any admission
+  ceiling's residual is `budget + one object` by construction. The lever ships default
+  OFF; the wall-clock ceiling already prevents multi-object pileup. The measured target
+  is therefore **per-object admission cost on the main thread** (ShapeAdapter + GPU
+  registration), which is the async-admission line in Phase 6, not a budget item.
+  `streaming.texture.frame_peak_*` remains the regression gate.
 - **Time from request to residency (Phase 3) now measured** on the one asynchronous
   path: request→ready avg 6.4 s / max 28.3 s, request→installed avg 13.7 s / max
   42.3 s at 30 m/s, with 415 queue-full refusals and 21,001 skipped admission

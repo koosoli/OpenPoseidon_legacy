@@ -2666,18 +2666,24 @@ static float ObjectStreamCeilingMs()
 // short, at least one object is always attempted so the fill terminates, and the residual
 // tail is `budget + one object's textures`.
 //
-// 16 MB is chosen against the measured 36.2 MB worst frame: it roughly halves the spike
-// while staying far above the per-object median, so fill time should be barely touched.
-// The A/B is this lever vs 0 (off, exactly the previous behaviour) on the same traverse;
-// `streaming.texture.frame_peak_*` in the capture is the readout.
+// DEFAULT OFF, and that is a measurement, not caution: the A/B on the same traverse
+// (asset-obs-vehicle30-budget16 vs -r2, 16 MB vs off) changed NOTHING -- peak frame
+// 36.4 vs 36.2 MB, 43 uploads in both arms -- because the worst frame is ONE object
+// (church_01.p3d: 43 textures, 66 ms tex, 285 ms total admission), and the residual
+// tail of any admission ceiling is `budget + one object` by construction. The wall-clock
+// ceiling already prevents the multi-object pileup this lever would bound, so on this
+// workload it is a lever without a problem. It stays available for a workload where
+// many small cold objects land in one frame; the enabled arm costs nothing when idle.
+// The real target the A/B exposed is per-OBJECT admission cost (adapt + register on the
+// main thread), which is the async-admission item, not a budget item.
 static uint64_t ObjectStreamUploadBudgetBytes()
 {
     static const uint64_t bytes = []
     {
         const char* v = std::getenv("WGR_OBJECT_STREAM_UPLOAD_MB");
-        const double parsedMb = v ? std::atof(v) : 16.0;
+        const double parsedMb = v ? std::atof(v) : 0.0;
         if (!(parsedMb > 0.0))
-            return static_cast<uint64_t>(0); // 0 or nonsense = ceiling off
+            return static_cast<uint64_t>(0); // 0 or nonsense = ceiling off (the default)
         return static_cast<uint64_t>(parsedMb * 1024.0 * 1024.0);
     }();
     return bytes;
