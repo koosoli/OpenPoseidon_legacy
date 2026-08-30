@@ -5184,6 +5184,9 @@ impl Renderer {
         // Same boundary for bindless texture slots: a slot freed by texture_destroy
         // this frame may only be reused for creates in later frames.
         self.textures.frame_submitted();
+        // Load-time sky bakes are submitted without waiting; their readbacks complete
+        // during polls/submissions and are drained here, 1-2 frames after registration.
+        self.gfx3d.collect_sky_bakes(&self.device);
         frame.present();
         // REN-TEMP-001E: this frame's camera becomes the previous frame's history.
         self.temporal.end_frame();

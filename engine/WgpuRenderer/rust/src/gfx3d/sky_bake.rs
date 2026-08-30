@@ -278,6 +278,7 @@ impl SkyBake {
     /// Synchronous: it submits and waits. That is fine for a load-time bake and is exactly what
     /// §3d says must NOT happen on the main thread for a whole model library — the caching and
     /// background scheduling live above this, so that this stays a pure, testable function.
+    // Blocking form: submit + wait + read. Used by the unit tests, where a stall is fine.
     pub fn bake(
         &self,
         device: &wgpu::Device,
@@ -286,6 +287,26 @@ impl SkyBake {
         dirs: &[glam::Vec4],
         s: &BakeSettings,
     ) -> Option<(Vec<[f32; 4]>, [f32; 3], [f32; 3])> {
+        let pending = self.bake_begin(device, queue, src, dirs, s)?;
+        if device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
+            return None;
+        }
+        pending.try_take()?
+    }
+
+    // Non-blocking form: encode + submit the whole bake and start the readback map, but do
+    // NOT wait. The caller keeps the PendingBake and calls try_take() once the map has
+    // completed (after a later poll/submit) — this is what keeps a per-model load-time bake
+    // from stalling the main thread on a GPU round-trip (measured 17 ms avg, 173 ms max per
+    // registration on the Everon traverse).
+    pub fn bake_begin(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        src: BakeSource<'_>,
+        dirs: &[glam::Vec4],
+        s: &BakeSettings,
+    ) -> Option<PendingBake> {
         if dirs.is_empty() {
             return None;
         }
@@ -527,16 +548,41 @@ impl SkyBake {
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
-        if device.poll(wgpu::PollType::wait_indefinitely()).is_err()
-            || !matches!(rx.recv(), Ok(Ok(())))
-        {
-            return None;
+        Some(PendingBake {
+            staging,
+            rx,
+            bbox_min,
+            bbox_max,
+        })
+    }
+}
+
+// A bake whose GPU work has been submitted and whose readback map is in flight. The map
+// callback fires during a later device poll or queue submission; try_take() is cheap to
+// call every frame until then.
+pub struct PendingBake {
+    staging: wgpu::Buffer,
+    rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
+    bbox_min: [f32; 3],
+    bbox_max: [f32; 3],
+}
+
+impl PendingBake {
+    // None = still in flight. Some(None) = the map failed (bake lost). Some(Some(..)) = done.
+    #[allow(clippy::option_option)]
+    pub fn try_take(&self) -> Option<Option<(Vec<[f32; 4]>, [f32; 3], [f32; 3])>> {
+        match self.rx.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) | Ok(Err(_)) => Some(None),
+            Ok(Ok(())) => {
+                let slice = self.staging.slice(..);
+                let data = slice.get_mapped_range();
+                let out = bytemuck::cast_slice::<u8, [f32; 4]>(&data).to_vec();
+                drop(data);
+                self.staging.unmap();
+                Some(Some((out, self.bbox_min, self.bbox_max)))
+            }
         }
-        let data = slice.get_mapped_range();
-        let out = bytemuck::cast_slice::<u8, [f32; 4]>(&data).to_vec();
-        drop(data);
-        staging.unmap();
-        Some((out, bbox_min, bbox_max))
     }
 }
 

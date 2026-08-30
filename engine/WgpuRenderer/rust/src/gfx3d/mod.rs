@@ -3331,6 +3331,10 @@ pub struct Gfx3d {
     // bake with none of §3d's caching or scheduling yet, so enabling it on a full model library
     // is the load stall that plan section warns about. WGR_SKY_BAKE_VOLUMES=1 opts in.
     sky_bake_enabled: bool,
+    // Bakes submitted at registration whose readback has not completed yet; drained by
+    // collect_sky_bakes() each frame. A model without its volume yet simply reads as
+    // fully open sky — the pre-bake behaviour — until the result lands a frame or two later.
+    sky_bakes_pending: Vec<(u32, sky_bake::PendingBake)>,
     sky_bake: Option<sky_bake::SkyBake>,
     // model index -> (volume, padded model-space AABB). CPU-side for now; the GPU atlas + the
     // per-fragment sample are the next step.
@@ -4051,6 +4055,7 @@ impl Gfx3d {
                 .map(|v| v != "0")
                 .unwrap_or(true),
             sky_bake: None,
+            sky_bakes_pending: Vec::new(),
             sky_volumes: FxHashMap::default(),
             // Announced through the GAME log (drained by lib.rs into the LogSink on the first
             // frame) so a captured road screenshot can be matched to which arm produced it.
@@ -7229,7 +7234,7 @@ impl Gfx3d {
             .get_or_insert_with(|| sky_bake::SkyBake::new(device, BAKED_VERT_SIZE));
         let dirs = sky_bake::hemisphere_directions();
         let settings = sky_bake::BakeSettings::default();
-        let Some((vis, bmin, bmax)) = bake.bake(
+        let Some(pending) = bake.bake_begin(
             device,
             queue,
             sky_bake::BakeSource::Pool {
@@ -7244,6 +7249,40 @@ impl Gfx3d {
         ) else {
             return;
         };
+        // Registration does NOT wait for the GPU round-trip (that wait was 61% of the
+        // whole cold-model admission cost). collect_sky_bakes() picks the result up.
+        self.sky_bakes_pending.push((model, pending));
+    }
+
+    // Drain completed sky bakes. Called once per frame after submit; the map callbacks
+    // fire during device polls/submissions, so results typically land 1-2 frames after
+    // the registration that started them.
+    pub fn collect_sky_bakes(&mut self, device: &wgpu::Device) {
+        if self.sky_bakes_pending.is_empty() {
+            return;
+        }
+        let _ = device.poll(wgpu::PollType::Poll);
+        let mut i = 0;
+        while i < self.sky_bakes_pending.len() {
+            let (model, pending) = &self.sky_bakes_pending[i];
+            let model = *model;
+            match pending.try_take() {
+                None => {
+                    i += 1;
+                    continue;
+                }
+                Some(None) => {
+                    self.sky_bakes_pending.swap_remove(i);
+                }
+                Some(Some((vis, bmin, bmax))) => {
+                    self.sky_bakes_pending.swap_remove(i);
+                    self.finish_sky_bake(model, vis, bmin, bmax);
+                }
+            }
+        }
+    }
+
+    fn finish_sky_bake(&mut self, model: u32, vis: Vec<[f32; 4]>, bmin: [f32; 3], bmax: [f32; 3]) {
         // Report the first few, because a bake that silently produces an all-open volume is
         // indistinguishable from a working one downstream — the same failure mode the per-frame
         // map's coverage check exists for. `enclosed` is the fraction of voxels that see less
