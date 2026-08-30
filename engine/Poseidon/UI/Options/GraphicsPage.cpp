@@ -550,10 +550,14 @@ void GraphicsPage::RefreshLocalizedChoices()
     for (size_t i = 0; i < m_renderScaleLabels.size(); ++i)
         m_renderScaleCStrs[i] = m_renderScaleLabels[i].c_str();
 
+    // The DLSS entry names the runtime version actually installed, so the picker
+    // itself answers "which DLSS is this" (owner request; the row description was
+    // easy to miss).
+    const std::string dlssVer = DlssRuntimeVersionString();
     m_upscalerLabels[0] = LocalizeStringWithFallback("STR_DISP_MAIN_OPT_VALUE_AUTO", "Auto");
     m_upscalerLabels[1] = LocalizeString("STR_DISP_MAIN_OPT_VALUE_OFF");
-    m_upscalerLabels[2] = "DLSS";
-    m_upscalerLabels[3] = "FSR 1";
+    m_upscalerLabels[2] = dlssVer.empty() ? std::string("DLSS (not found)") : "DLSS " + dlssVer;
+    m_upscalerLabels[3] = "FSR 1.0";
     for (size_t i = 0; i < m_upscalerLabels.size(); ++i)
         m_upscalerCStrs[i] = m_upscalerLabels[i].c_str();
 

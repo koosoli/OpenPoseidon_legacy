@@ -635,6 +635,12 @@ pub struct Renderer {
     // Optional RCAS pass over the DLSS output (NVIDIA removed DLSS's own sharpening;
     // this is the standard external answer). Uses fsr_sharpness for strength.
     dlss_sharpen: bool,
+    // Real sway motion vectors for vegetation (REN-TEMP-001T); WGR_VEG_VELOCITY=0
+    // reverts to camera-only reprojection under the canopy.
+    veg_velocity_on: bool,
+    // Dynamic camera-UBO offset of the MAIN scene camera this frame, for passes
+    // recorded outside render_frame's camera loop (the gpu velocity twin).
+    main_cam_off: u32,
     rcas_sharpener: upscaler::RcasSharpener,
     // Which backend produced the last upscaled frame (ffi::WgrTemporalInfo values).
     last_upscaler: u32,
@@ -1529,6 +1535,10 @@ impl Renderer {
                 .map(|v| v != "0")
                 .unwrap_or(true),
             rcas_sharpener: upscaler::RcasSharpener::new(),
+            veg_velocity_on: std::env::var("WGR_VEG_VELOCITY")
+                .map(|v| v != "0")
+                .unwrap_or(true),
+            main_cam_off: 0,
             fsr_runtime_on: std::env::var("WGR_FSR").map(|v| v != "0").unwrap_or(true),
             fsr_sharpness: std::env::var("WGR_FSR_SHARPNESS")
                 .ok()
@@ -1983,6 +1993,46 @@ impl Renderer {
                 ) {
                     let subset = self.temporal.object_velocity_subset(draws3d);
                     let skin_subset = self.temporal.skinned_velocity_subset(draws3d);
+                    // REN-TEMP-001T: real sway motion for vegetation (WGR_VEG_VELOCITY=0
+                    // falls back to the frozen-canopy behaviour for A/B).
+                    let veg_uniform = if self.veg_velocity_on {
+                        self.temporal.veg_velocity_uniform(&self.foliage_params)
+                    } else {
+                        None
+                    };
+                    let veg_subset = if veg_uniform.is_some() {
+                        self.temporal.veg_velocity_subset(draws3d)
+                    } else {
+                        Vec::new()
+                    };
+                    if !veg_subset.is_empty() {
+                        static VEG_LIVE: std::sync::Once = std::sync::Once::new();
+                        VEG_LIVE.call_once(|| {
+                            eprintln!(
+                                "[wgr] vegetation sway velocity live: {} draw(s) this frame",
+                                veg_subset.len()
+                            );
+                        });
+                    }
+                    // REN-TEMP-001T: the RETAINED set's vegetation (the distant trees
+                    // the owner watched freeze) gets the same real sway motion via the
+                    // gpu-driven velocity twin.
+                    if let Some(veg_u) = veg_uniform.as_ref() {
+                        static VEG_GPU_LIVE: std::sync::Once = std::sync::Once::new();
+                        VEG_GPU_LIVE.call_once(|| {
+                            eprintln!("[wgr] retained vegetation velocity twin active");
+                        });
+                        let gpu_params = temporal::gpu_veg_velocity_params(&obj_uniform, veg_u);
+                        self.gfx3d.render_gpu_driven_velocity(
+                            &self.device,
+                            &self.queue,
+                            encoder,
+                            &vel_view,
+                            &self.textures,
+                            self.main_cam_off,
+                            &gpu_params,
+                        );
+                    }
                     self.gfx3d.render_object_velocity(
                         &self.device,
                         &self.queue,
@@ -1991,7 +2041,9 @@ impl Renderer {
                         draws3d,
                         &subset,
                         &skin_subset,
+                        &veg_subset,
                         &obj_uniform,
+                        veg_uniform.as_ref(),
                     );
                 }
             }
@@ -3723,6 +3775,8 @@ impl Renderer {
             let cull_inputs = self.gfx3d.cull_inputs();
             self.far.set_cull_complement(&self.queue, cull_inputs);
             let offset = (main_scene_cam as u64 * self.gfx3d.camera_stride()) as u32;
+            // REN-TEMP-001T: remembered for the velocity twin recorded in run_tonemap.
+            self.main_cam_off = offset;
             if !self.suppress_world_objects {
                 self.far.dispatch(
                     &self.queue,

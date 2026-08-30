@@ -26,6 +26,46 @@ pub struct ObjVelUniform {
 }
 const _: () = assert!(std::mem::size_of::<ObjVelUniform>() == 208);
 
+// REN-TEMP-001T: uniform for the vegetation-sway velocity variant
+// (velocity_obj.wgsl `VegVelParams`). Sway lanes are (amp, time*speed, dir.x, dir.z)
+// and (gust, leaf flutter, stiffness, 0) for the current and previous frame.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct VegVelUniform {
+    pub sway_cur: [f32; 4],
+    pub sway_cur2: [f32; 4],
+    pub sway_prev: [f32; 4],
+    pub sway_prev2: [f32; 4],
+    pub cams: [f32; 4],
+    pub cam_delta: [f32; 4],
+}
+const _: () = assert!(std::mem::size_of::<VegVelUniform>() == 96);
+
+// REN-TEMP-001T: uniform for the RETAINED-path vegetation velocity twin
+// (gpu_driven.wgsl `GpuVelParams`).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuVegVelParams {
+    pub cur_vp: [f32; 16],
+    pub prev_vp: [f32; 16],
+    pub sway_prev: [f32; 4],
+    pub sway_prev2: [f32; 4],
+    pub cam_delta: [f32; 4],
+    pub vmisc: [f32; 4],
+}
+const _: () = assert!(std::mem::size_of::<GpuVegVelParams>() == 192);
+
+pub fn gpu_veg_velocity_params(obj: &ObjVelUniform, veg: &VegVelUniform) -> GpuVegVelParams {
+    GpuVegVelParams {
+        cur_vp: obj.cur_vp,
+        prev_vp: obj.prev_vp,
+        sway_prev: veg.sway_prev,
+        sway_prev2: veg.sway_prev2,
+        cam_delta: veg.cam_delta,
+        vmisc: obj.misc,
+    }
+}
+
 // Snapshot of the UNJITTERED main scene camera. `view`/`proj` are the raw WgrCamera
 // matrices (column-major, camera-relative view with zeroed translation, forward
 // infinite-far projection whose rasterised depth is stored reversed).
@@ -103,6 +143,8 @@ pub struct Temporal {
     pub prev_jitter_px: [f32; 2],
     cur: Option<CameraSnap>,
     prev: Option<CameraSnap>,
+    // REN-TEMP-001T: last frame's sway lanes (see veg_velocity_uniform).
+    prev_sway: Option<[f32; 8]>,
     // True for exactly the frames whose history is invalid (first frame, render-size
     // change, enable toggle). The velocity pass writes zero and the debug view flashes
     // blue on these frames.
@@ -169,6 +211,7 @@ impl Temporal {
             prev_jitter_px: [0.0; 2],
             cur: None,
             prev: None,
+            prev_sway: None,
             reset: true,
             pending_reset: None,
             last_reset_reason: "first frame",
@@ -395,6 +438,72 @@ impl Temporal {
             // raster and this pass without letting occluded surfaces through.
             misc: [0.02, 0.0, 0.0, 0.0],
         })
+    }
+
+    // REN-TEMP-001T: sway parameters of the PREVIOUS frame, rotated by
+    // veg_velocity_uniform once per frame. None until two frames have passed.
+    // (Field lives here beside the camera history it pairs with.)
+
+    // The vegetation-sway velocity uniform, rotating this frame's sway parameters
+    // into the previous slot. Returns None (and still rotates) while history is
+    // invalid or the wind is flat — the caller then skips the veg pass.
+    pub fn veg_velocity_uniform(
+        &mut self,
+        foliage: &crate::ffi::WgrFoliage,
+    ) -> Option<VegVelUniform> {
+        let cur_sway = [
+            foliage.sway_strength,
+            foliage.sway_time * foliage.sway_speed,
+            foliage.wind_dir_x,
+            foliage.wind_dir_z,
+            foliage.wind_gust,
+            foliage.sway_leaf,
+            foliage.sway_stiffness,
+            0.0,
+        ];
+        let prev_sway = self.prev_sway.replace(cur_sway);
+        if !self.enabled || self.reset || foliage.sway_strength <= 0.0 {
+            return None;
+        }
+        let prev_sway = prev_sway?;
+        let (cur, prev) = (self.cur.as_ref()?, self.prev.as_ref()?);
+        Some(VegVelUniform {
+            sway_cur: [cur_sway[0], cur_sway[1], cur_sway[2], cur_sway[3]],
+            sway_cur2: [cur_sway[4], cur_sway[5], cur_sway[6], 0.0],
+            sway_prev: [prev_sway[0], prev_sway[1], prev_sway[2], prev_sway[3]],
+            sway_prev2: [prev_sway[4], prev_sway[5], prev_sway[6], 0.0],
+            cams: [
+                cur.cam_pos[0],
+                cur.cam_pos[2],
+                prev.cam_pos[0],
+                prev.cam_pos[2],
+            ],
+            cam_delta: [
+                cur.cam_pos[0] - prev.cam_pos[0],
+                cur.cam_pos[1] - prev.cam_pos[1],
+                cur.cam_pos[2] - prev.cam_pos[2],
+                0.0,
+            ],
+        })
+    }
+
+    // The swaying-vegetation subset: (draws3d index, leaf flag). Selection mirrors the
+    // scene VS gate (material sun_ambient.w: 1 = bush, 2 = tree; leaf = alpha-cutout).
+    pub fn veg_velocity_subset(&self, draws: &[crate::ffi::WgrDraw3D]) -> Vec<(u32, f32)> {
+        if !self.enabled || self.reset {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for (i, d) in draws.iter().enumerate() {
+            if d.mat_sun_ambient[3] <= 0.5 || d.palette_slot != crate::ffi::NO_PALETTE {
+                continue;
+            }
+            out.push((i as u32, if d.alpha_ref > 0.0 { 1.0 } else { 0.0 }));
+            if out.len() >= 16384 {
+                break;
+            }
+        }
+        out
     }
 
     // Build the moving-rigid subset for this frame: (draws3d index, previous world

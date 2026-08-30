@@ -88,6 +88,79 @@ fn vs_skinned_velocity(@location(0) pos: vec3<f32>,
     return out;
 }
 
+// --- REN-TEMP-001T: vegetation-sway variant --------------------------------------
+// The wind sway is a closed-form vertex deformation (frame.wgsl veg_sway_offset), so
+// swaying vegetation gets REAL motion vectors: evaluate the same formula at the
+// current and the previous frame's wind parameters and take the difference. Without
+// this, DLSS reads sub-pixel sway as noise and freezes distant canopies (owner
+// report 2026-08-30: trees stop moving at distance under the upscaler).
+//
+// The formula below is a copy of frame.wgsl `veg_sway_offset` with the frame-UBO
+// lanes replaced by this pass's own uniform; keep the two in sync.
+
+struct VegVelParams {
+    sway_cur: vec4<f32>,   // amp, t (time*speed), wind_dir.x, wind_dir.z
+    sway_cur2: vec4<f32>,  // gust fraction, leaf flutter, stiffness exponent, pad
+    sway_prev: vec4<f32>,
+    sway_prev2: vec4<f32>,
+    cams: vec4<f32>,       // cam_cur.xz, cam_prev.xz (phase seed needs ABSOLUTE xz)
+    cam_delta: vec4<f32>,  // cam_cur - cam_prev, xyz (prev-cam-relative rebase)
+};
+
+struct VegInst {
+    world: mat4x4<f32>, // camera-relative current world (static objects: abs is shared)
+    params: vec4<f32>,  // x = leaf (alpha-cutout section: extra flutter), yzw unused
+};
+
+@group(0) @binding(5) var<uniform> veg: VegVelParams;
+@group(0) @binding(6) var<storage, read> veg_insts: array<VegInst>;
+
+const VEG_SWAY_HEIGHT_REF: f32 = 12.0;
+
+fn veg_sway_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32, p: vec4<f32>, p2: vec4<f32>) -> vec3<f32> {
+    let amp = p.x;
+    if (amp <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let t = p.y;
+    let dir = vec2<f32>(p.z, p.w);
+    let hn = clamp(max(model_y, 0.0) / VEG_SWAY_HEIGHT_REF, 0.0, 3.0);
+    let hs = pow(hn, p2.z);
+    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    let gust = 1.0 + 0.65 * p2.x;
+    let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
+    var bend = dir * (amp * hs * s * gust);
+    if (leaf > 0.0) {
+        let f = p2.y * leaf;
+        let perp = vec2<f32>(-dir.y, dir.x);
+        bend = bend + (dir * sin(t * 5.7 + ph * 3.1) + perp * sin(t * 4.3 + ph * 2.3)) *
+                          (amp * hs * 0.22 * f * gust);
+    }
+    return vec3<f32>(bend.x, 0.0, bend.y);
+}
+
+@vertex
+fn vs_veg_velocity(@location(0) pos: vec3<f32>, @builtin(instance_index) inst: u32) -> VsOut {
+    let vi = veg_insts[inst];
+    let p = vec4<f32>(pos, 1.0);
+    let rel = vi.world * p;
+    // Same phase seed as the scene VS: object origin back to ABSOLUTE world xz.
+    let phase = vi.world[3].xz + veg.cams.xy;
+    let leaf = vi.params.x;
+    let s_cur = veg_sway_at(pos.y, phase, leaf, veg.sway_cur, veg.sway_cur2);
+    let s_prev = veg_sway_at(pos.y, phase, leaf, veg.sway_prev, veg.sway_prev2);
+    let cur_pos = vec4<f32>(rel.xyz + s_cur, 1.0);
+    // Previous-camera-relative: abs - prev_cam = rel + (cam_cur - cam_prev).
+    let prev_pos = vec4<f32>(rel.xyz + veg.cam_delta.xyz + s_prev, 1.0);
+    var raster = mats.jittered_vp * cur_pos;
+    raster.z = raster.w - raster.z;
+    var out: VsOut;
+    out.pos = raster;
+    out.cur_clip = mats.cur_vp * cur_pos;
+    out.prev_clip = mats.prev_vp * prev_pos;
+    return out;
+}
+
 @fragment
 fn fs_velocity(in: VsOut) -> @location(0) vec2<f32> {
     // Visibility: this pass has no depth attachment (the scene depth is multisampled,

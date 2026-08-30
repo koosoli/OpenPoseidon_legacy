@@ -394,6 +394,13 @@ struct VelocityObjPass {
     skin_layout: wgpu::BindGroupLayout,
     skin_ssbo: wgpu::Buffer,
     skin_ssbo_cap: u64,
+    // REN-TEMP-001T vegetation-sway variant: cutout cards are double-sided, so its
+    // pipeline draws uncculled; its bind is rebuilt per frame (uniform + instances).
+    veg_pipeline: wgpu::RenderPipeline,
+    veg_layout: wgpu::BindGroupLayout,
+    veg_uniform: wgpu::Buffer,
+    veg_ssbo: wgpu::Buffer,
+    veg_ssbo_cap: u64,
 }
 
 impl VelocityObjPass {
@@ -588,6 +595,108 @@ impl VelocityObjPass {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            // Vegetation-sway variant: bindings 0 (mats), 2 (depth), 5 (sway params),
+            // 6 (instances) — indices match velocity_obj.wgsl.
+            let veg_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_velocity_veg_layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let veg_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("wgr_velocity_veg_pipeline_layout"),
+                    bind_group_layouts: &[Some(&veg_layout)],
+                    immediate_size: 0,
+                });
+            let veg_vbuf_layout = wgpu::VertexBufferLayout {
+                array_stride: BAKED_VERT_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+            };
+            let veg_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("wgr_velocity_veg_pipeline"),
+                layout: Some(&veg_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_veg_velocity"),
+                    buffers: &[veg_vbuf_layout],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Cw,
+                    // Vegetation cards are double-sided; culling would drop half the
+                    // canopy's velocity.
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_velocity"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rg16Float,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let veg_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_veg_uniform"),
+                size: std::mem::size_of::<crate::temporal::VegVelUniform>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let veg_ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("wgr_velocity_veg_insts"),
+                size: 80 * 512,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
             VelocityObjPass {
                 pipeline,
                 layout,
@@ -600,6 +709,11 @@ impl VelocityObjPass {
                 skin_layout,
                 skin_ssbo,
                 skin_ssbo_cap: 16 * 256,
+                veg_pipeline,
+                veg_layout,
+                veg_uniform,
+                veg_ssbo,
+                veg_ssbo_cap: 80 * 512,
             }
         }
     }
@@ -3338,6 +3452,12 @@ pub struct Gfx3d {
     // Depth+normal prepass variant of gpu_pipeline (vs_gpu / fs_gpu_prepass): writes depth +
     // the view-space normal G-buffer so the GPU-driven set participates in the prepass.
     gpu_prepass_pipeline: wgpu::RenderPipeline,
+    // REN-TEMP-001T retained-path vegetation velocity twin + its group(2) resources.
+    gpu_velocity_pipeline: wgpu::RenderPipeline,
+    gpu_vel_layout: wgpu::BindGroupLayout,
+    gpu_vel_uniform: wgpu::Buffer,
+    gpu_vel_bind: Option<wgpu::BindGroup>,
+    gpu_vel_bound_gen: u64,
     // GPU-driven cascade shadow depth pipeline (§6 multi-view, vs_gpu_shadow / fs_gpu_shadow):
     // the retained set cast into each cascade's depth map. Group 0 = the shadow pass UBO.
     gpu_shadow_pipeline: wgpu::RenderPipeline,
@@ -3740,6 +3860,46 @@ impl Gfx3d {
         // per-draw path; group 1 is instances/records/materials.
         let cull = cull::CullState::new(device);
         let gpu_group1_layout = cull::gpu_group1_layout(device);
+        let gpu_vel_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("wgr_gpu_velocity_group2"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let gpu_vel_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_gpu_velocity_uniform"),
+            size: std::mem::size_of::<crate::temporal::GpuVegVelParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let gpu_velocity_pipeline = cull::build_gpu_velocity_pipeline(
+            device,
+            composer,
+            &cameras.layout,
+            &gpu_group1_layout,
+            &gpu_vel_layout,
+            &textures.sampler_array_layout,
+            &conform.layout,
+        );
         let (gpu_pipeline, gpu_prepass_pipeline) = cull::build_gpu_pipeline(
             device,
             composer,
@@ -3933,6 +4093,11 @@ impl Gfx3d {
             gpu_pipeline,
             gpu_reflection_pipeline,
             gpu_prepass_pipeline,
+            gpu_velocity_pipeline,
+            gpu_vel_layout,
+            gpu_vel_uniform,
+            gpu_vel_bind: None,
+            gpu_vel_bound_gen: u64::MAX,
             gpu_shadow_pipeline,
             gpu_group1_layout,
             gpu_group1_bind: None,
@@ -4905,7 +5070,9 @@ impl Gfx3d {
         draws: &[crate::ffi::WgrDraw3D],
         subset: &[(u32, [f32; 16])],
         skin_subset: &[(u32, u32)],
+        veg_subset: &[(u32, f32)],
         uniform: &crate::temporal::ObjVelUniform,
+        veg_uniform: Option<&crate::temporal::VegVelUniform>,
     ) {
         // Skinned entries are drawable only when both sides of the bake ping-pong exist.
         let skin_ready = !skin_subset.is_empty()
@@ -4924,7 +5091,8 @@ impl Gfx3d {
                 );
             });
         }
-        if subset.is_empty() && !skin_ready {
+        let veg_ready = veg_uniform.is_some() && !veg_subset.is_empty();
+        if subset.is_empty() && !skin_ready && !veg_ready {
             return;
         }
         let Some(depth) = self.water_depth_view.clone() else {
@@ -5002,6 +5170,53 @@ impl Gfx3d {
                 ],
             }));
         }
+        let mut veg_bind: Option<wgpu::BindGroup> = None;
+        if veg_ready {
+            let mut vdata: Vec<f32> = Vec::with_capacity(veg_subset.len() * 20);
+            for (idx, leaf) in veg_subset {
+                let d = &draws[*idx as usize];
+                vdata.extend_from_slice(&d.world);
+                vdata.extend_from_slice(&[*leaf, 0.0, 0.0, 0.0]);
+            }
+            let vbytes: &[u8] = bytemuck::cast_slice(&vdata);
+            if (vbytes.len() as u64) > vp.veg_ssbo_cap {
+                vp.veg_ssbo_cap = (vbytes.len() as u64).next_power_of_two();
+                vp.veg_ssbo = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_velocity_veg_insts"),
+                    size: vp.veg_ssbo_cap,
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            queue.write_buffer(&vp.veg_ssbo, 0, vbytes);
+            queue.write_buffer(
+                &vp.veg_uniform,
+                0,
+                bytemuck::bytes_of(veg_uniform.expect("veg_ready")),
+            );
+            veg_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_velocity_veg_bind"),
+                layout: &vp.veg_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: vp.uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&depth),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: vp.veg_uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: vp.veg_ssbo.as_entire_binding(),
+                    },
+                ],
+            }));
+        }
         if vp.bind.is_none() || vp.bound_depth_gen != self.depth_gen {
             vp.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("wgr_velocity_obj_bind"),
@@ -5023,6 +5238,10 @@ impl Gfx3d {
             }));
             vp.bound_depth_gen = self.depth_gen;
         }
+        // Buffer growth and bind caching above needed `vp` mutable; the draw loops
+        // below interleave immutable `self` lookups (meshes, baked bases), so reborrow
+        // immutably before recording.
+        let vp = self.velocity_obj.as_ref().expect("velocity obj pass");
         encoder.push_debug_group("wgr_velocity_obj");
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("wgr_velocity_obj"),
@@ -5080,6 +5299,27 @@ impl Gfx3d {
                     continue;
                 };
                 pass.set_vertex_buffer(0, cur_baked.slice(cur_base as u64 * BAKED_VERT_SIZE..));
+                let first = mesh.alloc.ibase + d.index_begin;
+                pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
+            }
+        }
+        // REN-TEMP-001T: swaying vegetation — real motion vectors from the closed-form
+        // sway evaluated at both frames' wind parameters. Drawn last so its (small)
+        // deltas also override the camera-only reprojection under the canopy.
+        if let Some(veg_bind) = veg_bind.as_ref() {
+            pass.set_pipeline(&vp.veg_pipeline);
+            pass.set_bind_group(0, veg_bind, &[]);
+            for (i, (idx, _)) in veg_subset.iter().enumerate() {
+                let d = &draws[*idx as usize];
+                let key: MeshKey = slotmap::KeyData::from_ffi(d.mesh).into();
+                let Some(mesh) = self.meshes.get(key) else {
+                    continue;
+                };
+                if d.index_begin + d.index_count > mesh.index_count {
+                    continue;
+                }
+                let vert_off = mesh.alloc.vbase as u64 * BAKED_VERT_SIZE;
+                pass.set_vertex_buffer(0, self.pool.vbuf().slice(vert_off..));
                 let first = mesh.alloc.ibase + d.index_begin;
                 pass.draw_indexed(first..first + d.index_count, 0, i as u32..i as u32 + 1);
             }
@@ -8121,6 +8361,94 @@ impl Gfx3d {
                 ],
             )),
         );
+    }
+
+    // REN-TEMP-001T: retained-path vegetation velocity — replays the prepass'
+    // in-frustum indirect stream through the velocity twin pipeline into the velocity
+    // target. Non-canopy instances collapse in the VS, so the cost is dominated by
+    // the vegetation actually on screen.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_gpu_driven_velocity(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        textures: &SharedTextures,
+        cam_off: u32,
+        params: &crate::temporal::GpuVegVelParams,
+    ) {
+        if !self.gpu_driven_enabled {
+            return;
+        }
+        let Some(depth_view) = self.water_depth_view.clone() else {
+            return;
+        };
+        let (Some(camera_bind), Some(group1), Some(args)) = (
+            self.cameras.bind.as_ref(),
+            self.gpu_group1_bind.as_ref(),
+            self.cull.out_args(),
+        ) else {
+            return;
+        };
+        let Some(conform_bind) = self.conform.bind.as_ref() else {
+            return;
+        };
+        queue.write_buffer(&self.gpu_vel_uniform, 0, bytemuck::bytes_of(params));
+        if self.gpu_vel_bind.is_none() || self.gpu_vel_bound_gen != self.depth_gen {
+            self.gpu_vel_bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("wgr_gpu_velocity_bind"),
+                layout: &self.gpu_vel_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.gpu_vel_uniform.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&depth_view),
+                    },
+                ],
+            }));
+            self.gpu_vel_bound_gen = self.depth_gen;
+        }
+        encoder.push_debug_group("wgr_gpu_veg_velocity");
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_gpu_veg_velocity"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.gpu_velocity_pipeline);
+        pass.set_bind_group(0, camera_bind, &[cam_off]);
+        pass.set_bind_group(1, group1, &[]);
+        pass.set_bind_group(2, self.gpu_vel_bind.as_ref().expect("built above"), &[]);
+        pass.set_bind_group(3, textures.sampler_array_bind(), &[]);
+        pass.set_bind_group(4, conform_bind, &[]);
+        pass.set_vertex_buffer(0, self.pool.vbuf().slice(..));
+        pass.set_index_buffer(self.pool.ibuf().slice(..), wgpu::IndexFormat::Uint32);
+        let cap = self.cull.variant_capacity();
+        let counters = self.cull.counter_buf();
+        for v in 0..cull::CULL_VARIANT_COUNT {
+            let offset = v as u64 * cap as u64 * INDIRECT_ARG_SIZE;
+            if self.multi_draw_count_enabled {
+                pass.multi_draw_indexed_indirect_count(args, offset, counters, v as u64 * 4, cap);
+            } else {
+                pass.multi_draw_indexed_indirect(args, offset, cap);
+            }
+        }
+        drop(pass);
+        encoder.pop_debug_group();
     }
 
     #[allow(clippy::too_many_arguments)]

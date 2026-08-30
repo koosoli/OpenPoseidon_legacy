@@ -1891,6 +1891,88 @@ fn prepass_match_from_env() -> f64 {
 // same G-buffer the per-draw fs_prepass fills), so the GPU-driven set participates in the
 // depth+normal prepass (SSAO normals, early-Z) instead of colour-pass only.
 #[allow(clippy::too_many_arguments)]
+// REN-TEMP-001T: the retained-path VEGETATION VELOCITY twin (vs_gpu_velocity /
+// fs_gpu_velocity). Draws the same indirect stream as the prepass into the Rg16Float
+// velocity target; non-canopy instances collapse in the VS. group(2) is the velocity
+// uniform + depth (overlaying the bindless slot the colour variants use there).
+#[allow(clippy::too_many_arguments)]
+pub fn build_gpu_velocity_pipeline(
+    device: &wgpu::Device,
+    composer: &mut naga_oil::compose::Composer,
+    camera_layout: &wgpu::BindGroupLayout,
+    group1_layout: &wgpu::BindGroupLayout,
+    vel_layout: &wgpu::BindGroupLayout,
+    sampler_layout: &wgpu::BindGroupLayout,
+    conform_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let module = crate::shaders::make_module(
+        device,
+        composer,
+        "wgr_gpu_driven_velocity",
+        include_str!("gpu_driven.wgsl"),
+        "gfx3d/gpu_driven.wgsl",
+    );
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("wgr_gpu_velocity_pipeline_layout"),
+        bind_group_layouts: &[
+            Some(camera_layout),
+            Some(group1_layout),
+            Some(vel_layout),
+            Some(sampler_layout),
+            Some(conform_layout),
+        ],
+        immediate_size: 0,
+    });
+    let vbuf_attrs = [
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Float32x3,
+            offset: 0,
+            shader_location: 0,
+        },
+        wgpu::VertexAttribute {
+            format: wgpu::VertexFormat::Uint32,
+            offset: 32,
+            shader_location: 5,
+        },
+    ];
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<crate::ffi::WgrMeshVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &vbuf_attrs,
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_gpu_velocity_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_gpu_velocity"),
+            buffers: &[vbuf_layout],
+            compilation_options: Default::default(),
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            // Vegetation cards are double-sided.
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_gpu_velocity"),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rg16Float,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+            compilation_options: Default::default(),
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 pub fn build_gpu_pipeline(
     device: &wgpu::Device,
     composer: &mut naga_oil::compose::Composer,

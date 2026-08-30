@@ -947,3 +947,133 @@ fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
     let oct = oct_encode(normalize(n_view));
     return vec4<f32>(oct.x, oct.y, 0.0, cov);
 }
+
+// ---------------------------------------------------------------------------------
+// REN-TEMP-001T: velocity twin of the retained path. Rasterises the SAME in-frustum
+// set the prepass draws, but only canopy instances survive the VS (everything else
+// collapses to w=0 and never reaches the rasteriser): swaying vegetation is the one
+// retained content whose motion the fullscreen camera reprojection cannot know.
+// The conform + sway maths below is a COPY of vs_gpu's (and the sway formula a copy
+// of frame.wgsl veg_sway_offset with the frame lanes swapped for last frame's) —
+// keep all three in sync; the 9-vs-17-word bake stride taught us what silent copy
+// drift costs.
+//
+// group(2) here OVERLAYS the bindless-texture group of the colour/prepass variants:
+// the device honours only 5 bind groups, and this entry point never touches the
+// bindless array, so the slot is reused (same per-entry-point duplicate-binding
+// pattern as temporal.wgsl).
+
+struct GpuVelParams {
+    cur_vp: mat4x4<f32>,   // UNJITTERED current view-proj
+    prev_vp: mat4x4<f32>,  // previous frame's view-proj
+    sway_prev: vec4<f32>,  // amp, time*speed, wind_dir.x, wind_dir.z (LAST frame)
+    sway_prev2: vec4<f32>, // gust, leaf flutter, stiffness, 0
+    cam_delta: vec4<f32>,  // cam_cur - cam_prev (prev-camera-relative rebase)
+    vmisc: vec4<f32>,      // x = depth-ratio tolerance for the visibility compare
+};
+
+@group(2) @binding(0) var<uniform> velp: GpuVelParams;
+@group(2) @binding(1) var vel_scene_depth: texture_depth_2d;
+
+fn veg_sway_prev_at(model_y: f32, phase_xz: vec2<f32>, leaf: f32) -> vec3<f32> {
+    let amp = velp.sway_prev.x;
+    if (amp <= 0.0) {
+        return vec3<f32>(0.0, 0.0, 0.0);
+    }
+    let t = velp.sway_prev.y;
+    let dir = vec2<f32>(velp.sway_prev.z, velp.sway_prev.w);
+    let hn = clamp(max(model_y, 0.0) / 12.0, 0.0, 3.0);
+    let hs = pow(hn, velp.sway_prev2.z);
+    let ph = dot(phase_xz, vec2<f32>(0.37, 0.29));
+    let gust = 1.0 + 0.65 * velp.sway_prev2.x;
+    let s = sin(t * 0.9 + ph) * 0.65 + sin(t * 1.63 + ph * 1.7) * 0.35;
+    var bend = dir * (amp * hs * s * gust);
+    if (leaf > 0.0) {
+        let f = velp.sway_prev2.y * leaf;
+        let perp = vec2<f32>(-dir.y, dir.x);
+        bend = bend + (dir * sin(t * 5.7 + ph * 3.1) + perp * sin(t * 4.3 + ph * 2.3)) *
+                          (amp * hs * 0.22 * f * gust);
+    }
+    return vec3<f32>(bend.x, 0.0, bend.y);
+}
+
+struct VelVsOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) cur_clip: vec4<f32>,
+    @location(1) prev_clip: vec4<f32>,
+};
+
+@vertex
+fn vs_gpu_velocity(
+    @builtin(instance_index) rec_slot: u32,
+    @location(0) pos: vec3<f32>,
+    @location(5) conform_sel: u32,
+) -> VelVsOut {
+    var out: VelVsOut;
+    let rec = records[rec_slot];
+    let inst = instances[rec.instance];
+    let canopy = inst.flags & (INST_CANOPY_BUSH | INST_CANOPY_TREE | INST_CANOPY_FOREST);
+    if (canopy == 0u || frame.foliaged.x <= 0.0) {
+        // Not swaying: the fullscreen camera reprojection is already exact. Collapse.
+        out.pos = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+        out.cur_clip = out.pos;
+        out.prev_clip = out.pos;
+        return out;
+    }
+    let world = inst.world;
+    let world_pos_abs = world * vec4<f32>(pos, 1.0);
+    var world_pos = world_pos_abs.xyz - frame.cam_pos.xyz;
+    // Conform (copy of vs_gpu, position lanes only — normals don't matter here).
+    let mode = inst.conform2.z;
+    if (mode > 1.5) {
+        let sy = surface_y(world_pos_abs.xz);
+        if (conform_sel == 1u) {
+            world_pos.y = sy + world_pos.y - inst.conform0.x;
+        } else if (conform_sel == 2u) {
+            world_pos.y = surface_y_raster(world_pos_abs.xz, frame.cam_pos.xyz) - frame.cam_pos.y;
+        }
+    } else if (mode > 0.5) {
+        let s = inst.conform0.x;
+        let xIn = world_pos_abs.x * s + inst.conform0.y;
+        let zIn = world_pos_abs.z * s + inst.conform0.z;
+        let y00 = inst.conform1.x; let y10 = inst.conform1.y;
+        let d1000 = inst.conform1.z; let d0100 = inst.conform1.w;
+        let d1011 = inst.conform2.x; let d0111 = inst.conform2.y;
+        let triA = xIn <= 1.0 - zIn;
+        let py = select(y10 + d0111 - d1011 * xIn - zIn * d0111,
+                        y00 + d1000 * zIn + d0100 * xIn, triA);
+        world_pos.y = py - frame.cam_pos.y + pos.y + inst.conform0.w;
+    }
+    // Phase seed (copy of vs_gpu): per-tree crown centroid on forest patches.
+    var phase_xz = inst.center.xz;
+    if ((inst.flags & INST_CANOPY_FOREST) != 0u) {
+        let cw = world * vec4<f32>(crown_centres[conform_sel].xyz, 1.0);
+        phase_xz = cw.xz;
+    }
+    let leaf = select(0.0, 1.0, section_materials[rec.section].alpha_ref > 0.0);
+    let s_cur = veg_sway_offset(pos.y, phase_xz, leaf);
+    let s_prev = veg_sway_prev_at(pos.y, phase_xz, leaf);
+    let cur_pos = vec4<f32>(world_pos + s_cur, 1.0);
+    let prev_pos = vec4<f32>(world_pos + velp.cam_delta.xyz + s_prev, 1.0);
+    // frame.proj/view carry the jitter; reverse_z is the shared helper.
+    out.pos = reverse_z(frame.proj * frame.view * cur_pos);
+    out.cur_clip = velp.cur_vp * cur_pos;
+    out.prev_clip = velp.prev_vp * prev_pos;
+    return out;
+}
+
+@fragment
+fn fs_gpu_velocity(in: VelVsOut) -> @location(0) vec2<f32> {
+    let frag = vec2<i32>(in.pos.xy);
+    let scene_d = textureLoad(vel_scene_depth, frag, 0);
+    if (in.pos.z < scene_d * (1.0 - velp.vmisc.x)) {
+        discard;
+    }
+    let cur_ndc = in.cur_clip.xy / max(in.cur_clip.w, 1e-6);
+    if (in.prev_clip.w <= 1e-6) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let prev_ndc = in.prev_clip.xy / in.prev_clip.w;
+    let d = cur_ndc - prev_ndc;
+    return vec2<f32>(d.x * 0.5, d.y * -0.5);
+}
