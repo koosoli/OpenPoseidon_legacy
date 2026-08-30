@@ -959,46 +959,33 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // Rotor wash repeatedly injects the fast capillary ripple profile used by
     // bullet impacts, but over a wide rotor-disc-sized area.  This makes the
     // water visibly chatter beneath a helicopter instead of reading as a slow
-    // boat wake, while RPM still controls the strength.
-    const Helicopter* lastRotor = _engine.LastGrassRotor();
-    auto addRotorWash = [&](const Helicopter* helicopter)
+    // boat wake, while RPM still controls the strength. RenderSnapshot S2: the
+    // sources come from the frame's captured block (spinning rotors only, the
+    // occupied helicopter included), so this path no longer walks GWorld or
+    // queries GLandscape per candidate.
     {
-        if (!helicopter || eventCount >= WGR_MAX_WATER_INTERACTIONS)
-            return;
-        const float rotorSpeed = std::clamp(helicopter->RotorSpeed(), 0.0f, 1.0f);
-        if (rotorSpeed <= 0.02f)
-            return;
-        const Vector3 pos = helicopter->Position();
-        const float altitude = pos.Y() - _params.sea_level;
-        // A hovering aircraft can still stir the surface from several metres
-        // up, but do not inject ripples from a helicopter high in the sky or
-        // parked over dry land.
-        if (altitude < -2.0f || altitude > 30.0f || GLandscape->SurfaceY(pos.X(), pos.Z()) > _params.sea_level + 0.25f)
-            return;
-        WgrWaterInteractionEvent& event = events[eventCount++];
-        event.position_radius = {pos.X(), pos.Z(), 3.0f + 12.0f * rotorSpeed, 1.10f * rotorSpeed * rotorSpeed};
-        event.velocity_kind = {0.0f, 0.0f, -20.0f, static_cast<float>(WGR_WATER_INTERACTION_BULLET)};
-        // Bullet events are one-frame impulses. Re-emitting them every frame
-        // while the rotor turns creates a fast, dense ripple field that stops
-        // immediately when the RPM reaches zero.
-        event.time_life_foam_mass = {now, 0.0f, 0.0f, 0.0f};
-        event.direction_depth_flags = {0.0f, 0.0f, 0.0f, static_cast<float>(WGR_WATER_INTERACTION_PENDING_IMPULSE)};
-    };
-    bool lastRotorWasListed = false;
-    if (GWorld)
-    {
-        for (int i = 0; i < GWorld->NVehicles(); ++i)
+        const render::frame::PresentationSnapshot& rotorSnap = render::frame::GPresentationSnapshot();
+        for (int i = 0; i < rotorSnap.rotorSourceCount && eventCount < WGR_MAX_WATER_INTERACTIONS; ++i)
         {
-            const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
-            if (helicopter == lastRotor)
-                lastRotorWasListed = true;
-            addRotorWash(helicopter);
+            const render::frame::PresentationSnapshot::RotorSource& source = rotorSnap.rotorSources[i];
+            const float rotorSpeed = source.rotorSpeed;
+            const float altitude = source.y - _params.sea_level;
+            // A hovering aircraft can still stir the surface from several metres
+            // up, but do not inject ripples from a helicopter high in the sky or
+            // parked over dry land.
+            if (altitude < -2.0f || altitude > 30.0f || source.groundY > _params.sea_level + 0.25f)
+                continue;
+            WgrWaterInteractionEvent& event = events[eventCount++];
+            event.position_radius = {source.x, source.z, 3.0f + 12.0f * rotorSpeed, 1.10f * rotorSpeed * rotorSpeed};
+            event.velocity_kind = {0.0f, 0.0f, -20.0f, static_cast<float>(WGR_WATER_INTERACTION_BULLET)};
+            // Bullet events are one-frame impulses. Re-emitting them every frame
+            // while the rotor turns creates a fast, dense ripple field that stops
+            // immediately when the RPM reaches zero.
+            event.time_life_foam_mass = {now, 0.0f, 0.0f, 0.0f};
+            event.direction_depth_flags = {0.0f, 0.0f, 0.0f,
+                                           static_cast<float>(WGR_WATER_INTERACTION_PENDING_IMPULSE)};
         }
     }
-    // Mirrors grass: the dismounted player helicopter may be absent from the
-    // distributed list for a short handoff, but its weak link still exposes RPM.
-    if (!lastRotorWasListed)
-        addRotorWash(lastRotor);
 
     const bool reset = !_haveInteractionDomain || std::abs(originX - _interaction.domain.x) > interactionSize * 0.5f ||
                        std::abs(originZ - _interaction.domain.y) > interactionSize * 0.5f;

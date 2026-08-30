@@ -75,6 +75,29 @@ struct PresentationSnapshot
     float windGustFraction = 0.0f;
     float windMeanSpeed = 0.0f;        // gust-free mean: the cloud deck / sea spectrum inputs
     float windMeanDirectionRad = 0.0f;
+
+    // --- Slice S2: interactors -------------------------------------------------------
+    // The camera-attached entity (player on foot, or the occupied vehicle): the grass
+    // crush field. Raw facts only; the consumers keep their radius/strength formulas.
+    bool hasInteractor = false;
+    Vector3 interactorPos = VZero;
+    float interactorVisibleSize = 0.0f;
+    bool interactorRotor = false;       // the occupied vehicle is a helicopter with blades turning
+    float interactorRotorSpeed = 0.0f;  // 0..1
+
+    // Every helicopter in the world with its rotor still turning (the occupied one
+    // included, so the just-dismounted handoff needs no weak link on the renderer),
+    // nearest-to-camera first when more exist than fit. groundY is the terrain height
+    // under it, captured here so the consumers stop reading GLandscape per candidate.
+    struct RotorSource
+    {
+        float x = 0.0f, y = 0.0f, z = 0.0f;
+        float rotorSpeed = 0.0f; // 0..1
+        float groundY = 0.0f;
+    };
+    static constexpr int kMaxRotorSources = 8;
+    int rotorSourceCount = 0;
+    RotorSource rotorSources[kMaxRotorSources] = {};
 };
 
 // The one instance. Main thread only, rewritten every frame.

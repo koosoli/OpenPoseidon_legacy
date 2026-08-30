@@ -7685,27 +7685,23 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // CameraOn is the controlled entity in normal first/third-person play:
     // the player on foot, or their occupied car/tank. Its visible size gives
     // vehicles a wider flattened footprint without special vehicle classes.
-    if (GWorld && GWorld->CameraOn())
+    // RenderSnapshot S2: the interactor and the rotor sources come from the frame's
+    // captured block -- the world walks its own vehicle list once, and this path no
+    // longer touches GWorld/GLandscape or runs RTTI.
+    const render::frame::PresentationSnapshot& grassSnap = render::frame::GPresentationSnapshot();
+    if (grassSnap.hasInteractor)
     {
-        const Object* interactor = GWorld->CameraOn();
-        const Vector3 pos = interactor->Position();
+        const Vector3 pos = grassSnap.interactorPos;
         params.interactor_x = pos.X();
         params.interactor_z = pos.Z();
-        params.interactor_radius = std::clamp(interactor->VisibleSize() * 0.55f, 1.1f, 8.0f);
+        params.interactor_radius = std::clamp(grassSnap.interactorVisibleSize * 0.55f, 1.1f, 8.0f);
         params.interactor_strength = 1.0f;
-        // CameraOn is the occupied vehicle in normal play. Give a powered
-        // player helicopter an explicit, large crush field here rather than
-        // depending solely on the broader world-vehicle query below. This
-        // also covers the first few frames of takeoff before the helicopter
-        // has settled into the distributed vehicle list.
-        // CameraOn is normally a Soldier, not a helicopter. dyn_cast is an
-        // asserting checked cast in this codebase, so use RTTI's nullable
-        // form for this optional rotor-wash branch.
-        if (const Helicopter* helicopter = dynamic_cast<const Helicopter*>(interactor);
-            helicopter && helicopter->RotorSpeed() > 0.02f)
+        // The occupied vehicle in normal play. A powered player helicopter gets an
+        // explicit, large crush field here rather than depending solely on the
+        // rotor-source list below; this also covers the first few frames of takeoff.
+        if (grassSnap.interactorRotor && grassSnap.interactorRotorSpeed > 0.02f)
         {
-            _lastGrassRotor = const_cast<Helicopter*>(helicopter);
-            const float rotorSpeed = std::clamp(helicopter->RotorSpeed(), 0.0f, 1.0f);
+            const float rotorSpeed = grassSnap.interactorRotorSpeed;
             // Values in (1, 1.5] are a renderer-local rotor-wash marker.
             // The shader decodes the fractional part as actual RPM, making
             // both bending and flutter rise smoothly as the rotor spools up.
@@ -7736,11 +7732,11 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
             _haveGrassTrackPos = true;
         }
     }
-    // Rotor wash is intentionally transient. Keep the four closest powered
-    // helicopters whose downwash can reach the camera's grass region. Checking
-    // the rotor state rather than Airborne() makes the effect begin while the
-    // skids are still touching the ground, where takeoff is most noticeable.
-    if (GWorld && GLandscape)
+    // Rotor wash is intentionally transient. Keep the four closest rotor sources
+    // whose downwash can reach the camera's grass region; the snapshot's list is
+    // spinning-rotor helicopters only (rotor state, not Airborne(), so the effect
+    // begins while the skids still touch the ground) and already includes the
+    // occupied one -- the old just-dismounted weak-link special case is gone.
     {
         struct Candidate
         {
@@ -7750,45 +7746,28 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         std::array<Candidate, WGR_GRASS_DOWNWASH_COUNT> nearest{};
         for (Candidate& entry : nearest)
             entry.distance2 = std::numeric_limits<float>::infinity();
-        const Vector3 cameraPos = GWorld->CameraOn() ? GWorld->CameraOn()->Position() : VZero;
-        auto addDownwash = [&](const Helicopter* helicopter)
+        const Vector3 cameraPos = grassSnap.hasInteractor ? grassSnap.interactorPos : VZero;
+        for (int i = 0; i < grassSnap.rotorSourceCount; ++i)
         {
-            if (!helicopter)
-                return;
-            const float rotorSpeed = std::clamp(helicopter->RotorSpeed(), 0.0f, 1.0f);
-            // Rotor inertia survives leaving the aircraft and engine shutoff,
-            // so retain the transient wash until the blades actually stop.
-            if (rotorSpeed <= 0.02f)
-                return;
-            const Vector3 pos = helicopter->Position();
-            const float height = std::max(0.0f, pos.Y() - GLandscape->SurfaceY(pos.X(), pos.Z()));
+            const render::frame::PresentationSnapshot::RotorSource& source = grassSnap.rotorSources[i];
+            const float height = std::max(0.0f, source.y - source.groundY);
             if (height > 65.0f)
-                return;
+                continue;
+            const float rotorSpeed = source.rotorSpeed;
             const float radius = (10.0f + height * 0.40f) * (0.45f + 0.55f * rotorSpeed);
             // Keep enough force at the upper edge of the range to visibly
             // press the blades flat rather than merely sway their tips.
             const float strength = std::clamp(1.10f - height / 260.0f, 0.85f, 1.0f) * rotorSpeed * rotorSpeed;
-            const float distance2 = (pos - cameraPos).SquareSizeXZ();
+            const float dx = source.x - cameraPos.X();
+            const float dz = source.z - cameraPos.Z();
+            const float distance2 = dx * dx + dz * dz;
             int slot = 0;
             for (int j = 1; j < WGR_GRASS_DOWNWASH_COUNT; ++j)
                 if (nearest[j].distance2 > nearest[slot].distance2)
                     slot = j;
             if (distance2 < nearest[slot].distance2)
-                nearest[slot] = Candidate{distance2, {pos.X(), pos.Z(), radius, strength}};
-        };
-        bool lastRotorWasListed = false;
-        for (int i = 0; i < GWorld->NVehicles(); ++i)
-        {
-            const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
-            if (helicopter == _lastGrassRotor)
-                lastRotorWasListed = true;
-            addDownwash(helicopter);
+                nearest[slot] = Candidate{distance2, {source.x, source.z, radius, strength}};
         }
-        // A helicopter that the player has just left can momentarily be
-        // absent from the distributed list. Keep using its live rotor RPM
-        // through the weak link during that handoff.
-        if (!lastRotorWasListed)
-            addDownwash(_lastGrassRotor);
         for (int i = 0; i < WGR_GRASS_DOWNWASH_COUNT; ++i)
             params.downwash[i] = nearest[i].wash;
     }
@@ -7824,11 +7803,6 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
             }
         }
     }
-}
-
-const Helicopter* EngineWgpu::LastGrassRotor() const
-{
-    return _lastGrassRotor;
 }
 
 bool EngineWgpu::HasGrassPhotoClumps() const

@@ -8,6 +8,10 @@
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
+#include <Poseidon/World/World.hpp>
+#include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
+
+#include <algorithm>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
@@ -67,6 +71,73 @@ void CapturePresentationSnapshot()
 
     snap.rainEffectiveDensity = GRain.EffectiveDensity();
     snap.seaRippleGain = GRain.Params().seaRippleGain;
+
+    // S2: interactors. ONE walk of the vehicle list replaces the two per-frame RTTI
+    // walks the grass and water renderers used to run themselves, and including the
+    // occupied vehicle here removes the "just dismounted, briefly absent from the
+    // distributed list" weak-link special case both of them carried.
+    if (GWorld)
+    {
+        const Object* cameraOn = GWorld->CameraOn();
+        if (cameraOn)
+        {
+            snap.hasInteractor = true;
+            snap.interactorPos = cameraOn->Position();
+            snap.interactorVisibleSize = cameraOn->VisibleSize();
+        }
+        auto addRotor = [&](const Helicopter* helicopter)
+        {
+            if (!helicopter)
+                return;
+            const float rotorSpeed = std::clamp(helicopter->RotorSpeed(), 0.0f, 1.0f);
+            if (rotorSpeed <= 0.02f)
+                return;
+            const Vector3 pos = helicopter->Position();
+            PresentationSnapshot::RotorSource source;
+            source.x = pos.X();
+            source.y = pos.Y();
+            source.z = pos.Z();
+            source.rotorSpeed = rotorSpeed;
+            source.groundY = GLandscape ? GLandscape->SurfaceY(pos.X(), pos.Z()) : 0.0f;
+            if (snap.rotorSourceCount < PresentationSnapshot::kMaxRotorSources)
+            {
+                snap.rotorSources[snap.rotorSourceCount++] = source;
+                return;
+            }
+            // Full: keep the nearest to the interactor/camera.
+            const Vector3 reference = snap.hasInteractor ? snap.interactorPos : snap.cameraPos;
+            int farthest = 0;
+            float farthestD2 = -1.0f;
+            for (int i = 0; i < snap.rotorSourceCount; ++i)
+            {
+                const float dx = snap.rotorSources[i].x - reference.X();
+                const float dz = snap.rotorSources[i].z - reference.Z();
+                const float d2 = dx * dx + dz * dz;
+                if (d2 > farthestD2)
+                {
+                    farthestD2 = d2;
+                    farthest = i;
+                }
+            }
+            const float dx = source.x - reference.X();
+            const float dz = source.z - reference.Z();
+            if (dx * dx + dz * dz < farthestD2)
+                snap.rotorSources[farthest] = source;
+        };
+        const Helicopter* cameraHeli = dynamic_cast<const Helicopter*>(cameraOn);
+        if (cameraHeli)
+        {
+            addRotor(cameraHeli);
+            snap.interactorRotor = snap.rotorSourceCount > 0;
+            snap.interactorRotorSpeed = std::clamp(cameraHeli->RotorSpeed(), 0.0f, 1.0f);
+        }
+        for (int i = 0; i < GWorld->NVehicles(); ++i)
+        {
+            const Helicopter* helicopter = dynamic_cast<const Helicopter*>(GWorld->GetVehicle(i));
+            if (helicopter && helicopter != cameraHeli)
+                addRotor(helicopter);
+        }
+    }
 
     if (GWind.IsActive())
     {

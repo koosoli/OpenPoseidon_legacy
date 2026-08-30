@@ -63,10 +63,6 @@ class EngineWgpu : public EngineDummy
     // False if the window / wgpu device failed to come up; the factory then drops
     // this engine and falls back.
     bool IsValid() const { return _renderer != nullptr; }
-    // The most recently controlled helicopter, held as a weak link so effects
-    // can survive the player leaving the cockpit without risking a stale pointer.
-    const Helicopter* LastGrassRotor() const;
-
     RString GetDebugName() const override;
     RString GetRendererName() const override;
 
@@ -851,9 +847,6 @@ class EngineWgpu : public EngineDummy
     Vector3 _lastGrassTrackPos = VZero;
     float _grassTrackSampleTime = 0.0f;
     bool _haveGrassTrackPos = false;
-    // A weak link remains valid while a recently exited helicopter still
-    // exists, and becomes null automatically if the vehicle is deleted.
-    LLink<Helicopter> _lastGrassRotor;
     float _smSunFactor = 1.0f;
     bool _smEnabledFrame = false;
     shadow::CascadeSet _smCascades;
