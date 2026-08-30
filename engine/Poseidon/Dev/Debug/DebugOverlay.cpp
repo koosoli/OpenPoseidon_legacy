@@ -4740,8 +4740,7 @@ void DrawTemporalTab()
             else
                 LOG_ERROR(Graphics, "Dev panel: saving '{}' failed", cfgPath);
         }
-        Dev::PanelTooltip("Writes the whole tab (upscaler, quality, MSAA, scale, sharpness, DLSS sharpen) to
-"
+        Dev::PanelTooltip("Writes the whole tab (upscaler, quality, MSAA, scale, sharpness, DLSS sharpen) to "
                           "graphics.cfg - the same file the Options menu edits - applied on every launch.");
     }
 
