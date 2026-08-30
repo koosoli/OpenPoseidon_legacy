@@ -1693,7 +1693,11 @@ class Engine : public IGraphicsEngine
         float reactiveSky = 0.4f;    // history-control strengths (0 = off)
         float reactiveWater = 0.3f;
         bool dlssAutoExposure = true; // owner's A/B winner 2026-08-30
-        bool jitterYFlip = true;      // convention A/B arms — leave alone unless probing
+        bool jitterYFlip = true;
+        // FSR 1 (EASU+RCAS): the license-clean upscaler that ships in every build;
+        // active when DLSS is off/unavailable and render scale < 100 %.
+        bool fsrOn = true;
+        float fsrSharpness = 0.25f; // RCAS stops: 0 = sharpest, 2 = mildest      // convention A/B arms — leave alone unless probing
         bool mvRenderSpace = false;
         bool mvFlip = false;
     };
@@ -1713,6 +1717,8 @@ class Engine : public IGraphicsEngine
         // Active MSAA sample count of the scene targets (1 = off). Fixed at launch;
         // SetMsaaSamples changes the NEXT launch.
         int msaaSamples = 1;
+        // 0 none/native, 1 DLSS, 2 FSR1, 3 bilinear.
+        int activeUpscaler = 0;
     };
 
     struct TonemapSettings

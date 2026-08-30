@@ -4550,30 +4550,10 @@ void DrawRenderTab()
         return;
     }
 
-    int samples = GEngine->GetMsaaSamples();
-    int sampleIdx = samples >= 8 ? 3 : samples >= 4 ? 2 : samples >= 2 ? 1 : 0;
-    if (Dev::Combo("MSAA", &sampleIdx,
-                   "Off\0"
-                   "2x\0"
-                   "4x\0"
-                   "8x\0"))
-    {
-        static const int kSamples[] = {0, 2, 4, 8};
-        GEngine->SetMsaaSamples(kSamples[sampleIdx]);
-    }
-
-    float scale = GEngine->GetRenderScale();
-    if (Dev::SliderFloat("Render scale (SSAA)", &scale, 1.0f, 2.0f, "%.2f"))
-        GEngine->SetRenderScale(scale);
-    Dev::PanelSameLine();
-    if (Dev::Button("1x"))
-        GEngine->SetRenderScale(1.0f);
-    Dev::PanelSameLine();
-    if (Dev::Button("1.5x"))
-        GEngine->SetRenderScale(1.5f);
-    Dev::PanelSameLine();
-    if (Dev::Button("2x"))
-        GEngine->SetRenderScale(2.0f);
+    // MSAA + render scale moved to the Graphics tab (2026-08-30) — this tab carried
+    // the GL33-era controls, and once the wgpu engine actually honoured the setters
+    // both tabs showed competing knobs for the same state.
+    Dev::PanelHelp("MSAA und Render scale: -> Tab \"Graphics\"");
 
     bool a2c = GEngine->GetAlphaToCoverage();
     if (Dev::Checkbox("Alpha-to-coverage (cutout AA; needs MSAA)", &a2c))
@@ -4645,6 +4625,9 @@ void DrawTemporalTab()
     Dev::PanelHelp("temporal %s | DLSS route %s | DLSS %s (quality %d)",
                    info.temporalActive ? "on" : "off", info.dlssRoute ? "up" : "down",
                    info.dlssActive ? "active" : "inactive", info.dlssQuality);
+    static const char* kUpscalerNames[] = {"nativ (kein Upscaler)", "DLSS", "FSR 1", "Bilinear"};
+    Dev::PanelHelp("aktiver Upscaler: %s",
+                   kUpscalerNames[info.activeUpscaler >= 0 && info.activeUpscaler <= 3 ? info.activeUpscaler : 0]);
     Dev::PanelHelp("jitter (%.3f, %.3f) px | mip bias %.3f%s", info.jitterX, info.jitterY,
                    info.mipBiasEffective, info.resetThisFrame ? " | HISTORY RESET" : "");
     if (!info.dlssRoute)
@@ -4655,7 +4638,11 @@ void DrawTemporalTab()
     bool changed = false;
     changed |= Dev::Checkbox("Temporal (jitter + motion vectors)", &t.temporalOn);
     changed |= Dev::Checkbox("DLSS Super Resolution", &t.dlssOn);
-    Dev::PanelTooltip("Off = bilinear upscale fallback. Needs the NGX route (launch-time).");
+    Dev::PanelTooltip("Braucht die NGX-Route (NVIDIA, beim Start erkannt). Aus/nicht verfuegbar -> FSR 1 uebernimmt.");
+    changed |= Dev::Checkbox("FSR 1 (freier Fallback-Upscaler)", &t.fsrOn);
+    Dev::PanelTooltip("AMD FidelityFX EASU+RCAS (MIT-Lizenz, laeuft auf jeder GPU). Greift wenn DLSS aus ist.\nBeide aus = weiches Bilinear.");
+    changed |= Dev::SliderFloat("FSR Schaerfe (0 = max)", &t.fsrSharpness, 0.0f, 2.0f, "%.2f");
+    Dev::PanelTooltip("RCAS-Schaerfung in Blendenstufen: 0 = schaerfste Stufe, 2 = mildeste.");
     changed |= ImGui::SliderInt("Render scale %", &t.renderScalePct, 50, 200);
     Dev::PanelTooltip("<100%% = upscaling (67%% ~ DLSS Quality). 100%% + DLSS = DLAA. >100%% = SSAA (supersampling, expensive).");
     if (ImGui::Button("Native (alles aus)"))

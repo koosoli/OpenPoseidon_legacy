@@ -629,6 +629,11 @@ pub struct Renderer {
     dlss_mv_flip: bool,
     dlss_active_frame: bool,
     dlss_last_quality: i32,
+    // FSR 1 backend switches (live; env-seeded). Sharpness in RCAS stops.
+    fsr_runtime_on: bool,
+    fsr_sharpness: f32,
+    // Which backend produced the last upscaled frame (ffi::WgrTemporalInfo values).
+    last_upscaler: u32,
     // MSAA sample count of the scene targets (1 = off). Fixed at startup (WGR_MSAA); pipelines
     // and offscreen targets are built against it.
     sample_count: u32,
@@ -1087,9 +1092,18 @@ impl Renderer {
                 env_on
             }
         };
+        // 2026-08-30 evening, owner report on the default-on build: heavy sky
+        // ghosting, stripes and wall-texture flicker under motion — the skinned
+        // velocity pass consumes the bake OUTPUT, and that content was never
+        // validated (the draw-side probes only proved the draws read the wrong
+        // memory; garbage baked positions rasterise garbage motion vectors, which
+        // is exactly this symptom set). OFF until a readback test pins the bake
+        // content; skinned characters ride rigid/camera velocity, the state every
+        // owner-validated session ran.
+        let _ = temporal_will_run;
         let skin_bake_enabled = std::env::var("WGR_SKIN_BAKE")
             .map(|v| v != "0")
-            .unwrap_or(temporal_will_run);
+            .unwrap_or(false);
         // Indirect draw is default-on when the adapter supports it; WGR_INDIRECT=0 forces
         // the direct draw_one path for A/B. Disabled outright without INDIRECT_FIRST_INSTANCE.
         let indirect_enabled = indirect_first_instance
@@ -1487,6 +1501,7 @@ impl Renderer {
                 if let Some(raw) = ngx_raw {
                     v.push(Box::new(upscaler::DlssUpscaler::new(raw)));
                 }
+                v.push(Box::new(upscaler::FsrUpscaler::new()));
                 v.push(Box::new(upscaler::BilinearUpscaler::new()));
                 v
             },
@@ -1505,6 +1520,13 @@ impl Renderer {
                 .unwrap_or(false),
             dlss_active_frame: false,
             dlss_last_quality: -1,
+            fsr_runtime_on: std::env::var("WGR_FSR").map(|v| v != "0").unwrap_or(true),
+            fsr_sharpness: std::env::var("WGR_FSR_SHARPNESS")
+                .ok()
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.25)
+                .clamp(0.0, 2.0),
+            last_upscaler: 0,
             sample_count,
             tonemap,
             underwater,
@@ -2101,6 +2123,8 @@ impl Renderer {
                 reset: self.temporal.reset_this_frame(),
                 settings: upscaler::UpscaleSettings {
                     temporal_enabled: self.temporal.enabled,
+                    fsr_on: self.fsr_runtime_on,
+                    fsr_sharpness: self.fsr_sharpness,
                     dlss_runtime_on: self.dlss_runtime_on,
                     dlss_auto_exposure: self.dlss_auto_exposure,
                     jitter_y_flip: self.dlss_jy_flip,
@@ -2162,6 +2186,12 @@ impl Renderer {
                 self.dlss_active_frame = true;
                 self.dlss_last_quality = q;
             }
+            self.last_upscaler = match winner {
+                Some(("DLSS", _)) => 1,
+                Some(("FSR1", _)) => 2,
+                Some(("bilinear", _)) => 3,
+                _ => 0,
+            };
             up_view
         } else {
             post_source
@@ -2289,6 +2319,8 @@ impl Renderer {
         self.dlss_jy_flip = t.flags & 2 != 0;
         self.dlss_mv_render_space = t.flags & 4 != 0;
         self.dlss_mv_flip = t.flags & 8 != 0;
+        self.fsr_runtime_on = t.flags & 16 != 0;
+        self.fsr_sharpness = t.fsr_sharpness.clamp(0.0, 2.0);
     }
 
     fn temporal_info(&self) -> ffi::WgrTemporalInfo {
@@ -2308,6 +2340,7 @@ impl Renderer {
             mip_bias_effective: self.gfx3d.mip_bias_effective(),
             reset_this_frame: u32::from(self.temporal.reset_this_frame()),
             msaa_samples: self.sample_count,
+            active_upscaler: self.last_upscaler,
         }
     }
 

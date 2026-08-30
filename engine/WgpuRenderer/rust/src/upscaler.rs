@@ -14,6 +14,10 @@
 
 pub struct UpscaleSettings {
     pub temporal_enabled: bool,
+    // FSR 1 spatial backend (EASU+RCAS): the license-clean upscaler every build
+    // ships. sharpness is in RCAS stops (0 = sharpest, 2 = mildest).
+    pub fsr_on: bool,
+    pub fsr_sharpness: f32,
     pub dlss_runtime_on: bool,
     pub dlss_auto_exposure: bool,
     pub jitter_y_flip: bool,
@@ -91,6 +95,274 @@ impl TemporalUpscaler for BilinearUpscaler {
         ctx.encoder.push_debug_group("wgr_upscale");
         blitter.copy(ctx.device, ctx.encoder, &ctx.color_view, &ctx.output_view);
         ctx.encoder.pop_debug_group();
+        UpscaleOutcome::Done { quality: -1 }
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// FSR 1 (EASU + RCAS), ported from AMD's MIT-licensed FidelityFX sources — see
+// fsr1.wgsl for provenance and the SRTM wrapper that lets it run on our HDR slot.
+// Spatial-only: needs no jitter, no motion vectors, works identically in every build.
+// This is the shipped upscaler for non-NVIDIA players (plan follow-up "FSR", staged:
+// FSR1 now, the temporal FSR 3.1 port only if this proves insufficient).
+
+pub struct FsrUpscaler {
+    kit: Option<FsrKit>,
+    intermediate: Option<(wgpu::Texture, wgpu::TextureView)>,
+}
+
+struct FsrKit {
+    easu: wgpu::ComputePipeline,
+    rcas: wgpu::ComputePipeline,
+    layout: wgpu::BindGroupLayout,
+    params: wgpu::Buffer,
+    sampler: wgpu::Sampler,
+}
+
+impl FsrUpscaler {
+    pub fn new() -> Self {
+        FsrUpscaler {
+            kit: None,
+            intermediate: None,
+        }
+    }
+
+    fn ensure_kit(&mut self, device: &wgpu::Device) {
+        self.kit.get_or_insert_with(|| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("wgr_fsr1"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("fsr1.wgsl").into()),
+            });
+            let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("wgr_fsr1"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: wgpu::BufferSize::new(80),
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::StorageTexture {
+                            access: wgpu::StorageTextureAccess::WriteOnly,
+                            format: wgpu::TextureFormat::Rgba16Float,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("wgr_fsr1"),
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+            let mk = |entry: &str| {
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some(entry),
+                    layout: Some(&pl),
+                    module: &module,
+                    entry_point: Some(entry),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            };
+            FsrKit {
+                easu: mk("easu"),
+                rcas: mk("rcas"),
+                layout,
+                params: device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("wgr_fsr1_params"),
+                    size: 80,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                sampler: device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("wgr_fsr1"),
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    ..Default::default()
+                }),
+            }
+        });
+    }
+}
+
+// FsrEasuCon (ffx_fsr1.h), viewport == full input texture in our use.
+fn easu_constants(render: (u32, u32), output: (u32, u32)) -> [f32; 16] {
+    let (iw, ih) = (render.0 as f32, render.1 as f32);
+    let (ow, oh) = (output.0 as f32, output.1 as f32);
+    [
+        iw / ow,
+        ih / oh,
+        0.5 * iw / ow - 0.5,
+        0.5 * ih / oh - 0.5,
+        1.0 / iw,
+        1.0 / ih,
+        1.0 / iw,
+        -1.0 / ih,
+        -1.0 / iw,
+        2.0 / ih,
+        1.0 / iw,
+        2.0 / ih,
+        0.0,
+        4.0 / ih,
+        0.0,
+        0.0,
+    ]
+}
+
+impl TemporalUpscaler for FsrUpscaler {
+    fn label(&self) -> &'static str {
+        "FSR1"
+    }
+
+    fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome {
+        if !ctx.settings.fsr_on {
+            return UpscaleOutcome::Skip;
+        }
+        // EASU only upscales; SSAA (render above output) stays with the bilinear
+        // downsample. render == output is allowed: EASU is ~identity and RCAS still
+        // buys its sharpening.
+        if ctx.render.0 > ctx.output.0 || ctx.render.1 > ctx.output.1 {
+            return UpscaleOutcome::Skip;
+        }
+        let device = ctx.device;
+        // Intermediate (EASU output, tonemapped domain) at the output size.
+        let need_new = self
+            .intermediate
+            .as_ref()
+            .map(|(t, _)| (t.width(), t.height()) != ctx.output)
+            .unwrap_or(true);
+        if need_new {
+            let t = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("wgr_fsr1_mid"),
+                size: wgpu::Extent3d {
+                    width: ctx.output.0,
+                    height: ctx.output.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::STORAGE_BINDING,
+                view_formats: &[],
+            });
+            let v = t.create_view(&wgpu::TextureViewDescriptor::default());
+            self.intermediate = Some((t, v));
+        }
+        let mut data = [0f32; 20];
+        data[..16].copy_from_slice(&easu_constants(ctx.render, ctx.output));
+        data[16] = (-ctx.settings.fsr_sharpness.clamp(0.0, 2.0)).exp2();
+        self.ensure_kit(device);
+        let kit = self.kit.as_ref().expect("ensured above");
+        ctx.queue
+            .write_buffer(&kit.params, 0, bytemuck::cast_slice(&data));
+        let (_, mid_view) = self.intermediate.as_ref().expect("ensured above");
+        let easu_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_fsr1_easu"),
+            layout: &kit.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&ctx.color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&kit.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: kit.params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(mid_view),
+                },
+            ],
+        });
+        let rcas_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("wgr_fsr1_rcas"),
+            layout: &kit.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(mid_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&kit.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: kit.params.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&ctx.output_view),
+                },
+            ],
+        });
+        let gx = ctx.output.0.div_ceil(8);
+        let gy = ctx.output.1.div_ceil(8);
+        ctx.encoder.push_debug_group("wgr_fsr1");
+        {
+            let mut cp = ctx
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("wgr_fsr1_easu"),
+                    timestamp_writes: None,
+                });
+            cp.set_pipeline(&kit.easu);
+            cp.set_bind_group(0, &easu_bind, &[]);
+            cp.dispatch_workgroups(gx, gy, 1);
+        }
+        {
+            let mut cp = ctx
+                .encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("wgr_fsr1_rcas"),
+                    timestamp_writes: None,
+                });
+            cp.set_pipeline(&kit.rcas);
+            cp.set_bind_group(0, &rcas_bind, &[]);
+            cp.dispatch_workgroups(gx, gy, 1);
+        }
+        ctx.encoder.pop_debug_group();
+        {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            let (rw, rh) = ctx.render;
+            let (ow, oh) = ctx.output;
+            ONCE.call_once(|| {
+                eprintln!("[wgr] FSR1 active: {rw}x{rh} -> {ow}x{oh} (EASU+RCAS, SRTM-wrapped)");
+            });
+        }
         UpscaleOutcome::Done { quality: -1 }
     }
 }

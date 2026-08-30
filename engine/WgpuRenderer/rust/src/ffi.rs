@@ -1655,8 +1655,10 @@ pub struct WgrTemporalTuning {
     pub reactive_sky: f32,
     pub reactive_water: f32,
     // bit0 = DLSS auto-exposure, bit1 = jitter-Y flip, bit2 = MV render-space,
-    // bit3 = MV flip.
+    // bit3 = MV flip, bit4 = FSR1 enabled.
     pub flags: u32,
+    /// RCAS sharpness in stops (0 = sharpest, 2 = mildest).
+    pub fsr_sharpness: f32,
 }
 
 #[repr(C)]
@@ -1677,6 +1679,9 @@ pub struct WgrTemporalInfo {
     /// Active MSAA sample count of the scene targets (1 = off). Startup-fixed; the
     /// menu/panel setting applies on the next launch (WGR_MSAA is the channel).
     pub msaa_samples: u32,
+    /// Which upscaler produced the last frame: 0 none/native, 1 DLSS, 2 FSR1,
+    /// 3 bilinear.
+    pub active_upscaler: u32,
 }
 
 /// Push live temporal/upscaler tuning (dev panel). Null-safe.
