@@ -51,6 +51,11 @@ namespace ShapeAdapter
     LODShapeWithShadow* convertToLODShape(const Model& model, bool reversed = false,
                                           const AdapterBankTables* tables = nullptr);
 
+    // MAIN THREAD ONLY (config probe, file table, recursive ShapeBank::New). The
+    // no-tables conversion runs this itself; a caller that passed tables MUST call
+    // it afterwards, before OptimizeOneShape.
+    void CreateAdapterProxies(LODShapeWithShadow* shape, const Model& model);
+
     // MAT-053 -- the bridged-vehicle pilot seat. A bridged A1/A2/A3 vehicle's crew
     // proxies point at Arma-era placeholder models that exist neither as files nor
     // as config classes, so the adapter SKIPS them and no ManProxy is ever Present();

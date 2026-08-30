@@ -465,13 +465,174 @@ void BuildAdapterBankTables(const Poseidon::Model::Model& model, AdapterBankTabl
     }
 }
 
+// Proxy objects for a converted shape. MAIN THREAD ONLY: the probe reads the
+// config (Pars) and the file table (QIFStreamB), and NewProxyObject/NewObject
+// recurse into ShapeBank::New. Split out of convertToLODShape so the geometry
+// conversion can run on a preparer worker; callers that pass bank tables to the
+// conversion MUST call this afterwards, before OptimizeOneShape
+// (Shape::SerializeBin creates proxies before optimize, and that order stands).
+void CreateAdapterProxies(LODShapeWithShadow* shape, const Poseidon::Model::Model& model)
+{
+    if (model.sourceFormat != "ODOL")
+        return;
+    const int lodCount = static_cast<int>(model.lodLevels.size());
+    // MAT-053: candidate pilot/driver seats from SKIPPED crew proxies, one per
+    // lod they appear on; resolved to a single seat after the loop, when the
+    // shape's resolutions exist and FindSpecLevel can name the interior LOD.
+    std::vector<std::pair<int, ::Vector3>> bridgedSeatCandidates;
+    // Proxies must be created before OptimizeShapes (Shape::SerializeBin order)
+    {
+        for (int li = 0; li < lodCount; li++)
+        {
+            Shape* lod = shape->_lods[li];
+            if (!lod)
+                continue;
+            if (li >= static_cast<int>(model.lodLevels.size()))
+                continue;
+            const auto& lodLevel = model.lodLevels[li];
+            for (size_t pi = 0; pi < lodLevel.mesh.proxies.size(); pi++)
+            {
+                const auto& proxy = lodLevel.mesh.proxies[pi];
+                ProxyModelName proxyName = normalizeProxyModelName(proxy.name);
+                RString modelName(proxyName.modelName.c_str());
+
+                // AST-016B: probe before constructing. On OFP data every
+                // proxy shape ships, but the rev-40+ ODOL conversion now
+                // forwards proxy records whose models this install may not
+                // carry (Arma 1's crew placeholders under ca\temp\proxies\
+                // are not files anywhere -- the retail game resolves them
+                // another way). Letting Shapes.New discover the absence
+                // raises WarningMessage, and one warning is all it takes:
+                // InitVehicles fails the whole mission on the error latch
+                // (GetMaxError() >= EMError). An absent proxy model must
+                // degrade to an absent proxy, not a refused mission.
+                //
+                // Owner report 2026-08-26 ("even in original OFP assets I
+                // spawn far behind the cockpit"): the first version of this
+                // probe checked ONLY the file, but a classic crew proxy is
+                // a bare name ("uh60pilot") whose model is supplied by its
+                // CfgNonAIVehicles class ("Proxyuh60pilot") -- there is no
+                // file of that name and never was. The probe silently
+                // dropped 102 stock cockpit-crew proxies per mission, the
+                // driver ManProxy was never Present(), GetProxyCamera
+                // returned false, and every interior camera fell back to
+                // the MODEL ORIGIN -- metres behind the seat on aircraft.
+                // So: a proxy whose config class exists is NEVER skipped;
+                // the file probe is the fallback for config-less paths
+                // (the Arma-era \ca\temp\... placeholders this probe was
+                // written for, which have neither class nor file).
+                const bool proxyHasConfigClass =
+                    (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr;
+                if (!proxyHasConfigClass && !QIFStreamB::FileExist(GetShapeName(modelName)))
+                {
+                    // MAT-053: before dropping a PILOT/DRIVER seat, remember where it
+                    // was (first one wins -- proxy sequence 1 is the pilot). The name
+                    // test mirrors CfgCrew's own vocabulary; "view_*" anchors are not
+                    // seats.
+                    {
+                        const char* base = modelName;
+                        for (const char* q = modelName; *q; q++)
+                            if (*q == '\\' || *q == '/')
+                                base = q + 1;
+                        std::string leaf(base);
+                        for (char& c : leaf)
+                            c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                        // "out" excluded: a tank ships both `driver` and
+                        // `driverout` (the turn-out seat), and `find("driver")`
+                        // matches both -- storing the out seat here put a
+                        // buttoned-up driver's camera at the hatch head position.
+                        if (leaf.rfind("view", 0) != 0 &&
+                            (leaf.find("pilot") != std::string::npos ||
+                             leaf.find("driver") != std::string::npos) &&
+                            leaf.find("codriver") == std::string::npos &&
+                            leaf.find("out") == std::string::npos)
+                        {
+                            const auto& pm = proxy.transform.m;
+                            bridgedSeatCandidates.push_back(
+                                {li, ::Vector3(-pm[0][3], pm[1][3], -pm[2][3])});
+                        }
+                    }
+                    LOG_INFO(Graphics, "Proxy model absent, skipped: {} (from {})",
+                             (const char*)modelName, proxy.name);
+                    continue;
+                }
+
+                Ref<ProxyObject> po = new ProxyObject;
+                if (GReplaceProxies)
+                {
+                    RString proxyType = RString("Proxy") + modelName;
+                    RString proxyShape = GetShapeName(modelName);
+                    po->obj = NewObject(proxyType, proxyShape);
+                }
+                else
+                {
+                    po->obj = NewProxyObject(modelName);
+                }
+                if (!po->obj)
+                    continue;
+
+                po->name = modelName;
+                po->id = proxy.id >= 0 ? proxy.id : proxyName.id;
+                po->selection = static_cast<int>(proxy.selectionIndex);
+
+                const auto& m = proxy.transform.m;
+                Matrix4 trans;
+                trans.SetDirectionAside(::Vector3(m[0][0], m[0][1], m[0][2]));
+                trans.SetDirectionUp(::Vector3(m[1][0], m[1][1], m[1][2]));
+                trans.SetDirection(::Vector3(m[2][0], m[2][1], m[2][2]));
+                trans.SetPosition(::Vector3(m[0][3], m[1][3], m[2][3]));
+
+                LODShapeWithShadow* pshape = po->obj->GetShape();
+                if (pshape)
+                    trans.SetPosition(trans.FastTransform(pshape->BoundingCenter()));
+                po->obj->SetTransform(trans);
+                po->invTransform = trans.InverseScaled();
+                po->obj->SetDestructType(DestructNo);
+                lod->_proxy.Add(po);
+            }
+        }
+    }
+
+    // MAT-053 resolution: pick the seat from the VIEW-PILOT (else VIEW-GUNNER) LOD
+    // when one carries it -- on every bridged model measured, the graphical-LOD
+    // records disagree with the view-LOD record by a 180-degree turn about Y (A1
+    // UH-60 lod0 seat -0.65,-1.51,-4.57 vs view-lod +0.65,-1.51,+4.57), and the
+    // view-LOD one is the one that put the camera in the cockpit.
+    if (!bridgedSeatCandidates.empty())
+    {
+        // Preference order among the interior LODs. VIEW_CARGO is in the list
+        // because an Arma 3 helicopter need not have a VIEW_PILOT LOD at all --
+        // the MH-9 ships 1200 (cargo) for the whole cabin and no 1100, so
+        // without this the seat came from whichever graphical LOD happened to
+        // be first.
+        const int vp = shape->FindSpecLevel(VIEW_PILOT);
+        const int vg = shape->FindSpecLevel(VIEW_GUNNER);
+        const int vc = shape->FindSpecLevel(VIEW_CARGO);
+        const ::Vector3* chosen = &bridgedSeatCandidates.front().second;
+        for (const auto& cand : bridgedSeatCandidates)
+        {
+            if (cand.first == vp)
+            {
+                chosen = &cand.second;
+                break;
+            }
+            if (cand.first == vg || cand.first == vc)
+            {
+                chosen = &cand.second;
+            }
+        }
+        std::lock_guard<std::mutex> lock(GBridgedSeatMutex);
+        GBridgedSeats[static_cast<const void*>(shape)] = *chosen;
+    }
+}
+
 LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool reversed,
                                       const AdapterBankTables* tables)
 {
     // Sub-bucket timers for the Phase-6 question "what inside adapt is main-thread-bound".
     // Accumulated across LODs, logged once per model when the total is worth reading.
     const auto adaptT0 = ::Poseidon::Dev::Perf::Now();
-    double tanMs = 0.0, texMs = 0.0, matMs = 0.0, proxyMs = 0.0, vfillMs = 0.0, faceMs = 0.0, areaMs = 0.0, tailMs = 0.0;
+    double tanMs = 0.0, texMs = 0.0, matMs = 0.0, vfillMs = 0.0, faceMs = 0.0, areaMs = 0.0, tailMs = 0.0;
     auto shape = new LODShapeWithShadow();
 
     // Must match the lowered name used in ShapeBank::New
@@ -1187,156 +1348,11 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         shape->_paths = model.pathsIdx;
         shape->_hitpoints = model.hitpointsIdx;
 
-        // MAT-053: candidate pilot/driver seats from SKIPPED crew proxies, one per
-        // lod they appear on; resolved to a single seat after the loop, when the
-        // shape's resolutions exist and FindSpecLevel can name the interior LOD.
-        std::vector<std::pair<int, ::Vector3>> bridgedSeatCandidates;
-        // Proxies must be created before OptimizeShapes (Shape::SerializeBin order)
-        {
-            for (int li = 0; li < lodCount; li++)
-            {
-                Shape* lod = shape->_lods[li];
-                if (!lod)
-                    continue;
-                if (li >= static_cast<int>(model.lodLevels.size()))
-                    continue;
-                const auto& lodLevel = model.lodLevels[li];
-                for (size_t pi = 0; pi < lodLevel.mesh.proxies.size(); pi++)
-                {
-                    const auto& proxy = lodLevel.mesh.proxies[pi];
-                    ProxyModelName proxyName = normalizeProxyModelName(proxy.name);
-                    RString modelName(proxyName.modelName.c_str());
-
-                    // AST-016B: probe before constructing. On OFP data every
-                    // proxy shape ships, but the rev-40+ ODOL conversion now
-                    // forwards proxy records whose models this install may not
-                    // carry (Arma 1's crew placeholders under ca\temp\proxies\
-                    // are not files anywhere -- the retail game resolves them
-                    // another way). Letting Shapes.New discover the absence
-                    // raises WarningMessage, and one warning is all it takes:
-                    // InitVehicles fails the whole mission on the error latch
-                    // (GetMaxError() >= EMError). An absent proxy model must
-                    // degrade to an absent proxy, not a refused mission.
-                    //
-                    // Owner report 2026-08-26 ("even in original OFP assets I
-                    // spawn far behind the cockpit"): the first version of this
-                    // probe checked ONLY the file, but a classic crew proxy is
-                    // a bare name ("uh60pilot") whose model is supplied by its
-                    // CfgNonAIVehicles class ("Proxyuh60pilot") -- there is no
-                    // file of that name and never was. The probe silently
-                    // dropped 102 stock cockpit-crew proxies per mission, the
-                    // driver ManProxy was never Present(), GetProxyCamera
-                    // returned false, and every interior camera fell back to
-                    // the MODEL ORIGIN -- metres behind the seat on aircraft.
-                    // So: a proxy whose config class exists is NEVER skipped;
-                    // the file probe is the fallback for config-less paths
-                    // (the Arma-era \ca\temp\... placeholders this probe was
-                    // written for, which have neither class nor file).
-                    const bool proxyHasConfigClass =
-                        (Pars >> "CfgNonAIVehicles").FindEntry(RString("Proxy") + modelName) != nullptr;
-                    if (!proxyHasConfigClass && !QIFStreamB::FileExist(GetShapeName(modelName)))
-                    {
-                        // MAT-053: before dropping a PILOT/DRIVER seat, remember where it
-                        // was (first one wins -- proxy sequence 1 is the pilot). The name
-                        // test mirrors CfgCrew's own vocabulary; "view_*" anchors are not
-                        // seats.
-                        {
-                            const char* base = modelName;
-                            for (const char* q = modelName; *q; q++)
-                                if (*q == '\\' || *q == '/')
-                                    base = q + 1;
-                            std::string leaf(base);
-                            for (char& c : leaf)
-                                c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                            // "out" excluded: a tank ships both `driver` and
-                            // `driverout` (the turn-out seat), and `find("driver")`
-                            // matches both -- storing the out seat here put a
-                            // buttoned-up driver's camera at the hatch head position.
-                            if (leaf.rfind("view", 0) != 0 &&
-                                (leaf.find("pilot") != std::string::npos ||
-                                 leaf.find("driver") != std::string::npos) &&
-                                leaf.find("codriver") == std::string::npos &&
-                                leaf.find("out") == std::string::npos)
-                            {
-                                const auto& pm = proxy.transform.m;
-                                bridgedSeatCandidates.push_back(
-                                    {li, ::Vector3(-pm[0][3], pm[1][3], -pm[2][3])});
-                            }
-                        }
-                        LOG_INFO(Graphics, "Proxy model absent, skipped: {} (from {})",
-                                 (const char*)modelName, proxy.name);
-                        continue;
-                    }
-
-                    Ref<ProxyObject> po = new ProxyObject;
-                    const auto proxyT0 = ::Poseidon::Dev::Perf::Now();
-                    if (GReplaceProxies)
-                    {
-                        RString proxyType = RString("Proxy") + modelName;
-                        RString proxyShape = GetShapeName(modelName);
-                        po->obj = NewObject(proxyType, proxyShape);
-                    }
-                    else
-                    {
-                        po->obj = NewProxyObject(modelName);
-                    }
-                    proxyMs += ::Poseidon::Dev::Perf::ElapsedMs(proxyT0);
-                    if (!po->obj)
-                        continue;
-
-                    po->name = modelName;
-                    po->id = proxy.id >= 0 ? proxy.id : proxyName.id;
-                    po->selection = static_cast<int>(proxy.selectionIndex);
-
-                    const auto& m = proxy.transform.m;
-                    Matrix4 trans;
-                    trans.SetDirectionAside(::Vector3(m[0][0], m[0][1], m[0][2]));
-                    trans.SetDirectionUp(::Vector3(m[1][0], m[1][1], m[1][2]));
-                    trans.SetDirection(::Vector3(m[2][0], m[2][1], m[2][2]));
-                    trans.SetPosition(::Vector3(m[0][3], m[1][3], m[2][3]));
-
-                    LODShapeWithShadow* pshape = po->obj->GetShape();
-                    if (pshape)
-                        trans.SetPosition(trans.FastTransform(pshape->BoundingCenter()));
-                    po->obj->SetTransform(trans);
-                    po->invTransform = trans.InverseScaled();
-                    po->obj->SetDestructType(DestructNo);
-                    lod->_proxy.Add(po);
-                }
-            }
-        }
-
-        // MAT-053 resolution: pick the seat from the VIEW-PILOT (else VIEW-GUNNER) LOD
-        // when one carries it -- on every bridged model measured, the graphical-LOD
-        // records disagree with the view-LOD record by a 180-degree turn about Y (A1
-        // UH-60 lod0 seat -0.65,-1.51,-4.57 vs view-lod +0.65,-1.51,+4.57), and the
-        // view-LOD one is the one that put the camera in the cockpit.
-        if (!bridgedSeatCandidates.empty())
-        {
-            // Preference order among the interior LODs. VIEW_CARGO is in the list
-            // because an Arma 3 helicopter need not have a VIEW_PILOT LOD at all --
-            // the MH-9 ships 1200 (cargo) for the whole cabin and no 1100, so
-            // without this the seat came from whichever graphical LOD happened to
-            // be first.
-            const int vp = shape->FindSpecLevel(VIEW_PILOT);
-            const int vg = shape->FindSpecLevel(VIEW_GUNNER);
-            const int vc = shape->FindSpecLevel(VIEW_CARGO);
-            const ::Vector3* chosen = &bridgedSeatCandidates.front().second;
-            for (const auto& cand : bridgedSeatCandidates)
-            {
-                if (cand.first == vp)
-                {
-                    chosen = &cand.second;
-                    break;
-                }
-                if (cand.first == vg || cand.first == vc)
-                {
-                    chosen = &cand.second;
-                }
-            }
-            std::lock_guard<std::mutex> lock(GBridgedSeatMutex);
-            GBridgedSeats[static_cast<const void*>(shape)] = *chosen;
-        }
+        // Proxies: created inline on the legacy (no-tables) path only. With tables
+        // the conversion may be running on a worker, and proxy creation is bank
+        // work -- the caller runs CreateAdapterProxies on the main thread after.
+        if (!tables)
+            CreateAdapterProxies(shape, model);
 
         // Oxygen creates sections before marking proxy faces hidden, so section hints
         // lack IsHiddenProxy. Patch any section containing a proxy face selection.
@@ -1567,9 +1583,9 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
     if (adaptTotal >= 5.0)
     {
         LOG_INFO(Graphics,
-                 "ShapeAdapter split: {} total={:.1f} [tan={:.1f} vfill={:.1f} face={:.1f} tex={:.1f} mat={:.1f} proxy={:.1f} area={:.1f} tail={:.1f} other={:.1f}]",
-                 model.sourcePath.c_str(), adaptTotal, tanMs, vfillMs, faceMs, texMs, matMs, proxyMs, areaMs, tailMs,
-                 adaptTotal - tanMs - vfillMs - faceMs - texMs - matMs - proxyMs - areaMs - tailMs);
+                 "ShapeAdapter split: {} total={:.1f} [tan={:.1f} vfill={:.1f} face={:.1f} tex={:.1f} mat={:.1f} area={:.1f} tail={:.1f} other={:.1f}]",
+                 model.sourcePath.c_str(), adaptTotal, tanMs, vfillMs, faceMs, texMs, matMs, areaMs, tailMs,
+                 adaptTotal - tanMs - vfillMs - faceMs - texMs - matMs - areaMs - tailMs);
     }
     return shape;
 }
