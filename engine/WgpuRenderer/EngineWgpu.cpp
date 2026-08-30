@@ -3542,10 +3542,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // clamped, x texture — the per-fragment analogue of GL33's VSNormal + PSNormal.
     Color sunDif = HWhite;
     Color sunAmb = HWhite;
-    if (GScene && GScene->MainLight())
     {
-        sunDif = GScene->MainLight()->Diffuse();
-        sunAmb = GScene->MainLight()->Ambient();
+        // RenderSnapshot S1: the frame's captured sun colours, not a mid-draw live read.
+        const render::frame::PresentationSnapshot& matSnap = render::frame::GPresentationSnapshot();
+        if (matSnap.hasMainLight)
+        {
+            sunDif = matSnap.sunDiffuse;
+            sunAmb = matSnap.sunAmbient;
+        }
     }
     const float sunEn = render::Has(splitSpec.material, render::Material::DisableSun) ? 0.0f : 1.0f;
     const Color diffuse = sunDif * _curMaterial.diffuse;
