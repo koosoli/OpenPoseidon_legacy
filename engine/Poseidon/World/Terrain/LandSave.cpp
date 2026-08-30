@@ -3463,16 +3463,16 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     // straight back with the main-thread bank tables and let a worker run
                     // the conversion too -- measured 3+ s of the traverse's cold admission,
                     // versus <100 ms for the table resolution that stays here.
-                    // OPT-IN (default OFF): the worker-side conversion cannot create
-                    // proxies, and the adapter tail (OptimizeShapes) must run AFTER
-                    // proxy creation -- so a worker-converted shape is incomplete and
-                    // proxied models render wrong (floating weapons). Stays off until
-                    // the tail split moves everything after the proxy point to the
-                    // main-thread install.
+                    // Default ON again since the tail split (FinishOdolAdapterTail):
+                    // the worker conversion now stops BEFORE the proxy point and the
+                    // install runs proxies + OptimizeShapes in the required order.
+                    // Verified on the ev_DALL traverse: 797 cold models all async,
+                    // main-thread adapt 0.0 ms, coverage at parity.
+                    // WGR_OBJECT_STREAM_ASYNC_ADAPT=0 restores the synchronous adapt.
                     static const bool asyncAdapt = []
                     {
                         const char* v = std::getenv("WGR_OBJECT_STREAM_ASYNC_ADAPT");
-                        return v && v[0] == '1';
+                        return !v || v[0] != '0';
                     }();
                     if (asyncAdapt && (preparsed->sourceFormat == "ODOL" || preparsed->sourceFormat == "MLOD"))
                     {
