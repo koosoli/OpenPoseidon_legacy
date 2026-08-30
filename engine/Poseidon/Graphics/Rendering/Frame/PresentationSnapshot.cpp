@@ -12,6 +12,7 @@
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 
 #include <algorithm>
+#include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Weather/RainVolume.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
@@ -55,6 +56,67 @@ void CapturePresentationSnapshot()
             snap.moonAngularRadius = sun->MoonAngularRadius();
             snap.moonBrightness = sun->MoonBrightness();
             snap.moonSunDirection = sun->MoonSunDirection();
+        }
+    }
+
+    // S3: the local-light selection. Mirrors the walk the renderer ran in NextFrame
+    // verbatim -- the per-LIGHT night gate (a lamp dims with NightEffect and vanishes by
+    // day; a daylight-visible light such as fire or a muzzle flash passes at full
+    // strength), the range-normalised score that keeps a light whose attenuation volume
+    // contains the camera, and the sort. Skipped entirely by day when no daylight-visible
+    // light exists, exactly as before.
+    if (GScene && snap.hasMainLight)
+    {
+        const float night = snap.nightEffect;
+        bool anyDaylight = false;
+        for (int i = 0, n = GScene->NLights(); i < n && !anyDaylight; ++i)
+        {
+            const Light* light = GScene->GetLight(i);
+            anyDaylight = light != nullptr && light->IsOn() && light->IsDaylightVisible();
+        }
+        if (night > 0.0f || anyDaylight)
+        {
+            struct Candidate
+            {
+                float score;
+                PresentationSnapshot::LocalLight light;
+            };
+            std::vector<Candidate> candidates;
+            const Vector3 cameraPos = snap.hasCamera ? snap.cameraPos : VZero;
+            const int n = GScene->NLights();
+            candidates.reserve(n);
+            for (int i = 0; i < n; i++)
+            {
+                Light* light = GScene->GetLight(i);
+                if (!light || !light->IsOn())
+                    continue;
+                LightDescription desc;
+                light->GetDescription(desc);
+                const bool isSpot = desc.type == LTSpotLight;
+                if (desc.type != LTPoint && !isSpot)
+                    continue; // point + spot only; the sun is the directional main light
+                const float gate = light->IsDaylightVisible() ? 1.0f : night;
+                if (gate <= 0.0f)
+                    continue;
+                PresentationSnapshot::LocalLight entry;
+                entry.pos = desc.pos;
+                entry.startAtten = desc.startAtten;
+                entry.diffuse = desc.diffuse * gate;
+                entry.ambient = desc.ambient * gate;
+                entry.dir = desc.dir;
+                entry.dir.Normalize();
+                entry.spot = isSpot;
+                const float range = std::max(desc.startAtten * 10.0f, 1.0f);
+                const float score = desc.pos.Distance2(cameraPos) / (range * range);
+                candidates.push_back({score, entry});
+            }
+            std::sort(candidates.begin(), candidates.end(),
+                      [](const Candidate& a, const Candidate& b) { return a.score < b.score; });
+            snap.lightCandidates = static_cast<uint32_t>(candidates.size());
+            snap.lightCount =
+                static_cast<int>(std::min(candidates.size(), size_t(PresentationSnapshot::kMaxLights)));
+            for (int i = 0; i < snap.lightCount; ++i)
+                snap.lights[i] = candidates[i].light;
         }
     }
 

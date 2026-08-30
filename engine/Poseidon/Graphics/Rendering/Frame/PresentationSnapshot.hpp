@@ -98,6 +98,28 @@ struct PresentationSnapshot
     static constexpr int kMaxRotorSources = 8;
     int rotorSourceCount = 0;
     RotorSource rotorSources[kMaxRotorSources] = {};
+
+    // --- Slice S3: local lights --------------------------------------------------------
+    // The scored, camera-sorted point/spot light set for the frame, produced by ONE walk
+    // of the scene's light list here instead of two walks inside the renderer's NextFrame
+    // (a daylight-visible probe plus the scoring pass). Colours arrive pre-scaled by the
+    // per-light night gate, exactly as the renderer's walk produced them; the renderer
+    // only converts to its ABI struct and applies its own capacity/env clamp. Sorted
+    // nearest-fit first (the score prefers lights whose attenuation volume contains the
+    // camera). `lightCandidates` is the pre-cap count for the Forward+ gauges.
+    struct LocalLight
+    {
+        Vector3 pos = VZero;
+        float startAtten = 0.0f;
+        Color diffuse = HBlack;
+        Color ambient = HBlack;
+        Vector3 dir = VForward;
+        bool spot = false;
+    };
+    static constexpr int kMaxLights = 256;
+    int lightCount = 0;
+    uint32_t lightCandidates = 0;
+    LocalLight lights[kMaxLights] = {};
 };
 
 // The one instance. Main thread only, rewritten every frame.

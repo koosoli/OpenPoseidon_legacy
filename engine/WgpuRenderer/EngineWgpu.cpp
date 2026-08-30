@@ -1789,95 +1789,39 @@ void EngineWgpu::NextFrame()
         // the best-fitting lights around the active camera before the fixed GPU
         // capacity is applied; insertion order is not a useful visibility proxy.
         _lights.clear();
-        // The light WALK itself is snapshot slice S3 (it must move world-side); its
-        // environment atoms already read the captured block.
-        if (GScene && snap.hasMainLight)
+        // RenderSnapshot S3: the selection walk moved into CapturePresentationSnapshot --
+        // the world scores and sorts its own lights, this side only converts to the ABI
+        // struct and applies its capacity clamp.
+        //
+        // WGR_MAX_ACTIVE_LIGHTS: the A/B lever behind the Forward+ decision (B.1).
+        // 0 removes every local light from the flat loop, so the GPU frame delta on
+        // a night scene IS the lighting cost the roadmap's gate asks for. Default is
+        // the full fixed capacity -- today's behaviour.
         {
-            const float night = snap.nightEffect;
-            // The night gate is per LIGHT now, not per frame: a lamp is scaled by
-            // NightEffect and dropped by day, but a light flagged daylight-visible
-            // (fire, muzzle flash) is pushed at full strength regardless. So the
-            // frame is walked whenever the sun is down OR any such light exists.
-            bool anyDaylight = false;
-            for (int i = 0, n = GScene->NLights(); i < n && !anyDaylight; ++i)
+            static const size_t envCap = []
             {
-                const Light* l = GScene->GetLight(i);
-                anyDaylight = l != nullptr && l->IsOn() && l->IsDaylightVisible();
-            }
-            if (night > 0.0f || anyDaylight)
+                const char* v = std::getenv("WGR_MAX_ACTIVE_LIGHTS");
+                if (!v)
+                    return size_t(WGR_MAX_LIGHTS);
+                return size_t(std::clamp<long>(std::strtol(v, nullptr, 10), 0, WGR_MAX_LIGHTS));
+            }();
+            const size_t selected = std::min(size_t(snap.lightCount), envCap);
+            _lights.reserve(selected);
+            for (size_t i = 0; i < selected; ++i)
             {
-                struct LightCandidate
-                {
-                    float score;
-                    WgrLight light;
-                };
-                std::vector<LightCandidate> candidates;
-                const Vector3 cameraPos = snap.hasCamera ? snap.cameraPos : VZero;
-                const int n = GScene->NLights();
-                candidates.reserve(n);
-                for (int i = 0; i < n; i++)
-                {
-                    Light* light = GScene->GetLight(i);
-                    if (!light || !light->IsOn())
-                    {
-                        continue;
-                    }
-                    LightDescription desc;
-                    light->GetDescription(desc);
-                    const bool isSpot = desc.type == LTSpotLight;
-                    if (desc.type != LTPoint && !isSpot)
-                    {
-                        // point + spot only; the sun is the directional main light
-                        continue;
-                    }
-                    // Daylight-visible lights are not dimmed by the sun. In HDR a
-                    // fire has to be genuinely bright to read at noon; the light's
-                    // own colour carries that, so pass it through unscaled.
-                    const float gate = light->IsDaylightVisible() ? 1.0f : night;
-                    if (gate <= 0.0f)
-                    {
-                        continue;
-                    }
-                    const Color dif = desc.diffuse * gate;
-                    const Color amb = desc.ambient * gate;
-                    Vector3 beam = desc.dir;
-                    beam.Normalize();
-                    WgrLight pl{};
-                    pl.pos = {desc.pos.X(), desc.pos.Y(), desc.pos.Z(), desc.startAtten};
-                    pl.diffuse = {dif.R(), dif.G(), dif.B(), 0.0f};
-                    pl.ambient = {amb.R(), amb.G(), amb.B(), 0.0f};
-                    pl.dir = {beam.X(), beam.Y(), beam.Z(), isSpot ? 1.0f : 0.0f};
-                    // Prefer a light whose attenuation volume contains the camera. This
-                    // stable, range-normalised score keeps nearby runway/flood lights in
-                    // the shared terrain/object list even if a world loaded far-away lights
-                    // first. Terrain fragments still apply their exact per-pixel falloff.
-                    const float range = std::max(desc.startAtten * 10.0f, 1.0f);
-                    const float score = desc.pos.Distance2(cameraPos) / (range * range);
-                    candidates.push_back({score, pl});
-                }
-                std::sort(candidates.begin(), candidates.end(),
-                          [](const LightCandidate& a, const LightCandidate& b) { return a.score < b.score; });
-                // WGR_MAX_ACTIVE_LIGHTS: the A/B lever behind the Forward+ decision (B.1).
-                // 0 removes every local light from the flat loop, so the GPU frame delta on
-                // a night scene IS the lighting cost the roadmap's gate asks for. Default is
-                // the full fixed capacity -- today's behaviour.
-                static const size_t envCap = []
-                {
-                    const char* v = std::getenv("WGR_MAX_ACTIVE_LIGHTS");
-                    if (!v)
-                        return size_t(WGR_MAX_LIGHTS);
-                    return size_t(std::clamp<long>(std::strtol(v, nullptr, 10), 0, WGR_MAX_LIGHTS));
-                }();
-                const size_t selected = std::min(candidates.size(), envCap);
-                _lights.reserve(selected);
-                for (size_t i = 0; i < selected; ++i)
-                    _lights.push_back(candidates[i].light);
-                Poseidon::Dev::GLightCounters().candidates = static_cast<uint32_t>(candidates.size());
-                Poseidon::Dev::GLightCounters().cap = static_cast<uint32_t>(envCap);
-                if (std::getenv("WGR_STATIC_LIGHT_TRACE"))
-                    LOG_INFO(Graphics, "Wgpu local-light selection: candidates={} selected={} night={:.3f}",
-                             candidates.size(), selected, night);
+                const render::frame::PresentationSnapshot::LocalLight& src = snap.lights[i];
+                WgrLight pl{};
+                pl.pos = {src.pos.X(), src.pos.Y(), src.pos.Z(), src.startAtten};
+                pl.diffuse = {src.diffuse.R(), src.diffuse.G(), src.diffuse.B(), 0.0f};
+                pl.ambient = {src.ambient.R(), src.ambient.G(), src.ambient.B(), 0.0f};
+                pl.dir = {src.dir.X(), src.dir.Y(), src.dir.Z(), src.spot ? 1.0f : 0.0f};
+                _lights.push_back(pl);
             }
+            Poseidon::Dev::GLightCounters().candidates = snap.lightCandidates;
+            Poseidon::Dev::GLightCounters().cap = static_cast<uint32_t>(envCap);
+            if (!_lights.empty() && std::getenv("WGR_STATIC_LIGHT_TRACE"))
+                LOG_INFO(Graphics, "Wgpu local-light selection: candidates={} selected={} night={:.3f}",
+                         snap.lightCandidates, selected, snap.nightEffect);
         }
         // Daytime frames skip the selection walk entirely; the gauges must still say so
         // rather than exhibit last night's numbers.
