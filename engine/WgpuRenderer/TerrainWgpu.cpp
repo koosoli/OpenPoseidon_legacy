@@ -4,7 +4,8 @@
 #include "EngineWgpu.hpp"
 #include "TextureWgpu.hpp"
 
-#include <Poseidon/Core/Global.hpp> // Glob.time (coast wet-band animation clock)
+#include <Poseidon/Core/Global.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame clock
 #include <Poseidon/Asset/Formats/P3D/ODOLLoader.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
 #include <Poseidon/Foundation/Logging/Logging.hpp>
@@ -2665,7 +2666,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     // swash the water uses so the two register at one moving waterline.
     const Engine::WaterSettings& coast = _engine.WaterLook();
     _params.sea_level = land.GetSeaLevel();
-    _params.time = Glob.time.toFloat();
+    _params.time = render::frame::GPresentationSnapshot().timeSeconds;
     _params.swash_speed = coast.swashSpeed;
     _params.swash_amp = coast.swashAmp;
     _params.wet_height = coast.wetHeight;

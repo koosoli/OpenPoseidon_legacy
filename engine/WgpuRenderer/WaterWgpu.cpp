@@ -5,6 +5,7 @@
 
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
+#include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1 environment block
 #include <Poseidon/Graphics/Rendering/WaterInteractionBridge.hpp>
 #include <Poseidon/World/Entities/Vehicles/Air/Helicopter.hpp>
 #include <Poseidon/World/Scene/Camera/Camera.hpp>
@@ -522,16 +523,16 @@ bool WaterWgpu::UpdateSeaWind(float now)
 {
     // Opt-out: the setting, or WGR_WATER_WIND=0 for an A/B capture without a UI.
     static const bool envEnabled = EnvFloat("WGR_WATER_WIND", 1.0f) != 0.0f;
-    if (!_engine.WaterLook().windFromWeather || !envEnabled || !GWind.IsActive())
+    const render::frame::PresentationSnapshot& windSnap = render::frame::GPresentationSnapshot();
+    if (!_engine.WaterLook().windFromWeather || !envEnabled || !windSnap.windActive)
     {
         return false;
     }
 
     // MEAN wind only. Never `speed` / `directionRad` — see the latch commentary
     // above ApplyCascadePreset for why a gust must not touch h0.
-    const WindSample& wind = GWind.Sample();
-    const float wantSpeed = SnapToBucket(wind.meanSpeed, kSeaWindSpeedBucket);
-    const float wantDir = SnapToBucket(wind.meanDirectionRad, kSeaWindDirBucket);
+    const float wantSpeed = SnapToBucket(windSnap.windMeanSpeed, kSeaWindSpeedBucket);
+    const float wantDir = SnapToBucket(windSnap.windMeanDirectionRad, kSeaWindDirBucket);
 
     if (!_seaWindInit)
     {
@@ -556,9 +557,9 @@ bool WaterWgpu::UpdateSeaWind(float now)
     }
     // (b) moved out of the latched bucket by more than half a bucket + hysteresis
     const bool speedMoved =
-        std::abs(wind.meanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
-    const bool dirMoved =
-        std::abs(AngleDelta(_seaWindDirRad, wind.meanDirectionRad)) > (kSeaWindDirBucket * 0.5f + kSeaWindDirHysteresis);
+        std::abs(windSnap.windMeanSpeed - _seaWindSpeed) > (kSeaWindSpeedBucket * 0.5f + kSeaWindSpeedHysteresis);
+    const bool dirMoved = std::abs(AngleDelta(_seaWindDirRad, windSnap.windMeanDirectionRad)) >
+                          (kSeaWindDirBucket * 0.5f + kSeaWindDirHysteresis);
     if (!speedMoved && !dirMoved)
     {
         return false;
@@ -643,7 +644,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // plane rides at this height (no mesh regeneration — the legacy path re-levelled
     // cached vertices), and the Gerstner waves advance off `time` in the shader.
     _params.sea_level = land.GetSeaLevel();
-    _params.time = fz.freezeTime ? fz.fixedTime : Glob.time.toFloat();
+    _params.time = fz.freezeTime ? fz.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
     _params.wave_amp = look.waveAmp;
     _params.wave_choppy = look.waveChoppy;
     _params.wave_speed = look.waveSpeed;
@@ -1022,13 +1023,14 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // downpour left the sea being rained on at 0.05 -- ripples so faint they
     // read as no ripples at all, which is exactly what the owner reported.
     // GRain.EffectiveDensity() is what the drops you can SEE are falling at.
+    const render::frame::PresentationSnapshot& rainSnap = render::frame::GPresentationSnapshot();
     const float weatherRain =
-        GLandscape != nullptr ? std::clamp(GLandscape->GetRainDensity(), 0.0f, 1.0f) : 0.0f;
-    const float rainDensity = std::max(weatherRain, GRain.EffectiveDensity());
+        rainSnap.hasLandscape ? std::clamp(rainSnap.landscapeRainDensity, 0.0f, 1.0f) : 0.0f;
+    const float rainDensity = std::max(weatherRain, rainSnap.rainEffectiveDensity);
     // weather.z is the look knob (Weather tab, "Ocean ripple gain"): the strike
     // is a hashed branch in a pass that already runs over the whole field every
     // frame, so scaling it is free either way.
-    const float rippleGain = std::max(GRain.Params().seaRippleGain, 0.0f);
+    const float rippleGain = std::max(rainSnap.seaRippleGain, 0.0f);
     _interaction.weather = {rainDensity, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), rippleGain, 0.0f};
     wgr_water_set_interaction_params(_renderer, &_interaction);
 

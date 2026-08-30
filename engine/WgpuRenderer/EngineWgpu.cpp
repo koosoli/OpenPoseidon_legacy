@@ -26,6 +26,7 @@
 #include <Poseidon/Graphics/Rendering/Shape/ClipShape.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/ObjectAdmitProfile.hpp> // streamed-admission split timers
 #include <Poseidon/Dev/Diag/LightingDiag.hpp> // per-frame local-light gauges (Forward+ gate evidence)
+#include <Poseidon/Graphics/Rendering/Frame/PresentationSnapshot.hpp> // RenderSnapshot S1: the frame's environment block
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/World/MapTypes.hpp>                         // MapBush (spherical/canopy-normal flagging)
 #include <Poseidon/World/Scene/Object.hpp>                     // Object accessors (GPU-driven retained scene)
@@ -1523,6 +1524,12 @@ bool ShadowForceNoCpuCastersEnabled()
 
 void EngineWgpu::InitDraw(bool clear, PackedColor color)
 {
+    // RenderSnapshot S1: capture the frame's environment block ONCE, before anything
+    // draws (Landscape::Draw runs after InitDraw, so terrain/water read the same
+    // frame's values). Every former mid-frame pull of GScene/Glob/GWind/GRain/
+    // GLandscape weather below now consumes this value; moving this call into
+    // World::SimulateAndDraw is the next slice and touches only this line.
+    render::frame::CapturePresentationSnapshot();
     _verts.clear();
     _batches.clear();
     _draws3d.clear();
@@ -1637,11 +1644,14 @@ void EngineWgpu::NextFrame()
         // scene's fog range drives a linear fog factor per vertex. Packed into
         // each camera UBO (see WgrCamera). The 2D/sky path fogs separately via
         // per-vertex specular alpha.
+        // RenderSnapshot S1: environment inputs come from the frame's captured block,
+        // not live globals, from here to the end of NextFrame.
+        const render::frame::PresentationSnapshot& snap = render::frame::GPresentationSnapshot();
         float fogStart = 0.0f, fogInvRange = 0.0f, fogEnabled = 0.0f;
-        if (GScene)
+        if (snap.hasScene)
         {
-            fogStart = GScene->GetFogMinRange();
-            const float fogEnd = GScene->GetFogMaxRange();
+            fogStart = snap.fogMinRange;
+            const float fogEnd = snap.fogMaxRange;
             fogInvRange = (fogEnd > fogStart) ? 1.0f / (fogEnd - fogStart) : 0.0f;
             fogEnabled = 1.0f;
         }
@@ -1662,12 +1672,12 @@ void EngineWgpu::NextFrame()
         Color sunDiffuse = HWhite;
         Color sunAmbient = HWhite;
         Vector3 sunDir(-0.4f, -0.85f, -0.3f);
-        if (GScene && GScene->MainLight())
+        if (snap.hasMainLight)
         {
             const Color accom = GetAccomodateEye();
-            sunDiffuse = GScene->MainLight()->Diffuse() * accom;
-            sunAmbient = GScene->MainLight()->Ambient() * accom;
-            sunDir = GScene->MainLight()->Direction();
+            sunDiffuse = snap.sunDiffuse * accom;
+            sunAmbient = snap.sunAmbient * accom;
+            sunDir = snap.sunTravelDir;
         }
         sunDir.Normalize();
 
@@ -1683,11 +1693,11 @@ void EngineWgpu::NextFrame()
         // is ADDED to -- so a full moon read as ~40% daylight and switched the legacy-emissive
         // fade and the foliage night floor back toward their daytime values. Computed from the
         // sun alone here, before the moon joins.
-        float daylight = 1.0f - (GScene && GScene->MainLight() ? GScene->MainLight()->NightEffect() : 0.0f);
-        if (_hdrEnabled && _sky.enabled && _sky.skyLighting && GScene && GScene->MainLight())
+        float daylight = 1.0f - (snap.hasMainLight ? snap.nightEffect : 0.0f);
+        if (_hdrEnabled && _sky.enabled && _sky.skyLighting && snap.hasMainLight)
         {
-            const float camAlt = GScene->GetCamera() ? static_cast<float>(GScene->GetCamera()->Position().Y()) : 0.0f;
-            const Vector3 tr = AtmosphereSunTransmittance(_sky, camAlt, -GScene->MainLight()->SunDirection());
+            const float camAlt = snap.hasCamera ? static_cast<float>(snap.cameraPos.Y()) : 0.0f;
+            const Vector3 tr = AtmosphereSunTransmittance(_sky, camAlt, -snap.sunDirection);
             const float rad = _sky.sunIntensity * _sky.exposure;
             sunLin[0] = tr.X() * rad;
             sunLin[1] = tr.Y() * rad;
@@ -1704,7 +1714,7 @@ void EngineWgpu::NextFrame()
             // decode crushes midtones to ~6% of the sun and blackens interiors/shadowed faces),
             // scaled onto the sun's physical range. A generous, readable floor that still fades
             // toward night as the engine dims its ambient. Real sky irradiance replaces this later.
-            const Color amb = GScene->MainLight()->Ambient();
+            const Color amb = snap.sunAmbient;
             const float ambScale = _sky.skyAmbient * rad;
             ambLin[0] = amb.R() * ambScale;
             ambLin[1] = amb.G() * ambScale;
@@ -1721,11 +1731,10 @@ void EngineWgpu::NextFrame()
             // Reddened by the same atmospheric transmittance the sun uses, sampled along
             // the MOON's direction: a moon low over the horizon looks orange for the same
             // reason the sun does, and its light on the ground goes with it.
-            const float moonAmount = GScene->MainLight()->MoonLightAmount();
+            const float moonAmount = snap.moonLightAmount;
             if (moonAmount > 0.0f && _sky.moonIntensity > 0.0f)
             {
-                const Vector3 moonTr =
-                    AtmosphereSunTransmittance(_sky, camAlt, -GScene->MainLight()->MoonDirection());
+                const Vector3 moonTr = AtmosphereSunTransmittance(_sky, camAlt, -snap.moonDirection);
                 // moonIntensity is the full-moon irradiance as a FRACTION of the sun's
                 // (default 1/400 — see Engine::SkySettings). moonAmount already carries
                 // the phase falloff and the horizon ramps.
@@ -1780,9 +1789,11 @@ void EngineWgpu::NextFrame()
         // the best-fitting lights around the active camera before the fixed GPU
         // capacity is applied; insertion order is not a useful visibility proxy.
         _lights.clear();
-        if (GScene && GScene->MainLight())
+        // The light WALK itself is snapshot slice S3 (it must move world-side); its
+        // environment atoms already read the captured block.
+        if (GScene && snap.hasMainLight)
         {
-            const float night = GScene->MainLight()->NightEffect();
+            const float night = snap.nightEffect;
             // The night gate is per LIGHT now, not per frame: a lamp is scaled by
             // NightEffect and dropped by day, but a light flagged daylight-visible
             // (fire, muzzle flash) is pushed at full strength regardless. So the
@@ -1801,7 +1812,7 @@ void EngineWgpu::NextFrame()
                     WgrLight light;
                 };
                 std::vector<LightCandidate> candidates;
-                const Vector3 cameraPos = GScene->GetCamera() ? GScene->GetCamera()->Position() : VZero;
+                const Vector3 cameraPos = snap.hasCamera ? snap.cameraPos : VZero;
                 const int n = GScene->NLights();
                 candidates.reserve(n);
                 for (int i = 0; i < n; i++)
@@ -7110,7 +7121,7 @@ void EngineWgpu::UpdateAutoTonemap()
     // current values across the auto overwrite (else the Tonemap tab's bloom sliders
     // would be reset every frame in auto mode).
     const float bi = _tonemap.bloomIntensity, bt = _tonemap.bloomThreshold, bk = _tonemap.bloomKnee;
-    _tonemap = TonemapAtHour(Glob.clock.GetTimeOfDay() * 24.0f);
+    _tonemap = TonemapAtHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f);
     _tonemap.bloomIntensity = bi;
     _tonemap.bloomThreshold = bt;
     _tonemap.bloomKnee = bk;
@@ -7170,15 +7181,16 @@ void EngineWgpu::UpdateAutoExposureRate()
 
 void EngineWgpu::UpdateSunGlareExposure()
 {
-    if (!_renderer || !_hdrEnabled || !GScene || !GScene->GetCamera() || !GScene->MainLight())
+    const render::frame::PresentationSnapshot& glareSnap = render::frame::GPresentationSnapshot();
+    if (!_renderer || !_hdrEnabled || !glareSnap.hasCamera || !glareSnap.hasMainLight)
     {
         _sunGlareExposure = 1.0f;
         return;
     }
 
-    Vector3 view = GScene->GetCamera()->Direction();
+    Vector3 view = glareSnap.cameraDir;
     // LightSun stores light travel direction; the visible sun lies opposite it.
-    Vector3 sun = -GScene->MainLight()->SunDirection();
+    Vector3 sun = -glareSnap.sunDirection;
     view.Normalize();
     sun.Normalize();
 
@@ -7484,13 +7496,14 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
     // so a gust builds and decays instead of snapping), and it is the same
     // vector the ocean spectrum, the cloud deck and the smoke sources use, so
     // the field leans the way the sea is running.
-    if (settings.useLiveWind && GWind.IsActive())
+    const render::frame::PresentationSnapshot& grassWindSnap = render::frame::GPresentationSnapshot();
+    if (settings.useLiveWind && grassWindSnap.windActive)
     {
-        const WindSample& wind = GWind.Sample();
-        if (wind.speed > 0.001f)
+        if (grassWindSnap.windSpeed > 0.001f)
         {
-            params.wind_direction = wind.directionRad * (180.0f / 3.14159265358979323846f);
-            params.wind_strength = std::clamp(wind.speed * 0.20f * settings.windStrength, 0.0f, 3.0f);
+            params.wind_direction = grassWindSnap.windDirectionRad * (180.0f / 3.14159265358979323846f);
+            params.wind_strength =
+                std::clamp(grassWindSnap.windSpeed * 0.20f * settings.windStrength, 0.0f, 3.0f);
             // Gust travel from the wind that causes it: linear in speed, reaching 1.0 only
             // at a storm. Capped there rather than allowed to run on -- past 1 the field
             // crosses the world faster than the shipped look and begins to strobe, and
@@ -7498,7 +7511,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
             // by turning windScrollAuto off.
             if (settings.windScrollAuto)
             {
-                params.wind_scroll = std::clamp(wind.speed / GrassSettings::kWindScrollFullSpeed,
+                params.wind_scroll = std::clamp(grassWindSnap.windSpeed / GrassSettings::kWindScrollFullSpeed,
                                                 GrassSettings::kWindScrollFloor, 1.0f);
             }
         }
@@ -7874,7 +7887,7 @@ void EngineWgpu::UpdateAutoSky()
     // everything else (density heights, night colours/band, samples, planet/atmosphere
     // geometry, and the user toggles: sky lighting, ambient, aerial shadow, fog falloff,
     // enabled) stays exactly as the Sky tab left it. Kept in sync with LerpSky's field set.
-    const SkySettings k = SkyAtHour(Glob.clock.GetTimeOfDay() * 24.0f);
+    const SkySettings k = SkyAtHour(render::frame::GPresentationSnapshot().timeOfDay * 24.0f);
     _sky.exposure = k.exposure;
     _sky.sunIntensity = k.sunIntensity;
     _sky.sunAngularRadius = k.sunAngularRadius;
@@ -8013,9 +8026,9 @@ void EngineWgpu::PushRenderParams()
     // MUST run before cloud0 is packed below, or the driven value lands a frame late. Writes
     // _sky.cloudCoverage so the Sky tab's slider displays what is actually in effect; that slider
     // is disabled while this toggle is on, so nothing fights over the field.
-    if (_sky.cloudCoverageFromWeather && GLandscape)
+    if (_sky.cloudCoverageFromWeather && render::frame::GPresentationSnapshot().hasLandscape)
     {
-        const float overcast = GLandscape->GetOvercast();
+        const float overcast = render::frame::GPresentationSnapshot().overcast;
         const float t = overcast < 0.0f ? 0.0f : (overcast > 1.0f ? 1.0f : overcast);
         _sky.cloudCoverage = _sky.cloudCoverageClear + (_sky.cloudCoverageFull - _sky.cloudCoverageClear) * t;
     }
@@ -8142,19 +8155,19 @@ void EngineWgpu::PushRenderParams()
         }();
         float windResponse = 1.0f;
         float windSpeed = -1.0f; // -1 = live wind not consulted (authored steady breeze)
-        if (_foliage.swayUseLiveWind && GWind.IsActive())
+        const render::frame::PresentationSnapshot& windSnap = render::frame::GPresentationSnapshot();
+        if (_foliage.swayUseLiveWind && windSnap.windActive)
         {
-            const WindSample& wind = GWind.Sample();
             const float reference = std::max(_foliage.swayWindReference, 0.1f);
-            windResponse = std::clamp(std::max(wind.speed / reference, calmFloor), 0.0f, 2.5f);
-            windSpeed = wind.speed;
+            windResponse = std::clamp(std::max(windSnap.windSpeed / reference, calmFloor), 0.0f, 2.5f);
+            windSpeed = windSnap.windSpeed;
             swayAmp *= windResponse;
-            if (wind.speed > 0.001f)
+            if (windSnap.windSpeed > 0.001f)
             {
-                swayDirX = std::cos(wind.directionRad);
-                swayDirZ = std::sin(wind.directionRad);
+                swayDirX = std::cos(windSnap.windDirectionRad);
+                swayDirZ = std::sin(windSnap.windDirectionRad);
             }
-            swayGust = std::clamp(wind.gustFraction, -1.0f, 1.0f);
+            swayGust = std::clamp(windSnap.windGustFraction, -1.0f, 1.0f);
         }
         // WGR_SWAY_TRACE=1: log the RESOLVED amplitude the shaders will read, once a second.
         // Sway is motion, so a still capture cannot show whether the term is live; this line
@@ -8164,7 +8177,7 @@ void EngineWgpu::PushRenderParams()
         if (swayTrace)
         {
             static float lastLog = -1e9f;
-            const float now = Glob.time.toFloat();
+            const float now = windSnap.timeSeconds;
             if (now - lastLog >= 1.0f || now < lastLog)
             {
                 lastLog = now;
@@ -8172,14 +8185,15 @@ void EngineWgpu::PushRenderParams()
                          "VEG-SWAY: amp={:.4f} strength={:.3f} env={:.3f} windSpeed={:.2f} response={:.3f} "
                          "floor={:.3f} gust={:.3f} dir=({:.2f},{:.2f}) liveWind={} windActive={}",
                          swayAmp, _foliage.swayStrength, envScale, windSpeed, windResponse, calmFloor, swayGust,
-                         swayDirX, swayDirZ, _foliage.swayUseLiveWind ? 1 : 0, GWind.IsActive() ? 1 : 0);
+                         swayDirX, swayDirZ, _foliage.swayUseLiveWind ? 1 : 0, windSnap.windActive ? 1 : 0);
             }
         }
     }
     // The SAME clock the water surface and the cloud deck run on (Glob.time), and frozen by the
     // same switch — so a deterministic test frame stays deterministic with sway on, and a paused
     // simulation freezes the canopy instead of leaving it stirring over a stopped world.
-    const float swayTime = _waterLook.freeze.freezeTime ? _waterLook.freeze.fixedTime : Glob.time.toFloat();
+    const float swayTime =
+        _waterLook.freeze.freezeTime ? _waterLook.freeze.fixedTime : render::frame::GPresentationSnapshot().timeSeconds;
 
     // WGR_FOLIAGE_ABLATE=1 zeroes the leaf-lighting model for ONE frame's worth of A/B: the
     // subsurface fill, the terminator wrap, the ambient boost and -- the one that matters most
@@ -8257,17 +8271,17 @@ void EngineWgpu::PushSkyRuntime()
     // Live celestial targets from LightSun. The legacy dome placed each body at
     // camPos - astronomicalDir * range, so the view direction TOWARD it is the
     // negated astronomical direction (up by day, below the horizon at night).
+    const render::frame::PresentationSnapshot& skySnap = render::frame::GPresentationSnapshot();
     Vector3 tSun(0.0f, 1.0f, 0.0f);
     Vector3 tMoon(0.0f, -1.0f, 0.0f);
     float tPhase = 0.5f;
     float tNight = 0.0f;
-    if (GScene && GScene->MainLight())
+    if (skySnap.hasMainLight)
     {
-        LightSun* sun = GScene->MainLight();
-        tSun = -sun->SunDirection();
-        tMoon = -sun->MoonDirection();
-        tPhase = sun->MoonPhase();
-        tNight = sun->NightEffect();
+        tSun = -skySnap.sunDirection;
+        tMoon = -skySnap.moonDirection;
+        tPhase = skySnap.moonPhase;
+        tNight = skySnap.nightEffect;
     }
     tSun.Normalize();
     tMoon.Normalize();
@@ -8304,11 +8318,10 @@ void EngineWgpu::PushSkyRuntime()
     // Camera altitude ASL feeds the aerial/sky raymarch origin: with the old fixed 200 m
     // the march dived below the terrain when flying (fake density -> grey wash). Sea level
     // is y = 0 in OFP, so the camera's world Y is the altitude directly.
-    Camera* skyCam = GScene ? GScene->GetCamera() : nullptr;
-    const float camAlt = skyCam ? static_cast<float>(skyCam->Position().Y()) : 0.0f;
+    const float camAlt = skySnap.hasCamera ? static_cast<float>(skySnap.cameraPos.Y()) : 0.0f;
     // fog far-range: the aerial pass dissolves the terrain edge into the full sky as it nears
     // the fog/view distance, hiding the horizon colour step. 0 when there's no scene.
-    const float fogFar = GScene ? GScene->GetFogMaxRange() : 0.0f;
+    const float fogFar = skySnap.hasScene ? skySnap.fogMaxRange : 0.0f;
 
     WgrSkyRuntime rt{};
     rt.sun_dir = {_skySunDir.X(), _skySunDir.Y(), _skySunDir.Z(), 0.0f};
@@ -8322,12 +8335,11 @@ void EngineWgpu::PushSkyRuntime()
     float moonDiscScale = 0.0f;
     float moonEarthshine = 0.0f;
     Vector3 moonSunDir(0.0f, 1.0f, 0.0f);
-    if (GScene && GScene->MainLight())
+    if (skySnap.hasMainLight)
     {
-        const LightSun* ml = GScene->MainLight();
-        moonIllum = std::clamp(ml->MoonIllumination(), 0.0f, 1.0f);
-        moonRadius = std::max(ml->MoonAngularRadius(), 1.0e-5f);
-        moonSunDir = ml->MoonSunDirection();
+        moonIllum = std::clamp(skySnap.moonIllumination, 0.0f, 1.0f);
+        moonRadius = std::max(skySnap.moonAngularRadius, 1.0e-5f);
+        moonSunDir = skySnap.moonSunDirection;
         // Disc SURFACE radiance, not total brightness. MoonBrightness() is the empirical
         // lunar phase function — the TOTAL light the disc sends us — so dividing by the lit
         // AREA recovers the per-unit-area radiance. That division is what makes a quarter
@@ -8335,12 +8347,12 @@ void EngineWgpu::PushSkyRuntime()
         // real opposition effect and not an artistic choice.
         const float k = std::max(moonIllum, 0.02f);
         moonDiscScale = _sky.sunIntensity * _sky.exposure * _sky.moonIntensity *
-                        (ml->MoonBrightness() / k) * std::max(_sky.moonBrightnessScale, 0.0f);
+                        (skySnap.moonBrightness / k) * std::max(_sky.moonBrightnessScale, 0.0f);
         // Retire the night-vision inflation as the sun comes up. NightEffect is 0 in
         // daylight and 1 at night, so this is exactly 1.0 at night -- the night moon is
         // unchanged to the bit -- and moonDaylightScale at noon. Without it the disc kept
         // its full night radiance in a daylit sky and read as a second sun.
-        const float nightFactor = std::clamp(ml->NightEffect(), 0.0f, 1.0f);
+        const float nightFactor = std::clamp(skySnap.nightEffect, 0.0f, 1.0f);
         const float daylightFade = std::max(_sky.moonDaylightScale, 0.0f);
         moonDiscScale *= daylightFade + (1.0f - daylightFade) * nightFactor;
         // Earthshine is brightest when the moon is thinnest (the Earth is then "full" as seen
@@ -8367,23 +8379,23 @@ void EngineWgpu::PushSkyRuntime()
     constexpr double kWindWrap = 100000.0; // m
     const double cloudT = (_waterLook.freeze.freezeClouds || _waterLook.freeze.freezeTime)
                               ? static_cast<double>(_waterLook.freeze.fixedTime)
-                              : static_cast<double>(Glob.time.toFloat());
+                              : static_cast<double>(render::frame::GPresentationSnapshot().timeSeconds);
     // The deck's scroll velocity. Driven by the world's wind authority when
     // cloudWindFromWeather is on, so an overcast front that stiffens the wind
     // also runs the clouds — the same number that raises the sea state, leans
     // the grass and carries the smoke.
     double windVelX = static_cast<double>(_sky.cloudWind[0]);
     double windVelZ = static_cast<double>(_sky.cloudWind[1]);
-    if (_sky.cloudWindFromWeather && GWind.IsActive())
+    if (_sky.cloudWindFromWeather && skySnap.windActive)
     {
         // Mean wind, not the instantaneous gust: a 3 km-wide cloud bank does not
         // accelerate on a seven-second gust, and feeding gusts here would make
         // the whole sky shudder. Aloft scale converts surface wind to cloud-base
         // wind (see cloudWindAloftScale).
-        const WindSample& wind = GWind.Sample();
-        const double aloft = static_cast<double>(std::max(_sky.cloudWindAloftScale, 0.0f)) * wind.meanSpeed;
-        windVelX = aloft * std::cos(wind.meanDirectionRad);
-        windVelZ = aloft * std::sin(wind.meanDirectionRad);
+        const double aloft =
+            static_cast<double>(std::max(_sky.cloudWindAloftScale, 0.0f)) * skySnap.windMeanSpeed;
+        windVelX = aloft * std::cos(skySnap.windMeanDirectionRad);
+        windVelZ = aloft * std::sin(skySnap.windMeanDirectionRad);
     }
     // INTEGRATE the offset. `velocity * elapsed` is only correct while velocity is
     // constant; the moment the wind changes, that form rewrites the whole history
