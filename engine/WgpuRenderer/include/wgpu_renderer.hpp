@@ -3,6 +3,14 @@
  *
  * While this file contains C++ features, the actual exported symbols are all C ABI (extern "C"),
  * which the Rust side can implement using #[no_mangle] and #[repr(C)].
+ *
+ * THREADING CONTRACT: every function in this header is MAIN THREAD ONLY. The Rust
+ * side spawns no threads of its own and guards nothing against concurrent entry;
+ * texture destruction is immediate (no epoch — see gfx3d/pool.rs for the one
+ * resource class that HAS one), which is safe only because create/destroy/draw all
+ * run on the one thread in frame order. Phase 4.2 of the post-DLSS roadmap turns
+ * this line into a checked rule; until then it is the rule by declaration
+ * (docs/roadmap/ownership-authority.md).
  */
 #ifndef WGPU_RENDERER_HPP
 #define WGPU_RENDERER_HPP

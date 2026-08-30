@@ -2,7 +2,14 @@
 
 #include <Poseidon/IO/Streams/QStream.hpp>
 
-// file buffering class, suitable for background (multithreaded) usage
+// File buffering class. MAIN THREAD ONLY, despite the "MT" in FileServerMT.hpp: the
+// only implementation is FileServerST, ENABLE_OVERLAPPED_IO compiles out the request
+// queue (FileServer.cpp:19), and FileCache keeps an UNLOCKED MRU array — a worker
+// reading through this races the main thread's MoveToFront. Workers use the pure
+// loose-file readers instead (ModelCache::LoadLooseFile, ReadPAABlockChain,
+// ReadEmatFileLoose). This line said "suitable for background (multithreaded) usage"
+// until 2026-08-30; the roadmap ownership table (docs/roadmap/ownership-authority.md)
+// is where the claim was caught.
 
 
 namespace Poseidon
