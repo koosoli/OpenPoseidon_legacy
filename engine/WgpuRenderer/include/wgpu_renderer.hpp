@@ -1883,6 +1883,45 @@ extern "C"
 
     WGR_API void wgr_mesh_destroy(WgrRenderer* renderer, WgrMesh id);
 
+    /* --- REN-THR-009: the upload path that does not need the renderer handle --- */
+
+    /* Opaque. C++ only ever holds the pointer and hands it back. */
+    struct WgrUploader;
+
+    /* Borrow the renderer's upload surface. Unlike every other mesh entry point, the
+     * calls below do NOT form an exclusive reference to the renderer, so they are the
+     * one producer-side mutation that a thread other than the renderer's may make.
+     *
+     * LIFETIME CONTRACT -- stated here the way the rest of this ABI states its
+     * null-tolerance, because this one crosses a thread boundary:
+     *
+     *   1. The returned pointer is valid until wgr_destroy and is stable for the
+     *      renderer's whole life. It is a borrow, not an owner: nothing to release.
+     *      Returns null for a null renderer.
+     *   2. It may be used from any thread, concurrently with itself.
+     *   3. It may NOT be used concurrently with any entry point that takes
+     *      WgrRenderer* (62 of the 79 form an exclusive reference -- REN-THR-001).
+     *      That is trivially satisfied while everything is serial; once a render
+     *      thread exists, this is the rule that puts uploads on the producer and
+     *      everything else on the consumer.
+     *   4. Mesh lifetime is producer-owned and single-threaded. Updating and
+     *      destroying the SAME handle from two threads at once is forbidden, not
+     *      merely unspecified -- no lock defends it, deliberately (REN-THR-009). */
+    WGR_API const WgrUploader* wgr_uploader_get(WgrRenderer* renderer);
+
+    /* wgr_mesh_update's semantics exactly -- topology unchanged, vertex count must not
+     * exceed the mesh's allocated count -- without the renderer. An unknown handle,
+     * including one already passed to wgr_uploader_mesh_destroy, is ignored. Returns 1
+     * if a write was issued, 0 otherwise. */
+    WGR_API uint32_t wgr_uploader_mesh_update(const WgrUploader* uploader, WgrMesh id,
+                                              WgrSlice<WgrMeshVertex> verts);
+
+    /* Park a mesh destroy for the renderer to run at the top of its next frame. It
+     * cannot happen here: the real destroy drops skin-bake bind groups the draw path
+     * reads and returns ranges to the geometry pool's free lists, neither of which may
+     * change mid-frame. The handle stops accepting uploads immediately. */
+    WGR_API void wgr_uploader_mesh_destroy(const WgrUploader* uploader, WgrMesh id);
+
     /* --- GPU-driven retained scene (docs/gpu-culling-and-depth-plan.md Stage 3b) --- */
 
     /* Sentinel returned by wgr_model_register on failure. */

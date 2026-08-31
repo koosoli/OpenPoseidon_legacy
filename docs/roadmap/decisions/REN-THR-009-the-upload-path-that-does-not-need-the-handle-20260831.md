@@ -195,20 +195,60 @@ Adding locks for concurrency that does not exist yet would be untestable and wou
 guessing at a design the thread slice has not made. The rule followed here is REN-THR-006's:
 each slice is provable **serially** before there is any concurrency to blame.
 
+## ABI
+
+No hashed struct changed shape. `WgrUploader` is **opaque** — an incomplete type on the C++
+side and a zero-sized `#[repr(C)]` marker on the Rust side, never dereferenced by either;
+what crosses is a pointer. So neither hash list moved: `wgr_layout_hash` in `ffi.rs` and the
+`WgrHashSize` list in `wgpu_renderer.hpp` are untouched, and `WGR_ABI_VERSION` stays at 8.
+Three new exports, no version bump — which is the rule the brief states and the reason the
+`WgrObjectStats` entry's comments exist.
+
 ## Verification
 
 ### Suites
 
-| Suite | Before | After |
+Built and run in this worktree (`.claude/worktrees/agent-upload2`), preset
+`win-x64-clang-rwdi`. **Nothing was deployed and the game was never launched** — another
+session owns the game folder.
+
+| Suite | Before (this worktree, change reverted) | After |
 |---|---|---|
-| `PoseidonTests` | *(filled in below)* | |
-| `PoseidonCoreTests` | | |
-| `PoseidonFoundationTests` | | |
-| `wgpu_renderer` (Rust, rwdi) | | |
+| `PoseidonTests` | 3,111 cases / 389,942 assertions / **0 failures** | 3,111 / 389,942 / **0** |
+| `PoseidonCoreTests` | — | 838 cases / 9,808 assertions / **0 failures** |
+| `PoseidonFoundationTests` | — | 491 cases / **0 failures** (160,753 assertions; this total varies by design) |
+| `wgpu_renderer` (Rust, rwdi) | 216 passed / 1 ignored / 0 failed | **221 passed** / 1 ignored / 0 failed |
+| `OpenPoseidon.exe` | links | links |
+
+The brief quotes 389,947 assertions for `PoseidonTests`. This worktree measures **389,942
+both with and without the change** — the five are a difference between checkouts, not
+something this commit did. That is why the "before" column was measured here rather than
+quoted: the change was reverted file-by-file, `PoseidonTests` rebuilt and rerun, and the
+number came back identical. (`git stash` was **not** used for this: stashes are shared
+across every worktree of this repo, and reaching for one nearly popped another agent's
+`agent-heap-race: wip2` into this tree. It was restored; the stash entry survived.)
+
+The five new Rust tests are the whole of the delta: construction and metadata bookkeeping,
+an update's bytes reaching the pool at the right offset, an oversized update refused rather
+than clipped, deferred destroy draining exactly once, and a real pool growth republishing.
 
 ### Ablation
 
-*(filled in below)*
+Three, each reverted after measuring.
+
+| Ablation | Caught by | What it printed |
+|---|---|---|
+| Write at offset `0` instead of `vbase * VERT_SIZE` | `an_update_reaches_the_pool_at_the_right_offset_and_leaves_the_neighbour_alone` | `mesh b did not receive the new vertices — left: 5000.0, right: 7777.0` |
+| Off by **one vertex**: `vbase * VERT_SIZE + VERT_SIZE` | the same test **and** `a_pool_growth_republishes_and_uploads_keep_landing` | `post-growth upload did not reach the pool — left: 1000.0, right: 4242.0` |
+| `take_pending_destroys` clones instead of draining | `a_deferred_destroy_drains_once_and_stops_further_uploads` | `a drained destroy must not be handed out twice` |
+
+The first two matter for a specific reason: a wrong offset does not produce garbage, it
+produces *plausible vertices in the wrong place*. Tagging vertex `i` of a mesh as `tag + i`
+and asserting on both the target and its **neighbour** is what makes "correct" separable
+from "corrupted something else" — a test that only checked the target would have passed the
+off-by-one at every index but the last.
+
+Full Rust suite re-run after the revert: 221 passed / 0 failed.
 
 ## What this does not prove
 
@@ -223,3 +263,24 @@ each slice is provable **serially** before there is any concurrency to blame.
 - **It does not empty REN-THR-006's table.** `wgr_mesh_create`, `wgr_mesh_set_skin`,
   `SetFarProxyInstances`, surface/swap-interval calls and every stats reader still form
   `&mut *renderer`.
+- **Deferring the destroy is a behaviour change, not a pure refactor.** A mesh's pool
+  ranges now return to the free lists at the next frame's start rather than at the
+  destructor. The only observable difference is that a create in the same frame cannot
+  reuse those ranges yet, so peak pool residency can be marginally higher on a frame that
+  destroys and creates heavily. Unmeasured in a real scene; the suites do not see it.
+
+## What is left before a render thread can start
+
+1. **`wgr_mesh_create` and `wgr_mesh_set_skin`** — both structural, both creation-time.
+   REN-THR-001 already resolved the synchronous-handle objection to create (`Pool::alloc`'s
+   only failure is empty input), so the remaining work is routing them through the drain,
+   which slice 3 already does for the *retained* mesh path. The CPU path is the same shape.
+2. **`SetFarProxyInstances`** — bulk, load-time, ~117 MB of source rows on Chernarus-size
+   worlds. Needs a decision about ownership, not a queue.
+3. **The reads.** Every stats reader, `HasGrassPhotoClumps`, and the grass placement
+   witness. This is the snapshot problem and it belongs to the thread slice itself.
+4. **`ResizeSurface` / `SetSwapInterval` / screenshots** — stop-the-world class, like
+   device recreate.
+5. **The simulation divergence** REN-THR-005 records (SIM-815 in flight) must be closed or
+   bounded, because the equivalence oracle is what will decide whether a threaded frame is
+   the same frame.

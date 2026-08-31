@@ -581,6 +581,16 @@ class VertexBufferWgpu : public VertexBuffer
 {
   public:
     WgrRenderer* renderer = nullptr;
+    // REN-THR-009 — the per-frame vertex re-upload and the destroy go through here, not
+    // through `renderer`. Borrowed from the renderer once at creation and valid until
+    // wgr_destroy; see the lifetime contract on wgr_uploader_get. Never released.
+    //
+    // `renderer` is still held because SetSkinData stays on it: the audit found
+    // wgr_mesh_set_skin structural (it creates a GPU buffer, mutates the mesh record, and
+    // drops both skin-bake bind-cache entries the draw path reads), and one-time rather
+    // than per-frame — VertexBufferWgpu's own `skinned` guard makes it a creation-time
+    // call. It belongs with wgr_mesh_create, not on the upload path.
+    const WgrUploader* uploader = nullptr;
     uint64_t mesh = 0;
     int vertexCount = 0;
     bool isDynamic = false;
@@ -602,19 +612,33 @@ class VertexBufferWgpu : public VertexBuffer
     int paletteCount = 0;
     std::vector<Matrix4> palette;
 
-    VertexBufferWgpu(WgrRenderer* r, uint64_t m, int nv, bool dynamic)
-        : renderer(r), mesh(m), vertexCount(nv), isDynamic(dynamic)
+    VertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, uint64_t m, int nv, bool dynamic)
+        : renderer(r), uploader(up), mesh(m), vertexCount(nv), isDynamic(dynamic)
     {
     }
     ~VertexBufferWgpu() override
     {
-        if (renderer && mesh)
+        if (!mesh)
         {
-            // NOT counted by EngineWgpu::_ops: this destructor holds its own renderer
-            // pointer and runs wherever the last reference is dropped, which is a producer-
-            // side mutation site outside the engine object entirely. REN-THR-001's list of
-            // ten call sites missed it for exactly that reason, and the queue will have to
-            // reach it too.
+            return;
+        }
+        // NOT counted by EngineWgpu::_ops: this destructor holds its own renderer
+        // pointer and runs wherever the last reference is dropped, which is a producer-
+        // side mutation site outside the engine object entirely. REN-THR-001's list of
+        // ten call sites missed it for exactly that reason.
+        //
+        // REN-THR-009: it is now parked rather than done. The real destroy drops both
+        // skin-bake bind-cache entries (which the draw path reads) and returns this mesh's
+        // vertex/index ranges to the geometry pool's free lists, where a later create can
+        // be handed them — neither may happen while a frame is in flight. The renderer
+        // drains the parked handles at the top of its own frame. The handle stops
+        // accepting uploads immediately, at enqueue, not at drain.
+        if (uploader)
+        {
+            wgr_uploader_mesh_destroy(uploader, mesh);
+        }
+        else if (renderer)
+        {
             wgr_mesh_destroy(renderer, mesh);
         }
     }
@@ -679,7 +703,20 @@ class VertexBufferWgpu : public VertexBuffer
         }
         lastUploadHash = hash;
         haveUploadHash = true;
-        wgr_mesh_update(renderer, mesh, AsMeshVerts(verts));
+        // REN-THR-009 — the one per-frame producer-side mutation that does NOT go through
+        // the exclusive renderer handle. The audit found this path touches nothing
+        // structural: a shared slotmap lookup, two field reads, and one
+        // Queue::write_buffer into a vertex range that can never move. Queuing it instead
+        // would copy a full vertex array every frame for every skinned character, which is
+        // the wrong answer and the reason REN-THR-006 left this row of its table alone.
+        if (uploader)
+        {
+            wgr_uploader_mesh_update(uploader, mesh, AsMeshVerts(verts));
+        }
+        else
+        {
+            wgr_mesh_update(renderer, mesh, AsMeshVerts(verts));
+        }
     }
 
     // One-time: upload the bind pose (OrigPos/OrigNorm) + per-vertex bone indices
@@ -2625,7 +2662,13 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     }
 
     const bool dynamic = (type == VBDynamic || type == VBSmallDiscardable);
-    auto* buf = new VertexBufferWgpu(_renderer, mesh, nv, dynamic);
+    // REN-THR-009 — borrowed once, here, and held for the buffer's life. Valid until
+    // wgr_destroy (it is a borrow of a refcounted upload surface, not an owner), so there
+    // is nothing to release in the destructor. Null only if the renderer is null, which
+    // the guard at the top of this function has already ruled out; the buffer falls back
+    // to the renderer handle in that case rather than silently dropping uploads.
+    const WgrUploader* uploader = wgr_uploader_get(_renderer);
+    auto* buf = new VertexBufferWgpu(_renderer, uploader, mesh, nv, dynamic);
     render::mesh::BuildSections(src, buf->sections);
     return buf;
 }

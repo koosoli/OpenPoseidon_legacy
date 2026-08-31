@@ -23,6 +23,8 @@ mod textures;
 mod tonemap;
 mod underwater;
 mod upscaler;
+// REN-THR-009 — the Send + Sync upload surface for CPU-path meshes.
+mod uploader;
 mod water;
 mod water_visibility;
 
@@ -682,6 +684,10 @@ pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    // REN-THR-009 — handed to C++ by `wgr_uploader_get` and used from there WITHOUT forming
+    // `&mut *renderer`. Arc so the pointer stays valid for the renderer's whole life; the
+    // C++ side borrows it and never releases it.
+    uploader: std::sync::Arc<uploader::Uploader>,
     config: wgpu::SurfaceConfiguration,
     present_modes: Vec<wgpu::PresentMode>,
     textures: SharedTextures,
@@ -1588,6 +1594,7 @@ impl Renderer {
             log,
             runtime_diagnostics,
             surface,
+            uploader: std::sync::Arc::new(uploader::Uploader::new(queue.clone())),
             device,
             queue,
             config,
@@ -3064,6 +3071,9 @@ impl Renderer {
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
     ) -> Result<(), String> {
+        // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
+        // from the pool. This is the frame boundary a deferred mesh destroy waits for.
+        self.drain_deferred_mesh_destroys();
         let screen = glam::Vec2::new(self.config.width as f32, self.config.height as f32);
         self.gfx2d
             .prepare(&self.device, &self.queue, screen, fog, verts);
@@ -5343,6 +5353,10 @@ impl Renderer {
         // those superseded application-side handles; wgpu retains resources for
         // command buffers that are still executing on the GPU.
         self.gfx3d.frame_submitted(&self.device, &self.queue);
+        // REN-THR-009 — the other site where the pool epoch can move: a shrink reallocates
+        // the vertex buffer exactly as a growth does. Republish before the producer's next
+        // upload, which happens between frames, not at the next frame's start.
+        self.publish_pool_to_uploader();
         // Same boundary for bindless texture slots: a slot freed by texture_destroy
         // this frame may only be reused for creates in later frames.
         self.textures.frame_submitted();
@@ -5470,8 +5484,42 @@ impl Renderer {
     }
 
     fn mesh_create(&mut self, verts: &[WgrMeshVertex], indices: &[u32]) -> u64 {
-        self.gfx3d
-            .mesh_create(&self.device, &self.queue, verts, indices)
+        let id = self
+            .gfx3d
+            .mesh_create(&self.device, &self.queue, verts, indices);
+        // REN-THR-009 — one of the two production sites where the pool epoch can move (a
+        // growth reallocates the vertex buffer), so the uploader's cached buffer is
+        // republished here. Then the new mesh's vbase/vert_count, which are fixed for its
+        // life, so an off-handle update never has to ask the renderer anything.
+        if id != 0 {
+            self.publish_pool_to_uploader();
+            if let Some((vbase, vert_count)) = self.gfx3d.mesh_upload_meta(id) {
+                self.uploader
+                    .register_mesh(id, uploader::MeshUpload { vbase, vert_count });
+            }
+        }
+        id
+    }
+
+    /// The upload surface `wgr_uploader_get` hands to C++. See the lifetime contract there.
+    pub(crate) fn uploader(&self) -> &std::sync::Arc<uploader::Uploader> {
+        &self.uploader
+    }
+
+    /// Republish the pool's current vertex buffer to the uploader. Idempotent and cheap —
+    /// it clones only when the epoch actually moved — so it can be called unconditionally.
+    fn publish_pool_to_uploader(&self) {
+        self.uploader
+            .publish_pool(self.gfx3d.pool_generation(), self.gfx3d.pool_vbuf());
+    }
+
+    /// Run the destroys `wgr_uploader_mesh_destroy` parked. Called at the TOP of a frame:
+    /// `Gfx3d::mesh_destroy` removes `bake_bind_cache` entries the draw path reads and
+    /// returns ranges to the pool's free lists, so it may not land mid-frame.
+    fn drain_deferred_mesh_destroys(&mut self) {
+        for id in self.uploader.take_pending_destroys() {
+            self.gfx3d.mesh_destroy(id);
+        }
     }
 
     fn mesh_update(&mut self, handle: u64, verts: &[WgrMeshVertex]) {
@@ -5484,6 +5532,10 @@ impl Renderer {
     }
 
     fn mesh_destroy(&mut self, handle: u64) {
+        // Keep the uploader's metadata table from outliving the mesh, so a stale handle
+        // reaching `wgr_uploader_mesh_update` is ignored rather than writing into ranges a
+        // later create may already own.
+        self.uploader.forget_mesh(handle);
         self.gfx3d.mesh_destroy(handle);
     }
 

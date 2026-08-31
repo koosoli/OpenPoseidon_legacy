@@ -2125,6 +2125,100 @@ pub unsafe extern "C" fn wgr_mesh_set_skin(
     }));
 }
 
+/// The `Send + Sync` upload surface for CPU-path meshes (REN-THR-009). Opaque on both
+/// sides of the ABI: C++ only ever holds the pointer and hands it back.
+#[repr(C)]
+pub struct WgrUploader {
+    _opaque: [u8; 0],
+}
+
+// The pointer C++ holds is the `Arc`'s target reinterpreted; these two are the only places
+// that know it. Kept as functions rather than inline casts so the round trip reads once.
+fn uploader_as_ptr(u: &std::sync::Arc<crate::uploader::Uploader>) -> *const WgrUploader {
+    std::sync::Arc::as_ptr(u).cast::<WgrUploader>()
+}
+
+/// # Safety
+/// `p` must be non-null and must have come from `uploader_as_ptr` on a live renderer.
+unsafe fn uploader_from_ptr<'a>(p: *const WgrUploader) -> &'a crate::uploader::Uploader {
+    unsafe { &*p.cast::<crate::uploader::Uploader>() }
+}
+
+/// Borrow the renderer's upload surface. Unlike every other mesh entry point this forms a
+/// SHARED `&*renderer`, and the returned pointer can then be used without touching the
+/// renderer at all.
+///
+/// Lifetime contract — the same discipline the rest of this ABI documents for
+/// null-tolerance, written out because this one crosses a thread boundary:
+///
+/// 1. The pointer is valid until `wgr_destroy` and is stable for the renderer's whole
+///    life. It is a borrow, not an owner: there is nothing to release.
+/// 2. It may be used from any thread, concurrently with itself.
+/// 3. It may NOT be used concurrently with any entry point that forms `&mut *renderer`
+///    (which is 62 of the 79 — see REN-THR-001). Today that is trivially satisfied because
+///    everything is serial; when a render thread exists, this is the rule that puts uploads
+///    on the producer and everything else on the consumer.
+/// 4. Mesh lifetime is producer-owned and single-threaded: update and destroy on the SAME
+///    handle from two threads at once is forbidden, not merely unspecified.
+///
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null (returns null).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_uploader_get(renderer: *mut WgrRenderer) -> *const WgrUploader {
+    if renderer.is_null() {
+        return std::ptr::null();
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        uploader_as_ptr(renderer.uploader())
+    }))
+    .unwrap_or(std::ptr::null())
+}
+
+/// Re-upload vertex data for an existing mesh without the renderer handle. Semantics are
+/// `wgr_mesh_update`'s exactly: topology unchanged, the vertex count must not exceed the
+/// mesh's allocated count, and an unknown handle (including one already passed to
+/// `wgr_uploader_mesh_destroy`) is ignored. Returns 1 if a write was issued, 0 otherwise.
+///
+/// # Safety
+/// `uploader` must be a pointer from `wgr_uploader_get` whose renderer is still live, or
+/// null. `verts` must be a valid slice (data valid for its length, or null with length 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_uploader_mesh_update(
+    uploader: *const WgrUploader,
+    id: u64,
+    verts: WgrSlice<WgrMeshVertex>,
+) -> u32 {
+    if uploader.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let uploader = unsafe { uploader_from_ptr(uploader) };
+        let verts = unsafe { verts.as_slice() };
+        u32::from(uploader.mesh_update(id, verts))
+    }))
+    .unwrap_or(0)
+}
+
+/// Park a mesh destroy for the renderer to run at the top of its next frame. It cannot be
+/// done here: `Gfx3d::mesh_destroy` removes `bake_bind_cache` entries the draw path reads
+/// and returns ranges to the geometry pool's free lists, neither of which may change while
+/// a frame is in flight. The handle's upload metadata is dropped immediately, so a later
+/// `wgr_uploader_mesh_update` on it is a no-op rather than a write into reused ranges.
+///
+/// # Safety
+/// `uploader` must be a pointer from `wgr_uploader_get` whose renderer is still live, or
+/// null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_uploader_mesh_destroy(uploader: *const WgrUploader, id: u64) {
+    if uploader.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { uploader_from_ptr(uploader) }.enqueue_destroy(id);
+    }));
+}
+
 /// # Safety
 /// `renderer` must be a live pointer from `wgr_create`, or null.
 #[unsafe(no_mangle)]

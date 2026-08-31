@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use slotmap::{Key, KeyData, SlotMap};
 use wgpu::util::DeviceExt;
 
-mod pool;
+pub(crate) mod pool;
 use pool::{GeometryPool, MeshAlloc};
 
 // GPU cull + LOD + indirect-arg compaction (docs/gpu-culling-and-depth-plan.md Stage 3).
@@ -4657,6 +4657,24 @@ impl Gfx3d {
         }
         let vbase = mesh.alloc.vbase;
         self.pool.update_verts(queue, vbase, verts);
+    }
+
+    // REN-THR-009 — the three reads an off-handle upload needs, exposed without the
+    // `&mut self` that `mesh_update` carries for no reason. `vbase` and `vert_count` are
+    // fixed for the life of a mesh (the pool never compacts); the pool buffer is NOT, which
+    // is why `pool_generation` is published alongside it and the renderer republishes at
+    // the two sites where the epoch can move.
+    pub fn mesh_upload_meta(&self, handle: u64) -> Option<(u32, u32)> {
+        let mesh = self.meshes.get(KeyData::from_ffi(handle).into())?;
+        Some((mesh.alloc.vbase, mesh.vert_count))
+    }
+
+    pub fn pool_generation(&self) -> u64 {
+        self.pool.generation()
+    }
+
+    pub fn pool_vbuf(&self) -> &wgpu::Buffer {
+        self.pool.vbuf()
     }
 
     pub fn mesh_destroy(&mut self, handle: u64) {
