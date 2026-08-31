@@ -61,6 +61,7 @@ set(POSEIDON_BASE_TEST_SOURCES
     Threads/test_pocritical.cpp
     Threads/test_posemaphore.cpp
     Threads/test_pothread.cpp
+    Threads/test_thread_affinity.cpp
     Math/test_vector3.cpp
     Math/test_vector3d.cpp
 )

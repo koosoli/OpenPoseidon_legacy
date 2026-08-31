@@ -1,5 +1,6 @@
 #include <Poseidon/Foundation/Platform/FPUSetup.hpp>
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
 
@@ -59,6 +60,12 @@ void InitFPU()
     // parsing, well before InitializeEngineCore) are caught by the per-task
     // `EnsureFpEnvironmentMatchesMain()` in TaskPool rather than at thread start.
     CaptureMainFpEnvironment();
+
+    // Roadmap 4.1: same thread, same moment, different question. The FP capture records
+    // what the main thread's arithmetic looks like; this records WHICH THREAD it is, so
+    // the objects the ownership table calls main-thread-only can say so at runtime
+    // instead of only in a header comment. See Threads/ThreadAffinity.hpp.
+    CaptureMainThread();
 }
 
 } // namespace Poseidon::Foundation

@@ -47,6 +47,13 @@ float RandomGenerator::RandomValue(int seed) const
 
 float RandomGenerator::RandomValue() const
 {
+    // Roadmap 4.1 audit: until now only SetSeed carried this guard, so the guard could
+    // not fire for the case it was written for. A worker that reached the sequential
+    // stream would overwhelmingly DRAW from it, not re-seed it -- and `_seed++` here is
+    // the unsynchronised read-modify-write that makes the draw a race. Gauss and
+    // PlusMinus both route through this function, so this one call covers all three
+    // sequential draw entry points named in the header.
+    NoteSequentialUse();
     return _valueTable(_seed++) * (1.0 / static_cast<double>(RandomTable::Size));
 }
 

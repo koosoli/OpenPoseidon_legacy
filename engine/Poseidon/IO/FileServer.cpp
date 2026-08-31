@@ -7,6 +7,7 @@
 #include <Poseidon/Foundation/Memory/FastAlloc.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 #ifdef _WIN32
 #include <process.h>
@@ -36,6 +37,14 @@ FileCache::~FileCache() = default;
 
 int FileCache::Find(const char* name)
 {
+    // Roadmap 4.1. The header has said MAIN THREAD ONLY since 2026-08-30; this is the
+    // line that makes it checkable. Find is the funnel -- Use, Store and the eviction
+    // path all reach the MRU through it -- so a worker that reads a PBO-packed file
+    // through GFileServer reports here, before it can race MoveToFront's array shuffle.
+    // A report, not a lock: locking this cache would hide a call that should not be on
+    // a worker at all (the pure loose-file readers exist for exactly that case).
+    POSEIDON_MAIN_THREAD_ONLY("FileCache (GFileServer's unlocked MRU) -- workers must use "
+                              "ModelCache::LoadLooseFile / ReadPAABlockChain / ReadEmatFileLoose");
     for (int i = 0; i < _cache.Size(); i++)
     {
         const FileInCache* file = _cache[i];

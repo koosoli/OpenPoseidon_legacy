@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Dev/Diag/ScopedTimer.hpp>
+#include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
 #include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -604,6 +605,15 @@ LODShapeWithShadow* ShapeBank::NewFromModel(const char* name, bool reversed, boo
                                             std::shared_ptr<Model::Model> preparsed, LoadTiming* timing,
                                             LODShapeWithShadow* preadapted)
 {
+    // Roadmap 4.1. ObjectStreamPrepare.hpp lists this whole entry point -- the cache
+    // insert, the adapter it may run, and the vertex-buffer build under it -- as MAIN
+    // THREAD ONLY, and the streamed-admission path now hands it worker-produced IR
+    // (the `preparsed`/`preadapted` arguments) from the main thread. That is the exact
+    // arrangement a future slice could get wrong by calling one function too early, so
+    // the rule reports rather than relying on the header being reread.
+    POSEIDON_MAIN_THREAD_ONLY("ShapeBank::NewFromModel -- the model bank, AssetCache and vertex-buffer "
+                              "creation are main-thread only; workers produce IR (ModelCache::LoadLooseFile) "
+                              "and hand it here");
     char lowName[128];
     char cacheKey[160];
     BuildShapeCacheKey(name, reversed, shadow, lowName, cacheKey);
