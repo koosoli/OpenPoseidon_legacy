@@ -92,6 +92,11 @@ hardware, not the ~65 µs the arithmetic suggested: merging Hi-Z's eleven per-mi
 into one made that region 25% cheaper (0.042 ms) and left the frame residual untouched.
 Do not spend effort merging passes on the strength of that number. `PERF-010`.
 
+### Grass work as a whole — closed for now
+4.882 → 2.604 ms, frame 13.34 → 10.5 ms. Every lever B.4 listed is resolved: vertex count
+taken, prepass eliminated, cascade mask already existed, cards characterised and parked
+below. **Reopen with a corpus that measures differently, not with another idea.**
+
 ### Grass photo cards as a cheaper meadow
 34× cheaper than the procedural blades (frame 13.34 → 7.62 ms) and **not a replacement**:
 the atlas is authored as large sparse clumps, so the default spacing gives bare ground with

@@ -1351,6 +1351,14 @@ that are dominated by alpha overdraw, fragment shading or texture bandwidth.
 
 ### B.4 Vegetation overdraw and grass cost
 
+> **CLOSED for now, 2026-08-31. Grass went from 4.882 ms to 2.604 ms and the frame from
+> 13.34 ms to 10.5 ms.** Every lever this section listed has been resolved one way or the
+> other: the vertex count was taken (indexing, −39%), the prepass was eliminated as a wash,
+> the cascade-count optimisation turned out to already exist and be on by default, and the
+> photo-card path is measured, characterised and parked as a content job. What is left is
+> re-authored cards — see `PARKED.md`. Reopen this with a corpus that measures differently,
+> not with another idea.
+
 The largest *already measured* GPU line item gets its own entry so effort does not
 flow past it to the more fashionable items above. On stock-world captures the GPU
 frame is grass-dominated — roughly a third of GPU time — and stock-world scenes are
