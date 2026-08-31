@@ -66,6 +66,29 @@ The campaign is extracted with a small packing-aware PBO reader written for this
 DLSS silently falls back to native — that is the trap that produced the false
 bisect.
 
+## Second half of the night (05:00-05:30)
+
+Everything below is committed, pushed and **deployed** — the game folder is stamped with
+the tip at the time of writing.
+
+| Area | What | Evidence |
+|---|---|---|
+| Phase 7 | The GPU-cost item-budget clamp ships **opt-in** (`WGR_OBJECT_STREAM_GPU_BUDGET=1`) | Right where it matters — **0 interventions** at the probed 5,611 MB budget, so a set that fits is never shrunk. Wrong under pressure — at 1,200 MB it clamps 20,000 → 13,608 and then changes its mind **96 times in 200 s**, because shrinking the set changes the per-object measurement that drove the shrink |
+| Phase 5.3 | The snapshot counters are **visible** at last — a section of the Fixed Step tab and a `snapshot{}` block in `--capture-metrics` | They had been written on every publish since the ring landed and were readable only from a unit test |
+| Phase 5.3 | The drop counter is **not zero**, and the first capture that showed it said so | `firstDropGeneration == fallback + 1` in both of two runs: the one drop per world load is the menu→world handover frame. The counter now has a known-good value instead of an assumed one |
+| Phase 3.1 | A capture now records **which binary and what resolution** produced it | The JSON recorded neither; the commit lived only in the bench script's console. First run with it also settled what the bench had been measuring: `3.05-f84ec7a-dev, render 2305x965 → output 3441x1440, msaa 4, dlss_active true` — not the 800×600 the roadmap warns about |
+| Phase 3.1 | The `cpu_milliseconds` column was **dead in every capture ever written** — all 58 regions read −1 | `begin_frame` cleared the array the reader reads. Now published on frame end like the GPU rows; 13 of 58 regions report real time. Largest is 0.08 ms against a 25.6 ms frame, so recording the frame is not where the CPU's time goes. The existing test asserted the buggy contract and was rewritten |
+| Phase 4.3 | **Audited: every clause already met** — and not by the mechanism the call site suggests | No explicit `Texture::destroy()` anywhere; handles are dropped and wgpu's tracker defers the free. The 120-frame eviction window is a thrash heuristic, not a safety margin — said at the call site now, replacing a stale NOTE describing an already-fixed bug |
+| Phase 11A | `poSetMyPriority` was a silent no-op on Windows (thread ID cast to a HANDLE) | **Latent, not live** — the only Windows caller carried a workaround from the commit that introduced it. Fixed with a test that reads the priority back from the OS and that the old code fails |
+| Phase 1.4 | **HRTF probe and modes** merged in from the audio agent | `ALC_HRTF_STATUS_SOFT` was never queried, so "user chose Off" and "driver refused" logged identically. Now distinguishable. Measured here: 1 dataset, `Built-In HRTF`, and Auto ≡ On on this device because HRTF is already on before anything touches it |
+| Phase 8.6 | **Worker-count determinism harness** merged in from the determinism agent | Terrain generation is bit-identical at serial/1/2/4/8/32 workers. The negative control found a latent bug nothing had exercised: regenerating into a reused segment appended a second copy of the mesh (571 → 1056 → 1541 → 2026 vertices) and kept a stale water table |
+
+Engine suite **235,216** assertions / 0 failures; Foundation **159,282** / 0; renderer
+**204** / 0. All three green.
+
+One correction was issued against my own work: commit `97b08a39` corrects `869ce872`,
+which claimed the priority bug had a live impact it did not have.
+
 ## Open, in priority order
 
 1. **Retained-texture liveness** — `_lastUsedFrame` is refreshed only by the
