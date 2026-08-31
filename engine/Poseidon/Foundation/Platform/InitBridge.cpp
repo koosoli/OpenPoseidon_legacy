@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Foundation/Platform/InitBridge.hpp> // For function declarations
+#include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/ModSystem.hpp>
 #include <Poseidon/Core/Global.hpp> // For Glob
@@ -98,6 +99,10 @@ void ApplyConfigurationFlags()
     if (ENGINE_CONFIG.enablePIII)
     {
         SetFlushToZero();
+        // MXCSR.FTZ just changed on the main thread. Re-record the reference so workers
+        // conform to the environment that actually runs, whatever order this call site
+        // and InitFPU happen to execute in (roadmap 8.1).
+        Poseidon::Foundation::CaptureMainFpEnvironment();
     }
 }
 

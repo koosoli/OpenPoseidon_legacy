@@ -27,6 +27,7 @@ set(POSEIDON_BASE_TEST_SOURCES
     Common/test_platform.cpp
     Common/test_platformPaths.cpp
     Platform/test_cpp_runtime_warning.cpp
+    Platform/test_fp_environment.cpp
     Platform/test_crash_handler.cpp
     Platform/test_launch_diagnostics.cpp
     Containers/test_cachelist.cpp

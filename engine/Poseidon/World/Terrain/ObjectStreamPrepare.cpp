@@ -8,6 +8,7 @@
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp> // ReadEmatFileLoose (pure, worker-safe)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Threads/PoThread.hpp>
+#include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
 #include <Poseidon/World/Model/Model.hpp>
@@ -158,6 +159,14 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 #else
     Foundation::poSetMyPriority(-1);
 #endif
+
+    // Roadmap 8.1. This thread runs full ShapeAdapter geometry conversion whose output is
+    // installed verbatim on the main thread, so it must compute in the main thread's
+    // floating-point environment -- a new thread inherits the platform default MXCSR, not
+    // ours, and with ENGINE_CONFIG.enablePIII the two differ in flush-to-zero. Workers are
+    // created long after InitFPU, so the capture is always live by the time we get here.
+    Foundation::ApplyMainFpEnvironment();
+
     (void)workerIndex;
 
     std::unique_lock<std::mutex> lock(mutex);

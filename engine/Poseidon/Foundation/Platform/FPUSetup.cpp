@@ -1,4 +1,5 @@
 #include <Poseidon/Foundation/Platform/FPUSetup.hpp>
+#include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Dev/Debug/DebugTrap.hpp>
 
@@ -50,6 +51,14 @@ void InitFPU()
 #else // !_WIN32
     fesetround(FE_TONEAREST);
 #endif
+
+    // Roadmap 8.1: the state the main thread has RIGHT NOW is the process's intended
+    // numerical environment. Record it here, at the end of the only function that sets
+    // it, so every engine-owned worker can be conformed to it. Threads created before
+    // this point (the enkiTS pool is one — GameBase constructs it during command-line
+    // parsing, well before InitializeEngineCore) are caught by the per-task
+    // `EnsureFpEnvironmentMatchesMain()` in TaskPool rather than at thread start.
+    CaptureMainFpEnvironment();
 }
 
 } // namespace Poseidon::Foundation

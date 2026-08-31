@@ -1,4 +1,5 @@
 #include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 
 #include <enkiTS/TaskScheduler.h>
 
@@ -47,7 +48,8 @@ class RangeTask : public enki::ITaskSet
 
     void ExecuteRange(enki::TaskSetPartition range, uint32_t /*threadnum*/) override
     {
-        POSEIDON_TSAN_ACQUIRE(this); // see the dispatcher's pre-AddTaskSetToPipe writes
+        POSEIDON_TSAN_ACQUIRE(this);                  // see the dispatcher's pre-AddTaskSetToPipe writes
+        Foundation::EnsureFpEnvironmentMatchesMain(); // roadmap 8.1 — see the note on the ctor
         _work(range.start, range.end);
         POSEIDON_TSAN_RELEASE(this); // publish this partition's writes to the waiter
     }
@@ -66,7 +68,11 @@ struct FireAndForgetTask : public enki::ITaskSet
 
     explicit FireAndForgetTask(std::function<void()> w) : enki::ITaskSet(1), work(std::move(w)) {}
 
-    void ExecuteRange(enki::TaskSetPartition /*range*/, uint32_t /*threadnum*/) override { work(); }
+    void ExecuteRange(enki::TaskSetPartition /*range*/, uint32_t /*threadnum*/) override
+    {
+        Foundation::EnsureFpEnvironmentMatchesMain(); // roadmap 8.1 — see the note on the ctor
+        work();
+    }
 };
 
 // Lifetime-of-process slot for the optional global pool.  Tests
@@ -75,16 +81,31 @@ std::unique_ptr<TaskPool> g_globalPool;
 
 } // namespace
 
+// Roadmap 8.1. A worker thread starts with the platform-default MXCSR, not the main
+// thread's — see Foundation/Platform/FpEnvironment.hpp for why that matters. enkiTS
+// exposes a per-thread start hook (`profilerCallbacks.threadStart`), so use it.
+static void TaskPoolWorkerThreadStart(uint32_t /*threadnum*/)
+{
+    Foundation::ApplyMainFpEnvironment();
+}
+
 TaskPool::TaskPool(uint32_t threadCount) : _scheduler(std::make_unique<enki::TaskScheduler>())
 {
-    if (threadCount == 0)
+    // The threadStart hook alone is NOT sufficient here. GameBase constructs the
+    // process-wide pool during command-line parsing, which is well before
+    // InitializeEngineCore runs InitFPU — so at thread-start time there is usually
+    // nothing captured yet and the hook is a no-op. The per-task
+    // `EnsureFpEnvironmentMatchesMain()` in the two task adapters above closes that
+    // window: it is a read-and-compare (a few cycles) that writes only when the thread
+    // has actually drifted. The hook still earns its place for pools created after
+    // startup and for threads that never receive a task from these adapters.
+    enki::TaskSchedulerConfig config = _scheduler->GetConfig();
+    if (threadCount != 0)
     {
-        _scheduler->Initialize();
+        config.numTaskThreadsToCreate = threadCount - 1;
     }
-    else
-    {
-        _scheduler->Initialize(threadCount);
-    }
+    config.profilerCallbacks.threadStart = &TaskPoolWorkerThreadStart;
+    _scheduler->Initialize(config);
 }
 
 TaskPool::~TaskPool()

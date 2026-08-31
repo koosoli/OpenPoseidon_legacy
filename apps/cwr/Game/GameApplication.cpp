@@ -7,6 +7,7 @@
 #include <Poseidon/Core/Game/GameLoop.hpp>
 #include <Poseidon/Core/Version.hpp>
 #include <Poseidon/Foundation/Platform/FPUSetup.hpp>
+#include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Foundation/Platform/PoseidonInit.hpp>
 #include <Poseidon/Core/Config/Config.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -1434,6 +1435,9 @@ bool GameApplication::InitializeSubsystems()
     {
         extern void SetFlushToZero();
         SetFlushToZero();
+        // Roadmap 8.1: MXCSR.FTZ just changed on the main thread; re-record the reference
+        // engine-owned workers conform to.
+        Poseidon::Foundation::CaptureMainFpEnvironment();
     }
 
     // FontSystem must be up before any UI / overlay draws — every Font
