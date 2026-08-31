@@ -705,6 +705,34 @@ Three concrete conclusions, in the order they should be acted on:
    independent of both: doubling growth with no compaction means up to 2x live at
    steady state. Shrink-with-hysteresis when live stays well below capacity.
 
+**Implemented 2026-08-31, and what each piece measured.**
+
+- **The budget is now a measurement.** The renderer probes the device-local heap
+  through the HAL route DLSS already uses and takes 70% of it: on this machine
+  **5,611 MB of a probed 8,017 MB**, against the old fixed 2,048 MB guess.
+  Consequence on the traverse: `over_budget` goes **true → false** and the texture
+  LRU stops evicting entirely at defaults (60 → 0 evictions), because it is no
+  longer chasing a target that meant nothing. `WGR_DYNAMIC_VRAM_MB` still overrides;
+  0 is still unlimited; a backend that cannot be probed logs why and keeps 2,048.
+- **The geometry pool can hand its tail back** — shrink-with-hysteresis (live under
+  half of capacity for 120 consecutive frames, target 1.25x live, reallocated inside
+  the submit boundary so the GPU can never be reading the freed buffer). Real
+  compaction is impossible without a mesh-handle rewrite pass, because an allocation's
+  offset is baked into every recorded draw the moment it is handed out; the trailing
+  free block is exactly the doubling slack, which is what the 661 MB was.
+- **The item budget can be clamped by measured GPU cost** — but it ships **opt-in**
+  (`WGR_OBJECT_STREAM_GPU_BUDGET=1`). It does the right thing where it matters (zero
+  interventions at the probed budget, so a set that fits is never shrunk) and the
+  wrong thing under pressure: at 1,200 MB it clamps 20,000 → 13,608 and then
+  oscillates, 96 budget changes in 200 s, because shrinking the set changes the
+  per-object measurement that drove the shrink. It needs a dwell time on the
+  decision, a windowed cost average, and an understanding of what the release path
+  does when the desired set shrinks — all cheap, none of them safe to guess at.
+- **The retained-texture liveness sweep** exists but its pin exemption is also
+  opt-in (`WGR_RETAINED_LIVENESS=1`): the white buildings it was built to cure turned
+  out not to be an eviction symptom at all (see REN-RES-001), so relaxing a safety
+  check would buy nothing measurable.
+
 Once asynchronous loading is reliable, build a coherent residency manager.
 
 Phase 7 does **not** have to finish before Phase 8 begins. After the shared ownership,

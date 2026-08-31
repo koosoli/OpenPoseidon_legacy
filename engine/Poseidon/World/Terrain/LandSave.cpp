@@ -3025,23 +3025,53 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
 // so the clamp stays out of the way until the sample is meaningful.
 static uint32_t GpuClampedObjectBudget(uint32_t itemBudget, uint32_t residentNow, uint32_t& lastEffective)
 {
-    // Opt-out for A/B and for anyone chasing a residency difference.
+    // OPT-IN (WGR_OBJECT_STREAM_GPU_BUDGET=1), and the reason is measured, not cautious.
+    //
+    // The clamp behaves correctly where it must: on this machine's probed 5,611 MB
+    // budget it fires ZERO times over the traverse -- 20,000 objects at the measured
+    // ~150 KB each project well inside it, so a set that fits is never shrunk. Good.
+    //
+    // Under real pressure (WGR_DYNAMIC_VRAM_MB=1200) it clamps 20,000 -> 13,608, and
+    // then it OSCILLATES: 96 budget changes over a 200 s traverse, roughly one every
+    // two seconds. The loop is self-driving -- shrinking the set lowers the resident
+    // count, which changes the measured per-object cost, which moves the projection
+    // back under the low-water mark, which restores the full count, which grows the
+    // set again. The two water marks give hysteresis to the THRESHOLD but not to the
+    // DECISION, and "repeatedly loaded and evicted" is precisely what Phase 7 says to
+    // avoid. The resident count also did not fall the way the desired-set count did,
+    // so the release path's response to a lowered budget is not yet understood.
+    //
+    // What it needs before it can ship on: a dwell time on the decision (N consecutive
+    // updates past a mark before acting), a per-object cost averaged over a window
+    // rather than the instantaneous ratio, and a measurement of what the release path
+    // actually does when the desired set shrinks. All three are cheap; none of them
+    // are things to guess at 4 a.m. and leave in a build the owner wakes up to.
     static const bool enabled = []
     {
         const char* v = std::getenv("WGR_OBJECT_STREAM_GPU_BUDGET");
-        return !(v && v[0] == '0');
+        return v && v[0] == '1';
     }();
     if (!enabled || !GEngine)
         return itemBudget;
     Engine::GpuMemoryStatsOut mem;
     if (!GEngine->GetGpuMemoryStats(mem) || mem.budgetBytes == 0)
         return itemBudget; // backend reports nothing (GL33): the count is all we have
-    // Need a real sample of what an object costs. `kMinSample` keeps a handful of
-    // cheap early objects from setting the average for the whole world.
-    constexpr uint32_t kMinSample = 2000;
-    if (residentNow < kMinSample || mem.trackedBytes == 0)
+    // TWO corrections learned by measuring, both of which the first version got wrong
+    // and which made the clamp fire (20,000 -> 15,136) on a machine with 5.6 GB of
+    // room -- the exact pop-in-for-nothing this must never cause:
+    //
+    // 1. Divide by the OBJECT-ATTRIBUTABLE bytes, not `trackedBytes`. Tracked also
+    //    carries terrain and everything else the renderer accounts for, so early in a
+    //    fill that fixed overhead is spread over a handful of objects and the average
+    //    comes out several times too high.
+    // 2. Only sample a set that is actually FULL. At 10% filled the per-object figure
+    //    describes the first, nearest, most expensive objects, not the mix a full
+    //    budget holds. Half the item budget is the earliest point the ratio means
+    //    anything.
+    const uint64_t objectBytes = mem.objectTextureBytes + mem.geometryLiveBytes;
+    if (residentNow < itemBudget / 2 || objectBytes == 0)
         return itemBudget;
-    const uint64_t perObject = mem.trackedBytes / residentNow;
+    const uint64_t perObject = objectBytes / residentNow;
     if (perObject == 0)
         return itemBudget;
     // Two marks, and the gap between them IS the hysteresis: shrink only when the
