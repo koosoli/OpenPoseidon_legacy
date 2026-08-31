@@ -80,7 +80,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-ledger-validation]
     benchmark_artifacts: []
-    evidence_hash: bf1e04cfdd177bae985354981f6dc4f34cafee590e167aca4c1998ebc7b3d9dd
+    evidence_hash: 44118033414e83c2ab812dcad6d220103dfbd63cc282e657f23a294cd5385be1
     decision_record: null
     known_failures:
       - No reviewed activation commit exists; the overlay remains PREPARED.
@@ -320,7 +320,7 @@ tickets:
         verified_commit: null
     test_ids: [ffi-abi-layout-refusal, ffi-abi-version-contract, ffi-separately-built-dll-refusal]
     benchmark_artifacts: []
-    evidence_hash: 15ba96e50f77cf392883b04b975a3f0d4bbe09a7a95315a6f5f943348a3c1bab
+    evidence_hash: 7f9bf2c2a59495123c37f4c3491578eab59450fbe9d108a116d33067c610aed0
     decision_record: null
     known_failures:
       - >-
@@ -384,7 +384,7 @@ tickets:
         verified_commit: null
     test_ids: [wgpu-capabilities-check, wgpu-windowed-resize-capture, wgpu-normal-loop-minimize-restore, wgpu-lifecycle-repeat-in-session, runtime-diagnostics-once]
     benchmark_artifacts: [docs/roadmap/evidence/preview0-manifest.json]
-    evidence_hash: 449ceb8021eb72f947593d33960c6b3ddd47e8fe8f0c8e9ba280727fc6917957
+    evidence_hash: 39957b494cde7571cf308d1a564ca90fc7864333e108a9cb853f599989124374
     decision_record: null
     known_failures: []
     fallback: Unsupported optional capabilities are reported and feature paths remain gated.
@@ -453,7 +453,7 @@ tickets:
       - docs/roadmap/evidence/preview0-gl33-vs-wgpu-menu-diff-20260801.json
       - docs/roadmap/evidence/preview0-wgpu-mission-capture-automation-20260801-original-training-capture.json
       - docs/roadmap/evidence/preview0-gl33-vs-wgpu-original-training-current-build-diff-20260801.json
-    evidence_hash: 1f25244a4d5c31519f5d9db5927f4936a9c2a538e6219643fcf844074a1b2229
+    evidence_hash: f91ac35ac8eda19dec563392c896f444cae827b36c13ed0c724f942c0ecb577e
     decision_record: docs/roadmap/decisions/TEST-002-visual-divergence-20260801.md
     known_failures:
       - Oliver Kay classified the clean original-training comparison as EXPECTED_DIFFERENCE. An independent evidence reviewer and hosted CI result are still required before the ticket can be VALIDATED.
@@ -522,7 +522,7 @@ tickets:
     production_call_sites: []
     test_ids: [preview0-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: d5b5e67661a5ee109e351a99052c137a40250b9de713b33a668bf8eec7a74893
+    evidence_hash: 04f3f33cd70b95dde56928bfa75425cd7ca097e554bea33af220f83eb2dfa8ed
     decision_record: null
     known_failures:
       - >-
@@ -668,7 +668,7 @@ tickets:
     production_call_sites: []
     test_ids: [ast-012b-odol73-fixture]
     benchmark_artifacts: []
-    evidence_hash: 26afe11314cb9f4138c1b058634ff92b3c55a98281c5f6ba3a9af4040366c214
+    evidence_hash: b6af97c47eb78b2d9d79a6c9b5d8840cf4843f68e70a74927fc88a55bfaac022
     decision_record: null
     known_failures:
       - >-
@@ -747,7 +747,7 @@ tickets:
         symbol: MLOD::peekLodSignature
     test_ids: [ast-011a]
     benchmark_artifacts: []
-    evidence_hash: 96688e1fdb74c4c442ccd2bdf816d9dcca881006579dbabf67c0c924d4fcaa5b
+    evidence_hash: 0622bc873f64a3115d0857c6ef969cd67c53c841f51b30799cf2b96d6eb57d9f
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: MLOD_PER_LOD_DISPATCH
@@ -826,7 +826,7 @@ tickets:
         symbol: MLOD::readP3DMFaceTable
     test_ids: [ast-011b]
     benchmark_artifacts: []
-    evidence_hash: e181c9034518e47b0d124e2d7612687f6866d652d2287c511c1e74d4e370cfcd
+    evidence_hash: 2d2286941f70ac69b94de2214bbcf1d2762f03d9bf39b8d51e5f41678b407876
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: P3DM_STATIC_GEOMETRY
@@ -941,7 +941,7 @@ tickets:
         symbol: MLOD::readP3DMTAGGSection
     test_ids: [ast-011c]
     benchmark_artifacts: []
-    evidence_hash: eeac2b512dc55f997826d65bd9e54a8e6d87e7ab736f8fa351e9d35b040e0e8e
+    evidence_hash: 7cecde14e97c3b75990df8862e9d21b4d5263658e514213a50f526d5e5ef2c26
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: MULTI_UV
@@ -1063,7 +1063,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::PeekOdolRevision
     test_ids: [ast-012a, ast-012c]
     benchmark_artifacts: []
-    evidence_hash: 64d003dda118f577ce99503c533e272d2468a52ab78e637af3b66c072bb089bc
+    evidence_hash: 414e696f8049a6346632151414df401add4fc5843d4c47885954f5227cc7c990
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: ODOL_REVISION_DISPATCH
@@ -1160,7 +1160,7 @@ tickets:
                ast-012b-odol73-corpus-survey, ast-012b-odol73-production-path,
                ast-012b-odol73-wgpu-static-render]
     benchmark_artifacts: []
-    evidence_hash: 57bbe0738f858c4bd569b786b0c22bdba905afcf38e10405b72a8c636cad001a
+    evidence_hash: fa23d1d0f384c74884d826e6182a38ed059e6199565d142d2843bce0d87207ec
     decision_record: docs/roadmap/decisions/AST-012B-odol73-rectangle-fixture-20260808.md
     capability_claims:
       - capability: ODOL73_STATIC_LOD_PARSE
@@ -1362,7 +1362,7 @@ tickets:
         symbol: PacLevelMem::Init
     test_ids: [ast-013]
     benchmark_artifacts: []
-    evidence_hash: ae5a63015b9a87d9c6b33cdb0ff32d4fca614800f13c3a5a0e544620ba3de889
+    evidence_hash: 4e55cf5e561cb99b130728da8aa5be2f8dd2721e7000ea59df293daa0a40ddc7
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: PAA_TAGG_CAPTURE
@@ -1476,7 +1476,7 @@ tickets:
         symbol: Preproc::Process
     test_ids: [ast-014]
     benchmark_artifacts: []
-    evidence_hash: a8ba289ea06e0de192acbfefcd400ac4aae595e48d6c190da541084b32e269e2
+    evidence_hash: ca9e4208b5029c2172ab8b565ab337903abe56e78aa8aa80011bcb982d2af0e6
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: RVMAT_SOURCE_IR
@@ -1572,7 +1572,7 @@ tickets:
         symbol: ModelCache::normalizePath
     test_ids: [ast-015]
     benchmark_artifacts: []
-    evidence_hash: d271557d42ef18effc8cdd51e4f34190dddd0f37137078cc28dc586fb963945c
+    evidence_hash: a90760a459e31b8449d24748c3262994880720006589005835d9cc04b8dd851b
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: VIRTUAL_PATH_CANONICAL
@@ -2106,7 +2106,7 @@ tickets:
         symbol: Validate COMPAT-C1 capability matrix
     test_ids: [compat-c1-capability-matrix-check]
     benchmark_artifacts: []
-    evidence_hash: 0550860d3ef74303258fed56efde9ddd547f2d020b8f8a3c3f5d8f2d47b04f3b
+    evidence_hash: 2595e833a9014053342b4ac9e98333e6f57ca6a8861e7db94881d3525ffc870e
     decision_record: docs/roadmap/decisions/AST-007-reference-fixture-ladder-20260808.md
     capability_claims:
       - capability: CAPABILITY_MATRIX
@@ -2309,7 +2309,7 @@ tickets:
         symbol: EngineWgpu::DrawSection
     test_ids: [mat-030]
     benchmark_artifacts: []
-    evidence_hash: 1956ab522e77ceda2ecdb67929fca3e2c92185f661f5709b3a77e7cebb78e692
+    evidence_hash: 7ee1d35597b9bf8d1b0420a033e512380bd1d1e6b8a6d753424f8f124dc79692
     decision_record: docs/roadmap/decisions/MAT-030-treeadv-shader-family-20260809.md
     capability_claims:
       - capability: SUPERMATERIAL
@@ -3102,7 +3102,7 @@ tickets:
         symbol: Poseidon::Asset::Formats::P3D::DescribeOdolRevision
     test_ids: [odol40-arma1-corpus, odol40-material-layout]
     benchmark_artifacts: []
-    evidence_hash: 3ab5e436a6e643e74a73848f69be849a5bcae2ce1152c1693777aefcd5cb26b9
+    evidence_hash: df3629d9922bb100e84d0e0d344c546cfe794df48fcf1539df431baa7e8cbe3a
     decision_record: docs/roadmap/decisions/AST-012D-odol-40-embedded-material-has-no-extra-field-20260813.md
     capability_claims:
       - capability: ODOL40_STATIC_LOD_PARSE
@@ -3509,7 +3509,7 @@ tickets:
         symbol: IsNormalLevel
     test_ids: [mat-035-shadow-lods-not-viewing-distances, mat-035-unknown-sentinel-not-drawable]
     benchmark_artifacts: []
-    evidence_hash: 422472c329f39a861b2c2b66baea49f5e7efbb6db84a77fd413a44ba3a8bb6c1
+    evidence_hash: b279d710862d00cfb0863ae5b5bbcf25ee94a1462a85561c96e513d5d10ce50b
     decision_record: docs/roadmap/decisions/MAT-035-shadow-lods-were-drawable-20260811.md
     capability_claims:
       - capability: SHADOW_LODS_NOT_DRAWABLE
@@ -4011,7 +4011,7 @@ tickets:
         symbol: StaticEmitterRadianceScale
     test_ids: [preview0-wgpu-check]
     benchmark_artifacts: []
-    evidence_hash: efb723be8ffd1701b020c12d688603940333c31196b62d05ec001b630519a530
+    evidence_hash: 27e37ffd73eead3bd750a7c14757075ceadb67ae231303ff0c246da0ce540feb
     decision_record: docs/roadmap/decisions/MAT-041-emitter-radiance-is-a-target-not-a-multiplier-20260812.md
     capability_claims:
       - capability: EMITTER_RADIANCE_TARGET_PEAK
@@ -4159,7 +4159,7 @@ tickets:
                bank-mount-traversal-refusal, preview0-wgpu-check,
                original-training-wgpu-capture]
     benchmark_artifacts: []
-    evidence_hash: fd12db233fe65535bbf317701d042275df8ea301709ab10e458761b1656f2402
+    evidence_hash: 3a66a00ead826ace84845fc15ac1da2d1432c3c9ebca770f3a60b18dd917a2d1
     decision_record: docs/roadmap/decisions/WLD-013-bank-mount-prefix-20260810.md
     capability_claims:
       - capability: BANK_MOUNTS_UNDER_ITS_DECLARED_PREFIX
@@ -4254,7 +4254,7 @@ tickets:
         symbol: Modern object streaming
     test_ids: [oprw25-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: 64e201a80ae1530df013a7b0acb0510ac1da0d5da290f36bd5484b87cb9e2ef5
+    evidence_hash: a5479b89773bcccdbd03f7c97820b35aea0a35bbf31db06a54f9f27dbeead649
     decision_record: docs/roadmap/decisions/WLD-014-landscape-assumes-one-grid-20260810.md
     capability_claims:
       - capability: TWO_GRID_MISMATCH_IS_THE_BLOCKER
@@ -4359,7 +4359,7 @@ tickets:
         symbol: Poseidon::TerrainWgpu::UploadGeography
     test_ids: [oprw25-local-corpus, preview0-wgpu-check, original-training-wgpu-capture]
     benchmark_artifacts: []
-    evidence_hash: afcecbd173a01687e3b2f3a6ce0617cb3eb5dfacd19061de37a5e3aeda5ea49b
+    evidence_hash: 01710c114dcfd57a7a7f5c433a4f1857d7491b3ed329cbdb5df788c000129bb4
     decision_record: docs/roadmap/decisions/WLD-015-first-a3-world-in-engine-20260810.md
     capability_claims:
       - capability: A3_WORLD_LOADS_AND_TERRAIN_RENDERS
@@ -4507,7 +4507,7 @@ tickets:
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
                original-training-wgpu-capture]
     benchmark_artifacts: []
-    evidence_hash: bf8cc7d5ba9405d5d48227ed114845a7466e39b9c45121c704bc086143849ff5
+    evidence_hash: e54e5e576c270c55c076513564361686790536ff800de27c9ef3d852cf5d846e
     decision_record: docs/roadmap/decisions/WLD-018-satellite-stage-was-dropped-on-both-generations-20260812.md
     capability_claims:
       - capability: SATELLITE_STAGE_REACHES_THE_IR
@@ -4619,7 +4619,7 @@ tickets:
     test_ids: [oprw24-local-corpus, oprw25-local-corpus, preview0-wgpu-check,
                original-training-wgpu-capture, terrain-census-a3-local-corpus]
     benchmark_artifacts: []
-    evidence_hash: 40b025f75ff9c60fdfc29b9fdc093af840a1e9bdd5d328b24974167d213ff16d
+    evidence_hash: d3a0aa5bffb9fc7ac6b549c589723918165ded35bb8699dde6726ecf92044f0b
     decision_record: docs/roadmap/decisions/WLD-019-lca-mask-is-an-indexed-selector-20260812.md
     capability_claims:
       - capability: LCA_MASK_IS_AN_INDEXED_SURFACE_SELECTOR
@@ -4924,7 +4924,7 @@ tickets:
         symbol: GGpuTerrainConform
     test_ids: [wld-021-road-banding-ablation]
     benchmark_artifacts: []
-    evidence_hash: 60dd5b2cbad24bf340530b2734a4407e10a07fbacb4c469b46905508a82b09f9
+    evidence_hash: de21c8906e79e06aa321c80c14815459ac95125d08b6d908519129f49ccc4903
     decision_record: docs/roadmap/decisions/WLD-021-road-banding-is-a-wgpu-shading-bug-20260813.md
     capability_claims:
       - capability: ROAD_BANDING_IS_BACKEND_NOT_DATA
@@ -5106,7 +5106,7 @@ tickets:
         symbol: PlanarTerrain
     test_ids: [perf-002-interleaved-ablation]
     benchmark_artifacts: []
-    evidence_hash: 8ed2dfc38e93f29d9681d4c09fad04e4029c37dd587313fc3f04ec20e5163276
+    evidence_hash: 3c49f645a6f3daf510f052c9f9448c9913c05a237d730eea2e7f494898270897
     decision_record: docs/roadmap/decisions/PERF-002-the-arma-3-frame-is-the-water-reflection-20260813.md
     capability_claims:
       - capability: PLANAR_REFLECTION_IS_THE_DOMINANT_A3_FRAME_COST
@@ -5379,7 +5379,7 @@ tickets:
     production_call_sites: []
     test_ids: [arch-001-gengine-call-site-census]
     benchmark_artifacts: []
-    evidence_hash: cf0070958b24cdeda63da9e3ad253a233106c5fa2306f92bc2b72a6142c0415b
+    evidence_hash: b0e38bd9940d9e4910dc74af748cf85cbd54c6c5163164153098551ce5efb0de
     decision_record: docs/roadmap/decisions/ARCH-001-simulation-render-separation-audit-20260812.md
     capability_claims:
       - capability: SIMULATION_DOES_NOT_READ_RENDERER_STATE
@@ -5548,7 +5548,7 @@ tickets:
     production_call_sites: []
     test_ids: [matching-abi-declaration-accepted, drifted-shared-struct-layout-refused]
     benchmark_artifacts: []
-    evidence_hash: f3e5babb385e62f5bd41d91b9eea1241f06826b2678906c341dd83f1c5205881
+    evidence_hash: a2269681bb945a4f31566d11c4fd7a3d842de009c64422d0469645ebc8b55644
     decision_record: docs/roadmap/decisions/CORE-NEG-003-abi-guard-checked-four-structs-20260814.md
     capability_claims:
       - capability: ABI_LAYOUT_DRIFT_REFUSED
@@ -5627,7 +5627,7 @@ tickets:
     production_call_sites: []
     test_ids: [rnd-031-viewer-floor-grid-capture]
     benchmark_artifacts: []
-    evidence_hash: 13c105edbcbdd966ddc262e8556afc07c46f13a57ff26454b9efc4a5cdc4a956
+    evidence_hash: e69d560aceb53479b8b5663ba0dc4a69db79b8dc8e83114ab3efc7f2c93138a9
     decision_record: docs/roadmap/decisions/RND-031-wgpu-had-no-3d-line-primitive-20260814.md
     capability_claims:
       - capability: WGPU_3D_LINE_PRIMITIVE
@@ -5696,21 +5696,10 @@ tickets:
     review_model: AUTOMATED_EVIDENCE
     scheduling_state: DONE
     status: INTEGRATED
-    outcome: >-
-      Landed 2026-08-25 in aa4c4c75, two lines. `Odol40.hpp` and `Odol49.hpp` now
-      store the section's CommonFaceFlags word instead of discarding it, in the
-      same slot revision 73 has used since fb6c676. Nothing downstream changed:
-      the mask, the hints copy and all six skips were already correct and were
-      only ever handed zero. Covers revision 40 via `ReadOdol40StaticSections`
-      and revisions 48/49/50/52/54, which all share `ReadOdolA2StaticModel`.
-      Measured after: A1 T-72 (rev 40) sections 0-2, the three marker sections
-      carrying its six proxies, read `0x1000c000`; A2 T-72 (rev 48) reads
-      `0x10002000`; and this record's own fixture `house_k_1_ep1.p3d` (rev 49)
-      reads `0x10002000` at LOD 0, where the investigation measured `0x0`.
-      Also added the flag word plus a HIDDEN-PROXY/HIDDEN tag to
-      `PoseidonTools model selections`, since the value had no observability at
-      all -- a reader that drops the word is indistinguishable from a file that
-      never set it. Deployed to the game folder the same day.
+    # ADAPTED: two lines changed existing readers (Odol40/Odol49) rather than adding a
+    # path. The narrative that used to sit in this field is the decision record's job
+    # and is already there in full -- this field takes one of the five verdicts.
+    outcome: ADAPTED
     owner: null
     branch: feat/consolidated
     baseline_commit: 361949c
@@ -5722,8 +5711,13 @@ tickets:
     blocks: []
     implementation_commits: [aa4c4c75]
     production_call_sites:
-      - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp (ReadOdol40StaticSections)
-      - engine/Poseidon/Asset/Formats/P3D/Odol49.hpp (ReadOdolA2StaticSections)
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol40.hpp
+        symbol: ReadOdol40StaticSections
+      # Was recorded as ReadOdolA2StaticSections, which does not exist in the file. The
+      # record's own outcome text names ReadOdolA2StaticModel, and that is the symbol
+      # (Odol49.hpp:262) the five revision-specific readers all route through.
+      - file: engine/Poseidon/Asset/Formats/P3D/Odol49.hpp
+        symbol: ReadOdolA2StaticModel
     test_ids: [mat-046-takistan-proxy-section-census]
     benchmark_artifacts: []
     evidence_hash: 021f49e6cbb122775e993857168b751b5914d78ee3c31d40fe087f0345b30eaf
@@ -5820,14 +5814,27 @@ tickets:
       - engine/Poseidon/Asset/Formats/P3D/Odol49.hpp
       - engine/Poseidon/Asset/Formats/P3D/Odol40.hpp
   - id: RND-032
-    overlay: PREVIEW0-EXEC-001
+    # Re-filed from PREVIEW0-EXEC-001 on 2026-08-31. Preview 0 is a shipped milestone
+    # and its overlay is deliberately EXACT, so a record scoped to it that its
+    # authorised_tickets list does not name makes the gate fail -- which it had been
+    # doing in CI. This is post-Preview-0 renderer and asset-compatibility work; the
+    # active overlay is SUPERSET and takes a scoped record without authorising it,
+    # which is the light path the ledger provides for exactly this.
+    overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: XOB export writes every graphical LOD, restoring object LOD selection
     class: RUNTIME_INFRA
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
-    status: PARTIAL
+    # Was PARTIAL, which is not one of the eight lifecycle states the validator accepts
+    # and never has been. Nothing caught it: the Preview-0 validator failed earlier on
+    # the ticket-set mismatch and never reached this line, and the COMPAT-C1 validator
+    # never saw the record because it was scoped to the other overlay. INTEGRATED is
+    # the honest mapping -- the change is in shipped code at both named call sites --
+    # and the work still outstanding is already stated by verification_commit: null
+    # and scheduling_state: OPEN, which is what PARTIAL was reaching for.
+    status: INTEGRATED
     outcome: null
     owner: null
     branch: codex/wgpu-performance-modernisation
@@ -5851,7 +5858,7 @@ tickets:
         verified_commit: null
     test_ids: [xob-multi-lod-roundtrip, everon-lod-ab-capture]
     benchmark_artifacts: []
-    evidence_hash: f5ee166f22a3e9e67c712513b26d3e2aaf47dd52cc0cf72ad1e90d4129c9a3c8
+    evidence_hash: 9ae2065af76eb1412acd58d772e9bc0e9e6aa3f65e952c44a4305778a5f19ef5
     decision_record: docs/roadmap/decisions/RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md
     known_failures:
       - >-
@@ -5897,14 +5904,27 @@ tickets:
       - apps/tools/Tools/commands/XobCommand.cpp
       - engine/WgpuRenderer/rust/src/gfx3d/cull.wgsl
   - id: RND-033
-    overlay: PREVIEW0-EXEC-001
+    # Re-filed from PREVIEW0-EXEC-001 on 2026-08-31. Preview 0 is a shipped milestone
+    # and its overlay is deliberately EXACT, so a record scoped to it that its
+    # authorised_tickets list does not name makes the gate fail -- which it had been
+    # doing in CI. This is post-Preview-0 renderer and asset-compatibility work; the
+    # active overlay is SUPERSET and takes a scoped record without authorising it,
+    # which is the light path the ledger provides for exactly this.
+    overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: Cross-layer frame profile; objects are not the bottleneck on any layer
     class: RUNTIME_INFRA
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
-    status: PARTIAL
+    # PARTIAL is not one of the eight lifecycle states and never has been; nothing
+    # caught it because the Preview-0 validator failed earlier on the ticket-set
+    # mismatch and the COMPAT-C1 one never saw the record.
+    # Mapped CONSERVATIVELY to RESEARCHED, not INTEGRATED: implementation_commits is
+    # empty AND at least one named production call site does not resolve to a symbol in
+    # the file it names. RESEARCHED claims only what the decision record supports.
+    # Verifying the call sites, and promoting this if a fix did land, is parked.
+    status: RESEARCHED
     outcome: null
     owner: null
     branch: codex/wgpu-performance-modernisation
@@ -5925,7 +5945,7 @@ tickets:
         verified_commit: null
     test_ids: [water-sim-skip-ab, takistan-perf-budget200k, dayz-chernarus-audit]
     benchmark_artifacts: []
-    evidence_hash: 1ba60d02021c8193f985cca2e18468e51ad0553184110d374f4ed2e9423c5f85
+    evidence_hash: 903ec235538457d10b490122f4c36cbc00e37c81f2f86d6e8bd51934cf46c5e1
     decision_record: docs/roadmap/decisions/RND-033-cross-layer-frame-profile-objects-are-not-the-bottleneck-20260815.md
     known_failures:
       - >-
@@ -5976,14 +5996,27 @@ tickets:
       - docs/roadmap/decisions/RND-032-single-lod-xob-export-cost-6-5x-of-gpu-frame-20260815.md
       - engine/WgpuRenderer/rust/src/water/mod.rs
   - id: MAT-047
-    overlay: PREVIEW0-EXEC-001
+    # Re-filed from PREVIEW0-EXEC-001 on 2026-08-31. Preview 0 is a shipped milestone
+    # and its overlay is deliberately EXACT, so a record scoped to it that its
+    # authorised_tickets list does not name makes the gate fail -- which it had been
+    # doing in CI. This is post-Preview-0 renderer and asset-compatibility work; the
+    # active overlay is SUPERSET and takes a scoped record without authorising it,
+    # which is the light path the ledger provides for exactly this.
+    overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: PAA written without a FLAG tagg disables alpha cutout globally
     class: RUNTIME_INFRA
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
-    status: PARTIAL
+    # PARTIAL is not one of the eight lifecycle states and never has been; nothing
+    # caught it because the Preview-0 validator failed earlier on the ticket-set
+    # mismatch and the COMPAT-C1 one never saw the record.
+    # Mapped CONSERVATIVELY to RESEARCHED, not INTEGRATED: implementation_commits is
+    # empty AND at least one named production call site does not resolve to a symbol in
+    # the file it names. RESEARCHED claims only what the decision record supports.
+    # Verifying the call sites, and promoting this if a fix did land, is parked.
+    status: RESEARCHED
     outcome: null
     owner: null
     branch: codex/wgpu-performance-modernisation
@@ -6004,7 +6037,7 @@ tickets:
         verified_commit: null
     test_ids: [paa-encoder-flag-tagg, reforger-netfence-cutout-ab]
     benchmark_artifacts: []
-    evidence_hash: 6978c13732055fd86a4fab59a4e8a588199ea2aded20712691b8575a96fe1657
+    evidence_hash: 3df76f64fe21b921f8de4c9237d4b5caaa462608f9c75ef5be78b09736178f8b
     decision_record: docs/roadmap/decisions/MAT-047-paa-without-a-flag-tagg-disables-alpha-cutout-globally-20260815.md
     known_failures:
       - >-
@@ -6043,14 +6076,25 @@ tickets:
       - engine/Poseidon/Graphics/Textures/PAAEncoder.cpp
       - engine/Poseidon/Graphics/Rendering/Font/Pactext.cpp
   - id: CLD-021
-    overlay: PREVIEW0-EXEC-001
+    # Re-filed from PREVIEW0-EXEC-001 on 2026-08-31. Preview 0 is a shipped milestone
+    # and its overlay is deliberately EXACT, so a record scoped to it that its
+    # authorised_tickets list does not name makes the gate fail -- which it had been
+    # doing in CI. This is post-Preview-0 renderer and asset-compatibility work; the
+    # active overlay is SUPERSET and takes a scoped record without authorising it,
+    # which is the light path the ledger provides for exactly this.
+    overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: Cloud ground shadows ended in a hard line at the map half-extent
     class: RUNTIME_INFRA
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
-    status: PARTIAL
+    # PARTIAL is not one of the eight lifecycle states and never has been; nothing
+    # caught it because the Preview-0 validator failed earlier on the ticket-set
+    # mismatch and the COMPAT-C1 one never saw the record.
+    # Verified before re-stating: select_cloud_shadow_span EXISTS at sky/mod.rs:1980 and
+    # was added by bd00297d, so this record was understating a fix that shipped.
+    status: INTEGRATED
     outcome: null
     owner: null
     branch: codex/wgpu-performance-modernisation
@@ -6061,7 +6105,7 @@ tickets:
     depends_on: []
     blocked_by: []
     blocks: []
-    implementation_commits: []
+    implementation_commits: [bd00297d]
     production_call_sites:
       - file: engine/WgpuRenderer/rust/src/sky/mod.rs
         symbol: select_cloud_shadow_span
@@ -6074,7 +6118,7 @@ tickets:
         verified_commit: null
     test_ids: [cloud-shadow-range-tests, cloud-shadow-edge-ab]
     benchmark_artifacts: []
-    evidence_hash: 1e386363dfe008cb65063a91e5e051f3508d2365ac568c008bf6eb8fbcb9ef47
+    evidence_hash: eb648009fe5f8b1ffc3617e367c6e68485fe147a0da956cfdd85f9809a561ae1
     decision_record: docs/roadmap/decisions/CLD-021-cloud-shadow-map-ended-in-a-hard-line-at-2048-m-20260815.md
     known_failures:
       - >-
@@ -6114,14 +6158,27 @@ tickets:
       - engine/WgpuRenderer/rust/src/shaders/frame.wgsl
       - engine/WgpuRenderer/rust/src/godrays.wgsl
   - id: RND-034
-    overlay: PREVIEW0-EXEC-001
+    # Re-filed from PREVIEW0-EXEC-001 on 2026-08-31. Preview 0 is a shipped milestone
+    # and its overlay is deliberately EXACT, so a record scoped to it that its
+    # authorised_tickets list does not name makes the gate fail -- which it had been
+    # doing in CI. This is post-Preview-0 renderer and asset-compatibility work; the
+    # active overlay is SUPERSET and takes a scoped record without authorising it,
+    # which is the light path the ledger provides for exactly this.
+    overlay: COMPAT-C1-EXEC-001
     is_example: false
     title: Capture sub-rect was the cinema border, not a window-sizing regression
     class: RUNTIME_INFRA
     obligation: OPTIONAL
     execution_mode: IMPLEMENT
     scheduling_state: OPEN
-    status: PARTIAL
+    # PARTIAL is not one of the eight lifecycle states and never has been; nothing
+    # caught it because the Preview-0 validator failed earlier on the ticket-set
+    # mismatch and the COMPAT-C1 one never saw the record.
+    # Mapped CONSERVATIVELY to RESEARCHED, not INTEGRATED: implementation_commits is
+    # empty AND at least one named production call site does not resolve to a symbol in
+    # the file it names. RESEARCHED claims only what the decision record supports.
+    # Verifying the call sites, and promoting this if a fix did land, is parked.
+    status: RESEARCHED
     outcome: null
     owner: null
     branch: codex/wgpu-performance-modernisation
@@ -6145,7 +6202,7 @@ tickets:
         verified_commit: null
     test_ids: [freefly-cinema-border-ab, window-clamp-warning]
     benchmark_artifacts: []
-    evidence_hash: 78bd36ac03f6a67c112adeab54426aea5b121b5356e014cdac20759811409010
+    evidence_hash: c2347e170ed21f683023d8b3180d89280e5fd1b0ffb7b08b9fe825e2473882cb
     decision_record: docs/roadmap/decisions/RND-034-the-capture-sub-rect-was-the-cinema-border-not-a-sizing-bug-20260815.md
     known_failures:
       - >-

@@ -256,6 +256,24 @@ records it (Vehicles reads and writes `ScriptState`) rather than pretending othe
 
 ---
 
+### Three ledger records whose production call sites do not resolve
+`RND-033`, `MAT-047` and `RND-034` name symbols that are not in the files they cite —
+`WaterSim::update`, `EngineWgpu::LogObjectStats`, `PAAEncoder::WritePAA`,
+`ApplyTestWorldFreeFly`. All three carried `status: PARTIAL`, which is not one of the eight
+lifecycle states and never has been, so the ledger gate rejected them the moment it could
+see them at all. They were set to `RESEARCHED` on 2026-08-31 — deliberately the conservative
+reading, since each has an empty `implementation_commits` list and a decision record that
+does support a finding.
+
+**What is not known is whether a fix landed for any of them and simply was not recorded.**
+That happened to `CLD-021` in the same batch: its `select_cloud_shadow_span` does exist
+(`sky/mod.rs:1980`, added by `bd00297d`), so its record had been understating shipped work,
+and it was corrected to `INTEGRATED`. Unparks by doing for these three what was done for
+that one: find the symbol, find the commit, promote or leave it. Half an hour each, and it
+must not be guessed — `RESEARCHED` under-claims safely, `INTEGRATED` does not.
+
+---
+
 ## How to use this page
 
 If you park something, add it here with the reason and the unpark condition. If you unpark
