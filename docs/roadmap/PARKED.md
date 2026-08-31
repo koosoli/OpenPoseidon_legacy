@@ -93,8 +93,16 @@ is about the prepass only.
 
 ### Phase 5 step 6 — the render thread
 Four named blockers in `render-snapshot-design.md` §3b. Two of the original six are now
-closed (the dangling `Helicopter*` and the renderer mutating streaming state mid-draw). The
-largest remaining is that the **push path is still single-buffered**: `_draws3d`, `_verts`,
+closed (the dangling `Helicopter*` and the renderer mutating streaming state mid-draw), and
+**blocker 3 (stable render-object identity) is reduced to one scheme of three** — the other
+two were already fixed on 2026-08-30 and the design doc simply had not been revised. What
+is left there is `Object*` map keys, and the roadmap overstates it: there is no
+use-after-free today, and since the instance handles gained generations the worst outcome
+of a recycled address is a leak. A separate, real defect surfaced in the audit: the
+motion-vector id folds to a **16-bit lane**, so two live objects 65,535 ids apart share one
+history slot. `REN-ID-001`.
+
+The largest remaining blocker is that the **push path is still single-buffered**: `_draws3d`, `_verts`,
 `_cmds`, `_palette`, `_cameras`, `_shadowCasters` are cleared in `InitDraw` and appended to
 by the world traversal on the same thread. Deliberately **not** built ahead of its
 consumer — doubling that storage before a render thread exists buys nothing and costs
