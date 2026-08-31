@@ -1215,8 +1215,9 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 // objects. Reforger Everon does not need this at all -- 199,881 objects but only 218 MB of
 // textures, because they are heavily reused.
 //
-// The RIGHT fix is for a pin to mean "recently drawn" rather than "registered", so the LRU
-// can do its job. Half of that is now DONE and half is not; the split matters, so:
+// The RIGHT fix is for a pin to stop meaning "registered, therefore untouchable" and for the
+// LRU to age a retained texture on whether it was recently DRAWN. Both halves of that now
+// exist; the split still matters when reading the code, so:
 //
 // SOLVED (REN-RES-001, slot leases -- wgr_texture_slot_acquire / _create_in_slot). The
 // blocker used to be that a retained model's texture reference is a BAKED BINDLESS SLOT
@@ -1234,16 +1235,31 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 // is no shader change and no per-fetch cost; the price is that a slot is held while
 // evicted, bounded by distinct texture NAMES (3,552 on Chernarus against a cap of 8,192).
 //
-// NOT SOLVED, and it is what still gates the pin check in TextureBankWgpu::TrimResidency:
-// there is no LIVENESS signal from the GPU-driven path. `_lastUsedFrame` is refreshed only
-// inside EnsureUploaded(), which the DIRECT draw path calls every frame via UseMipmap, so a
-// direct-draw texture's eviction costs one white frame and self-heals. A retained model's
-// textures are touched at registration and never again -- nothing calls EnsureUploaded for
-// them per frame. Unpin them today and every retained texture becomes an eviction candidate
-// 120 frames after registration regardless of whether it is on screen, gets evicted, and is
-// never re-uploaded: correct slots, white buildings. That is a worse bug than the one being
-// fixed, which is why the check stays until the retained path both marks its textures used
-// and can ask for a refill. That work lives in EngineWgpu's snapshot consumption, not here.
+// ALSO SOLVED (REN-RES-001 "Liveness"), which is what finally let the pin check in
+// TextureBankWgpu::TrimResidency be relaxed. `_lastUsedFrame` is refreshed inside
+// EnsureUploaded(), which the DIRECT draw path calls every frame via UseMipmap -- so a
+// direct-draw texture's eviction costs one white frame and self-heals -- but a retained
+// model's textures were touched at registration and never again, because nothing on that path
+// calls EnsureUploaded per frame. Unpinning them in that state made every retained texture an
+// eviction candidate 120 frames after registration regardless of whether it was on screen, and
+// nothing ever asked for it back: correct slots, white buildings. Measured exactly so at
+// WGR_DYNAMIC_VRAM_MB=900 on the Everon traverse, 2026-08-31.
+//
+// The two missing halves now exist, both in EngineWgpu:
+//
+//   * MarkRetainedModelLiveness() sweeps the retained instance table against the camera each
+//     frame (a slice of it, so the cost is bounded) and calls NoteTextureUse for the textures
+//     of every registered model with an instance inside the object draw distance. It is a
+//     PER-MODEL, distance-only signal -- a strict superset of what actually drew, because the
+//     GPU's cull results come back only as aggregate counters and the CPU never sees a
+//     Full-coverage object's visibility at all. Marking too much is the safe error.
+//   * InvalidateStaleGpuModels() does the refill: a model back in range whose texture was
+//     evicted gets an EnsureUploaded() rather than a teardown, and the lease above is what
+//     makes that enough -- the upload reclaims the same bindless index, so the baked material
+//     is correct again without re-registering anything.
+//
+// The pin exemption survives only as a failsafe, gated on the sweep having completed a pass
+// recently; WGR_RETAINED_LIVENESS=0 restores the old unconditional exemption for an A/B.
 //
 // Separately, the `Texture with 'wgr_texture' label is invalid` failure seen on Chernarus is
 // most likely NOT an eviction race at all: textures.rs calls device.create_texture with no

@@ -102,25 +102,35 @@ void TextureBankWgpu::TrimResidency()
     if (stats.object_texture_bytes <= textureBudget)
         return;
 
-    // NOTE on the ResidentPins() check below, before anyone relaxes it. A pin means "some
-    // REGISTERED model references this", and on DayZ Chernarus that starves this LRU to 1-31
-    // candidates while tracked VRAM climbs past twice the budget. Making pinned textures
-    // evictable is still the goal, and ONE of the two blockers is now gone:
+    // NOTE on the ResidentPins() check below. A pin means "some REGISTERED model references
+    // this", and while pins were unconditionally exempt this LRU starved to 1-31 candidates on
+    // DayZ Chernarus while tracked VRAM climbed past twice the budget. Making pinned textures
+    // evictable needed two things, and both now exist:
     //
     //   * Slot identity -- FIXED (REN-RES-001). wgr_model_register still bakes each material's
     //     bindless slot permanently, but a slot is now LEASED by the TextureWgpu rather than by
     //     one upload, so an eviction leaves it reserved-and-white and the re-upload reclaims the
     //     same index. Evicting a pinned texture no longer corrupts anything.
-    //   * Liveness -- STILL MISSING, and it is why this check stays. _lastUsedFrame is only
-    //     refreshed by EnsureUploaded(), which the direct-draw path calls every frame; the
-    //     GPU-driven path touches a texture at registration and never again. Drop the pin test
-    //     today and every retained texture ages out 120 frames after registration whether or
-    //     not it is visible, is evicted, and is never re-uploaded -- because nothing on the
-    //     retained path asks for a refill. Right slots, white buildings.
+    //   * Liveness -- now supplied by EngineWgpu::MarkRetainedModelLiveness, which sweeps the
+    //     retained instance table against the camera and calls NoteTextureUse for the textures
+    //     of every registered model that has an instance within the object draw distance. That
+    //     is what makes _lastUsedFrame mean something on the retained path, where nothing calls
+    //     EnsureUploaded() per frame. The refill half lives in InvalidateStaleGpuModels, which
+    //     re-uploads an evicted texture whose model has come back into range (the lease keeps
+    //     its slot, so no re-registration is needed) and only destroys the registration when
+    //     that re-upload fails.
     //
-    // So the remaining work is a per-frame "this registered model drew" signal plus a refill
-    // request, in EngineWgpu's snapshot consumption. Full argument at TextureMipBias() in
-    // TextureWgpu.cpp.
+    // The exemption therefore survives only as a FAILSAFE, gated on _retainedLivenessActive:
+    // until the sweep has completed one full pass, a retained texture's _lastUsedFrame is still
+    // the frame it was registered on, and evicting on that would be evicting on noise -- right
+    // slots, white buildings, which is exactly the A/B measured at WGR_DYNAMIC_VRAM_MB=900 on
+    // 2026-08-31. The flag is also cleared whenever the sweep cannot run at all (no camera, no
+    // draw distance) or WGR_RETAINED_LIVENESS=0 pins it off for an A/B from one binary.
+    //
+    // Granularity worth knowing when reading an eviction log: the signal is PER MODEL and
+    // distance-only (no frustum, no occlusion), and it lags by up to one sweep pass. It is
+    // deliberately conservative in the keep direction -- it marks more than actually drew.
+    // Full argument at TextureMipBias() in TextureWgpu.cpp.
     //
     // NOTE on the budget test above: stats.tracked_bytes is textures + geometry, but only
     // textures are evictable here. A world whose GEOMETRY alone exceeds the budget (Everon is
@@ -136,8 +146,16 @@ void TextureBankWgpu::TrimResidency()
     for (int i = 0; i < _texture.Size(); ++i)
     {
         TextureWgpu* texture = _texture[i];
-        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() || texture->ResidentPins() != 0 ||
-            IsTerrainOwnedTexture(texture) || _residencyFrame < texture->LastUsedFrame() + grace)
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() || IsTerrainOwnedTexture(texture))
+            continue;
+        const bool pinned = texture->ResidentPins() != 0;
+        if (pinned && !_retainedLivenessActive)
+            continue;
+        // A pinned texture's mark comes from an incremental sweep, so it is allowed to be a
+        // sweep-period old before it means anything. Unpinned (direct-draw) textures are marked
+        // every frame they are used and keep the plain grace.
+        const uint64_t effectiveGrace = pinned ? std::max(grace, _retainedLivenessMaxAgeFrames) : grace;
+        if (_residencyFrame < texture->LastUsedFrame() + effectiveGrace)
             continue;
         candidates.push_back(texture);
     }
@@ -146,8 +164,14 @@ void TextureBankWgpu::TrimResidency()
 
     const uint64_t target = textureBudget * 9 / 10;
     uint32_t evicted = 0;
+    // Counted separately because it is the number that says whether the liveness signal is
+    // doing anything: before it existed this was structurally 0, and a run where evicted>0 but
+    // pinned==0 means the LRU is still only reaching direct-draw textures.
+    uint32_t evictedPinned = 0;
     for (TextureWgpu* texture : candidates)
     {
+        if (texture->ResidentPins() != 0)
+            ++evictedPinned;
         texture->EvictGpu();
         ++evicted;
         // Amortise the FFI query while still stopping close to the target.
@@ -158,9 +182,10 @@ void TextureBankWgpu::TrimResidency()
     }
     if (evicted && wgr_get_memory_stats(_renderer, &stats))
         LOG_INFO(Graphics,
-                 "Wgpu texture LRU: evicted={} textureBytes={} textureBudget={} tracked={} budget={} candidates={}",
-                 evicted, stats.object_texture_bytes, textureBudget, stats.tracked_bytes, stats.budget_bytes,
-                 candidates.size());
+                 "Wgpu texture LRU: evicted={} (pinned={}) textureBytes={} textureBudget={} tracked={} budget={} "
+                 "candidates={} liveness={}",
+                 evicted, evictedPinned, stats.object_texture_bytes, textureBudget, stats.tracked_bytes,
+                 stats.budget_bytes, candidates.size(), _retainedLivenessActive ? 1 : 0);
 }
 
 int TextureBankWgpu::Find(RStringB name) const

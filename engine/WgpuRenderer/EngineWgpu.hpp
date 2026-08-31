@@ -724,7 +724,54 @@ class EngineWgpu : public EngineDummy
     //! texture. The parked path has always revalidated handles for exactly this reason; a LIVE
     //! model had no such check, which is the difference between a surface that recovers and one
     //! that is white until the world reloads.
+    //!
+    //! Since the liveness sweep landed this also does the REFILL half: a mismatch on a model
+    //! the sweep says is in range is first met with EnsureUploaded() on the missing textures,
+    //! and only a model whose re-upload failed (or whose texture never held a slot lease, so
+    //! its baked index really has moved) is destroyed. That ordering is what lets
+    //! TrimResidency evict a pinned texture at all -- eviction becomes a round trip rather
+    //! than a one-way door.
     uint32_t InvalidateStaleGpuModels();
+
+    // --- Retained-path texture liveness (REN-RES-001 "Liveness") -------------------------
+    //! Refresh `_lastUsedFrame` on the textures of every registered model that still has an
+    //! instance near the camera, so TextureBankWgpu's LRU can age retained textures the same
+    //! way it ages direct-draw ones.
+    //!
+    //! WHY THIS SHAPE, and what it is not. The honest signal would be "which models survived
+    //! the GPU cull", and the renderer does read cull results back -- but only as AGGREGATE
+    //! counters (wgr_get_object_stats), never per model, and making them per-model is a Rust
+    //! change. The CPU's own visible set is no good either: Scene::ObjectForDrawing diverts a
+    //! FULL-coverage object out of the draw list BEFORE the frustum test, so the CPU never
+    //! learns whether the very objects most at risk (whole buildings) were visible.
+    //!
+    //! So this sweeps the retained instance table itself and asks a cheaper question --
+    //! "is any instance of this model within the object draw distance" -- which is a strict
+    //! SUPERSET of what drew (no frustum, no size cull, no occlusion). Erring toward marking
+    //! is the safe direction: a texture wrongly kept costs VRAM, a texture wrongly evicted
+    //! costs a white building.
+    //!
+    //! Granularity: PER MODEL, not per instance. Lag: up to one sweep pass -- the table is
+    //! walked a slice of buckets per frame (kRetainedLivenessSweepFrames) so a 200k-instance
+    //! world costs a bounded fraction of a frame rather than one hitch, and a pass therefore
+    //! completes well inside TrimResidency's 120-frame grace.
+    void MarkRetainedModelLiveness();
+    // Rolling bucket cursor into _gpuInstances. unordered_map iteration is only stable while
+    // the bucket count is, so a rehash restarts the pass rather than silently skipping part of
+    // the table -- restarting costs latency, skipping would cost correctness.
+    size_t _livenessCursor = 0;
+    size_t _livenessBuckets = 0;
+    // Completed sweeps. Also the dedupe key: a shape marked in this pass is not walked again
+    // until the next one, so a model with 5,000 instances costs one texture walk, not 5,000.
+    uint64_t _livenessPass = 0;
+    // Residency frame at which the last pass COMPLETED. The valve in MarkRetainedModelLiveness
+    // withdraws the pin relaxation when this falls too far behind.
+    uint64_t _livenessPassFrame = 0;
+    std::unordered_map<const LODShapeWithShadow*, uint64_t> _livenessMarked;
+    //! True iff `shape` was marked in the current or the immediately preceding pass. The
+    //! previous pass counts because the current one is only partly walked at any moment, so
+    //! testing against it alone would call every not-yet-visited model dead.
+    bool RetainedModelIsLive(const LODShapeWithShadow* shape) const;
     uint32_t DestroyGpuModelMeshes(const LODShapeWithShadow* shape); // just the pool meshes
     void UnparkGpuModel(const LODShapeWithShadow* shape);  // no-op if not parked
     void OnShapeDestroyed(const LODShape* shape);

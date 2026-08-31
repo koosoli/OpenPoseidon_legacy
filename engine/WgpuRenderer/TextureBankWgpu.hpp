@@ -56,6 +56,17 @@ class TextureBankWgpu : public AbstractTextBank
     // It records the Texture objects whose stable WGPU handles are baked into a
     // retained model, allowing EngineWgpu to pin only models with live instances.
     std::vector<TextureWgpu*>* _capture = nullptr;
+    // Set by EngineWgpu once its retained-model liveness sweep has completed a FULL pass, so
+    // every registered model in the working set has had one chance to refresh its textures'
+    // _lastUsedFrame. Until then a pin is the only thing standing between a retained texture
+    // and an eviction nothing would ever repair -- see TrimResidency.
+    bool _retainedLivenessActive = false;
+    // The oldest a retained mark may be while the sweep is healthy, in residency frames -- the
+    // sweep is incremental, so a live model's mark is legitimately up to a pass old. A pinned
+    // texture must be unmarked for at least this long before the LRU may touch it, whatever the
+    // configured grace: with WGR_TEXTURE_EVICT_GRACE_FRAMES=2 a plain grace would condemn a
+    // model that is merely waiting its turn in the sweep.
+    uint64_t _retainedLivenessMaxAgeFrames = 0;
 
   public:
     explicit TextureBankWgpu(WgrRenderer* renderer);
@@ -67,6 +78,16 @@ class TextureBankWgpu : public AbstractTextBank
     void EndModelTextureCapture();
     void NoteTextureUse(TextureWgpu* texture);
     uint64_t ResidencyFrame() const { return _residencyFrame; }
+    // EngineWgpu::MarkRetainedModelLiveness calls this with `true` after its first complete
+    // sweep and with `false` whenever the sweep cannot run (no camera / no draw distance /
+    // WGR_RETAINED_LIVENESS=0) or has stopped completing passes. While false, TrimResidency
+    // keeps skipping pinned textures. `maxAgeFrames` is how stale a healthy mark may be.
+    void SetRetainedLivenessActive(bool active, uint64_t maxAgeFrames = 0)
+    {
+        _retainedLivenessActive = active;
+        _retainedLivenessMaxAgeFrames = maxAgeFrames;
+    }
+    bool RetainedLivenessActive() const { return _retainedLivenessActive; }
     // Enforce the shared WGR_DYNAMIC_VRAM_MB budget after submission. Retained
     // model textures are pinned explicitly; direct-path textures remain resident
     // while used and become LRU candidates only after a grace period.

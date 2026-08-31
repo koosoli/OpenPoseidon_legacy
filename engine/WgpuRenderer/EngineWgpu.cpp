@@ -2110,6 +2110,9 @@ void EngineWgpu::NextFrame()
         LogDrawSectionStats();
         if (_wbank)
         {
+            // BEFORE the trim: this is what makes _lastUsedFrame mean anything on the retained
+            // path, and the LRU immediately below is its only consumer.
+            MarkRetainedModelLiveness();
             _wbank->TrimResidency();
             // Immediately after the trim and before the next frame's admits, which is the only
             // window where dropping a live registration is safe: this frame is already recorded.
@@ -5887,12 +5890,168 @@ void EngineWgpu::ReleaseGpuModel(const LODShapeWithShadow* shape)
                  releasedMeshes, evictedTextures);
 }
 
+namespace
+{
+// How many frames a full pass over the retained instance table is spread across. 30 at 60 fps
+// is half a second, comfortably inside TrimResidency's 120-frame grace, so a model that is in
+// range gets its textures marked long before they could age out. Lowering it costs CPU per
+// frame; raising it past the grace would let a live model's textures die of the lag alone.
+constexpr size_t kRetainedLivenessSweepFrames = 30;
+// Never walk fewer than this many buckets per frame: on a small table the division above would
+// otherwise round to a crawl for no saving at all.
+constexpr size_t kRetainedLivenessMinBuckets = 256;
+
+// Multiplier on the object draw distance for the "in range" test. Slightly over 1 because the
+// draw distance is measured to an object's centre while the cull works on its bounds, and
+// because the streamer admits a little beyond what it draws; the cost of the margin is a few
+// extra resident textures, the cost of being short is a white wall at the edge of view.
+float RetainedLivenessRangeScale()
+{
+    static const float scale = []
+    {
+        if (const char* v = std::getenv("WGR_RETAINED_LIVENESS_MARGIN"))
+            return std::clamp(static_cast<float>(std::atof(v)), 1.0f, 8.0f);
+        return 1.15f;
+    }();
+    return scale;
+}
+
+// WGR_RETAINED_LIVENESS=0 turns the whole signal off, which puts TrimResidency back on the
+// unconditional pin exemption. Both arms of the A/B therefore come out of one binary -- the
+// same discipline WGR_EVICT_ON_MODEL_RELEASE follows above.
+bool RetainedLivenessEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_RETAINED_LIVENESS");
+        return !(v && *v == '0');
+    }();
+    return on;
+}
+} // namespace
+
+bool EngineWgpu::RetainedModelIsLive(const LODShapeWithShadow* shape) const
+{
+    const auto it = _livenessMarked.find(shape);
+    if (it == _livenessMarked.end())
+        return false;
+    // Marks carry the id of the pass that was IN PROGRESS when they were made, i.e.
+    // _livenessPass + 1. Accepting >= _livenessPass therefore accepts the pass now running and
+    // the last completed one, and rejects anything older.
+    return it->second >= _livenessPass;
+}
+
+void EngineWgpu::MarkRetainedModelLiveness()
+{
+    // Every early return clears the flag rather than leaving it set: TrimResidency may only
+    // evict a pinned texture while this sweep is actually feeding it, and "the sweep stopped
+    // running" must not read as "everything is dead".
+    if (!_gpuDriven || !_wbank || !RetainedLivenessEnabled() || _gpuInstances.empty())
+    {
+        if (_wbank)
+            _wbank->SetRetainedLivenessActive(false);
+        return;
+    }
+    const render::frame::PresentationSnapshot& snap = render::frame::GPresentationSnapshot();
+    if (!snap.valid || !snap.hasCamera || !snap.hasScene || snap.objectDrawDistance <= 0.0f)
+    {
+        _wbank->SetRetainedLivenessActive(false);
+        return;
+    }
+    const Vector3 camPos = snap.cameraPos;
+    const float range = snap.objectDrawDistance * RetainedLivenessRangeScale();
+    const float rangeSq = range * range;
+
+    // THE VALVE. A pass can be restarted from the top by a rehash, and a table that keeps
+    // rehashing (heavy streaming, world load) can keep restarting it. If passes stop COMPLETING
+    // for longer than the age the marks are trusted to, the marks are no longer evidence and
+    // the pin exemption must come back -- otherwise the LRU would read "not marked lately" off
+    // a sweep that simply never got there and evict a building in plain view.
+    const uint64_t maxMarkAge = 2 * kRetainedLivenessSweepFrames;
+    if (_livenessPass != 0 && _wbank->ResidencyFrame() > _livenessPassFrame + maxMarkAge)
+        _wbank->SetRetainedLivenessActive(false);
+
+    // A rehash moves every entry, so a cursor into the old bucket layout means nothing. Restart
+    // the pass; the table settles quickly and passes then run to completion.
+    const size_t buckets = _gpuInstances.bucket_count();
+    if (buckets != _livenessBuckets)
+    {
+        _livenessBuckets = buckets;
+        _livenessCursor = 0;
+    }
+    if (buckets == 0)
+        return;
+    const size_t slice = (buckets + kRetainedLivenessSweepFrames - 1) / kRetainedLivenessSweepFrames;
+    const size_t perFrame = std::max(kRetainedLivenessMinBuckets, slice);
+    const bool haveProxies = !_gpuProxies.empty();
+
+    auto markShape = [&](const LODShapeWithShadow* shape)
+    {
+        if (!shape)
+            return;
+        uint64_t& marked = _livenessMarked[shape];
+        if (marked == _livenessPass + 1)
+            return; // already marked in the pass now running
+        marked = _livenessPass + 1;
+        if (const auto found = _gpuModelTextures.find(shape); found != _gpuModelTextures.end())
+            for (TextureWgpu* texture : found->second)
+                _wbank->NoteTextureUse(texture);
+    };
+
+    const size_t end = std::min(buckets, _livenessCursor + perFrame);
+    for (; _livenessCursor < end; ++_livenessCursor)
+    {
+        for (auto it = _gpuInstances.begin(_livenessCursor); it != _gpuInstances.end(_livenessCursor); ++it)
+        {
+            // Registration position, not a live Position(): only static objects are admitted to
+            // the retained path, and SceneObjectMoved drops anything that stops being static.
+            if ((it->second.pos - camPos).SquareSize() > rangeSq)
+                continue;
+            markShape(it->second.shape);
+            // A parent's furniture children are separate registrations with their own pins, and
+            // they are only ever as visible as the parent that carries them.
+            if (haveProxies)
+                if (const auto pit = _gpuProxies.find(it->first); pit != _gpuProxies.end())
+                    for (const auto& child : pit->second.children)
+                        markShape(child.shape);
+        }
+    }
+    if (_livenessCursor >= buckets)
+    {
+        _livenessCursor = 0;
+        ++_livenessPass;
+        _livenessPassFrame = _wbank->ResidencyFrame();
+        // One complete pass is the precondition TrimResidency waits on: from here on every
+        // registered model in the working set has had a chance to speak for its textures, so a
+        // stale _lastUsedFrame is evidence rather than an artefact of never having been asked.
+        _wbank->SetRetainedLivenessActive(true, maxMarkAge);
+        if (std::getenv("WGR_MODEL_RESIDENCY_TRACE"))
+            LOG_INFO(Graphics, "Wgpu retained liveness: pass={} instances={} marked={} range={:.0f}m", _livenessPass,
+                     _gpuInstances.size(), _livenessMarked.size(), range);
+    }
+}
+
 uint32_t EngineWgpu::InvalidateStaleGpuModels()
 {
     // Same staleness test the parked path uses, applied to every registration: the handles
     // baked into the model must still be the ones the textures hold.
+    //
+    // REFILL FIRST, destroy second. Before the liveness sweep a mismatch could only mean "a
+    // texture this model needs was evicted and nothing will ever bring it back", so tearing the
+    // registration down and rebuilding it on the next admit was the only repair available. Now
+    // that TrimResidency is allowed to evict a PINNED texture, a mismatch is the normal way a
+    // model comes back into range, and the cheap repair is to re-upload: REN-RES-001's slot
+    // lease means the new upload lands in the same bindless index, so the baked material is
+    // correct again the moment the handle exists and no re-registration is needed.
+    //
+    // The recorded handle is then updated to the new one. That is only sound because of the
+    // lease -- it asserts "the slot behind this handle is the slot the material baked" -- so it
+    // is done ONLY for a texture that actually holds a lease (SlotLease() != 0). A texture that
+    // never got one (bindless array at cap) falls back to per-upload slots, where the baked
+    // index really has moved, and it must go down the destroy path exactly as before.
     std::vector<const LODShapeWithShadow*> stale;
-    for (const auto& [shape, handles] : _gpuModelTextureHandles)
+    uint32_t refilled = 0;
+    for (auto& [shape, handles] : _gpuModelTextureHandles)
     {
         const auto textures = _gpuModelTextures.find(shape);
         if (textures == _gpuModelTextures.end() || textures->second.size() != handles.size())
@@ -5900,16 +6059,39 @@ uint32_t EngineWgpu::InvalidateStaleGpuModels()
             stale.push_back(shape);
             continue;
         }
+        // Only a model the sweep says is in range is worth re-uploading; refilling one that is
+        // out of range would undo the eviction the same frame it happened and thrash the file
+        // reads (EvictGpu clears _uploadTried, so a re-upload re-reads every mip).
+        const bool live = RetainedModelIsLive(shape);
+        bool broken = false;
         for (size_t i = 0; i < handles.size(); i++)
         {
             TextureWgpu* texture = textures->second[i];
-            if (!texture || texture->GpuHandle() != handles[i])
+            if (!texture)
             {
-                stale.push_back(shape);
+                broken = true;
                 break;
             }
+            if (texture->GpuHandle() == handles[i])
+                continue;
+            if (live && texture->GpuHandle() == 0 && texture->SlotLease() != 0)
+            {
+                const uint64_t handle = texture->EnsureUploaded();
+                if (handle != 0)
+                {
+                    handles[i] = handle; // same slot, new handle -- see the lease note above
+                    ++refilled;
+                    continue;
+                }
+            }
+            broken = true;
+            break;
         }
+        if (broken)
+            stale.push_back(shape);
     }
+    if (refilled)
+        LOG_INFO(Graphics, "Wgpu model residency: {} evicted textures re-uploaded into their leased slots", refilled);
     // Collected first: DestroyGpuModel erases from the very maps being walked.
     for (const LODShapeWithShadow* shape : stale)
         DestroyGpuModel(shape);
@@ -5965,6 +6147,9 @@ void EngineWgpu::DestroyGpuModel(const LODShapeWithShadow* shape)
     _gpuModelCoverage.erase(shape);
     _gpuModelComplement.erase(shape);
     _gpuConformShapes.erase(shape);
+    // The liveness map is keyed by the same shape pointer and would otherwise accumulate one
+    // entry per shape ever registered, including dead ones whose addresses can be reused.
+    _livenessMarked.erase(shape);
 }
 
 void EngineWgpu::OnShapeDestroyed(const LODShape* shape)

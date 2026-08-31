@@ -177,3 +177,104 @@ a regression from the lease. At the default 2,048 MB budget nothing goes white.
 That A/B is the reason the pin check must stay until the liveness signal exists: the
 lease makes eviction *safe to attempt*, it does not make the retained path *ask for
 its textures back*.
+
+## Liveness (2026-08-31, second change — closes the blocker above)
+
+The pin check is now **relaxed**, gated on a liveness signal that did not exist when the
+section above was written. Both things the retained path lacked are supplied.
+
+### 1. The signal: `EngineWgpu::MarkRetainedModelLiveness()`
+
+Called from `NextFrame` immediately **before** `TrimResidency()`, since the LRU is its only
+consumer. It walks the retained instance table (`_gpuInstances`) and, for every instance
+within the object draw distance of the camera, calls `TextureBankWgpu::NoteTextureUse` on
+its model's textures — the same call `EnsureUploaded` makes on the direct path, so
+`_lastUsedFrame` finally means the same thing on both.
+
+**What was rejected, and why.** The honest signal is "which models survived the GPU cull".
+The renderer does read cull results back, but only as *aggregate* counters
+(`wgr_get_object_stats` / the `Objects counts:` row) — nothing is per model, and making it
+per model is a Rust-side change. The CPU's own visible set is no better: `Scene::ObjectForDrawing`
+diverts a **Full**-coverage object out of the draw list *before* the frustum test, so the CPU
+never learns whether the objects most at risk — whole buildings — were on screen. What is left
+is the instance table itself, and a cheaper question.
+
+**Granularity, stated plainly:**
+
+- **Per model, not per instance.** One instance in range marks the whole model's textures.
+- **Distance only.** No frustum, no size cull, no occlusion — a strict *superset* of what
+  drew. Deliberate: a texture wrongly kept costs VRAM, a texture wrongly evicted costs a
+  white building. Turning round on the spot therefore evicts nothing, which is the intent.
+- **Lag of up to one sweep pass.** The table is walked a slice of buckets per frame
+  (`kRetainedLivenessSweepFrames` = 30) so a 200k-instance world costs a bounded fraction of a
+  frame instead of one hitch. A rehash restarts the pass — restarting costs latency, skipping
+  would cost correctness.
+- Margin on the draw distance is 1.15x (`WGR_RETAINED_LIVENESS_MARGIN`), because the draw
+  distance is measured to an object's centre while the cull works on its bounds.
+
+### 2. The refill: inside `InvalidateStaleGpuModels()`
+
+Reused rather than replaced, as the mechanism was already the right one — it just had one
+outcome. It now **refills first and destroys second**: on a handle mismatch, a model the sweep
+says is in range gets `EnsureUploaded()` on the missing texture, and only a model whose
+re-upload *failed* is torn down. The recorded handle is then updated to the new one, which is
+sound **only** because of the lease — the assertion being made is "the slot behind this handle
+is the slot the material baked". It is therefore done only for a texture with
+`SlotLease() != 0`; a texture that never got a lease (bindless array at cap) really has moved
+index and still goes down the destroy path.
+
+### 3. The relaxation, and the two failsafes on it
+
+`TrimResidency`'s `ResidentPins() != 0` exemption is now conditional on
+`_retainedLivenessActive`, which `EngineWgpu` sets only after a **complete** sweep pass. Before
+that, a retained texture's `_lastUsedFrame` is still the frame it was registered on, and
+evicting on it would be evicting on noise — the exact 900 MB failure above.
+
+Two ways the signal can silently stop being trustworthy, both closed:
+
+- **Marks stale because the sweep is slow.** A pinned texture must be unmarked for
+  `max(grace, 2 × sweep period)` frames, not just `grace`. Without this,
+  `WGR_TEXTURE_EVICT_GRACE_FRAMES=2` would condemn a model merely waiting its turn in the sweep.
+- **Passes stop completing.** If the last *completed* pass falls further behind than that same
+  age (heavy streaming rehashing the table over and over), the flag is withdrawn and the pin
+  exemption comes straight back.
+
+`WGR_RETAINED_LIVENESS=0` pins the whole signal off, so both arms of the A/B come out of one
+binary — the discipline `WGR_EVICT_ON_MODEL_RELEASE` already follows.
+
+**Why this cannot thrash.** An evict/refill loop would need a live model's texture to be
+evicted. A live model is marked every pass, so its `_lastUsedFrame` is always fresher than the
+grace, so it is never a candidate. When the in-range working set alone exceeds the texture
+budget the LRU simply runs out of candidates and stops — the same over-budget behaviour as
+before, with the buildings in view still textured.
+
+### Tests
+
+**None added, and the reason is structural, not an omission.** `PoseidonTests` links
+`Poseidon` / `PoseidonGL33` / `PoseidonOpenAL` and **not** the wgpu backend
+(`tests/unit/engine/Poseidon/CMakeLists.txt`), so no C++ unit test can reach `EngineWgpu`,
+`TextureBankWgpu` or `TextureWgpu` at all. Everything new here is either a device-touching
+call or a private member of those classes. Making it testable means either linking the
+backend (and with it the Rust cdylib) into the unit suite, or lifting the pass-freshness and
+range predicates into a backend-independent header — a worthwhile follow-up, out of scope for
+this change.
+
+`PoseidonTests` was run as a regression gate regardless: **2,968 cases / 235,117 assertions /
+0 failures**, unchanged in substance from the base (the suite cannot link this code, so it
+cannot be affected by it).
+
+### What must be verified in-game
+
+The same run that produced the white buildings, because it is the only one that exercises
+this at all: **`WGR_DYNAMIC_VRAM_MB=900`, the 30 m/s Everon traverse.** Success is *both* of:
+
+1. `Wgpu texture LRU: evicted=` rows still firing — the row now carries `(pinned=N)` and
+   `liveness=1`. `liveness=1` with `pinned>0` is the proof the new path is doing the work;
+   `pinned=0` means the LRU is still only reaching direct-draw textures.
+2. Buildings keep their textures throughout, including after flying away from a village and
+   back — the return is what exercises the refill, and
+   `Wgpu model residency: N evicted textures re-uploaded into their leased slots` should
+   appear when it happens.
+
+A useful third arm from the same binary: `WGR_RETAINED_LIVENESS=0` at 900 MB must reproduce
+the old white buildings. If it does not, the run is not exercising eviction at all.

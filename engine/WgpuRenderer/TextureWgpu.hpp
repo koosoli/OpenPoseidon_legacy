@@ -89,6 +89,12 @@ class TextureWgpu : public Texture
     uint64_t GpuHandle() const { return _gpuHandle; }
     uint64_t LastUsedFrame() const { return _lastUsedFrame; }
     uint32_t ResidentPins() const { return _residentPins; }
+    // REN-RES-001: the leased bindless slot, or 0 if none was available at the first upload.
+    // Non-zero is the promise the retained path leans on -- a re-upload after EvictGpu lands
+    // in THIS index, so every material that baked it keeps sampling the right texture and no
+    // model needs re-registering. 0 means the array was at cap and this texture fell back to
+    // per-upload slots, where that promise does NOT hold.
+    uint32_t SlotLease() const { return _slotLease; }
     bool IsDynamicTexture() const { return _dynamic; }
     void PinResident() { ++_residentPins; }
     void UnpinResident()
