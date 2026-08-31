@@ -13,6 +13,7 @@
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
+#include <Poseidon/Dev/Diag/SnapshotDiag.hpp>
 
 // Foundation/Framework/DebugLog.hpp defines `DebugLog` as a function-like macro
 // and ImGui declares a member of the same name, so the macro eats it. See the
@@ -158,6 +159,97 @@ void DrawFixedStepTab()
     {
         ImGui::SameLine();
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "(experimental)");
+    }
+
+    // --- The other half of the sim/render boundary (roadmap 5.3) --------------------
+    //
+    // The accumulator above says how often simulation ran per frame. THIS says what
+    // crossed the boundary between them. 5.3 forbids an unbounded producer/consumer
+    // queue and asks for "visible counters for snapshot age, queue depth and renderer
+    // wait time"; the counters have existed since the ring landed and nothing displayed
+    // them, which is the same as not having them.
+    ImGui::Spacing();
+    ImGui::SeparatorText("Presentation snapshot");
+
+    const SnapshotCounters& snap = GSnapshotCounters();
+    if (snap.published == 0)
+    {
+        ImGui::TextDisabled("Nothing published yet.");
+    }
+    else
+    {
+        // Depth is published-minus-consumed and CANNOT exceed the ring while producer
+        // and consumer are one thread; showing the bound next to it is the point, so a
+        // reader can see the headroom rather than a bare number.
+        const std::uint64_t depth = snap.published - snap.consumed;
+        ImGui::Text("Published %llu / consumed %llu   depth %llu of %u slot(s)",
+                    (unsigned long long)snap.published, (unsigned long long)snap.consumed,
+                    (unsigned long long)depth, snap.ringSize);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Depth is the queue. The ring is BOUNDED at the slot count, so\n"
+                              "simulation cannot run arbitrarily far ahead of presentation and\n"
+                              "silently add input latency -- it drops instead of queueing.\n"
+                              "That drop is the counter below, not this one.");
+        }
+
+        ImGui::Text("Consumed age: %llu frame(s)", (unsigned long long)snap.consumedAge);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("How old the snapshot the renderer last consumed was, in publishes.\n"
+                              "0 is the only value the synchronous path can produce: the world\n"
+                              "publishes and the renderer consumes that same frame's values.\n"
+                              "Anything above 0 means presentation is running behind simulation,\n"
+                              "which only becomes possible once the render thread splits off.");
+        }
+
+        if (snap.publishedWithoutConsume > 0)
+        {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Dropped (published without consume): %llu",
+                               (unsigned long long)snap.publishedWithoutConsume);
+        }
+        else
+        {
+            ImGui::TextDisabled("Dropped (published without consume): 0");
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("A publish that found the previous snapshot still un-retired.\n"
+                              "Zero by construction today -- the producer calls the consumer --\n"
+                              "so a nonzero value is the FIRST evidence that the two clocks have\n"
+                              "come apart. It is deliberately not smoothed or hidden.");
+        }
+
+        ImGui::Text("Fallback captures: %llu", (unsigned long long)snap.fallback);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Frames no world drove, where the RENDERER captured the snapshot\n"
+                              "itself (main menu, tools). Expected to be nonzero before a world\n"
+                              "loads and flat afterwards; a rising count in play means the world\n"
+                              "is missing its publish.");
+        }
+
+        ImGui::TextDisabled("Resource epoch: %u", snap.resourceEpoch);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Bumped when GPU-visible resources are invalidated wholesale.\n"
+                              "Nothing bumps it yet, by design: the snapshot carries only scalars\n"
+                              "today, so there is nothing an epoch could invalidate. It is the\n"
+                              "declared seam for when snapshots start carrying handles.");
+        }
+
+        // Renderer wait time is 5.3's third counter and it is NOT displayed, because on
+        // this path it is not a measurement -- the consumer IS the producer's caller, so
+        // the wait is structurally zero and a row reading "0.00 ms" would look like a
+        // measured result rather than an arithmetic identity.
+        ImGui::TextDisabled("Renderer wait: n/a (one thread — see tooltip)");
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Not shown rather than shown as zero. Simulation calls the renderer\n"
+                              "directly, so there is no point at which presentation waits for a\n"
+                              "snapshot; the number would be an identity, not evidence. This row\n"
+                              "becomes real when Phase 5 step 6 gives the renderer its own thread.");
+        }
     }
 
     ImGui::Spacing();

@@ -1,6 +1,7 @@
 #include <Poseidon/Dev/Diag/FrameProfiler.hpp>
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/StreamingDiag.hpp>
+#include <Poseidon/Dev/Diag/SnapshotDiag.hpp>
 #include <Poseidon/Foundation/Platform/VersionNo.h>
 #include "GameApplication.hpp"
 #include <Poseidon/Foundation/Platform/InitBridge.hpp>
@@ -334,6 +335,23 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(gpu, "object_textures", g.objectTextureCount);
             cJSON_AddBoolToObject(gpu, "over_budget", g.overBudget);
             cJSON_AddNumberToObject(gpu, "per_object_kb", g.bytesPerResidentObject / 1024.0);
+        }
+        // The simulation/presentation boundary (roadmap 5.3). Queue depth against its
+        // bound, the age of what the renderer consumed, and the drop counter -- so a
+        // capture can prove the queue stayed bounded rather than a reader trusting that
+        // it must have. `renderer_wait_ms` is deliberately absent: on the synchronous
+        // path it is an identity, not a measurement.
+        {
+            const Dev::SnapshotCounters& sn = Dev::GSnapshotCounters();
+            cJSON* sj = cJSON_AddObjectToObject(streaming, "snapshot");
+            cJSON_AddNumberToObject(sj, "published", (double)sn.published);
+            cJSON_AddNumberToObject(sj, "consumed", (double)sn.consumed);
+            cJSON_AddNumberToObject(sj, "depth", (double)(sn.published - sn.consumed));
+            cJSON_AddNumberToObject(sj, "ring_size", sn.ringSize);
+            cJSON_AddNumberToObject(sj, "consumed_age", (double)sn.consumedAge);
+            cJSON_AddNumberToObject(sj, "published_without_consume", (double)sn.publishedWithoutConsume);
+            cJSON_AddNumberToObject(sj, "fallback", (double)sn.fallback);
+            cJSON_AddNumberToObject(sj, "resource_epoch", sn.resourceEpoch);
         }
         cJSON* res = cJSON_AddObjectToObject(streaming, "residency");
         cJSON_AddBoolToObject(res, "valid", s.residency.valid);
