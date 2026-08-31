@@ -250,6 +250,24 @@ behaviour exactly); they need a tuning pass with ears before shipping. The HRTF
 half stands -- a hardware probe showed HRTF was already auto-active on the
 owner's device before the feature, so the new modes only add control.
 
+**Follow-up 2026-08-31** (branch `agent-audio-efx`,
+`docs/roadmap/decisions/AUD-102-efx-environment-from-world-state-20260831.md`): the
+parked EFX half is still parked, but it is now testable and one defect inside it is
+fixed. The classifier (`Audio::ClassifyEnvironment`) and the crossfade
+(`Audio::EnvironmentBlender`) were lifted into `engine/Poseidon/Audio/` as pure logic
+the engine actually calls, with 17 unit cases covering the decision table, blend
+monotonicity, mid-blend retargeting and the stalled-frame cap. The defect:
+`ComputeEFXTarget` overwrote density with `envSize/100`, which is right for the
+outdoor 2..100 size scale but wrong for `SERoom`, whose size is in the room preset's
+own units -- every interior ran at a modal density of 0.02-0.08 against the 0.4287 the
+preset was authored with, i.e. the hollow/ringing end of the control. Interiors now
+keep the preset's density. That is a checkable reason for part of the owner's verdict;
+it is not a claim the verdict is answered, and nothing has been listened to. Also
+recorded there: what the classifier genuinely cannot tell apart (mountains is a bare
+170 m altitude test, not a terrain class; one cell, no enclosure or distance-to-surface
+cue outdoors; `SEForest` still uses the *city* preset, 2001 parity), which is the
+untuned pre-existing behaviour the next listening pass should start from.
+
 ### 1.4 Small audio wins
 
 The current OpenAL backend is already a suitable foundation. Do not replace it merely
