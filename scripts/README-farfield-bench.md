@@ -58,6 +58,31 @@ Default mission is `tests/perf/missions/perf_abel.abel`. The other four in that 
 (`perf_combat.eden`, `perf_field.eden`, `perf_town.noe`, `perf_water.eden`) are drivable with
 `-Mission tests/perf/missions/perf_town.noe`.
 
+**Choose the mission for the change you are measuring, and do not let the default choose for
+you.** These scenes are not interchangeable, and the default is the most GPU-bound of them:
+
+| | CPU frame in `swap` | simulation-side CPU |
+|---|---:|---:|
+| `perf_abel` (the default) | **91%** | 0.15 ms |
+| `perf_town` | 81% | 0.46 ms |
+| `perf_combat` | ~50% | 17–24 ms |
+
+So `perf_abel` measures the GPU and almost nothing else: a change to CPU-side work — the
+simulation, the object stream, threading, anything that would be hidden behind a GPU wait —
+reads as noise there by construction. `perf_combat` is the only one of the five with real
+simulation load (AI, vehicles, radio traffic, particles) and it is where CPU work shows.
+
+This is not hypothetical. Every performance figure in this repository's history was taken on
+`perf_abel`, including a whole grass campaign that belonged there — and PERF-012 then measured
+that render/simulation overlap is worth 34–42% of a combat frame and **1.3%** of an abel
+frame. Measuring step 9 on the default would have concluded it does nothing. See
+`docs/roadmap/decisions/PERF-012-*.md`.
+
+A caution that goes with them: `perf_combat` streams for a long time on Everon. Its frame is
+still dominated by object admission at 900 frames; the run has to reach roughly 110 s (or the
+`Renderer mutation ops` line has to read zero) before "steady" means anything. `-WarmupSeconds
+110` with a raised `-TimeoutSeconds` gets there; the default 150 s watchdog does not.
+
 ### Against a substituted world
 
 ```powershell
