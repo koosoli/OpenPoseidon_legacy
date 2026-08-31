@@ -151,14 +151,13 @@ struct ObjectStreamPreparer::Impl
 
 void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
 {
-    // Below-normal priority: this thread must never win a core from the render thread. The
-    // Foundation helper's Win32 arm passes a thread ID where a HANDLE is needed and so is a
-    // no-op there; call the platform API directly on Windows and the helper elsewhere.
-#ifdef _WIN32
-    ::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
-#else
+    // Below-normal priority: this thread must never win a core from the render thread.
+    //
+    // This was a #ifdef _WIN32 direct SetThreadPriority call, working around the Foundation
+    // helper passing a thread ID where a HANDLE is needed. The helper is fixed (PoThread.cpp,
+    // 2026-08-31), so the workaround is gone -- keeping it would have left the underlying bug
+    // in place for every other caller while looking like this one was fine.
     Foundation::poSetMyPriority(-1);
-#endif
 
     // Roadmap 8.1. This thread runs full ShapeAdapter geometry conversion whose output is
     // installed verbatim on the main thread, so it must compute in the main thread's

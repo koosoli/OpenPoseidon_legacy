@@ -1423,7 +1423,13 @@ After those shared foundations, **split the architecture work rather than serial
 ### Asset/streaming track
 
 10A. Build the staged asynchronous asset pipeline and hardened Derived Data Cache.  
-11A. Add task QoS so streaming/decode cannot starve simulation.  
+11A. Add task QoS so streaming/decode cannot starve simulation. *(Partly in place, and
+one piece of it was not working at all: the preparer's workers ask for BELOW_NORMAL
+priority through `poSetMyPriority`, which cast a thread ID to a HANDLE and was a silent
+no-op on Windows — every such worker ran at normal priority. Fixed 2026-08-31 with a test
+that reads the priority back from the OS. What is genuinely in place: 2 workers, a bounded
+distance-ordered queue with back-pressure rather than dropping, and the main-thread FP
+environment applied on each worker.)*  
 12A. Add residency budgets, hysteresis and predictive streaming.
 
 These two tracks may run concurrently after shared critical-path step 9. Neither a finished DDC nor a

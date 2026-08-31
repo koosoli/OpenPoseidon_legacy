@@ -373,3 +373,41 @@ TEST_CASE("poThread - Common usage patterns", "[threads][pothread]")
         }
     }
 }
+
+// poSetMyPriority was a silent no-op on Windows until 2026-08-31: it cast
+// GetCurrentThreadId() -- a DWORD ID -- to a HANDLE and handed it to SetThreadPriority,
+// which wants a real handle. It failed every time, and every caller discarded the bool, so
+// threads that asked to be deprioritised simply were not. The object-stream preparer
+// workers are the ones that mattered (roadmap 11A: streaming must not starve simulation).
+//
+// This test asserts the OUTCOME, not the call: it reads the priority back from the OS.
+// Asserting only that the function returns true would have passed on a version that set
+// the priority of some other thread entirely.
+#ifdef _WIN32
+TEST_CASE("Poseidon::Foundation::poSetMyPriority - actually changes this thread's priority", "[threads][pothread]")
+{
+    const int original = ::GetThreadPriority(::GetCurrentThread());
+    REQUIRE(original != THREAD_PRIORITY_ERROR_RETURN);
+
+    SECTION("below normal is applied and readable back")
+    {
+        REQUIRE(Poseidon::Foundation::poSetMyPriority(-1));
+        CHECK(::GetThreadPriority(::GetCurrentThread()) == THREAD_PRIORITY_BELOW_NORMAL);
+    }
+
+    SECTION("the delta is clamped, not rejected")
+    {
+        // -7 is out of range; the contract is that it clamps to the lowest band rather
+        // than failing, so a caller cannot accidentally leave a thread at normal priority
+        // by asking for too much.
+        REQUIRE(Poseidon::Foundation::poSetMyPriority(-7));
+        CHECK(::GetThreadPriority(::GetCurrentThread()) == THREAD_PRIORITY_LOWEST);
+        REQUIRE(Poseidon::Foundation::poSetMyPriority(7));
+        CHECK(::GetThreadPriority(::GetCurrentThread()) == THREAD_PRIORITY_HIGHEST);
+    }
+
+    // Leave the test runner's own thread as we found it -- a leaked priority change would
+    // silently skew the timing of every test that runs after this one.
+    ::SetThreadPriority(::GetCurrentThread(), original);
+}
+#endif
