@@ -310,3 +310,35 @@ Unchanged from REN-THR-009's list except that its item 1 is now done:
 5. **The simulation divergence** REN-THR-005 records (SIM-815 in flight) must be closed or
    bounded, because the equivalence oracle is what will decide whether a threaded frame is the
    same frame.
+
+---
+
+## Verification run by the session holding the game folder, 2026-09-01
+
+**The strongest gate passes.** `scripts\Check-FrameEquivalence.ps1` on this commit:
+**901 of 901 scene frames content-identical, no differing slice, exit 0.** That covers this
+document's own concern directly — `sl[7]` (`shad=`) is the slice a mistranslated caster would
+move, and it does not move.
+
+One thing had to be fixed before that gate could be trusted, and it is worth knowing here:
+`WgrShadowCaster` carries a mesh handle *and* a texture handle, and the frame hash was
+masking `draws3d`'s handles but not those. Under machine load the two runs completed asset
+loads in a different order and `sl[7]` moved in every frame — the gate reported a phantom
+regression against three innocent commits. Both slices are masked now (`fda8aa99`). So the
+caster slice was, briefly, exactly as sensitive to handle order as this document warned.
+
+**Of the five in-game checks this document asked for:**
+
+| check | status |
+|---|---|
+| 5. no steady stream of `create was cancelled` | **passed** — zero occurrences across four captures, and zero `ANOMALY` lines |
+| 4. roads conform to sloped ground | **passed** — the `perf_town` and Everon captures show roads following terrain, no floating or buried segments |
+| 1. infantry animate | **partial.** The player's own hands are CPU-path skinned geometry and render correctly at bind-plus-animation, which exercises `MeshSetSkin` end to end. Infantry at a distance where a frozen bind pose would be visible was **not** framed. |
+| 2. newly visible animated objects appear on the frame they become visible | **not checked** — needs a moving camera past a spawn boundary. |
+| 3. shadows appear at the same time and in the same pose | **not checked** — same reason. |
+
+Checks 2 and 3 are the ones this document says decided the design, so their being unchecked
+is the honest gap in this verification rather than a formality. Four freefly attempts failed
+to frame the units: the terrain at the mission's unit cluster is at **147 m**, so cameras
+placed at 12–62 m were underground or inside the grass canopy — `SurfaceY` at the target is
+worth reading out of the log (`grounded the player at …`) before choosing an altitude.
