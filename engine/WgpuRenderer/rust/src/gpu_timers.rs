@@ -327,6 +327,18 @@ impl GpuTimers {
 
     /// Open a region bracket. Must be called OUTSIDE any render/compute pass (the
     /// timestamp is written on the encoder itself).
+    ///
+    /// A REGION OPENED SEVERAL TIMES IN ONE FRAME REPORTS THE LAST ONE, NOT THE SUM.
+    /// Each region owns one query pair, so a second bracket overwrites the first: the
+    /// harvest reads that pair and cannot know it was written more than once. Contrast
+    /// `cpu_end`, which deliberately ACCUMULATES so a region recorded in several places
+    /// reports one honest per-frame figure -- the two halves of this file do not agree,
+    /// and only the CPU half says so at the call site.
+    ///
+    /// `GrassShadow` is the live example: `draw_shadow` is called once per shadow cascade,
+    /// so the row reports one cascade's grass draw and not the four. Reading it as a total
+    /// understates grass shadowing by the cascade count, which is a trap worth knowing
+    /// before quoting the number (2026-08-31: nearly quoted it here).
     pub fn begin(&self, encoder: &mut wgpu::CommandEncoder, region: Region) {
         if let Some(inner) = &self.inner {
             encoder.write_timestamp(&inner.query_set, region as u32 * 2);
