@@ -562,6 +562,29 @@ buffers and applied at an explicit ownership boundary.
 
 This is the first major architectural project after the low-hanging improvements.
 
+> **Status, 2026-08-31.** Steps 1–5 are done and step 6's *precondition* is done; step 6
+> itself (the thread) and step 7 (overlap) are not. What landed:
+>
+> - **The producer/consumer handoff exists**, in four drained slices — settings, retained
+>   instances, retained meshes and models, overlay textures. The producer holds its own
+>   handles and nothing outside one drain per frame touches the renderer handle. Design and
+>   counts in `REN-THR-001`; the slices and their verification in `REN-THR-006`.
+> - **The push-frame storage is double-buffered** (`84a44e79`), which also closed the
+>   `_gpuInstances` race by placement rather than by a mutex.
+> - **Step 6's equivalence proof is available and reaches zero.** Two runs, or two *builds*,
+>   publish content-identical frames in 901 of 901 scene frames. It took a determinism mode
+>   (`SIM-816`) and three clocks removed from the published frame; the gate is
+>   `scripts\Check-FrameEquivalence.ps1`.
+>
+> **Before building the thread, read `PERF-012`.** Overlap is worth 34–42% of a *combat*
+> frame and **1.3%** of `perf_abel`, the scene every performance figure in this project has
+> ever been taken on. The remaining handoff work is worth doing because it makes the boundary
+> true, not because it will move the bench.
+>
+> What still bypasses the drain is listed in `REN-THR-006`: the CPU-path `mesh_create` and
+> `mesh_set_skin`, the far-proxy bulk upload, the stats *reads*, and the stop-the-world
+> surface calls.
+
 Implement it incrementally:
 
 1. Build a snapshot while rendering remains on the main thread.
