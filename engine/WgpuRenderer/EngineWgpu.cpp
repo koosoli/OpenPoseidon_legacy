@@ -1775,6 +1775,43 @@ void EngineWgpu::DrainResourceOps()
         }
     }
     _resourceOps.clear();
+    DrainOverlayTexOps();
+}
+
+// Separate from DrainResourceOps because it has a second legitimate drain point: ImGui
+// creates its font atlas from INSIDE NextFrame (DebugOverlay::NewFrame runs after the main
+// drains), and SubmitOverlay translates handles in the same frame -- so SubmitOverlay
+// drains any ops enqueued since. Both call sites are producer-serial today and both sit at
+// what will be the render thread's frame boundary.
+void EngineWgpu::DrainOverlayTexOps()
+{
+    if (!_renderer)
+    {
+        _overlayTexOps.clear();
+        return;
+    }
+    for (OverlayTexOp& op : _overlayTexOps)
+    {
+        switch (op.kind)
+        {
+        case OverlayTexOp::Create:
+            _overlayTexIdOf[op.handle] = wgr_texture_create(_renderer, U32(op.w), U32(op.h), WGR_TEXTURE_RGBA8, 1, 0,
+                                                            op.rgba.data(), U32(op.rgba.size()));
+            break;
+        case OverlayTexOp::Update:
+            if (const auto it = _overlayTexIdOf.find(op.handle); it != _overlayTexIdOf.end())
+                wgr_texture_update(_renderer, it->second, op.rgba.data(), U32(op.rgba.size()));
+            break;
+        case OverlayTexOp::Destroy:
+            if (const auto it = _overlayTexIdOf.find(op.handle); it != _overlayTexIdOf.end())
+            {
+                wgr_texture_destroy(_renderer, it->second);
+                _overlayTexIdOf.erase(it);
+            }
+            break;
+        }
+    }
+    _overlayTexOps.clear();
 }
 
 void EngineWgpu::DrainInstanceOps()
@@ -7189,7 +7226,15 @@ uint64_t EngineWgpu::OverlayTextureCreate(int w, int h, const uint8_t* rgba)
         return 0;
     }
     _ops.textureOps++;
-    return wgr_texture_create(_renderer, U32(w), U32(h), WGR_TEXTURE_RGBA8, 1, 0, rgba, U32(w) * U32(h) * 4);
+    OverlayTexOp op;
+    op.kind = OverlayTexOp::Create;
+    op.handle = _nextOverlayTexHandle++;
+    op.w = w;
+    op.h = h;
+    op.rgba.assign(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    const uint64_t handle = op.handle;
+    _overlayTexOps.push_back(std::move(op));
+    return handle;
 }
 
 void EngineWgpu::OverlayTextureUpdate(uint64_t texture, int w, int h, const uint8_t* rgba)
@@ -7199,7 +7244,13 @@ void EngineWgpu::OverlayTextureUpdate(uint64_t texture, int w, int h, const uint
         return;
     }
     _ops.textureOps++;
-    wgr_texture_update(_renderer, texture, rgba, U32(w) * U32(h) * 4);
+    OverlayTexOp op;
+    op.kind = OverlayTexOp::Update;
+    op.handle = texture;
+    op.w = w;
+    op.h = h;
+    op.rgba.assign(rgba, rgba + static_cast<size_t>(w) * h * 4);
+    _overlayTexOps.push_back(std::move(op));
 }
 
 void EngineWgpu::OverlayTextureDestroy(uint64_t texture)
@@ -7207,7 +7258,10 @@ void EngineWgpu::OverlayTextureDestroy(uint64_t texture)
     if (_renderer)
     {
         _ops.textureOps++;
-        wgr_texture_destroy(_renderer, texture);
+        OverlayTexOp op;
+        op.kind = OverlayTexOp::Destroy;
+        op.handle = texture;
+        _overlayTexOps.push_back(std::move(op));
     }
 }
 
@@ -7215,6 +7269,7 @@ void EngineWgpu::SubmitOverlay(const OverlayVertex* verts, int vertCount, const 
                                const OverlayDrawCmd* cmds, int cmdCount)
 {
     static_assert(sizeof(OverlayVertex) == sizeof(WgrOverlayVertex), "overlay vertex layouts must match");
+    DrainOverlayTexOps(); // the font atlas may have been created since the frame's main drain
     _overlayVerts.clear();
     _overlayIndices.clear();
     _overlayDraws.clear();
@@ -7231,7 +7286,33 @@ void EngineWgpu::SubmitOverlay(const OverlayVertex* verts, int vertCount, const 
         const OverlayDrawCmd& c = cmds[i];
         WgrOverlayDraw& d = _overlayDraws[i];
         d.clip = {c.clip[0], c.clip[1], c.clip[2], c.clip[3]};
-        d.texture_id = c.texture;
+        // c.texture is a PRODUCER handle (REN-THR-010); 0 stays the built-in white. An
+        // unknown handle maps to white rather than to a stranger's texture.
+        if (c.texture == 0)
+        {
+            d.texture_id = 0;
+        }
+        else
+        {
+            const auto it = _overlayTexIdOf.find(c.texture);
+            if (it != _overlayTexIdOf.end())
+            {
+                d.texture_id = it->second;
+            }
+            else
+            {
+                // White, not a stranger's texture -- and said out loud, because the visible
+                // symptom (a white panel) is otherwise indistinguishable from a UI that
+                // simply has no texture, and this is the one path in the three drains that
+                // cannot be exercised headlessly (it needs an open dev-panel window).
+                d.texture_id = 0;
+                static uint32_t reported = 0;
+                if (reported++ < 8)
+                    LOG_ERROR(Graphics,
+                              "ANOMALY overlay draw carries unknown producer texture handle {} -- drawn white",
+                              c.texture);
+            }
+        }
         d.first_index = c.firstIndex;
         d.index_count = c.indexCount;
         d.base_vertex = c.baseVertex;

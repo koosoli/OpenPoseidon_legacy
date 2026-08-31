@@ -1068,6 +1068,27 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps();
 
+    // REN-THR-010 -- overlay (ImGui/UI) textures through the same drain, with producer
+    // handles. Their ids also flow into WgrOverlayDraw::texture_id, but SubmitOverlay runs
+    // inside NextFrame AFTER the drain, so it translates through the map at copy time.
+    struct OverlayTexOp
+    {
+        enum Kind : uint8_t
+        {
+            Create,
+            Update,
+            Destroy
+        };
+        Kind kind = Create;
+        uint64_t handle = 0;
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba; // Create/Update payload (copied; UI-sized, rare)
+    };
+    std::vector<OverlayTexOp> _overlayTexOps;
+    uint64_t _nextOverlayTexHandle = 1; // 0 stays "built-in white"
+    std::unordered_map<uint64_t, uint64_t> _overlayTexIdOf;
+    void DrainOverlayTexOps();
+
     // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
     // and answered "unmeasured" twice, in the two places where the answer decides the
     // design. These count it. A mean alone would hide the shape -- streaming is bursty by
