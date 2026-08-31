@@ -149,7 +149,43 @@ fallback and retire semantics, no consumer rewritten.
 `PresentationSnapshotSlotIndex`, `PresentationSnapshotSlot`,
 `ResetPresentationSnapshotRingForTest`, and `kPresentationSnapshotRingSize`.
 
-### What still blocks step 6 (render thread)
+### RE-AUDIT 2026-08-31: two of the four do not block the render thread
+
+The four blockers below were written on 2026-08-30 and the code has moved. Re-checked
+against the tree before starting the work, because this document has already been wrong
+twice today in the same direction — it listed as open two things that had been closed.
+
+**Blocker 1 — CLOSED.** The cull push read `snap.hasScene ? snap.objectDrawDistance :
+GScene->GetObjectDrawDistance()`, a live world read from the render path and the sharp end
+of the `lodInvWidth` problem. Removed: snapshot only, and the push is skipped when there is
+no scene. Verified functionally — 98,684 registered instances before and after, identical.
+
+**Blocker 2 — NOT on the path to a render thread.** The claim is that recording draws off
+the main thread forces `GCurrentConformPlane` / `GCurrentIsVegetation` /
+`GCurrentFoliageKind` to become parameters. True, but the render thread does not move the
+*recording*; it moves the *replay*. Every read of these three is at PUSH time, on the same
+call stack as the `Object::Draw` that writes them: `EngineWgpu::DrawSectionTL` (3376, 3597,
+3647), `AddShadowCaster` (6750) and the conform-plane branch at 660, all called during the
+world traversal. The values are consumed into the pushed draw record before any handoff
+exists. They are function arguments passed through globals — ugly, and a genuine blocker
+for a **parallel traversal**, which is a later item. Not for this one.
+
+**Blocker 3 — reduces to a container, not an identity.** Two of its three schemes were
+already closed on 2026-08-30 (REN-ID-001). What actually bites is that `NextFrame()` —
+the function that would move — reads `_gpuInstances.empty()` and `.size()` (1872, 1940)
+**and calls `MarkRetainedModelLiveness()` (2115), which walks and writes the map**, while
+`SceneObjectCreated` / `SceneObjectRemoved` mutate it on the simulation thread. A concurrent
+`size()` against an `insert` on an `unordered_map` is undefined behaviour, and no per-entry
+generation touches that. The fix is placement, not identity: the liveness sweep is residency
+bookkeeping, not rendering, and belongs on the simulation side; the two counts belong in the
+pushed frame.
+
+**Blocker 4 — the real remaining one**, unchanged: the push path is single-buffered.
+
+So the order for step 6 is **3 then 4**, and 2 waits for the parallel-traversal work it
+actually blocks.
+
+### What still blocks step 6 (render thread) — as written 2026-08-30
 
 The ring removes the *storage* hazard. Four things are still same-thread by
 construction, and each has to be answered before renderer preparation can move off the
