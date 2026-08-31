@@ -7212,25 +7212,35 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     if (!_frameHashOn)
         return;
 
-    uint64_t h = 14695981039346656037ull;
-    h = HashBytes(h, &frame.clear, sizeof(frame.clear));
-    h = HashBytes(h, &frame.fog_color, sizeof(frame.fog_color));
-    h = HashSlice(h, frame.cameras);
-    h = HashSlice(h, frame.draws3d);
-    h = HashSlice(h, frame.verts);
-    h = HashSlice(h, frame.batches);
-    h = HashSlice(h, frame.cmds);
-    h = HashSlice(h, frame.palette);
-    h = HashSlice(h, frame.shadow_casters);
-    h = HashSlice(h, frame.overlay_verts);
-    h = HashSlice(h, frame.overlay_indices);
-    h = HashSlice(h, frame.overlay_draws);
-    h = HashSlice(h, frame.terrain_nodes);
-    h = HashSlice(h, frame.terrain_batches);
-    h = HashSlice(h, frame.lights);
-    h = HashSlice(h, frame.water_nodes);
-    h = HashSlice(h, frame.water_batches);
-    h = HashSlice(h, frame.grass_batches);
+    // Per SLICE, not just the fold. A single number says two runs differ; it cannot say
+    // which subsystem they differ in, and the slice that parts first names the suspect
+    // directly -- draws3d is the LOD governor's output, terrain_nodes the terrain's,
+    // grass_batches the grass placement's. The fold is built from the same values so the
+    // whole-frame figure is unchanged.
+    constexpr uint64_t kBasis = 14695981039346656037ull;
+    uint64_t sl[kFrameHashSlices];
+    sl[0] = HashBytes(HashBytes(kBasis, &frame.clear, sizeof(frame.clear)), &frame.fog_color,
+                      sizeof(frame.fog_color));
+    sl[1] = HashSlice(kBasis, frame.cameras);
+    sl[2] = HashSlice(kBasis, frame.draws3d);
+    sl[3] = HashSlice(kBasis, frame.verts);
+    sl[4] = HashSlice(kBasis, frame.batches);
+    sl[5] = HashSlice(kBasis, frame.cmds);
+    sl[6] = HashSlice(kBasis, frame.palette);
+    sl[7] = HashSlice(kBasis, frame.shadow_casters);
+    sl[8] = HashSlice(kBasis, frame.overlay_verts);
+    sl[9] = HashSlice(kBasis, frame.overlay_indices);
+    sl[10] = HashSlice(kBasis, frame.overlay_draws);
+    sl[11] = HashSlice(kBasis, frame.terrain_nodes);
+    sl[12] = HashSlice(kBasis, frame.terrain_batches);
+    sl[13] = HashSlice(kBasis, frame.lights);
+    sl[14] = HashSlice(kBasis, frame.water_nodes);
+    sl[15] = HashSlice(kBasis, frame.water_batches);
+    sl[16] = HashSlice(kBasis, frame.grass_batches);
+
+    uint64_t h = kBasis;
+    for (uint64_t v : sl)
+        h = HashBytes(h, &v, sizeof(v));
 
     // Frames that differ from their predecessor. If this stays at zero while the camera
     // moves, the hash is not reading the frame and every "equivalent" verdict it gives is
@@ -7246,7 +7256,18 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     // runs there compares how long the disk took, not what the producer built. The window
     // start is settable so the comparison can be moved past whatever the scene's load costs.
     if (_frameHashCount >= _frameHashFirst && _frameHashCount < _frameHashFirst + 96)
-        LOG_INFO(Graphics, "Wgpu frame hash: frame[{}]={:#018x}", _frameHashCount, h);
+    {
+        LOG_INFO(Graphics,
+                 "Wgpu frame hash: frame[{}]={:#018x} | scal={:08x} cam={:08x} d3d={:08x} vert={:08x} "
+                 "bat={:08x} cmd={:08x} pal={:08x} shad={:08x} ovv={:08x} ovi={:08x} ovd={:08x} "
+                 "tn={:08x} tb={:08x} lit={:08x} wn={:08x} wb={:08x} grass={:08x}",
+                 _frameHashCount, h, static_cast<uint32_t>(sl[0]), static_cast<uint32_t>(sl[1]),
+                 static_cast<uint32_t>(sl[2]), static_cast<uint32_t>(sl[3]), static_cast<uint32_t>(sl[4]),
+                 static_cast<uint32_t>(sl[5]), static_cast<uint32_t>(sl[6]), static_cast<uint32_t>(sl[7]),
+                 static_cast<uint32_t>(sl[8]), static_cast<uint32_t>(sl[9]), static_cast<uint32_t>(sl[10]),
+                 static_cast<uint32_t>(sl[11]), static_cast<uint32_t>(sl[12]), static_cast<uint32_t>(sl[13]),
+                 static_cast<uint32_t>(sl[14]), static_cast<uint32_t>(sl[15]), static_cast<uint32_t>(sl[16]));
+    }
 
     if (_frameHashCount != 0 && h != _frameHashLast)
         _frameHashDistinct++;

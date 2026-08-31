@@ -1006,6 +1006,7 @@ class EngineWgpu : public EngineDummy
     // It is only an oracle if the frames are reproducible in the first place, which is a
     // question about the engine, not about this code, and is answered by running it. Enabled
     // by WGR_FRAME_HASH=1 and off otherwise: it walks every published byte.
+    static constexpr int kFrameHashSlices = 17; // scalars + the sixteen slices
     void HashPublishedFrame(const WgrFrame& frame);
     bool _frameHashOn = false;
     uint64_t _frameHashRun = 0;   // folded over every frame so far this run

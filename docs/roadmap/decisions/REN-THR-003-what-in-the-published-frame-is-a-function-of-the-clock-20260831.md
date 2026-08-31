@@ -370,3 +370,66 @@ governor is the whole of it or merely the first thing to part.
   from the camera and the sun, both snapshot-derived, but the grass-cascade mask
   (`EngineWgpu.cpp:2099-2133`) depends on `_grassPhotoTuftActive` and the cascade split distances.
   If the hash is ever extended, that block is the first place to look for a surprise.
+
+---
+
+## The experiments, run
+
+Run by the session holding the game folder, on `perf_abel`, three runs per arm, hashing a
+96-frame window at frame 400. The instrument was extended first: `HashPublishedFrame` now
+reports **each of the seventeen slices separately** as well as the fold, which was this
+document's own cheapest-high-value suggestion and which turned out to carry the most
+information of anything measured here.
+
+**Experiment 0 — the `--fps` confounder: clear.** `farfield-bench.ps1` never passes it, so
+the FPS/LOD text is not in `_verts` and no measurement in this line of work is void.
+
+**Experiment 1 — freeze the LOD governor (`WGR_LOD_GOVERNOR_RANGE=1`): a real contributor,
+and not the whole cause.**
+
+| arm | 2D slices part at | world slices part at |
+|---|---:|---:|
+| everything free | **51** | **52** |
+| governor frozen | **59** | **60** |
+| governor frozen **+** object stream clocks pinned | **59** | **60** |
+
+Freezing the governor buys eight frames, and buys them *exactly*: two arms that differ in
+four other environment variables both part at 59/60, which is why this is read as signal
+rather than as run-to-run noise. But divergence still happens, so `_lodInvWidth` is **a**
+clock in the published frame and not the only one.
+
+**Experiments 2 and 3 — the object stream, eliminated a third time.** With the hard ceiling
+and the per-update budget pinned as this document correctly insisted (`MAX_MS=0`,
+`MS_PER_UPDATE=0`, not just `MAX_BATCH_SCALE=1`) and prefetch disabled, the divergence
+point does not move by a single frame. The earlier eliminations were right for the wrong
+reason; this one is right for the right one.
+
+## The finding the per-slice hashes produced
+
+In **every** arm, the same shape:
+
+- `verts`, `batches` and `cmds` — the 2D path — part **exactly one frame before**
+  everything else.
+- `overlay_verts`, `overlay_indices`, `overlay_draws` and `lights` **never part at all**,
+  across 96 frames and three runs, in any arm.
+- Everything else — `draws3d`, `terrain_nodes`, `terrain_batches`, `water_*`,
+  `grass_batches`, the camera and the fog scalars — parts together, one frame later.
+
+The one-frame lead is the useful part, and it is reproducible. The natural reading is that
+the divergence begins **inside** a frame, after the world has been assembled and before the
+2D pass is: the 2D content of frame *N* already reflects it while the world content of frame
+*N* does not, and the world catches up at *N+1*. That points at something read between those
+two points in the frame — which is a much smaller region of code to search than "anything
+that touches a clock".
+
+That the light set never parts is worth recording too: whatever varies is not the lighting
+solution, and any future explanation has to be consistent with lights being stable while
+terrain, water and grass are not.
+
+## Where this leaves it
+
+One clock confirmed in the published frame (`Scene::_lodInvWidth`, from
+`GetAvgFrameDuration`), three candidates eliminated by measurement, and the remaining cause
+localised to what happens between the world draw and the 2D draw of the same frame. Not
+solved. Phase 5 step 6 still cannot take its proof, and the queue still cannot be shown
+equivalent.
