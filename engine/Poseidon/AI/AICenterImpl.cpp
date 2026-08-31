@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <Poseidon/Foundation/Framework/PoTime.hpp>
 #include <Poseidon/Core/Application.hpp>
 
@@ -292,31 +293,27 @@ bool AICenter::CanSupport(UIActionType type)
     return false;
 }
 
-int CmpGuardedVehicles(const AITargetInfo* const* i1, const AITargetInfo* const* i2)
+int CompareGuardedVehicleRank(bool sideUnknown1, float cost1, bool sideUnknown2, float cost2)
 {
-    const AITargetInfo* info1 = *i1;
-    const AITargetInfo* info2 = *i2;
-    if (info1->_side == TSideUnknown)
+    // Known sides rank ahead of unknown ones.
+    if (sideUnknown1 != sideUnknown2)
     {
-        if (info2->_side != TSideUnknown)
-        {
-            return 1;
-        }
+        return sideUnknown1 ? 1 : -1;
     }
-    else if (info2->_side == TSideUnknown)
-    {
-        return -1;
-    }
-
-    float diff = info2->_type->GetCost() - info1->_type->GetCost();
+    // Then descending type cost.
+    float diff = cost2 - cost1;
     if (diff != 0)
     {
         return sign(diff);
     }
-    else
-    {
-        return info1->_idExact - info2->_idExact;
-    }
+    // SIM-803: 0, deliberately. See GuardedVehicleBefore below.
+    return 0;
+}
+
+bool GuardedVehicleBefore(const AITargetInfo* i1, const AITargetInfo* i2)
+{
+    return CompareGuardedVehicleRank(i1->_side == TSideUnknown, i1->_type->GetCost(), i2->_side == TSideUnknown,
+                                     i2->_type->GetCost()) < 0;
 }
 
 void AICenter::UpdateGuarding()
@@ -377,7 +374,29 @@ void AICenter::UpdateGuarding()
     }
 
     // 4. sort list
-    QSort(targets.Data(), targets.Size(), CmpGuardedVehicles);
+    //
+    // SIM-803 (Phase 8.3, stable iteration and reductions). This used to be
+    //     QSort(..., CmpGuardedVehicles)
+    // whose equal-cost tie-break was `return info1->_idExact - info2->_idExact`,
+    // i.e. the difference of two EntityAI heap addresses. Two things were wrong
+    // with it, and step 5 below turns both into gameplay: this ordering decides
+    // which guarding group is sent to which vehicle.
+    //
+    //  * It ordered by allocation address. Equal-cost targets -- and `_type->GetCost()`
+    //    is a flat per-type constant, so any two vehicles of the same type tie exactly
+    //    -- were ranked by where the allocator happened to put them. That differs
+    //    between runs, between machines, and (in MP) between clients, for identical
+    //    game state.
+    //  * On x64 the subtraction is a ptrdiff_t narrowed to the int return type. Two
+    //    objects more than 2GiB apart in the address space produce a truncated
+    //    difference with the WRONG SIGN, so the comparator is not even a consistent
+    //    ordering of the addresses it was using.
+    //
+    // `targets` is built immediately above by scanning NTargets()/GetTarget(i) in
+    // index order, so the info's index in AICenter's ordered target array is a stable
+    // identity that already exists here. std::stable_sort uses exactly that as the
+    // tie-break, and GuardedVehicleBefore now contains no pointer term at all.
+    std::stable_sort(targets.Data(), targets.Data() + targets.Size(), GuardedVehicleBefore);
 
     // 5. assign vehicles to groups
     int n = targets.Size();

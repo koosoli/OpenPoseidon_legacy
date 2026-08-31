@@ -517,6 +517,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     AI/test_entity_displayname_lang_switch.cpp
     AI/test_ai_subgroup.cpp
     AI/test_unit_number_list.cpp
+    AI/test_stable_ordering.cpp
 
     # UI tests
     UI/Map/test_uiMap.cpp

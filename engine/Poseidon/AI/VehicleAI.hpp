@@ -334,6 +334,32 @@ class TargetList: public RefArray<Target>
 	void Manage( AIGroup *group );
 	void Manage(); // player visible list managenemt
 	int Find( TargetType *target ) const;
+
+	// SIM-803 (Phase 8.3, stable iteration and reductions).
+	//
+	// Ranks the list by descending subjectiveCost. The ordering this produces is
+	// gameplay-observable: AIGroup::AssignTargets and SelectInterestingTarget walk
+	// this array in order, so whichever of two equally-costed targets lands first
+	// is the one a unit engages.
+	//
+	// subjectiveCost ties are NOT rare. AIGroup::GetSubjectiveCost collapses to the
+	// type's flat GetCost() for any target that cannot currently fire back, so two
+	// identical unit types tie exactly, bit for bit, every think cycle.
+	//
+	// This is deliberately a STABLE sort. The previous implementation used QSort
+	// (Foundation/Algorithms/Qsort.hpp) with a comparator that returns 0 on a tie;
+	// QSort is an unstable quicksort (and its <=8-element ShortSort path is a
+	// selection sort, also unstable), so equal-cost targets came out in whatever
+	// order the partitioning happened to leave them. That is deterministic only for
+	// as long as the array arrives in a deterministic order -- which is exactly the
+	// assumption Phase 8 breaks when detection starts producing targets from worker
+	// jobs that complete in scheduler order.
+	//
+	// Tie-break is therefore the target's existing index in this array, which is a
+	// stable identity that already exists here and does not involve a heap address.
+	// (Object::ID() is not usable as the identity: WorldImpl.cpp:1772+ assigns -1 to
+	// every dynamically created vehicle, so it is not unique for AI entities.)
+	void SortBySubjectiveCost();
 };
 
 

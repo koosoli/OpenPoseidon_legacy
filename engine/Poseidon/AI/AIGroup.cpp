@@ -1078,11 +1078,25 @@ static int CompUnits(const OLink<AIUnit>* unit1, const OLink<AIUnit>* unit2)
 {
     // check existence
     AIUnit* u1 = unit1->GetLink();
+    AIUnit* u2 = unit2->GetLink();
+    // SIM-803: two empty slots must compare EQUAL. This used to fall straight into
+    // `if (!u1) return 1;`, so Cmp(null, null) answered 1 in both directions -- an
+    // inconsistent comparator claiming a > b AND b > a. _units is a fixed array of
+    // MAX_UNITS_PER_GROUP (12) slots that is normally mostly empty, so the pair of
+    // nulls is the common case, not an edge case, and the order QSort then leaves
+    // the array in is not defined by the comparator at all. The rest of this
+    // function is already a total order (it ends in a u1->ID() - u2->ID() tie-break,
+    // which is the pattern the rest of this audit wanted everywhere), so this null
+    // handling was the only ambiguity in group unit ordering -- and SortUnits below
+    // decides formation slots and leadership succession.
+    if (!u1 && !u2)
+    {
+        return 0;
+    }
     if (!u1)
     {
-        return 1;
+        return 1; // empty slots sort to the end
     }
-    AIUnit* u2 = unit2->GetLink();
     if (!u2)
     {
         return -1;

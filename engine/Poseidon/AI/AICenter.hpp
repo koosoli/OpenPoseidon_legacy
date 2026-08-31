@@ -48,6 +48,26 @@ public:
 	float FadingPositionAccuracy() const;
 };
 
+// SIM-803 (Phase 8.3, stable iteration and reductions).
+//
+// Ranking key for AICenter::UpdateGuarding's guarded-vehicle list, split out from
+// the AITargetInfo pointers so it can be exercised without a live world: known
+// sides ahead of unknown, then descending type cost, then a DELIBERATE 0.
+//
+// Returning 0 on a tie is the point. The old comparator broke equal-cost ties with
+// `info1->_idExact - info2->_idExact`, the difference of two heap addresses, which
+// made a gameplay decision (which group guards which vehicle) depend on the
+// allocator -- and, being a ptrdiff_t narrowed to int, could return the wrong sign
+// for objects more than 2GiB apart. Ties are now resolved by std::stable_sort at
+// the call site, i.e. by the info's index in AICenter's ordered target array.
+//
+// Returns <0 if 1 ranks before 2, >0 if after, 0 if the two are indistinguishable.
+int CompareGuardedVehicleRank(bool sideUnknown1, float cost1, bool sideUnknown2, float cost2);
+
+// Strict-weak ordering over AITargetInfo built on CompareGuardedVehicleRank.
+// Contains no pointer term; must only ever be used with a STABLE sort.
+bool GuardedVehicleBefore(const AITargetInfo *i1, const AITargetInfo *i2);
+
 class AICheckPointInfo
 {
 public:

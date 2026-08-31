@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 
@@ -465,6 +466,23 @@ int TargetList::Find(TargetType* obj) const
         }
     }
     return -1;
+}
+
+// SIM-803 (Phase 8.3). See the declaration in AI/VehicleAI.hpp for the reasoning.
+// std::stable_sort, not QSort: equal subjectiveCost must keep the order the array
+// already has, so the winner does not depend on partitioning or on the order the
+// targets happened to be appended.
+void TargetList::SortBySubjectiveCost()
+{
+    Ref<Target>* first = Data();
+    std::stable_sort(first, first + Size(),
+                     [](const Ref<Target>& a, const Ref<Target>& b)
+                     {
+                         // Strict: `a before b` only when a is strictly more costly.
+                         // Equal costs compare false both ways, which is what makes
+                         // stable_sort fall back to the existing index order.
+                         return a->subjectiveCost > b->subjectiveCost;
+                     });
 }
 
 void EntityAI::AddNewTargets(TargetList& res, bool initialize)

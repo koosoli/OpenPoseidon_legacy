@@ -408,12 +408,11 @@ void AIGroup::GetInVehicles()
     }
 }
 
-static int BetterTarget(const Ref<Target>* v0, const Ref<Target>* v1)
-{
-    Target* t0 = *v0;
-    Target* t1 = *v1;
-    return sign(t1->subjectiveCost - t0->subjectiveCost);
-}
+// SIM-803: moved to TargetList::SortBySubjectiveCost (World/Detection/Target.cpp,
+// beside the other TargetList methods) so the
+// ordering -- and its tie-break -- is one testable place rather than a file-static
+// comparator handed to an unstable sort. See the comment on the declaration in
+// VehicleAI.hpp for why the tie-break matters.
 
 void AIGroup::ReactToEnemyDetected()
 {
@@ -684,8 +683,8 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
         }
     }
 
-    // sort
-    QSort(_targetList.Data(), _targetList.Size(), BetterTarget);
+    // sort (stable: equal subjectiveCost keeps existing index order -- SIM-803)
+    _targetList.SortBySubjectiveCost();
 
     // realloc target list if allocated space is too big
     int allocSize = _targetList.MaxSize();
