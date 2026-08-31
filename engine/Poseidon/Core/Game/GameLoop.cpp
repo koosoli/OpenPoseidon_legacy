@@ -294,13 +294,17 @@ bool AppIdle()
     }
 #endif
 
-    // REN-THR-002: lockstep pacing. Built to be the prerequisite for proving that a
-    // restructured producer publishes the same frames, and then MEASURED NOT TO BE ONE --
-    // recorded here rather than quietly kept, because the next person will have the same
-    // idea. Three runs of one scene, frame hashes over a 96-frame window past the load:
-    // WITHOUT this the runs agree for 24 frames before diverging, WITH it for 19. Pinning
-    // deltaT does not improve frame-stream reproducibility, so whatever makes frame ~420
-    // differ between two runs is not the pacing.
+    // REN-THR-002: lockstep pacing, built as the prerequisite for proving that a
+    // restructured producer publishes the same frames.
+    //
+    // It was written up once as MEASURED NOT TO HELP -- 24 frames of agreement without it
+    // against 19 with, and 59 against 46 in a second pairing. Both readings were mine and
+    // both were wrong, for a reason worth leaving here: with deltaT pinned to 1/60 s while
+    // a frame really takes ~9.7 ms, each frame advances the world 16.7 ms, so the lockstep
+    // arm is nearly twice as far into the world at frame N as the arm it was compared with.
+    // Counting FRAMES until two runs diverge does not compare the same thing across arms
+    // that cover different amounts of world time per frame. The comparison, not the mode,
+    // was the defect; whether pinning deltaT helps is still unmeasured.
     //
     // Kept because it is a real capability the search for that cause will want, and because
     // it is the scriptable form of the Ctrl-O "Fix Sim" cheat above -- which does the same

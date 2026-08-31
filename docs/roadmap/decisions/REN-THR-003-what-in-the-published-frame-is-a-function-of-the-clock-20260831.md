@@ -433,3 +433,53 @@ One clock confirmed in the published frame (`Scene::_lodInvWidth`, from
 localised to what happens between the world draw and the 2D draw of the same frame. Not
 solved. Phase 5 step 6 still cannot take its proof, and the queue still cannot be shown
 equivalent.
+
+---
+
+## Second addendum — two of the four constraints were artefacts, and the lockstep comparison was invalid
+
+REN-THR-004's audit checked the four facts above instead of accepting them, and two did not
+survive. Both corrections are to claims made in the section immediately above.
+
+**`lights` and the three `overlay_*` slices do not "never diverge". They are empty.** The
+prediction was free to test, because `HashSlice` folds a slice's length in ahead of its
+bytes, so an empty slice always hashes to the same value. In the logs already captured, all
+four columns are constant at `…9dce13f5` for every frame of the window — the empty-slice
+hash. `perf_abel` is a noon mission with no lights, and the local-light selection is skipped
+outright unless it is night or a light is daylight-visible; the bench opens no dev-panel
+window, so `SubmitOverlay` clears its three vectors and returns early. **So "the lighting
+solution is stable while grass is not" was never a fact about the renderer**, and any
+explanation built to satisfy it was being asked to satisfy nothing. The instruction to find
+what distinguishes `overlay_*` from `verts` resolves to: one of them is empty.
+
+Worth keeping for what it says about the instrument: a per-slice hash reports a *stable*
+value for a slice that is never populated, which is indistinguishable at a glance from a
+slice that is populated identically every frame. The length fold is what makes the two
+separable at all, and it was put there for a different reason.
+
+**The lockstep comparison was invalid in both directions.** Running the two known clocks off
+together — the experiment neither arm had tried — gives:
+
+| arm | 2D parts at | world parts at |
+|---|---:|---:|
+| nothing frozen | 51 | 52 |
+| LOD governor frozen | 59 | 60 |
+| governor frozen + object-stream clocks pinned | 59 | 60 |
+| governor frozen + `POSEIDON_LOCKSTEP_HZ=60` | **46** | **47** |
+
+Lockstep looks worse in both pairings it appears in — 24 against 19 earlier, 59 against 46
+here — and the consistency is what gives the reason away. With `deltaT` pinned to 1/60 s
+while a frame really takes about 9.7 ms, **each frame advances the world 16.7 ms**, so the
+lockstep arm is nearly twice as far into the world at frame *N* as the arm it is being
+compared against. Counting frames-until-divergence across arms that cover different amounts
+of world time per frame does not compare the same thing.
+
+So the earlier statement that pinning `deltaT` was *measured not to help* is **withdrawn**.
+It was measured against an incomparable baseline. Whether it helps is unmeasured, and the
+measurement that would settle it has to hold world time constant rather than frame count.
+The mode is kept and the code comment at its call site now says this rather than the
+retracted claim.
+
+What survives all of it: the LOD governor is a confirmed clock in the published frame
+(51→59 between two arms whose pacing *is* comparable), the object stream is eliminated, and
+the 2D path leads the world by exactly one frame in every arm measured — four of them now.
