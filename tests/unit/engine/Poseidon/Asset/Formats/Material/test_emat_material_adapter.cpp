@@ -114,6 +114,43 @@ TEST_CASE("EMAT adapter: an albedo map is taken when the material has one", "[as
     REQUIRE(riverBase->texture.isProcedural);
 }
 
+TEST_CASE("EMAT adapter: a Reforger coarse-LOD MatPBRBasic is bound from its Color alone",
+          "[asset][material][emat][mat-054]")
+{
+    // MAT-054. Everon's white blocks at distance are not a water case and not a DayZ
+    // case, and they are the reason this contract has to be pinned for MatPBRBasic and
+    // not only for MatWaterPool: Reforger's BAKED-LOD materials -- the `*_MLOD`,
+    // `*_lod3` and `*_Color_palette` files a model's coarse LODs name -- carry a single
+    // flat `Color` and NO map of any kind. Verbatim from
+    // `Assets/Structures/Walls/Crashbarrier/data/CrashBarrier_MLOD.emat` (data005.pak);
+    // 12 of the 40 materials in the measured untextured set are this shape, and every
+    // one of their colours is dark (0.016 to 0.32), so the 1.0 white a section falls to
+    // when nothing binds is the largest error the format can produce.
+    //
+    // The adapter has always handled this -- the synthesis is keyed on `Color` and not
+    // on a class -- and that is exactly why it needs a test naming this family: the fix
+    // for MAT-054 lives in the converter, which must deploy such an `.emat` even though
+    // it bakes no `.paa` for it, and it may do so ONLY while this holds.
+    const TranslatedMaterial mlod = TranslateEmat(ParseEmat("MatPBRBasic {\n"
+                                                            " Color 0.168 0.185 0.188 1\n"
+                                                            " Cull none\n"
+                                                            " SurfaceProperties "
+                                                            "\"{CE9253778DD8FBDE}Common/Materials/Game/metal.gamemat\"\n"
+                                                            " RoughnessScale 0.48\n"
+                                                            " MetalnessScale 0.838\n"
+                                                            "}\n"),
+                                                 "Assets/Structures/Walls/Crashbarrier/data/CrashBarrier_MLOD.emat",
+                                                 "");
+
+    const TranslatedSlot* base = mlod.Find(MaterialSlot::BaseColour);
+    REQUIRE(base != nullptr);
+    REQUIRE(base->texture.isProcedural);
+    REQUIRE(base->texture.raw.find("color(0.168,0.185,0.188,1") != std::string::npos);
+    // The whole point: a material of this shape must NOT read as binding nothing, or
+    // the section reaches the GPU on bindless slot 0 and draws white.
+    REQUIRE_FALSE(BindsNothing(mlod));
+}
+
 TEST_CASE("EMAT adapter: a colour-only material becomes a procedural base colour", "[asset][material][emat][dz-002]")
 {
     // DayZ water authors no albedo texture at all -- its whole appearance is one
