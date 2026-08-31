@@ -83,8 +83,9 @@ that were made to the card path.
 ### The grass depth prepass — **a wash, measured 2026-08-31**
 Costs 1.449 ms and saves 1.353 ms of grass colour; net zero. Turning the prepass off drops
 the frame 1.3 ms only because ambient occlusion goes with it, which is a feature trade, not
-a win. The grass lever is the **15.5 M vertices per frame** (10.5 M near + 5.0 M mid, drawn
-three times), not the prepass.
+a win. The vertex-count lever it pointed at **has since been taken**: indexing the blade
+ribbons cut grass from 4.882 to 2.973 ms (see B.4 in the roadmap), which is why this entry
+is about the prepass only.
 
 ---
 
