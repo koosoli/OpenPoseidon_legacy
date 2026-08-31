@@ -748,6 +748,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     if (const char* v = std::getenv("WGR_FRAME_HASH"); v && v[0] && v[0] != '0')
     {
         _frameHashOn = true;
+        if (const char* f = std::getenv("WGR_FRAME_HASH_FIRST"); f && f[0])
+            _frameHashFirst = static_cast<uint32_t>(std::max(0, std::atoi(f)));
         LOG_INFO(Graphics, "Wgpu frame hash: ON -- every published frame is walked byte for byte "
                            "(REN-THR-001 equivalence oracle); this is not a play setting");
     }
@@ -7239,7 +7241,11 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     // frame. Per-index hashes over the opening frames are the part that IS comparable, and
     // how far down this list two runs agree is the measurement of how far producer
     // determinism actually extends.
-    if (_frameHashCount < 96)
+    // A WINDOW, not a prefix. The opening frames are the mission loading, where the same
+    // frame is republished a variable number of times while I/O completes -- comparing two
+    // runs there compares how long the disk took, not what the producer built. The window
+    // start is settable so the comparison can be moved past whatever the scene's load costs.
+    if (_frameHashCount >= _frameHashFirst && _frameHashCount < _frameHashFirst + 96)
         LOG_INFO(Graphics, "Wgpu frame hash: frame[{}]={:#018x}", _frameHashCount, h);
 
     if (_frameHashCount != 0 && h != _frameHashLast)

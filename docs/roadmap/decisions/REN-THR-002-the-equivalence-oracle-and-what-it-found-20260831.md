@@ -73,6 +73,45 @@ the first change that needs proving and there is currently no way to prove it. I
 cheap relative to what depends on it, and it composes with SIM-813, which removed the last
 wall-clock input to the *simulation* stage earlier today for the same underlying reason.
 
+## Addendum, same day: the window was in the wrong place, and the fix that was supposed to work does not
+
+Two corrections to the section above, both found by continuing to measure.
+
+**1. The 96-frame window was measuring the loading screen.** Hashing the *first* 96
+published frames compares how long the disk took, not what the producer built — during load
+the same frame is republished a variable number of times, which is why the three runs showed
+wildly different distinct-hash counts (75 / 44 / 79). The window is now placeable
+(`WGR_FRAME_HASH_FIRST`), and moved past the load the picture is considerably better than
+the original section reports: **three runs agree for the first 24 frames of a steady window
+and then diverge**, rather than 2–3.
+
+**2. Lockstep pacing does not fix it.** A `POSEIDON_LOCKSTEP_HZ` mode was added on the
+reasoning above — pin `deltaT`, remove the wall clock from the pacing, and frame *N* of two
+runs will have simulated the same world. Measured, over the same window, three runs each:
+
+| | agreeing prefix |
+|---|---:|
+| no lockstep | **24 frames** |
+| `POSEIDON_LOCKSTEP_HZ=60` | **19 frames** |
+
+Not an improvement. The hypothesis that pacing was the divergence source is **refuted**, and
+the section above is wrong where it says the prerequisite is a fixed-step replay mode. Also
+tried, in combination with lockstep: forcing the object stream's admission batch to a fixed
+size and making streaming synchronous (`WGR_OBJECT_STREAM_MAX_BATCH_SCALE=1`,
+`WGR_OBJECT_STREAM_ASYNC=0`), on the theory that the wall-clock admission budget in
+`LandSave.cpp` — which SIM-813 independently flagged, where a slow frame admits *more* — was
+feeding the published frame. It did not help either.
+
+What the numbers now suggest is not gradual drift but a **single event at a fixed offset**:
+all three runs agree, then all three disagree, at the same place, and the prefix lengths are
+identical between the run-1/run-2 and run-1/run-3 pairs in both arms. Something lands around
+twenty frames into the window — an async readback with a two-to-three frame latency and the
+LOD or streaming decision it feeds is the obvious suspect, and is not yet checked.
+
+So the prerequisite for step 6 stands, but it is **an audit, not a switch**: find every input
+to the published frame that is a function of how fast the machine ran. Three candidates have
+now been eliminated by measurement rather than by argument, which is the useful part.
+
 ## What this does not say
 
 - **It does not say the engine is nondeterministic.** It says the frame *stream* is not

@@ -294,6 +294,43 @@ bool AppIdle()
     }
 #endif
 
+    // REN-THR-002: lockstep pacing. Built to be the prerequisite for proving that a
+    // restructured producer publishes the same frames, and then MEASURED NOT TO BE ONE --
+    // recorded here rather than quietly kept, because the next person will have the same
+    // idea. Three runs of one scene, frame hashes over a 96-frame window past the load:
+    // WITHOUT this the runs agree for 24 frames before diverging, WITH it for 19. Pinning
+    // deltaT does not improve frame-stream reproducibility, so whatever makes frame ~420
+    // differ between two runs is not the pacing.
+    //
+    // Kept because it is a real capability the search for that cause will want, and because
+    // it is the scriptable form of the Ctrl-O "Fix Sim" cheat above -- which does the same
+    // thing at 10 Hz but exists only in cheat-enabled builds and only from a keypress, so no
+    // capture harness can reach it. Off unless asked for.
+    //
+    // Read once: the value must not change mid-run, which is the whole point.
+    static const float lockstepDeltaT = []
+    {
+        const char* v = std::getenv("POSEIDON_LOCKSTEP_HZ");
+        if (!v || !v[0])
+            return 0.0f;
+        const double hz = std::atof(v);
+        // A nonsense value must be inert rather than freezing or exploding the simulation.
+        if (!(hz > 0.0) || hz > 1000.0)
+        {
+            LOG_WARN(Core, "POSEIDON_LOCKSTEP_HZ={} is not a rate in (0, 1000]; ignoring", v);
+            return 0.0f;
+        }
+        LOG_INFO(Core,
+                 "Lockstep pacing ON at {} Hz -- deltaT is pinned and no longer measured. "
+                 "Frame times reported in this mode are NOT play performance.",
+                 hz);
+        return static_cast<float>(1.0 / hz);
+    }();
+    if (lockstepDeltaT > 0.0f)
+    {
+        deltaT = lockstepDeltaT;
+    }
+
     if (GApp->m_canRender)
     {
         // Dispatch UI key events buffered by SDL input processing

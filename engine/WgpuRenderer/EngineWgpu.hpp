@@ -1012,6 +1012,7 @@ class EngineWgpu : public EngineDummy
     uint64_t _frameHashLast = 0;  // the last single frame, so a stuck value is visible
     uint32_t _frameHashCount = 0; // frames folded in
     uint32_t _frameHashDistinct = 0;
+    uint32_t _frameHashFirst = 0; // WGR_FRAME_HASH_FIRST -- move the window past the load
 
     MutationOps _ops;      // this frame, so far
     MutationOps _opsTotal; // summed since the last report
