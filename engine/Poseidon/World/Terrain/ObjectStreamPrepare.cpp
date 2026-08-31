@@ -471,6 +471,21 @@ ObjectStreamPreparer::~ObjectStreamPreparer()
         if (worker.joinable())
             worker.join();
     _impl->workers.clear();
+    // SIM-807. `convertedShapes` holds RAW LODShapeWithShadow pointers that this
+    // class owns between the worker finishing and TakeConverted. Reset and
+    // DropStale both delete them; destruction did not, so every shape converted
+    // but not yet installed was leaked when the preparer went away. The vector's
+    // own destructor cannot help -- it destroys the pointers, not the objects --
+    // and the symptom is invisible short of a leak checker, because a shape that
+    // was never installed is one nothing else references either.
+    // Safe here and only here: the workers are joined above, so no one can be
+    // writing the slot.
+    for (LODShapeWithShadow*& shape : _impl->convertedShapes)
+    {
+        delete shape;
+        shape = nullptr;
+    }
+    _impl->convertedShapes.clear();
 }
 
 bool ObjectStreamPreparer::Running() const
