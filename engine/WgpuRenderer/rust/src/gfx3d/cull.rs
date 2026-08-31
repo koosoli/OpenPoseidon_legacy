@@ -323,6 +323,143 @@ impl ShadowCullView {
     }
 }
 
+/// The retained static-instance table: slots, the free list that recycles them, and the
+/// per-slot generation that makes a recycled slot distinguishable from the one it replaced
+/// (ID-2/ID-3, `docs/roadmap/render-snapshot-design.md` §4).
+///
+/// Split out of `CullState` so the identity rules are testable without a GPU: `CullState::new`
+/// builds compute pipelines and therefore needs a device, which made every test of this logic
+/// skip silently on a machine with no adapter. Nothing here touches wgpu.
+///
+/// **The handle is `(slot + 1) | generation << 24`.** Handle 0 is always invalid, which also
+/// disambiguates the FFI's 0-on-error return from a real first slot. `instance_remove` bumps
+/// the slot's generation, so every handle the caller still holds stops resolving the moment
+/// the instance is removed — it addresses *nothing* rather than whatever later reused the
+/// slot. Treat a handle as an opaque value; never do arithmetic on it.
+///
+/// **Bound:** 8 bits of generation, so a stale handle aliases again only after 256
+/// remove/add cycles *of the same slot*. That is a real bound, not a proof — it is asserted
+/// by `stale_handle_aliases_only_after_256_generations` so the number stays honest.
+#[derive(Default)]
+pub(crate) struct InstanceTable {
+    /// Static slots [0, len). A removed slot keeps its storage but has `model = INVALID_MODEL`,
+    /// so the cull compute skips it until the slot is reused.
+    slots: Vec<InstanceGpu>,
+    /// Removed slots, ready to be recycled by the next `add`.
+    free_slots: Vec<u32>,
+    /// One generation per slot; `generations.len()` is always `slots.len()`.
+    generations: Vec<u8>,
+    /// Every handle this table refused. Write-only until ID-3 gave it a reader: a rejection
+    /// that nothing can count is a rejection no test can distinguish from a no-op.
+    stale_ops: u64,
+    /// Inclusive min..=max slot changed since the last upload.
+    dirty: Option<(u32, u32)>,
+}
+
+impl InstanceTable {
+    fn handle(slot: u32, generation: u8) -> u32 {
+        debug_assert!(slot < 0x00FF_FFFE, "instance slot space exhausted");
+        (slot + 1) | ((generation as u32) << 24)
+    }
+
+    /// Resolve a handle to its slot. `None` for handle 0, for a slot that was never
+    /// allocated, and for a generation that no longer matches — the stale case, which is
+    /// counted so `stale_ops()` can prove the rejection happened.
+    fn slot_of(&mut self, handle: u32) -> Option<u32> {
+        let biased = handle & 0x00FF_FFFF;
+        if biased == 0 {
+            self.stale_ops += 1;
+            return None;
+        }
+        let slot = biased - 1;
+        let generation = (handle >> 24) as u8;
+        match self.generations.get(slot as usize) {
+            Some(&current) if current == generation => Some(slot),
+            _ => {
+                self.stale_ops += 1;
+                if self.stale_ops <= 8 {
+                    eprintln!(
+                        "[wgr] stale instance handle {:#010x} (slot {} gen {} vs current {:?}) -- ignored",
+                        handle,
+                        slot,
+                        generation,
+                        self.generations.get(slot as usize)
+                    );
+                }
+                None
+            }
+        }
+    }
+
+    fn mark_dirty(&mut self, slot: u32) {
+        self.dirty = Some(match self.dirty {
+            Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
+            None => (slot, slot),
+        });
+    }
+
+    /// Add an instance, recycling a free slot when one is available. Returns its handle.
+    /// A recycled slot keeps the generation its removal bumped it to, so the handle returned
+    /// here can never equal a handle the caller still holds for the dead occupant.
+    fn add(&mut self, inst: InstanceGpu) -> u32 {
+        let slot = if let Some(s) = self.free_slots.pop() {
+            self.slots[s as usize] = inst;
+            s
+        } else {
+            self.slots.push(inst);
+            self.generations.push(0);
+            (self.slots.len() - 1) as u32
+        };
+        self.mark_dirty(slot);
+        Self::handle(slot, self.generations[slot as usize])
+    }
+
+    /// Overwrite an instance in place. A stale handle is refused and counted — it must not
+    /// write through to whatever now occupies the slot.
+    fn update(&mut self, handle: u32, inst: InstanceGpu) {
+        let Some(slot) = self.slot_of(handle) else {
+            return;
+        };
+        if let Some(e) = self.slots.get_mut(slot as usize) {
+            *e = inst;
+            self.mark_dirty(slot);
+        }
+    }
+
+    /// Remove an instance: blank it for the compute, bump its generation so every outstanding
+    /// handle dies with it, and recycle the slot. A stale handle is refused and counted, which
+    /// is also what stops a double remove from pushing the same slot onto the free list twice.
+    fn remove(&mut self, handle: u32) {
+        let Some(slot) = self.slot_of(handle) else {
+            return;
+        };
+        if let Some(e) = self.slots.get_mut(slot as usize) {
+            e.model = INVALID_MODEL;
+            self.generations[slot as usize] = self.generations[slot as usize].wrapping_add(1);
+            self.free_slots.push(slot);
+            self.mark_dirty(slot);
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    fn as_slice(&self) -> &[InstanceGpu] {
+        &self.slots
+    }
+
+    fn take_dirty(&mut self) -> Option<(u32, u32)> {
+        self.dirty.take()
+    }
+
+    /// How many handles this table has refused. The only observable evidence that the
+    /// generation check did anything.
+    pub(crate) fn stale_ops(&self) -> u64 {
+        self.stale_ops
+    }
+}
+
 pub struct CullState {
     // Instancing-collapse three-pass pipelines (§3.6), all over `layout`: COUNT (1/instance) ->
     // EMIT (1/section) -> SCATTER (1/instance). Shared by the main + every shadow view.
@@ -345,19 +482,10 @@ pub struct CullState {
     crown_centres: Vec<[f32; 4]>,
     tables_dirty: bool,
 
-    // Unified instance buffer: static slots [0, static.len()) with a free-list, then the
-    // dynamic region re-copied every frame. A removed static slot has model = INVALID_MODEL.
-    static_instances: Vec<InstanceGpu>,
-    free_slots: Vec<u32>,
-    // Per-slot generation (ID-2, render-snapshot design section 4): the public
-    // instance handle is (slot+1) | generation<<24, so a handle kept past its
-    // instance's removal addresses NOTHING instead of whatever reused the slot.
-    // 8 bits of generation = a stale handle only aliases after 256 reuse cycles
-    // of one slot; before this there was no protection at all. Handle 0 = invalid,
-    // which also disambiguates the FFI's 0-on-error return from a real first slot.
-    generations: Vec<u8>,
-    stale_instance_ops: u64,
-    static_dirty: Option<(u32, u32)>, // inclusive min..=max changed static slot this frame
+    // Unified instance buffer: the static region (ID-3: an InstanceTable, which owns the
+    // slots, the free list and the generations, and needs no device) then the dynamic
+    // region re-copied every frame.
+    instances: InstanceTable,
     dynamic: Vec<InstanceGpu>,
     // Static region length uploaded last frame, so a grown static region re-copies the
     // dynamic tail to its new offset.
@@ -624,11 +752,7 @@ impl CullState {
             section_materials: Vec::new(),
             crown_centres: Vec::new(),
             tables_dirty: false,
-            static_instances: Vec::new(),
-            free_slots: Vec::new(),
-            generations: Vec::new(),
-            stale_instance_ops: 0,
-            static_dirty: None,
+            instances: InstanceTable::default(),
             dynamic: Vec::new(),
             uploaded_static_len: 0,
             model_buf: super::StorageArray::new("wgr_cull_models"),
@@ -850,67 +974,24 @@ impl CullState {
         }
     }
 
-    fn instance_handle(slot: u32, generation: u8) -> u32 {
-        debug_assert!(slot < 0x00FF_FFFE, "instance slot space exhausted");
-        (slot + 1) | ((generation as u32) << 24)
-    }
-
-    // Decode a handle; None for handle 0 (invalid) or a generation mismatch (stale).
-    fn instance_slot(&mut self, handle: u32) -> Option<u32> {
-        let biased = handle & 0x00FF_FFFF;
-        if biased == 0 {
-            return None;
-        }
-        let slot = biased - 1;
-        let generation = (handle >> 24) as u8;
-        match self.generations.get(slot as usize) {
-            Some(&current) if current == generation => Some(slot),
-            _ => {
-                self.stale_instance_ops += 1;
-                if self.stale_instance_ops <= 8 {
-                    eprintln!(
-                        "[wgr] stale instance handle {:#010x} (slot {} gen {} vs current {:?}) -- ignored",
-                        handle, slot, generation, self.generations.get(slot as usize)
-                    );
-                }
-                None
-            }
-        }
-    }
-
-    // Add a static instance; returns its HANDLE (slot + generation; see `generations`).
+    // Add a static instance; returns its generation-carrying HANDLE (see `InstanceTable`).
     pub fn instance_add(&mut self, inst: InstanceGpu) -> u32 {
-        let slot = if let Some(s) = self.free_slots.pop() {
-            self.static_instances[s as usize] = inst;
-            s
-        } else {
-            self.static_instances.push(inst);
-            self.generations.push(0);
-            (self.static_instances.len() - 1) as u32
-        };
-        self.mark_static_dirty(slot);
-        Self::instance_handle(slot, self.generations[slot as usize])
+        self.instances.add(inst)
     }
 
     pub fn instance_update(&mut self, handle: u32, inst: InstanceGpu) {
-        let Some(slot) = self.instance_slot(handle) else { return };
-        if let Some(e) = self.static_instances.get_mut(slot as usize) {
-            *e = inst;
-            self.mark_static_dirty(slot);
-        }
+        self.instances.update(handle, inst);
     }
 
-    // Remove a static instance: mark its slot a free-list hole (model = INVALID_MODEL, so
-    // the compute skips it), BUMP its generation so every outstanding handle dies with it,
-    // and recycle the slot.
     pub fn instance_remove(&mut self, handle: u32) {
-        let Some(slot) = self.instance_slot(handle) else { return };
-        if let Some(e) = self.static_instances.get_mut(slot as usize) {
-            e.model = INVALID_MODEL;
-            self.generations[slot as usize] = self.generations[slot as usize].wrapping_add(1);
-            self.free_slots.push(slot);
-            self.mark_static_dirty(slot);
-        }
+        self.instances.remove(handle);
+    }
+
+    /// Handles refused by the retained instance table since startup (ID-3). Nonzero means
+    /// something held a handle past its instance's removal — a C++-side identity bug that
+    /// used to corrupt a live instance silently and now shows up here instead.
+    pub fn stale_instance_ops(&self) -> u64 {
+        self.instances.stale_ops()
     }
 
     // Replace the whole dynamic set (re-copied every frame — the churny set the CPU already
@@ -1011,13 +1092,6 @@ impl CullState {
         }
     }
 
-    fn mark_static_dirty(&mut self, slot: u32) {
-        self.static_dirty = Some(match self.static_dirty {
-            Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
-            None => (slot, slot),
-        });
-    }
-
     // Upload dirty tables + instances + params and (re)build the bind group. Call once per
     // frame before dispatch. Returns whether any GPU buffer was (re)allocated, so the
     // GPU-driven draw's group-1 bind group (which borrows instances/records/materials) is
@@ -1045,19 +1119,22 @@ impl CullState {
         }
 
         // Instance buffer = static region then the dynamic tail. Ensure capacity for both.
-        let static_len = self.static_instances.len() as u32;
+        let static_len = self.instances.len() as u32;
         let total = static_len as u64 + self.dynamic.len() as u64;
         let inst_bytes = total.max(1) * std::mem::size_of::<InstanceGpu>() as u64;
         grew |= self.instance_buf.ensure(device, inst_bytes);
         let stride = std::mem::size_of::<InstanceGpu>() as u64;
+        // Cleared here, not inside the branch: the pre-ID-3 code cleared `static_dirty`
+        // unconditionally at the end of prepare, including on the no-buffer path.
+        let dirty = self.instances.take_dirty();
         if let Some(buf) = self.instance_buf.buf.as_ref() {
             // A grown static region shifts the dynamic tail, so re-upload the whole static
             // region (not just the dirty range) whenever static_len changed.
             let full_static = self.uploaded_static_len != static_len;
             if full_static && static_len > 0 {
-                queue.write_buffer(buf, 0, bytemuck::cast_slice(&self.static_instances));
-            } else if let Some((lo, hi)) = self.static_dirty {
-                let range = &self.static_instances[lo as usize..=hi as usize];
+                queue.write_buffer(buf, 0, bytemuck::cast_slice(self.instances.as_slice()));
+            } else if let Some((lo, hi)) = dirty {
+                let range = &self.instances.as_slice()[lo as usize..=hi as usize];
                 queue.write_buffer(buf, lo as u64 * stride, bytemuck::cast_slice(range));
             }
             // Dynamic tail every frame at the (possibly new) static offset.
@@ -1069,7 +1146,6 @@ impl CullState {
                 );
             }
         }
-        self.static_dirty = None;
         self.uploaded_static_len = static_len;
 
         // Shared-buffer growth (tables + instances) forces a rebuild of EVERY view's bind
@@ -2675,6 +2751,132 @@ pub(crate) mod tests {
     // slot indices. Tests that assert against GPU records decode with this.
     fn raw_slot(handle: u32) -> u32 {
         (handle & 0x00FF_FFFF) - 1
+    }
+
+    // ---- ID-3: the retained instance table's identity rules -------------------------
+    //
+    // These run on `InstanceTable` directly, NOT through `CullState`, and that is the
+    // point: `CullState::new` builds compute pipelines and so needs an adapter, which
+    // means every test written against it begins `let Some(..) = headless() else {
+    // return; }` and PASSES VACUOUSLY on a machine with no GPU. The identity rules are
+    // pure bookkeeping and must be provable without one.
+    //
+    // ID-2 landed the generation check with no test at all: deleting the check from
+    // `slot_of` (returning `Some(slot)` unconditionally) broke nothing in the suite.
+    // Each test below fails under exactly that ablation.
+
+    fn inst(model: u32) -> InstanceGpu {
+        InstanceGpu {
+            world: [0.0; 16],
+            center: [0.0; 4],
+            model,
+            flags: 0,
+            cull_radius: 0,
+            _pad: 0,
+            conform0: [0.0; 4],
+            conform1: [0.0; 4],
+            conform2: [0.0; 4],
+        }
+    }
+
+    #[test]
+    fn a_recycled_slot_refuses_the_dead_occupants_handle() {
+        let mut t = InstanceTable::default();
+        let dead = t.add(inst(11));
+        t.remove(dead);
+        // The next add MUST land in the slot just freed -- otherwise this test would be
+        // proving nothing about recycling.
+        let live = t.add(inst(22));
+        assert_eq!(
+            raw_slot(dead),
+            raw_slot(live),
+            "test is vacuous unless the slot was actually recycled"
+        );
+        assert_ne!(dead, live, "a recycled slot must not reissue the same handle");
+
+        // The whole point: writing through the stale handle must not touch the live
+        // instance now occupying that slot.
+        let before = t.stale_ops();
+        t.update(dead, inst(99));
+        assert_eq!(
+            t.as_slice()[raw_slot(live) as usize].model,
+            22,
+            "a stale handle wrote through to the live instance that reused its slot"
+        );
+        assert_eq!(t.stale_ops(), before + 1, "the rejection was not counted");
+
+        // ...and the live handle still works, so the check is not simply refusing everything.
+        t.update(live, inst(33));
+        assert_eq!(t.as_slice()[raw_slot(live) as usize].model, 33);
+        assert_eq!(t.stale_ops(), before + 1);
+    }
+
+    #[test]
+    fn a_stale_handle_cannot_remove_the_instance_that_replaced_it() {
+        let mut t = InstanceTable::default();
+        let dead = t.add(inst(11));
+        t.remove(dead);
+        let live = t.add(inst(22));
+
+        // A double remove is the realistic C++-side bug (an object freed without its
+        // SceneObjectRemoved, then the recycled address removed again). Without the
+        // generation check this frees a live instance AND pushes the slot onto the free
+        // list twice, after which two different objects are handed the same slot.
+        t.remove(dead);
+        assert_ne!(
+            t.as_slice()[raw_slot(live) as usize].model,
+            INVALID_MODEL,
+            "a stale handle removed the live instance occupying its slot"
+        );
+
+        let a = t.add(inst(1));
+        let b = t.add(inst(2));
+        assert_ne!(
+            raw_slot(a),
+            raw_slot(b),
+            "the free list handed the same slot out twice (double-free of a slot)"
+        );
+    }
+
+    #[test]
+    fn handle_zero_is_never_a_valid_slot() {
+        let mut t = InstanceTable::default();
+        let live = t.add(inst(7));
+        assert_ne!(live, 0, "handle 0 is the FFI's error value and must never be issued");
+        // 0 must be refused rather than resolving to slot 0, which is what the +1 bias buys.
+        t.update(0, inst(99));
+        assert_eq!(t.as_slice()[raw_slot(live) as usize].model, 7);
+        assert_eq!(t.stale_ops(), 1);
+    }
+
+    #[test]
+    fn a_handle_for_a_slot_that_was_never_allocated_is_refused() {
+        let mut t = InstanceTable::default();
+        t.add(inst(7));
+        t.update(InstanceTable::handle(9999, 0), inst(99));
+        assert_eq!(t.as_slice().len(), 1, "an out-of-range handle grew the table");
+        assert_eq!(t.stale_ops(), 1);
+    }
+
+    #[test]
+    fn stale_handle_aliases_only_after_256_generations() {
+        // The documented bound, asserted so the number cannot quietly drift. 8 bits of
+        // generation: 255 remove/add cycles of one slot are still distinguishable, the
+        // 256th wraps and the original handle resolves again.
+        let mut t = InstanceTable::default();
+        let first = t.add(inst(1));
+        for _ in 0..255 {
+            let h = InstanceTable::handle(raw_slot(first), t.generations[raw_slot(first) as usize]);
+            t.remove(h);
+            let again = t.add(inst(1));
+            assert_eq!(raw_slot(again), raw_slot(first));
+            assert_ne!(again, first, "generations must stay distinct for 255 cycles");
+        }
+        // One more cycle wraps the 8-bit generation back onto the original handle.
+        let h = InstanceTable::handle(raw_slot(first), t.generations[raw_slot(first) as usize]);
+        t.remove(h);
+        let wrapped = t.add(inst(1));
+        assert_eq!(wrapped, first, "the 256-cycle aliasing bound moved");
     }
 
     #[test]
