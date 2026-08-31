@@ -10,6 +10,7 @@
 #include <sys/stat.h>
 #include <string>
 #include <vector>
+#include <Poseidon/Foundation/Algorithms/Sha256.hpp>
 #include <Poseidon/Foundation/Containers/Array.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 #include <Poseidon/Foundation/Framework/DebugLog.hpp>
@@ -1111,6 +1112,46 @@ Ref<IFileBuffer> QFBank::Read(const char* name) const
     }
 }
 
+// AST-003. See the header for why this hashes logical content and why it is lazy.
+RString QFBank::GetContentHash(const char* name) const
+{
+    if (!Load())
+    {
+        return RString();
+    }
+    const FileInfoO& info = FindFileInfo(name);
+    if (IsNull(info))
+    {
+        return RString();
+    }
+    // Key on the member's canonical name as stored in the index, not on the
+    // caller's spelling: "Data\x.paa" and "data/x.paa" are one member and must
+    // not occupy two entries with two independently-computed hashes.
+    const std::string key((const char*)info.name);
+    const auto found = _contentHashes.find(key);
+    if (found != _contentHashes.end())
+    {
+        return RString(found->second.c_str());
+    }
+
+    Ref<IFileBuffer> data = Read(name);
+    if (!data || data->GetError() || !data->GetData())
+    {
+        // A member that cannot be read has no content to state. Returning ""
+        // rather than the hash of nothing keeps "unknown" distinguishable from
+        // "empty" -- an empty member has a real, well-defined SHA-256.
+        return RString();
+    }
+    const int size = data->GetSize();
+    if (size < 0)
+    {
+        return RString();
+    }
+    const std::string hex = Foundation::Sha256::Of(data->GetData(), static_cast<size_t>(size));
+    _contentHashes.emplace(key, hex);
+    return RString(hex.c_str());
+}
+
 Ref<IFileBuffer> QFBank::ReadOverlapped(const char* file) const
 {
     if (!Load())
@@ -1178,6 +1219,10 @@ void QFBank::Clear()
     EXCLUSIVE();
     // clear variables that are not part of Global structure
     _files.Clear();
+    // The memo is keyed by member name only, so it must not survive the index it
+    // describes: a bank unloaded and reopened over a rewritten archive would
+    // otherwise answer with the previous file's content hash.
+    _contentHashes.clear();
     _fileAccess.Free();
     if (_handle)
     {

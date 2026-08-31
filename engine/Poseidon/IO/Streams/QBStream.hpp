@@ -8,6 +8,8 @@
 #include <Poseidon/IO/Streams/QStream.hpp>
 #include <Poseidon/IO/Streams/FileInfo.h>
 #include <cstdint>
+#include <map>
+#include <string>
 
 #ifndef _WIN32
 #include <Poseidon/IO/Filesystem/DirScanner.hpp>
@@ -235,6 +237,12 @@ class QFBank
     //! set true when an attempt to open (DoOpen) failed
     bool _error;
 
+    // AST-003 -- memoised SHA-256 of member content, keyed by the member's
+    // canonical (lowercased, native-slash) name. Empty until something asks.
+    // Mutable because GetContentHash is const for the same reason Load() is:
+    // it changes nothing an observer can see except how long the next call takes.
+    mutable std::map<std::string, std::string> _contentHashes;
+
     static QFBankFunctions* _defaultFunctions;
     static void SetDefaultFunctions(QFBankFunctions* f) { _defaultFunctions = f; }
 
@@ -306,6 +314,36 @@ class QFBank
     Ref<IFileBuffer> Read(const char* file) const;
     //! read file using overlapped I/O - uncompress if necessary
     Ref<IFileBuffer> ReadOverlapped(const char* file) const;
+
+    // AST-003 -- SHA-256 (lowercase hex) of a member's CONTENT, or "" when the
+    // member does not exist or cannot be read.
+    //
+    // This is the producer half of DerivedAssetKey (AST-020): a derived artefact
+    // may only be reused when every input's *content* is unchanged, and until now
+    // nothing could state the content of an asset living inside a PBO -- which is
+    // nearly all of them. The PBO header carries name, packing magic, uncompressed
+    // size, offset and mtime per member, and no checksum of any kind; the 21-byte
+    // trailer that Arma-2-era and later archives carry is a SHA-1 of the WHOLE
+    // FILE, so it identifies an archive, never a member, and this reader has never
+    // read it. Hence: hash the bytes.
+    //
+    // What is hashed is the LOGICAL content -- what Read() hands back, after
+    // decompression or decryption. Two archives storing identical bytes, one raw
+    // and one Cprs, must agree, because for the consumer they are the same asset.
+    // Hashing the stored bytes would be cheaper and would make the packer's choice
+    // part of the asset's identity, which is exactly the kind of accidental input
+    // the key exists to exclude.
+    //
+    // LAZY, not computed at index time: hashing every member on Load() is a second
+    // full pass over the archive (0.47 GiB across the 44 retail CWA archives, 44.2
+    // GiB across the 546 Arma 3 ones) for members that are mostly never opened.
+    // The first call for a member pays a hash of its bytes; later calls are a map
+    // lookup. Nothing in the engine calls this yet -- it is opt-in by construction.
+    RString GetContentHash(const char* name) const;
+
+    // Number of members whose hash has been computed. Exists so a test can prove
+    // memoisation rather than assume it.
+    size_t ContentHashCacheSize() const { return _contentHashes.size(); }
     int GetFileOrder(const char* file);
 
     void ForEach(void (*Func)(const FileInfoO& fi, const FileBankType* files, void* context),
