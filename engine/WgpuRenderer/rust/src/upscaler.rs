@@ -2,15 +2,54 @@
 //
 // The renderer owns an ordered chain of backends and asks each in turn to fill the
 // output-extent target from the render-extent inputs; the first `Done` wins. Today the
-// chain is [DLSS (dlss builds, when the NGX route is up), Bilinear]; FSR/XeSS slot in
-// as further implementations of the same trait, and "Native" is the absence of the
-// chain entirely (at 100%-scale-without-DLAA no upscale target exists and the post
+// chain is [DLSS (dlss builds, when the NGX route is up), FSR 1, Bilinear]; XeSS/FSR 3
+// slot in as further implementations of the same trait, and "Native" is the absence of
+// the chain entirely (at 100%-scale-without-DLAA no upscale target exists and the post
 // chain reads the resolve directly — see ensure_hdr).
 //
 // Boundary rules (plan §18): no vendor type leaves its backend; backends communicate
 // with the renderer ONLY through `UpscaleContext` and `UpscaleOutcome`. A backend that
 // records through a raw API may SPLIT the frame (submit the current encoder, submit its
 // own, leave a fresh encoder in the context) — queue order preserves the data flow.
+//
+// REN-UPS-001 adds the third piece: `UpscalerCaps`. The renderer must sometimes act on
+// what the winning backend IS (report its id, sharpen its output, roll back defaults it
+// required) and used to do that by matching the backend's label string. It now asks the
+// backend to DECLARE those facts. See `UpscalerCaps` below.
+
+// The `WgrTemporalInfo::active_upscaler` readout values. They are part of the C ABI
+// (engine/Poseidon/Graphics/Core/Engine.hpp `TemporalInfo::activeUpscaler`), so each
+// backend OWNS its own id via `UpscalerCaps` — an id and its implementation can no
+// longer drift apart the way a `match` on the winner's label could.
+pub const ID_NATIVE: u32 = 0;
+pub const ID_DLSS: u32 = 1;
+pub const ID_FSR1: u32 = 2;
+pub const ID_BILINEAR: u32 = 3;
+
+// REN-UPS-001 — the explicit capability description the roadmap asks for
+// (POST-DLSS-MODERNISATION-ROADMAP §1.1: "Add an explicit capability description so a
+// backend can declare which inputs it requires and which features it supports").
+//
+// Before this existed the orchestration recovered the same facts by string-matching the
+// winning backend's `label()` in three places. That is the `if (dlss) ... else if (fsr)`
+// branching §1.1 says must go, and it fails silently: renaming a label, or adding a
+// backend that also wants external sharpening, changes renderer behaviour with no
+// compile error anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpscalerCaps {
+    /// The `active_upscaler` value the engine should report when this backend wins.
+    pub info_id: u32,
+    /// The backend reconstructs from history, so it REQUIRES the temporal contract:
+    /// jitter, motion vectors and depth. The renderer auto-enables the temporal path
+    /// and a sub-100% render scale for such a backend, and must roll both back if the
+    /// backend later disables itself — jitter with nothing accumulating it is shimmer,
+    /// and a 67% bilinear frame is not the native look anyone asked for.
+    pub needs_temporal_inputs: bool,
+    /// The backend does no sharpening of its own, so the renderer's external RCAS pass
+    /// is meaningful over its output. False for FSR 1 (RCAS is its own second dispatch,
+    /// sharpening twice would be a defect) and for bilinear (a diagnostic path).
+    pub wants_external_sharpen: bool,
+}
 
 pub struct UpscaleSettings {
     pub temporal_enabled: bool,
@@ -46,6 +85,13 @@ pub struct UpscaleContext<'a> {
     pub output: (u32, u32),
     pub jitter_px: [f32; 2],
     pub reset: bool,
+    // REN-UPS-001 — the roadmap's "history-reset token AND REASON" (§1.1). The token
+    // alone cannot tell a backend apart a camera teleport (discard history) from a
+    // render-size change (the history is gone anyway). `Temporal` has computed this
+    // string since REN-TEMP-001; it simply never crossed the boundary. Diagnostic
+    // today — the first backend that wants to react to a reset kind needs it here,
+    // not a second accessor into renderer state.
+    pub reset_reason: &'static str,
     pub settings: UpscaleSettings,
     // INFO-level messages a backend wants logged (feature creation, one-time init);
     // the renderer drains these after the chain runs.
@@ -64,6 +110,9 @@ pub enum UpscaleOutcome {
 
 pub trait TemporalUpscaler {
     fn label(&self) -> &'static str;
+    /// What this backend needs and what it supports. Constant for the backend's
+    /// lifetime; the orchestration queries it instead of testing which backend it is.
+    fn caps(&self) -> UpscalerCaps;
     fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome;
 }
 
@@ -84,6 +133,14 @@ impl BilinearUpscaler {
 impl TemporalUpscaler for BilinearUpscaler {
     fn label(&self) -> &'static str {
         "bilinear"
+    }
+
+    fn caps(&self) -> UpscalerCaps {
+        UpscalerCaps {
+            info_id: ID_BILINEAR,
+            needs_temporal_inputs: false,
+            wants_external_sharpen: false,
+        }
     }
 
     fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome {
@@ -239,6 +296,18 @@ fn easu_constants(render: (u32, u32), output: (u32, u32)) -> [f32; 16] {
 impl TemporalUpscaler for FsrUpscaler {
     fn label(&self) -> &'static str {
         "FSR1"
+    }
+
+    fn caps(&self) -> UpscalerCaps {
+        UpscalerCaps {
+            info_id: ID_FSR1,
+            // Spatial-only: EASU reads one frame. Depth, motion vectors and jitter are
+            // ignored, which is exactly why FSR 1 must not hold the temporal contract
+            // down to its own level (§1.1: not the lowest common denominator).
+            needs_temporal_inputs: false,
+            // RCAS is FSR 1's own second dispatch; an external pass would sharpen twice.
+            wants_external_sharpen: false,
+        }
     }
 
     fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome {
@@ -576,6 +645,18 @@ impl TemporalUpscaler for DlssUpscaler {
         "DLSS"
     }
 
+    fn caps(&self) -> UpscalerCaps {
+        UpscalerCaps {
+            info_id: ID_DLSS,
+            // Consumes the full temporal contract; `evaluate` disables itself outright
+            // when the temporal path is off rather than producing history artefacts.
+            needs_temporal_inputs: true,
+            // NVIDIA removed DLSS's internal sharpening in 2.5; the industry answer is
+            // an external CAS/RCAS pass, which the renderer runs when `dlss_sharpen`.
+            wants_external_sharpen: true,
+        }
+    }
+
     fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome {
         use crate::dlss;
         use wgpu::hal::vulkan as hal_vk;
@@ -798,5 +879,91 @@ impl TemporalUpscaler for DlssUpscaler {
             }
             Err(r) => self.disable(format!("NGX create/evaluate failed: {r:#x}")),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The non-DLSS half of the chain lib.rs builds. DLSS cannot be constructed without
+    // live Vulkan handles, so its caps are asserted as the constant they are declared
+    // to be (see `impl TemporalUpscaler for DlssUpscaler`) in `dlss_caps_are_temporal`.
+    fn spatial_chain() -> Vec<Box<dyn TemporalUpscaler>> {
+        vec![
+            Box::new(FsrUpscaler::new()),
+            Box::new(BilinearUpscaler::new()),
+        ]
+    }
+
+    // The ids cross the C ABI as `TemporalInfo::activeUpscaler`; the engine indexes a
+    // 4-entry name table with them (DebugOverlay.cpp `kUpscalerNames`). Renumbering
+    // here silently relabels the dev panel, so pin the values.
+    #[test]
+    fn info_ids_match_the_engine_abi() {
+        assert_eq!(ID_NATIVE, 0);
+        assert_eq!(ID_DLSS, 1);
+        assert_eq!(ID_FSR1, 2);
+        assert_eq!(ID_BILINEAR, 3);
+    }
+
+    // Two backends reporting the same id would make the panel lie about which one ran,
+    // and `ID_NATIVE` means "the chain did not run at all" — no backend may claim it.
+    #[test]
+    fn backend_ids_are_unique_and_never_native() {
+        let mut seen = vec![ID_DLSS];
+        for u in spatial_chain() {
+            let id = u.caps().info_id;
+            assert_ne!(id, ID_NATIVE, "{} claims the native id", u.label());
+            assert!(!seen.contains(&id), "{} duplicates id {}", u.label(), id);
+            seen.push(id);
+        }
+    }
+
+    // The regression this capability replaced: the orchestration ran its external RCAS
+    // pass for the winner whose LABEL was "DLSS". FSR 1's second dispatch already is
+    // RCAS, so an external pass over its output sharpens the frame twice.
+    #[test]
+    fn spatial_backends_do_not_ask_for_external_sharpening() {
+        for u in spatial_chain() {
+            let caps = u.caps();
+            assert!(
+                !caps.wants_external_sharpen,
+                "{} would be sharpened twice",
+                u.label()
+            );
+            assert!(
+                !caps.needs_temporal_inputs,
+                "{} is spatial and must survive with the temporal path off",
+                u.label()
+            );
+        }
+    }
+
+    // Bilinear is the terminal fallback: it must never require an input that can be
+    // absent, or a frame could reach the end of the chain with nothing written.
+    #[test]
+    fn terminal_fallback_requires_nothing() {
+        let caps = BilinearUpscaler::new().caps();
+        assert!(!caps.needs_temporal_inputs);
+        assert_eq!(caps.info_id, ID_BILINEAR);
+    }
+
+    #[cfg(feature = "dlss")]
+    #[test]
+    fn dlss_caps_are_temporal_and_want_external_sharpening() {
+        // Null handles are safe here: `caps()` is a pure constant and never touches
+        // them, and nothing in this test reaches `evaluate`.
+        let raw = crate::dlss_device::NgxRawHandles {
+            instance: std::ptr::null_mut(),
+            physical_device: std::ptr::null_mut(),
+            device: std::ptr::null_mut(),
+        };
+        let caps = DlssUpscaler::new(raw).caps();
+        assert_eq!(caps.info_id, ID_DLSS);
+        assert!(caps.needs_temporal_inputs);
+        assert!(caps.wants_external_sharpen);
     }
 }

@@ -2327,6 +2327,7 @@ impl Renderer {
                 output,
                 jitter_px: self.temporal.jitter_px,
                 reset: self.temporal.reset_this_frame(),
+                reset_reason: self.temporal.last_reset_reason(),
                 settings: upscaler::UpscaleSettings {
                     temporal_enabled: self.temporal.enabled,
                     fsr_on: self.fsr_runtime_on,
@@ -2342,17 +2343,24 @@ impl Renderer {
                 },
                 notes: Vec::new(),
             };
-            let mut winner: Option<(&'static str, i32)> = None;
+            // REN-UPS-001: the winner is carried as its CAPABILITIES, not its label.
+            // Everything below asks the caps what to do; nothing tests which backend
+            // won. `temporal_backend_died` is likewise a capability question, so a
+            // future XeSS/FSR3 backend gets the same rollback for free.
+            let mut winner: Option<(upscaler::UpscalerCaps, i32)> = None;
             let mut disabled: Vec<String> = Vec::new();
+            let mut temporal_backend_died = false;
             for u in self.upscalers.iter_mut() {
+                let caps = u.caps();
                 match u.evaluate(&mut ctx) {
                     upscaler::UpscaleOutcome::Done { quality } => {
-                        winner = Some((u.label(), quality));
+                        winner = Some((caps, quality));
                         break;
                     }
                     upscaler::UpscaleOutcome::Skip => {}
                     upscaler::UpscaleOutcome::Disabled(msg) => {
                         disabled.push(format!("{} disabled: {}", u.label(), msg));
+                        temporal_backend_died |= caps.needs_temporal_inputs;
                     }
                 }
             }
@@ -2361,17 +2369,13 @@ impl Renderer {
             for n in &notes {
                 self.log.log(log_level::INFO, n);
             }
-            let mut dlss_died = false;
             for m in &disabled {
                 self.log.log(log_level::WARN, m);
-                if m.starts_with("DLSS ") {
-                    dlss_died = true;
-                }
             }
-            // A dying DLSS backend takes its auto-defaults with it: jitter without an
-            // accumulator is shimmer, and 67% bilinear is not the native look anyone
+            // A dying temporal backend takes its auto-defaults with it: jitter without
+            // an accumulator is shimmer, and 67% bilinear is not the native look anyone
             // asked for. Explicit env pins and panel choices are left alone.
-            if dlss_died {
+            if temporal_backend_died {
                 if self.temporal_auto && self.temporal.enabled {
                     self.temporal.enabled = false;
                     self.log.log(
@@ -2389,15 +2393,22 @@ impl Renderer {
                     );
                 }
             }
-            if let Some(("DLSS", q)) = winner {
-                self.dlss_active_frame = true;
-                self.dlss_last_quality = q;
-                if self.dlss_sharpen {
+            if let Some((caps, q)) = winner {
+                if caps.info_id == upscaler::ID_DLSS {
+                    // The `dlss_active` / `dlss_quality` panel readouts name DLSS
+                    // specifically, so they stay tied to that id rather than to
+                    // "some temporal backend ran".
+                    self.dlss_active_frame = true;
+                    self.dlss_last_quality = q;
+                }
+                // The external RCAS pass is a CAPABILITY of the winning backend, not a
+                // property of DLSS: FSR 1 sharpens itself, bilinear is diagnostic.
+                if caps.wants_external_sharpen && self.dlss_sharpen {
                     let (tex, view) = self
                         .hdr_upscaled
                         .as_ref()
                         .map(|(t, v)| (t.clone(), v.clone()))
-                        .expect("DLSS ran, so the upscale target exists");
+                        .expect("a backend ran, so the upscale target exists");
                     self.rcas_sharpener.sharpen(
                         &self.device,
                         &self.queue,
@@ -2408,12 +2419,9 @@ impl Renderer {
                     );
                 }
             }
-            self.last_upscaler = match winner {
-                Some(("DLSS", _)) => 1,
-                Some(("FSR1", _)) => 2,
-                Some(("bilinear", _)) => 3,
-                _ => 0,
-            };
+            self.last_upscaler = winner
+                .map(|(caps, _)| caps.info_id)
+                .unwrap_or(upscaler::ID_NATIVE);
             up_view
         } else {
             post_source
@@ -3278,7 +3286,7 @@ impl Renderer {
         // chain overwrites it when it actually runs. Without this the panel kept
         // showing the LAST backend after switching to native (owner report - no
         // feedback that "everything off" took effect).
-        self.last_upscaler = 0;
+        self.last_upscaler = upscaler::ID_NATIVE;
         // REN-TEMP-001I: (object, mesh) -> baked base_vertex — the cross-frame identity
         // palette slots cannot provide. prepare_skin_bake already ran above.
         if self.temporal.enabled {
