@@ -51,11 +51,10 @@ variance, and the ring includes the spikes. The ceiling is a fraction of the mea
 a claim about the *average* frame, which is the right one for a throughput change, but it is
 not a claim that a 14 ms frame contains 17 ms of recoverable work.
 
-**`setup` is a bucket, not a subsystem.** It is the whole pre-draw phase, which on a
-streaming world includes the object stream's admission. During Everon's fill-in `setup`
-reaches 51 ms; the runs above were taken at 110 s, after the mutation counters read zero for
-tens of frames, so the fill-in is done — but "simulation-side" here still means "everything
-before the draw", not "AI and physics".
+**`setup` was a bucket, and it has been opened — see the addendum.** It was the whole
+pre-draw phase, and its own comment in `FrameProfiler.hpp` listed "input, network, scripts,
+camera, landscape sim" without mentioning that the entire fixed-step simulation loop ran
+inside it.
 
 ## What follows for the plan
 
@@ -77,3 +76,38 @@ before the draw", not "AI and physics".
 - It does not measure what overlap would actually *achieve* — only its ceiling. Handoff cost,
   the drain's own serialisation, and cache effects all subtract, and none is estimated here.
 - `perf_water` and `phys_things` were not run.
+
+
+---
+
+## Addendum — the bucket opened: it is the simulation loop, 48% of the combat frame
+
+`PhaseSetup` was marked at `World.cpp:1490`, and `StepSimulation` is called in its loop at
+`World.cpp:916` — several hundred lines earlier. So the entire fixed-step simulation ran
+inside a phase named "setup" whose comment did not mention it. `perf.Mark` accumulates
+(`+=`), so closing the bucket before the loop and opening a `sim:step` phase after it splits
+the two without changing what either measures.
+
+Same scene, same 110 s warm-up, `perf_combat`:
+
+| phase | avg | share of frame |
+|---|---:|---:|
+| **`sim:step`** | **30.08 ms** | **48.3%** |
+| `swap` | 27.02 ms | 43.3% |
+| `drw:land` | 2.32 ms | 3.7% |
+| `land:obj` | 1.43 ms | 2.3% |
+| everything else together | 1.49 ms | 2.4% |
+| `setup`, now that it is only what its name says | **0.13 ms** | 0.2% |
+
+So the largest single CPU cost in the engine is the fixed-step simulation loop, at half the
+combat frame, and until this split it was reported under a name that suggested
+initialisation. `ai+veh` is 0.16 ms — that phase is marked *inside* the region the loop
+already covers, so it never measured the AI's real cost either.
+
+This sharpens the overlap ceiling rather than changing it: simulation-side is now
+30.4 ms against 27.0 ms of `swap`, so the ceiling is the **swap** (43.3% of the frame), not
+the simulation. There is more simulation work than there is GPU wait to hide it behind.
+
+And it points step 14 ("optimise measured hotspots") at a specific place. Nothing here says
+*what* inside `StepSimulation` costs 30 ms — SIM-810 lists its six stages and that is the
+next subdivision, not this one.

@@ -906,6 +906,9 @@ void World::Simulate(float deltaT, bool& enableDraw)
 
     Dev::FixedStepFrame stepFrame;
     stepFrame.stepSeconds = static_cast<float>(_simulationSteps.StepSeconds());
+    // PERF-012: close the setup bucket here so the fixed-step loop below is its own phase.
+    // Everything before this point is the input/network/camera work the name promises.
+    perf.Mark(Dev::FrameProfiler::PhaseSetup);
     if (IsSimulationEnabled())
     {
         const float fixedDeltaT = static_cast<float>(_simulationSteps.StepSeconds());
@@ -922,6 +925,7 @@ void World::Simulate(float deltaT, bool& enableDraw)
     {
         _simulationSteps.Reset();
     }
+    perf.Mark(Dev::FrameProfiler::PhaseSimStep);
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
     // sampling it earlier would report the previous frame's leftover.
     stepFrame.alpha = static_cast<float>(_simulationSteps.Alpha());

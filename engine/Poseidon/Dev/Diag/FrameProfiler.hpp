@@ -19,7 +19,13 @@ class FrameProfiler
   public:
     enum Phase
     {
-        PhaseSetup = 0,    // input, network, scripts, camera, landscape sim
+        // PERF-012: "setup" was input + network + camera + landscape sim AND THE ENTIRE
+        // FIXED-STEP SIMULATION LOOP, which its own comment did not mention. On the combat
+        // scene that bucket is 17-24 ms of a ~50 ms frame -- the single largest CPU cost in
+        // the engine -- and it was reported as one number with a name that hid what was in
+        // it. The loop now has its own phase so the two are separable.
+        PhaseSetup = 0,    // input, network, scripts, camera, landscape sim (NOT the sim loop)
+        PhaseSimStep,      // the fixed-step simulation loop: StepSimulation x steps
         PhaseDrawInit,     // clear, sky prep, camera setup
         PhaseDrawObjPrep,  // object pass preparation (EndObjects, shadow setup)
         PhaseDrawLandGround, // terrain mesh + water + horizon
@@ -39,8 +45,9 @@ class FrameProfiler
 
     static const char* PhaseName(int p)
     {
-        static const char* kNames[PhaseCount] = {"setup",    "drw:init", "drw:prep", "land:gnd", "land:obj", "drw:land", "drw:obj",
-                                                 "drw:post", "hud",      "ai+veh",   "sound",    "swap"};
+        static const char* kNames[PhaseCount] = {"setup",    "sim:step", "drw:init", "drw:prep", "land:gnd", "land:obj",
+                                                 "drw:land", "drw:obj",  "drw:post", "hud",      "ai+veh",   "sound",
+                                                 "swap"};
         return (p >= 0 && p < PhaseCount) ? kNames[p] : "?";
     }
 
