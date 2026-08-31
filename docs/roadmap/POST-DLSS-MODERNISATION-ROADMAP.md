@@ -376,6 +376,32 @@ Maintain comparable captures for:
 Every later optimisation must identify the recorded cost that it attacks and define a
 before/after acceptance test.
 
+## The GPU frame, measured and now 95% attributed (2026-08-31)
+
+Five stock scenes, 1600×900 windowed, DLSS off, same binary, after the atmosphere gained
+timer regions and the sky's SH projection was fixed. Milliseconds of GPU frame time.
+
+| scene | frame | unattributed | grass | grass % | sky total | shadow cascades |
+|---|---:|---:|---:|---:|---:|---:|
+| `perf_abel` | 13.69 | 0.40 | 4.81 | **35%** | 3.33 | 1.93 |
+| `perf_town` | 7.18 | 0.30 | 0.59 | 8% | 1.76 | 0.26 |
+| `perf_water` | 18.72 | 0.47 | 5.93 | **32%** | 3.35 | 1.94 |
+| `perf_combat` | 19.41 | 0.39 | 7.60 | **39%** | 3.02 | 3.45 |
+| `perf_field` | 9.09 | 0.58 | 1.10 | 12% | 1.56 | 0.43 |
+
+**The unattributed block is gone** — 0.3 to 0.6 ms, down from 2.7 to 3.3 ms. It was never
+inter-pass overhead or anything exotic: it was the atmosphere, which had no timer region at
+all, and within it a spherical-harmonic projection running on one GPU lane at 1.812 ms a
+frame. Both are fixed. The frame is now better than 95% attributed on every scene, which is
+what makes the rest of this table trustworthy.
+
+**Grass is the target, and now on measured ground rather than reputation** — 32-39% of the
+frame on the three vegetated scenes, three to four times the next-largest line. That is
+track B.4, and it can be worked with a denominator.
+
+The sky total (1.6-3.4 ms, mostly the cloud march) is second. Shadow cascades are third and
+scale hard with scene content: 0.26 ms on the town against 3.45 ms in combat.
+
 **First measured bottleneck, 2026-08-31: 27% of the GPU frame is attributed to nothing.**
 See `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-20260831.md`.
 On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.5 ms frame
