@@ -292,6 +292,16 @@ Build: `win-x64-clang-rwdi`, worktree `.claude/worktrees/agent-prep`, target
 | baseline (`safety/asset-obs-001`, `caba3bde`) | 3008 | 240,655 | 0 | 20 |
 | after this change (default, concurrency gate off) | 3017 | 240,863 | 0 | 20 |
 
+The branch was rebased onto `safety/asset-obs-001` at `93a6433f` (10 commits
+later) before landing, rebuilt and re-run: **3017 cases, 240,863 assertions, 0
+failures, 20 skipped** — unchanged, so those ten commits added no cases and the
+before/after above still reads straight.
+
+The reproducer was re-run on the rebased tree: `SIM807_RACE_THREADS=4` crashed
+2 runs of 3, `SIM807_RACE_THREADS=1` was clean 2 of 2. It is probabilistic, so
+one clean run at 4 threads proves nothing and the case should be run several
+times.
+
 +9 cases, +208 assertions. The `[preparer]` subset was run 6 consecutive times at the default
 gating and passed every time (10 cases at that filter — the 9 new ones plus a
 pre-existing `test_streaming_diag` case that shares the tag).
