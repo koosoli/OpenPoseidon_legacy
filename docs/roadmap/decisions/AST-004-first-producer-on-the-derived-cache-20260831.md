@@ -348,3 +348,41 @@ the case count is the stable one and is what is quoted, as in AST-003.
 
 The two hidden cases (`[.][ast004cost]`, `[.][ast004bench]`) do not run in the default suite and
 move no count.
+
+---
+
+## Addendum — measured in the running game, and it does not pay on Abel
+
+AST-004 shipped default-off because nothing had ever loaded a world with the cache on; the
+document said so and asked for exactly this. It has now been run, on the `perf_abel`
+mission, by the session that owns the game folder.
+
+**The cache works.** With `POSEIDON_MODEL_DDC=1` a cold run populates
+`%LOCALAPPDATA%\OpenPoseidon\derived` with **329 entries, 18 MB**, and the world is
+identical either way: **98,684 registered instances in every arm**, cache on or off, cold or
+warm. Nothing is lost or wrongly reconstructed.
+
+**It also does not make the mission load faster.** Time from process start to the first
+frame of scene content, six runs:
+
+| | run 1 | run 2 |
+|---|---:|---:|
+| cache ON, cold store | 2.99 s | 2.26 s |
+| cache ON, warm store | 2.35 s | 2.26 s |
+| cache OFF | 2.52 s | 2.28 s |
+
+Every arm lands in the same 2.26–2.99 s band and the three second runs are within 0.09 s of
+each other. **There is no measurable win**, and the one figure that looks like one — the
+2.99 s cold run — is the OS file cache being cold on the first launch after a rebuild. That
+is the same trap this document already records for its own bench run 1, which is worth
+noting: the flattering number reappeared in a different arm and had to be discarded twice.
+
+Why, given the 1.9x measured over 448 models: Abel's mission does not load enough distinct
+models for the P3D parse to be the thing the load is waiting on. The 21x figure that
+selected this producer is a per-model ratio and remains true; it simply is not multiplied by
+a large enough count here to show through the rest of the load.
+
+**Default-off stays, and is now the measured position rather than the cautious one.** What
+would change it is a world where the model count is large — Everon or an Arma 2/3 corpus,
+where AST-004's own "left undone" list already says the expansion ratio and the speedup are
+unmeasured. This addendum is one mission on one world and does not speak for those.
