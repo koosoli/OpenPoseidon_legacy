@@ -1,4 +1,4 @@
-# REN-THR-006/007/008 — The producer/consumer drain exists, in three verified slices
+# REN-THR-006/007/008/010 — The producer/consumer drain exists, in four verified slices
 
 **Date:** 2026-08-31
 **Branch:** `asset-obs-001`
@@ -7,7 +7,8 @@
 REN-THR-001 counted 62 of 79 FFI entry points forming `&mut *renderer` and concluded the
 three shapes of producer-side mutation collapse into **one queue drained at one point per
 frame**. That queue now exists. Everything below is live in `EngineWgpu` and drained at the
-top of `NextFrame`, in this order: settings, resources, instances.
+top of `NextFrame`, in this order: settings, resources (including overlay textures),
+instances.
 
 ## Slice 1 — settings (`cc20b525`)
 
@@ -51,10 +52,19 @@ ANOMALY lines, identical registered count (52,507) and identical scene image thr
 | What | Why it stays, for now |
 |---|---|
 | `VertexBufferWgpu` (create/update/set-skin/destroy) | CPU-path meshes: handles ride inside `WgrDraw3D` payloads and per-frame `wgr_mesh_update` is *upload traffic*. The thread answer is a genuinely `Send` upload path (`Pool::update_verts` is `&self` + `Queue`), not a queue that copies vertex arrays every frame. |
-| Overlay textures (`wgr_texture_*`) | UI; same synchronous-handle story, low traffic, next in line. |
 | `SetFarProxyInstances` | Bulk upload at world load (~117 MB source rows on Chernarus-size worlds). |
 | `SetSwapInterval`, `ResizeSurface`, screenshots | Synchronous answers / surface ownership — stop-the-world class, like device recreate. |
 | Stats readers (`GetObjectStats` etc.), `HasGrassPhotoClumps`, `SetGrassSettings`'s placement witness | **Reads.** The snapshot problem; owned by the thread slice. |
+
+## Slice 4 — overlay textures (`075f3dba`)
+
+The three UI texture entry points enqueue against producer handles and
+`DrainOverlayTexOps` translates them. It has **two** drain points, not one: ImGui creates its
+font atlas from inside `NextFrame`, after the frame's main drains, so `SubmitOverlay` drains
+again before translating the handles it copies into `WgrOverlayDraw`. An unknown handle draws
+white *and* logs an ANOMALY, because a white panel is otherwise indistinguishable from a UI
+that legitimately has no texture. Verified after the fact by the cross-build comparison in the
+addendum below.
 
 ## What this does not prove
 
