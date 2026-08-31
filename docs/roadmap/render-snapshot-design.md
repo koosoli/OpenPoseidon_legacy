@@ -48,7 +48,8 @@ thread-global draw-context variables.
 | Terrain queries | `SurfaceY` per frame per helicopter; sea level; map name | `:7751`, `WaterWgpu.cpp:645-669` |
 | Draw context | `GCurrentConformPlane` / `GCurrentIsVegetation` / `GCurrentFoliageKind` thread-globals written by Object draw code | `:659, 3385-3387` / `Object.cpp:531,1104` |
 
-**Two reads are not reads at all:**
+**Two reads are not reads at all — and BOTH are now closed. Verified against the code
+2026-08-31, not against this document:**
 - `TerrainWgpu.cpp:2640` calls `UpdateModernObjectResidency(cameraPos)` — the renderer
   MUTATES world streaming state mid-draw. This is also why object streaming bills to
   the `land:gnd` CPU phase. Moving this call to the simulation side is a prerequisite,
