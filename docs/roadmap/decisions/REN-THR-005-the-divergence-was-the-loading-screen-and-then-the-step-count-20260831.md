@@ -61,13 +61,46 @@ screens.
 **Terrain and grass never diverge in either arm**, across 41 and 40 frames. Whatever remains
 is not in the terrain or the grass placement.
 
+## Correction to the table above: count the disagreeing frames, not the first one
+
+"First parting" is the wrong statistic and it flattered the result. `verts` appeared to part
+at world+1 under lockstep, but that is a **single-frame blip** — run 2 differs at world+1 and
+all three agree again at world+2 — and treating it as the parting point produced the reading
+that the 2D path was now the sole remaining problem. It is not. Counting the frames in which
+the three runs disagree, per slice:
+
+| slice | wall-clock (41 frames) | lockstep (40 frames) |
+|---|---:|---:|
+| `cameras`, `draws3d`, `palette`, `shadow_casters` | 39 | **28** |
+| `verts` | 39 | 29 |
+| `water_nodes` | 39 | **0** |
+| `clear`/`fog`, `batches`, `cmds`, `terrain_nodes`, `terrain_batches`, `water_batches`, `grass_batches` | 0 | 0 |
+
+So lockstep **removes the water-node divergence outright** (39 → 0) and takes everything
+position-dependent from 95% of frames disagreeing to 70%. That is a large improvement and it
+is not a solution: 28 of 40 frames still differ.
+
+What never differs in either arm is as informative: the terrain nodes and batches, the grass
+batches, the 2D batch and command structure, and the clear and fog scalars. Everything that
+does differ is downstream of **entity positions**. So the residue is inside the simulation
+rather than in the renderer's assembly of the frame — with an identical step count and an
+identical starting state, an identical simulation should produce identical positions, and it
+does not.
+
+SIM-813 removed the one wall-clock budget in the AI stage earlier the same day and that fix
+is in this build, so it is not that. Finding what else inside a step is a function of real
+time, or of thread scheduling, is the next question, and `StateTimeline` (SIM-808) is the
+instrument for it rather than this one — it reports a first divergence by tick, record and
+field, which is one level below what a frame hash can see.
+
 ## What is left, and it is small and named
 
-Under lockstep the world holds 12 frames but `verts` — the 2D path — parts after **1**. So
-the 2D path now has a clock dependence that is *not* the simulation pacing, and it is the
-only thing standing between here and a reproducible frame stream. That is REN-THR-004's
-candidate 2 (the HUD dim ramps) or something beside it, and it is now testable in isolation
-because everything else holds still: `POSEIDON_NO_HUD` at `World.cpp:1766` is the experiment.
+Per the correction above, the residue is **in the simulation, not the 2D path** — `verts`
+disagrees in 29 frames where `draws3d` disagrees in 28, which is the same divergence reaching
+both, not a separate 2D clock. REN-THR-004's HUD-ramp candidate is also ruled out
+arithmetically: it reads `Glob.uiTime`, which accumulates `noAccDeltaT = deltaT`
+(`World.cpp:174`, `:399`), and lockstep pins `deltaT`, so `uiTime` advances by a constant in
+this arm and cannot be what varies.
 
 Note the shape has inverted. Before alignment the 2D path appeared to *lead* the world by
 one frame, and a great deal of thought went into explaining that. It was an artefact of
