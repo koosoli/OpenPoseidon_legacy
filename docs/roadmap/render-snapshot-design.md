@@ -52,8 +52,14 @@ thread-global draw-context variables.
 - `TerrainWgpu.cpp:2640` calls `UpdateModernObjectResidency(cameraPos)` — the renderer
   MUTATES world streaming state mid-draw. This is also why object streaming bills to
   the `land:gnd` CPU phase. Moving this call to the simulation side is a prerequisite,
-  not a nicety.
-- The cached `_lastGrassRotor` raw pointer (`:7694`) is a dangling-pointer surface.
+  not a nicety. **Still open (slice S4).**
+- ~~The cached `_lastGrassRotor` raw pointer (`:7694`) is a dangling-pointer surface.~~
+  **Closed by slice S2, verified 2026-08-31.** The pointer no longer exists anywhere in
+  the tree, and neither do the two RTTI vehicle walks the table above attributes to the
+  renderer: `grep -c dynamic_cast` returns **0** for both `EngineWgpu.cpp` and
+  `WaterWgpu.cpp`. Rotor wash now arrives by value in the snapshot's `rotorSources[]`,
+  read at `EngineWgpu.cpp:7908` and `WaterWgpu.cpp:970`. The row in the table above is
+  kept as the record of what it used to be; the "Today" column for it is history.
 
 ## 3. Step-1 plan: `WorldPresentationSnapshot`, built once, consumed only
 
