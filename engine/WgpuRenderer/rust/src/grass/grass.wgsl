@@ -234,6 +234,20 @@ const VERTS_PER_CARD: u32 = BLADE_SEGMENTS * 6u;
 const NEAR_CLUMP_BLADES: u32 = 6u;
 const VERTS_PER_NEAR_BLADE: u32 = BLADE_SEGMENTS * 6u;
 const VERTS_PER_NEAR_CLUMP: u32 = NEAR_CLUMP_BLADES * VERTS_PER_NEAR_BLADE;
+// UNIQUE vertices per blade, which is what the vertex shader is now invoked for.
+//
+// A blade is a strip of BLADE_SEGMENTS quads, and drawing it non-indexed issues six
+// vertices per quad -- 30 for five segments. But a quad's upper two corners are the
+// next quad's lower two, and this shader derives EVERY output from just `t` (the row)
+// and `left` (the side): see the `corner` decode this replaces, where `upper` and
+// `left` were the only things `corner` fed. So the duplicated corners were producing
+// bit-identical vertices, 30 invocations for 12 distinct results.
+//
+// Indexed, the post-transform cache reuses each computed vertex and the shader runs
+// (BLADE_SEGMENTS + 1) * 2 times instead. That is 12 instead of 30 for the near blade
+// and 8 instead of 18 for the mid one -- a 2.5x and 2.25x cut in vertex work for
+// geometry that is identical by construction, not merely similar.
+const VERTS_PER_NEAR_BLADE_UNIQUE: u32 = (BLADE_SEGMENTS + 1u) * 2u;
 // Mid LOD's unit is a clump: six independently varied three-segment ribbons.
 // It deliberately uses opaque geometry rather than a photographed alpha card,
 // preserving early-Z while keeping a volumetric silhouette at 25-160 m.
@@ -241,6 +255,7 @@ const MID_CLUMP_BLADES: u32 = 6u;
 const MID_BLADE_SEGMENTS: u32 = 3u;
 const VERTS_PER_MID_BLADE: u32 = MID_BLADE_SEGMENTS * 6u;
 const VERTS_PER_MID_CLUMP: u32 = MID_CLUMP_BLADES * VERTS_PER_MID_BLADE;
+const VERTS_PER_MID_BLADE_UNIQUE: u32 = (MID_BLADE_SEGMENTS + 1u) * 2u;
 
 fn hash11(p: vec2<f32>) -> f32 {
     let h = dot(p, vec2<f32>(127.1, 311.7));
@@ -1098,14 +1113,16 @@ fn vs_grass(@builtin(vertex_index) vertex_index: u32, @builtin(instance_index) i
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
-    let blade = vertex_index / VERTS_PER_NEAR_BLADE;
+    // `vertex_index` is now an INDEX VALUE, not a draw-order slot: the index buffer
+    // (build_blade_indices in mod.rs) maps the six corners of each quad onto the two
+    // rows they share with their neighbours. Row and side are all this shader ever
+    // needed; see VERTS_PER_NEAR_BLADE_UNIQUE.
+    let blade = vertex_index / VERTS_PER_NEAR_BLADE_UNIQUE;
     let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
-    let packed = vertex_index % VERTS_PER_NEAR_BLADE;
-    let segment = packed / 6u;
-    let corner = packed % 6u;
-    let upper = corner == 2u || corner == 4u || corner == 5u;
-    let left = corner == 0u || corner == 3u || corner == 5u;
-    let t = f32(segment + select(0u, 1u, upper)) / f32(BLADE_SEGMENTS);
+    let packed = vertex_index % VERTS_PER_NEAR_BLADE_UNIQUE;
+    let row = packed / 2u;
+    let left = (packed % 2u) == 0u;
+    let t = f32(row) / f32(BLADE_SEGMENTS);
     // Four clump archetypes: compact upright, open meadow, low splayed, tall wisp.
     let archetype = u32(seed * 4.0);
     // Most meadow clumps stay short; the occasional wisp preserves a layered
@@ -1176,13 +1193,11 @@ fn vs_grass_mid(@builtin(vertex_index) vertex_index: u32, @builtin(instance_inde
     let crush_data = unpack2x16unorm(inst_packed.y);
     let crush = crush_data.x;
     let rotor_wash = active_rotor_wash(inst.xz, crush, crush_data.y);
-    let blade = vertex_index / VERTS_PER_MID_BLADE;
-    let packed = vertex_index % VERTS_PER_MID_BLADE;
-    let segment = packed / 6u;
-    let corner = packed % 6u;
-    let upper = corner == 2u || corner == 4u || corner == 5u;
-    let left = corner == 0u || corner == 3u || corner == 5u;
-    let t = f32(segment + select(0u, 1u, upper)) / f32(MID_BLADE_SEGMENTS);
+    let blade = vertex_index / VERTS_PER_MID_BLADE_UNIQUE;
+    let packed = vertex_index % VERTS_PER_MID_BLADE_UNIQUE;
+    let row = packed / 2u;
+    let left = (packed % 2u) == 0u;
+    let t = f32(row) / f32(MID_BLADE_SEGMENTS);
     // Each member gets a stable radial base, orientation, height and bend. The
     // spacing remains at the clump centre, so interaction and placement stay
     // exactly as before while the rendered unit becomes a tuft of real blades.

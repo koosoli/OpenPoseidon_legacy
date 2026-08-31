@@ -80,6 +80,41 @@ fn near_placement_spacing(
     }
 }
 
+/// Index list for a ribbon of `blades` blades of `segments` quads each, mapping the six
+/// corners of every quad onto the two ROWS the quad shares with its neighbours.
+///
+/// Non-indexed, a five-segment blade issues 30 vertices; only 12 of them are distinct,
+/// because grass.wgsl's vertex shader derives every output from the row (`t`) and the
+/// side (`left`) and nothing else -- the duplicated corners were computing bit-identical
+/// results. This table is what lets the post-transform cache collapse them, so the
+/// geometry is unchanged by construction rather than by inspection.
+///
+/// Corner order must match the winding the shader replaced: corners 2, 4 and 5 are the
+/// upper row and corners 0, 3 and 5 are the left side.
+fn build_blade_indices(blades: u32, segments: u32) -> Vec<u32> {
+    let unique_per_blade = (segments + 1) * 2;
+    let mut out = Vec::with_capacity((blades * segments * 6) as usize);
+    for blade in 0..blades {
+        for segment in 0..segments {
+            for corner in 0..6u32 {
+                let upper = corner == 2 || corner == 4 || corner == 5;
+                let left = corner == 0 || corner == 3 || corner == 5;
+                let row = segment + u32::from(upper);
+                out.push(blade * unique_per_blade + row * 2 + u32::from(!left));
+            }
+        }
+    }
+    out
+}
+
+/// 0, 1, 2, ... -- an indexed draw that reproduces a non-indexed one exactly. The photo
+/// card entry points (`vs_grass_mid_tuft`) decode `vertex_index` their own way and are
+/// deliberately not re-derived; giving them identity indices keeps one draw path for both
+/// modes instead of two indirect-argument layouts that must be kept in step.
+fn identity_indices(count: u32) -> Vec<u32> {
+    (0..count).collect()
+}
+
 /// Mid-ring candidate spacing. Must mirror `mid_placement_spacing` in grass.wgsl.
 fn mid_placement_spacing(cards: bool, card_spacing: f32) -> f32 {
     if cards {
@@ -365,6 +400,12 @@ pub struct Grass {
     grass_params: wgpu::Buffer,
     placement_count: wgpu::Buffer,
     indirect: wgpu::Buffer,
+    near_index: wgpu::Buffer,
+    mid_index: wgpu::Buffer,
+    // Which table each index buffer currently holds, so it is rewritten only when the
+    // renderer mode actually changes rather than every frame.
+    near_index_mode: std::cell::Cell<u8>,
+    mid_index_mode: std::cell::Cell<u8>,
     mid_placement_count: wgpu::Buffer,
     mid_indirect: wgpu::Buffer,
     far_placement_count: wgpu::Buffer,
@@ -780,10 +821,27 @@ impl Grass {
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // 20 bytes, not 16: draw_indexed_indirect takes five u32s
+        // (index_count, instance_count, first_index, base_vertex, first_instance).
+        // `instance_count` stays at offset 4 in both layouts, which is what the
+        // placement-count copy writes, so that plumbing is untouched.
         let indirect = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_indirect"),
-            size: 16,
+            size: 20,
             usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Sized for the largest table either ring can need: 12 blades x 5 segments x 6.
+        let near_index = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_near_index"),
+            size: 12 * 5 * 6 * 4,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mid_index = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_mid_index"),
+            size: 6 * 3 * 6 * 4,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let mid_placement_count = device.create_buffer(&wgpu::BufferDescriptor {
@@ -796,7 +854,7 @@ impl Grass {
         });
         let mid_indirect = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_grass_mid_indirect"),
-            size: 16,
+            size: 20,
             usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1251,6 +1309,10 @@ impl Grass {
             grass_params,
             placement_count,
             indirect,
+            near_index,
+            mid_index,
+            near_index_mode: std::cell::Cell::new(u8::MAX),
+            mid_index_mode: std::cell::Cell::new(u8::MAX),
             mid_placement_count,
             mid_indirect,
             far_placement_count,
@@ -2051,11 +2113,29 @@ impl Grass {
         } else {
             180
         };
+        // Indexed args: index_count first, then instance_count (which the placement copy
+        // overwrites), then first_index / base_vertex / first_instance.
         queue.write_buffer(
             &self.indirect,
             0,
-            bytemuck::cast_slice(&[near_verts, 0, 0, 0]),
+            bytemuck::cast_slice(&[near_verts, 0u32, 0u32, 0u32, 0u32]),
         );
+        // The blade table collapses 30 draw slots onto 12 distinct vertices; the card
+        // path keeps identity indices because its vertex shader decodes vertex_index
+        // itself. Mode 0 = blades, 1 = cards.
+        let near_mode: u8 = u8::from(self.tuft_enabled && self.last_params.clump_renderer != 0.0);
+        if self.near_index_mode.get() != near_mode {
+            self.near_index_mode.set(near_mode);
+            let table = if near_mode == 1 {
+                identity_indices(near_verts)
+            } else {
+                // 12 blades when the clump renderer is on, 6 when it is not; the shader
+                // reads the same blade count from grass.renderer.x.
+                let blades = if self.last_params.clump_renderer != 0.0 { 12 } else { 6 };
+                build_blade_indices(blades, 5)
+            };
+            queue.write_buffer(&self.near_index, 0, bytemuck::cast_slice(&table));
+        }
         // Mid LOD is either six opaque three-segment ribbons per clump, or two
         // crossed, alpha-tested photo cards (2 * 6 vertices) when a compatible
         // tuft has been explicitly enabled.
@@ -2063,8 +2143,18 @@ impl Grass {
         queue.write_buffer(
             &self.mid_indirect,
             0,
-            bytemuck::cast_slice(&[mid_verts, 0, 0, 0]),
+            bytemuck::cast_slice(&[mid_verts, 0u32, 0u32, 0u32, 0u32]),
         );
+        let mid_mode: u8 = u8::from(self.tuft_enabled);
+        if self.mid_index_mode.get() != mid_mode {
+            self.mid_index_mode.set(mid_mode);
+            let table = if mid_mode == 1 {
+                identity_indices(mid_verts)
+            } else {
+                build_blade_indices(6, 3)
+            };
+            queue.write_buffer(&self.mid_index, 0, bytemuck::cast_slice(&table));
+        }
         // Far LOD is one terrain-conforming coverage quad per compacted cell.
         queue.write_buffer(
             &self.far_indirect,
@@ -2132,7 +2222,8 @@ impl Grass {
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.mid_data_bind, &[]);
-        pass.draw_indirect(&self.mid_indirect, 0);
+        pass.set_index_buffer(self.mid_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.mid_indirect, 0);
         let near_pipeline = match (
             kind,
             self.tuft_enabled && self.last_params.clump_renderer != 0.0,
@@ -2146,7 +2237,8 @@ impl Grass {
         pass.set_bind_group(0, camera_bind, &[camera_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
-        pass.draw_indirect(&self.indirect, 0);
+        pass.set_index_buffer(self.near_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.indirect, 0);
         timers.end_pass(pass, region);
     }
 
@@ -2872,5 +2964,70 @@ mod tests {
         assert_eq!(grass.last_params.blade_contrast, 3.0);
         assert_eq!(grass.last_params.blade_self_shadow, 0.7);
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod blade_index_tests
+{
+    use super::*;
+
+    // The old, non-indexed decode, kept verbatim as the oracle: this is exactly what
+    // grass.wgsl computed from a draw-order slot before the index buffer existed.
+    fn legacy_row_and_side(segments: u32, slot: u32) -> (u32, bool) {
+        let verts_per_blade = segments * 6;
+        let packed = slot % verts_per_blade;
+        let segment = packed / 6;
+        let corner = packed % 6;
+        let upper = corner == 2 || corner == 4 || corner == 5;
+        let left = corner == 0 || corner == 3 || corner == 5;
+        (segment + u32::from(upper), left)
+    }
+
+    // THE claim the whole change rests on: every draw slot still resolves to the same
+    // (row, side) it did before, so the geometry is identical rather than similar.
+    // Asserted for both ribbon shapes the renderer draws.
+    #[test]
+    fn indices_resolve_to_the_same_row_and_side_as_the_non_indexed_decode() {
+        for (blades, segments) in [(12u32, 5u32), (6, 5), (6, 3)] {
+            let indices = build_blade_indices(blades, segments);
+            assert_eq!(indices.len() as u32, blades * segments * 6);
+            let unique_per_blade = (segments + 1) * 2;
+            for (slot, &index) in indices.iter().enumerate() {
+                let slot = slot as u32;
+                // What the shader now derives from the index value.
+                let blade = index / unique_per_blade;
+                let packed = index % unique_per_blade;
+                let (row, left) = (packed / 2, (packed % 2) == 0);
+                // What it used to derive from the draw slot.
+                let (want_row, want_left) = legacy_row_and_side(segments, slot);
+                assert_eq!(blade, slot / (segments * 6), "blade at slot {slot}");
+                assert_eq!(row, want_row, "row at slot {slot} of {blades}x{segments}");
+                assert_eq!(left, want_left, "side at slot {slot} of {blades}x{segments}");
+            }
+        }
+    }
+
+    // The saving, stated as a test so a future change to the ribbon shape cannot quietly
+    // give it back: distinct indices are what the post-transform cache can collapse to.
+    #[test]
+    fn the_table_collapses_thirty_slots_onto_twelve_vertices() {
+        let near = build_blade_indices(12, 5);
+        let distinct: std::collections::BTreeSet<u32> = near.iter().copied().collect();
+        assert_eq!(near.len(), 12 * 30);
+        assert_eq!(distinct.len(), 12 * 12, "near blade must have 12 unique vertices");
+
+        let mid = build_blade_indices(6, 3);
+        let distinct_mid: std::collections::BTreeSet<u32> = mid.iter().copied().collect();
+        assert_eq!(mid.len(), 6 * 18);
+        assert_eq!(distinct_mid.len(), 6 * 8, "mid blade must have 8 unique vertices");
+    }
+
+    // Identity indices must reproduce a non-indexed draw exactly -- that is the whole
+    // reason the card path can share one draw call with the blades.
+    #[test]
+    fn identity_indices_are_the_non_indexed_order() {
+        let ids = identity_indices(12);
+        assert_eq!(ids, (0..12).collect::<Vec<u32>>());
     }
 }
