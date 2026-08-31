@@ -949,6 +949,21 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          "vehicles={:.3f} visibility={:.3f} physics={:.3f}",
                          acc.ticks, total * inv, acc.ms[0] * inv, acc.ms[1] * inv, acc.ms[2] * inv, acc.ms[3] * inv,
                          acc.ms[4] * inv, acc.ms[5] * inv);
+                // How much world time the catch-up cap threw away, against the 60 ticks a
+                // real second nominally buys. A tick rate well under 60 with zero discards
+                // means the frames were simply long; a nonzero discard count means the
+                // simulation is behind and the world is running slow.
+                static std::size_t lastDiscarded = 0;
+                static std::size_t lastEvents = 0;
+                const std::size_t discarded = _simulationSteps.DiscardedSteps() - lastDiscarded;
+                const std::size_t events = _simulationSteps.DiscardEvents() - lastEvents;
+                lastDiscarded = _simulationSteps.DiscardedSteps();
+                lastEvents = _simulationSteps.DiscardEvents();
+                LOG_INFO(World,
+                         "Sim pacing: {} ticks in the last second of frame time (nominal {:.0f}); catch-up cap "
+                         "discarded {} steps in {} frames (cap {})",
+                         acc.ticks, 1.0 / _simulationSteps.StepSeconds(), discarded, events,
+                         _simulationSteps.MaxCatchUpSteps());
             }
             Sim::ResetSimStageCosts();
         }

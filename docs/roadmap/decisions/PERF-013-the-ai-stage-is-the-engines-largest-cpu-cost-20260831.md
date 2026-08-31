@@ -75,3 +75,50 @@ back — which is a real check, not a hope.
   with meaningful AI load; on `perf_abel` the whole loop is 0.15 ms.
 - It does not say what *inside* `PerformAI` costs 30 ms. That is the next subdivision.
 - Physics reads 0.000 because this mission has no physics world, not because physics is free.
+
+---
+
+## Addendum — the world runs slow in a fight, and nothing was counting
+
+PERF-013 noted in passing that a one-second window held 32 ticks against a nominal 60, and
+left it as a caveat about reading the table. It is worth more than a caveat.
+
+`FixedStepAccumulator::Advance` caps a frame at 8 catch-up steps and then **discards the
+remainder** (`_accumulatedSeconds = fmod(...)`). That is the anti-spiral guard doing exactly
+what it was written for: a 200 ms frame cannot be allowed to queue twelve ticks and make the
+next frame worse. But a discarded step is simulation that never happens — world time thrown
+away — and the class counted neither the steps nor the frames it happened in. It does now
+(behaviour unchanged; two counters and three accessors).
+
+`perf_combat`, 110 s warm-up, consecutive one-second windows:
+
+```
+59 ticks in the last second (nominal 60);  discarded  8 steps in 1 frame
+40 ticks                                   discarded 21 steps in 4 frames
+58 ticks                                   discarded  4 steps in 3 frames
+55 ticks                                   discarded  8 steps in 5 frames
+40 ticks                                   discarded 26 steps in 5 frames
+40 ticks                                   discarded 23 steps in 5 frames
+40 ticks                                   discarded 23 steps in 3 frames
+40 ticks                                   discarded 35 steps in 5 frames
+```
+
+**In sustained combat the tick rate settles at 40 of 60 and the cap throws away 23–35 steps
+a second** — between a third and six tenths of a second of world time, every second, in five
+frames or fewer. The game world is running at roughly two thirds speed, and in the worst
+window closer to half.
+
+This is not a bug in the accumulator: without the cap those frames would compound. It is the
+*cost* of the AI stage arriving somewhere nobody was looking. A player in a heavy fight sees
+the world in slow motion, and until this line existed there was no way to say so with a
+number, or to tell it apart from "the renderer is slow".
+
+It also sharpens what fixing the AI stage would buy. Making `PerformAI` twice as fast would
+not just raise the framerate: it would give back the world time the cap is currently
+discarding, which is a correctness-shaped improvement rather than a smoothness one.
+
+**What this does not say.** One scene, one machine, one run of eight windows. The cap of 8 is
+`DefaultMaxCatchUpSteps` and nothing here argues it is the right number — raising it trades
+slow motion for hitching, and that trade is not measured. And a low tick rate with *zero*
+discards would mean something entirely different (long frames, no lost time), which is why
+the line reports both.
