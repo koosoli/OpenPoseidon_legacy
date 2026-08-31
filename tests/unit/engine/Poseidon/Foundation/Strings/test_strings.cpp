@@ -8,6 +8,9 @@
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Strings/Bstring.hpp>
 #include <cstring>
+#include <atomic>
+#include <thread>
+#include <vector>
 
 using Catch::Matchers::Equals;
 
@@ -637,4 +640,70 @@ TEST_CASE("RString - GetKey for HashMap", "[strings]")
         REQUIRE(str.GetKey() != nullptr);
         REQUIRE(strcmp(str.GetKey(), "") == 0);
     }
+}
+
+// Batch 6: the RString buffer's refcount must be atomic (SIM-807)
+//
+// CompactBuffer<char> is the buffer behind every RString, and behind every
+// interned RStringB.  The RStringB bank holds a mutex around its *map*, but the
+// string it returns is AddRef'd and Release'd outside that lock by whichever
+// thread happens to hold a copy.  A plain `++_count` / `--_count` there loses
+// increments, Release() reaches 0 while a live reference remains, and the buffer
+// is `delete[]`d underneath its owner -- process heap corruption, surfacing
+// inside the allocator at an unrelated site later.  That was SIM-807's crash.
+//
+// This case is deliberately written NOT to crash when the fix is reverted: a
+// large bias of held references keeps the count far from 0, so a lost update
+// shows up as a wrong final count rather than as a premature free.  Reverting
+// CompactBuf.hpp to `++_count` makes it FAIL (measured), not segfault.
+TEST_CASE("RString buffer refcount is atomic under concurrent AddRef/Release", "[strings][threads]")
+{
+    using ::Poseidon::Foundation::String;
+
+    String* buf = ::Poseidon::Foundation::CreateString("sim807_shared_selection_name");
+    buf->AddRef(); // the reference this test itself holds
+
+    constexpr int kBias = 200000; // keeps the count away from 0 if an update is lost
+    for (int i = 0; i < kBias; ++i)
+    {
+        buf->AddRef();
+    }
+
+    constexpr int kThreads = 4;
+    constexpr int kIters = 100000;
+    std::atomic<bool> go{false};
+    std::vector<std::thread> pool;
+    pool.reserve(kThreads);
+    for (int t = 0; t < kThreads; ++t)
+    {
+        pool.emplace_back(
+            [&]
+            {
+                while (!go.load(std::memory_order_acquire))
+                {
+                    std::this_thread::yield();
+                }
+                for (int i = 0; i < kIters; ++i)
+                {
+                    buf->AddRef();
+                    buf->Release();
+                }
+            });
+    }
+    go.store(true, std::memory_order_release);
+    for (std::thread& th : pool)
+    {
+        th.join();
+    }
+
+    // Every AddRef was paired with a Release, so the count must be exactly what
+    // it was before the threads ran.  Non-atomic ++/-- drifts here.
+    REQUIRE(buf->RefCounter() == kBias + 1);
+
+    for (int i = 0; i < kBias; ++i)
+    {
+        buf->Release();
+    }
+    REQUIRE(buf->RefCounter() == 1);
+    buf->Release(); // frees
 }

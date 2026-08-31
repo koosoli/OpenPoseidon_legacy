@@ -3583,18 +3583,26 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     // first showed as bit-divergence rather than a crash. Reproduce with
                     // SIM807_CONCURRENT_ADAPT=1 on the [race] tag.
                     //
-                    // The write has NOT been found. It correlates with the model's named
-                    // selection count and disappears when selections are cleared, which points
-                    // at ShapeAdapter.cpp's selection loop or something it allocates alongside;
-                    // a genuine unguarded registration in FastCAlloc's global instance list was
-                    // found and fixed while hunting it, and did NOT fix this (5 of 8 runs still
-                    // crash). ASan would settle it and the Windows sanitizer preset does not
-                    // configure -- that is the next step.
+                    // THE WRITE HAS SINCE BEEN FOUND AND FIXED (same day): CompactBuffer's
+                    // reference count was a plain non-atomic int, and CompactBuffer<char> is
+                    // String -- the buffer behind every RString and therefore every interned
+                    // RStringB. The bank's mutex guards the MAP; the string it hands back is
+                    // refcounted outside that lock by every Ref<String> copy and destructor.
+                    // Two workers interning the same selection name lost an increment and
+                    // freed a buffer somebody still held. See CompactBuf.hpp. That is why the
+                    // rate tracked the named-selection count, and why pinning one name made it
+                    // worse rather than better -- one counter, hammered harder.
                     //
-                    // A crash in the default path is worse than a slow load. This costs the
-                    // ~3 s of cold conversion the tail split moved off the main thread; the
-                    // tail split itself stands, and the switch comes back the day the write is
-                    // found. WGR_OBJECT_STREAM_ASYNC_ADAPT=1 re-enables it for that hunt.
+                    // Measured with the fix: 0 crashes in 12 runs of the SIM-807 reproducer,
+                    // against 9 in 12 without it.
+                    //
+                    // THE DEFAULT IS STILL OFF, DELIBERATELY, and that is the owner's call to
+                    // reverse rather than mine. One reproducer going quiet is strong evidence
+                    // about THIS race and no evidence at all about a second one, and the owner
+                    // was asleep when it was found; a crash in the path they play is worth more
+                    // than the ~3 s of cold conversion turning it on would return. Everything
+                    // needed to flip it is here: set WGR_OBJECT_STREAM_ASYNC_ADAPT=1, or change
+                    // this predicate back to `!v || v[0] != '0'`.
                     static const bool asyncAdapt = []
                     {
                         const char* v = std::getenv("WGR_OBJECT_STREAM_ASYNC_ADAPT");
