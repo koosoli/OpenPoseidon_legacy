@@ -34,7 +34,6 @@ class FrameProfiler
         PhaseDrawObjects,  // object + shadow passes, queue flush, frame observe
         PhaseDrawPost,     // cuts/effects, alternate draw paths, cleanup
         PhaseHud,          // UI, titles, FinishDraw
-        PhaseAiVehicles,   // PerformAI + SimulateAllVehicles
         PhaseSound,        // PerformSound + AdvanceAll + Commit
         PhaseSwap,         // NextFrame (resolve + present)
         PhaseCount,
@@ -45,9 +44,15 @@ class FrameProfiler
 
     static const char* PhaseName(int p)
     {
-        static const char* kNames[PhaseCount] = {"setup",    "sim:step", "drw:init", "drw:prep", "land:gnd", "land:obj",
-                                                 "drw:land", "drw:obj",  "drw:post", "hud",      "ai+veh",   "sound",
-                                                 "swap"};
+        // "ai+veh" was removed rather than left reading zero: PerformAI and
+        // SimulateAllVehicles run inside the fixed-step loop and are `sim:step`, and the
+        // phase that carried the name was measuring the SOUND work (PERF-013). A phase no
+        // call site marks would report 0.000 forever, which is indistinguishable from work
+        // that is genuinely free -- this repository has a documented history of diagnostics
+        // that reported 0 where they meant "did not run".
+        static const char* kNames[PhaseCount] = {"setup",    "sim:step", "drw:init", "drw:prep", "land:gnd",
+                                                 "land:obj", "drw:land", "drw:obj",  "drw:post", "hud",
+                                                 "sound",    "swap"};
         return (p >= 0 && p < PhaseCount) ? kNames[p] : "?";
     }
 

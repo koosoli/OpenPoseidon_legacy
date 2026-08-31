@@ -1916,8 +1916,12 @@ void World::Simulate(float deltaT, bool& enableDraw)
         GSoundsys->Commit(); // commit deferred settings
     }
 
-    perf.Mark(Dev::FrameProfiler::PhaseAiVehicles);
-
+    // PERF-013: this used to be Mark(PhaseAiVehicles) followed IMMEDIATELY by
+    // Mark(PhaseSound) with nothing between them, so the sound work above was booked as
+    // "ai+veh" and "sound" measured the gap between two adjacent statements -- 0.000 ms,
+    // every frame. The two readings that made the profiler look sane (ai+veh 0.16 ms,
+    // sound 0.000) were the same bug seen from both ends. The AI has never been here: it
+    // runs inside the fixed-step loop, which is now `sim:step`.
     perf.Mark(Dev::FrameProfiler::PhaseSound);
 
     if (enableDraw)
