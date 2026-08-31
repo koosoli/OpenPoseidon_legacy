@@ -778,6 +778,16 @@ candidate), and say which corpus in the commit.
 The same table is the answer to "why is the frame 28 ms": it is GPU-bound, not CPU-bound,
 which is what the grass measurements have said all along.
 
+**A concrete first customer for the DDC: loading Reforger's Everon natively.** See
+`docs/roadmap/decisions/RFG-002-loading-everon-without-converting-it-20260831.md`. Six of
+the eight formats on that path already have engine-side readers and two of them (`.edds`
+textures, `.emat` materials) are already wired into the runtime — which removes the
+expensive half of the offline export outright. Exactly one reader is missing engine-side
+(the `.et` prefab graph, ~100 lines currently in the converter), and the rest is plumbing.
+Geometry conversion does not disappear, it moves to load time — which is precisely what a
+Derived Data Cache is for, and why this is the right first workload to design it against
+rather than a hypothetical one.
+
 ### Derived Data Cache
 
 Legacy data should not be converted into modern GPU form on every launch.
