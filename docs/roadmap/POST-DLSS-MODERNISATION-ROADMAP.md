@@ -457,6 +457,20 @@ fields for *forward*-compatible evolution exist nowhere. Both belong to the
 
 ### 4.3 Deferred reclamation
 
+**Audited 2026-08-31 — every clause already met, and NOT by the mechanism a reader would
+guess.** See `docs/roadmap/decisions/REN-RES-002-deferred-reclamation-audit-20260831.md`.
+The renderer contains no call to wgpu's explicit `Texture::destroy()`/`Buffer::destroy()`
+anywhere; handles are dropped, and wgpu's resource tracker holds the allocation until every
+submission referencing it completes. The one thing wgpu cannot defer for us — a bindless
+slot INDEX, which is baked into material buffers and encoded draws — is parked and
+recycled only in `frame_submitted()`, after the frame's queue submit. Snapshots carry no
+handles and preparer workers hold none, so those two clauses are satisfied vacuously.
+
+The 120-frame texture eviction window is therefore **not** the "arbitrary frame-count
+delay" this section forbids: it governs thrash policy, not lifetime, and lowering it can
+cost an upload but cannot cost a use-after-free. That distinction is now stated at the
+call site, because it is not visible from there.
+
 Resource destruction must be deferred until no published snapshot, worker job or
 in-flight GPU submission can still reference the resource.
 

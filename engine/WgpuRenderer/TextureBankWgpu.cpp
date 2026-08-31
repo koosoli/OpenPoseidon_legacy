@@ -132,12 +132,23 @@ void TextureBankWgpu::TrimResidency()
     // deliberately conservative in the keep direction -- it marks more than actually drew.
     // Full argument at TextureMipBias() in TextureWgpu.cpp.
     //
-    // NOTE on the budget test above: stats.tracked_bytes is textures + geometry, but only
-    // textures are evictable here. A world whose GEOMETRY alone exceeds the budget (Everon is
-    // 84% geometry) therefore evicts every candidate texture every frame chasing a target it
-    // can never reach. Comparing stats.object_texture_bytes against a texture share of the
-    // budget would be the honest test; left alone deliberately, as changing it moves the
-    // numbers currently being benchmarked.
+    // The grace window. IT IS NOT A SAFETY MARGIN, and reading it as one is the mistake this
+    // comment exists to prevent (roadmap 4.3, which forbids "arbitrary frame-count delays" as
+    // a lifetime mechanism -- correctly, but this is not one).
+    //
+    // What actually makes eviction safe is ownership, not elapsed frames. Audited 2026-08-31:
+    // the Rust renderer contains NO call to wgpu's explicit `Texture::destroy()` /
+    // `Buffer::destroy()` anywhere -- `Textures::destroy` removes the handle from the registry
+    // and DROPS it. wgpu's resource tracker then keeps the underlying GPU allocation alive
+    // until every submission still referencing it has completed. Separately, the texture's
+    // BINDLESS SLOT INDEX is parked and only recycled in `frame_submitted()`, after the
+    // frame's queue submit, because encoded draws and material buffers carry that index for
+    // the rest of the frame. Those two together are the completed-work tracking 4.3 asks for.
+    //
+    // So this number is a THRASH heuristic: how long a texture must go unused before we are
+    // willing to pay to load it again. Lowering it cannot cause a use-after-free; it can cause
+    // a texture to be evicted and immediately re-uploaded. Raising it cannot make eviction
+    // safer; it can only hold more bytes.
     uint64_t grace = 120;
     if (const char* value = std::getenv("WGR_TEXTURE_EVICT_GRACE_FRAMES"))
         grace = static_cast<uint64_t>(std::clamp<long long>(std::strtoll(value, nullptr, 10), 2, 36000));
