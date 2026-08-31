@@ -348,8 +348,20 @@ target_link_libraries(Poseidon PUBLIC imgui::imgui)
 # C++ Standard
 # ============================================================
 
+# 20, matching the root CMakeLists and what CLAUDE.md has always claimed the codebase is.
+#
+# This said 17, with no comment, while the root sets 20 -- so the library that IS the engine
+# compiled one standard behind everything that links it, and a reader who trusted the project
+# description reached for `std::span` in engine code and found it missing. That is how it was
+# noticed: SIM-811 needed a span and had to hand-roll one.
+#
+# The override was obsolete rather than load-bearing, and this is measured, not assumed:
+# raised to 20, `Poseidon` builds with ZERO errors, and PoseidonGame, PoseidonTests and
+# PoseidonFoundationTests all build and pass (242,689 and 164,072 assertions, 0 failures).
+# It also removes a real mismatch rather than creating one -- 17-vs-20 across a link boundary
+# was the status quo, not the change.
 set_target_properties(Poseidon PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     C_STANDARD 11
     C_STANDARD_REQUIRED ON
