@@ -391,7 +391,15 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(gpu, "geometry_retired_mb", g.geometryRetiredBytes / (1024.0 * 1024.0));
             cJSON_AddNumberToObject(gpu, "object_textures", g.objectTextureCount);
             cJSON_AddBoolToObject(gpu, "over_budget", g.overBudget);
-            cJSON_AddNumberToObject(gpu, "per_object_kb", g.bytesPerResidentObject / 1024.0);
+            // Only when it was actually derived. A stock CWA mission does not use the
+            // modern object-streaming path at all, so `residency.valid` is false and there
+            // is no object count to divide by -- and a flat `0` there reads as a measured
+            // zero rather than as "not applicable". Two separate defects fixed the same
+            // day (the dead cpu_milliseconds column and the snapshot drop counter's
+            // assumed value) were both exactly this: a diagnostic that cannot say "did not
+            // run" gets read as "ran". Absent is the honest answer.
+            if (g.bytesPerResidentObject > 0)
+                cJSON_AddNumberToObject(gpu, "per_object_kb", g.bytesPerResidentObject / 1024.0);
         }
         // The simulation/presentation boundary (roadmap 5.3). Queue depth against its
         // bound, the age of what the renderer consumed, and the drop counter -- so a

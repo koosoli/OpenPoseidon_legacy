@@ -153,7 +153,13 @@ void DrawStreamingTab()
             Row("gpu tex / geom live / geom cap", "%.0f / %.0f / %.0f MB",
                 s.gpu.objectTextureBytes / (1024.0 * 1024.0), s.gpu.geometryLiveBytes / (1024.0 * 1024.0),
                 s.gpu.geometryCapacityBytes / (1024.0 * 1024.0));
-            Row("gpu per resident object", "%.0f KB", s.gpu.bytesPerResidentObject / 1024.0);
+            // Shown only when derived -- a stock CWA mission does not use the modern
+            // object-streaming path, so there is no object count to divide by and a flat
+            // "0 KB" would read as a measurement.
+            if (s.gpu.bytesPerResidentObject > 0)
+                Row("gpu per resident object", "%.0f KB", s.gpu.bytesPerResidentObject / 1024.0);
+            else
+                Row("gpu per resident object", "%s", "n/a (no modern object residency)");
         }
         Row("shape cache", "%llu/%llu held, hits %llu, ins %llu, drops %llu", (unsigned long long)r.shapeCacheSize,
             (unsigned long long)r.shapeCacheLimit, (unsigned long long)r.shapeCacheHits,
