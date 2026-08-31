@@ -167,11 +167,13 @@ main thread:
    same-thread transient global with save/restore nesting (`Object::Draw`, `ForestPlain`,
    `SceneShadowPass`). Recording draws off the main thread forces them to become
    parameters, threaded through the `Shape::Draw` override fan-out across both backends.
-3. **No stable render-object IDs (§4).** Three unrelated, non-generation-checked
-   schemes — raw `Object*` map keys, the 16-bit draw-sort id, and Rust's recycled
-   retained-instance free list. All three are safe today only because deletion and
-   rendering cannot interleave. They are also what `resourceEpoch` is waiting on: an
-   epoch has nothing to guard until the snapshot carries handles.
+3. **Stable render-object IDs (§4) — mostly done; see REN-ID-001.** Of the three
+   schemes, the draw-object id (ID-1) and the Rust retained-instance free list (ID-2/3)
+   are closed. What is left is the raw `Object*` map keys, and their render-thread
+   problem is that `_gpuInstances` is an `unordered_map` mutated on the main thread
+   while the liveness sweep walks it — container ownership, which belongs with item 4
+   below rather than with identity. `resourceEpoch` still has nothing to guard until
+   the snapshot carries handles.
 4. **The push path itself is not double-buffered.** The ring covers the *pull* set;
    the per-frame vectors on `EngineWgpu` (`_draws3d`, `_verts`, `_cmds`, `_palette`,
    `_cameras`, `_shadowCasters`) are still cleared in `InitDraw` and appended to by the
@@ -185,24 +187,37 @@ contract needs both fixed before interpolation (step 8), though neither blocks s
 
 ## 4. Identity: what 5.1's "stable render-object ID" must replace
 
-Three unrelated schemes exist, none generation-checked:
+> **Revised 2026-08-31 (REN-ID-001).** This section described three open schemes. Two
+> of them were closed on 2026-08-30, after it was written. See
+> `decisions/REN-ID-001-stable-render-object-identity-20260831.md` for the full audit,
+> the design and the ablation evidence. Summary below.
 
-1. Raw `Object*` keys in `_gpuInstances`/`_gpuProxies`/`_drawObjectIds`
-   (`EngineWgpu.hpp:663-672`) — address recycling held off only by the erase in
-   `SceneObjectRemoved`.
-2. The 16-bit draw-sort id in `WgrDraw3D.misc` bits 16-31 (motion-vector history key)
-   — allocated lazily from the pointer, wraps at 65536 with an assumption, not a
-   check (`EngineWgpu.cpp:6170-6173`).
-3. Rust retained-instance slots — a recycled free list with no generation
-   (`cull.rs:844-869`); a stale slot addresses a live, reused instance.
+Three unrelated schemes existed. **One is still open.**
 
-The natural home for a `{index, generation}` render id is **on `Object` itself,
-beside `_gpuCoverage`** — that field exists precisely because a per-frame
-`unordered_map<Object*>` probe was the hottest CPU cost in the frame
-(`EngineWgpu.cpp:6362-6376`). One Object-resident id replaces the hash probe in
-`CurrentDrawObjectId()`, keys the motion-vector history without the 16-bit wrap, and
-gives the Rust free list a validity token. This is Phase 4's stable-handle work and
-should land BEFORE snapshot slices S2/S3 depend on identity; S1 does not.
+1. **OPEN.** Raw `Object*` keys in `_gpuInstances`/`_gpuProxies` (`EngineWgpu.hpp:670`,
+   `:695`) — address recycling held off only by the erase in `SceneObjectRemoved`.
+   (`_drawObjectIds`, named here originally, no longer exists.) Its severity is now
+   *leak*, not corruption: the retained-slot write a recycled address would drive is
+   refused by scheme 3's generation check. Its real render-thread blocker is container
+   ownership — an `unordered_map` mutated on the main thread while the liveness sweep
+   walks it — which a per-entry id does not address. Fix it *with* blocker 4's
+   push-path double-buffering, not before.
+2. **CLOSED** (ID-1, `62c0ac3b`). The draw-object identity is `Object::RenderId()`
+   (`Object.cpp:1744`), an Object-resident process-monotonic `uint32_t` beside
+   `_gpuCoverage`. It needs no generation because it recycles no index. What remains
+   is *width*, not identity: `CurrentDrawObjectId()` folds it to the 16-bit
+   `WgrDraw3D.misc` lane (`EngineWgpu.cpp:6448`), so two live objects 65,535 ids apart
+   alias a motion-vector history slot. Removed only by widening the ABI lane.
+3. **CLOSED** (ID-2, `52b512d3`; tested and made observable by ID-3). Rust
+   retained-instance handles are `(slot + 1) | generation << 24`, bumped on removal
+   and checked on every update/remove, in `InstanceTable` (`cull.rs`). A stale handle
+   is refused and counted (`stale_instance_ops`). Aliases only after 256 reuse cycles
+   of one slot — asserted by test, not assumed.
+
+The two mechanisms are deliberate and not a duplication: generations exist to make a
+*recycled* index distinguishable, so they live only where indices are recycled (the
+Rust slot table). `Object::RenderId()` recycles nothing and therefore needs none.
+Do not introduce a third convention.
 
 ## 5. Non-goals for step 1
 
