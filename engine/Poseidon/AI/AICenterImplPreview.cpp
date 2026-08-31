@@ -2,6 +2,7 @@
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AIGroupScanBudget.hpp>
 #include <Poseidon/AI/Path/AIDefs.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -479,13 +480,32 @@ namespace Poseidon
 {
 void AICenter::UpdateGroup()
 {
-    // maintain CPU load under certain limit
-    // get current time (QueryPerformanceCounter)
-    Foundation::SectionTimeHandle sectionTime = Foundation::StartSectionTime();
-    float maxTimePerCenter = 0.020;
+    // SIM-813. This loop used to be cut short by a QueryPerformanceCounter budget:
+    //
+    //     Foundation::SectionTimeHandle sectionTime = Foundation::StartSectionTime();
+    //     float maxTimePerCenter = 0.020;
+    //     ...
+    //     if (Foundation::CompareSectionTimeGE(sectionTime, maxTimePerCenter)) break;
+    //
+    // which made the SET OF GROUPS THAT THINK IN A TICK a function of how fast this CPU
+    // ran. It was the AI stage's only per-tick clock dependence and the last one anywhere
+    // in the simulation (the step itself is fixed at 1/60 s -- World.cpp:910), so with it
+    // gone the stage's selection is a function of simulation state alone. SIM-812 ranked
+    // it above every other finding of its mutation audit for that reason.
+    //
+    // What replaces it is `NGroups() + 1` loop entries, which is the walk's OWN natural
+    // ceiling and therefore cannot bind on a walk a fast machine would have finished: see
+    // AIGroupScanBudget.hpp for why, and for the one case that can exceed it (a group
+    // created inside Think(), which is what the clock was really catching).
+    Determinism::GroupScanBudget budget(NGroups());
 
     for (int i = 0; i < GroupsPerCycle;)
     {
+        if (budget.Exhausted())
+        {
+            break;
+        }
+
         // search for oldest non-updated group
         float maxAge = 0;
         AIGroup* maxGrp = nullptr;
@@ -516,11 +536,6 @@ void AICenter::UpdateGroup()
             i++;
         }
         maxGrp->_lastUpdateTime = _lastUpdateTime;
-        // guarantee no center takes too much CPU time
-        if (Foundation::CompareSectionTimeGE(sectionTime, maxTimePerCenter))
-        {
-            break;
-        }
     }
 }
 
