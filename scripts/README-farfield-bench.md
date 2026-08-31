@@ -58,6 +58,26 @@ Default mission is `tests/perf/missions/perf_abel.abel`. The other four in that 
 (`perf_combat.eden`, `perf_field.eden`, `perf_town.noe`, `perf_water.eden`) are drivable with
 `-Mission tests/perf/missions/perf_town.noe`.
 
+**Do not measure while anything else is building.** A background compile inflates the
+simulation roughly **fifteenfold** on `perf_combat` — measured, same build, same scene, same
+110 s warm-up:
+
+| | with two subagents compiling | idle |
+|---|---:|---:|
+| frame mean | 372 ms | **51.6 ms** |
+| `sim:step` per frame | 286 ms | **18.2 ms** |
+| tick rate | 40 of 60 | **60–63 of 60** |
+| catch-up steps discarded per second | 23–35 | **0** |
+
+That is enough to invent findings out of nothing: it produced a whole decision document
+claiming the AI stage cost 21–34 ms/tick and that the world ran at two thirds speed, both of
+which are artefacts (see the correction banner on `PERF-013`). The GPU-side figures move far
+less, which makes the trap worse — a loaded run looks plausible rather than obviously broken.
+
+Check before starting, not after a suspicious result: `tasklist | grep -iE "clang|ninja|rustc"`
+must be empty. The same applies to `scripts\Check-FrameEquivalence.ps1`, which under load
+reported a phantom regression in three innocent commits.
+
 **Choose the mission for the change you are measuring, and do not let the default choose for
 you.** These scenes are not interchangeable, and the default is the most GPU-bound of them:
 

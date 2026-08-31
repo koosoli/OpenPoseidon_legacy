@@ -1,5 +1,44 @@
 # PERF-013 — Inside the simulation loop: the AI stage is the engine's largest CPU cost
 
+> ## ⚠ CORRECTION, 2026-09-01: every number in this document below was taken on a loaded machine
+>
+> The runs this document is built on were made **while two subagents were compiling**. Re-measured
+> on an idle machine, same scene, same 110 s warm-up, same build:
+>
+> | | as published below | idle re-measurement |
+> |---|---:|---:|
+> | `sim:step` per frame | 286 ms | **18.2 ms** |
+> | frame mean | 372 ms | **51.6 ms** |
+> | AI per tick | 21–34 ms | **2.9 – 3.3 ms** |
+> | tick rate | 40 / 60 | **60 – 63 / 60** |
+> | catch-up steps discarded per second | 23 – 35 | **0** |
+>
+> **So both headline findings are withdrawn as stated.** The AI stage is *not* 21–34 ms/tick,
+> and the world does *not* run at two thirds speed — that was contention with a compiler,
+> which inflates the simulation roughly fifteenfold and pushes long frames past the
+> catch-up cap.
+>
+> **What survives, and it is the useful part:**
+> - The *structure* is right and is confirmed idle: within the tick, AI is the largest stage
+>   (2.9–3.3 ms of a 4.7–5.3 ms tick, ~63%), then Vehicles (1.37–1.48), then Visibility (0.46).
+>   The ranking is unchanged; only the magnitudes were wrong.
+> - The two profiler defects this document found are real and are fixed: `setup` hid the
+>   simulation loop, and `ai+veh`/`sound` had their regions swapped.
+> - `FixedStepAccumulator` now counts discarded steps, which is how the load artefact was
+>   caught at all. On an idle machine it reports zero, which is the honest reading.
+> - PERF-012's overlap ceilings were checked against the idle run and **hold**: frame 51.6 ms,
+>   swap 27.3 ms, `sim:step` 18.2 ms per frame, so the ceiling is still the swap at ~43%.
+>
+> The lesson is not subtle and it is now a rule in `scripts/README-farfield-bench.md`: **do not
+> measure while an agent is building.** I checked machine load *after* a suspicious result
+> rather than before taking the measurement, and the load had ended by then.
+>
+> The original text is kept below unedited, because a correction that erases what it corrects
+> teaches nothing.
+
+---
+
+
 **Date:** 2026-08-31
 **Branch:** `asset-obs-001`
 **Follows:** PERF-012 (the fixed-step loop is 48% of a combat frame)
