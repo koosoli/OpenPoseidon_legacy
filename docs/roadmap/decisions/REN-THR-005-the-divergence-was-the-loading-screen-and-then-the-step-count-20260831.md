@@ -102,10 +102,12 @@ arithmetically: it reads `Glob.uiTime`, which accumulates `noAccDeltaT = deltaT`
 (`World.cpp:174`, `:399`), and lockstep pins `deltaT`, so `uiTime` advances by a constant in
 this arm and cannot be what varies.
 
-Note the shape has inverted. Before alignment the 2D path appeared to *lead* the world by
-one frame, and a great deal of thought went into explaining that. It was an artefact of
-comparing runs that were at different points in their load. What is real is the opposite:
-with the pacing fixed, the world is stable and the 2D path is not.
+The "2D path leads the world by one frame" that REN-THR-003 reported, and that REN-THR-004
+was commissioned to explain, was an artefact of comparing runs at different points in their
+load. There is no lead. Aligned and counted, `verts` and `draws3d` disagree in 29 and 28
+frames of the same 40 — one divergence reaching both slices, arriving in the same frames.
+An agent spent a full audit on a phenomenon that a correctly placed window would have shown
+did not exist, which is the cost of a measurement stated more confidently than it was taken.
 
 ## What this does not say
 
