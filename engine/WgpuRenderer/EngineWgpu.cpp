@@ -7470,7 +7470,35 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     sl[0] = HashBytes(HashBytes(kBasis, &frame.clear, sizeof(frame.clear)), &frame.fog_color,
                       sizeof(frame.fog_color));
     sl[1] = HashSlice(kBasis, frame.cameras);
-    sl[2] = HashSlice(kBasis, frame.draws3d);
+    // SIM-816: the draw records carry mesh and texture HANDLES, and handle values ride
+    // asset-load completion order -- two bit-identical simulations legitimately label the
+    // same content differently. WGR_FRAME_HASH_MASK_IDS=1 hashes draws3d with those three
+    // fields zeroed, so "same frames" means "same content". Everything else in the record
+    // (transforms, materials, blend state, flags) still counts.
+    static const bool maskIds = []
+    {
+        const char* v = std::getenv("WGR_FRAME_HASH_MASK_IDS");
+        return v && v[0] && v[0] != '0';
+    }();
+    if (maskIds)
+    {
+        uint64_t h2 = kBasis;
+        const uint32_t n = frame.draws3d.length;
+        h2 = HashBytes(h2, &n, sizeof(n));
+        for (uint32_t i = 0; i < n; i++)
+        {
+            WgrDraw3D d = frame.draws3d.data[i];
+            d.mesh = 0;
+            d.texture_id = 0;
+            d.normal_texture_id = 0;
+            h2 = HashBytes(h2, &d, sizeof(d));
+        }
+        sl[2] = h2;
+    }
+    else
+    {
+        sl[2] = HashSlice(kBasis, frame.draws3d);
+    }
     sl[3] = HashSlice(kBasis, frame.verts);
     sl[4] = HashSlice(kBasis, frame.batches);
     sl[5] = HashSlice(kBasis, frame.cmds);
