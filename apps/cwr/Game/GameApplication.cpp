@@ -106,6 +106,63 @@ bool WriteCaptureMetrics(const std::string& path)
     cJSON_AddNumberToObject(root, "schema_version", 1);
     cJSON_AddStringToObject(root, "renderer", GEngine->GetRendererName().Data());
     cJSON_AddStringToObject(root, "runtime", GEngine->GetDebugName().Data());
+
+    // WHICH BINARY, AT WHAT RESOLUTION -- roadmap 3.1, first bullet: "every capture
+    // records the exe/DLL commit and the render resolution next to the numbers; a
+    // capture without both is not evidence."
+    //
+    // Until now this file recorded NEITHER. The bench script printed the deployed commit
+    // to its console, which is gone the moment the terminal scrolls, while the JSON --
+    // the thing that gets copied into a write-up and quoted weeks later -- carried only
+    // "Wgpu". That is precisely the shape of the 2026-08-22 failure, where a session
+    // measured a renderer 152 commits behind the installed one and wrote up every result
+    // as a fresh finding. A rule enforced by a script is enforced only while someone runs
+    // the script; put it in the artefact and a capture cannot exist without it.
+    //
+    // The version string comes through GetVersionString() rather than BuildInfo::GitSha
+    // directly, and that is not an accident: PoseidonBuildInfo regenerates the header on
+    // every build, but only the three translation units listed with OBJECT_DEPENDS in
+    // engine/Poseidon/CMakeLists.txt recompile when the sha changes. Version.cpp is one
+    // of them; this file is not. Including the header here would have baked in whatever
+    // sha was current the first time this file compiled -- a stale commit reported with
+    // total confidence, which is worse than no commit at all.
+    {
+        cJSON* build = cJSON_AddObjectToObject(root, "build");
+        cJSON_AddStringToObject(build, "version", GetVersionString().Data());
+
+        // Resolution, and both of them. Under an upscaler the render resolution and the
+        // output resolution differ, and a frame time means nothing without knowing which
+        // one it was produced at -- the farfield bench defaults to 800x600 and overstates
+        // play framerate by roughly 25% (3.1, second bullet), which is only detectable
+        // afterwards if the number is written down.
+        if (GEngine->SupportsTemporalTuning())
+        {
+            const auto ti = GEngine->GetTemporalInfo();
+            cJSON_AddNumberToObject(build, "render_width", ti.renderWidth);
+            cJSON_AddNumberToObject(build, "render_height", ti.renderHeight);
+            cJSON_AddNumberToObject(build, "output_width", ti.outputWidth);
+            cJSON_AddNumberToObject(build, "output_height", ti.outputHeight);
+            cJSON_AddNumberToObject(build, "msaa_samples", ti.msaaSamples);
+            static const char* kUpscalers[] = {"native", "dlss", "fsr1", "bilinear"};
+            const int u = (ti.activeUpscaler >= 0 && ti.activeUpscaler <= 3) ? ti.activeUpscaler : 0;
+            cJSON_AddStringToObject(build, "upscaler", kUpscalers[u]);
+            // dlss_route is "the NGX device came up at launch"; dlss_active is "it ran
+            // last frame". They come apart when nvngx_dlss.dll is missing beside the exe,
+            // and a run that silently fell back to native looked exactly like a reference
+            // run for long enough to produce two false bisects (see REN-TEMP-002).
+            cJSON_AddBoolToObject(build, "dlss_route", ti.dlssRoute);
+            cJSON_AddBoolToObject(build, "dlss_active", ti.dlssActive);
+            cJSON_AddNumberToObject(build, "dlss_quality", ti.dlssQuality);
+        }
+        else
+        {
+            // No temporal path (GL33, or WGR_HDR off): the window size is the whole story,
+            // and saying so beats omitting the field and leaving a reader to guess.
+            cJSON_AddNumberToObject(build, "output_width", GEngine->Width());
+            cJSON_AddNumberToObject(build, "output_height", GEngine->Height());
+            cJSON_AddStringToObject(build, "upscaler", "native");
+        }
+    }
     // Sized off kGpuRegionEnd, NOT a literal. This was `float timings[32]` while the region
     // count was 33, and wgr_get_gpu_timings clamps to out_len — so "Terrain: main colour" was
     // silently missing from EVERY capture ever written. A hardcoded buffer here does not fail

@@ -363,7 +363,16 @@ before/after acceptance test.
 Each of these has already produced wrong numbers at least once in this repository:
 
 - every capture records the exe/DLL commit (`DEPLOYED-FROM.txt`) and the render
-  resolution next to the numbers; a capture without both is not evidence;
+  resolution next to the numbers; a capture without both is not evidence.
+  **Enforced in the artefact since 2026-08-31**: `--capture-metrics` writes a `build{}`
+  block carrying the version string (which embeds the commit the running binary was
+  built from), render AND output resolution, MSAA sample count, the active upscaler, and
+  `dlss_route` / `dlss_active` separately. Until then the JSON recorded neither, and the
+  commit existed only in the bench script's console output, which is gone as soon as the
+  terminal scrolls. A rule enforced by a script is enforced only while somebody runs the
+  script. Sample from the first run that had it, which also settled what the bench had
+  actually been measuring: `version 3.05-f84ec7a-dev, render 2305x965, output 3441x1440,
+  msaa 4, upscaler dlss, dlss_active true`;
 - the farfield bench defaults to 800×600 and overstates play-resolution framerate by
   roughly 25% — its numbers must never be quoted as play performance;
 - one-shot GPU passes leave their timer regions registered, so `--capture-metrics`
