@@ -8417,10 +8417,34 @@ void EngineWgpu::PushSkyRuntime()
     tMoon.Normalize();
     const Color tFog = FogColor();
 
-    // Ease the coarse LightSun-driven inputs toward their live values each frame so the
-    // sun disc + horizon haze move smoothly instead of snapping every few seconds. Snap
-    // on the first push and on large jumps (teleport / time-skip) to avoid a slow sweep.
-    const float alpha = 0.1f;
+    // Ease the coarse LightSun-driven inputs toward their live values so the sun disc +
+    // horizon haze move smoothly instead of snapping every few seconds. Snap on the first
+    // push and on large jumps (teleport / time-skip) to avoid a slow sweep.
+    //
+    // THE RATE IS A TIME CONSTANT, NOT A PER-FRAME FRACTION. This was `alpha = 0.1f`
+    // applied once per frame, which makes the settling time a count of FRAMES: tau is ten
+    // frames, so the sky eased over 0.33 s at 30 fps and 0.083 s at 120 fps -- four times
+    // faster on a faster machine, for the same in-game event. render-snapshot-design.md
+    // §3b lists this under 5.1's "previous PRESENTED frame" contract as something to fix
+    // before interpolation; it is also simply wrong today, and visible as the sun disc and
+    // haze reacting at different speeds on different hardware.
+    //
+    // kSkySmoothTau is chosen so the behaviour at 60 fps is UNCHANGED to three decimals:
+    // 1 - exp(-(1/60)/0.1582) = 0.0999. A machine that was at 60 fps sees what it saw.
+    //
+    constexpr float kSkySmoothTau = 0.1582f;
+    const auto skyNow = std::chrono::steady_clock::now();
+    float alpha = 1.0f; // no previous step: snap
+    if (_skySmoothAt.time_since_epoch().count() != 0)
+    {
+        // Capped at one second. A loading screen or an alt-tab produces a dt of many
+        // seconds, and while alpha saturating to 1 there is harmless (it snaps, which is
+        // what you want after a stall), the cap keeps the value finite and the intent
+        // legible rather than relying on exp() underflow to do it.
+        const float dt = std::min(std::chrono::duration<float>(skyNow - _skySmoothAt).count(), 1.0f);
+        alpha = 1.0f - std::exp(-dt / kSkySmoothTau);
+    }
+    _skySmoothAt = skyNow;
     if (!_skyInit || tSun.DotProduct(_skySunDir) < 0.5f)
     {
         _skySunDir = tSun;

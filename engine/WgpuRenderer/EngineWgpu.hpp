@@ -558,6 +558,17 @@ class EngineWgpu : public EngineDummy
     // makes the sun disc + horizon haze stutter. PushSkyRuntime eases these toward the
     // live values each frame (snapping on init / large jumps). See procedural-sky-plan §9.
     bool _skyInit = false;
+    // When the sky smoothing last stepped, so its ease can be a TIME constant instead of a
+    // per-frame fraction. Zero-initialised time_point = "no previous step", treated as a snap.
+    //
+    // STEADY CLOCK, not the snapshot's `timeSeconds`, and the reason is precision. That field
+    // is `Glob.time.toFloat()` -- seconds since mission start, in a float -- so after four
+    // hours of play its representable step is about 1 ms and after eight it is 2 ms, against
+    // a 120 fps frame of 8 ms. The dt would quantise to something coarse and wrong LATE in a
+    // session and be fine early, which is the worst shape a bug can have. Pausing is not a
+    // problem for a real clock here: with the target constant the ease simply converges and
+    // stops, and a time skip is already handled by the large-jump snap.
+    std::chrono::steady_clock::time_point _skySmoothAt{};
     Vector3 _skySunDir;
     Vector3 _skyMoonDir;
     float _skyMoonPhase = 0.5f;
