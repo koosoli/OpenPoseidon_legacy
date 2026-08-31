@@ -763,6 +763,25 @@ class Landscape : public SerializeClass
     uint64_t _modernObjectColdTexPrepared = 0;
     uint64_t _modernObjectColdParkHits = 0;
     uint64_t _modernObjectColdParkStale = 0;
+    // WHICH BOUND STOPPED THE ADMIT LOOP (roadmap 1.3 "cap GPU uploads by bytes and/or
+    // milliseconds per frame"). The loop is governed by FIVE bounds -- a hard batch cap, a
+    // per-frame upload byte ceiling, a wall-clock ceiling, an ordinary time budget, and a
+    // floor that suppresses the ordinary budget until it is met -- and until these counters
+    // not one of them reported ever firing. Tuning any of them was therefore guesswork: the
+    // A/B that left the upload ceiling default-OFF had to be run as a whole-capture
+    // before/after because there was no way to ask the cheaper question, "did that ceiling
+    // stop a single update?".
+    //
+    // Counted once per residency update, on the FIRST bound that returns true -- that is the
+    // one that ends the update, and re-counting the same bound on every subsequent cell would
+    // make the tally a measure of how many cells the world has.
+    // `_modernObjectAdmitUpdates` is the denominator; updates that drained every candidate
+    // without hitting anything are `updates - (sum of the four)`.
+    uint64_t _modernObjectAdmitUpdates = 0;
+    uint64_t _modernObjectAdmitStopCap = 0;      // attempted >= admitCap
+    uint64_t _modernObjectAdmitStopUpload = 0;   // frame upload bytes >= WGR_OBJECT_STREAM_UPLOAD_MB
+    uint64_t _modernObjectAdmitStopCeiling = 0;  // elapsed >= WGR_OBJECT_STREAM_MAX_MS
+    uint64_t _modernObjectAdmitStopBudget = 0;   // elapsed >= the ordinary budget (only above the floor)
     // Ensure the preparer knows this world's model table; no-op if already current.
     void EnsureModernObjectPreparer();
     // Walk the desired set once per recentre and enqueue every distinct cold model in

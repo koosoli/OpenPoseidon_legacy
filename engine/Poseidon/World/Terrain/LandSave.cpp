@@ -2250,6 +2250,11 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectAsyncInstalled = 0;
         _modernObjectAsyncWaited = 0;
         _modernObjectSyncCold = 0;
+        _modernObjectAdmitUpdates = 0;
+        _modernObjectAdmitStopCap = 0;
+        _modernObjectAdmitStopUpload = 0;
+        _modernObjectAdmitStopCeiling = 0;
+        _modernObjectAdmitStopBudget = 0;
         _modernObjectColdModels = 0;
         _modernObjectColdParseMs = 0.0;
         _modernObjectColdAdaptMs = 0.0;
@@ -3482,12 +3487,31 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                Poseidon::Dev::GTextureStreamCounters().frameUploadBytes.load(std::memory_order_relaxed) >=
                    admitUploadBudgetBytes;
     };
+    // WHICH bound stopped this update. Recorded on the first true only: the loop keeps asking
+    // once a bound is spent (the outer cell loop re-enters), so counting every true would
+    // count cells, not stops. See the member declarations in Landscape.hpp.
+    ++_modernObjectAdmitUpdates;
+    bool admitStopRecorded = false;
     auto admitBudgetSpent = [&]
     {
         if (attempted >= admitCap)
+        {
+            if (!admitStopRecorded)
+            {
+                admitStopRecorded = true;
+                ++_modernObjectAdmitStopCap;
+            }
             return true;
+        }
         if (uploadBudgetSpent())
+        {
+            if (!admitStopRecorded)
+            {
+                admitStopRecorded = true;
+                ++_modernObjectAdmitStopUpload;
+            }
             return true;
+        }
         const auto elapsed = std::chrono::steady_clock::now() - admitStart;
         const float elapsedMs = std::chrono::duration<float, std::milli>(elapsed).count();
         if (attempted < admitFloor)
@@ -3504,11 +3528,33 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             // the guarantee that it always terminates -- and it is also the residual tail this
             // ceiling cannot remove, because that one object may be a cold model costing tens of
             // milliseconds. Removing THAT needs asynchronous admission.
-            return admitCeilingMs > 0.0f && attempted > 0 && elapsedMs >= admitCeilingMs;
+            const bool ceiling = admitCeilingMs > 0.0f && attempted > 0 && elapsedMs >= admitCeilingMs;
+            if (ceiling && !admitStopRecorded)
+            {
+                admitStopRecorded = true;
+                ++_modernObjectAdmitStopCeiling;
+            }
+            return ceiling;
         }
         if (admitCeilingMs > 0.0f && elapsedMs >= admitCeilingMs)
+        {
+            if (!admitStopRecorded)
+            {
+                admitStopRecorded = true;
+                ++_modernObjectAdmitStopCeiling;
+            }
             return true;
-        return elapsedMs >= admitBudgetMs;
+        }
+        if (elapsedMs >= admitBudgetMs)
+        {
+            if (!admitStopRecorded)
+            {
+                admitStopRecorded = true;
+                ++_modernObjectAdmitStopBudget;
+            }
+            return true;
+        }
+        return false;
     };
 
     // (d) THE ADMIT LOOP, WITH SKIP-NOT-WAIT.
@@ -3963,6 +4009,15 @@ void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCou
     out.coldTexPrepared = _modernObjectColdTexPrepared;
     out.parkHits = _modernObjectColdParkHits;
     out.parkStale = _modernObjectColdParkStale;
+    out.admitUpdates = _modernObjectAdmitUpdates;
+    out.admitStopCap = _modernObjectAdmitStopCap;
+    out.admitStopUpload = _modernObjectAdmitStopUpload;
+    out.admitStopCeiling = _modernObjectAdmitStopCeiling;
+    out.admitStopBudget = _modernObjectAdmitStopBudget;
+    // The armed flags come from the same accessors the admit loop reads, so a consumer that
+    // renders an unarmed bound as n/a cannot disagree with what the loop actually did.
+    out.admitUploadCeilingArmed = ObjectStreamUploadBudgetBytes() > 0;
+    out.admitWallCeilingArmed = ObjectStreamCeilingMs() > 0.0f;
     out.prepValid = _modernObjectPreparer && _modernObjectPreparer->Running();
     if (out.prepValid)
         out.prep = _modernObjectPreparer->SnapshotStats();

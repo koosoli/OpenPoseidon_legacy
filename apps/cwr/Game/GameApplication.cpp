@@ -346,6 +346,15 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(prep, "workers", p.workers);
             cJSON_AddNumberToObject(prep, "requested", (double)p.requested);
             cJSON_AddNumberToObject(prep, "rejected_full", (double)p.rejectedFull);
+            // Request dedup (roadmap 1.3). `coalesced` is asks that rode on an in-flight
+            // parse; `coalesced_stuck` is asks refused because the model is sticky
+            // NotLoose/Failed and the caller fell back to the synchronous path -- kept apart
+            // so a packed world's every-model-is-NotLoose case cannot read as a 99% hit rate.
+            cJSON_AddNumberToObject(prep, "coalesced", (double)p.coalesced);
+            cJSON_AddNumberToObject(prep, "coalesced_stuck", (double)p.coalescedStuck);
+            // The ready bound biting: workers parked with queue work in hand.
+            cJSON_AddNumberToObject(prep, "ready_full_parks", (double)p.readyFullParks);
+            cJSON_AddNumberToObject(prep, "ready_limit", (double)Poseidon::ObjectStreamPreparer::ReadyLimit());
             cJSON_AddNumberToObject(prep, "prepared", (double)p.prepared);
             cJSON_AddNumberToObject(prep, "taken", (double)p.taken);
             cJSON_AddNumberToObject(prep, "not_loose", (double)p.notLoose);
@@ -449,6 +458,21 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(res, "cold_tex_prepared", (double)r.coldTexPrepared);
             cJSON_AddNumberToObject(res, "park_hits", (double)r.parkHits);
             cJSON_AddNumberToObject(res, "park_stale", (double)r.parkStale);
+            // Which of the admit loop's bounds ended each update (roadmap 1.3). The four
+            // stop counters are disjoint and sum to at most `admit_updates`; the remainder
+            // are updates that drained every candidate on their own.
+            cJSON_AddNumberToObject(res, "admit_updates", (double)r.admitUpdates);
+            cJSON_AddNumberToObject(res, "admit_stop_cap", (double)r.admitStopCap);
+            cJSON_AddNumberToObject(res, "admit_stop_budget", (double)r.admitStopBudget);
+            // ABSENT, NOT ZERO, when the lever is off. A disabled ceiling and an armed
+            // ceiling that was never reached both produce 0, and they are opposite answers
+            // to "does this lever earn its place" -- the same failure as the dead
+            // per_object_kb column above. A reader who finds no key must go and look at
+            // the environment; a reader who finds 0 will conclude the lever is useless.
+            if (r.admitWallCeilingArmed)
+                cJSON_AddNumberToObject(res, "admit_stop_ceiling", (double)r.admitStopCeiling);
+            if (r.admitUploadCeilingArmed)
+                cJSON_AddNumberToObject(res, "admit_stop_upload", (double)r.admitStopUpload);
         }
     }
 

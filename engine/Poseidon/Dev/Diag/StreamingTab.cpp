@@ -15,6 +15,7 @@
 #endif
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdarg>
 
 namespace Poseidon::Dev
@@ -113,6 +114,18 @@ void DrawStreamingTab()
             Row("queued / ready now", "%zu / %zu", p.queued, p.ready);
             Row("requested", "%llu (%llu refused: queue full)", (unsigned long long)p.requested,
                 (unsigned long long)p.rejectedFull);
+            // Request dedup, and the ready bound's back-pressure. The percentage denominator
+            // is enqueued + coalesced, i.e. the asks that a working coalescer could have
+            // saved; sticky refusals (NotLoose/Failed -> synchronous fallback) are shown
+            // beside it rather than folded in, because they save no parse.
+            {
+                const unsigned long long asks = p.requested + p.coalesced;
+                Row("coalesced", "%llu (%.0f%% of %llu asks), %llu sticky", (unsigned long long)p.coalesced,
+                    asks ? 100.0 * (double)p.coalesced / (double)asks : 0.0, asks,
+                    (unsigned long long)p.coalescedStuck);
+            }
+            Row("ready-bound parks", "%llu (limit %zu)", (unsigned long long)p.readyFullParks,
+                ObjectStreamPreparer::ReadyLimit());
             Row("prepared / taken", "%llu / %llu", (unsigned long long)p.prepared, (unsigned long long)p.taken);
             Row("not loose / failed / dropped", "%llu / %llu / %llu", (unsigned long long)p.notLoose,
                 (unsigned long long)p.failed, (unsigned long long)p.dropped);
@@ -176,6 +189,23 @@ void DrawStreamingTab()
             (unsigned long long)r.coldTexPrepared);
         Row("model park hits / stale", "%llu / %llu", (unsigned long long)r.parkHits,
             (unsigned long long)r.parkStale);
+        // Which bound ended each admit update. A bound whose lever is off prints "n/a",
+        // never 0: 0-because-disabled and 0-because-never-reached are opposite answers to
+        // "is this lever earning its place".
+        Row("admit updates", "%llu (%llu drained fully)", (unsigned long long)r.admitUpdates,
+            (unsigned long long)(r.admitUpdates -
+                                 std::min(r.admitUpdates, r.admitStopCap + r.admitStopUpload +
+                                                              r.admitStopCeiling + r.admitStopBudget)));
+        Row("stopped by cap / budget", "%llu / %llu", (unsigned long long)r.admitStopCap,
+            (unsigned long long)r.admitStopBudget);
+        if (r.admitWallCeilingArmed)
+            Row("stopped by wall ceiling", "%llu", (unsigned long long)r.admitStopCeiling);
+        else
+            Row("stopped by wall ceiling", "%s", "n/a (WGR_OBJECT_STREAM_MAX_MS=0)");
+        if (r.admitUploadCeilingArmed)
+            Row("stopped by upload ceiling", "%llu", (unsigned long long)r.admitStopUpload);
+        else
+            Row("stopped by upload ceiling", "%s", "n/a (WGR_OBJECT_STREAM_UPLOAD_MB unset)");
         ImGui::EndTable();
     }
 }

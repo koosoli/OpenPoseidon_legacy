@@ -136,6 +136,24 @@ struct ObjectStreamResidencyCounters
     uint64_t coldTexPrepared = 0;
     uint64_t parkHits = 0;
     uint64_t parkStale = 0;
+    // WHICH OF THE ADMIT LOOP'S BOUNDS ACTUALLY BIT (roadmap 1.3 "cap GPU uploads by bytes
+    // and/or milliseconds per frame"). `admitUpdates` is the denominator; the four stop
+    // counters are disjoint (first bound to fire ends the update) and their sum is at most
+    // `admitUpdates` -- the remainder are updates that drained every candidate.
+    //
+    // THE TWO `*Armed` FLAGS ARE NOT DECORATION. Both the upload ceiling
+    // (WGR_OBJECT_STREAM_UPLOAD_MB, default OFF) and the wall-clock ceiling
+    // (WGR_OBJECT_STREAM_MAX_MS) can be switched off, and a disabled bound reports the same
+    // 0 as a bound that was armed and never reached. Those are opposite conclusions -- "this
+    // lever is not needed" vs "this lever is not on" -- so consumers MUST render an
+    // unarmed counter as n/a (panel) or omit the key entirely (JSON) rather than print 0.
+    uint64_t admitUpdates = 0;
+    uint64_t admitStopCap = 0;
+    uint64_t admitStopUpload = 0;
+    uint64_t admitStopCeiling = 0;
+    uint64_t admitStopBudget = 0;
+    bool admitUploadCeilingArmed = false;
+    bool admitWallCeilingArmed = false;
     bool prepValid = false; // async preparer exists (WGR_OBJECT_STREAM_ASYNC on and a world loaded)
     ObjectStreamPreparer::Stats prep;
 };
