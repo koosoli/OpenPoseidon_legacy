@@ -624,6 +624,10 @@ class Landscape : public SerializeClass
     // object budget is the bound, so a world smaller than the budget loads whole.
     int _modernObjectRadius = 64;
     uint32_t _modernObjectBudget = 20000;
+    // Phase 7: the item budget after the measured-GPU-cost clamp, and the last value
+    // logged, so the clamp reports each change once rather than every recentre.
+    uint32_t _modernObjectEffectiveBudget = 0;
+    uint32_t _modernObjectBudgetLogged = 0;
     uint32_t _modernObjectCreatesPerUpdate = 128;
     uint32_t _modernResidentObjectCount = 0;
     // Cadence counter for the residency progress row (see UpdateModernObjectResidency).

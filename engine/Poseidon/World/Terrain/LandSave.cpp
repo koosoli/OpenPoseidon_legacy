@@ -3002,6 +3002,71 @@ void Landscape::PrefetchModernObjectModels(const std::vector<ModernObjectCellCan
                  wanted.size(), alreadyWarm, requested, staleDropped);
 }
 
+// The item budget, clamped by what the GPU can actually hold (roadmap Phase 7:
+// "use CPU and GPU memory budgets rather than arbitrary item-count limits").
+//
+// `_modernObjectBudget` is a COUNT -- 20,000 placements -- and until the renderer's
+// budget became a measurement rather than a fixed 2 GB guess there was nothing
+// trustworthy to clamp it against. Now there is: the renderer probes the device's
+// device-local heap and takes a documented share of it. Measured on the 30 m/s
+// Everon traverse, 2026-08-31: 119.9 KB per resident object, so 20,000 items
+// promises ~2.3 GB -- comfortably inside the 5,611 MB probed on this machine, but
+// NOT inside a 4 GB card's share, and not on a texture-heavier corpus.
+//
+// The clamp therefore does nothing on hardware with room (it must not: shrinking a
+// resident set that fits is pop-in bought for nothing) and engages only when the
+// measured cost per object says the count would not fit. HYSTERESIS is the whole
+// point of the two water marks: releasing at the same threshold that admits would
+// let the set oscillate across a recentre boundary, which is precisely the
+// "repeatedly loaded and evicted" the roadmap names.
+//
+// Per-object cost is measured, not assumed: tracked bytes / resident objects, from
+// the renderer's own totals. Before anything is resident there is no measurement,
+// so the clamp stays out of the way until the sample is meaningful.
+static uint32_t GpuClampedObjectBudget(uint32_t itemBudget, uint32_t residentNow, uint32_t& lastEffective)
+{
+    // Opt-out for A/B and for anyone chasing a residency difference.
+    static const bool enabled = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_GPU_BUDGET");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled || !GEngine)
+        return itemBudget;
+    Engine::GpuMemoryStatsOut mem;
+    if (!GEngine->GetGpuMemoryStats(mem) || mem.budgetBytes == 0)
+        return itemBudget; // backend reports nothing (GL33): the count is all we have
+    // Need a real sample of what an object costs. `kMinSample` keeps a handful of
+    // cheap early objects from setting the average for the whole world.
+    constexpr uint32_t kMinSample = 2000;
+    if (residentNow < kMinSample || mem.trackedBytes == 0)
+        return itemBudget;
+    const uint64_t perObject = mem.trackedBytes / residentNow;
+    if (perObject == 0)
+        return itemBudget;
+    // Two marks, and the gap between them IS the hysteresis: shrink only when the
+    // projected cost of the FULL item budget passes the high mark, and only grow
+    // back once the projection falls under the low one.
+    const uint64_t high = mem.budgetBytes; // projected cost may not exceed the budget
+    const uint64_t low = mem.budgetBytes * 85 / 100;
+    const uint64_t projected = perObject * itemBudget;
+    uint32_t effective = lastEffective != 0 ? lastEffective : itemBudget;
+    if (projected > high)
+    {
+        // Fit the count to the budget, never below a floor that keeps the near
+        // window populated -- an empty world is worse than an over-budget one.
+        const uint64_t fits = mem.budgetBytes / perObject;
+        const uint32_t target = static_cast<uint32_t>(std::clamp<uint64_t>(fits, 2000u, itemBudget));
+        effective = std::min(effective, target);
+    }
+    else if (projected < low)
+    {
+        effective = itemBudget; // pressure gone: restore the configured count
+    }
+    lastEffective = effective;
+    return effective;
+}
+
 void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
 {
     if (!_modernObjectStreaming || _modernObjectCells.empty())
@@ -3190,6 +3255,18 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // rather than a ceiling. Worlds where the budget already binds (Stratis requests 19,998 of
     // 163,953 inside the first 64 cells, ChernarusPlus far sooner) never enter the loop and
     // keep their measured behaviour and memory exactly.
+    // Phase 7: the count, clamped by measured GPU cost (no-op when it fits).
+    const uint32_t effectiveBudget =
+        GpuClampedObjectBudget(_modernObjectBudget, _modernResidentObjectCount,
+                   _modernObjectEffectiveBudget);
+    if (effectiveBudget != _modernObjectBudget && effectiveBudget != _modernObjectBudgetLogged)
+    {
+        _modernObjectBudgetLogged = effectiveBudget;
+        LOG_INFO(World,
+             "Modern object residency: GPU budget clamps the item budget {} -> {} "
+             "(measured cost per resident object; WGR_OBJECT_STREAM_GPU_BUDGET=0 disables)",
+             _modernObjectBudget, effectiveBudget);
+    }
     if (rebuildCandidates)
     {
         const auto enclosedPlacements = [&](int radius)
@@ -3199,14 +3276,14 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             const int ex1 = std::min(_landRange, centerX + radius + 1);
             const int ez1 = std::min(_landRange, centerZ + radius + 1);
             uint64_t total = 0;
-            for (int z = ez0; z < ez1 && total < _modernObjectBudget; ++z)
+            for (int z = ez0; z < ez1 && total < effectiveBudget; ++z)
                 for (int x = ex0; x < ex1; ++x)
                     total += _modernObjectCells[static_cast<size_t>(z) * _landRange + x].size();
             return total;
         };
         int windowRadius = std::clamp(_modernObjectRadius, 1, _landRange);
         if (_modernObjectWindowGrowth)
-            while (windowRadius < _landRange && enclosedPlacements(windowRadius) < _modernObjectBudget)
+            while (windowRadius < _landRange && enclosedPlacements(windowRadius) < effectiveBudget)
                 windowRadius = std::min(_landRange, windowRadius * 2);
 
         const int x0 = std::max(0, centerX - windowRadius);
@@ -3251,7 +3328,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
         for (const CellCandidate& cell : candidates)
         {
             const uint32_t count = static_cast<uint32_t>(_modernObjectCells[cell.index].size());
-            if (requested != 0 && requested + count > _modernObjectBudget)
+            if (requested != 0 && requested + count > effectiveBudget)
                 break;
             _modernObjectCellDesired[cell.index] = 1;
             requested += count;
