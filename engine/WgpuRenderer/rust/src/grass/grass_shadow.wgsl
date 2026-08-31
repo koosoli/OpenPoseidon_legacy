@@ -224,14 +224,18 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
         let live_wash = (1.0 - smoothstep(grass.interactor_radius * 0.18, grass.interactor_radius, length(delta))) * crush;
         rotor_wash = max(cached_wash, live_wash);
     }
-    let blade = vertex_index / 30u;
+    // Indexed, mirroring grass.wgsl: `vertex_index` is an index value, and a five-segment
+    // blade has 12 distinct vertices rather than 30 draw slots. This shader, like the
+    // colour one, derives everything from the row and the side -- `left` at the lateral
+    // offset below is the only other use of `corner` -- so the duplicated quad corners
+    // were recomputing identical positions.
+    let blade = vertex_index / 12u;
     let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
-    let packed = vertex_index % 30u;
-    let segment = packed / 6u;
-    let corner = packed % 6u;
-    let upper = corner == 2u || corner == 4u || corner == 5u;
-    let left = corner == 0u || corner == 3u || corner == 5u;
-    let t = f32(segment + select(0u, 1u, upper)) / 5.0;
+    
+    let packed = vertex_index % 12u;
+    let row = packed / 2u;
+    let left = (packed % 2u) == 0u;
+    let t = f32(row) / 5.0;
     let archetype = u32(seed * 4.0);
     let clump_height = select(select(select(0.60, 0.75, archetype == 1u), 0.52, archetype == 2u), 0.90, archetype == 3u);
     let clump_spread = select(select(select(0.10, 0.20, archetype == 1u), 0.28, archetype == 2u), 0.14, archetype == 3u);

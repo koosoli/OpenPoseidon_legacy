@@ -2266,11 +2266,13 @@ impl Grass {
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
-        pass.draw_indirect(&self.indirect, 0);
+        pass.set_index_buffer(self.near_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.indirect, 0);
         if self.tuft_enabled {
             pass.set_pipeline(&self.tuft_shadow_pipeline);
             pass.set_bind_group(2, &self.mid_data_bind, &[]);
-            pass.draw_indirect(&self.mid_indirect, 0);
+            pass.set_index_buffer(self.mid_index.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed_indirect(&self.mid_indirect, 0);
         }
         timers.end_pass(pass, Region::GrassShadow);
     }
