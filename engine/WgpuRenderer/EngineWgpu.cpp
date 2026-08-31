@@ -2505,10 +2505,28 @@ void EngineWgpu::PushSceneCamera()
             // Draw distance + lodInvWidth come from the presentation snapshot (captured at
             // InitDraw): they are frame-constant scene state, unlike the camera pulls above,
             // which UpdateProjection() legitimately re-reads mid-draw (MAT-052).
+            // SNAPSHOT ONLY -- no live fallback. This read used to be
+            // `snap.hasScene ? snap.objectDrawDistance : GScene->GetObjectDrawDistance()`,
+            // and the fallback was three things at once, all bad:
+            //
+            //   * a live read of world state from the render path, which is precisely what
+            //     Phase 5 exists to remove and what becomes a data race the moment the
+            //     renderer has its own thread -- `_lodInvWidth` is written DURING the draw by
+            //     the framerate governor (SceneDraw.cpp:1176, :1198), so it is the one field
+            //     POSEIDON_SNAPSHOT_VALIDATE=1 reports as an intra-frame mutator;
+            //   * unreachable in the good case, since `hasScene` is exactly "GScene was
+            //     non-null at capture";
+            //   * a null dereference in the bad one -- if GScene was null at capture and is
+            //     still null now, the fallback dereferences it.
+            //
+            // With no scene there is nothing to cull, so skipping the push is the honest
+            // behaviour rather than pushing zeroes and culling everything.
             const auto& snap = render::frame::GPresentationSnapshot();
-            const float drawDistance = snap.hasScene ? snap.objectDrawDistance : GScene->GetObjectDrawDistance();
-            const float lodInvWidth = snap.hasScene ? snap.lodInvWidth : GScene->GetLodInvWidth();
-            wgr_set_cull_params(_renderer, drawDistance, static_cast<float>(camera->Left()), lodInvWidth, 0.125f);
+            if (snap.hasScene)
+            {
+                wgr_set_cull_params(_renderer, snap.objectDrawDistance, static_cast<float>(camera->Left()),
+                                    snap.lodInvWidth, 0.125f);
+            }
         }
         if (_gpuDriven && _renderer)
         {
