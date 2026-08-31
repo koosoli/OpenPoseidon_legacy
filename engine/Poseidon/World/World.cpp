@@ -8,6 +8,7 @@
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/World/SimStageGraph.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -1912,56 +1913,112 @@ void World::Simulate(float deltaT, bool& enableDraw)
 #endif
 }
 
+// SIM-811 / roadmap Phase 8 step 10S. The order of a tick is `Sim::kSimStageOrder` --
+// data, in World/SimStageGraph.hpp, next to the resource declarations that say which
+// stage produces what the next one reads. The bodies live here; the SEQUENCE does not.
+//
+// This is the serial graph and nothing more. One thread, no barriers, no scheduler, and
+// the stages run in exactly the order the call sequence used to run them in -- SIM-810
+// recorded that order first precisely so this change could not quietly alter it. In
+// particular scripts still run BEFORE the AI, which is where the engine has always put
+// them and where Phase 8's diagram does not; see the note in SimStageGraph.hpp.
 void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicle, bool updateVisibility)
 {
-    // Keep the world clock, weather and wind in the same tick as the vehicles
-    // that consume them. Rendering observes the most recently completed tick.
-    Glob.time += deltaT;
-    SimulateLandscape(deltaT);
-
-    // Opt-in (POSEIDON_FIXEDSTEP_SCRIPTS / the Fixed Step tab). Placed after the
-    // clock so a script observing `time` sees this tick's value, and before the AI
-    // so orders a script issues are acted on within the same tick rather than the
-    // next one. Off by default -- see the note on FixedStepScriptsEnabled().
-    if (Dev::FixedStepScriptsEnabled())
+    struct StepContext
     {
-        SimulateScripts();
+        World*  world;
+        float   deltaT;
+        float   noAccDeltaT;
+        Entity* cameraVehicle;
+    };
+
+    StepContext context{this, deltaT, noAccDeltaT, cameraVehicle};
+
+    std::uint32_t enabled = Sim::kAllSimStages;
+    // Opt-in (POSEIDON_FIXEDSTEP_SCRIPTS / the Fixed Step tab), off by default -- see
+    // the note on FixedStepScriptsEnabled().
+    if (!Dev::FixedStepScriptsEnabled())
+    {
+        enabled &= ~Sim::SimStageMask(Sim::SimStage::Scripts);
+    }
+    // The Ctrl-Y cheat toggle. True in normal play.
+    if (!updateVisibility)
+    {
+        enabled &= ~Sim::SimStageMask(Sim::SimStage::Visibility);
+    }
+    // No physics world, no physics stage. `GetPhysicsWorld` is a plain accessor over a
+    // global, so asking here rather than inside the stage costs nothing and keeps the
+    // executed trace honest about what actually ran.
+    if (Physics::GetPhysicsWorld() == nullptr)
+    {
+        enabled &= ~Sim::SimStageMask(Sim::SimStage::Physics);
     }
 
+    Sim::RunSimStagesSerial(enabled, &context,
+                            [](void* ctx, Sim::SimStage stage)
+                            {
+                                StepContext& step = *static_cast<StepContext*>(ctx);
+                                World&       world = *step.world;
+
+                                switch (stage)
+                                {
+                                case Sim::SimStage::Clock:
+                                    // Keep the world clock, weather and wind in the same tick as the
+                                    // vehicles that consume them. Rendering observes the most recently
+                                    // completed tick.
+                                    Glob.time += step.deltaT;
+                                    world.SimulateLandscape(step.deltaT);
+                                    break;
+
+                                case Sim::SimStage::Scripts:
+                                    // After the clock so a script observing `time` sees this tick's
+                                    // value, and before the AI so orders a script issues are acted on
+                                    // within the same tick rather than the next one.
+                                    world.SimulateScripts();
+                                    break;
+
+                                case Sim::SimStage::AI:
 #if BACKGROUND_AI
-    _secThread->FinishSecondary();
+                                    world._secThread->FinishSecondary();
 #else
-    PerformAI(deltaT, noAccDeltaT);
+                                    world.PerformAI(step.deltaT, step.noAccDeltaT);
 #endif
-    SimulateAllVehicles(deltaT, noAccDeltaT, cameraVehicle);
+                                    break;
 
-    if (updateVisibility)
-    {
-        GetSensorList()->SmartUpdateAll();
-    }
+                                case Sim::SimStage::Vehicles:
+                                    world.SimulateAllVehicles(step.deltaT, step.noAccDeltaT, step.cameraVehicle);
+                                    break;
 
-    // PHY-020: exactly one physics step per fixed simulation tick. Deliberately
-    // NOT its own accumulator -- a second clock would drift against this one and
-    // reintroduce the frame-rate dependence the whole ARCH-001 item removed. It
-    // also inherits the catch-up cap and the pause behaviour for free.
-    if (Physics::PhysicsWorld* physics = Physics::GetPhysicsWorld())
-    {
-        // The proxy moves BEFORE the step, so its sweep is resolved in the same
-        // tick as the bodies it pushes. Moving it after would leave every shove
-        // one tick late and make contacts look sticky.
-        // The PLAYER, not the camera's vehicle. In free-fly there is no camera
-        // vehicle at all, so the proxy silently never moved -- which reads exactly
-        // like "objects ignore me".
-        if (Person* player = PlayerOn())
-        {
-            Dev::UpdatePhysicsPlayerProxy(player->WorldTransform().Position());
-        }
-        else if (cameraVehicle)
-        {
-            Dev::UpdatePhysicsPlayerProxy(cameraVehicle->WorldTransform().Position());
-        }
-        physics->Step(deltaT);
-    }
+                                case Sim::SimStage::Visibility:
+                                    world.GetSensorList()->SmartUpdateAll();
+                                    break;
+
+                                case Sim::SimStage::Physics:
+                                    // PHY-020: exactly one physics step per fixed simulation tick.
+                                    // Deliberately NOT its own accumulator -- a second clock would
+                                    // drift against this one and reintroduce the frame-rate dependence
+                                    // the whole ARCH-001 item removed. It also inherits the catch-up
+                                    // cap and the pause behaviour for free.
+                                    //
+                                    // The proxy moves BEFORE the step, so its sweep is resolved in the
+                                    // same tick as the bodies it pushes. Moving it after would leave
+                                    // every shove one tick late and make contacts look sticky.
+                                    // The PLAYER, not the camera's vehicle. In free-fly there is no
+                                    // camera vehicle at all, so the proxy silently never moved --
+                                    // which reads exactly like "objects ignore me".
+                                    if (Person* player = world.PlayerOn())
+                                    {
+                                        Dev::UpdatePhysicsPlayerProxy(player->WorldTransform().Position());
+                                    }
+                                    else if (step.cameraVehicle)
+                                    {
+                                        Dev::UpdatePhysicsPlayerProxy(
+                                            step.cameraVehicle->WorldTransform().Position());
+                                    }
+                                    Physics::GetPhysicsWorld()->Step(step.deltaT);
+                                    break;
+                                }
+                            });
 }
 
 void World::HandleVoiceChatShortcuts()
