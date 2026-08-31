@@ -308,6 +308,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_render_frame_stats.cpp
     Graphics/Rendering/test_render_frame_perf_budget.cpp
     Graphics/Rendering/test_render_frame_runtime_checks.cpp
+    Graphics/Rendering/test_presentation_snapshot_ring.cpp
     Graphics/Rendering/test_cloudlet_depth_contract.cpp
 
     # Rendering tests (batch-07)

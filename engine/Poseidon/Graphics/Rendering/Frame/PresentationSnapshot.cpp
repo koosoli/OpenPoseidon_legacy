@@ -13,7 +13,11 @@
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
+#include <Poseidon/Dev/Diag/SnapshotDiag.hpp>
+
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdlib>
 #include <vector>
 #include <Poseidon/World/Terrain/Landscape.hpp>
@@ -23,10 +27,51 @@
 namespace Poseidon::render::frame
 {
 
-PresentationSnapshot& GPresentationSnapshot()
+// --- The ring ----------------------------------------------------------------------
+//
+// kPresentationSnapshotRingSize slots plus an index saying which one is published. A
+// publish fills the OTHER slot and then flips the index, so the storage a consumer is
+// reading is never the storage the producer is writing. See the header for why two.
+//
+// The index is atomic and the flip is a release store even though everything here runs
+// on the main thread today: the flip is the exact point that will become the
+// publication edge when step 6 moves the consumer to its own thread, and writing it as
+// a relaxed int now would mean finding this line again later by memory. It costs
+// nothing single-threaded.
+static std::array<PresentationSnapshot, kPresentationSnapshotRingSize>& GRing()
 {
-    static PresentationSnapshot snapshot;
-    return snapshot;
+    static std::array<PresentationSnapshot, kPresentationSnapshotRingSize> ring;
+    return ring;
+}
+
+static std::atomic<int>& GCurrentSlot()
+{
+    static std::atomic<int> slot{0};
+    return slot;
+}
+
+// Monotonic publish counter and the resource-lifetime epoch stamped onto each publish.
+static uint64_t GGeneration = 0;
+static uint32_t GResourceEpoch = 0;
+
+const PresentationSnapshot& GPresentationSnapshot()
+{
+    return GRing()[GCurrentSlot().load(std::memory_order_acquire)];
+}
+
+int PresentationSnapshotSlotIndex()
+{
+    return GCurrentSlot().load(std::memory_order_acquire);
+}
+
+const PresentationSnapshot& PresentationSnapshotSlot(int index)
+{
+    return GRing()[index % kPresentationSnapshotRingSize];
+}
+
+void BumpPresentationResourceEpoch()
+{
+    ++GResourceEpoch;
 }
 
 // The one place live global state is read. Shared by the per-frame capture and by the
@@ -226,23 +271,77 @@ static void FillPresentationSnapshot(PresentationSnapshot& snap)
 // snapshot" from "nobody has" without a frame counter. Main thread only.
 static bool GSnapshotFresh = false;
 
+void PublishPresentationSnapshot(const PresentationSnapshot& snap)
+{
+    Dev::SnapshotCounters& diag = Dev::GSnapshotCounters();
+
+    // 5.3's bounded-queue rule, enforced in structure. The ring cannot grow, so a
+    // producer that outran the consumer does not queue -- it DROPS the un-retired
+    // snapshot by overwriting the slot behind it. That drop is the event worth
+    // counting: it is zero by construction while producer and consumer are the same
+    // thread and strictly alternate, and it is the first thing that will move if step 6
+    // gets the handoff wrong. Counted here rather than asserted because a legitimate
+    // second publish within one frame (world up mid-menu-frame) must not crash a
+    // release build.
+    if (GSnapshotFresh)
+        ++diag.publishedWithoutConsume;
+
+    // Write the slot that is NOT current, then flip. Reset to defaults first: the slot
+    // holds an older frame's values, and FillPresentationSnapshot only assigns the
+    // fields whose source is present (the has* pattern), so a stale light array or
+    // rotor list would otherwise survive into a frame that has none.
+    const int next = (GCurrentSlot().load(std::memory_order_relaxed) + 1) % kPresentationSnapshotRingSize;
+    PresentationSnapshot& slot = GRing()[next];
+    slot = snap;
+    slot.generation = ++GGeneration;
+    slot.resourceEpoch = GResourceEpoch;
+    GCurrentSlot().store(next, std::memory_order_release);
+    GSnapshotFresh = true;
+
+    ++diag.published;
+    diag.ringSize = static_cast<uint32_t>(kPresentationSnapshotRingSize);
+    diag.resourceEpoch = GResourceEpoch;
+}
+
 void CapturePresentationSnapshot()
 {
     PresentationSnapshot snap; // defaults = the values the consuming sites used with no world up
     FillPresentationSnapshot(snap);
-    GPresentationSnapshot() = snap;
-    GSnapshotFresh = true;
+    PublishPresentationSnapshot(snap);
 }
 
 void CapturePresentationSnapshotIfStale()
 {
     if (!GSnapshotFresh)
+    {
         CapturePresentationSnapshot();
+        ++Dev::GSnapshotCounters().fallback;
+    }
 }
 
 void RetirePresentationSnapshot()
 {
+    if (GSnapshotFresh)
+    {
+        Dev::SnapshotCounters& diag = Dev::GSnapshotCounters();
+        ++diag.consumed;
+        // Age, in publishes, of what was consumed. Always 0 today (one publish, one
+        // retire, same thread); nonzero after step 6 means presentation is that many
+        // frames behind simulation, which is 5.3's "snapshot age" gauge.
+        diag.consumedAge = GGeneration - GPresentationSnapshot().generation;
+    }
     GSnapshotFresh = false;
+}
+
+void ResetPresentationSnapshotRingForTest()
+{
+    for (PresentationSnapshot& slot : GRing())
+        slot = PresentationSnapshot{};
+    GCurrentSlot().store(0, std::memory_order_release);
+    GGeneration = 0;
+    GResourceEpoch = 0;
+    GSnapshotFresh = false;
+    Dev::GSnapshotCounters() = Dev::SnapshotCounters{};
 }
 
 // POSEIDON_SNAPSHOT_VALIDATE=1 — the correctness oracle the design doc's validation

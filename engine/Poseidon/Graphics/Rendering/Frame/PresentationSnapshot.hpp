@@ -22,12 +22,39 @@
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Graphics/Rendering/Colors.hpp>
 
+#include <cstdint>
+
 namespace Poseidon::render::frame
 {
 
 struct PresentationSnapshot
 {
     bool valid = false;
+
+    // --- Identity (roadmap 5.1: "snapshot generation and resource-lifetime epoch") ----
+
+    // Monotonic count of publishes since process start. 0 means "never published"; the
+    // first published snapshot is generation 1, and every later publish is strictly
+    // greater. This is what lets a consumer say WHICH frame's values it is holding
+    // rather than only "the current ones" -- the property the ring below exists to make
+    // meaningful, and the one a render thread will key its temporal history off when
+    // step 6 stops guaranteeing one publish per consume.
+    uint64_t generation = 0;
+
+    // Resource-lifetime epoch. Bumped when the set of GPU-visible resources a snapshot
+    // may reference is invalidated WHOLESALE -- world unload, device loss, renderer
+    // restart -- so an in-flight snapshot stamped with an older epoch can be rejected
+    // instead of dereferencing handles that no longer name anything.
+    //
+    // SEAM, NOT YET FED: nothing bumps this today, deliberately. The snapshot currently
+    // carries no resource handles at all -- every field is a scalar or a by-value light
+    // / rotor record, copied out of live state at capture -- so there is nothing an
+    // epoch could invalidate, and wiring a producer now would mean inventing a fake
+    // one. The field is stamped on every publish and echoed into the diagnostics so
+    // that when §4's stable render-object IDs land and the snapshot starts carrying
+    // handles, the only work is calling BumpPresentationResourceEpoch() from the
+    // invalidation points; the ABI and the plumbing are already here.
+    uint32_t resourceEpoch = 0;
 
     // GScene: distance fog, plus the object-cull/LOD inputs PushSceneCamera feeds the
     // GPU cull (Scene::LevelFromDistance2's shared values). Frame-constant; the camera
@@ -127,10 +154,42 @@ struct PresentationSnapshot
     LocalLight lights[kMaxLights] = {};
 };
 
-// The one instance. Main thread only, rewritten every frame.
-PresentationSnapshot& GPresentationSnapshot();
+// --- The ring (roadmap Phase 5 step 5, "double- or triple-buffer the snapshots") -----
+//
+// WHY TWO AND NOT THREE. Publishing used to overwrite one global instance in place,
+// which means a consumer holding a reference to it was reading the same storage the
+// next publish would scribble on. That is fine while the producer (World::Simulate) and
+// the consumer (the render path) are the same thread and strictly alternate -- but it
+// is the exact invariant step 6 breaks, and it cannot be reasoned about locally because
+// the reference escapes to ~30 read sites across three renderer files.
+//
+// Two slots make the writer's target disjoint from the reader's source: a publish fills
+// the slot that is NOT current, then flips the index, so a `const PresentationSnapshot&`
+// taken at the top of a frame stays valid and unmodified for that whole frame no matter
+// what the producer does. That is the property worth having now.
+//
+// A third slot buys nothing until the producer may run AHEAD of the consumer -- i.e.
+// until step 7's simulation/render overlap, where a producer that is one frame ahead
+// needs a slot to write while the consumer holds one and a third holds the newest
+// complete result. Today the producer cannot run ahead (it calls InitDraw itself, on the
+// same thread), so a third slot would only add a snapshot's worth of storage and, worse,
+// absorb the "published without being consumed" event that 5.3 asks us to keep VISIBLE.
+// Raise this when the threads split and the diagnostics show the drop; not before.
+inline constexpr int kPresentationSnapshotRingSize = 2;
 
-// Fill the instance from live globals. Null-safe: with no world/scene up, the has*
+// The current published snapshot. Const: consumers read, they never write, and taking
+// one reference for the whole frame is the intended usage. Before any publish this
+// returns a default-constructed snapshot (valid == false, generation == 0), which is
+// exactly the state the consuming sites already handled for "no world up".
+const PresentationSnapshot& GPresentationSnapshot();
+
+// Publish a snapshot the caller has already filled: writes the next ring slot, stamps
+// generation and the resource epoch, then flips the current index. Separated from the
+// capture below so a test (and, later, a world-side producer that builds the value
+// itself) can drive the ring without live globals.
+void PublishPresentationSnapshot(const PresentationSnapshot& snap);
+
+// Fill from live globals and publish. Null-safe: with no world/scene up, the has*
 // flags stay false and every field keeps the default the consuming sites used.
 // Phase 5 step 1: the WORLD calls this at the simulation/draw boundary
 // (World::Simulate, right before GEngine->InitDraw) — simulation publishes,
@@ -145,6 +204,24 @@ void CapturePresentationSnapshotIfStale();
 // Marks the frame's snapshot consumed; the next InitDraw with no world-side capture
 // re-captures instead of serving a previous frame's values. Called at FinishDraw.
 void RetirePresentationSnapshot();
+
+// Bump the resource-lifetime epoch: every snapshot published after this call is stamped
+// with the new value, and any snapshot still in flight with the old one names resources
+// that may no longer exist. See PresentationSnapshot::resourceEpoch — NOTHING CALLS THIS
+// YET, by design; it is the declared producer end of that seam so the invalidation
+// points have something to call the day the snapshot starts carrying handles.
+void BumpPresentationResourceEpoch();
+
+// Ring introspection. For tests and diagnostics only — the frame path uses
+// GPresentationSnapshot(). `PresentationSnapshotSlot` indexes the raw ring so a test can
+// prove slot REUSE (that publish N+kRingSize lands back in publish N's storage) rather
+// than only that the accessor returns something plausible.
+int PresentationSnapshotSlotIndex();
+const PresentationSnapshot& PresentationSnapshotSlot(int index);
+
+// Tests only: clears the ring, the generation counter, the epoch, the freshness flag
+// and the diagnostics counters, so ordering assertions do not depend on what ran first.
+void ResetPresentationSnapshotRingForTest();
 
 // POSEIDON_SNAPSHOT_VALIDATE=1: re-read the live values at end of draw and log every
 // field that changed since capture — the intra-frame-constancy oracle. No-op when the

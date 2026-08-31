@@ -8,6 +8,11 @@
 > S3, and the 30 m/s traverse (resident 19992, fps unchanged) for S4. Open: S5
 > (per-draw context globals), the camera pulls inside push-side `PushSceneCamera`,
 > load-time latches — and §4's stable IDs, which are the next milestone.
+>
+> **Status 2026-08-31: Phase 5 step 5 is done** — the single instance is now a
+> two-slot ring with a monotonic `generation`, a stamped-but-unfed `resourceEpoch`
+> seam, and the 5.3 bounded-queue counters. See §3b for what was built and, more to
+> the point, the four things that still block step 6.
 
 **Status:** design grounded in a complete inventory of what the WGPU renderer reads
 from live state today (2026-08-30, `asset-obs-001`; all citations verified there).
@@ -88,6 +93,88 @@ Executable slices, each independently buildable and testable:
 Validation: a debug mode that, for N frames, reads both snapshot and live values and
 asserts equality — the same post-hoc-observer pattern `render::frame::SceneInputs`
 already established (`SceneInputs.hpp:46-86`, filled at `World.cpp:1685`).
+
+## 3b. Step 5 (double-buffering) — done 2026-08-31
+
+Roadmap Phase 5 step 5 and 5.1's "snapshot generation and resource-lifetime epoch"
+bullet are implemented. Structural only: same values, same capture point, same
+fallback and retire semantics, no consumer rewritten.
+
+**What is there now.**
+
+- **A ring of `kPresentationSnapshotRingSize = 2` snapshots** replaces the single
+  global instance. A publish fills the slot that is *not* current and then flips an
+  atomic index (release store), so the storage a consumer reads is never the storage
+  the producer writes. `GPresentationSnapshot()` still returns the current published
+  snapshot — now as `const&` — so the ~30 renderer read sites are untouched.
+  Two and not three: the producer cannot run ahead of the consumer today (it calls
+  `InitDraw` itself, on the same thread), so a third slot would only add storage and
+  would *absorb* the drop event 5.3 wants visible. Raise it at step 7's overlap.
+- **`generation`** — a monotonic publish counter stamped at flip time. 0 means never
+  published; strictly increases across a wrap, so recycled slot storage never means
+  recycled identity. This is what a render thread will key temporal history off once
+  step 6 stops guaranteeing one publish per consume.
+- **`resourceEpoch`** — stamped from the ring on every publish, echoed to the
+  diagnostics, bumped by `BumpPresentationResourceEpoch()`. **Nothing calls the bump
+  yet, deliberately.** The snapshot carries no resource handles — every field is a
+  scalar or a by-value light/rotor record — so there is nothing an epoch could
+  invalidate, and inventing a producer would mean inventing a fake one. It is a
+  declared seam: when §4's stable render-object IDs land and handles enter the
+  snapshot, the work is calling the bump from the invalidation points, not changing
+  the shape.
+- **The 5.3 bound, enforced in structure and made observable.** The ring cannot grow,
+  so a producer that outran the consumer does not queue — it drops the un-retired
+  snapshot by overwriting the slot behind it. `Poseidon::Dev::GSnapshotCounters()`
+  (`Dev/Diag/SnapshotDiag.hpp`, the `StreamingDiag`/`LightingDiag` pattern) carries
+  `published`, `consumed`, `fallback`, `publishedWithoutConsume`, `consumedAge`,
+  `ringSize` and `resourceEpoch`. `publishedWithoutConsume` and `consumedAge` are 0 by
+  construction on today's synchronous path; they are the first counters that will move
+  if step 6 gets the handoff wrong.
+- **Tests** — `tests/unit/engine/Poseidon/Graphics/Rendering/test_presentation_snapshot_ring.cpp`,
+  driven through `PublishPresentationSnapshot()` so no world, scene or renderer is
+  needed. They assert slot *reuse order* (publish *i* and *i*+2 share storage,
+  consecutive publishes do not), strictly increasing generation across a wrap, that a
+  reference held across a later publish is unmodified — the property the in-place
+  overwrite did not have — and the drop counter.
+
+**API delta:** `GPresentationSnapshot()` returns `const&` (was mutable `&`); new
+`PublishPresentationSnapshot`, `BumpPresentationResourceEpoch`,
+`PresentationSnapshotSlotIndex`, `PresentationSnapshotSlot`,
+`ResetPresentationSnapshotRingForTest`, and `kPresentationSnapshotRingSize`.
+
+### What still blocks step 6 (render thread)
+
+The ring removes the *storage* hazard. Four things are still same-thread by
+construction, and each has to be answered before renderer preparation can move off the
+main thread:
+
+1. **The pull set is not closed.** The snapshot is the environment block, the
+   interactors and the light set. The camera *matrices* are still live pulls inside
+   push-side `PushSceneCamera` — deliberately, because `UpdateProjection()` legitimately
+   changes the projection mid-draw (MAT-052 cockpit zSpace) — and `lodInvWidth` is
+   still mutated intra-frame by Pass1's framerate governor. `POSEIDON_SNAPSHOT_VALIDATE=1`
+   names `lodInvWidth` as the only steady-state intra-frame mutator; on a render thread
+   that stops being a benign in-frame adjustment and becomes a data race.
+2. **S5 is deferred, and step 6 is where it comes due.** The world→renderer handoff of
+   `GCurrentConformPlane` / `GCurrentIsVegetation` / `GCurrentFoliageKind` is a
+   same-thread transient global with save/restore nesting (`Object::Draw`, `ForestPlain`,
+   `SceneShadowPass`). Recording draws off the main thread forces them to become
+   parameters, threaded through the `Shape::Draw` override fan-out across both backends.
+3. **No stable render-object IDs (§4).** Three unrelated, non-generation-checked
+   schemes — raw `Object*` map keys, the 16-bit draw-sort id, and Rust's recycled
+   retained-instance free list. All three are safe today only because deletion and
+   rendering cannot interleave. They are also what `resourceEpoch` is waiting on: an
+   epoch has nothing to guard until the snapshot carries handles.
+4. **The push path itself is not double-buffered.** The ring covers the *pull* set;
+   the per-frame vectors on `EngineWgpu` (`_draws3d`, `_verts`, `_cmds`, `_palette`,
+   `_cameras`, `_shadowCasters`) are still cleared in `InitDraw` and appended to by the
+   world traversal on the same thread. Step 6 needs the same slot-and-flip treatment
+   applied to `WgrFrame`'s backing storage, or the world will be pushing into the
+   buffers Rust is reading.
+
+Beyond those: skin-palette keying is still per-frame submission order (`:2725`) and the
+sky EMA is frame-rate dependent (`:8276-8302`) — 5.1's "previous *presented* frame"
+contract needs both fixed before interpolation (step 8), though neither blocks step 6.
 
 ## 4. Identity: what 5.1's "stable render-object ID" must replace
 
