@@ -21,7 +21,7 @@ ceiling = min(simulation-side CPU work, time spent in swap)
 
 per frame, and it is a **ceiling**: real handoff costs, and any serialisation the queues
 impose, come out of it. Phases from `--capture-metrics`'s `cpu_frame_phases_ms`, which is a
-256-frame ring; simulation-side is `setup` + `ai+veh` + `sound`, and `swap` is the present
+256-frame ring; simulation-side is `setup` + `ai+veh` + `sound` (and, after the addendum below, `sim:step`), and `swap` is the present
 call. Two runs per scene, `WGR_DLSS=0`, 1600×900.
 
 ## Result

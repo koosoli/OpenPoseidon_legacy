@@ -1,3 +1,4 @@
+#include <chrono>
 #include "SimStageGraph.hpp"
 
 // The declarations below were read off the call sites in World.cpp (SIM-810's table),
@@ -218,18 +219,24 @@ SimStageTrace RunSimStagesSerial(SimStageSpan order, std::uint32_t enabledMask, 
                                  SimStageDispatch dispatch)
 {
     SimStageTrace trace;
+    SimStageCosts().ticks++;
     for (const SimStage stage : order)
     {
         if ((enabledMask & SimStageMask(stage)) == 0)
         {
             continue;
         }
+        const auto stageStart = std::chrono::steady_clock::now();
         dispatch(context, stage);
+        const float stageMs =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - stageStart).count();
+        SimStageCosts().ms[static_cast<std::size_t>(stage)] += stageMs;
         // The trace is fixed-size because a tick runs each stage at most once. A caller
         // that passes a longer order still gets every stage RUN; only the record of it
         // stops growing.
         if (trace.count < kSimStageCount)
         {
+            trace.ms[trace.count] = stageMs;
             trace.visited[trace.count] = stage;
             ++trace.count;
         }
@@ -240,6 +247,17 @@ SimStageTrace RunSimStagesSerial(SimStageSpan order, std::uint32_t enabledMask, 
 SimStageTrace RunSimStagesSerial(std::uint32_t enabledMask, void* context, SimStageDispatch dispatch)
 {
     return RunSimStagesSerial(SimStageSpan{kSimStageOrder}, enabledMask, context, dispatch);
+}
+
+SimStageCostAccum& SimStageCosts()
+{
+    static SimStageCostAccum accum;
+    return accum;
+}
+
+void ResetSimStageCosts()
+{
+    SimStageCosts() = SimStageCostAccum{};
 }
 
 } // namespace Poseidon::Sim

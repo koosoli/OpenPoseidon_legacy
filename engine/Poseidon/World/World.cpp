@@ -926,6 +926,33 @@ void World::Simulate(float deltaT, bool& enableDraw)
         _simulationSteps.Reset();
     }
     perf.Mark(Dev::FrameProfiler::PhaseSimStep);
+    // PERF-013: sim:step is the engine's largest CPU cost (30 ms, 48% of a combat frame).
+    // The runner times each stage; this is where the window is closed and reported, once a
+    // second, so the split rides in the same log as every other per-frame accounting line.
+    // Denominator included: a per-stage mean is meaningless without the tick count, and a
+    // tick count of zero is a paused simulation rather than a free one.
+    {
+        static double sinceReportSec = 0.0;
+        sinceReportSec += deltaT;
+        if (sinceReportSec >= 1.0)
+        {
+            sinceReportSec = 0.0;
+            Sim::SimStageCostAccum& acc = Sim::SimStageCosts();
+            if (acc.ticks > 0)
+            {
+                const double inv = 1.0 / static_cast<double>(acc.ticks);
+                double total = 0.0;
+                for (const double v : acc.ms)
+                    total += v;
+                LOG_INFO(World,
+                         "Sim stage ms/tick over {} ticks (total {:.3f}): clock={:.3f} scripts={:.3f} ai={:.3f} "
+                         "vehicles={:.3f} visibility={:.3f} physics={:.3f}",
+                         acc.ticks, total * inv, acc.ms[0] * inv, acc.ms[1] * inv, acc.ms[2] * inv, acc.ms[3] * inv,
+                         acc.ms[4] * inv, acc.ms[5] * inv);
+            }
+            Sim::ResetSimStageCosts();
+        }
+    }
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
     // sampling it earlier would report the previous frame's leftover.
     stepFrame.alpha = static_cast<float>(_simulationSteps.Alpha());

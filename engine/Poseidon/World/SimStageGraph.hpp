@@ -197,9 +197,33 @@ struct SimStageTrace
 {
     std::array<SimStage, kSimStageCount> visited{};
     std::uint8_t                         count = 0;
+    /// Wall time of each visited stage, same index as `visited`. PERF-012 measured the
+    /// fixed-step loop at 30 ms -- 48% of a combat frame and the engine's largest single
+    /// CPU cost -- and could say nothing about WHICH stage that is. The runner already
+    /// walks the stages one at a time, so this is the one place where per-stage cost can
+    /// be had without a timer at every call site.
+    ///
+    /// Wall time, not simulation time: this is diagnostic and must never reach a
+    /// simulation decision. SIM-813 removed the last wall clock that did, and SIM-816's
+    /// determinism mode would report a divergence if one came back.
+    std::array<float, kSimStageCount> ms{};
 
     [[nodiscard]] SimStageSpan Visited() const { return {visited.data(), count}; }
 };
+
+/// Per-stage cost, accumulated across every tick since the last read. The runner adds to
+/// this unconditionally -- one `steady_clock` pair per stage, six per tick, against stages
+/// that cost milliseconds -- so there is no gate to forget to switch on and no "did not
+/// run" ambiguity in a zero.
+struct SimStageCostAccum
+{
+    std::array<double, kSimStageCount> ms{};
+    std::uint64_t                      ticks = 0;
+};
+
+/// The process-wide accumulator. Read it, print it, and call `Reset()` to start a window.
+SimStageCostAccum& SimStageCosts();
+void               ResetSimStageCosts();
 
 /// Runs `order` serially, skipping stages whose bit is clear in `enabledMask`.
 ///
