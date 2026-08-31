@@ -234,6 +234,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     World/Weapons/test_penetration.cpp
     World/test_physics_world.cpp
     World/test_physics_determinism.cpp
+    World/test_first_divergent_boundary.cpp
     Foundation/Threads/test_watchdog.cpp
     World/Model/test_flag_bit_preservation.cpp
     World/Model/test_lod_purpose.cpp
