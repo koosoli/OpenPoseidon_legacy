@@ -1358,10 +1358,29 @@ GPU-bound. (Other scenarios are CPU-bound instead: framerate-governed LOD detail
 produced slow frames where the GPU was under 10% of the cost. Phase 3 captures decide
 which regime a given scene is in.)
 
-Candidate levers, each requiring a before/after capture:
+**Measured 2026-08-31, and one candidate lever is already eliminated.**
 
-- alpha/alpha-to-coverage overdraw reduction: tighter card geometry, depth ordering,
-  earlier depth rejection;
+The cost, `perf_abel` at 1600×900 with DLSS off, 13.69 ms frame:
+
+| | ms | share |
+|---|---:|---:|
+| Grass colour | 2.467 | 18.0% |
+| Grass prepass | 1.443 | 10.5% |
+| Grass shadow | 0.899 | 6.6% |
+| **total** | **4.81** | **35%** |
+
+And what it draws: **near 29,136 instances from 270,400 candidates → 10,488,960
+vertices; mid 46,743 from 732,736 → 5,048,244; far 0.** That is **15.5 M vertices of
+grass per frame, drawn three times** (prepass, colour, shadow) — and the near tier is
+360 vertices per instance against the mid tier's 108.
+
+- ~~earlier depth rejection via the prepass~~ — **eliminated, it is a wash.** The grass
+  prepass costs 1.449 ms and saves 1.353 ms of grass colour: net zero. Turning the whole
+  prepass off drops the frame 1.3 ms, but only because ambient occlusion goes with it,
+  which is a feature trade rather than a win. Do not chase this.
+- **The vertex count is the open lever**, and the 360-vs-108 step between near and mid is
+  where to look first: it is a 3.3× jump in per-instance cost that has to be justified by
+  what a near instance actually shows.
 - density and draw-distance shaping through the existing grass photo-card gates;
 - cheaper shading for the far grass bands.
 
