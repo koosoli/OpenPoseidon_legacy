@@ -58,7 +58,14 @@ POSEIDON_TICK_HASH=1           # the per-tick oracle (off by default)
 ```
 
 Under it: **902 aligned ticks, zero divergence, every column** — positions, velocities,
-camera, RNG draw count, shapes, entities, cloudlets. Normal play is untouched: the wall
+camera, RNG draw count, shapes, entities, cloudlets.
+
+**Qualified, after more pairs (see the second addendum).** That figure is one pair. Over
+thirteen further runs the *simulation* columns — positions, velocities, RNG draw count,
+shapes, entities, cloudlets — were identical in every tick of every pair. The **camera**
+column flickered in 6 ticks of 902 in one pair out of three, non-absorbing: identical before,
+identical after. So the honest claim is that the simulation is deterministic and the camera
+sampling is not quite, not that everything is always zero. Normal play is untouched: the wall
 clock seed (missions should not repeat) and the audio-clocked radio remain the default; every
 gate reads `LockstepPacingActive()` or its env equivalent.
 
@@ -113,3 +120,40 @@ itself.
   entity ordinal remains its prerequisite.
 - The radio's nominal-duration path slightly changes *when* queued messages drain under
   lockstep versus normal play. That is confined to the diagnostic mode by construction.
+
+
+---
+
+## Second addendum — two claims tightened, one of them mine and wrong
+
+**1. A 710-tick divergence I explained, incorrectly.** After the upload-path commit landed,
+one run diverged from four others in 710 ticks starting at tms 3281. I wrote this up as "the
+first run after a new binary is not comparable" and attached a cold-cache-plus-streaming-budget
+rationale — plausible, and built on a single observation.
+
+The owner suggested they had nudged the camera during that run. The discriminating test costs
+three runs: **after a fresh deploy, with nobody at the keyboard, the first run is bit-identical
+to the second and to a run made before the deploy.** Binary freshness is refuted. Stray input
+into the window is the explanation, and it is now the warning in
+`scripts/Check-FrameEquivalence.ps1` — the runs open a real window and the game takes real
+input, so a click or a mouse move mid-run forks the simulation from that tick onward and never
+recovers. That signature — large, starts partway through, absorbing — is exactly what was seen.
+
+**2. The camera column is not quite deterministic, and "zero divergence" was one pair.**
+Across three untouched runs after a deploy, and four more before it:
+
+| | |
+|---|---|
+| `pos`, `vel`, `rng`, `shapes`, `ents`, `clouds` | identical in **every** tick of **every** pair |
+| `cam` | 6 ticks of 902 differ, in **one** pair of three |
+
+The six are isolated and non-absorbing (tms 13770, 13787, 13804, 13923, 13940, 14127 — the
+last seconds of the run), with the RNG draw count and every entity value identical in those
+same ticks. So this is not the simulation drifting: it is the camera being sampled from
+something the tick recorder observes at a slightly different point, and it is the next thing
+to look at rather than a defect in the mode.
+
+`Check-FrameEquivalence.ps1` compares the *published frame*, not the tick hash, and it has
+returned 100.00% on every warm pair run so far — the camera flicker is below what the frame
+slices resolve, or does not reach them. That gap is unexplained and is stated here rather than
+smoothed over.
