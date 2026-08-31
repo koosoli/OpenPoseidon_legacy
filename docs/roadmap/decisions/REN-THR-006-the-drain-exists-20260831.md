@@ -54,7 +54,7 @@ ANOMALY lines, identical registered count (52,507) and identical scene image thr
 | `VertexBufferWgpu` (create/update/set-skin/destroy) | CPU-path meshes: handles ride inside `WgrDraw3D` payloads and per-frame `wgr_mesh_update` is *upload traffic*. The thread answer is a genuinely `Send` upload path (`Pool::update_verts` is `&self` + `Queue`), not a queue that copies vertex arrays every frame. |
 | `SetFarProxyInstances` | Bulk upload at world load (~117 MB source rows on Chernarus-size worlds). |
 | `SetSwapInterval`, `ResizeSurface`, screenshots | Synchronous answers / surface ownership — stop-the-world class, like device recreate. |
-| Stats readers (`GetObjectStats` etc.), `HasGrassPhotoClumps`, `SetGrassSettings`'s placement witness | **Reads.** The snapshot problem; owned by the thread slice. |
+| Stats readers (`GetObjectStats` etc.), `HasGrassPhotoClumps`, `SetGrassSettings`'s placement witness | **Reads.** Audited 2026-09-01 and much smaller than this row implied — see below. |
 
 ## Slice 4 — overlay textures (`075f3dba`)
 
@@ -65,6 +65,28 @@ again before translating the handles it copies into `WgrOverlayDraw`. An unknown
 white *and* logs an ANOMALY, because a white panel is otherwise indistinguishable from a UI
 that legitimately has no texture. Verified after the fact by the cross-build comparison in the
 addendum below.
+
+## The reads, audited — 19 call sites, and 17 of them are diagnostics
+
+This table called the reads "the snapshot problem, owned by the thread slice", which
+implied a snapshot had to be built before a render thread could exist. Counted, they are 19
+call sites in five files, and they sort into three groups:
+
+| group | sites | what a render thread means for it |
+|---|---:|---|
+| Dev panel, streaming diagnostics, capture-metrics JSON | **17** | They read renderer counters to display or log them. A frame-stale value is not a defect in a readout; the requirement is that the read not tear, not that it be current. |
+| `World.cpp:1593` — the capability probe | 1 | A `static const bool` initialised on first call that **discards the stats** and only asks "is this the WGPU engine". Runs once, at boot, before any thread would exist. |
+| `LandSave.cpp:3062` — the GPU-cost item clamp | 1 | The one read that reaches a *decision*. It is **opt-in and off by default** (`WGR_OBJECT_STREAM_GPU_BUDGET=1`) and already parked in `PARKED.md` for oscillating under pressure. |
+
+So there is no snapshot to build before the thread. What is needed is narrower and can be
+stated as a rule: **the diagnostic readers must read a published copy rather than the live
+renderer**, which is the same one-drain-per-frame shape everything else in this document
+uses, and the single decision-making read is behind a switch that is off — and if it is ever
+turned on, it needs the snapshot treatment before it does.
+
+This is the third time in this line of work that an item written down as a phase-sized
+blocker turned out, on being counted, to be a handful of sites and a switch. The pattern is
+worth naming: a row in a table costs nothing to write and implies work nobody has measured.
 
 ## What this does not prove
 
