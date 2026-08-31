@@ -2551,10 +2551,19 @@ Engine* GameApplication::CreateGraphicsEngine(const GraphicsEngineParams& params
         // successful WGPU smoke test. Auto remains the deliberate fallback path.
         if (_stricmp(renderBackend.c_str(), "wgpu") == 0)
         {
-            RptF("Requested WGPU renderer is unavailable; refusing automatic GL33 fallback");
+            // LOG_ERROR, not RptF. `RptF` is `#define RptF(...) ((void)0)` in EVERY build
+            // (DebugLog.hpp:61) -- so this refusal, which the sole-renderer gate cites as
+            // "the mechanism and it is unambiguous", compiled to nothing and said nothing.
+            // Measured 2026-08-31 with WGR_FORCE_INIT_FAIL=1: the process exits 1 and does
+            // not fall back, which is the important half and was always true, but the log
+            // carried no reason at all. A refusal nobody can read is a hidden switch with
+            // extra steps.
+            LOG_ERROR(Graphics,
+                      "Requested WGPU renderer is unavailable; refusing automatic GL33 fallback. "
+                      "Pass --render gl33 explicitly, or --render auto, if a fallback is wanted.");
             return nullptr;
         }
-        RptF("Unknown or unavailable render backend '%s', defaulting to Auto", renderBackend.c_str());
+        LOG_WARN(Graphics, "Unknown or unavailable render backend '{}', defaulting to Auto", renderBackend.c_str());
         engine = GraphicsEngineFactory::Create(GraphicsBackend::Auto, params);
     }
 
