@@ -70,13 +70,65 @@ is why this is a tractable piece of work rather than a rewrite.
    fulfilled later, or a second, genuinely `Send` upload path that does not go through
    the exclusive handle. This one is a design decision, not a refactor.
 
+## Shape 3, resolved: the synchronous handle is not load-bearing
+
+Shape 3 was left above as "a design decision, not a refactor", because
+`wgr_mesh_create` returns an id the caller checks immediately —
+`if (!mesh) return nullptr;`, choosing the non-retained path on failure. A queued
+command cannot answer synchronously, so that fallback looked like it forced the whole
+upload path to stay on the producer's thread.
+
+It does not, and the reason is one line in `gfx3d/pool.rs:468`:
+
+```rust
+if verts.is_empty() || indices.is_empty() {
+    return None;
+}
+```
+
+That is the **only** failure path in `Pool::alloc`. Everything after it grows the pool and
+succeeds; there is no exhaustion case and no fallible device call. So the condition the
+C++ fallback is testing for is *empty input* — which the caller can test itself, before
+calling, without the pool and without the renderer. **The id can therefore be allocated
+producer-side and the create queued**, and nothing about failure handling is lost. The
+empty-input guard moves from "check the returned handle" to "do not enqueue an empty
+mesh", which is a better place for it anyway.
+
+`mesh_update` is easier still: `Pool::update_verts` already takes `&self` and writes
+through `&wgpu::Queue`, both of which are `Sync`. It is only the `&mut *renderer` at the
+FFI boundary that makes it exclusive.
+
+### But uploads still cannot run *during* a frame
+
+Resolving the handle question does not make creation concurrent with drawing, and this is
+the real constraint on shape 3. `Gfx3d::mesh_create` clears `bake_bind_cache` and
+`bake_bind_cache_prev` whenever the pool's generation changes (`gfx3d/mod.rs:4576`),
+because pool growth reallocates the vertex buffer that every cached bind group references.
+The draw path **reads that cache** — `bake_bind_cache.get(&g.mesh)` at `mod.rs:4923`, with
+a per-frame swap at `4738`. A create landing mid-frame therefore destroys bind groups the
+frame in progress is still using. That is a genuine data dependency, not an aliasing
+technicality, and no amount of `Send` fixes it.
+
+So creates must be **drained at a frame boundary**, not merely moved to another thread.
+Which is the same mechanism shape 2 needs, and it collapses the three shapes into one:
+a queue the producer fills and the consumer drains at one defined point per frame. That
+is a considerably better answer than three separate mechanisms, and it is what the next
+implementation step should build.
+
 ## What this changes about the plan
 
 Step 5 as written — *"put the renderer on its own thread"* — is shape 3's problem wearing
-a different hat, and it cannot be the next commit. The order that follows from the counts
-above is: settings into the frame, then the instance queue, then the upload path, and only
-then a thread. Each of the first three is independently testable **with everything still
-serial**, which is what the phase gate wants anyway.
+a different hat, and it cannot be the next commit.
+
+With shape 3 resolved the three shapes are **one mechanism**, not three: a command queue
+the producer fills and the consumer drains at one defined point per frame. Settings are
+the trivial case of it, instances the incremental one, creates the one that made the queue
+necessary. Building one queue and moving the ten call sites onto it is a smaller job than
+the three-part sequence this document originally proposed, and every step of it is
+testable **while everything is still serial** — which is what the phase gate wants anyway.
+
+Only after all ten sites go through the queue does "one thread owns the handle" become a
+statement that can be true.
 
 ## What this does not say
 
