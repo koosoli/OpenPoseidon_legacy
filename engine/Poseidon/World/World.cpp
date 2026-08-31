@@ -4,6 +4,9 @@
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
 #include <Poseidon/Core/Game/FixedStepAccumulator.hpp>
+#include <Poseidon/Core/TickStateHash.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
+#include <cstdlib>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/Dev/Diag/PhysicsCorpus.hpp>
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
@@ -2019,6 +2022,77 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
                                     break;
                                 }
                             });
+
+    // SIM-815: after every stage of the tick has run, fold the load-bearing sim
+    // state into one log line. Off unless POSEIDON_TICK_HASH=1; costs one branch
+    // per tick when off.
+    RecordTickStateHash();
+}
+
+void World::RecordTickStateHash()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_TICK_HASH");
+        return v && v[0] != '0' && v[0] != '\0';
+    }();
+    if (!on)
+    {
+        return;
+    }
+
+    using namespace Poseidon::Determinism;
+    // Process-lifetime on purpose: the tick index then counts every fixed step
+    // the process ever ran, and two runs are aligned by the tms= column (under
+    // lockstep Glob.time is affine in the tick index), not by assuming both
+    // worlds started on the same tick.
+    static TickStateHash recorder;
+
+    recorder.BeginTick();
+    std::uint64_t ents = 0;
+    auto foldEntity = [&](Entity* veh)
+    {
+        if (!veh)
+        {
+            return;
+        }
+        const Vector3 pos = veh->Position();
+        recorder.FoldVec3(TickFieldClass::Positions, pos.X(), pos.Y(), pos.Z());
+        const Vector3 spd = veh->ObjectSpeed();
+        recorder.FoldVec3(TickFieldClass::Velocities, spd.X(), spd.Y(), spd.Z());
+        ++ents;
+    };
+    // The lists the simulation itself steps, in their stored order -- a change
+    // of ORDER hashes differently, and that is a finding, not a false positive
+    // (DistributeImportances is a pure function of state, so two identical runs
+    // partition identically). Buildings are deliberately excluded: they do not
+    // move, and their residency is already visible through the shape count.
+    for (int i = 0; i < _vehicles.Size(); i++)
+    {
+        foldEntity(_vehicles.Get(i));
+    }
+    for (int i = 0; i < _fastVehicles.Size(); i++)
+    {
+        foldEntity(_fastVehicles[i]);
+    }
+    for (int i = 0; i < _outVehicles.Size(); i++)
+    {
+        foldEntity(_outVehicles[i]);
+    }
+    if (Camera* cam = _scene.GetCamera())
+    {
+        const Vector3 cp = cam->Position();
+        recorder.FoldVec3(TickFieldClass::Camera, cp.X(), cp.Y(), cp.Z());
+    }
+
+    recorder.SetCounter(TickCounter::RngDraws, GRandGen.SequentialDraws());
+    recorder.SetCounter(TickCounter::ShapeCount, static_cast<std::uint64_t>(Shapes.Size()));
+    recorder.SetCounter(TickCounter::EntityCount, ents);
+    recorder.SetCounter(TickCounter::Cloudlets, static_cast<std::uint64_t>(_cloudlets.Size()));
+    recorder.SetCounter(TickCounter::TimeMs, static_cast<std::uint64_t>(static_cast<std::int64_t>(Glob.time.toInt())));
+
+    const TickStateRow row = recorder.EndTick();
+    LOG_INFO(World, "{}", TickStateHash::FormatRow(row));
 }
 
 void World::HandleVoiceChatShortcuts()

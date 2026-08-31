@@ -49,6 +49,13 @@ class RandomTable
 class RandomGenerator
 {
     mutable int _seed;
+    // SIM-815: cumulative count of sequential draws. The tick-hash recorder
+    // (Core/TickStateHash) logs it per fixed step, so two runs whose consumers
+    // took a DIFFERENT NUMBER of draws in a tick name that tick directly --
+    // the draw-count coupling (smoke spawn cadence through the LOD governor,
+    // radio pacing through audio completion) is the failure mode this counts.
+    // One increment on a path that already runs an atomic CAS; not gated.
+    mutable unsigned long long _sequentialDraws = 0;
     RandomTable _seedTable;
     RandomTable _valueTable;
 
@@ -75,6 +82,11 @@ class RandomGenerator
     float RandomValue() const;
     float Gauss(float min, float mid, float max) const;
     float PlusMinus(float a, float b) const;
+
+    // SIM-815: how many sequential draws have been taken since process start.
+    // Gauss and PlusMinus route through RandomValue(), so this counts all three
+    // entry points. Read by the tick-hash recorder; safe to read anywhere.
+    unsigned long long SequentialDraws() const { return _sequentialDraws; }
 
     __forceinline int GetSeed(int x, int z) const { return _seedTable.Seed(x, z); }
     __forceinline int GetSeedRef(int x, int z) const { return _seedTable.SeedRef(x, z); }

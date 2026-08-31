@@ -54,6 +54,7 @@ float RandomGenerator::RandomValue() const
     // PlusMinus both route through this function, so this one call covers all three
     // sequential draw entry points named in the header.
     NoteSequentialUse();
+    ++_sequentialDraws; // SIM-815: the tick-hash recorder logs this per fixed step
     return _valueTable(_seed++) * (1.0 / static_cast<double>(RandomTable::Size));
 }
 

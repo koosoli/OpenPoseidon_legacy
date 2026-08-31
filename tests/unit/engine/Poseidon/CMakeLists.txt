@@ -186,6 +186,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Core tests
     UI/Locale/test_supported_languages.cpp
     Core/test_deterministic_commit.cpp
+    Core/test_tick_state_hash.cpp
     Core/test_engine_config.cpp
     Core/test_application_exit.cpp
     Core/test_window_close.cpp

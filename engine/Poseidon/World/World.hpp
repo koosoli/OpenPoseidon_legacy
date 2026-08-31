@@ -518,6 +518,12 @@ class World
 	// The simulation-only tail of a frame. Rendering remains in Simulate while
 	// the outer game loop is converted to drive this at a fixed rate.
 	void StepSimulation(float deltaT, float noAccDeltaT, Entity *cameraVehicle, bool updateVisibility);
+	// SIM-815: env-gated (POSEIDON_TICK_HASH=1) per-tick state recorder -- folds
+	// entity positions/velocities, the camera, the sequential RNG draw counter
+	// and the resident-shape count into one log line per fixed step, so two
+	// runs' logs diffed by tick name the first divergent tick and the field
+	// class that moved. One branch per tick when the env var is unset.
+	void RecordTickStateHash();
 	// Paces StepSimulation. A MEMBER, not a function-local static: a static
 	// outlives the World that filled it, so loading a new mission would inherit
 	// the previous one's leftover fraction and could run a stray catch-up tick
