@@ -905,6 +905,58 @@ class EngineWgpu : public EngineDummy
     int _smCascadeRes = 0;
     bool _smCascadesValid = false;
     std::vector<WgrShadowCaster> _shadowCasters;
+
+    // PUSH-FRAME BACKING (Phase 5 step 6, blocker 4).
+    //
+    // The fifteen vectors above and the `cameras` vector built inside NextFrame are the
+    // frame the renderer consumes. `WgrFrame` holds non-owning `WgrSlice`s into them, so
+    // while a render thread is reading a frame the producer must not be refilling the same
+    // storage -- and `cameras` is worse than the rest, because it is a LOCAL whose lifetime
+    // ends when NextFrame returns. That is fine while the call is synchronous and is a
+    // dangling pointer the moment it is not.
+    //
+    // Publishing swaps the producer's vectors into a ring slot and points the frame at the
+    // SLOT. The producer then refills the vectors it swapped out -- which still own their
+    // capacity, so this costs no allocation churn -- and the consumer reads storage nobody
+    // is writing.
+    //
+    // TWO SLOTS, for the same reason the presentation-snapshot ring has two: two makes the
+    // writer's target disjoint from the reader's source, which is the property worth having.
+    // A third only pays once the producer may run AHEAD of the consumer, and it would absorb
+    // the "published without being consumed" event that 5.3 asks to keep visible. Raise it
+    // when the threads split and the counters show the drop, not before.
+    struct PushFrameBacking
+    {
+        std::vector<WgrVertex2D> verts;
+        std::vector<WgrDraw2DBatch> batches;
+        std::vector<WgrDraw3D> draws3d;
+        std::vector<WgrCmd> cmds;
+        std::vector<WgrMat4> palette;
+        std::vector<WgrLight> lights;
+        std::vector<WgrShadowCaster> shadowCasters;
+        std::vector<WgrOverlayVertex> overlayVerts;
+        std::vector<uint16_t> overlayIndices;
+        std::vector<WgrOverlayDraw> overlayDraws;
+        std::vector<WgrTerrainNode> terrainNodes;
+        std::vector<WgrTerrainBatch> terrainBatches;
+        std::vector<WgrWaterNode> waterNodes;
+        std::vector<WgrWaterBatch> waterBatches;
+        std::vector<WgrGrassBatch> grassBatches;
+        std::vector<WgrCamera> cameras;
+
+        // Blocker 3, closed here rather than by locking the map. `NextFrame` needs to know
+        // whether the retained set can cast shadows, and asked `_gpuInstances.empty()` --
+        // an unordered_map the SIMULATION thread inserts into and erases from. A concurrent
+        // `size()` against an `insert` is undefined behaviour, and no per-entry generation
+        // touches that. So the producer records the count it already knows at publish time
+        // and the consumer never sees the container. The liveness sweep that walks the same
+        // map stays with the producer, after publish, because it is residency bookkeeping
+        // and not rendering.
+        uint32_t retainedInstances = 0;
+    };
+    static constexpr int kPushFrameRing = 2;
+    PushFrameBacking _pushRing[kPushFrameRing];
+    int _pushSlot = 0;
     // Camera position the shadow casters were made camera-relative to, and the origin the Rust
     // side reconstructs absolute world xz from (depth-pass terrain conform) and builds every
     // shadow-cascade cull frustum around. Must match the caster world matrices, so it is NOT

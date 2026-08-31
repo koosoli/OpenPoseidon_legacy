@@ -2010,15 +2010,48 @@ void EngineWgpu::NextFrame()
             }
         }
 
+        // PUBLISH: hand the frame's storage to a ring slot before describing it.
+        //
+        // `WgrFrame` is slices -- pointer and length, non-owning -- so whatever it points at
+        // must outlive the consumer's use of it and must not be written meanwhile. Today the
+        // consumer is `wgr_render_frame` on this same thread, so pointing at the members
+        // works; the moment a render thread exists it does not, and `cameras` fails first
+        // because it is a LOCAL that dies when this function returns.
+        //
+        // Swapping costs nothing: the producer gets back the slot's vectors, which still own
+        // their capacity, and refills them next frame. See PushFrameBacking for why the ring
+        // is two deep.
+        PushFrameBacking& backing = _pushRing[_pushSlot];
+        _pushSlot = (_pushSlot + 1) % kPushFrameRing;
+        backing.verts.swap(_verts);
+        backing.batches.swap(_batches);
+        backing.draws3d.swap(_draws3d);
+        backing.cmds.swap(_cmds);
+        backing.palette.swap(_palette);
+        backing.lights.swap(_lights);
+        backing.shadowCasters.swap(_shadowCasters);
+        backing.overlayVerts.swap(_overlayVerts);
+        backing.overlayIndices.swap(_overlayIndices);
+        backing.overlayDraws.swap(_overlayDraws);
+        backing.terrainNodes.swap(_terrainNodes);
+        backing.terrainBatches.swap(_terrainBatches);
+        backing.waterNodes.swap(_waterNodes);
+        backing.waterBatches.swap(_waterBatches);
+        backing.grassBatches.swap(_grassBatches);
+        backing.cameras = std::move(cameras);
+        // What the producer knew about the retained set when it built this frame. The
+        // consumer must never ask `_gpuInstances` itself -- see PushFrameBacking.
+        backing.retainedInstances = static_cast<uint32_t>(_gpuInstances.size());
+
         WgrFrame frame{};
         frame.clear = {_clear[0], _clear[1], _clear[2], _clear[3]};
         frame.fog_color = {fog.R(), fog.G(), fog.B()};
-        frame.cameras = cameras;
-        frame.draws3d = _draws3d;
-        frame.verts = _verts;
-        frame.batches = _batches;
-        frame.cmds = _cmds;
-        frame.palette = _palette;
+        frame.cameras = backing.cameras;
+        frame.draws3d = backing.draws3d;
+        frame.verts = backing.verts;
+        frame.batches = backing.batches;
+        frame.cmds = backing.cmds;
+        frame.palette = backing.palette;
         if (shadowActive)
         {
             frame.shadow.count = U32(_smCascades.count);
@@ -2094,17 +2127,17 @@ void EngineWgpu::NextFrame()
             // _currentCamera, which may have advanced to a HUD/weapon camera by now); the
             // depth shader adds cam_pos back to sample the terrain conform at the right xz.
             frame.shadow.cam_pos = {_smCamPos[0], _smCamPos[1], _smCamPos[2], 0.0f};
-            frame.shadow_casters = _shadowCasters;
+            frame.shadow_casters = backing.shadowCasters;
         }
-        frame.overlay_verts = _overlayVerts;
-        frame.overlay_indices = _overlayIndices;
-        frame.overlay_draws = _overlayDraws;
-        frame.terrain_nodes = _terrainNodes;
-        frame.terrain_batches = _terrainBatches;
-        frame.lights = _lights;
-        frame.water_nodes = _waterNodes;
-        frame.water_batches = _waterBatches;
-        frame.grass_batches = _grassBatches;
+        frame.overlay_verts = backing.overlayVerts;
+        frame.overlay_indices = backing.overlayIndices;
+        frame.overlay_draws = backing.overlayDraws;
+        frame.terrain_nodes = backing.terrainNodes;
+        frame.terrain_batches = backing.terrainBatches;
+        frame.lights = backing.lights;
+        frame.water_nodes = backing.waterNodes;
+        frame.water_batches = backing.waterBatches;
+        frame.grass_batches = backing.grassBatches;
         wgr_render_frame(_renderer, &frame);
         LogObjectPerfRow();
         LogDrawSectionStats();
