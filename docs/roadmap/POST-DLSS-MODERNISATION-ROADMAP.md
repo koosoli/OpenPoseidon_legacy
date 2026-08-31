@@ -1378,11 +1378,29 @@ grass per frame, drawn three times** (prepass, colour, shadow) — and the near 
   prepass costs 1.449 ms and saves 1.353 ms of grass colour: net zero. Turning the whole
   prepass off drops the frame 1.3 ms, but only because ambient occlusion goes with it,
   which is a feature trade rather than a win. Do not chase this.
-- **The vertex count is the open lever**, and the 360-vs-108 step between near and mid is
-  where to look first: it is a 3.3× jump in per-instance cost that has to be justified by
-  what a near instance actually shows. Note the resolution-derived near-radius clamp is
-  already in (`near_radius.min(resolvable)` in `grass/mod.rs`), so the obvious form of this
-  — near blades drawn beyond the distance a blade covers a pixel — is already handled.
+- ~~**The vertex count is the open lever**~~ — **taken, 2026-08-31: grass is 39% cheaper.**
+  A blade is five quads drawn NON-INDEXED, so it issued 30 vertices where only 12 are
+  distinct: the vertex shader derives everything from the row and the side, so the
+  duplicated quad corners were computing bit-identical results. Indexed, the
+  post-transform cache collapses them.
+
+  | | before | after |
+  |---|---:|---:|
+  | Grass prepass | 1.462 ms | **0.853 ms** |
+  | Grass colour | 2.505 ms | **1.225 ms** |
+  | Grass shadow | 0.915 ms | 0.895 ms |
+  | grass total | 4.882 ms | **2.973 ms** |
+  | GPU frame | 13.34 ms | **12.15 ms** |
+
+  Identical geometry by construction; the index table is tested against the old decode
+  kept verbatim as an oracle. **Grass shadow did not improve** — that pass is not
+  vertex-bound, and it is now the largest single grass line at 0.895 ms. Also note the
+  clump renderer was already the cheaper of the two procedural looks (360 vertices but
+  centres 3.20x apart against 180 at 1.72x — net 1.7x fewer vertices), so that is not a
+  lever either.
+  The resolution-derived near-radius clamp was already in (`near_radius.min(resolvable)`
+  in `grass/mod.rs`), so the other obvious form of this — near blades drawn beyond the
+  distance at which a blade covers a pixel — was already handled too.
 - **The photo-card path is 34× cheaper and is NOT a drop-in replacement.** Measured
   2026-08-31 on `perf_abel`, 1600×900, DLSS off. The atlas is resident (9 photographed
   clump families) and the path is simply not opted into on OFP worlds, which build no map
