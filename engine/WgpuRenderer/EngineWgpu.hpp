@@ -957,6 +957,50 @@ class EngineWgpu : public EngineDummy
     static constexpr int kPushFrameRing = 2;
     PushFrameBacking _pushRing[kPushFrameRing];
     int _pushSlot = 0;
+
+    // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
+    // and answered "unmeasured" twice, in the two places where the answer decides the
+    // design. These count it. A mean alone would hide the shape -- streaming is bursty by
+    // nature, and a queue is sized by its worst frame, not its average one -- so the peak
+    // is carried alongside and reported with its denominator in frames.
+    struct MutationOps
+    {
+        uint32_t instanceAdd = 0;
+        uint32_t instanceUpdate = 0;
+        uint32_t instanceRemove = 0;
+        uint32_t meshCreate = 0;
+        uint32_t meshDestroy = 0;
+        uint32_t modelRegister = 0;
+        uint32_t textureOps = 0;
+        uint32_t settingsPush = 0;
+
+        void Add(const MutationOps& o)
+        {
+            instanceAdd += o.instanceAdd;
+            instanceUpdate += o.instanceUpdate;
+            instanceRemove += o.instanceRemove;
+            meshCreate += o.meshCreate;
+            meshDestroy += o.meshDestroy;
+            modelRegister += o.modelRegister;
+            textureOps += o.textureOps;
+            settingsPush += o.settingsPush;
+        }
+        void Max(const MutationOps& o)
+        {
+            instanceAdd = std::max(instanceAdd, o.instanceAdd);
+            instanceUpdate = std::max(instanceUpdate, o.instanceUpdate);
+            instanceRemove = std::max(instanceRemove, o.instanceRemove);
+            meshCreate = std::max(meshCreate, o.meshCreate);
+            meshDestroy = std::max(meshDestroy, o.meshDestroy);
+            modelRegister = std::max(modelRegister, o.modelRegister);
+            textureOps = std::max(textureOps, o.textureOps);
+            settingsPush = std::max(settingsPush, o.settingsPush);
+        }
+    };
+    MutationOps _ops;      // this frame, so far
+    MutationOps _opsTotal; // summed since the last report
+    MutationOps _opsPeak;  // worst single frame since the last report
+    uint32_t _opsFrames = 0;
     // Camera position the shadow casters were made camera-relative to, and the origin the Rust
     // side reconstructs absolute world xz from (depth-pass terrain conform) and builds every
     // shadow-cascade cull frustum around. Must match the caster world matrices, so it is NOT

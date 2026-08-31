@@ -609,6 +609,11 @@ class VertexBufferWgpu : public VertexBuffer
     {
         if (renderer && mesh)
         {
+            // NOT counted by EngineWgpu::_ops: this destructor holds its own renderer
+            // pointer and runs wherever the last reference is dropped, which is a producer-
+            // side mutation site outside the engine object entirely. REN-THR-001's list of
+            // ten call sites missed it for exactly that reason, and the queue will have to
+            // reach it too.
             wgr_mesh_destroy(renderer, mesh);
         }
     }
@@ -1247,6 +1252,7 @@ EngineWgpu::~EngineWgpu()
         // Release the retained scene's owned pool meshes before tearing down the renderer.
         for (uint64_t mesh : _gpuMeshes)
         {
+            _ops.meshDestroy++;
             wgr_mesh_destroy(_renderer, mesh);
         }
         _gpuMeshes.clear();
@@ -2021,6 +2027,15 @@ void EngineWgpu::NextFrame()
         // Swapping costs nothing: the producer gets back the slot's vectors, which still own
         // their capacity, and refills them next frame. See PushFrameBacking for why the ring
         // is two deep.
+        // Roll the mutation counters at the publish point, because that is where the
+        // producer/consumer cut will be: everything counted here happened while the
+        // PREVIOUS frame was the renderer's, which is precisely the traffic a queue has to
+        // carry once the two stop running in lockstep.
+        _opsTotal.Add(_ops);
+        _opsPeak.Max(_ops);
+        _opsFrames++;
+        _ops = MutationOps{};
+
         PushFrameBacking& backing = _pushRing[_pushSlot];
         _pushSlot = (_pushSlot + 1) % kPushFrameRing;
         backing.verts.swap(_verts);
@@ -2353,6 +2368,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     std::vector<VertexIndex> indices(static_cast<size_t>(ni));
     render::mesh::BuildIndices(src, indices.data());
 
+    _ops.meshCreate++;
     const uint64_t mesh = wgr_mesh_create(
         _renderer, AsMeshVerts(verts), WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
 
@@ -5399,6 +5415,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         uint64_t mesh = 0;
         {
             AdmitTimer createTimer(&render::GObjectAdmitProfile.meshCreateMs);
+            _ops.meshCreate++;
             mesh = wgr_mesh_create(_renderer, AsMeshVerts(verts),
                                    WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
         }
@@ -5755,6 +5772,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     {
         AdmitTimer ffiTimer(&render::GObjectAdmitProfile.modelRegisterMs);
         model =
+            _ops.modelRegister++;
             wgr_model_register(_renderer, shape->BoundingSphere(), WgrSlice<WgrModelLod>{lods.data(), U32(lods.size())},
                                WgrSlice<WgrModelSection>{sections.data(), U32(sections.size())},
                                WgrSlice<WgrModelMaterial>{materials.data(), U32(materials.size())},
@@ -5802,6 +5820,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         // never belong to a registered model, so return their pool ranges now.
         for (uint64_t mesh : modelMeshes)
         {
+            _ops.meshDestroy++;
             wgr_mesh_destroy(_renderer, mesh);
             _gpuMeshes.erase(mesh);
         }
@@ -6176,6 +6195,7 @@ uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
         for (uint64_t mesh : found->second)
         {
             if (_renderer)
+                _ops.meshDestroy++;
                 wgr_mesh_destroy(_renderer, mesh);
             _gpuMeshes.erase(mesh);
             ++releasedMeshes;
@@ -6292,6 +6312,7 @@ bool EngineWgpu::EmitGpuProxies(Object* parent, LODShapeWithShadow* shape)
         }
         const Matrix4 world = parentT * proxy.obj->Transform();
         const WgrInstance inst = BuildGpuProxyInstance(world, pmodel);
+        _ops.instanceAdd++;
         const uint32_t slot = wgr_instance_add(_renderer, &inst);
         RetainGpuModel(pshape);
         if (render::GObjectAdmitProfile.active)
@@ -6314,6 +6335,7 @@ void EngineWgpu::RemoveGpuProxies(const Object* parent)
     }
     for (const auto& child : it->second.children)
     {
+        _ops.instanceRemove++;
         wgr_instance_remove(_renderer, child.slot);
         ReleaseGpuModel(child.shape);
     }
@@ -6372,6 +6394,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     const ConformPlane cp = GpuConformFor(*obj, *shape, _gpuConformShapes.count(shape) != 0);
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
     TraceGpuInstance("created", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, model);
+    _ops.instanceAdd++;
     const uint32_t slot = wgr_instance_add(_renderer, &inst);
     RetainGpuModel(shape);
     // Full (whole object on the GPU) vs Partial (GPU owns the opaque geometry; the CPU still
@@ -6513,6 +6536,7 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
     {
         return;
     }
+    _ops.instanceRemove++;
     wgr_instance_remove(_renderer, it->second.slot);
     const LODShapeWithShadow* shape = it->second.shape;
     _gpuInstances.erase(it);
@@ -6536,6 +6560,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     // back to the CPU path, which draws the destroyed/animated geometry.
     if (!shape || shape != it->second.shape || obj->IsDestroyed())
     {
+        _ops.instanceRemove++;
         wgr_instance_remove(_renderer, it->second.slot);
         const LODShapeWithShadow* residentShape = it->second.shape;
         _gpuInstances.erase(it);
@@ -6550,6 +6575,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     const ConformPlane cp = GpuConformFor(*obj, *shape, _gpuConformShapes.count(shape) != 0);
     const WgrInstance inst = BuildGpuInstance(*obj, it->second.model, cp);
     TraceGpuInstance("updated", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, it->second.model);
+    _ops.instanceUpdate++;
     wgr_instance_update(_renderer, it->second.slot, &inst);
     it->second.pos = obj->Transform().Position();
     it->second.mode = cp.mode;
@@ -6572,6 +6598,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
             }
             const Matrix4 world = parentT * proxy.obj->Transform();
             const WgrInstance pinst = BuildGpuProxyInstance(world, child.model);
+            _ops.instanceUpdate++;
             wgr_instance_update(_renderer, child.slot, &pinst);
         }
     }
@@ -6904,6 +6931,7 @@ uint64_t EngineWgpu::OverlayTextureCreate(int w, int h, const uint8_t* rgba)
     {
         return 0;
     }
+    _ops.textureOps++;
     return wgr_texture_create(_renderer, U32(w), U32(h), WGR_TEXTURE_RGBA8, 1, 0, rgba, U32(w) * U32(h) * 4);
 }
 
@@ -6913,6 +6941,7 @@ void EngineWgpu::OverlayTextureUpdate(uint64_t texture, int w, int h, const uint
     {
         return;
     }
+    _ops.textureOps++;
     wgr_texture_update(_renderer, texture, rgba, U32(w) * U32(h) * 4);
 }
 
@@ -6920,6 +6949,7 @@ void EngineWgpu::OverlayTextureDestroy(uint64_t texture)
 {
     if (_renderer)
     {
+        _ops.textureOps++;
         wgr_texture_destroy(_renderer, texture);
     }
 }
@@ -7208,6 +7238,27 @@ void EngineWgpu::LogObjectPerfRow()
              cpuOf(WGR_GPU_TIMER_OBJ_COLOR_SEGMENT), cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_0),
              cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_1), cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_2),
              cpuOf(WGR_GPU_TIMER_SHADOW_CASCADE_3));
+
+    // REN-THR-001: how much renderer state the producer mutates outside NextFrame, which is
+    // the traffic a command queue would have to carry. Mean AND peak, with the frame count
+    // that is their denominator -- streaming is bursty, and a queue is sized by its worst
+    // frame. Mesh destroys from VertexBufferWgpu's destructor are NOT in these numbers.
+    if (_opsFrames > 0)
+    {
+        const auto mean = [&](uint32_t total) { return static_cast<double>(total) / _opsFrames; };
+        LOG_INFO(Graphics,
+                 "Renderer mutation ops over {} frames -- mean/peak: inst add={:.2f}/{} update={:.2f}/{} "
+                 "remove={:.2f}/{} | mesh create={:.2f}/{} destroy={:.2f}/{} | model reg={:.2f}/{} | "
+                 "texture={:.2f}/{}",
+                 _opsFrames, mean(_opsTotal.instanceAdd), _opsPeak.instanceAdd, mean(_opsTotal.instanceUpdate),
+                 _opsPeak.instanceUpdate, mean(_opsTotal.instanceRemove), _opsPeak.instanceRemove,
+                 mean(_opsTotal.meshCreate), _opsPeak.meshCreate, mean(_opsTotal.meshDestroy), _opsPeak.meshDestroy,
+                 mean(_opsTotal.modelRegister), _opsPeak.modelRegister, mean(_opsTotal.textureOps),
+                 _opsPeak.textureOps);
+        _opsTotal = MutationOps{};
+        _opsPeak = MutationOps{};
+        _opsFrames = 0;
+    }
 
     ObjectStatsOut o;
     if (!GetObjectStats(o))
