@@ -361,3 +361,247 @@ pre-existing `test_streaming_diag` case that shares the tag).
   (§4a).
 
 No shader, no renderer, no data and no deploy.
+
+---
+
+# SIM-807 part 2 — the write, found (2026-08-31)
+
+Branch `agent-heap-race`. Measured at `safety/asset-obs-001` = `8c2235ab`.
+Follow-on session, tasked with exactly one thing: find the stray write that part 1
+localised to the named-selection loop but could not name.
+
+**The fix landed as `8baf5d98`**, committed by the coordinating `asset-obs`
+session ("Found by the heap-race agent; validated, integrated and deployed
+here") while this session was still writing the record up. That commit's patch is
+byte-identical to the one measured below — `git rebase` dropped this session's own
+commit as "already upstream" — so the numbers here describe exactly the code that
+shipped, and its `LandSave.cpp` comment supersedes the one drafted here. The three
+commits rebased over in the meantime (`65be2fc6`, `fb41884f`, and `8baf5d98`
+itself) touch `POST-DLSS-MODERNISATION-ROADMAP.md` and the fix's own three files,
+so every measurement below still reads straight against the landed tree.
+
+**It is found, it is fixed, and it was never in `ShapeAdapter.cpp` at all.**
+
+## 9. The write
+
+`engine/Poseidon/Foundation/Containers/CompactBuf.hpp:22-30`, as it stood before
+this session:
+
+```cpp
+template <class Type>
+class CompactBuffer
+{
+    // include RefCount functionality to avoid virtual functions table and delete
+  private:
+    mutable int _count;
+  public:
+    int AddRef() const { return ++_count; }
+    int Release() const { int ret = --_count; if (ret == 0) { Delete(); } return ret; }
+    int RefCounter() const { return _count; }
+};
+```
+
+**The reference count on every `RString` buffer was a plain non-atomic `int`.**
+
+`CompactBuffer<char>` is `String` (`RString.hpp:15`), and `RString` holds it as
+`Ref<String>`. So this counter is the one behind *every* `RString` in the engine
+and behind *every interned `RStringB`*. `Ref<Type>`'s copy constructor, copy
+assignment, `Free()` and destructor (`Pointers.hpp:292-347`) call
+`source->AddRef()` / `_ref->Release()` — which bind to **these** methods, not to
+`RefCount`'s.
+
+The failure is the textbook one. Two threads share an interned string. Both run
+`++_count` on it; the read-modify-write is not atomic, one increment is lost;
+later both run `--_count`; the count reaches 0 while a live reference is still
+outstanding; `Release()` calls `Delete()`, which is `delete[] (char*)this`. The
+buffer is freed under its owner. Everything after that is the allocator writing
+into, and handing out, memory that another live object still points at — which is
+why the crash lands inside mimalloc, at a **different site every run**, some
+arbitrary time after the actual fault. Part 1 read that signature correctly as "a
+stray write, not an allocator bug"; the stray write is the premature `delete[]`.
+
+### Why part 1's "what was ruled out" table missed it
+
+The row reads:
+
+> The allocators are unlocked | `RefCount` uses `__atomic_*`; `FastAlloc` and the `RStringB` bank both hold a `std::mutex`; `Buffer` is plain `new[]` | all already locked
+
+Every clause of that is true, and it still misses the counter, because
+**`CompactBuffer` does not derive from `RefCount`**. Its own comment says why —
+*"include RefCount functionality to avoid virtual functions table and delete"* —
+it reimplements the interface to stay vtable-free. When `RefCount::_count` was
+made atomic (`Pointers.hpp:230-247`, for the parallel terrain generation
+double-free), `CompactBuffer` did not inherit that fix and nothing pointed at it.
+The audit checked the base class that `RString` does not use.
+
+The `RStringB` bank was checked too, and it is genuinely correct: `GetOrAdd`
+returns **by value** under `_mtx` so a concurrent rehash cannot invalidate the
+result. But the value it returns is an `RString`, and copying an `RString` is an
+`AddRef` on the shared buffer — which happens **outside** that lock, in whichever
+thread holds the copy, for the whole rest of the string's life. Locking the map
+was never going to be enough; the bank's own comment ("Individual Get/Add locking
+would not be enough") had the right instinct and stopped one level too early.
+
+### Why it looked like the selection loop
+
+Both of part 1's clues fall straight out of this, and neither implicates
+`ShapeAdapter.cpp`:
+
+* **The rate scales with named-selection count.** `NamedSelection` holds an
+  `RStringB _name` (`Shape.hpp:126`). Each one is constructed
+  (`Animation.cpp:306-312`, `_name = nameLow` → `RStringBT(RStringType)` →
+  `GetOrAdd`) and then **copied again** by `AddNamedSel` → `_sel.Add(sel)` →
+  `NamedSelection::DoConstruct(src)` → `_name = src._name`. Both threads convert
+  the *same* model, so they intern the *same* names and land on the *same*
+  `CompactBuffer`s. More selections is literally more concurrent unsynchronised
+  `++`/`--` on shared counters. `SIM807_RACE_SELECTIONS=0` removes essentially
+  all of that traffic, which is why clearing selections "fixed" it.
+* **Pinning one name did not help (still crashed 2/6).** Recorded in part 1 as
+  evidence *against* the bank. It is evidence *for* this: pinning removes the
+  bank's map churn but concentrates every thread's refcount traffic onto one
+  shared counter. It should, if anything, have made it worse — and part 1's own
+  measurement of 2/6 is not distinguishable from the 3/6-ish baseline.
+
+The named-selection loop was the *carrier*, not the fault. It is the densest
+producer of shared interned strings in the conversion, so it is where a
+process-wide bug in string refcounting surfaces first.
+
+### The mechanism, demonstrated in isolation
+
+Not inferred — measured. A 40-line standalone program (clang -O2, same machine)
+with the two counter variants side by side, 4 threads × 100,000 balanced
+`AddRef`/`Release` pairs, biased by 200,000 held references so a lost update
+shows as drift instead of a free:
+
+| variant | final count (5 runs, expected 200,001) |
+|---|---|
+| `++_count` / `--_count` | 200,003 · 200,003 · **199,997** · 200,004 · 200,007 — **0/5 correct** |
+| `__atomic_add_fetch` / `__atomic_sub_fetch` | 200,001 ×5 — **5/5 correct** |
+
+Note run 3: the plain counter drifts **downwards**. That is the direction that
+frees a live buffer, and it is reachable in a few hundred thousand operations on
+a quiet machine.
+
+## 10. The fix
+
+`CompactBuf.hpp` — `_count` moved to the GCC `__atomic` builtins, mirroring
+`RefCount` exactly (`__ATOMIC_RELAXED` on the increment, `__ATOMIC_ACQ_REL` on the
+decrement so the writes of every other holder are visible before the buffer is
+freed, `__atomic_load_n` for the probe). Builtins rather than `std::atomic<int>`
+for the same reason `RefCount` gives: no libatomic dependency. `CompactBuffer<char>`
+is the only instantiation in the tree (grep: `RString.hpp:15` and nothing else),
+so the blast radius is strings and only strings.
+
+Two callers probe the count without holding a lock and are worth naming, because
+both are now merely *imprecise* rather than *unsafe*:
+
+* `RStringBT::Free()` (`RString.hpp:362-369`) reads `RefCounter() == 2` outside
+  the bank lock to decide whether to `Unregister`. `Unregister` re-checks liveness
+  under `_mtx` (`:476-488`), so a stale read costs at worst a string left interned
+  in the bank — a bounded leak, not a free.
+* `RString::MakeMutable()` reads `RefCounter() > 1`. Unreachable for interned
+  strings: `RStringT` makes `Lower`/`Upper` private, and the one mutating caller
+  in this path (`NamedSelection`'s constructor, `RString nameLow = name;
+  nameLow.Lower();`) operates on a freshly created private buffer with exactly one
+  reference.
+
+Neither is changed. Both are noted so the next reader does not have to re-derive
+that they are safe.
+
+## 11. Measurements
+
+Same reproducer as part 1, same machine, same `win-x64-clang-rwdi` preset,
+worktree `.claude/worktrees/agent-heap`:
+
+```
+SIM807_CONCURRENT_ADAPT=1 PoseidonTests.exe "[race]"
+```
+
+| build | runs | non-zero exits |
+|---|---:|---:|
+| `8c2235ab`, before the fix | 12 | **9** (segfault, exit 139) |
+| with the atomic `_count` | 12 | **0** |
+| with the atomic `_count`, `SIM807_RACE_THREADS=8 SIM807_RACE_SELECTIONS=200` | 8 | **0** |
+
+The stress arm is 8 threads and 200 selections per LOD — 3.3× the selection count
+and 2× the threads of the default arm, i.e. well past the configuration that
+crashed 9 times in 12 — and it is clean. Being probabilistic, 0/20 is strong
+evidence and not a proof; the arm is cheap and should be re-run on any future
+change to the string bank or to `Ref<>`.
+
+Regression suites, both green on the fixed build:
+
+| suite | cases | assertions | failures | skipped |
+|---|---:|---:|---:|---:|
+| `PoseidonTests` | 3017 | 240,863 | 0 | 20 |
+| `PoseidonFoundationTests` | 484 | 163,839 | 0 | 0 |
+
+`PoseidonTests` matches part 1 §6's post-change baseline exactly (3017 / 240,863 /
+0 / 20), so the atomic counter costs no case and breaks none.
+
+## 12. The regression test
+
+`tests/unit/engine/Poseidon/Foundation/Strings/test_strings.cpp` — one new case,
+`RString buffer refcount is atomic under concurrent AddRef/Release`, tags
+`[strings][threads]`, in `PoseidonFoundationTests`.
+
+It is written **not to crash** when the fix is reverted. Four threads run 100,000
+balanced `AddRef`/`Release` pairs against one shared buffer that is pre-biased with
+200,000 held references, so a lost update surfaces as a wrong final count rather
+than as a premature free and a dead process. That matters: the whole reason half
+of part 1's harness is behind `SIM807_CONCURRENT_ADAPT=1` is that a segfaulting
+`PoseidonTests` makes ctest unusable for every other worktree on this machine.
+This case does not have that problem and runs unconditionally.
+
+Its teeth are measured, not assumed — the isolation experiment in §9 is the same
+shape (same bias, same thread and iteration counts) and the non-atomic variant
+failed 5 runs out of 5.
+
+## 13. What this does NOT change
+
+* **`WGR_OBJECT_STREAM_ASYNC_ADAPT` stays OFF by default.** It was turned off in
+  `00aa5870` because this crash was in the owner's play path. Turning it back on
+  is worth ~3 s of a traverse's cold admission and it is **the owner's decision**,
+  not this session's. The comment at `LandSave.cpp:3569-3596` is updated to say the
+  write was found rather than that it is still open, and the default is untouched.
+* **No game was launched, nothing was deployed, no data was regenerated.** The
+  change is one header and one test; the reproducer needs no game data. If the
+  owner does re-enable stage 3, that is the point at which a deploy and a traverse
+  are needed.
+* **Part 1's other open items stand.** The parse stage is still unhashed, the
+  texture-prepare stage is still uncovered, `PreparedTextureStore` still races by
+  design, and `BuildAdapterBankTables` is still main-thread-only by contract. This
+  session fixed one memory-safety bug; it did not audit the preparer.
+* **This is not a claim that the conversion is now thread-safe.** It is a claim
+  that the specific heap corruption SIM-807 reproduced is gone, over 20 runs
+  including a 2×/3.3× stress arm. The bit-divergence part 1 saw ("job index 4 of
+  12") is consistent with the same cause — a freed and reused name buffer hashes
+  differently — but divergence-without-crash was not separately reproduced here,
+  so that link is inference and is flagged as such.
+
+## 14. A note for the next audit
+
+The general lesson is narrow and worth stating plainly, because it is the reason
+this took two sessions: **this codebase has two independent reference-count
+implementations, and only one of them was audited.** `RefCount` (`Pointers.hpp`)
+is atomic and carries a comment explaining why. `CompactBuffer` (`CompactBuf.hpp`)
+reimplements `AddRef`/`Release`/`RefCounter` from scratch to avoid a vtable, and
+was not. Anything reached through `Ref<>` binds to whichever of the two its type
+actually provides. Grepping for `class RefCount` finds one of them; grepping for
+`int AddRef() const` finds both. After this change they agree.
+
+## 15. Files (part 2)
+
+All three landed in `8baf5d98`:
+
+* `engine/Poseidon/Foundation/Containers/CompactBuf.hpp` — the fix.
+* `tests/unit/engine/Poseidon/Foundation/Strings/test_strings.cpp` — the
+  regression case.
+* `engine/Poseidon/World/Terrain/LandSave.cpp` — comment only, replacing the stale
+  "the write has NOT been found" paragraph. **No behaviour change; the default is
+  still off.** (Verified on this session's own draft of that hunk by diffing it and
+  confirming no non-comment line changed; the landed wording is the integrating
+  session's and says the same thing.)
+
+This document is the only part of the work that did not land in that commit, which
+is why it is a separate one.
