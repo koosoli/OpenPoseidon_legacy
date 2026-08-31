@@ -74,7 +74,7 @@ correspond — every earlier comparison stumbled over this), over 901 frames:
 | slice | disagreeing frames |
 |---|---:|
 | cameras, palette, shadow casters, terrain, water, grass, 2D structure, scalars | **0** |
-| `verts` (HUD) | 1 |
+| `verts` (HUD) | 1 — **the teardown frame; see below** |
 | `draws3d` | 882 |
 
 And the rendered images are **98.93% pixel-identical with a maximum channel delta of 12** —
@@ -83,12 +83,27 @@ the draw records carry mesh *handles*, handles are assigned in creation order, a
 order rides asynchronous load I/O. The simulation is deterministic; the renderer's id
 assignment is not, and does not need to be — but the oracle must learn to see through it.
 
+## Correction: the single `verts` frame was the teardown, and the real figure is zero
+
+With handle masking on (below), the last remaining difference was one `verts` frame. It is
+**tick 902, the frame after the capture** — the screenshot fires at tick 901 and the run
+publishes one more frame with `draws3d` empty and 72 vertices of leftover UI while the
+mission is dismantled. Comparing it compares shutdown timing.
+
+Excluding frames that draw no world — the same exclusion the loading screen already needed,
+and for the same reason — the comparison is **901 of 901 frames content-identical, 100.00%,
+no differing slice**, both run-to-run and across two different binaries.
+
+So the rule the method now carries: **a frame with `draws3d` empty is not a frame of the
+scene.** Every puzzling residue in this line of work turned out to be frames from outside
+the scene: first the loading screen (REN-THR-005), then the teardown.
+
 ## What remains for step 6
 
-One refinement: a hash mode that masks (or translates to content-stable keys) the volatile
-handle fields in `WgrDraw3D`, so "same frames" means "same content" rather than "same
-labels". With that, the equivalence proof for every producer restructuring — the queue
-slices, the thread — is a two-run diff that can actually reach zero.
+Nothing. The masking hash landed, the teardown frame is excluded by rule, and the diff
+reaches zero — run-to-run and build-to-build. The equivalence proof Phase 5 step 6 requires
+is available for every producer restructuring from here on, including the render thread
+itself.
 
 ## What this does not say
 

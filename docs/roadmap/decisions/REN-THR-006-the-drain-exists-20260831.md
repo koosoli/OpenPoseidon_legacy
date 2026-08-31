@@ -92,17 +92,25 @@ Two builds differing only in `EngineWgpu.{cpp,hpp}` (`4d59e813` versus `075f3dba
 once under `POSEIDON_LOCKSTEP_HZ=60 WGR_LOD_GOVERNOR_RANGE=1 WGR_FRAME_HASH_MASK_IDS=1`,
 frames aligned by simulation tick:
 
-| | |
-|---|---:|
-| tick-aligned frames compared | 901 |
-| **content-identical across all seventeen slices** | **900 (99.9%)** |
-| differing | `verts`, in one frame |
+| | cross-build | run-to-run, same build |
+|---|---:|---:|
+| world-drawing frames compared | 901 | 901 |
+| **content-identical across all seventeen slices** | **901 (100.00%)** | **901 (100.00%)** |
+| differing slices | **none** | **none** |
 
-That is the same figure as two runs of the *same* build (SIM-816), and the same single `verts`
-frame — so the overlay slice contributed **no** observable difference, and the one outlier is
-the pre-existing run-to-run blip rather than anything this change did. A cross-build
-comparison that lands exactly on the run-to-run noise floor is the strongest statement this
-oracle can currently make.
+**Zero.** The overlay slice changed nothing observable, and neither does running the same
+binary twice.
+
+The "one differing `verts` frame" first reported here was the **teardown frame**: the
+screenshot fires at tick 901 and the run then publishes one more frame at tick 902 with
+`d3d = 0` — no world, 72 vertices of leftover UI — while the mission is dismantled. Comparing
+it compares shutdown timing. Excluding frames that draw no world (which also excludes the
+loading screen, and for the same reason) both comparisons are exact.
+
+That exclusion is a rule of the method now, not a one-off: **a frame with `draws3d` empty is
+not a frame of the scene.** Every earlier measurement in this line of work that reported a
+puzzling residue was, on inspection, comparing frames outside the scene — first the loading
+screen (REN-THR-005), now the teardown.
 
 **A trap worth recording, because it nearly invalidated the measurement.** Arm A was built by
 checking out the two files at the older commit while `HEAD` stayed where it was — and
