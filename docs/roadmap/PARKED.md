@@ -109,6 +109,36 @@ is about the prepass only.
 
 ---
 
+## Found and not fixed — defects the ownership audit turned up
+
+Recorded here because they are real, none is urgent, and none is being worked on. Full
+detail in `SIM-805`; the table itself is `docs/roadmap/ownership-authority.md`, now 36 rows
+with a **Rule** column saying whether each is *stated*, *implicit* (obeyed by accident) or
+*checked* (the program notices a violation). **Four are checked. That ratio is the number
+to watch.**
+
+### The savegame version is written and never compared
+`WorldSerializeVersion = 13` appears in exactly three places and **all three are writes**.
+The reader's only failure mode is the field being absent; any value that parses is accepted,
+including one from the future. Its per-field gating (`if (_version < minVersion) return
+LSOK`) is right for an older save and exactly backwards for a newer one. Roadmap 4.1's
+closing requirement is unmet.
+
+### Multiplayer authority is a bool checked by convention at ~150 sites
+Every mutator is public and callable on a remote object; the nearest chokepoint only
+refuses to *send* an update it already applied locally. `Object::IsLocal()` hardcodes
+`true`.
+
+### `BACKGROUND_AI` gates a class that does not exist
+`SecondaryThread` is forward-declared at `Core/Types.hpp:36` and **never defined**. The gate
+is off by an explicit `0` in two files and by an *undefined macro* in `World.cpp`.
+Uncompilable dead code, and the reason SIM-804 could establish "nothing touches physics from
+another thread" so easily.
+
+### A static object's `NetworkId` derives from an id that `ResetIDs` renumbers on save
+4.1's "no ephemeral handle becomes a persisted identity" is clean by grep — but this is its
+mirror image and was not.
+
 ## Parked on dependencies — blocked by real work, not by a decision
 
 ### Phase 5 step 6 — the render thread
