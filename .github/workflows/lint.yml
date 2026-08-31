@@ -104,6 +104,16 @@ jobs:
             exit 1
           fi
 
+      # REN-GL33-003, gate bullet 5. The real assertion runs in build.yml's
+      # `wgpu-refusal` job, against the built client. This step tests the
+      # CHECKER: it drives scripts/check_wgpu_refusal.py against eight stub
+      # binaries and requires it to accept the one that honours the
+      # no-silent-fallback contract and reject all seven that break it. Same
+      # shape as the acceptance-gate self-test above, and for the same reason --
+      # a gate that has never been seen to fail is a green tick, not a gate.
+      - name: Self-test the WGPU refusal checker
+        run: python3 scripts/check_wgpu_refusal_selftest.py
+
       - name: Validate WGPU renderer and composed WGSL
         run: cargo test --manifest-path engine/WgpuRenderer/rust/Cargo.toml --package wgpu_renderer
 

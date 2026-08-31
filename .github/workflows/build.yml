@@ -405,10 +405,20 @@ jobs:
       - name: Run Trident tests
         env:
           ALSOFT_DRIVERS: 'null'
-          # The Ubuntu runner is a headless compatibility lane.  Keep the
-          # explicit WGPU scenario on wgpu's GL backend under the Xvfb display;
-          # Preview-0's release-tier Vulkan validation remains on Windows.
-          WGPU_BACKEND: 'gl'
+          # This said `gl` from the day the WGPU scenarios were written, on the
+          # reasoning that wgpu's GL backend is the one that survives Xvfb.  It
+          # cannot work, and it was never going to: Renderer::new refuses any
+          # adapter without TEXTURE_BINDING_ARRAY (rust/src/lib.rs:982-989), and
+          # wgpu-hal's GLES adapter does not mention that feature anywhere
+          # (29.0.4, src/gles/adapter.rs) -- it never exposes it on any driver.
+          # Nothing depends on the value today because all six WGPU scenarios
+          # carry `ci-host-blocked` and are skipped below, so this is not a
+          # behaviour change; it is removing a trap for whoever unskips them.
+          # `vulkan` is the only candidate that can clear the feature gate on a
+          # GPU-free runner, via Mesa's lavapipe ICD -- which the
+          # `wgpu-start-probe` job below actually measures.  See
+          # docs/roadmap/decisions/REN-GL33-003.
+          WGPU_BACKEND: 'vulkan'
           HARNESS_CMD_TIMEOUT_SEC: '180'
           PAPA_BEAR_MASTER_SERVICE: ${{ github.workspace }}/exe/papa-bear-master-service
           TRI_OUTPUT_DIR: ${{ github.workspace }}/trident-output
@@ -485,6 +495,181 @@ jobs:
         with:
           name: trident-output-${{ steps.build_metadata.outputs.sha_short }}-shard${{ matrix.shard }}
           path: trident-output
+          if-no-files-found: ignore
+
+  # REN-GL33-001 gate bullet 5 asks for "an explicit WGPU-start assertion" in CI.
+  # A hosted runner cannot give one: it has no GPU, and Renderer::new hard-refuses
+  # any adapter lacking TEXTURE_BINDING_ARRAY + non-uniform indexing
+  # (engine/WgpuRenderer/rust/src/lib.rs:982-989) or VERTEX_WRITABLE_STORAGE
+  # (:1015-1018).  wgpu's GL backend never exposes TEXTURE_BINDING_ARRAY at all
+  # (wgpu-hal 29.0.4 src/gles/adapter.rs mentions it nowhere), so no software GL
+  # path can satisfy it either.  See docs/roadmap/decisions/REN-GL33-003.
+  #
+  # This job asserts the OTHER half of the same contract, which is hardware-free
+  # and is the half that regresses silently: an explicit `--render wgpu` that
+  # cannot create WGPU must fail loudly and must never fall through to GL33.
+  # WGR_FORCE_INIT_FAIL=1 triggers it at the factory, before any device or window
+  # bring-up, so this behaves identically here and on a workstation with a GPU.
+  #
+  # It does NOT assert that WGPU starts. Do not quote it as if it did.
+  wgpu-refusal:
+    name: WGPU refusal contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs:
+      - build-linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download demo game data
+        uses: ./.github/actions/download-extract
+        with:
+          url: ${{ env.DEMO_ASSETS_URL }}
+          path: packages/Demo
+          archive-name: CWR-demo-assets-v2.zip
+
+      - name: Install Linux runtime packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1 libopengl0 libx11-6 libxext6 libxrandr2 libxcursor1 libxi6 \
+            libxtst6 libxinerama1 libxkbcommon0 libwayland-client0 libopenal1 \
+            xvfb xauth
+
+      - name: Build metadata
+        id: build_metadata
+        shell: bash
+        run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Game
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CWR_ARTIFACT_PREFIX }}-Game-${{ steps.build_metadata.outputs.sha_short }}
+          path: exe
+
+      - name: Assert the WGPU no-silent-fallback contract
+        env:
+          ALSOFT_DRIVERS: 'null'
+        run: |
+          chmod +x exe/*
+          # Xvfb because the control arm runs `--window`; the wgpu arm never
+          # reaches window creation, which is the point of forcing at the factory.
+          xvfb-run -a --server-args="$TRIDENT_XVFB_ARGS" \
+            python3 scripts/check_wgpu_refusal.py \
+            --exe exe/PoseidonGame \
+            --data-dir packages/Demo \
+            --out-dir wgpu-refusal-output
+
+      - name: Upload refusal logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wgpu-refusal-${{ steps.build_metadata.outputs.sha_short }}
+          path: wgpu-refusal-output
+          if-no-files-found: ignore
+
+  # Informational only -- `continue-on-error`, and it must stay that way until
+  # somebody reads a green run of it.  It answers REN-GL33-001's open question R2
+  # ("does WGPU start under Xvfb on the hosted CI image?") on every run instead of
+  # leaving it a guess.
+  #
+  # The candidate is lavapipe (Mesa's software Vulkan ICD), NOT the GL backend:
+  # GL cannot expose TEXTURE_BINDING_ARRAY, so `WGPU_BACKEND=gl` is a guaranteed
+  # refusal.  lavapipe advertises VK_EXT_descriptor_indexing and
+  # vertexPipelineStoresAndAtomics, which is exactly what wgpu maps
+  # TEXTURE_BINDING_ARRAY / VERTEX_WRITABLE_STORAGE onto
+  # (wgpu-hal src/vulkan/adapter.rs:14-20), so it is the only credible GPU-free
+  # way to make this bullet real.  Whether it survives the rest of bring-up --
+  # shader compilation, surface formats, the frame -- is unknown, and finding out
+  # for free on every push is worth more than the guess.
+  #
+  # If this goes green and stays green, promote it: drop continue-on-error, and
+  # gate bullet 5's first half is genuinely satisfied.
+  wgpu-start-probe:
+    name: WGPU start probe (lavapipe, informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    continue-on-error: true
+    needs:
+      - build-linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download demo game data
+        uses: ./.github/actions/download-extract
+        with:
+          url: ${{ env.DEMO_ASSETS_URL }}
+          path: packages/Demo
+          archive-name: CWR-demo-assets-v2.zip
+
+      - name: Install Linux runtime packages and a software Vulkan ICD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1 libopengl0 libx11-6 libxext6 libxrandr2 libxcursor1 libxi6 \
+            libxtst6 libxinerama1 libxkbcommon0 libwayland-client0 libopenal1 \
+            xvfb xauth mesa-vulkan-drivers vulkan-tools libvulkan1
+
+      - name: Build metadata
+        id: build_metadata
+        shell: bash
+        run: echo "sha_short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Game
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.CWR_ARTIFACT_PREFIX }}-Game-${{ steps.build_metadata.outputs.sha_short }}
+          path: exe
+
+      - name: Report the adapter lavapipe offers
+        run: |
+          mkdir -p wgpu-start-probe
+          # vulkaninfo's own summary is the second witness for whatever the game
+          # log says about the adapter; capture it before the game runs so a
+          # failure to start can be read against what the ICD actually offers.
+          xvfb-run -a --server-args="$TRIDENT_XVFB_ARGS" \
+            vulkaninfo --summary > wgpu-start-probe/vulkaninfo.txt 2>&1 || true
+          sed -n '1,80p' wgpu-start-probe/vulkaninfo.txt || true
+          echo "--- descriptorIndexing / vertexPipelineStoresAndAtomics ---"
+          xvfb-run -a --server-args="$TRIDENT_XVFB_ARGS" vulkaninfo 2>/dev/null \
+            | grep -iE "descriptorIndexing|vertexPipelineStoresAndAtomics|VK_EXT_descriptor_indexing" \
+            | sort -u | head -40 || true
+
+      - name: Try to start WGPU on lavapipe
+        env:
+          ALSOFT_DRIVERS: 'null'
+          WGPU_BACKEND: vulkan
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          chmod +x exe/*
+          set +e
+          xvfb-run -a --server-args="$TRIDENT_XVFB_ARGS" \
+            ./exe/PoseidonGame -C packages/Demo --window --check \
+            --render wgpu --log-level info \
+            > wgpu-start-probe/start.log 2>&1
+          status=$?
+          set -e
+          echo "exit=$status"
+          sed -n '1,400p' wgpu-start-probe/start.log
+          # The verdict, stated so a reader does not have to infer it from a
+          # green tick this job cannot produce anyway.
+          if grep -q "wgpu renderer created" wgpu-start-probe/start.log; then
+            echo "PROBE RESULT: WGPU STARTED on lavapipe. Gate bullet 5's start half is now reachable in CI."
+          else
+            echo "PROBE RESULT: WGPU did not start on lavapipe (exit=$status). Bullet 5 remains hardware-blocked."
+          fi
+          exit $status
+
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wgpu-start-probe-${{ steps.build_metadata.outputs.sha_short }}
+          path: wgpu-start-probe
           if-no-files-found: ignore
 
   steamrt4:

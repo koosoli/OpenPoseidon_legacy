@@ -97,10 +97,12 @@ Describe "OpenGL render startup checks" {
     }
 
     It "starts with GL33 render in check mode" {
-        # Was D3D11 before the backend pruning; only GL33 + Dummy
-        # remain.  --render gl33 is the explicit form; the bare default
-        # is also gl33 so this is also a smoke test that the
-        # explicit-flag path still works.
+        # Was D3D11 before the backend pruning; GL33, WGPU and Dummy
+        # remain.  --render gl33 is the explicit form.  The bare default
+        # has been `wgpu` since 2026-08-06 (AppConfig.hpp `_renderBackend`),
+        # so this test covers the explicit flag only -- it is NOT also a
+        # default-path smoke test, which is what this comment claimed until
+        # 2026-08-31.
         $output = Invoke-GuiExe $script:gameExe -C $script:gameDir --window --check --log-format jsonl --render gl33
         $LASTEXITCODE | Should -Be 0
         $logs = Get-JsonlLogs $output
