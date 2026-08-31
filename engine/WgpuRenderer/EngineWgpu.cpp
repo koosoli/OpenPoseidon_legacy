@@ -745,6 +745,12 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
     // an unreachable feature is one nobody can show anybody else.
     //   POSEIDON_DOF=1  POSEIDON_DOF_FOCUS=<m>  POSEIDON_DOF_BLUR=<px>  POSEIDON_DOF_BAND=<m>
+    if (const char* v = std::getenv("WGR_FRAME_HASH"); v && v[0] && v[0] != '0')
+    {
+        _frameHashOn = true;
+        LOG_INFO(Graphics, "Wgpu frame hash: ON -- every published frame is walked byte for byte "
+                           "(REN-THR-001 equivalence oracle); this is not a play setting");
+    }
     if (const char* v = std::getenv("POSEIDON_DOF"); v && v[0] && v[0] != '0')
     {
         _dof.enabled = true;
@@ -2153,6 +2159,7 @@ void EngineWgpu::NextFrame()
         frame.water_nodes = backing.waterNodes;
         frame.water_batches = backing.waterBatches;
         frame.grass_batches = backing.grassBatches;
+        HashPublishedFrame(frame);
         wgr_render_frame(_renderer, &frame);
         LogObjectPerfRow();
         LogDrawSectionStats();
@@ -7165,6 +7172,83 @@ static_assert(NestingTablesAgree(),
 //
 // Rate: one burst every 2 s, matching the water rows. At 50+ FPS an unlimited row produced ~25
 // lines/second in the equivalent water case, which floods the log the capture is read from.
+namespace
+{
+// FNV-1a over raw bytes. Chosen because the property this needs is "two runs that published
+// different frames must disagree", not cryptographic strength -- a collision here costs a
+// missed difference in a development gate, not a security property.
+inline uint64_t HashBytes(uint64_t h, const void* p, size_t n)
+{
+    const auto* b = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; i++)
+    {
+        h ^= b[i];
+        h *= 1099511628211ull;
+    }
+    return h;
+}
+
+template <typename T>
+inline uint64_t HashSlice(uint64_t h, const WgrSlice<T>& s)
+{
+    // Length first, so an empty slice and a missing one are distinguishable and so two
+    // adjacent slices cannot be confused for one longer one.
+    const uint32_t n = s.length;
+    h = HashBytes(h, &n, sizeof(n));
+    if (s.data && n)
+        h = HashBytes(h, s.data, static_cast<size_t>(n) * sizeof(T));
+    return h;
+}
+} // namespace
+
+// The frame as the renderer will see it, hashed at the moment of publication. See the
+// declaration for why this exists; the short version is that every remaining Phase 5 step
+// restructures the producer, and "it still publishes the same frame" is the only claim that
+// makes such a restructuring provable rather than plausible.
+void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
+{
+    if (!_frameHashOn)
+        return;
+
+    uint64_t h = 14695981039346656037ull;
+    h = HashBytes(h, &frame.clear, sizeof(frame.clear));
+    h = HashBytes(h, &frame.fog_color, sizeof(frame.fog_color));
+    h = HashSlice(h, frame.cameras);
+    h = HashSlice(h, frame.draws3d);
+    h = HashSlice(h, frame.verts);
+    h = HashSlice(h, frame.batches);
+    h = HashSlice(h, frame.cmds);
+    h = HashSlice(h, frame.palette);
+    h = HashSlice(h, frame.shadow_casters);
+    h = HashSlice(h, frame.overlay_verts);
+    h = HashSlice(h, frame.overlay_indices);
+    h = HashSlice(h, frame.overlay_draws);
+    h = HashSlice(h, frame.terrain_nodes);
+    h = HashSlice(h, frame.terrain_batches);
+    h = HashSlice(h, frame.lights);
+    h = HashSlice(h, frame.water_nodes);
+    h = HashSlice(h, frame.water_batches);
+    h = HashSlice(h, frame.grass_batches);
+
+    // Frames that differ from their predecessor. If this stays at zero while the camera
+    // moves, the hash is not reading the frame and every "equivalent" verdict it gives is
+    // vacuous -- the same trap SIM-808 records for the simulation timeline.
+    // The first frames individually, by index. A whole-run fold cannot be compared between
+    // two runs at all -- they do not even publish the same NUMBER of frames, because the run
+    // is ended by a wall clock and the simulation takes a variable number of fixed steps per
+    // frame. Per-index hashes over the opening frames are the part that IS comparable, and
+    // how far down this list two runs agree is the measurement of how far producer
+    // determinism actually extends.
+    if (_frameHashCount < 96)
+        LOG_INFO(Graphics, "Wgpu frame hash: frame[{}]={:#018x}", _frameHashCount, h);
+
+    if (_frameHashCount != 0 && h != _frameHashLast)
+        _frameHashDistinct++;
+    _frameHashLast = h;
+    _frameHashRun = HashBytes(_frameHashRun ? _frameHashRun : 14695981039346656037ull, &h, sizeof(h));
+    _frameHashCount++;
+}
+
 void EngineWgpu::LogObjectPerfRow()
 {
     static std::chrono::steady_clock::time_point lastLog{};
@@ -7243,6 +7327,14 @@ void EngineWgpu::LogObjectPerfRow()
     // the traffic a command queue would have to carry. Mean AND peak, with the frame count
     // that is their denominator -- streaming is bursty, and a queue is sized by its worst
     // frame. Mesh destroys from VertexBufferWgpu's destructor are NOT in these numbers.
+    if (_frameHashOn && _frameHashCount > 0)
+    {
+        LOG_INFO(Graphics,
+                 "Wgpu frame hash: run={:#018x} last={:#018x} frames={} changed={} -- 'changed' is "
+                 "how many differed from their predecessor; zero while the view moves means the "
+                 "hash is not reading the frame and any equivalence verdict from it is vacuous",
+                 _frameHashRun, _frameHashLast, _frameHashCount, _frameHashDistinct);
+    }
     if (_opsFrames > 0)
     {
         const auto mean = [&](uint32_t total) { return static_cast<double>(total) / _opsFrames; };

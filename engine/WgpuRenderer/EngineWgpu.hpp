@@ -997,6 +997,22 @@ class EngineWgpu : public EngineDummy
             settingsPush = std::max(settingsPush, o.settingsPush);
         }
     };
+    // Phase 5 step 6 wants lockstep equivalence PROVEN before the producer and the renderer
+    // are allowed to overlap. This is the oracle for the renderer half: the exact bytes
+    // published to wgr_render_frame, hashed at the publish point. Any restructuring of the
+    // producer -- the command queue, the instance table moving across the boundary, the
+    // handoff itself -- is equivalent if and only if it publishes the same frames.
+    //
+    // It is only an oracle if the frames are reproducible in the first place, which is a
+    // question about the engine, not about this code, and is answered by running it. Enabled
+    // by WGR_FRAME_HASH=1 and off otherwise: it walks every published byte.
+    void HashPublishedFrame(const WgrFrame& frame);
+    bool _frameHashOn = false;
+    uint64_t _frameHashRun = 0;   // folded over every frame so far this run
+    uint64_t _frameHashLast = 0;  // the last single frame, so a stuck value is visible
+    uint32_t _frameHashCount = 0; // frames folded in
+    uint32_t _frameHashDistinct = 0;
+
     MutationOps _ops;      // this frame, so far
     MutationOps _opsTotal; // summed since the last report
     MutationOps _opsPeak;  // worst single frame since the last report
