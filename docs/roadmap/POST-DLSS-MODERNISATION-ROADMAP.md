@@ -1,6 +1,9 @@
 # OpenPoseidon post-DLSS modernisation roadmap
 
 **Status:** Living plan  
+**Parked work:** everything deliberately not being worked on, with the reason and what
+would unpark it, is on one page: [PARKED.md](PARKED.md). Add to it when you park
+something; delete the entry in the same commit as the work when you unpark it.  
 **Created:** 2026-08-29  
 **Scope:** Work that begins after the current DLSS integration reaches its ship gate  
 **Revision:** v2 — ownership/ABI hardening, renderer-history correction, task QoS,
