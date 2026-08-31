@@ -7275,6 +7275,17 @@ void EngineWgpu::LogObjectPerfRow()
              o.registeredInstances, o.mainInstances, o.mainDraws, o.mainTris, o.colorInstances, o.colorDraws,
              o.colorDrawsSolid, o.colorDrawsAlpha, o.colorTris, o.colorTrisSolid, o.colorTrisAlpha, o.directCalls,
              o.directIndirectCalls, o.directTris);
+    if (o.staleInstanceOps != 0)
+    {
+        // ID-3's counter, now readable. It only ever logged its first eight occurrences, so
+        // until this line a sustained identity bug went quiet after the eighth. Nonzero is a
+        // handle outliving its instance on THIS side of the FFI.
+        LOG_ERROR(Graphics,
+                  "ANOMALY stale instance handles refused since startup: {} -- a C++ handle "
+                  "outlived its instance; the renderer refused the write rather than "
+                  "corrupting whatever now occupies the slot",
+                  o.staleInstanceOps);
+    }
     LOG_INFO(Graphics, "Objects shadow counts: c0={}/{} c1={}/{} c2={}/{} c3={}/{} (instances/tris)",
              o.shadowInstances[0], o.shadowTris[0], o.shadowInstances[1], o.shadowTris[1], o.shadowInstances[2],
              o.shadowTris[2], o.shadowInstances[3], o.shadowTris[3]);
@@ -7336,6 +7347,7 @@ bool EngineWgpu::GetObjectStats(ObjectStatsOut& out) const
     out.directIndirectCalls = s.direct_indirect_calls;
     out.directInstances = s.direct_instances;
     out.directTris = s.direct_tris;
+    out.staleInstanceOps = s.stale_instance_ops;
     return true;
 }
 

@@ -1580,6 +1580,11 @@ const fn wgr_layout_hash() -> u32 {
     h = hash_size(h, sz::<WgrLogCallbacks>());
     h = hash_size(h, sz::<WgrFrame>());
     h = hash_size(h, sz::<WgrFarInstance>());
+    // An OUT struct the engine allocates and the DLL fills. It was missing from this set,
+    // so a size disagreement between exe and DLL would have been written past the caller's
+    // buffer with the handshake reporting no problem at all -- the silent-mismatch failure
+    // rule 0 exists for, in the one direction where it corrupts the caller's stack.
+    h = hash_size(h, sz::<WgrObjectStats>());
     h
 }
 
@@ -2927,6 +2932,13 @@ pub struct WgrObjectStats {
     pub direct_indirect_calls: u32,
     pub direct_instances: u32,
     pub direct_tris: u32,
+
+    /// Instance handles used after their instance was removed, refused and counted since
+    /// startup (ID-3). The table has counted these all along; nothing outside its own unit
+    /// tests could read the number, and only the first eight were ever logged -- so a
+    /// sustained identity bug was invisible after the eighth occurrence. Nonzero is a
+    /// C++-side bug, never a renderer one.
+    pub stale_instance_ops: u64,
 }
 
 /// Fill `out` with this frame's object accounting. Returns 1 on success, 0 when the
@@ -2969,6 +2981,7 @@ pub unsafe extern "C" fn wgr_get_object_stats(
             direct_indirect_calls: direct.indirect_calls,
             direct_instances: direct.instances,
             direct_tris: direct.tris,
+            stale_instance_ops: renderer.stale_instance_ops(),
             ..Default::default()
         };
         for c in 0..4usize {

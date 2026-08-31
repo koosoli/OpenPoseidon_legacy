@@ -2663,6 +2663,9 @@ class Engine : public IGraphicsEngine
         // LOD 0..6 plus a "7 or coarser" bucket, over the MAIN view's survivors.
         uint32_t mainLodHist[8] = {};
         uint32_t directCalls = 0, directIndirectCalls = 0, directInstances = 0, directTris = 0;
+        // Instance handles used after their instance was removed, refused and counted since
+        // startup. Nonzero is a bug on THIS side of the boundary, not in the renderer.
+        uint64_t staleInstanceOps = 0;
     };
 
     // PERF-005 - per-region CPU ENCODE ms, indexed exactly like GetWaterGpuTimings

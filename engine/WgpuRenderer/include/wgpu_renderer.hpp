@@ -1497,6 +1497,9 @@ struct WgrObjectStats
     uint32_t direct_indirect_calls;
     uint32_t direct_instances;
     uint32_t direct_tris;
+    /* Stale instance handles refused since startup (ID-3). Nonzero means a C++-side
+     * identity bug -- a handle outliving its instance -- not a renderer fault. */
+    uint64_t stale_instance_ops;
 };
 
 /* GRS-A — grass instance accounting (mirrors WgrGrassStats in rust/src/ffi.rs).
@@ -2434,6 +2437,10 @@ constexpr uint32_t WgrLayoutHash()
     h = WgrHashSize(h, sizeof(WgrLogCallbacks));
     h = WgrHashSize(h, sizeof(WgrFrame));
     h = WgrHashSize(h, sizeof(WgrFarInstance));
+    // An OUT struct the engine allocates and the DLL fills. It was missing from this set, so
+    // a size disagreement between exe and DLL would have been written past this side's buffer
+    // with the handshake reporting no problem -- a silent mismatch that corrupts the caller.
+    h = WgrHashSize(h, sizeof(WgrObjectStats));
     return h;
 }
 

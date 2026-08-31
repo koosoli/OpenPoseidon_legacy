@@ -7990,6 +7990,12 @@ impl Gfx3d {
         self.cull.instance_count()
     }
 
+    /// Stale instance handles refused since startup (ID-3), so the engine can report the
+    /// count rather than only the first eight log lines.
+    pub fn stale_instance_ops(&self) -> u64 {
+        self.cull.stale_instance_ops()
+    }
+
     /// Zero every cull view's stats slice. Must be recorded before the frame's first cull.
     pub fn begin_frame_object_stats(&self, encoder: &mut wgpu::CommandEncoder) {
         self.cull.begin_frame_stats(encoder);

@@ -1984,6 +1984,10 @@ impl Renderer {
         )
     }
 
+    fn stale_instance_ops(&self) -> u64 {
+        self.gfx3d.stale_instance_ops()
+    }
+
     // GRS-A — latest grass instance counts (same async-readback discipline).
     fn grass_stats(&self) -> crate::grass::GrassStats {
         self.grass.stats()
