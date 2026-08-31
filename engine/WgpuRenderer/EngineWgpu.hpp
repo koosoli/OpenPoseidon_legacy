@@ -958,6 +958,43 @@ class EngineWgpu : public EngineDummy
     PushFrameBacking _pushRing[kPushFrameRing];
     int _pushSlot = 0;
 
+    // REN-THR-006 -- the settings half of the producer/consumer handoff (REN-THR-001
+    // shape 1). Every wgr_set_* the producer used to call mid-frame now computes its exact
+    // FFI payload at the moment the setter runs and parks it here; NextFrame pushes the
+    // dirty ones at ONE point, which is where the render thread's frame will begin. Last
+    // write wins inside a frame -- byte-for-byte what back-to-back direct calls did,
+    // because each call overwrote the previous renderer state anyway.
+    //
+    // Payloads, not inputs: the computation (clamps, env gates, catch-all scaling) stays
+    // in the setter where it can read producer state (GScene, _terrain, Glob) freely.
+    // Only the finished bytes cross the drain.
+    struct PendingRendererSettings
+    {
+        bool suppressWorld = false;
+        bool suppressWorldDirty = false;
+
+        uint32_t cullDrawSpheres = 0, cullDisableFrustum = 0, cullOcclusion = 0;
+        bool cullDebugDirty = false;
+
+        WgrTemporalTuning temporal{};
+        bool temporalDirty = false;
+
+        WgrGrassParams grassParams{};
+        bool grassParamsDirty = false;
+        float grassCardSpacing = 0.0f;
+        bool grassSpacingDirty = false;
+
+        // From PushSceneCamera: the object cull's four inputs and the far tier's knobs.
+        float cullDrawDistance = 0.0f, cullCamLeft = 0.0f, cullLodInvWidth = 0.0f, cullPixelLimit = 0.0f;
+        bool cullParamsDirty = false;
+        float farNearCutoff = 0.0f, farDistance = 0.0f, farPixelLimit = 0.0f;
+        uint32_t farEnabled = 0;
+        bool farParamsDirty = false;
+    };
+    PendingRendererSettings _pendingSet;
+    // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
+    void ApplyPendingRendererSettings();
+
     // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
     // and answered "unmeasured" twice, in the two places where the answer decides the
     // design. These count it. A mean alone would hide the shape -- streaming is bursty by

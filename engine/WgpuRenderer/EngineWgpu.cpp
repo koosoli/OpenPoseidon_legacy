@@ -1631,10 +1631,58 @@ static void LogDrawSectionStats()
     GDrawSectionCalls = 0;
 }
 
+// REN-THR-006: the settings drain. Everything the producer latched since the last frame is
+// pushed here, at the one point per frame where the render thread's ownership of the handle
+// will begin. Order between entries is irrelevant by construction -- each writes disjoint
+// renderer state -- and order within an entry is last-write-wins, which is what back-to-back
+// direct calls already meant.
+void EngineWgpu::ApplyPendingRendererSettings()
+{
+    if (!_renderer)
+        return;
+    PendingRendererSettings& p = _pendingSet;
+    if (p.suppressWorldDirty)
+    {
+        wgr_set_suppress_world_objects(_renderer, p.suppressWorld);
+        p.suppressWorldDirty = false;
+    }
+    if (p.cullDebugDirty)
+    {
+        wgr_set_cull_debug(_renderer, p.cullDrawSpheres, p.cullDisableFrustum, p.cullOcclusion);
+        p.cullDebugDirty = false;
+    }
+    if (p.temporalDirty)
+    {
+        wgr_set_temporal_tuning(_renderer, &p.temporal);
+        p.temporalDirty = false;
+    }
+    if (p.grassSpacingDirty)
+    {
+        wgr_grass_set_card_spacing(_renderer, p.grassCardSpacing);
+        p.grassSpacingDirty = false;
+    }
+    if (p.grassParamsDirty)
+    {
+        wgr_grass_set_params(_renderer, &p.grassParams);
+        p.grassParamsDirty = false;
+    }
+    if (p.cullParamsDirty)
+    {
+        wgr_set_cull_params(_renderer, p.cullDrawDistance, p.cullCamLeft, p.cullLodInvWidth, p.cullPixelLimit);
+        p.cullParamsDirty = false;
+    }
+    if (p.farParamsDirty)
+    {
+        wgr_far_set_params(_renderer, p.farNearCutoff, p.farDistance, p.farPixelLimit, p.farEnabled);
+        p.farParamsDirty = false;
+    }
+}
+
 void EngineWgpu::NextFrame()
 {
     if (_renderer)
     {
+        ApplyPendingRendererSettings();
         SyncWaterLookProfile();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
         // into _tonemap / _sky (auto mode only; manual override holds the tabs' values).
@@ -2583,8 +2631,11 @@ void EngineWgpu::PushSceneCamera()
             const auto& snap = render::frame::GPresentationSnapshot();
             if (snap.hasScene)
             {
-                wgr_set_cull_params(_renderer, snap.objectDrawDistance, static_cast<float>(camera->Left()),
-                                    snap.lodInvWidth, 0.125f);
+                _pendingSet.cullDrawDistance = snap.objectDrawDistance;
+                _pendingSet.cullCamLeft = static_cast<float>(camera->Left());
+                _pendingSet.cullLodInvWidth = snap.lodInvWidth;
+                _pendingSet.cullPixelLimit = 0.125f;
+                _pendingSet.cullParamsDirty = true;
             }
         }
         if (_gpuDriven && _renderer)
@@ -2639,7 +2690,11 @@ void EngineWgpu::PushSceneCamera()
                 nearCutoff = farTier.complement ? FAR_TIER_HARD_FLOOR_M
                                                 : farDrawDistance * FarTierNearCutoffFraction();
             }
-            wgr_far_set_params(_renderer, nearCutoff, farTier.distance, farTier.pixelLimit, farTier.enabled ? 1u : 0u);
+            _pendingSet.farNearCutoff = nearCutoff;
+            _pendingSet.farDistance = farTier.distance;
+            _pendingSet.farPixelLimit = farTier.pixelLimit;
+            _pendingSet.farEnabled = farTier.enabled ? 1u : 0u;
+            _pendingSet.farParamsDirty = true;
         }
     }
 
@@ -6466,7 +6521,8 @@ void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
               (t.mvRenderSpace ? 4u : 0u) | (t.mvFlip ? 8u : 0u) | (t.fsrOn ? 16u : 0u) |
               (t.dlssSharpen ? 32u : 0u);
     w.fsr_sharpness = std::clamp(t.fsrSharpness, 0.0f, 2.0f);
-    wgr_set_temporal_tuning(_renderer, &w);
+    _pendingSet.temporal = w;
+    _pendingSet.temporalDirty = true;
 }
 
 Engine::TemporalInfo EngineWgpu::GetTemporalInfo()
@@ -6671,9 +6727,13 @@ void EngineWgpu::SuppressWorldObjects(bool suppress)
 {
     // Only the GPU-driven path retains a GPU-resident world set that draws independently of
     // the per-frame 3D lists; the CPU path already stops when World skips its 3D block.
+    //
+    // Latched, not called: World::Simulate fires this MID-TICK, which is exactly the class
+    // of producer-side renderer mutation the drain exists to absorb (REN-THR-006).
     if (_gpuDriven && _renderer)
     {
-        wgr_set_suppress_world_objects(_renderer, suppress);
+        _pendingSet.suppressWorld = suppress;
+        _pendingSet.suppressWorldDirty = true;
     }
 }
 
@@ -6683,7 +6743,10 @@ void EngineWgpu::SetCullDebugSettings(const CullDebugSettings& s)
     _cullDebug.dumpNearby = false; // momentary button, never stored
     if (_gpuDriven && _renderer)
     {
-        wgr_set_cull_debug(_renderer, s.drawSpheres, s.disableFrustum, s.occlusion);
+        _pendingSet.cullDrawSpheres = s.drawSpheres;
+        _pendingSet.cullDisableFrustum = s.disableFrustum;
+        _pendingSet.cullOcclusion = s.occlusion;
+        _pendingSet.cullDebugDirty = true;
     }
     if (s.dumpNearby && _gpuDriven)
     {
@@ -8066,7 +8129,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
         const float grid = envOverride > 0.0f ? envOverride
                                               : (density > 1.001f ? fromDensity : settings.photoCardSpacing);
         const float applied = std::clamp(grid, 0.06f, 4.0f);
-        wgr_grass_set_card_spacing(_renderer, applied);
+        _pendingSet.grassCardSpacing = applied;
+        _pendingSet.grassSpacingDirty = true;
         // Say what arrived, on change only. SubmitGrass re-pushes this every frame,
         // so an unrate-limited line would be one per frame; a line ONLY when the
         // number moves is exactly the signal "did my slider reach the renderer".
@@ -8190,7 +8254,8 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
             params.downwash[i] = nearest[i].wash;
     }
     std::copy(_grassTracks.begin(), _grassTracks.end(), params.tracks);
-    wgr_grass_set_params(_renderer, &params);
+    _pendingSet.grassParams = params;
+    _pendingSet.grassParamsDirty = true;
     // PLACEMENT WITNESS. A capture pair that "looks the same" cannot tell an inert lever from a
     // field the placement pass rejected outright (this pose sits on a hard-object cell, the
     // world's geography excludes it, ...). The compacted counters say which: log them when the
