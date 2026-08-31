@@ -72,6 +72,14 @@ hardware, not the ~65 µs the arithmetic suggested: merging Hi-Z's eleven per-mi
 into one made that region 25% cheaper (0.042 ms) and left the frame residual untouched.
 Do not spend effort merging passes on the strength of that number. `PERF-010`.
 
+### Grass photo cards as a cheaper meadow
+34× cheaper than the procedural blades (frame 13.34 → 7.62 ms) and **not a replacement**:
+the atlas is authored as large sparse clumps, so the default spacing gives bare ground with
+isolated tufts and densifying gives oversized reeds. Spacing and card size are coupled and
+only spacing has a slider. **Unparks with re-authored smaller cards** — a content job with a
+3–5 ms prize. The owner's earlier "flickering, far too dense" verdict predates both fixes
+that were made to the card path.
+
 ### The grass depth prepass — **a wash, measured 2026-08-31**
 Costs 1.449 ms and saves 1.353 ms of grass colour; net zero. Turning the prepass off drops
 the frame 1.3 ms only because ambient occlusion goes with it, which is a feature trade, not
@@ -100,6 +108,16 @@ suite can run. Owner decision, not an agent's. `REN-GL33-001`.
 **Do not attempt without a corpus that measures differently.** `swap` is 27.171 ms of a
 28.686 ms frame; all main-thread CPU work sums to ~1.5 ms and material interpretation is a
 fraction of the 0.081 ms `land:obj` bucket. There is nothing to reclaim on a stock world.
+
+### Renderer-bug triage without GL33 — gate bullet 8, still PARTIAL
+The written procedure now exists (`docs/roadmap/renderer-bug-triage.md`) and was scored
+against the three historical cases rather than the ones it was written for: `RND-031` is
+reachable without GL33 at all, `MAT-030:146` never needed it (GL33 drew that birch wrong the
+same way), and **`WLD-021` is genuinely lost** — no Takistan in the archive, and GL33 never
+got compat coverage so one cannot be added. Two harness facts worth knowing: `lint.yml`
+gates the machinery, not any archived scene; and `changed_pixel_ratio` cannot rank severity
+— a blacked-out object scores 0.027 while a signed-off, non-blocking backend difference on
+the same scene scores 0.55. **Unparks when bullet 6 covers a non-CWA family.**
 
 ### Order-dependent `DDSConverter` test
 Passes in the full suite, fails when run alone (`32 == 64`). Relies on state an earlier test
