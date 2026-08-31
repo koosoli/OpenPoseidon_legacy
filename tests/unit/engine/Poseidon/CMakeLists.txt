@@ -342,6 +342,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Audio/test_audio_math.cpp
     Audio/test_dx8_reference.cpp
     Audio/test_eax_efx.cpp
+    Audio/test_environment_blend.cpp
     Audio/test_capture.cpp
     Audio/test_smoke.cpp
     Audio/test_oal_loopback.cpp

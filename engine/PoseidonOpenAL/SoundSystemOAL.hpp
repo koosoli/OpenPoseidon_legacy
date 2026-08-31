@@ -162,11 +162,14 @@ class SoundSystemOAL : public IAudioSystem
     bool InitEFX();
     void DeinitEFX();
     void DoSetEAXEnvironment();
-    // Per-frame (Commit): eases the applied reverb toward the target parameter set with
-    // a ~0.6 s time constant, so a Plain->Room transition fades instead of hard-cutting.
-    // The target itself is computed by a file-local helper in the .cpp
-    // (EFXEAXREVERBPROPERTIES is an anonymous-struct typedef and cannot be forward
-    // declared); all blend state lives behind this pointer so the header stays AL-free.
+    // Per-frame (Commit): eases the applied reverb toward the target parameter set, so
+    // a Plain->Room transition fades instead of hard-cutting. The easing itself is
+    // Audio::EnvironmentBlender (Poseidon/Audio/EnvironmentBlend.hpp), which is where
+    // the time constant is defined and where it is unit-tested; this class only gathers
+    // and scatters the AL parameter struct around it. The target is computed by a
+    // file-local helper in the .cpp (EFXEAXREVERBPROPERTIES is an anonymous-struct
+    // typedef and cannot be forward declared); all blend state lives behind this
+    // pointer so the header stays AL-free.
     struct EfxBlendState;
     std::unique_ptr<EfxBlendState> _efxBlend;
     void TickEnvironmentBlend();

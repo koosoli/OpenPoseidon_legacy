@@ -19,6 +19,7 @@
 #include <Poseidon/Input/InputSubsystem.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Audio/Speaker.hpp>
+#include <Poseidon/Audio/EnvironmentClassify.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <cmath>
@@ -1187,65 +1188,32 @@ void World::PerformSound(Entity* inside, float deltaT)
             // Map clearance to a modest band instead: a 1 m stairwell ~2.0, a 10 m hall
             // ~6.5, capped at 8 (decay x4.2) so no interior ever exceeds a church.
             const float clearance = GSmokeWorldQuery().IndoorClearanceAt(pos, listenerRoom, 15.0f);
-            sRoomSize = std::clamp(1.5f + clearance * 0.5f, 1.9f, 8.0f);
+            // Floor is 2.0, not the preset's 1.9: DoSetEAXEnvironment clamps the size
+            // to [2, 100] before using it, so anything below 2 was never reachable and
+            // a 1.9 floor only made the band look smaller than it is.
+            sRoomSize = std::clamp(1.5f + clearance * 0.5f, 2.0f, 8.0f);
         }
     }
-    if (sRoomInside)
-    {
-        SoundEnvironment env;
-        env.type = SERoom;
-        env.size = sRoomSize;
-        env.density = 0.5;
-        GSoundsys->SetEnvironment(env);
+    // One place decides which environment this is; ClassifyEnvironment
+    // (Poseidon/Audio/EnvironmentClassify.hpp) holds the decision so it can be pinned
+    // by unit tests without a landscape or a sound device. The branch bodies moved
+    // verbatim -- forest/city/mountains/plain are the 2001 sizes and densities.
+    Audio::EnvironmentSurroundings surroundings;
+    surroundings.insideRoom = sRoomInside;
+    surroundings.roomSize = sRoomSize;
+    surroundings.forest = geogr.u.forestInner || geogr.u.forestOuter;
+    surroundings.hardObjects = geogr.u.howManyHardObjects;
+    surroundings.objects = geogr.u.howManyObjects;
+    surroundings.surfaceYAboveWater = sy;
+
+    const SoundEnvironment env = Audio::ClassifyEnvironment(surroundings);
+    GSoundsys->SetEnvironment(env);
 #if SHOW_ENV
-        GlobalShowMessage(100, "Room %.1f %.1f", env.size, env.density);
-#endif
-    }
-    else if (geogr.u.forestInner || geogr.u.forestOuter)
     {
-        SoundEnvironment env;
-        env.type = SEForest;
-        env.size = 38;
-        env.density = 0.5;
-        GSoundsys->SetEnvironment(env);
-#if SHOW_ENV
-        GlobalShowMessage(100, "Forest %.1f %.1f", env.size, env.density);
-#endif
+        static const char* const kNames[] = {"Plain", "City", "Forest", "Mountains", "Room"};
+        GlobalShowMessage(100, "%s %.1f %.1f", kNames[env.type], env.size, env.density);
     }
-    else if (geogr.u.howManyHardObjects > 0)
-    {
-        SoundEnvironment env;
-        env.type = SECity;
-        env.size = (4 - geogr.u.howManyHardObjects) * 15;
-        env.density = geogr.u.howManyHardObjects * (1.0f / 3);
-        GSoundsys->SetEnvironment(env);
-#if SHOW_ENV
-        GlobalShowMessage(100, "City %.1f %.1f", env.size, env.density);
 #endif
-    }
-    else if (sy > 170)
-    {
-        SoundEnvironment env;
-        env.type = SEMountains;
-        env.size = sy - 120;
-        saturate(env.size, 50, 100);
-        env.density = 0.5;
-        GSoundsys->SetEnvironment(env);
-#if SHOW_ENV
-        GlobalShowMessage(100, "Mountains %.1f %.1f", env.size, env.density);
-#endif
-    }
-    else
-    {
-        SoundEnvironment env;
-        env.type = SEPlain;
-        env.size = 75 - geogr.u.howManyObjects * 15;
-        env.density = 0.5;
-        GSoundsys->SetEnvironment(env);
-#if SHOW_ENV
-        GlobalShowMessage(100, "Plain %.1f %.1f", env.size, env.density);
-#endif
-    }
 
     GSoundsys->SetListener(cam.Position(), cam.Speed(), cam.Direction(), cam.DirectionUp());
     PerformSound(_vehicles, inside, deltaT);
