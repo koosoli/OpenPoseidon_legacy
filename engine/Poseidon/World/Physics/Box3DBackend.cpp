@@ -243,6 +243,34 @@ public:
         {
             return;
         }
+        // A DYNAMIC body is in two places -- the slot table and `_probes` -- and
+        // this only ever cleared the first. `_probes` is not a debug convenience:
+        // `Step` applies wind through it and `GetProbeSamples` calls
+        // b3Body_GetTransform on every entry, unguarded. So an individually
+        // removed probe left a dangling b3BodyId that the next readback
+        // dereferences.
+        //
+        // Reachable, not theoretical. `LooseObjects::Release` -> `PhysicsWorld::
+        // Remove` is exactly this call on a `SpawnModelProbe` body, and it runs
+        // from `Thing::~Thing`, from switching the feature off, and from an object
+        // ceasing to be local in multiplayer. Measured: three probes, remove the
+        // middle one, and the next `GetProbeSamples()` is a SIGSEGV.
+        //
+        // The second failure is quieter and worse. Box3D reuses body ids, so once
+        // a later body took the freed id, the stale entry ALIASED it -- and
+        // `ClearProbes`, which destroys every body in `_probes`, would then delete
+        // a building's collider that nothing had asked it to touch. Erasing here
+        // also fixes `ClearProbes`'s double-destroy of an already-removed probe
+        // and the `probes` stat, which counted removals as still present.
+        // erase-remove, not std::erase_if: this library is built as C++17.
+        const b3BodyId dying = slot->body;
+        _probes.erase(std::remove_if(_probes.begin(), _probes.end(),
+                                     [&](const Probe& probe) {
+                                         return probe.body.index1 == dying.index1 &&
+                                                probe.body.world0 == dying.world0;
+                                     }),
+                      _probes.end());
+
         b3DestroyBody(slot->body);
         slot->body = b3_nullBodyId;
         // b3DestroyBody takes the body's shapes with it, so the running total has
@@ -571,7 +599,21 @@ public:
         const b3BodyId body = b3Shape_GetBody(hit.shapeId);
         for (const Slot& slot : _slots)
         {
-            if (slot.body.index1 == body.index1 && slot.body.world0 == body.world0 && slot.generation % 2 != 0)
+            // NO PARITY TEST. This used to also require `slot.generation % 2 != 0`,
+            // reading the generation counter as a live/dead flag: slots start at 1
+            // and `RemoveBody` increments, so a freed slot is even. But `Store`
+            // REUSES a freed slot without incrementing again, so the body that
+            // moves in keeps the even generation -- and this was the only place
+            // that treated even as dead. The effect: after any removal, the next
+            // body to take that slot was hit by the ray and then reported as "no
+            // body", every time, for as long as it lived. `Find()` never agreed
+            // with this reading; it compares the generation exactly, which is what
+            // a generation counter is for.
+            //
+            // Liveness is already implied by the match itself. `RemoveBody` and
+            // `ClearProbes` both set `slot.body = b3_nullBodyId`, whose `index1`
+            // is 0, and a body Box3D just handed back from a ray hit never is.
+            if (slot.body.index1 == body.index1 && slot.body.world0 == body.world0)
             {
                 return BodyId{slot.index, slot.generation};
             }

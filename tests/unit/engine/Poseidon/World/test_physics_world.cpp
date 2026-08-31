@@ -250,3 +250,149 @@ TEST_CASE("a world with no backend answers safely", "[physics]")
     CHECK_FALSE(world.SetTerrain(nullptr, 0, 0, 0.0f, 0.0f, 0.0f));
     CHECK(world.GetStats().bodies == 0);
 }
+
+TEST_CASE("removing a probe body individually leaves no dangling readback", "[physics]")
+{
+    // The path nothing called. `ClearProbes()` removes probes wholesale and is
+    // what the dev panel uses, so `RemoveBody()` on a body that is ALSO a probe
+    // had never run -- yet it is exactly what `LooseObjects::Release` does, via
+    // `PhysicsWorld::Remove`, from `Thing::~Thing`.
+    //
+    // Before the fix this crashed: `RemoveBody` freed the slot and destroyed the
+    // body but left the entry in `_probes`, and `GetProbeSamples` calls
+    // b3Body_GetTransform on every entry without a validity check. Three probes,
+    // remove the middle one, next readback = SIGSEGV.
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+
+    std::vector<BodyId> ids;
+    for (int i = 0; i < 3; ++i)
+    {
+        SphereProbeDef def;
+        def.position = Vector3(0.0f, 5.0f + static_cast<float>(i), 0.0f);
+        def.radius = 0.2f;
+        const BodyId id = backend->SpawnSphereProbe(def);
+        REQUIRE(id.IsValid());
+        ids.push_back(id);
+    }
+    REQUIRE(backend->GetStats().probes == 3);
+    REQUIRE(backend->GetStats().bodies == 3);
+
+    backend->RemoveBody(ids[1]);
+
+    // The count is the cheap tell, and it was wrong before anything crashed.
+    CHECK(backend->GetStats().bodies == 2);
+    CHECK(backend->GetStats().probes == 2);
+
+    std::vector<ProbeSample> samples;
+    backend->GetProbeSamples(samples); // used to fault here
+    REQUIRE(samples.size() == 2);
+    // Every surviving sample still resolves to a live slot. A sample whose id
+    // came back invalid would mean the entry outlived its slot -- the same defect
+    // wearing a quieter symptom.
+    for (const ProbeSample& s : samples)
+    {
+        CHECK(s.id.IsValid());
+        BodyMotion motion;
+        CHECK(backend->GetBodyMotion(s.id, motion));
+    }
+    CHECK_FALSE(samples[0].id == ids[1]);
+    CHECK_FALSE(samples[1].id == ids[1]);
+
+    // Stepping must not touch the removed body either -- `Step` walks `_probes`
+    // to apply wind.
+    WindSettings wind;
+    wind.enabled = true;
+    wind.velocity = Vector3(5.0f, 0.0f, 0.0f);
+    backend->SetWind(wind);
+    backend->Step(1.0f / 60.0f);
+    CHECK(backend->GetStats().probes == 2);
+
+    // The quieter half: Box3D reuses body ids, so a stale `_probes` entry can
+    // come to ALIAS a body created later. `ClearProbes` destroys everything in
+    // `_probes`, so the alias would delete a collider nobody asked it to touch.
+    const std::vector<Vector3> cube = UnitCube();
+    ConvexPiece                piece{cube.data(), static_cast<int>(cube.size())};
+    Matrix4                    at(MIdentity);
+    at.SetPosition(Vector3(20.0f, 1.0f, 20.0f));
+    const BodyId building = backend->AddStaticBody(&piece, 1, at);
+    REQUIRE(building.IsValid());
+
+    // A step before the ray: Box3D holds a newly created proxy in a move buffer
+    // until the next broadphase update, so a cast straight after AddStaticBody
+    // misses a body that is genuinely there.
+    backend->Step(1.0f / 60.0f);
+
+    Vector3       hit;
+    const Vector3 from(20.5f, 10.0f, 20.5f);
+    const Vector3 to(20.5f, -5.0f, 20.5f);
+    REQUIRE(backend->CastRay(from, to, hit) == building);
+
+    backend->ClearProbes();
+    CHECK(backend->GetStats().probes == 0);
+    // Still there. This is the assertion the whole test exists for.
+    CHECK(backend->CastRay(from, to, hit) == building);
+
+    backend->Destroy();
+}
+
+TEST_CASE("a ray identifies a body that moved into a recycled slot", "[physics]")
+{
+    // `CastRay` is the only place that read the generation counter as a live/dead
+    // PARITY flag -- slots start at 1, `RemoveBody` increments, so a freed slot is
+    // even. `Store` then reuses that slot WITHOUT incrementing again, so the next
+    // occupant keeps the even generation and this refused to name it. The ray hit;
+    // the answer came back "no body".
+    //
+    // It matters because the answer feeds `ShotShell::TryPenetrate` through
+    // `MeasureThickness`, and because a slot is freed by every `ClearProbes()` and
+    // every `LooseObjects::Release`. Nothing in the suite removed a body and then
+    // cast a ray at its replacement, which is why an inconsistency between `Find()`
+    // (exact compare, always right) and this (parity, wrong on every reuse) sat
+    // there unnoticed.
+    auto backend = CreatePhysicsBackend();
+    REQUIRE(backend->Create());
+
+    const std::vector<Vector3> cube = UnitCube();
+    ConvexPiece                piece{cube.data(), static_cast<int>(cube.size())};
+    Matrix4                    at(MIdentity);
+    at.SetPosition(Vector3(20.0f, 1.0f, 20.0f));
+
+    // First occupant of slot 0. A ray names it -- this always worked.
+    const BodyId first = backend->AddStaticBody(&piece, 1, at);
+    REQUIRE(first.IsValid());
+    backend->Step(1.0f / 60.0f); // let the broadphase take the new proxy
+
+    Vector3       hit;
+    const Vector3 from(20.5f, 10.0f, 20.5f);
+    const Vector3 to(20.5f, -5.0f, 20.5f);
+    REQUIRE(backend->RayHitAnything(from, to));
+    REQUIRE(backend->CastRay(from, to, hit) == first);
+
+    // Free the slot and put a different body in it.
+    backend->RemoveBody(first);
+    CHECK_FALSE(backend->RayHitAnything(from, to));
+
+    const BodyId second = backend->AddStaticBody(&piece, 1, at);
+    REQUIRE(second.IsValid());
+    CHECK(second != first);          // the generation moved on
+    CHECK(second.index == first.index); // and it is the same slot, so this is the reuse case
+    backend->Step(1.0f / 60.0f);
+
+    // The ray still hits -- that half was never broken, which is what made the
+    // other half hard to see.
+    REQUIRE(backend->RayHitAnything(from, to));
+    // And it names the CURRENT occupant. This is the assertion that used to fail.
+    CHECK(backend->CastRay(from, to, hit) == second);
+    // Never the stale handle.
+    CHECK_FALSE(backend->CastRay(from, to, hit) == first);
+
+    // Third occupant, so the fix is not merely "even generations also work".
+    backend->RemoveBody(second);
+    const BodyId third = backend->AddStaticBody(&piece, 1, at);
+    REQUIRE(third.IsValid());
+    backend->Step(1.0f / 60.0f);
+    CHECK(backend->CastRay(from, to, hit) == third);
+
+    backend->Destroy();
+}
