@@ -1380,7 +1380,29 @@ grass per frame, drawn three times** (prepass, colour, shadow) — and the near 
   which is a feature trade rather than a win. Do not chase this.
 - **The vertex count is the open lever**, and the 360-vs-108 step between near and mid is
   where to look first: it is a 3.3× jump in per-instance cost that has to be justified by
-  what a near instance actually shows.
+  what a near instance actually shows. Note the resolution-derived near-radius clamp is
+  already in (`near_radius.min(resolvable)` in `grass/mod.rs`), so the obvious form of this
+  — near blades drawn beyond the distance a blade covers a pixel — is already handled.
+- **The photo-card path is 34× cheaper and is NOT a drop-in replacement.** Measured
+  2026-08-31 on `perf_abel`, 1600×900, DLSS off. The atlas is resident (9 photographed
+  clump families) and the path is simply not opted into on OFP worlds, which build no map
+  clutter atlas; `WGR_GRASS_CLUTTER_SOURCE=2` forces it.
+
+  | | frame | grass | vertices |
+  |---|---:|---:|---:|
+  | procedural blades (today) | 13.34 ms | 4.882 ms | 15,537,456 |
+  | cards @ 1.11 m (default) | **7.62 ms** | 0.142 ms | 75,768 |
+  | cards @ 0.45 m | 8.63 ms | 0.641 ms | 460,380 |
+  | cards @ 0.28 m | 10.28 ms | 1.234 ms | 1,058,352 |
+
+  **The cost is real and the look is not there.** At the default spacing the field is
+  isolated tufts on bare ground — a semi-desert, not a meadow. Densifying does not fix it:
+  the atlas is authored as large sparse clumps, so at 0.28 m it becomes a wall of
+  oversized reeds towering over the camera. Spacing and card size are coupled and only
+  the first has a slider. Closing this needs **re-authored smaller cards**, not a setting,
+  and that is a content job with a 3-5 ms prize attached. (The owner's earlier verdict on
+  cards — "flickering, far too dense", Takistan — predates the own-grid placement and the
+  alpha-to-coverage fix, so it is not evidence against the current path.)
 - density and draw-distance shaping through the existing grass photo-card gates;
 - cheaper shading for the far grass bands.
 
