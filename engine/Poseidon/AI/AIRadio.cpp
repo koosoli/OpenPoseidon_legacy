@@ -1,3 +1,4 @@
+#include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815): deterministic radio timing
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/AI/Path/AIDefs.hpp>
@@ -1442,7 +1443,7 @@ void RadioChannel::Say(RString waveName, AIUnit* sender, RString senderName, RSt
         }
     }
 
-    if (pars.name.GetLength() > 0 && GWorld->GetAcceleratedTime() <= 1)
+    if (pars.name.GetLength() > 0 && GWorld->GetAcceleratedTime() <= 1 && !Poseidon::LockstepPacingActive())
     {
         IWave* wave = GSoundScene->OpenAndPlayOnce2D(pars.name, 1, pars.freq, false);
         if (wave)
@@ -1625,7 +1626,14 @@ void RadioChannel::NextMessage()
 
             RadioSentence sent;
             SaySentence(sent, _actualMsg->GetLanguage(), clsVariant, params, pauseAfterMessage);
-            if (GWorld->GetAcceleratedTime() <= 1)
+            // SIM-815: under lockstep pacing the drain must not wait on the audio device.
+            // Two identical runs hear the same contact report end on different TICKS, the
+            // follow-up order lands on different ticks, and Transmitted()'s two RNG draws
+            // shift the shared stream for every later consumer -- measured as the FIRST
+            // divergence between runs (tick 68, rng +2, everything else still identical).
+            // The accelerated-time branch below already IS the deterministic path: the
+            // message runs for its nominal duration, counted in simulation time.
+            if (GWorld->GetAcceleratedTime() <= 1 && !Poseidon::LockstepPacingActive())
             {
                 sent.Say(this, _actualMsg->GetSpeaker());
                 _pauseAfterMessage = 0;
@@ -1642,12 +1650,13 @@ void RadioChannel::NextMessage()
         else
         {
             RString wave = _actualMsg->GetWave();
-            if (wave.GetLength() > 0)
+            if (wave.GetLength() > 0 && !Poseidon::LockstepPacingActive())
             {
                 Say(wave, _actualMsg->GetSender(), _actualMsg->GetSenderName(), "", _actualMsg->GetDuration());
             }
             else
             {
+                // SIM-815: nominal duration under lockstep, same as the sentence branch.
                 _pauseAfterMessage = _actualMsg->GetDuration();
             }
             // Do not send over network - used as title effects etc.

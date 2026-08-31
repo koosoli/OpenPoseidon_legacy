@@ -114,6 +114,37 @@ static void SetFrameCapTimerResolution(bool wanted)
 // triWaitFrames). Tickles the watchdog and pumps OS events so the window
 // stays responsive; does not run a full AppIdle — callers that want that
 // call AppIdle() directly.
+// SIM-815: the one place the lockstep state lives, so subsystems that must swap a real-time
+// dependence for their deterministic path can ask (the radio drain does). Function-local
+// static, not namespace-scope, so the log line runs after logging is up.
+static float LockstepDeltaT()
+{
+    static const float v = []
+    {
+        const char* e = std::getenv("POSEIDON_LOCKSTEP_HZ");
+        if (!e || !e[0])
+            return 0.0f;
+        const double hz = std::atof(e);
+        // A nonsense value must be inert rather than freezing or exploding the simulation.
+        if (!(hz > 0.0) || hz > 1000.0)
+        {
+            LOG_WARN(Core, "POSEIDON_LOCKSTEP_HZ={} is not a rate in (0, 1000]; ignoring", e);
+            return 0.0f;
+        }
+        LOG_INFO(Core,
+                 "Lockstep pacing ON at {} Hz -- deltaT is pinned and no longer measured. "
+                 "Frame times reported in this mode are NOT play performance.",
+                 hz);
+        return static_cast<float>(1.0 / hz);
+    }();
+    return v;
+}
+
+bool LockstepPacingActive()
+{
+    return LockstepDeltaT() > 0.0f;
+}
+
 void ProcessMessagesNoWait()
 {
     GDebugger.ProcessAlive();
@@ -318,29 +349,11 @@ bool AppIdle()
     // capture harness can reach it. Off unless asked for.
     //
     // Read once: the value must not change mid-run, which is the whole point.
-    static const float lockstepDeltaT = []
-    {
-        const char* v = std::getenv("POSEIDON_LOCKSTEP_HZ");
-        if (!v || !v[0])
-            return 0.0f;
-        const double hz = std::atof(v);
-        // A nonsense value must be inert rather than freezing or exploding the simulation.
-        if (!(hz > 0.0) || hz > 1000.0)
-        {
-            LOG_WARN(Core, "POSEIDON_LOCKSTEP_HZ={} is not a rate in (0, 1000]; ignoring", v);
-            return 0.0f;
-        }
-        LOG_INFO(Core,
-                 "Lockstep pacing ON at {} Hz -- deltaT is pinned and no longer measured. "
-                 "Frame times reported in this mode are NOT play performance.",
-                 hz);
-        return static_cast<float>(1.0 / hz);
-    }();
+    const float lockstepDeltaT = LockstepDeltaT();
     if (lockstepDeltaT > 0.0f)
     {
         deltaT = lockstepDeltaT;
     }
-
     if (GApp->m_canRender)
     {
         // Dispatch UI key events buffered by SDL input processing

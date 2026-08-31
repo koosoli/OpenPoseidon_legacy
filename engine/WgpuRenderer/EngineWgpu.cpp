@@ -751,6 +751,8 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
         _frameHashOn = true;
         if (const char* f = std::getenv("WGR_FRAME_HASH_FIRST"); f && f[0])
             _frameHashFirst = static_cast<uint32_t>(std::max(0, std::atoi(f)));
+        if (const char* n = std::getenv("WGR_FRAME_HASH_COUNT"); n && n[0])
+            _frameHashWindow = static_cast<uint32_t>(std::max(1, std::atoi(n)));
         LOG_INFO(Graphics, "Wgpu frame hash: ON -- every published frame is walked byte for byte "
                            "(REN-THR-001 equivalence oracle); this is not a play setting");
     }
@@ -7501,7 +7503,7 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     // frame is republished a variable number of times while I/O completes -- comparing two
     // runs there compares how long the disk took, not what the producer built. The window
     // start is settable so the comparison can be moved past whatever the scene's load costs.
-    if (_frameHashCount >= _frameHashFirst && _frameHashCount < _frameHashFirst + 96)
+    if (_frameHashCount >= _frameHashFirst && _frameHashCount < _frameHashFirst + _frameHashWindow)
     {
         // REN-THR-004 asks two questions of the parting frame that a hash cannot answer.
         // LENGTHS: same length either side means the bytes changed (a colour, an alpha, a

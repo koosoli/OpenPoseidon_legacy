@@ -1,3 +1,4 @@
+#include <Poseidon/Core/Game/GameLoop.hpp> // LockstepPacingActive (SIM-815)
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp>
 #include <Poseidon/UI/Locale/Stringtable/CodepageTranscode.hpp>
@@ -136,13 +137,25 @@ World::World(Engine* engine, bool editor)
     Vector3 lightDirection(+1, -0.5, +1);
     LightSun* mainLight = new LightSun();
 
+    // SIM-815: this wall-clock reseed is what kept two "identical" runs on different RNG
+    // streams even after the constructor's seed was pinned -- it runs at world init and
+    // silently undid the fix, which is why the tick-hash experiment still parted at the
+    // same tick. Under lockstep pacing the seed is fixed here too; normal play keeps the
+    // wall clock, because missions repeating identically would be a gameplay change.
+    if (Poseidon::LockstepPacingActive())
+    {
+        GRandGen.SetSeed(1337);
+    }
+    else
+    {
 #ifdef _WIN32
-    SYSTEMTIME time;
-    GetLocalTime(&time);
-    GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + time.wSecond);
+        SYSTEMTIME time;
+        GetLocalTime(&time);
+        GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + time.wSecond);
 #else
-    GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + (unsigned)time(nullptr));
+        GRandGen.SetSeed(Poseidon::Foundation::GlobalTickCount() + (unsigned)time(nullptr));
 #endif
+    }
     Glob.clock.SetTimeInYear(8 * OneHour + 130 * OneDay);
     mainLight->Recalculate(this);
     _timeToSkip = 0;

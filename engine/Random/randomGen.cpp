@@ -1,3 +1,6 @@
+#include <cstdio>
+#include <cstdlib>
+#include <intrin.h> // _ReturnAddress, for the POSEIDON_RNG_TRACE diagnostic
 #include <Random/randomGen.hpp>
 #include <Poseidon/Foundation/Framework/AppFrame.hpp>
 
@@ -55,6 +58,31 @@ float RandomGenerator::RandomValue() const
     // sequential draw entry points named in the header.
     NoteSequentialUse();
     ++_sequentialDraws; // SIM-815: the tick-hash recorder logs this per fixed step
+    // SIM-815 follow-up: the tick hash can say THAT the draw count diverged at a tick, not
+    // WHO drew. This names the caller: POSEIDON_RNG_TRACE=lo:hi prints the return address
+    // of every draw in that counter window, and diffing two runs' address sequences names
+    // the first divergent consumer via llvm-symbolizer. Diagnostic, off unless set, and the
+    // parse cost is paid once.
+    {
+        struct TraceWindow
+        {
+            unsigned long long lo = 0, hi = 0;
+        };
+        static const TraceWindow w = []
+        {
+            TraceWindow t;
+            if (const char* v = std::getenv("POSEIDON_RNG_TRACE"); v && v[0])
+            {
+                if (std::sscanf(v, "%llu:%llu", &t.lo, &t.hi) != 2)
+                    t = TraceWindow{};
+            }
+            return t;
+        }();
+        if (_sequentialDraws >= w.lo && _sequentialDraws < w.hi)
+        {
+            std::printf("[rngtrace] draw=%llu ret=%p\n", _sequentialDraws, _ReturnAddress());
+        }
+    }
     return _valueTable(_seed++) * (1.0 / static_cast<double>(RandomTable::Size));
 }
 
@@ -187,7 +215,30 @@ RandomTable::RandomTable(int seed)
 // Seeded construction yields a reproducible generator, e.g. for landscape bumps.
 RandomGenerator::RandomGenerator(int seed1, int seed2) : _seed(seed2), _seedTable(seed1), _valueTable(120) {}
 
-RandomGenerator::RandomGenerator() : _seed(Poseidon::Foundation::GlobalTickCount() + 3256), _seedTable(Poseidon::Foundation::GlobalTickCount()), _valueTable(120) {}
+// The default constructor seeds the SHARED SEQUENTIAL STREAM from the wall clock -- which is
+// the right choice for play (missions should not repeat identically) and the root cause of
+// every RNG-downstream divergence between "identical" runs: two runs never even start with
+// the same seed, so the first value-dependent branch takes a different number of draws and
+// the tick-hash rng column parts (measured: always at the same tick, with counts equal until
+// then, which is exactly what a differing seed under an identical call sequence looks like).
+//
+// Under POSEIDON_LOCKSTEP_HZ (the determinism mode, SIM-815) or an explicit
+// POSEIDON_RNG_SEED the seed is fixed. Read directly from the environment because this layer
+// sits below Core and must not know GameLoop.
+static int DeterministicSeedOr(int wallClockValue)
+{
+    if (const char* v = std::getenv("POSEIDON_RNG_SEED"); v && v[0])
+        return std::atoi(v);
+    if (const char* v = std::getenv("POSEIDON_LOCKSTEP_HZ"); v && v[0])
+        return 1337;
+    return wallClockValue;
+}
+
+RandomGenerator::RandomGenerator()
+    : _seed(DeterministicSeedOr(Poseidon::Foundation::GlobalTickCount()) + 3256),
+      _seedTable(DeterministicSeedOr(Poseidon::Foundation::GlobalTickCount())), _valueTable(120)
+{
+}
 
 float RandomGenerator::Gauss(float min, float mid, float max) const
 {
