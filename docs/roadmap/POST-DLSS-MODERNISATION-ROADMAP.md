@@ -674,6 +674,37 @@ must distinguish different mods/addons that expose the same virtual path.
 
 ## Phase 7 — Streaming and residency
 
+**Measured 2026-08-31 (the denominators this phase was missing).** The streaming
+snapshot now carries the renderer's GPU residency totals beside the object count
+(`gpu_residency{}` in `--capture-metrics`, rows in the Streaming tab). On the 30 m/s
+Reforger Everon traverse, 1280x720, build `52d58b46`:
+
+| quantity | value | what it says |
+|---|---:|---|
+| resident objects / item budget | 19,963 / 20,000 | the item budget is ALWAYS the binding constraint |
+| GPU tracked | 2,336 MB | of a 2,048 MB "budget" |
+| bytes per resident object | **119.9 KB** | so the 20,000-item budget promises **~2.3 GB** on this corpus |
+| object textures | 992 MB (1,362 textures) | 42% of tracked |
+| geometry live / pool capacity | 682 MB / **1,344 MB** | **661 MB allocated and unused** — the pool doubles and never compacts |
+| geometry retired | 0 MB | nothing is ever handed back |
+
+Three concrete conclusions, in the order they should be acted on:
+
+1. **The "budget" is not a budget.** `WGR_DYNAMIC_VRAM_MB` defaults to a FIXED 2,048 MB
+   and is never compared against the device's actual VRAM, so "over budget" is
+   permanently true on this corpus while a 8-12 GB card sits half empty. Probing the
+   real device heap (the renderer already takes the Vulkan HAL route for DLSS) must
+   come BEFORE any byte-driven admission gate — gating on the fixed guess would shrink
+   the resident set on hardware that has room to spare, i.e. trade pop-in for nothing.
+2. **The item budget can then become a byte budget**: `effective items =
+   min(item cap, byte budget / bytes-per-object)`, with a high/low water pair as the
+   hysteresis the phase asks for. The measured 119.9 KB/object is what makes this
+   expressible at all; it is also the number to re-measure per corpus, since a
+   texture-heavy interior world will not look like geometry-heavy Everon.
+3. **The geometry pool's 661 MB of slack is the cheapest win on the list** and is
+   independent of both: doubling growth with no compaction means up to 2x live at
+   steady state. Shrink-with-hysteresis when live stays well below capacity.
+
 Once asynchronous loading is reliable, build a coherent residency manager.
 
 Phase 7 does **not** have to finish before Phase 8 begins. After the shared ownership,
