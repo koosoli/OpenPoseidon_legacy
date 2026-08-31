@@ -292,3 +292,52 @@ that is worth anything is H4.
 - **It says nothing about whether the AI can be parallelised.** That is Phase 8 step 12S and
   it depends on SIM-812's finding that AI neighbour writes go past setters via friend access,
   which no timer can change.
+
+---
+
+## 6. Measured — H1 is refuted, and the cost is in `AIGroup::Think`'s own body
+
+Run by the session holding the game folder, on an **idle** machine (PERF-013's correction
+banner explains why that qualifier is load-bearing). `perf_combat`, 110 s warm-up, three
+consecutive one-second windows. The completeness check passes: `aiTicks` equals the sim
+line's tick count in every window, and the seven unnested buckets sum to that line's `ai=`
+(3.31 against 3.308, 2.87 against 2.869, 3.16 against 3.158).
+
+```
+AI ms/tick over 63 aiTicks:  radio=0.002 exposure=0.005 map=0.062 guarding=0.000
+  support=0.000 groupScan=3.239 [groupThink=3.236 [groupExpensive=0.108
+  subThink=0.574 [unitThink=0.491]]] endMission=0.000
+AI counts/tick: centers=2.00 radioGroups=25.00 scanIters=16.65 groupsPerScan=12.68
+  groupThinks=15.44 groupExpensives=0.43 subThinks=18.29 unitThinks=49.54
+```
+
+| hypothesis | verdict |
+|---|---|
+| **H1** — the selection rescan dominates | **REFUTED.** `groupScan − groupThink` = **0.003 ms**, one tenth of one percent of the stage. The rescan is O(N²) in comparisons and those comparisons are free: ~211 of them a tick (16.65 × 12.68) against 12 groups. |
+| **H2** — many full group thinks per tick | **CONFIRMED.** 15.44 group thinks a tick against 2 centers, and `groupThink` carries 3.236 of `groupScan`'s 3.239. |
+| **H3** — the cost is per-unit at the leaf | **REFUTED**, and this is the important one. `subThink` is 0.574 of `groupThink`'s 3.236 — under 18% — and `unitThink` is 0.491 of that. **2.55 ms/tick, 79% of the AI stage, is inside `AIGroup::Think`'s own body**, above the descent into subgroups and units. Per unit the leaf costs 0.0099 ms (0.491 over 49.54 thinks); per group think the body costs 0.165 ms. |
+| **H4** — a large share is not AI | **REFUTED**, as expected: `endMission` and `map` are 0.000 and 0.062 ms. Worth recording — the once-a-tick sensor walk is a real waste and is not a *cost*. |
+
+### What that changes
+
+**The fix the defect in §4 proposes is not worth doing.** Indexing the selection to remove
+an O(N²) rescan buys 0.003 ms/tick. §4 was right to leave it alone and right about why —
+"if H1 refutes, fixing it is pure risk for nothing" — and it did refute.
+
+**The parallel candidate Phase 8 hoped for is not there either.** H3 was the good outcome:
+per-unit work under a per-group parent parallelises. Instead 79% of the stage is in the
+group's own body, which is one call per group, with SIM-812's neighbour writes going past
+setters via friend access. Twelve groups is not much width, and the work is not where the
+width is.
+
+**What is left is the direct one:** 15.44 group thinks a tick against 12 groups means most
+groups think most ticks, and `AIGroup::Think`'s body costs 0.165 ms each time. Whether that
+body is doing something rationable — as `UpdateMap` already is, at 8 changes a tick — is the
+next question, and it is a reading question rather than a measuring one now.
+
+### Caveats
+
+Three one-second windows, one scene, one machine, idle. `perf_combat` has 2 centers, ~12
+groups, 25 radio groups and ~50 unit thinks a tick; a mission with ten times the groups may
+move the balance, and in particular the rescan that is free at 12 groups is not obviously
+free at 120. The `groupsPerScan` counter is there so that can be checked rather than assumed.
