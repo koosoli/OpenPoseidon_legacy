@@ -278,3 +278,32 @@ this at all: **`WGR_DYNAMIC_VRAM_MB=900`, the 30 m/s Everon traverse.** Success 
 
 A useful third arm from the same binary: `WGR_RETAINED_LIVENESS=0` at 900 MB must reproduce
 the old white buildings. If it does not, the run is not exercising eviction at all.
+
+## The premise was wrong — measured 2026-08-31, four arms
+
+The "white buildings under memory pressure" that motivated the liveness work are
+**not caused by texture eviction**. Same 30 m/s Everon traverse, same pose, one
+binary:
+
+| arm | evictions | pinned evicted | buildings |
+|---|---:|---:|---|
+| `WGR_DYNAMIC_VRAM_MB=900`, liveness ON | 60 | **0** | white |
+| `WGR_DYNAMIC_VRAM_MB=900`, liveness OFF | 13 | **0** | white |
+| `WGR_DYNAMIC_VRAM_MB=900`, `WGR_TEXTURE_EVICT_GRACE_FRAMES=36000` | **0** | 0 | white |
+| default budget (5,611 MB probed), no pressure | **0** | 0 | white |
+
+`WGR_FAR_TIER=0` does not change them either, so they are not far-tier stand-ins.
+The `Wgpu material: section draws UNTEXTURED` count is **70 in every arm**,
+including the unpressured one — a constant property of this world at this
+distance, not a residency symptom. No pinned texture was ever evicted in any arm,
+so the pin exemption never even engaged.
+
+Consequences, both recorded rather than quietly acted on:
+
+1. **The liveness signal ships DEFAULT OFF** (`WGR_RETAINED_LIVENESS=1` to enable).
+   The sweep and the refill are correct work and stay in the binary, but relaxing
+   a safety check needs a demonstrated benefit, and there is none yet: nothing in
+   these runs shows an eviction that a live model needed.
+2. **The white blocks are a separate, open question** — a materials/LOD issue in
+   the substituted Reforger world at distance, unrelated to Phase 7. Worth its own
+   investigation with a near-field comparison; explicitly NOT chased here.

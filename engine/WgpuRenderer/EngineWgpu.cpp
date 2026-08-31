@@ -5919,12 +5919,31 @@ float RetainedLivenessRangeScale()
 // WGR_RETAINED_LIVENESS=0 turns the whole signal off, which puts TrimResidency back on the
 // unconditional pin exemption. Both arms of the A/B therefore come out of one binary -- the
 // same discipline WGR_EVICT_ON_MODEL_RELEASE follows above.
+// DEFAULT OFF since 2026-08-31, and the reason is a measurement that contradicts the
+// premise this was built on. The signal itself is sound and stays in the binary; what
+// is NOT established is that relaxing the pin exemption buys anything.
+//
+// The white buildings this was meant to cure are not caused by texture eviction at
+// all. Measured on the 30 m/s Everon traverse, same pose, four arms:
+//   * WGR_DYNAMIC_VRAM_MB=900, liveness ON   -> 60 evictions, every row pinned=0, white
+//   * WGR_DYNAMIC_VRAM_MB=900, liveness OFF  -> 13 evictions, every row pinned=0, white
+//   * WGR_DYNAMIC_VRAM_MB=900 + grace=36000  ->  0 evictions,                    white
+//   * default budget (5611 MB probed)        ->  0 evictions, over budget false, white
+// and the same blocks stay white with WGR_FAR_TIER=0, so they are neither far-tier
+// stand-ins nor evicted textures. The `draws UNTEXTURED` count is identical (70) in
+// every arm including the unpressured one: it is a constant property of this world at
+// this distance, not a residency symptom.
+//
+// So the pin exemption would be a relaxation of a safety check bought with an unproven
+// benefit, on the same night a wrong relaxation of a different check made soldiers
+// invisible. It ships OFF until someone shows an eviction that a live model actually
+// needed. WGR_RETAINED_LIVENESS=1 turns it on for that experiment.
 bool RetainedLivenessEnabled()
 {
     static const bool on = []
     {
         const char* v = std::getenv("WGR_RETAINED_LIVENESS");
-        return !(v && *v == '0');
+        return v && *v == '1';
     }();
     return on;
 }
