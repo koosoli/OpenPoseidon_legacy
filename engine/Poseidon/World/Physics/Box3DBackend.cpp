@@ -765,6 +765,15 @@ public:
         stats.terrainRegistered = _heightField != nullptr;
         stats.terrainWidth = _terrainWidth;
         stats.terrainHeight = _terrainHeight;
+        // Asked of the LIVE world rather than of b3DefaultWorldDef, because the
+        // question 8.4 cares about is what this world will actually do inside a
+        // step -- and b3World_SetWorkerCount can change that after creation. A
+        // value above 1 means Box3D creates its own threads and its own internal
+        // scheduler (types.h: "Otherwise Box3D will create threads and use an
+        // internal scheduler"), which would be a thread pool the engine neither
+        // owns nor FP-conforms.
+        stats.workerCount =
+            b3World_IsValid(_world) ? static_cast<std::uint32_t>(b3World_GetWorkerCount(_world)) : 0u;
         return stats;
     }
 

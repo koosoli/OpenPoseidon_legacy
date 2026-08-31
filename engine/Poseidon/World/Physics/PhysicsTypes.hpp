@@ -74,6 +74,19 @@ struct PhysicsStats
     /// Worst single step seen. A mean hides the hitch that a player feels.
     float worstStepMs = 0.0f;
 
+    /// How many threads the BACKEND uses inside one step. 1 means the solver runs
+    /// entirely on the calling thread.
+    ///
+    /// This is a measurement, not a setting, and it is on the boundary rather than
+    /// buried in the backend because roadmap 8.4 turns on it: "parallel query
+    /// access is enabled only for operations and backend versions whose
+    /// thread-safety contract has been verified". A backend that quietly spawns its
+    /// own workers changes the answer to that question, is invisible from
+    /// PhysicsWorld, and would not appear in SIM-801's thread table either -- so
+    /// its FP environment would be nobody's. Reporting it makes the assumption
+    /// falsifiable by a test instead of by reading a third-party default.
+    std::uint32_t workerCount = 0;
+
     bool terrainRegistered = false;
     /// Terrain grid actually handed to the backend, for comparison against the
     /// landscape's own dimensions.
