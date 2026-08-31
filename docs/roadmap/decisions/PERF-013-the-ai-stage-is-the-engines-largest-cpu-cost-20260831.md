@@ -37,11 +37,12 @@ Both halves of the misreading — a bucket that hid the loop, and a phase that a
 measure it — were in the same profiler and pointed the same wrong way.
 
 **The simulation is not keeping up with real time.** Each window covers one second of
-accumulated `deltaT` and contains **32 ticks**, against the 60 the fixed step nominally
-wants. The accumulator is shedding ticks because a tick costs more than its budget. That is a
-statement about this scene at this object count, not about the engine everywhere — but it
-means "ms per tick" and "ms per second of play" differ by roughly a factor of two here, and
-the table above is the former.
+accumulated `deltaT` and holds fewer ticks than the 60 the fixed step nominally wants — 32 in
+the window this table came from, and **40 to 59 across the eight windows the addendum
+measures**, which is the range to quote. The accumulator is shedding ticks because a tick
+costs more than its budget. So "ms per tick" and "ms per second of play" are not the same
+number here, and the table above is the former. The addendum below counts what is actually
+lost.
 
 ## What follows
 
