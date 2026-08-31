@@ -2611,6 +2611,16 @@ class Engine : public IGraphicsEngine
             region == kFarGpuRegionDraw || region == kCloudGpuRegionMarch ||
             region == kCloudGpuRegionComposite || region == kOpsGpuRegionPreWater ||
             region == kOpsGpuRegionPostWater ||
+            // Water draw and god rays were MISSING from this list until 2026-08-31. Unlike
+            // the rows above they open their own render pass on the encoder instead of
+            // being bracketed inside one, so they read as standalone at the call site --
+            // but containment here is about the TIMESTAMPS, and both fall inside the
+            // colour segment's bracket. Reported as outermost they were double-counted:
+            // on perf_water the sum came to 20.485 ms against a 20.322 ms frame, a
+            // NEGATIVE residual, the parts explaining more than the whole. See PERF-010.
+            // Region 15 is the water surface pass; the water block (0..18) is indexed
+            // numerically here because it has no per-row constants, only Begin/End.
+            region == kWaterGpuRegionBegin + 15 || region == kPostGpuRegionGodRays ||
             (region >= kObjectGpuRegionBegin + 5 && region <= kObjectGpuRegionBegin + 6))
             return kObjectGpuContainerBegin + 1;
         // Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so its

@@ -1419,6 +1419,22 @@ constexpr uint32_t WgrGpuTimerContainedBy(uint32_t region)
         case WGR_GPU_TIMER_CLOUD_COMPOSITE:
         case WGR_GPU_TIMER_OPS_PRE_WATER:
         case WGR_GPU_TIMER_OPS_POST_WATER:
+        /* WATER DRAW AND GOD RAYS WERE MISSING HERE UNTIL 2026-08-31, and the omission is
+         * easy to make: unlike the rows above they open their OWN render pass on the
+         * encoder rather than being bracketed inside one, so they look standalone at the
+         * call site. Containment is about the TIMESTAMPS, not the pass structure, and both
+         * sit inside the colour segment's bracket (lib.rs: the segment spans 4742-5134,
+         * water draw is 4929-4970 and god rays is inside the same span).
+         *
+         * Reported as outermost they were double-counted by the documented sum rule. On
+         * perf_water that made the "sum of outermost" 20.485 ms against a 20.322 ms frame
+         * -- a NEGATIVE residual, i.e. the parts explaining more than the whole, which is
+         * the same class of visible-nonsense the comment above this function was written
+         * about. Correcting it turns the four measured scenes from {2.395, -0.163, 3.384,
+         * 2.476} ms of unexplained time into {2.864, 3.037, 3.802, 2.771} -- all positive,
+         * and near-constant across frames from 9 to 20 ms. See PERF-010. */
+        case WGR_GPU_TIMER_WATER_DRAW:
+        case WGR_GPU_TIMER_GOD_RAYS:
             return WGR_GPU_TIMER_OBJ_COLOR_SEGMENT;
         /* Grass casts into the cascade depth maps from INSIDE each cascade's render pass, so
          * its one region is already inside the per-cascade brackets. Attributed to cascade 0

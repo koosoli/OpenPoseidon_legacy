@@ -378,10 +378,18 @@ before/after acceptance test.
 
 **First measured bottleneck, 2026-08-31: 27% of the GPU frame is attributed to nothing.**
 See `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-20260831.md`.
-On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.4 ms frame
-with DLSS off; the missing 2.8 ms is either inter-pass overhead across 44 pass boundaries
-(64 µs each, the right order) or genuinely un-bracketed work, and nobody has separated the
-two. The same measurement prices DLSS for the first time at **~1.07 ms** (1072×603 →
+On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.5 ms frame
+with DLSS off. The missing time is **fixed per-frame overhead**, established by measuring
+four scenes: the residual is 2.7-2.9 ms whether the frame is 10.5 ms or 20.1 ms, so it
+does not scale with work. That is ~65 µs across each of ~45 pass boundaries — setup,
+teardown, barriers, target transitions. **The lever is fewer, larger passes, not more
+timer brackets**, and because the cost is constant it grows as a share of every
+improvement made elsewhere: 13% of a heavy frame, 27% of a light one.
+
+Getting there required fixing the measurement first: `Water draw` and `Post: god rays`
+were missing from the containment table, so a naive sum double-counted them — on
+`perf_water` the "sum of outermost" came to 20.485 ms against a 20.322 ms frame, a
+negative residual. The same measurement prices DLSS for the first time at **~1.07 ms** (1072×603 →
 1600×900, RTX 3070), invisible to the profiler because NGX's dispatches are not ours to
 bracket.
 

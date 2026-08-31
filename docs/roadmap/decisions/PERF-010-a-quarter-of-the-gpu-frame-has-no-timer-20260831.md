@@ -40,7 +40,45 @@ Not a resolution artefact: both arms render 1072×603 internally. `WGR_DLSS=0` d
 give you native — it gives you **bilinear** upscaling of the same reduced render target,
 which is worth knowing before quoting a "DLSS off" number as a native baseline.
 
-## The two hypotheses, neither yet tested
+## CORRECTION, same day: the denominator was wrong, and fixing it answered the question
+
+Extending the measurement to four scenes exposed a bug in the measurement itself. On
+`perf_water` the sum of outermost rows came to **20.485 ms against a 20.322 ms frame** — a
+**negative residual**, the parts explaining more than the whole. A partition that
+over-counts is not a partition, so the "27% unattributed" above could not be trusted as
+stated.
+
+Cause: `GpuTimerContainedBy` (and its `wgpu_renderer.hpp` mirror) did not list **`Water
+draw`** or **`Post: god rays`** as being inside the 3D colour sub-pass. Both are: the
+colour segment's bracket spans `lib.rs:4742-5134` and water draw sits at 4929-4970 with
+god rays at 5071. They were missed because, unlike every other row in that list, they open
+their **own render pass on the encoder** instead of being bracketed inside one, so they
+read as standalone at the call site — but containment here is about the *timestamps*, not
+the pass structure. God rays in particular was moved into that span by a recent change
+("God rays composite before the transparent draws, not after everything") and the
+containment table did not follow it.
+
+Fixed, redeployed, re-measured from the binary — both rows now report `contained_by=41`:
+
+| Scene | frame | attributed | residual | |
+|---|---:|---:|---:|---|
+| `perf_water` | 20.052 ms | 17.368 ms | **2.684 ms** | 13.4% |
+| `perf_field` | 10.529 ms | 7.650 ms | **2.878 ms** | 27.3% |
+
+**And that answers the question the section below was written to leave open.** The residual
+is **near-constant in absolute terms** — 2.7 to 2.9 ms — across frames of 10.5 ms and
+20.1 ms, i.e. across a doubling of scene cost. Across the four scenes measured before the
+fix (corrected arithmetically) it is 2.86 / 3.04 / 3.80 / 2.77 ms. It does not scale with
+work.
+
+So it is **fixed per-frame overhead**, not un-bracketed scene work: pass setup and
+teardown, barriers, render-target transitions across ~43-48 pass boundaries, which is
+~65 µs each. The consequence for planning is sharper than the original finding. A constant
+3 ms is 13% of a heavy frame and **27% of a light one** — it does not shrink as everything
+else is optimised, so it grows as a share of every improvement made elsewhere. The lever
+is fewer, larger passes; it is not more timer brackets.
+
+## The two hypotheses as originally written, kept for the record
 
 - **Inter-pass overhead.** 44 regions ran this frame. Each region's timestamps bracket
   only its own work; barriers, render-target transitions, cache flushes and pipeline
@@ -54,7 +92,7 @@ which is worth knowing before quoting a "DLSS off" number as a native baseline.
 Distinguishing them is cheap and nobody has done it: bracket the whole encoder in one
 region and compare against the sum, or vary the pass count (turn off a feature that owns
 several regions) and see whether the unattributed time moves with the count or with the
-work.
+work. *(Done, above: it moves with neither — it is constant.)*
 
 ## Why this comes before track B.4
 
