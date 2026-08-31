@@ -144,6 +144,23 @@ another thread" so easily.
 4.1's "no ephemeral handle becomes a persisted identity" is clean by grep — but this is its
 mirror image and was not.
 
+### 274 `RptF` diagnostics that compile to nothing
+`#define RptF(...) ((void)0)` (`DebugLog.hpp:61`), unconditional, in every build. **274 call
+sites** across the engine, all silent. One of them was the sole-renderer gate's cited
+evidence for "an intentional WGPU init failure produces a clear error" — the refusal
+behaved correctly and said nothing, and the gate row had been written by reading the source
+as if it were behaviour. That one is now a real `LOG_ERROR`. **The other 273 are not
+touched**, deliberately: they are legacy 2001 diagnostics and turning them all on at once is
+a log-volume change nobody has measured. Unpark by measuring the volume on a traverse first,
+then deciding per subsystem.
+
+### The object-stream upload cap: works, unknown whether it helps
+`WGR_OBJECT_STREAM_UPLOAD_MB`, default off. The new `admit_stop_upload` counter proves it
+fires — 17 to 19 times per Everon traverse, stable to ±1. Whether turning it on helps is
+**not** settled: resident objects came out 68k–101k with it off against 76k–119k with it on
+over three runs each, so the 12k gap between the means is indistinguishable from noise on
+that scene. Unparks with a quieter measurement, not with another traverse.
+
 ## Parked on dependencies — blocked by real work, not by a decision
 
 ### Phase 5 step 6 — the render thread
