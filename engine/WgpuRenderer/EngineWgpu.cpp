@@ -585,13 +585,20 @@ class VertexBufferWgpu : public VertexBuffer
     // through `renderer`. Borrowed from the renderer once at creation and valid until
     // wgr_destroy; see the lifetime contract on wgr_uploader_get. Never released.
     //
-    // `renderer` is still held because SetSkinData stays on it: the audit found
+    // `renderer` is still held for the destroy fallback below (and for the null test that
+    // stands in for "is there a backend at all").
+    //
+    // REN-THR-011 — SetSkinData no longer calls the exclusive handle. The audit found
     // wgr_mesh_set_skin structural (it creates a GPU buffer, mutates the mesh record, and
     // drops both skin-bake bind-cache entries the draw path reads), and one-time rather
     // than per-frame — VertexBufferWgpu's own `skinned` guard makes it a creation-time
-    // call. It belongs with wgr_mesh_create, not on the upload path.
+    // call. It belongs with wgr_mesh_create, and wgr_mesh_create is now queued, so it is
+    // queued too, through `link`.
     const WgrUploader* uploader = nullptr;
-    uint64_t mesh = 0;
+    // The mesh's identity. Shared with the queued create and with any draw recorded before
+    // that create was drained; see CpuMeshSlot for why this is a slot and not a handle.
+    std::shared_ptr<CpuMeshSlot> slot;
+    std::shared_ptr<CpuMeshLink> link;
     int vertexCount = 0;
     bool isDynamic = false;
     AutoArray<render::mesh::MeshSection> sections;
@@ -612,13 +619,18 @@ class VertexBufferWgpu : public VertexBuffer
     int paletteCount = 0;
     std::vector<Matrix4> palette;
 
-    VertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, uint64_t m, int nv, bool dynamic)
-        : renderer(r), uploader(up), mesh(m), vertexCount(nv), isDynamic(dynamic)
+    // The renderer handle, or 0 while the queued create has not been drained. Every use site
+    // must be able to cope with 0 — that is the whole shape of REN-THR-011.
+    uint64_t RendererMesh() const { return slot ? slot->renderer : 0; }
+
+    VertexBufferWgpu(WgrRenderer* r, const WgrUploader* up, std::shared_ptr<CpuMeshSlot> s,
+                     std::shared_ptr<CpuMeshLink> l, int nv, bool dynamic)
+        : renderer(r), uploader(up), slot(std::move(s)), link(std::move(l)), vertexCount(nv), isDynamic(dynamic)
     {
     }
     ~VertexBufferWgpu() override
     {
-        if (!mesh)
+        if (!slot)
         {
             return;
         }
@@ -633,13 +645,27 @@ class VertexBufferWgpu : public VertexBuffer
         // be handed them — neither may happen while a frame is in flight. The renderer
         // drains the parked handles at the top of its own frame. The handle stops
         // accepting uploads immediately, at enqueue, not at drain.
+        //
+        // REN-THR-011: `dead` is set unconditionally and FIRST, because the interesting case
+        // is the one where there is nothing to destroy — a buffer created and released inside
+        // a single draw phase, before the drain that would have defined its mesh ever ran.
+        // VBSmallDiscardable shadow meshes do exactly this. Cancelling the queued create is
+        // strictly better than fulfilling it and then destroying it: no pool allocation, no
+        // bind-cache clear, no generation bump for a mesh nobody can name any more.
+        slot->dead = true;
+        if (slot->renderer == 0)
+        {
+            std::vector<SVertex>().swap(slot->verts);
+            std::vector<VertexIndex>().swap(slot->indices);
+            return;
+        }
         if (uploader)
         {
-            wgr_uploader_mesh_destroy(uploader, mesh);
+            wgr_uploader_mesh_destroy(uploader, slot->renderer);
         }
         else if (renderer)
         {
-            wgr_mesh_destroy(renderer, mesh);
+            wgr_mesh_destroy(renderer, slot->renderer);
         }
     }
 
@@ -659,7 +685,7 @@ class VertexBufferWgpu : public VertexBuffer
     // mesh that re-derives byte-identical geometry), skipping just the GPU copy.
     void Update(const Shape& src, bool dynamic) override
     {
-        if (skinned || !renderer || !mesh)
+        if (skinned || !renderer || !slot)
         {
             return;
         }
@@ -709,13 +735,25 @@ class VertexBufferWgpu : public VertexBuffer
         // Queue::write_buffer into a vertex range that can never move. Queuing it instead
         // would copy a full vertex array every frame for every skinned character, which is
         // the wrong answer and the reason REN-THR-006 left this row of its table alone.
+        //
+        // REN-THR-011 — unless the create has not been drained yet, in which case there is no
+        // mesh to upload into and the right move is to rewrite what the create will upload.
+        // The end state is byte-identical to today's create-then-update pair, one drain later,
+        // and it is what keeps the conformed-road case exact: that road's FIRST Update is the
+        // one that replaces BuildVertices bytes with BuildOrigVertices bytes carrying the
+        // ClipLand selector, and it runs in the same draw phase as the create.
+        if (slot->renderer == 0)
+        {
+            slot->verts = std::move(verts);
+            return;
+        }
         if (uploader)
         {
-            wgr_uploader_mesh_update(uploader, mesh, AsMeshVerts(verts));
+            wgr_uploader_mesh_update(uploader, slot->renderer, AsMeshVerts(verts));
         }
         else
         {
-            wgr_mesh_update(renderer, mesh, AsMeshVerts(verts));
+            wgr_mesh_update(renderer, slot->renderer, AsMeshVerts(verts));
         }
     }
 
@@ -723,7 +761,7 @@ class VertexBufferWgpu : public VertexBuffer
     // and weights, marking the mesh eligible for the skinned pipeline.
     void SetSkinData(const AnimationRTWeights& weightTable, const Shape& bindShape) override
     {
-        if (skinned || !renderer || !mesh || bindShape.NVertex() != vertexCount)
+        if (skinned || !renderer || !slot || bindShape.NVertex() != vertexCount)
         {
             return;
         }
@@ -758,8 +796,24 @@ class VertexBufferWgpu : public VertexBuffer
             }
         }
 
-        wgr_mesh_update(renderer, mesh, AsMeshVerts(verts));
-        wgr_mesh_set_skin(renderer, mesh, bones, weights);
+        // REN-THR-011 — queued, not called. Both halves are structural: the update writes the
+        // bind pose the skinned pipeline reads, and set_skin allocates a new GPU buffer and
+        // drops both bake_bind_cache entries the draw path reads, neither of which may land
+        // while a frame is in flight. They ride ONE op so their order can never come apart,
+        // and the op sits behind this mesh's create in the same FIFO queue.
+        //
+        // `skinned` flips here, at enqueue, not at drain — deliberately. It is what makes
+        // BeginMeshTL and AddShadowCaster attach a bone palette to draws recorded later in
+        // THIS draw phase, and those draws are rendered after the drain that applies the skin.
+        // Flipping it at the drain instead would cost every skinned mesh one frame of drawing
+        // at bind pose with no palette, which is a visible pop.
+        if (!link || !link->engine)
+        {
+            // No engine to queue against (teardown). Leave `skinned` false so a later call
+            // retries rather than marking a mesh skinned that will never receive weights.
+            return;
+        }
+        link->engine->EnqueueCpuMeshSetSkin(slot, std::move(verts), std::move(bones), std::move(weights));
         skinned = true;
     }
 
@@ -778,6 +832,7 @@ class VertexBufferWgpu : public VertexBuffer
 
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
+    _cpuMeshLink->engine = this; // see CpuMeshLink; nulled in ~EngineWgpu
     // Picture Mode depth of field can be armed from the environment as well as from the tab.
     // Same reason the ballistics recorder needed it: a feature reachable only by clicking cannot
     // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
@@ -1286,6 +1341,10 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
 EngineWgpu::~EngineWgpu()
 {
+    // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
+    // engine on some teardown orders. Nulling it here turns a late SetSkinData into a no-op
+    // instead of a call through a destroyed engine (REN-THR-011).
+    _cpuMeshLink->engine = nullptr;
     LODShape::SetDestroyListener(nullptr, nullptr);
     // While the engine (and its renderer) is still alive so the overlay's
     // textures release cleanly; a later fallback engine can then re-init.
@@ -1594,6 +1653,8 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     _verts.clear();
     _batches.clear();
     _draws3d.clear();
+    // Indices into _draws3d; they must die with it or they patch a stranger (REN-THR-011).
+    _draws3dPendingMesh.clear();
     _cmds.clear();
     _palette.clear();
     _cameras.clear();
@@ -1601,6 +1662,7 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
     _haveCamera = false;
     _swMesh = nullptr;
     _shadowCasters.clear();
+    _castersPendingMesh.clear(); // indices into it (REN-THR-011)
     _smCascadesValid = false;
     _smEnabledFrame = ShadowMapsEnabled();
     if (clear)
@@ -1795,6 +1857,39 @@ void EngineWgpu::DrainResourceOps()
             }
             break;
         }
+        case ResourceOp::CpuMeshCreate:
+        {
+            // REN-THR-011. `dead` means the VertexBufferWgpu was destroyed before this drain
+            // ran, so nothing can name the mesh any more: skipping the create is the whole
+            // handling of that case, and it is cheaper than creating and then destroying.
+            if (!op.cpu || op.cpu->dead)
+            {
+                break;
+            }
+            op.cpu->renderer =
+                wgr_mesh_create(_renderer, AsMeshVerts(op.cpu->verts),
+                                WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.cpu->indices.data()),
+                                                   U32(op.cpu->indices.size())});
+            // The payload has done its job; a CPU mesh's later uploads go through the
+            // uploader, not through the slot. Release rather than clear -- these are full
+            // vertex and index arrays and there are thousands of live CPU meshes.
+            std::vector<SVertex>().swap(op.cpu->verts);
+            std::vector<VertexIndex>().swap(op.cpu->indices);
+            break;
+        }
+        case ResourceOp::MeshSetSkin:
+        {
+            // Behind its mesh's create in the same FIFO queue, so `renderer` is set by the
+            // time this runs -- unless the create was skipped (dead) or never enqueued, in
+            // which case there is nothing to skin and silence is correct: the buffer is gone.
+            if (!op.cpu || op.cpu->renderer == 0)
+            {
+                break;
+            }
+            wgr_mesh_update(_renderer, op.cpu->renderer, AsMeshVerts(op.verts));
+            wgr_mesh_set_skin(_renderer, op.cpu->renderer, op.bones, op.weights);
+            break;
+        }
         case ResourceOp::ModelRegister:
         {
             // The sections carry producer mesh handles; the renderer gets real ones.
@@ -1813,6 +1908,62 @@ void EngineWgpu::DrainResourceOps()
     }
     _resourceOps.clear();
     DrainOverlayTexOps();
+}
+
+void EngineWgpu::EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::vector<SVertex> verts,
+                                       std::vector<uint8_t> bones, std::vector<uint8_t> weights)
+{
+    ResourceOp op;
+    op.kind = ResourceOp::MeshSetSkin;
+    op.mesh = slot ? slot->producer : 0;
+    op.cpu = std::move(slot);
+    op.verts = std::move(verts);
+    op.bones = std::move(bones);
+    op.weights = std::move(weights);
+    _resourceOps.push_back(std::move(op));
+}
+
+// REN-THR-011 -- see PendingMeshRef in the header for why this exists and why it runs here.
+// Called from NextFrame after every drain and before the frame is described, so what is
+// published (and hashed) carries renderer handles exactly as a direct wgr_mesh_create would
+// have left them. Costs nothing on a frame that created no CPU mesh, which is most of them.
+void EngineWgpu::PatchPendingMeshHandles()
+{
+    for (const PendingMeshRef& ref : _draws3dPendingMesh)
+    {
+        if (ref.index >= _draws3d.size() || !ref.slot)
+            continue;
+        // Still 0 means the create was cancelled (the buffer died inside this same draw
+        // phase). The renderer ignores an unknown mesh, so a 0 here drops the draw -- which
+        // is what happened before this change too, by a longer road: the destructor's
+        // deferred destroy is drained at the TOP of wgr_render_frame, so the handle the draw
+        // carried was already freed by the time the draw was read.
+        _draws3d[ref.index].mesh = ref.slot->renderer;
+        if (ref.slot->renderer == 0)
+            _droppedUndefinedMeshDraws++;
+    }
+    for (const PendingMeshRef& ref : _castersPendingMesh)
+    {
+        if (ref.index >= _shadowCasters.size() || !ref.slot)
+            continue;
+        _shadowCasters[ref.index].mesh = ref.slot->renderer;
+        if (ref.slot->renderer == 0)
+            _droppedUndefinedMeshDraws++;
+    }
+    _draws3dPendingMesh.clear();
+    _castersPendingMesh.clear();
+    if (_droppedUndefinedMeshDraws != 0)
+    {
+        static uint32_t reported = 0;
+        if (reported++ < 8)
+        {
+            LOG_INFO(Graphics,
+                     "Wgpu CPU mesh: {} draw records named a mesh whose create was cancelled "
+                     "(buffer released inside the same draw phase); dropped",
+                     _droppedUndefinedMeshDraws);
+        }
+        _droppedUndefinedMeshDraws = 0;
+    }
 }
 
 // Separate from DrainResourceOps because it has a second legitimate drain point: ImGui
@@ -2196,6 +2347,7 @@ void EngineWgpu::NextFrame()
         if (ShadowForceNoCpuCastersEnabled())
         {
             _shadowCasters.clear();
+            _castersPendingMesh.clear(); // indices into it (REN-THR-011)
         }
         const bool shadowActive =
             _smCascadesValid && (!_shadowCasters.empty() ||
@@ -2318,6 +2470,13 @@ void EngineWgpu::NextFrame()
         _opsPeak.Max(_ops);
         _opsFrames++;
         _ops = MutationOps{};
+
+        // REN-THR-011 -- resolve every CPU-mesh handle recorded before this frame's drain,
+        // BEFORE the arrays are swapped into the ring and before HashPublishedFrame walks
+        // them. draws3d masks its mesh field under WGR_FRAME_HASH_MASK_IDS; shadow_casters
+        // does NOT, so a published producer-side placeholder would move the caster slice's
+        // hash and quietly break the cross-build equivalence oracle.
+        PatchPendingMeshHandles();
 
         PushFrameBacking& backing = _pushRing[_pushSlot];
         _pushSlot = (_pushSlot + 1) % kPushFrameRing;
@@ -2476,6 +2635,10 @@ void EngineWgpu::NextFrame()
     _palette.clear();
     _cameras.clear();
     _shadowCasters.clear();
+    // Already emptied by PatchPendingMeshHandles on a frame that published; cleared again
+    // here so a frame that returned early (no renderer) cannot carry indices forward.
+    _draws3dPendingMesh.clear();
+    _castersPendingMesh.clear();
     _overlayVerts.clear();
     _overlayIndices.clear();
     _overlayDraws.clear();
@@ -2652,13 +2815,26 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     std::vector<VertexIndex> indices(static_cast<size_t>(ni));
     render::mesh::BuildIndices(src, indices.data());
 
+    // REN-THR-011 — queued, and INFALLIBLE, for the reason REN-THR-001 established and the
+    // retained path at RegisterGpuModel already relies on: the only failure wgr_mesh_create
+    // ever had is empty input (pool.rs:468 — everything after it grows the pool and succeeds,
+    // with no exhaustion case and no fallible device call). Both emptiness conditions are
+    // checked above, producer-side, without the pool and without the renderer, so the queued
+    // create cannot fail and there is no returned id left to test. That matters here more
+    // than it did there: `_buffer` being null is, per ShapeDraw.cpp:508, "the ONLY structural
+    // place the two backends can diverge" for a road, so a create that cannot fail removes
+    // the divergence rather than deferring it.
     _ops.meshCreate++;
-    const uint64_t mesh = wgr_mesh_create(
-        _renderer, AsMeshVerts(verts), WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
-
-    if (!mesh)
+    auto slot = std::make_shared<CpuMeshSlot>();
+    slot->producer = _nextMeshHandle++; // one handle space with the retained meshes
+    slot->verts = std::move(verts);
+    slot->indices = std::move(indices);
     {
-        return nullptr;
+        ResourceOp op;
+        op.kind = ResourceOp::CpuMeshCreate;
+        op.mesh = slot->producer;
+        op.cpu = slot;
+        _resourceOps.push_back(std::move(op));
     }
 
     const bool dynamic = (type == VBDynamic || type == VBSmallDiscardable);
@@ -2668,7 +2844,7 @@ VertexBuffer* EngineWgpu::CreateVertexBuffer(const Shape& src, VBType type)
     // the guard at the top of this function has already ruled out; the buffer falls back
     // to the renderer handle in that case rather than silently dropping uploads.
     const WgrUploader* uploader = wgr_uploader_get(_renderer);
-    auto* buf = new VertexBufferWgpu(_renderer, uploader, mesh, nv, dynamic);
+    auto* buf = new VertexBufferWgpu(_renderer, uploader, std::move(slot), _cpuMeshLink, nv, dynamic);
     render::mesh::BuildSections(src, buf->sections);
     return buf;
 }
@@ -3276,7 +3452,9 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     }
 
     WgrDraw3D d{};
-    d.mesh = buf->mesh;
+    // REN-THR-011: the real handle for every mesh created in an earlier frame; 0 for one
+    // created earlier in THIS draw phase, patched at the publish point after the drain.
+    d.mesh = buf->RendererMesh();
     d.index_begin = U32(siBeg.beg);
     d.index_count = U32(indexCount);
     d.texture_id = tex;
@@ -4036,6 +4214,14 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     }
 
     _draws3d.push_back(d);
+    // REN-THR-011 -- remembered by INDEX and patched after the drain. Registered here rather
+    // than where d.mesh was filled because several doors above (WGR_KILL_TEX among them) can
+    // still drop the draw, and an entry for a record that was never pushed would patch a
+    // stranger. push_back only appends, so the index stays valid until the frame is published.
+    if (d.mesh == 0 && buf->slot)
+    {
+        _draws3dPendingMesh.push_back(PendingMeshRef{U32(_draws3d.size() - 1), buf->slot});
+    }
     _cmds.push_back(WgrCmd{WGR_CMD_DRAW_3D, U32(_draws3d.size() - 1)});
 }
 
@@ -7157,6 +7343,15 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
         if (haveRun)
         {
             _shadowCasters.push_back(run);
+            // REN-THR-011 -- and this is the call site that decided the design. SceneShadowPass
+            // calls ConvertToVBuffer and then AddShadowCaster on consecutive lines (:574, :600),
+            // so a caster naming a mesh whose create has NOT been drained is the ordinary case
+            // for every newly visible shadowed object, not a corner. Same index-and-patch as
+            // the draw records.
+            if (run.mesh == 0 && buf->slot)
+            {
+                _castersPendingMesh.push_back(PendingMeshRef{U32(_shadowCasters.size() - 1), buf->slot});
+            }
             haveRun = false;
         }
     };
@@ -7198,7 +7393,7 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
         }
         flush();
         run = WgrShadowCaster{};
-        run.mesh = buf->mesh;
+        run.mesh = buf->RendererMesh();
         run.index_begin = U32(si.beg);
         run.index_count = U32(si.end - si.beg);
         std::memcpy(run.world.m, &world, sizeof(run.world.m));

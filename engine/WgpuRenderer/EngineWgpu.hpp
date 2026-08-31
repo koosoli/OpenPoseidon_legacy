@@ -55,6 +55,46 @@ constexpr Sampler2DFlags& operator|=(Sampler2DFlags& a, Sampler2DFlags b)
     return a = a | b;
 }
 
+class EngineWgpu;
+
+// REN-THR-011 -- the identity of a CPU-path (VertexBufferWgpu) mesh, shared by the buffer,
+// by the queued create that will define it, and by any draw or shadow caster recorded
+// against it before that create was drained.
+//
+// It is a shared slot rather than a handle plus a producer->renderer map, and the reason is
+// lifetime, not taste. A VertexBufferWgpu is destroyed from wherever the last reference to
+// its Shape drops, which can be BEFORE the create it enqueued has been drained: a map entry
+// would then have to be reaped by code that cannot reach the engine, and a raw back-pointer
+// from the queue into the buffer would dangle exactly there. Shared ownership makes the slot
+// outlive whichever of the two dies first, and turns "the buffer is gone" into a flag the
+// drain reads rather than a lifetime question nobody can answer.
+struct CpuMeshSlot
+{
+    uint64_t producer = 0; // from EngineWgpu::_nextMeshHandle -- ONE handle space with the retained meshes
+    uint64_t renderer = 0; // written at the drain; 0 means "the create has not landed yet"
+    bool dead = false;     // the buffer died; a create still queued must be skipped, not fulfilled
+    // What the queued create will upload. VertexBufferWgpu::Update rewrites this in place
+    // while `renderer` is still 0 instead of issuing an upload against a mesh that does not
+    // exist yet, which is what keeps the conformed-road case exact: today that first Update
+    // replaces the BuildVertices bytes the create wrote with BuildOrigVertices ones in the
+    // same frame (ObjectClasses.cpp's gpuConform block depends on it), and it still does.
+    std::vector<SVertex> verts;
+    std::vector<VertexIndex> indices;
+};
+
+// REN-THR-011 -- the back edge a CPU-path vertex buffer needs and must not own outright.
+//
+// VertexBufferWgpu::SetSkinData has to append to the engine's resource queue (set_skin is
+// structural: it allocates a GPU buffer and drops both skin-bake bind-cache entries the draw
+// path reads, so it belongs at the frame boundary next to the create -- REN-THR-009). But
+// the buffer has no defined destruction order against the engine, so a raw EngineWgpu* in it
+// would dangle at shutdown. This is that pointer with a kill switch: ~EngineWgpu nulls it,
+// every buffer still alive reads the null, and the call becomes a no-op instead of a crash.
+struct CpuMeshLink
+{
+    EngineWgpu* engine = nullptr;
+};
+
 // Inherits from EngineDummy, so we don't have to add manual stubs for all the missing virtual functions.
 class EngineWgpu : public EngineDummy
 {
@@ -1036,23 +1076,30 @@ class EngineWgpu : public EngineDummy
     // BASE -- which is baked into vertex data -- is applied at the drain, where the real
     // base exists, via the op's crownComp offsets.
     //
-    // Deliberately NOT covered: the CPU-path VertexBufferWgpu meshes (their handles ride
-    // inside WgrDraw3D payloads and their per-frame wgr_mesh_update is upload traffic, not
-    // bookkeeping -- the right thread answer there is a genuinely Send upload path, not a
-    // queue that copies vertex arrays), and the overlay textures (UI, same story).
+    // REN-THR-011 closes the CPU-path half. Its per-frame vertex upload stays off the queue
+    // (that is REN-THR-009's Send uploader, and copying a vertex array per frame per skinned
+    // character would be the wrong answer); only the two STRUCTURAL calls join -- the create
+    // and set_skin, both of which allocate and both of which clear bind-cache entries the
+    // draw path reads. The overlay textures have their own queue below, for the drain-point
+    // reason recorded there.
     struct ResourceOp
     {
         enum Kind : uint8_t
         {
             MeshCreate,
             MeshDestroy,
-            ModelRegister
+            ModelRegister,
+            CpuMeshCreate, // REN-THR-011: identity is `cpu`, not `mesh` -- see CpuMeshSlot
+            MeshSetSkin    // REN-THR-011: bind pose in `verts`, plus `bones` / `weights`
         };
         Kind kind = MeshCreate;
         uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
         uint32_t model = 0; // ModelRegister: the producer handle being defined
         float sphereRadius = 0.0f;
-        std::vector<SVertex> verts;        // MeshCreate (moved in, zero-copy)
+        std::shared_ptr<CpuMeshSlot> cpu;  // CpuMeshCreate / MeshSetSkin
+        std::vector<uint8_t> bones;        // MeshSetSkin
+        std::vector<uint8_t> weights;      // MeshSetSkin
+        std::vector<SVertex> verts;        // MeshCreate (moved in, zero-copy); MeshSetSkin bind pose
         std::vector<VertexIndex> indices;  // MeshCreate
         std::vector<WgrVec4> crownCentres; // MeshCreate, optional: register, then patch
         std::vector<uint32_t> crownComp;   //   verts[i].conform = base + crownComp[i]
@@ -1067,6 +1114,39 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<uint64_t, uint64_t> _meshIdOf;  // producer -> renderer (post-drain)
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
     void DrainResourceOps();
+
+    // REN-THR-011 -- CPU-path meshes translate by SLOT, not through _meshIdOf, and the
+    // handles they leave in the draw arrays are patched at the publish point.
+    //
+    // Why the publish point and not the buffer: a mesh can be created and drawn in the SAME
+    // frame, and routinely is. SceneShadowPass.cpp:572-600 calls ConvertToVBuffer and then
+    // AddShadowCaster on consecutive lines, so at the moment the caster is recorded the drain
+    // that will define the mesh has not run yet -- handing the buffer its renderer handle back
+    // at the drain cannot answer that, because the answer is needed earlier than the drain.
+    // The record therefore carries whatever the slot knows at record time (already the real
+    // handle for every mesh created in an earlier frame -- the overwhelming majority, and free)
+    // and the few that were still 0 are remembered by index and patched below, after the drain
+    // and BEFORE HashPublishedFrame, so what is published and hashed is exactly what a direct
+    // wgr_mesh_create would have published.
+    struct PendingMeshRef
+    {
+        uint32_t index = 0;
+        std::shared_ptr<CpuMeshSlot> slot; // shared: the buffer may already be gone
+    };
+    std::vector<PendingMeshRef> _draws3dPendingMesh;
+    std::vector<PendingMeshRef> _castersPendingMesh;
+    void PatchPendingMeshHandles();
+    uint32_t _droppedUndefinedMeshDraws = 0;
+    // Nulled by ~EngineWgpu; see CpuMeshLink.
+    std::shared_ptr<CpuMeshLink> _cpuMeshLink = std::make_shared<CpuMeshLink>();
+
+  public:
+    // Called by VertexBufferWgpu::SetSkinData through _cpuMeshLink. Public because the buffer
+    // lives in an anonymous namespace in the .cpp and is not a friend of anything.
+    void EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::vector<SVertex> verts,
+                               std::vector<uint8_t> bones, std::vector<uint8_t> weights);
+
+  private:
 
     // REN-THR-010 -- overlay (ImGui/UI) textures through the same drain, with producer
     // handles. Their ids also flow into WgrOverlayDraw::texture_id, but SubmitOverlay runs
