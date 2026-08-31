@@ -216,6 +216,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     # Cross-generation compatibility smoke (REN-GL33-002). Reads the local licensed
     # corpora where they exist and reports itself skipped where they do not.
     Asset/Compat/test_compat_smoke.cpp
+    Asset/Compat/test_reforger_native.cpp
     # Formats tests (isolated format readers)
     Asset/Formats/Common/test_format_detector.cpp
     Asset/Formats/test_wrp.cpp
