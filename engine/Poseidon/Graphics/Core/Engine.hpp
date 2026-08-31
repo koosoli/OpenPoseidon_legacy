@@ -2563,7 +2563,18 @@ class Engine : public IGraphicsEngine
         kPostGpuRegionExposure = 55,
         kPostGpuRegionTonemap = 56,
         kPostGpuRegionUi2d = 57,
-        kGpuRegionEnd = 58,
+        // ATMOSPHERE. PERF-010 narrowed a ~3 ms per-frame residual that is independent of
+        // scene cost, pass count and RESOLUTION; these five were the resolution-independent
+        // per-frame GPU work with no region at all. Every one writes a FIXED-SIZE target --
+        // LUT, froxel grid, equirect env map, nine SH coefficients -- which is exactly why
+        // the residual did not care how big the window was. All OUTERMOST: they run before
+        // the colour sub-pass opens. Appended, never inserted: these are FFI slot numbers.
+        kSkyGpuRegionLuts = 58,
+        kSkyGpuRegionFroxel = 59,
+        kSkyGpuRegionEnv = 60,
+        kSkyGpuRegionSh = 61,
+        kSkyGpuRegionDraw = 62,
+        kGpuRegionEnd = 63,
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

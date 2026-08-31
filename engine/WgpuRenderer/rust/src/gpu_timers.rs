@@ -127,6 +127,18 @@ pub enum Region {
     ExposureAdapt = 55,  // luminance reduction + the eased 1x1 exposure scale
     TonemapResolve = 56, // the tonemap curve into the display-referred target
     Ui2d = 57,           // the 2D/UI segment drawn over the tonemapped frame
+    // --- The atmosphere block. PERF-010 spent a night narrowing a ~3 ms per-frame residual
+    // that is independent of scene cost, of pass count and of RESOLUTION (7.7x the output
+    // pixels moved it 12%). These five were the resolution-independent per-frame GPU work
+    // with no region at all: every one is a FIXED-SIZE target -- LUT, froxel grid, equirect
+    // env map, nine SH coefficients -- which is exactly why the residual did not care how
+    // big the window was. Appended after Ui2d rather than inserted, because these are FFI
+    // slot numbers mirrored in wgpu_renderer.hpp and an insert silently relabels every row.
+    SkyLuts = 58,   // transmittance + multiscatter LUTs (rebuilt only when the atmosphere changes)
+    SkyFroxel = 59, // the aerial-perspective froxel volume, with terrain + cascade occlusion
+    SkyEnv = 60,    // the disc-free equirect sky reflection env map
+    SkySh = 61,     // env map -> SH-9 diffuse sky irradiance
+    SkyDraw = 62,   // the fullscreen sky pass itself
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -139,7 +151,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 58;
+pub const REGION_COUNT: usize = 63;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -542,7 +554,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 58);
+        assert_eq!(REGION_COUNT, 63);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -556,6 +568,9 @@ mod tests {
         assert_eq!(Region::GrassShadow as u32, 24);
         assert_eq!(Region::CloudMarch as u32, 48);
         assert_eq!(Region::Ui2d as u32, 57);
+        // The atmosphere block, appended for PERF-010.
+        assert_eq!(Region::SkyLuts as u32, 58);
+        assert_eq!(Region::SkyDraw as u32, 62);
         assert_eq!(Region::FrameTotal as u32, 25);
         // LIT-020 appended AFTER FrameTotal's index rather than renumbering it: these are FFI
         // slot numbers mirrored in wgpu_renderer.hpp, so an insert would silently relabel every

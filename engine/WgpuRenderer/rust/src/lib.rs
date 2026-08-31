@@ -4144,22 +4144,31 @@ impl Renderer {
             );
             // Rebuild the transmittance + multiscatter LUTs first if the atmosphere
             // changed (no-op most frames), then draw the fullscreen sky.
+            self.gpu_timers.begin(&mut encoder, TimerRegion::SkyLuts);
             self.sky.render_luts(&mut encoder);
+            self.gpu_timers.end(&mut encoder, TimerRegion::SkyLuts);
             // Fill the aerial-perspective froxel volume from the fresh uniform + LUTs, now
             // occluded by the terrain sun-shadow mask (far) + cascade shadow map (near) so
             // the sun can't bleed through hills OR objects, and casters carve god-ray shafts.
+            self.gpu_timers.begin(&mut encoder, TimerRegion::SkyFroxel);
             self.sky.render_froxel(
                 &self.device,
                 &mut encoder,
                 &shadow_mask_view,
                 self.gfx3d.shadow_sample_view(),
             );
+            self.gpu_timers.end(&mut encoder, TimerRegion::SkyFroxel);
             // Bake the disc-free sky reflection env map (equirect) from the fresh uniform + LUTs, so
             // the water surface can reflect this frame's sky (Stage 4a). Cheap; before the sky pass.
+            self.gpu_timers.begin(&mut encoder, TimerRegion::SkyEnv);
             self.sky.render_env(&mut encoder);
+            self.gpu_timers.end(&mut encoder, TimerRegion::SkyEnv);
             // Project the env map into SH-9 diffuse sky irradiance (object + terrain ambient). Reads
             // the fresh env; the camera group already binds the resulting buffer (frame binding 9).
+            self.gpu_timers.begin(&mut encoder, TimerRegion::SkySh);
             self.sky.render_sh(&mut encoder);
+            self.gpu_timers.end(&mut encoder, TimerRegion::SkySh);
+            self.gpu_timers.begin(&mut encoder, TimerRegion::SkyDraw);
             encoder.push_debug_group("wgr_sky");
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wgr_sky"),
@@ -4185,6 +4194,7 @@ impl Renderer {
             self.sky.render(&mut pass);
             drop(pass);
             encoder.pop_debug_group();
+            self.gpu_timers.end(&mut encoder, TimerRegion::SkyDraw);
         }
 
         // The underwater volume is genuinely view-local work, so keep it completely

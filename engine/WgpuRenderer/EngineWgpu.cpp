@@ -7038,6 +7038,11 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Post: exposure adapt",            // WGR_GPU_TIMER_EXPOSURE_ADAPT
         "Post: tonemap",                   // WGR_GPU_TIMER_TONEMAP_RESOLVE
         "UI / 2D",                         // WGR_GPU_TIMER_UI_2D
+        "Sky: LUTs",                       // WGR_GPU_TIMER_SKY_LUTS
+        "Sky: aerial froxel",              // WGR_GPU_TIMER_SKY_FROXEL
+        "Sky: env map",                    // WGR_GPU_TIMER_SKY_ENV
+        "Sky: SH irradiance",              // WGR_GPU_TIMER_SKY_SH
+        "Sky: draw",                       // WGR_GPU_TIMER_SKY_DRAW
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }

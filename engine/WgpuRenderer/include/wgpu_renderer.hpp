@@ -1373,7 +1373,13 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_EXPOSURE_ADAPT = 55,
     WGR_GPU_TIMER_TONEMAP_RESOLVE = 56,
     WGR_GPU_TIMER_UI_2D = 57,
-    WGR_GPU_TIMER_REGION_COUNT = 58,
+    /* Atmosphere (PERF-010): fixed-size per-frame work that had no region. */
+    WGR_GPU_TIMER_SKY_LUTS = 58,
+    WGR_GPU_TIMER_SKY_FROXEL = 59,
+    WGR_GPU_TIMER_SKY_ENV = 60,
+    WGR_GPU_TIMER_SKY_SH = 61,
+    WGR_GPU_TIMER_SKY_DRAW = 62,
+    WGR_GPU_TIMER_REGION_COUNT = 63,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
