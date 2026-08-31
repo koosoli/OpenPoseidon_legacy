@@ -15,6 +15,57 @@ def sha256(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def parse_grid(text: str) -> tuple[int, int]:
+    rows, _, cols = text.lower().partition("x")
+    try:
+        parsed = (int(rows), int(cols))
+    except ValueError as error:
+        raise SystemExit(f"--regions must look like ROWSxCOLS, got {text!r}") from error
+    if parsed[0] < 1 or parsed[1] < 1:
+        raise SystemExit("--regions rows and columns must both be >= 1")
+    return parsed
+
+
+def region_report(
+    rgb_deltas: list[float], width: int, height: int, rows: int, cols: int, threshold: int
+) -> dict[str, Any]:
+    """Per-tile changed-pixel ratios, plus the worst tile.
+
+    The whole-image scalars have no useful scale on their own: a 200x200 object
+    that vanished entirely scores changed_pixel_ratio 0.027, while an *expected*
+    GL33-vs-WGPU backend difference on the same scene scores 0.55. A reader with
+    only the global numbers would dismiss the real regression and investigate the
+    non-bug. Where the difference sits is the part that discriminates, and it has
+    to be in the report rather than only in the mask PNG, or the report cannot be
+    acted on without a human looking at an image.
+    """
+    tiles: list[dict[str, Any]] = []
+    for row in range(rows):
+        y0, y1 = row * height // rows, (row + 1) * height // rows
+        for col in range(cols):
+            x0, x1 = col * width // cols, (col + 1) * width // cols
+            count = 0
+            total = 0.0
+            for y in range(y0, y1):
+                base = y * width
+                for delta in rgb_deltas[base + x0 : base + x1]:
+                    total += delta
+                    if delta > threshold:
+                        count += 1
+            pixels = (y1 - y0) * (x1 - x0)
+            tiles.append(
+                {
+                    "row": row,
+                    "col": col,
+                    "box": [x0, y0, x1, y1],
+                    "changed_pixel_ratio": count / pixels if pixels else 0.0,
+                    "mean_absolute_rgb_delta": total / pixels if pixels else 0.0,
+                }
+            )
+    peak = max(tiles, key=lambda tile: tile["changed_pixel_ratio"]) if tiles else None
+    return {"rows": rows, "cols": cols, "tiles": tiles, "peak": peak}
+
+
 def load_acceptance_profile(path: pathlib.Path) -> dict[str, Any]:
     try:
         profile = json.loads(path.read_text(encoding="utf-8"))
@@ -44,6 +95,8 @@ def main() -> None:
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--threshold", type=int, default=12,
                         help="per-channel difference that counts as changed (0..255)")
+    parser.add_argument("--regions", default="4x4",
+                        help="ROWSxCOLS grid of per-tile ratios in the report; 1x1 to disable")
     parser.add_argument("--acceptance-profile", type=pathlib.Path,
                         help="optional JSON policy; supports thresholds, pending review, or correctness review")
     parser.add_argument("--require-accepted", action="store_true",
@@ -51,6 +104,7 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.threshold <= 255:
         raise SystemExit("threshold must be in 0..255")
+    grid_rows, grid_cols = parse_grid(args.regions)
     with Image.open(args.reference) as reference_image, Image.open(args.candidate) as candidate_image:
         reference = reference_image.convert("RGBA")
         candidate = candidate_image.convert("RGBA")
@@ -77,6 +131,9 @@ def main() -> None:
         "changed_pixel_ratio": changed_pixel_ratio,
         "mean_absolute_rgb_delta": mean_absolute_rgb_delta,
         "max_absolute_rgb_delta": max(rgb_deltas),
+        "regions": region_report(
+            rgb_deltas, reference.width, reference.height, grid_rows, grid_cols, args.threshold
+        ),
         "mask": {"path": str(args.mask), "sha256": sha256(args.mask)},
     }
     accepted = None
