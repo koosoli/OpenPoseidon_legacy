@@ -337,7 +337,13 @@ TEST_CASE("the AI's visibility read is a declared previous-tick edge", "[determi
     REQUIRE(has(SimStage::Vehicles, SimStage::Scripts, SimResource::VehicleState));
     REQUIRE(has(SimStage::Visibility, SimStage::Scripts, SimResource::Visibility));
 
-    REQUIRE(lagged.size() == 4);
+    // Was 4 when SIM-811 wrote this case. SIM-814 audited the declarations against the
+    // call sites and found six more bits, which add four more previous-tick edges: the
+    // wind tick reading last tick's helicopter positions, a flare's script run from
+    // inside the vehicle stage, automatic fire reading the same stale sensor results the
+    // AI reads, and loose objects taking a pose from a solver that has not stepped yet.
+    // The whole set, in order, is pinned in test_sim_stage_evidence.cpp.
+    REQUIRE(lagged.size() == 8);
 }
 
 TEST_CASE("same-tick edges are the ones the order was chosen to create", "[determinism][taskgraph]")

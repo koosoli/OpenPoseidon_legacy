@@ -5,6 +5,12 @@
 // rather than narrower: an over-declared read produces a spurious edge, which somebody
 // investigates and removes, whereas an under-declared read produces a missing edge,
 // which nobody ever notices.
+//
+// SIM-814: every bit below is now backed by a recorded call path in `SimStageEvidence.cpp`
+// or by a named widening in the same file, and a test walks both. Do not add a bit here
+// without adding its evidence -- the test fails, by design, and names the stage and the
+// resource. Six bits were ADDED by that audit, all of them reached through two or more
+// layers of call, and each is marked (SIM-814) below.
 
 namespace Poseidon::Sim
 {
@@ -20,8 +26,13 @@ constexpr std::uint32_t Res(SimResource r)
 // Indexed by SimStage. Order must match the enum.
 constexpr std::array<SimStageDecl, kSimStageCount> kDecls = {{
     // Clock -- `Glob.time += deltaT; SimulateLandscape(deltaT)`. Advances the clock and
-    // steps weather and wind. Reads nothing another stage produced this tick.
-    {SimStage::Clock, 0, Res(SimResource::Clock)},
+    // steps weather and wind.
+    //
+    // (SIM-814) It also READS VehicleState, which SIM-811 recorded as `reads = 0`. The
+    // wind tick ends with `GAirflow.Update(...)`, which ranks helicopters by distance
+    // from the camera and reads their positions and rotor speeds. The first stage of the
+    // tick therefore consumes what the fourth stage wrote -- last tick's.
+    {SimStage::Clock, Res(SimResource::VehicleState), Res(SimResource::Clock)},
 
     // Scripts -- `SimulateScripts()`. Reads `time` (that is WHY it sits after the clock),
     // and reads world state broadly through game commands. Writes script state, and
@@ -34,19 +45,42 @@ constexpr std::array<SimStageDecl, kSimStageCount> kDecls = {{
     // AI -- `PerformAI`. Reads the clock, its own carried state, where everything is,
     // and WHO CAN SEE WHOM. That last read is the one that matters: Visibility is
     // written at stage 5, after this, so this read resolves to the previous tick.
+    //
+    // (SIM-814) It also WRITES VehicleState. `AIUnit::Think` -> `CheckGetOut` ->
+    // `ProcessGetOut` -> `DoGetOut` sets a person's transform and hands them the
+    // vehicle's velocity, eleven hops below `PerformAI`. The stage that integrates entity
+    // motion runs immediately after, so this is a same-tick edge and not a race today --
+    // but it was undeclared, and under Phase 8's concurrency it would have been one.
     {SimStage::AI,
      Res(SimResource::Clock) | Res(SimResource::AIState) | Res(SimResource::VehicleState) |
          Res(SimResource::Visibility),
-     Res(SimResource::AIState)},
+     Res(SimResource::AIState) | Res(SimResource::VehicleState)},
 
     // Vehicles -- `SimulateAllVehicles`. Consumes the orders the AI just wrote and
     // integrates entity motion.
-    {SimStage::Vehicles, Res(SimResource::Clock) | Res(SimResource::AIState) | Res(SimResource::VehicleState),
-     Res(SimResource::VehicleState)},
+    //
+    // (SIM-814) Three additions, all reached five layers down through the
+    // `(vehicle->*simul)` dispatch:
+    //   * Visibility, read -- automatic fire asks `WhatFireResult`, which asks
+    //     `GLOB_WORLD->Visibility`. The same previous-tick sensor results the AI reads.
+    //   * PhysicsState, read and write -- `Thing::Simulate` hands loose objects to the
+    //     solver and reads their pose back, in the stage BEFORE the solver steps.
+    //   * ScriptState, read and write -- `IlluminatingShell::Simulate` adds and RUNS a
+    //     script (`onFlare.sqs`) from inside this stage, so "scripts are a stage" is not
+    //     the whole truth.
+    {SimStage::Vehicles,
+     Res(SimResource::Clock) | Res(SimResource::ScriptState) | Res(SimResource::AIState) |
+         Res(SimResource::VehicleState) | Res(SimResource::Visibility) | Res(SimResource::PhysicsState),
+     Res(SimResource::ScriptState) | Res(SimResource::VehicleState) | Res(SimResource::PhysicsState)},
 
     // Visibility -- `GetSensorList()->SmartUpdateAll()`. Reads where everything ended up
     // and recomputes who can see whom.
-    {SimStage::Visibility, Res(SimResource::VehicleState), Res(SimResource::Visibility)},
+    //
+    // (SIM-814) Also reads the clock -- every cell it writes is stamped with `Glob.time`
+    // -- and AIState, because `CheckPos` retires a dead sensor only when nothing
+    // commands it.
+    {SimStage::Visibility, Res(SimResource::Clock) | Res(SimResource::AIState) | Res(SimResource::VehicleState),
+     Res(SimResource::Visibility)},
 
     // Physics -- the player-proxy move plus one `PhysicsWorld::Step`. Reads the player's
     // (or camera vehicle's) position to place the proxy, then steps its own world.

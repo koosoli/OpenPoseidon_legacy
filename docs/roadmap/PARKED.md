@@ -228,6 +228,32 @@ leaves behind. Chip `task_cc1f2932`. Do not "fix" it by accepting 32 — work ou
 is correct first, because a converter silently producing a half-size level is the more
 interesting possibility.
 
+### Loose objects read a solver that has not stepped yet
+**Parked 2026-08-31 by SIM-814**, which found it while auditing the stage graph's resource
+declarations and is deliberately not fixing it in the same change. The Vehicles stage reads
+a body's pose — `world->GetBodyMotion(body, motion)`,
+`engine/Poseidon/World/Physics/LooseObjects.cpp:100`, reached from `Thing::Simulate` — and
+the Physics stage steps the solver afterwards, `engine/Poseidon/World/World.cpp:2018`. So a
+loose object's position is always one tick behind the solve that produced it. The graph now
+reports it as the previous-tick edge `physics → vehicles (physicsState)`, and
+`test_sim_stage_evidence.cpp` pins it, so it cannot vanish unnoticed.
+**Unparks** when somebody decides whether to move the hand-over after the physics step or
+the physics step before the vehicle stage — a physics-behaviour change with no test
+coverage today, and `LooseObjects` is off by default (`PHY-010`), so nothing visible is
+waiting on it.
+
+### A flare runs a script from inside the vehicle stage
+**Parked 2026-08-31 by SIM-814.** `IlluminatingShell::Simulate`
+(`engine/Poseidon/World/Entities/Weapons/Shots.cpp:1642`) calls `GWorld->AddScript(script)`
+and then `GWorld->SimulateScripts()` at `Shots.cpp:1665-1667`, so the Scripts stage
+re-enters in the middle of the Vehicles stage. Harmless while everything is serial, and
+rare — it needs a flare *and* an `onFlare.sqs` in the mission. It matters for Phase 8: under
+concurrency a script would run on whichever thread happened to be simulating a flare, and
+"a stage is a stage" is the assumption the whole task graph rests on. The declaration now
+records it (Vehicles reads and writes `ScriptState`) rather than pretending otherwise.
+**Unparks** with Phase 8's deterministic command-and-commit stage, which is where
+"a stage may not re-enter another stage" becomes enforceable rather than aspirational.
+
 ---
 
 ## How to use this page

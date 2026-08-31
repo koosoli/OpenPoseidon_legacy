@@ -27,11 +27,18 @@
 // in the tick, i.e. the previous tick's -- a DECLARED edge that `AnalyseSerialOrder`
 // reports, rather than a fact somebody has to notice while reading 80 lines of C++.
 //
-// Honest limit: the reads/writes are hand-audited from the call sites, not derived by
-// the compiler and not enforced at runtime. A stage that touches something it did not
-// declare will not be caught. Making the declaration binding needs the "deterministic
-// command and result commit" stage that SIM-810 names as the largest remaining piece of
-// work, and that is deliberately not started here.
+// Honest limit, as amended by SIM-814: the reads/writes are still hand-audited rather
+// than derived by the compiler, but they are no longer unverified. `SimStageEvidence.hpp`
+// carries the call path behind every bit, and `test_sim_stage_evidence.cpp` fails when a
+// path stops matching the source, when a bit has no path and no written reason, or -- for
+// the three resources whose access points can be enumerated -- when a new call appears
+// inside a stage's reach. That audit found SIX bits missing, every one of them four or
+// more layers of call below a stage's entry point.
+//
+// What is still not caught: a new touch of Clock, VehicleState or AIState, whose witnesses
+// run to thousands of sites and are not censused. Making the declaration binding in full
+// needs the "deterministic command and result commit" stage that SIM-810 names as the
+// largest remaining piece of work, and that is deliberately not started here.
 
 #include <array>
 #include <cstddef>
