@@ -145,14 +145,51 @@ impl RangeAllocator {
         let free: u64 = self.free.iter().map(|&(_, len)| len as u64).sum();
         (self.cap as u64).saturating_sub(free) as u32
     }
+
+    // The free block that runs to the end of the space, if there is one: (offset, len).
+    // `offset` is the LOWEST capacity this allocator can be trimmed to without moving a
+    // live range, which is the whole reason a shrink is expressible here at all (see
+    // GeometryPool::shrink_target).
+    fn trailing_free(&self) -> Option<(u32, u32)> {
+        self.free
+            .last()
+            .copied()
+            .filter(|&(off, len)| off.saturating_add(len) == self.cap)
+    }
+
+    // Reduce capacity to `new_cap`. Only legal when `new_cap` is at or above the start of
+    // the trailing free block — i.e. nothing live sits at or above `new_cap`. Returns false
+    // and changes nothing otherwise, so a caller that got the arithmetic wrong loses the
+    // saving rather than corrupting an allocation.
+    fn shrink(&mut self, new_cap: u32) -> bool {
+        if new_cap >= self.cap {
+            return false;
+        }
+        let Some((off, _len)) = self.trailing_free() else {
+            return false;
+        };
+        if new_cap < off {
+            return false;
+        }
+        if new_cap == off {
+            self.free.pop();
+        } else {
+            let last = self.free.len() - 1;
+            self.free[last] = (off, new_cap - off);
+        }
+        self.cap = new_cap;
+        true
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct GeometryResidency {
     // Bytes suballocated to live meshes. Only `free()` (i.e. mesh_destroy) returns bytes here.
     pub live_bytes: u64,
-    // Bytes the two backing buffers occupy. Monotonically non-decreasing: the pool grows and
-    // has NO shrink path, so `capacity - live` is permanent slack once a peak has been touched.
+    // Bytes the two backing buffers occupy. NOT monotonic since REN-RES-002: the pool grows
+    // by doubling and gives capacity back through `maybe_shrink()` once live has stayed well
+    // under it for `SHRINK_FRAMES` consecutive frames. `capacity - live` is therefore
+    // transient slack, not permanent.
     pub capacity_bytes: u64,
     // NOT an eviction counter, despite reading like one where it surfaces as "geometryRetired".
     // It is the transient set of buffers superseded by a growth *this frame*, held only until
@@ -193,9 +230,16 @@ pub struct GeometryPool {
     // GPU work still in flight. Keeping a fixed number of *growth generations*
     // instead retained hundreds of MiB indefinitely on dense A3/DayZ worlds.
     retired: Vec<wgpu::Buffer>,
-    // Bumped whenever vbuf or ibuf is reallocated by a growth. Cached bind groups /
-    // pass state referencing a pool buffer compare against this to know when to rebuild.
+    // Bumped whenever vbuf or ibuf is reallocated by a growth OR a shrink. Cached bind
+    // groups / pass state referencing a pool buffer compare against this to know when to
+    // rebuild.
     epoch: u64,
+    // Consecutive frames in which at least one allocator has been at or below
+    // SHRINK_LOW_WATER of its capacity. THE HYSTERESIS: a shrink needs SHRINK_FRAMES of
+    // them in a row, so one quiet frame between two loads cannot trigger a full-pool
+    // realloc + GPU copy. Reset to 0 by any frame that is not under the mark, by any
+    // growth, and by a shrink that actually fired.
+    shrink_streak: u32,
 }
 
 impl GeometryPool {
@@ -203,6 +247,42 @@ impl GeometryPool {
     // working set is a modest budget; these keep load-time growth to a few copies.
     const INIT_VERTS: u32 = 1 << 18; // 256K verts (~9 MB)
     const INIT_INDICES: u32 = 1 << 19; // 512K indices (2 MB)
+
+    // REN-RES-002 — shrink policy. Measured motivation (roadmap Phase 7, 2026-08-31,
+    // Reforger Everon traverse): geometry live 682 MB against 1,344 MB of pool capacity —
+    // 661 MB allocated and never used, because growth doubles and there was no shrink path
+    // at all. At a 2 GB residency budget that slack alone is a third of the budget.
+    //
+    // WHY THIS SHAPE AND NOT COMPACTION. A live range's offset is baked into the engine's
+    // `Mesh.alloc` (and, through it, into the cull tables and every recorded draw) the
+    // moment `alloc()` returns; the pool holds no back-reference to the owners, so it
+    // cannot move a range and tell anyone. Real compaction would need a mesh-handle
+    // rewrite pass across gfx3d — a much larger change. What IS available for free is the
+    // TAIL: if the free list ends in a block that runs to `cap`, every live range lies
+    // below that block's offset, so capacity can be trimmed to it with every live range
+    // keeping its exact offset and every baked base staying correct. That is the "cheaper
+    // variant" — it recovers the doubling slack (which is precisely a trailing free block)
+    // and recovers nothing from interior fragmentation.
+    //
+    // THE THREE CONSTANTS, and why ping-pong is impossible:
+    //  - a shrink needs used <= 0.5 * cap for SHRINK_FRAMES CONSECUTIVE frames;
+    //  - it targets 1.25 * used, so immediately after a shrink used/cap >= 0.8, which is
+    //    far above the 0.5 mark — the streak cannot re-arm without something being freed;
+    //  - it only fires when the new capacity at most HALVES the buffer, so a marginal
+    //    saving never pays for a full-pool GPU copy;
+    //  - any growth resets the streak to 0.
+    // Together: shrink -> grow -> shrink oscillation would require crossing 0.5 and then
+    // 0.8 within the same working set, which the 1.25 headroom rules out.
+
+    // Live must be at or under this fraction of capacity to arm the streak.
+    const SHRINK_LOW_WATER: f64 = 0.5;
+    // Consecutive frames under the mark before a shrink fires. ~2 s at 60 fps: long enough
+    // that a map load's quiet gaps do not trigger a realloc, short enough that a level
+    // transition's slack is handed back well inside a session.
+    const SHRINK_FRAMES: u32 = 120;
+    // Capacity to aim for, as a multiple of live. Above 1.0 so the next few allocations do
+    // not immediately grow again; this is the anti-ping-pong term.
+    const SHRINK_HEADROOM: f64 = 1.25;
 
     pub fn new(device: &wgpu::Device) -> Self {
         Self {
@@ -212,6 +292,7 @@ impl GeometryPool {
             ialloc: RangeAllocator::new(Self::INIT_INDICES),
             epoch: 0,
             retired: Vec::new(),
+            shrink_streak: 0,
         }
     }
 
@@ -248,8 +329,106 @@ impl GeometryPool {
 
     // Called immediately after the renderer's frame command buffer has been
     // submitted. This is the precise lifetime boundary required by retire().
-    pub fn frame_submitted(&mut self) {
+    //
+    // `device`/`queue` are here so the shrink check can run at exactly this boundary and
+    // nowhere else: `retired` is cleared FIRST (releasing last frame's superseded
+    // handles), then a shrink may push this frame's superseded buffer into the now-empty
+    // list, where it is held until the NEXT submit. That is the same lifetime a growth
+    // gets, so a shrink can never free a buffer the GPU is still reading.
+    //
+    // Returns true if a shrink actually reallocated (the caller must then drop any cache
+    // holding a pool buffer, exactly as it does for a growth).
+    pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         self.retired.clear();
+        self.maybe_shrink(device, queue)
+    }
+
+    // The capacity `alloc` should be trimmed to, or None if a shrink is not warranted.
+    // `init` is the allocator's initial capacity, a floor: dropping below it would only
+    // buy a few MB and reintroduce load-time growth copies on the next map.
+    fn shrink_target(alloc: &RangeAllocator, init: u32) -> Option<u32> {
+        let used = alloc.used();
+        if f64::from(used) > Self::SHRINK_LOW_WATER * f64::from(alloc.cap) {
+            return None;
+        }
+        // Everything live is below `toff`; without a trailing free block there is nothing
+        // to give back regardless of how much is free in the interior.
+        let (toff, _) = alloc.trailing_free()?;
+        let want = (f64::from(used) * Self::SHRINK_HEADROOM).ceil();
+        let want = if want >= f64::from(u32::MAX) {
+            u32::MAX
+        } else {
+            want as u32
+        };
+        let new_cap = want.max(toff).max(init);
+        // Only worth a full-buffer realloc plus a GPU copy if it at least halves the
+        // buffer. `>` not `>=` so an exact halving still qualifies.
+        if new_cap > alloc.cap / 2 {
+            return None;
+        }
+        Some(new_cap)
+    }
+
+    // Whether either allocator is currently under the low-water mark. Split out so the
+    // streak logic reads as one statement and can be reasoned about in tests.
+    fn under_low_water(&self) -> bool {
+        let under = |a: &RangeAllocator| {
+            a.cap > 0 && f64::from(a.used()) <= Self::SHRINK_LOW_WATER * f64::from(a.cap)
+        };
+        under(&self.valloc) || under(&self.ialloc)
+    }
+
+    fn maybe_shrink(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        if !self.under_low_water() {
+            self.shrink_streak = 0;
+            return false;
+        }
+        self.shrink_streak += 1;
+        if self.shrink_streak < Self::SHRINK_FRAMES {
+            return false;
+        }
+        // Reset unconditionally: whether or not a buffer actually qualifies this frame,
+        // the streak has been spent. Otherwise a pool that is under the mark but has no
+        // trailing free block would re-attempt (and re-fail) the arithmetic every frame.
+        self.shrink_streak = 0;
+
+        let mut shrank = false;
+        if let Some(new_cap) = Self::shrink_target(&self.valloc, Self::INIT_VERTS) {
+            let new_buf = Self::make_vbuf(device, new_cap);
+            Self::copy_prefix(
+                device,
+                queue,
+                &self.vbuf,
+                &new_buf,
+                new_cap as u64 * VERT_SIZE,
+                "v",
+            );
+            let old = std::mem::replace(&mut self.vbuf, new_buf);
+            self.retire(old);
+            // Only after the copy has been issued: shrink() is the point of no return for
+            // the free list, and it must describe the buffer that is now installed.
+            self.valloc.shrink(new_cap);
+            shrank = true;
+        }
+        if let Some(new_cap) = Self::shrink_target(&self.ialloc, Self::INIT_INDICES) {
+            let new_buf = Self::make_ibuf(device, new_cap);
+            Self::copy_prefix(
+                device,
+                queue,
+                &self.ibuf,
+                &new_buf,
+                new_cap as u64 * INDEX_SIZE,
+                "i",
+            );
+            let old = std::mem::replace(&mut self.ibuf, new_buf);
+            self.retire(old);
+            self.ialloc.shrink(new_cap);
+            shrank = true;
+        }
+        if shrank {
+            self.epoch += 1;
+        }
+        shrank
     }
 
     pub fn vbuf(&self) -> &wgpu::Buffer {
@@ -338,6 +517,8 @@ impl GeometryPool {
         self.retire(old_v);
         self.valloc.grow(new_cap);
         self.epoch += 1;
+        // A growth is proof the working set is not shrinking; the hysteresis restarts.
+        self.shrink_streak = 0;
         self.valloc.alloc(n).expect("post-grow vertex alloc")
     }
 
@@ -360,6 +541,8 @@ impl GeometryPool {
         self.retire(old_i);
         self.ialloc.grow(new_cap);
         self.epoch += 1;
+        // A growth is proof the working set is not shrinking; the hysteresis restarts.
+        self.shrink_streak = 0;
         self.ialloc.alloc(n).expect("post-grow index alloc")
     }
 
@@ -387,7 +570,230 @@ impl GeometryPool {
 
 #[cfg(test)]
 mod tests {
-    use super::{RangeAllocator, grown_cap};
+    use super::{GeometryPool, RangeAllocator, VERT_SIZE, grown_cap};
+    use crate::ffi::WgrMeshVertex;
+    use bytemuck::Zeroable;
+
+    // A mesh whose first vertex carries `tag` in pos.x, so a readback can prove THIS
+    // allocation's bytes are the ones still sitting at its base after a shrink.
+    fn tagged_mesh(n: u32, tag: f32) -> (Vec<WgrMeshVertex>, Vec<u32>) {
+        let mut verts = vec![WgrMeshVertex::zeroed(); n as usize];
+        for (i, v) in verts.iter_mut().enumerate() {
+            v.pos.x = tag + i as f32;
+        }
+        (verts, (0..n).collect())
+    }
+
+    fn read_first_vertex_x(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pool: &GeometryPool,
+        vbase: u32,
+        count: u32,
+    ) -> Vec<f32> {
+        let bytes = count as u64 * VERT_SIZE;
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("pool_readback"),
+            size: bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut enc =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        enc.copy_buffer_to_buffer(pool.vbuf(), vbase as u64 * VERT_SIZE, &staging, 0, bytes);
+        queue.submit(std::iter::once(enc.finish()));
+        let slice = staging.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        rx.recv().unwrap().unwrap();
+        let data = slice.get_mapped_range();
+        let verts: &[WgrMeshVertex] = bytemuck::cast_slice(&data);
+        verts.iter().map(|v| v.pos.x).collect()
+    }
+
+    // REN-RES-002 — the central hysteresis property, on a real device.
+    //
+    // Measured motivation: 682 MB live against 1,344 MB of capacity, because the pool
+    // doubled and never gave anything back. This drives the sequence that produces exactly
+    // that shape (grow, then free the big allocation) and asserts three things at once:
+    // SHRINK_FRAMES - 1 quiet frames do nothing, the SHRINK_FRAMES'th reallocates down, and
+    // the allocation that survived still reads back byte-for-byte at its original base.
+    #[test]
+    fn shrink_fires_only_on_the_full_streak_and_preserves_live_ranges() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            return;
+        };
+        let mut pool = GeometryPool::new(&device);
+
+        // A small survivor at base 0, then a large one that forces a vertex growth.
+        let (sv, si) = tagged_mesh(100, 1000.0);
+        let keep = pool.alloc(&device, &queue, &sv, &si).expect("survivor");
+        assert_eq!(keep.vbase, 0);
+        let (bv, bi) = tagged_mesh(400_000, 0.0);
+        let big = pool.alloc(&device, &queue, &bv, &bi).expect("big");
+
+        let grown = pool.residency().capacity_bytes;
+        assert!(
+            grown > GeometryPool::INIT_VERTS as u64 * VERT_SIZE,
+            "the setup must actually grow the pool, else the test proves nothing"
+        );
+
+        // Hand the big allocation back: live collapses to 100 vertices against a capacity
+        // sized for 400,100 — the doubling slack this change exists to recover.
+        pool.free(&big, 400_000, 400_000);
+        assert_eq!(
+            pool.residency().capacity_bytes,
+            grown,
+            "freeing alone must not shrink; only the streak may"
+        );
+
+        // ONE frame under the mark must not be enough, and neither must N-1.
+        for frame in 0..GeometryPool::SHRINK_FRAMES - 1 {
+            pool.frame_submitted(&device, &queue);
+            assert_eq!(
+                pool.residency().capacity_bytes,
+                grown,
+                "shrank after only {} consecutive quiet frames",
+                frame + 1
+            );
+        }
+
+        assert!(
+            pool.frame_submitted(&device, &queue),
+            "the {}th consecutive quiet frame must shrink",
+            GeometryPool::SHRINK_FRAMES
+        );
+        let shrunk = pool.residency().capacity_bytes;
+        assert!(
+            shrunk < grown,
+            "capacity did not come down ({grown} -> {shrunk})"
+        );
+
+        // The whole point: the survivor keeps its offset AND its bytes. Reading pos.x back
+        // out of the new buffer is the only thing that proves the copy was right — the
+        // free-list bookkeeping would look identical if the copy had been skipped.
+        let xs = read_first_vertex_x(&device, &queue, &pool, keep.vbase, 100);
+        for (i, x) in xs.iter().enumerate() {
+            assert_eq!(*x, 1000.0 + i as f32, "vertex {i} was corrupted by the shrink");
+        }
+
+        // And it must not immediately shrink again or start oscillating. Two independent
+        // brakes hold here: the 1.25 headroom, and the INIT floor that this pool has now
+        // landed on (a further shrink would not halve the buffer, so it is declined).
+        for _ in 0..GeometryPool::SHRINK_FRAMES * 2 {
+            pool.frame_submitted(&device, &queue);
+        }
+        assert!(
+            pool.residency().capacity_bytes <= shrunk,
+            "capacity grew back on its own"
+        );
+    }
+
+    // A growth is the signal that the working set is expanding, so it must restart the
+    // hysteresis from zero rather than letting a nearly-complete streak fire one frame later.
+    #[test]
+    fn a_growth_resets_the_shrink_streak() {
+        let Some((device, queue)) = crate::gfx3d::cull::tests::headless() else {
+            return;
+        };
+        let mut pool = GeometryPool::new(&device);
+        let (sv, si) = tagged_mesh(100, 1.0);
+        pool.alloc(&device, &queue, &sv, &si).expect("survivor");
+        let (bv, bi) = tagged_mesh(400_000, 0.0);
+        let big = pool.alloc(&device, &queue, &bv, &bi).expect("big");
+        pool.free(&big, 400_000, 400_000);
+
+        // Get to one frame short of firing.
+        for _ in 0..GeometryPool::SHRINK_FRAMES - 1 {
+            assert!(!pool.frame_submitted(&device, &queue));
+        }
+
+        // Now grow. Without the reset, the very next frame would shrink.
+        let (gv, gi) = tagged_mesh(700_000, 0.0);
+        let grow = pool.alloc(&device, &queue, &gv, &gi).expect("grow");
+        let after_growth = pool.residency().capacity_bytes;
+        pool.free(&grow, 700_000, 700_000);
+        assert!(
+            !pool.frame_submitted(&device, &queue),
+            "a growth must reset the streak, not leave it one frame from firing"
+        );
+        assert_eq!(pool.residency().capacity_bytes, after_growth);
+
+        // A full fresh streak still works.
+        for _ in 0..GeometryPool::SHRINK_FRAMES - 1 {
+            pool.frame_submitted(&device, &queue);
+        }
+        assert!(
+            pool.residency().capacity_bytes < after_growth,
+            "a complete streak after the growth must still shrink"
+        );
+    }
+
+    // The tail is the only thing that can be given back. If the last live range sits at the
+    // top of the space, there is no trailing free block and a shrink must decline rather
+    // than trim capacity out from under it — that would be silent memory corruption.
+    #[test]
+    fn shrink_declines_when_the_tail_is_live() {
+        let mut ranges = RangeAllocator::new(1024);
+        let low = ranges.alloc(16).unwrap();
+        let high = ranges.alloc(1024 - 16).unwrap();
+        assert_eq!(high, 16);
+        assert!(ranges.trailing_free().is_none(), "nothing free at the top");
+        assert_eq!(GeometryPool::shrink_target(&ranges, 0), None);
+
+        // Free the top and it becomes expressible; the low range's offset is untouched.
+        ranges.free(high, 1024 - 16);
+        let target = GeometryPool::shrink_target(&ranges, 0).expect("tail is now free");
+        assert!(
+            target >= low + 16,
+            "a shrink must never cut into the surviving range"
+        );
+        assert!(target <= 1024 / 2, "a shrink must at least halve the buffer");
+        assert!(ranges.shrink(target));
+        assert_eq!(ranges.cap, target);
+        assert_eq!(ranges.used(), 16, "the live range survived the trim");
+    }
+
+    // The anti-ping-pong argument, stated as a test rather than only as a comment: after a
+    // shrink the pool sits at 1/HEADROOM = 80% utilisation, which is far above the 50%
+    // low-water mark, so the streak cannot re-arm and a second shrink cannot follow.
+    // (`used` starts at 17, not 1: at a handful of units `ceil(used * 1.25)` rounds to a
+    // ratio the fraction no longer describes. The real pool cannot get there — the INIT
+    // floor keeps its capacity in the hundreds of thousands of units.)
+    #[test]
+    fn a_shrink_leaves_the_pool_above_its_own_low_water_mark() {
+        for used in [17u32, 1000, 65_536, 262_144] {
+            let cap = used.saturating_mul(64).max(4096);
+            let mut ranges = RangeAllocator::new(cap);
+            ranges.alloc(used).unwrap();
+            let Some(target) = GeometryPool::shrink_target(&ranges, 0) else {
+                continue;
+            };
+            assert!(ranges.shrink(target));
+            assert!(
+                f64::from(ranges.used()) > GeometryPool::SHRINK_LOW_WATER * f64::from(ranges.cap),
+                "used {} of {} is still under the low-water mark, so it would shrink again",
+                ranges.used(),
+                ranges.cap
+            );
+            assert_eq!(GeometryPool::shrink_target(&ranges, 0), None);
+        }
+    }
+
+    // A pool sitting exactly at its initial capacity has nothing worth reclaiming; the floor
+    // stops a fresh, nearly-empty pool from reallocating itself down to nothing and then
+    // paying growth copies on the very first map load.
+    #[test]
+    fn shrink_never_goes_below_the_initial_capacity() {
+        let ranges = RangeAllocator::new(GeometryPool::INIT_VERTS);
+        assert_eq!(
+            GeometryPool::shrink_target(&ranges, GeometryPool::INIT_VERTS),
+            None
+        );
+    }
 
     // Whatever WGR_GEO_POOL_GROWTH is set to, growth must (a) always serve the allocation that
     // triggered it and (b) never wrap. `cap + n` used to be a plain add: at a capacity near

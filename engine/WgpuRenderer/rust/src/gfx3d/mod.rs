@@ -4599,8 +4599,14 @@ impl Gfx3d {
         self.pool.residency()
     }
 
-    pub fn frame_submitted(&mut self) {
-        self.pool.frame_submitted();
+    pub fn frame_submitted(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        // REN-RES-002: the pool may reallocate DOWN here. A shrink moves the pool buffers
+        // exactly as a growth does, so it invalidates the same cache — the skin-bake binds
+        // hold the vbuf at binding 0. mesh_create already does this for the growth case.
+        if self.pool.frame_submitted(device, queue) {
+            self.bake_bind_cache.clear();
+            self.bake_bind_cache_prev.clear();
+        }
     }
 
     // Attach interleaved per-vertex skin data (4 bone indices + 4 weights).

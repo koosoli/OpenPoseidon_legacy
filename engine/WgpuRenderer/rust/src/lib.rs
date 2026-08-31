@@ -528,6 +528,142 @@ pub struct DirectDrawStats {
     pub tris: u32,
 }
 
+// REN-RES-003 — the dynamic residency budget, derived from the device instead of guessed.
+//
+// The measured problem (roadmap Phase 7, 2026-08-31, Reforger Everon traverse): the budget
+// was a FIXED 2,048 MB and nothing ever compared it against the card. Tracked residency came
+// in at 2,336 MB, so `over_budget` was permanently true and the texture LRU chased a target
+// with no relation to the hardware — on an 8-12 GB card that was still mostly empty.
+//
+// Fraction of the device-local heap taken as the default budget. 0.70, and the 30% is not
+// arbitrary padding — it is the memory this process does NOT account for and cannot see in
+// `tracked_bytes`:
+//   * the swapchain, depth, HDR and shadow targets, the GTAO/bloom/DoF chains and every other
+//     render target the renderer itself allocates (none are counted in the residency total,
+//     which covers only object textures and pool geometry);
+//   * the desktop compositor's own surfaces and any other application's VRAM — a browser or a
+//     second monitor's worth of composited windows is easily hundreds of MB;
+//   * driver-side allocations (command buffers, descriptor heaps, shader/pipeline binaries,
+//     paging reserve) that never appear in any wgpu accounting;
+//   * the pool's own doubling transient — a growth holds BOTH buffers plus the copy at once,
+//     which the module header measures at 3x the current size at the moment of the copy.
+// A higher fraction risks the failure this codebase has already hit once (create_buffer
+// returning an INVALID buffer on a DayZ world, i.e. wgpu's silent out-of-memory); a much lower
+// one throws away the headroom the probe was added to find. Re-measure before moving it.
+const RESIDENCY_BUDGET_FRACTION: f64 = 0.70;
+
+// What the budget default falls back to when no probe is possible. This is the historical
+// fixed value, kept deliberately: an unprobed backend must behave exactly as it did before.
+const RESIDENCY_BUDGET_FALLBACK_MB: u64 = 2048;
+
+/// Read the largest DEVICE_LOCAL heap the adapter reports, in bytes.
+///
+/// `Ok(bytes)` on success; `Err(reason)` names why not, and the reason is logged verbatim so a
+/// fallback is never silent. The renderer already takes the wgpu HAL route for DLSS
+/// (`dlss_device.rs`), so this is the same escape hatch, used read-only.
+fn probe_device_local_bytes(adapter: &wgpu::Adapter) -> Result<u64, &'static str> {
+    match adapter.get_info().backend {
+        wgpu::Backend::Vulkan => {
+            // SAFETY: read-only. We take no ownership of the physical device or instance, do
+            // not call anything that mutates them, and the returned borrow ends here.
+            let heap = unsafe {
+                adapter
+                    .as_hal::<wgpu::hal::api::Vulkan>()
+                    .and_then(|hal_adapter| {
+                        let props = hal_adapter
+                            .shared_instance()
+                            .raw_instance()
+                            .get_physical_device_memory_properties(
+                                hal_adapter.raw_physical_device(),
+                            );
+                        let count =
+                            (props.memory_heap_count as usize).min(props.memory_heaps.len());
+                        props.memory_heaps[..count]
+                            .iter()
+                            // VK_MEMORY_HEAP_DEVICE_LOCAL_BIT. Compared as a raw bit so this
+                            // file does not have to name an `ash` type — `ash` is an OPTIONAL
+                            // dependency here (dlss only), and this probe must work in the
+                            // default build that does not pull it in.
+                            .filter(|heap| heap.flags.as_raw() & 0x1 != 0)
+                            .map(|heap| heap.size)
+                            .max()
+                    })
+            };
+            match heap {
+                Some(bytes) if bytes > 0 => Ok(bytes),
+                Some(_) => Err("Vulkan reported a zero-sized DEVICE_LOCAL heap"),
+                None => Err("Vulkan adapter exposed no DEVICE_LOCAL heap"),
+            }
+        }
+        #[cfg(windows)]
+        wgpu::Backend::Dx12 => {
+            // DXGI's Budget is what the OS says this process may use RIGHT NOW, so it already
+            // subtracts other applications — unlike the Vulkan heap size, which is the whole
+            // card. Applying the same fraction to it is therefore doubly conservative, which
+            // is the safe direction and keeps one policy constant instead of two.
+            // SAFETY: read-only; QueryVideoMemoryInfo does not mutate the adapter.
+            let budget = unsafe {
+                adapter.as_hal::<wgpu::hal::api::Dx12>().and_then(|a| {
+                    // DXGI_MEMORY_SEGMENT_GROUP_LOCAL is 0, which is the derived Default.
+                    a.raw_adapter()
+                        .query_video_memory_info(Default::default())
+                        .ok()
+                        .map(|info| info.Budget)
+                })
+            };
+            match budget {
+                Some(bytes) if bytes > 0 => Ok(bytes),
+                _ => Err("DXGI QueryVideoMemoryInfo returned no local budget"),
+            }
+        }
+        // GL/Metal/Noop and (on non-Windows) DX12 have no portable heap query here.
+        _ => Err("backend exposes no device-memory query"),
+    }
+}
+
+/// Turn the env override and the probe result into a budget in bytes plus the line that must
+/// be logged for it. Pure, so the four cases (override, override 0 = unlimited, probe present,
+/// probe absent) are unit-testable without a device.
+fn residency_budget_from(env_mb: Option<u64>, probe: Result<u64, &'static str>) -> (u64, String) {
+    if let Some(mb) = env_mb {
+        let bytes = mb.saturating_mul(1024 * 1024);
+        let note = if mb == 0 { " = UNLIMITED" } else { "" };
+        return (
+            bytes,
+            format!(
+                "wgpu dynamic residency budget: {mb} MB{note} (WGR_DYNAMIC_VRAM_MB override; \
+                 device probe: {})",
+                match probe {
+                    Ok(heap) => format!("{} MB device-local", heap / (1024 * 1024)),
+                    Err(reason) => format!("unavailable — {reason}"),
+                }
+            ),
+        );
+    }
+    match probe {
+        Ok(heap) => {
+            let bytes = (heap as f64 * RESIDENCY_BUDGET_FRACTION) as u64;
+            (
+                bytes,
+                format!(
+                    "wgpu dynamic residency budget: {} MB = {:.0}% of {} MB probed device-local \
+                     heap (0 = unlimited via WGR_DYNAMIC_VRAM_MB)",
+                    bytes / (1024 * 1024),
+                    RESIDENCY_BUDGET_FRACTION * 100.0,
+                    heap / (1024 * 1024),
+                ),
+            )
+        }
+        Err(reason) => (
+            RESIDENCY_BUDGET_FALLBACK_MB.saturating_mul(1024 * 1024),
+            format!(
+                "wgpu dynamic residency budget: {RESIDENCY_BUDGET_FALLBACK_MB} MB FIXED FALLBACK \
+                 — no device probe ({reason}); set WGR_DYNAMIC_VRAM_MB to override (0 = unlimited)"
+            ),
+        ),
+    }
+}
+
 pub struct Renderer {
     // How much wider the planar reflection's frustum is than the screen's. 1 = the old behaviour,
     // where a grazing reflection ran off the edge of the reflection target and the reflected
@@ -922,17 +1058,17 @@ impl Renderer {
         // doesn't pad an enormous array (a level with more unique textures overflows to
         // the white slot — 8192 comfortably covers OFP content). Must be >= terrain's 512.
         let object_texture_cap = 8192u32.max(terrain::TERRAIN_MAX_GROUND_LAYERS);
-        let residency_budget_mb = std::env::var("WGR_DYNAMIC_VRAM_MB")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(2048);
-        let residency_budget_bytes = residency_budget_mb.saturating_mul(1024 * 1024);
-        log.log(
-            log_level::INFO,
-            &format!(
-                "wgpu dynamic residency budget: {residency_budget_mb} MB (WGR_DYNAMIC_VRAM_MB; 0 = unlimited)"
-            ),
+        // REN-RES-003: the residency budget used to be a flat 2,048 MB that was never
+        // compared against the device. Probe the real device-local heap and derive the
+        // default from it; the env var still overrides exactly as before.
+        let probe = probe_device_local_bytes(&adapter);
+        let (residency_budget_bytes, budget_log) = residency_budget_from(
+            std::env::var("WGR_DYNAMIC_VRAM_MB")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok()),
+            probe,
         );
+        log.log(log_level::INFO, &budget_log);
 
         // BOTH binding-array limits DEFAULT TO 0 even on devices that fully support
         // binding arrays, so both must be requested explicitly or layout creation panics
@@ -5184,7 +5320,7 @@ impl Renderer {
         // the old pool buffer. Submission is the safe boundary for releasing
         // those superseded application-side handles; wgpu retains resources for
         // command buffers that are still executing on the GPU.
-        self.gfx3d.frame_submitted();
+        self.gfx3d.frame_submitted(&self.device, &self.queue);
         // Same boundary for bindless texture slots: a slot freed by texture_destroy
         // this frame may only be reused for creates in later frames.
         self.textures.frame_submitted();
@@ -5621,5 +5757,77 @@ impl Renderer {
             res,
             out,
         )
+    }
+}
+
+// REN-RES-003 — the residency budget must be a measurement, not a guess. These pin the
+// derivation itself (pure); the probe against real hardware is exercised by the startup log
+// line, which names the heap it read.
+#[cfg(test)]
+mod residency_budget_tests {
+    use super::{RESIDENCY_BUDGET_FALLBACK_MB, RESIDENCY_BUDGET_FRACTION, residency_budget_from};
+
+    const MB: u64 = 1024 * 1024;
+
+    // Measured on this workstation 2026-08-31 (RTX 3070, headless adapter, no game run):
+    //   Vulkan — DEVICE_LOCAL heap 8017 MB -> budget 5611 MB
+    //   Dx12   — DXGI local Budget 7249 MB -> budget 5074 MB (lower because DXGI's Budget
+    //            already subtracts what other processes hold; the Vulkan heap is the card)
+    //   Gl     — no query -> the 2048 MB fixed fallback, with the reason in the log
+    // i.e. the old fixed 2,048 MB was under-budgeting this card by ~3.5 GB.
+    #[test]
+    fn probed_heap_becomes_a_fraction_of_itself() {
+        let heap = 8192 * MB; // an 8 GB card
+        let (bytes, log) = residency_budget_from(None, Ok(heap));
+        assert_eq!(bytes, (heap as f64 * RESIDENCY_BUDGET_FRACTION) as u64);
+        // The measured failure this replaces: 2,336 MB tracked against a 2,048 MB budget on
+        // a card with room to spare. A probed 8 GB card must clear that mark comfortably.
+        assert!(
+            bytes > 2336 * MB,
+            "a probed 8 GB card must budget above the 2,336 MB that was measured over budget \
+             (got {} MB)",
+            bytes / MB
+        );
+        assert!(log.contains("probed device-local heap"), "log was: {log}");
+        assert!(log.contains("8192 MB"), "log must name the heap it read: {log}");
+    }
+
+    #[test]
+    fn absent_probe_keeps_the_old_fixed_budget_and_says_why() {
+        let (bytes, log) =
+            residency_budget_from(None, Err("backend exposes no device-memory query"));
+        assert_eq!(bytes, RESIDENCY_BUDGET_FALLBACK_MB * MB);
+        assert!(log.contains("FIXED FALLBACK"), "log was: {log}");
+        assert!(
+            log.contains("backend exposes no device-memory query"),
+            "the fallback REASON must be in the log, not just the fact: {log}"
+        );
+    }
+
+    #[test]
+    fn env_override_wins_over_a_successful_probe() {
+        let (bytes, log) = residency_budget_from(Some(900), Ok(8192 * MB));
+        assert_eq!(bytes, 900 * MB, "the override must be exact, not scaled");
+        assert!(log.contains("override"), "log was: {log}");
+        // The probe is still reported, so a run with an override can still be read against
+        // what the card actually has.
+        assert!(log.contains("8192 MB device-local"), "log was: {log}");
+    }
+
+    #[test]
+    fn env_override_of_zero_is_still_unlimited() {
+        for probe in [Ok(8192 * MB), Err("backend exposes no device-memory query")] {
+            let (bytes, log) = residency_budget_from(Some(0), probe);
+            assert_eq!(bytes, 0, "0 must stay the unlimited sentinel");
+            assert!(log.contains("UNLIMITED"), "log was: {log}");
+        }
+    }
+
+    #[test]
+    fn a_tiny_probe_does_not_wrap_or_produce_an_accidental_unlimited() {
+        // A software/virtual adapter can report a very small heap. The budget must stay a
+        // small positive number: 0 would silently mean "unlimited", the exact opposite.
+        let (bytes, _) = residency_budget_from(None, Ok(64 * MB));
+        assert!(bytes > 0 && bytes < 64 * MB, "got {bytes} bytes");
     }
 }
