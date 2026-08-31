@@ -304,7 +304,13 @@ bool AppIdle()
     // arm is nearly twice as far into the world at frame N as the arm it was compared with.
     // Counting FRAMES until two runs diverge does not compare the same thing across arms
     // that cover different amounts of world time per frame. The comparison, not the mode,
-    // was the defect; whether pinning deltaT helps is still unmeasured.
+    // was the defect -- and the deeper defect was that both windows sat inside the MISSION
+    // LOAD, so they were timing the loading screen.
+    //
+    // Measured properly (REN-THR-005), aligning each run on the first frame that draws the
+    // world: this mode makes the fixed-step count identical in 40 frames of 40 across three
+    // runs, raises bit-identical published frames from 2/41 to 11/40, and holds the camera
+    // and draws3d identical for 12 frames instead of 2. It does what it was built to do.
     //
     // Kept because it is a real capability the search for that cause will want, and because
     // it is the scriptable form of the Ctrl-O "Fix Sim" cheat above -- which does the same

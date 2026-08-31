@@ -1,3 +1,4 @@
+#include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include "EngineWgpu.hpp"
 #include <Poseidon/Core/BuildInfo.hpp>
 #include "TerrainWgpu.hpp"
@@ -7257,6 +7258,16 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     // start is settable so the comparison can be moved past whatever the scene's load costs.
     if (_frameHashCount >= _frameHashFirst && _frameHashCount < _frameHashFirst + 96)
     {
+        // REN-THR-004 asks two questions of the parting frame that a hash cannot answer.
+        // LENGTHS: same length either side means the bytes changed (a colour, an alpha, a
+        // transform); a different length means geometry appeared or vanished, and those are
+        // different bugs. STEPS: how many fixed simulation ticks this frame ran -- if the
+        // parting frame is where two runs first take a different number, the one-frame lead
+        // of the 2D path over the world is explained and needs no further candidate.
+        LOG_INFO(Graphics, "Wgpu frame len[{}]: steps={} vert={} bat={} cmd={} d3d={} tn={} grass={}",
+                 _frameHashCount, Dev::LastFixedStepFrame().steps, frame.verts.length, frame.batches.length,
+                 frame.cmds.length, frame.draws3d.length, frame.terrain_nodes.length,
+                 frame.grass_batches.length);
         LOG_INFO(Graphics,
                  "Wgpu frame hash: frame[{}]={:#018x} | scal={:08x} cam={:08x} d3d={:08x} vert={:08x} "
                  "bat={:08x} cmd={:08x} pal={:08x} shad={:08x} ovv={:08x} ovi={:08x} ovd={:08x} "
