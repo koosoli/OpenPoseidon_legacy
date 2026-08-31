@@ -70,6 +70,14 @@ selection-building part of the conversion (`ShapeAdapter.cpp:1140-1180`,
 `NamedSelection` construction + `Shape::AddNamedSel` + the following
 `Shape::Compact()`) or in something it allocates alongside.
 
+> **SUPERSEDED — the write was found later the same day. Skip to the part 2 appendix at
+> the end of this document before acting on anything in this paragraph.** It is
+> `CompactBuffer::_count`, a non-atomic reference count behind every interned string
+> (`CompactBuf.hpp`), fixed in `8baf5d98`. In particular: ASan was **not** needed, the
+> selection loop named below is the carrier and **not** the fault, and the two "next steps"
+> in this paragraph are both wrong turns. Left in place rather than rewritten, because the
+> reasoning that led here is worth seeing next to the answer.
+
 **The exact write is not identified, and this record does not claim it is.** The
 tool that would name it is ASan; the Windows preset `win-x64-clang-san` **does
 not configure in this tree** (`Configuring incomplete, errors occurred` →
