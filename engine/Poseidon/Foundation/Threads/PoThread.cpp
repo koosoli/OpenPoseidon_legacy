@@ -81,12 +81,17 @@ bool poSetPriority(ThreadId id, int delta)
 // deprioritised stayed at normal priority and nothing said so, because the bool return was
 // discarded at the call site.
 //
-// That mattered. The object-stream preparer workers ask for BELOW_NORMAL precisely so they
-// can never take a core from the render thread (roadmap 11A, "streaming/decode cannot
-// starve simulation"), and they had been running at normal priority the whole time. The
-// preparer had already noticed and worked around it with a #ifdef _WIN32 direct call; the
-// workaround is now removed, because a helper that lies is worse than no helper -- the next
-// caller would not have known to work around it.
+// The bug was LATENT, and being precise about that matters. `git log -S` says the only
+// Windows caller -- the object-stream preparer's workers, which ask for BELOW_NORMAL so
+// they can never take a core from the render thread (roadmap 11A) -- carried a #ifdef
+// _WIN32 direct SetThreadPriority workaround from the very commit that introduced them
+// (daf92238). So no thread ever actually ran at the wrong priority. The other caller,
+// NetPeer, uses poSetPriority with a real handle from poThreadCreate and was always fine.
+//
+// The fix is therefore about the TRAP, not about a live symptom: the next caller would
+// have had no way to know the helper needed working around, and a helper that silently
+// lies is worse than no helper. The workaround in the preparer is now removed, so there is
+// one way to do this and it works.
 //
 // GetCurrentThread() returns the pseudo-handle for the calling thread: always valid, needs
 // no CloseHandle, and is what this always meant.

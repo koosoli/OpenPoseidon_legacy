@@ -1424,10 +1424,11 @@ After those shared foundations, **split the architecture work rather than serial
 
 10A. Build the staged asynchronous asset pipeline and hardened Derived Data Cache.  
 11A. Add task QoS so streaming/decode cannot starve simulation. *(Partly in place, and
-one piece of it was not working at all: the preparer's workers ask for BELOW_NORMAL
-priority through `poSetMyPriority`, which cast a thread ID to a HANDLE and was a silent
-no-op on Windows — every such worker ran at normal priority. Fixed 2026-08-31 with a test
-that reads the priority back from the OS. What is genuinely in place: 2 workers, a bounded
+one of its helpers was broken but latent: `poSetMyPriority` cast a thread ID to a HANDLE
+and was a silent no-op on Windows. No thread was actually mis-prioritised — the preparer
+carried a direct-API workaround from the commit that introduced its workers — so this was
+a trap for the next caller rather than a live defect. Fixed 2026-08-31, workaround removed,
+with a test that reads the priority back from the OS and that the old code fails. What is genuinely in place: 2 workers, a bounded
 distance-ordered queue with back-pressure rather than dropping, and the main-thread FP
 environment applied on each worker.)*  
 12A. Add residency budgets, hysteresis and predictive streaming.
