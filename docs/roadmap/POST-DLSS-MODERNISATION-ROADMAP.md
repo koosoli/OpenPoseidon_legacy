@@ -688,6 +688,39 @@ Implement one vertical asset slice at a time:
 Each slice must support request deduplication, cancellation, error placeholders,
 bounded queues and traceable state transitions before moving to the next asset type.
 
+**Slice status, and a measurement that should stop slice 3 from being attempted.**
+
+Slices 1 and 2 are built: the `ObjectStreamPreparer` parses textures and static models on
+its own workers, with a bounded distance-ordered queue, back-pressure instead of dropping,
+and traceable states (`Unknown`/`Queued`/`Parsing`/`Ready`/`NotLoose`/`Failed`/
+`Converting`/`Converted`). Slice 2 also moved ODOL geometry conversion onto those workers
+by splitting `convertToLODShape`'s tail.
+
+**Slice 3 (material interpretation) is main-thread-only and should stay that way until
+something measures otherwise.** What holds it there is named at
+`ShapeAdapter.hpp:44` — `BuildAdapterBankTables` touches `GlobLoadTexture`, the global
+`GTexMaterialBank`, and `LoadHeaders`, none of which are thread-safe. Making them safe is
+real work. What that work would buy, measured on the deployed build, 2026-08-31,
+`perf_abel` at 3441×1440 with DLSS active, 256 sampled frames:
+
+| phase | avg ms | max ms |
+|---|---:|---:|
+| `swap` (waiting on present) | **27.171** | 1148.448 |
+| `land:gnd` | 0.616 | 13.774 |
+| `drw:land` | 0.430 | 1.371 |
+| everything else, summed | ~0.47 | — |
+| **frame** | **28.686** | — |
+
+**95% of the frame is `swap`.** Every piece of CPU work the main thread does, material
+interpretation included, sums to about 1.5 ms — and material interpretation is a fraction
+of the 0.081 ms `land:obj` bucket, because the tail split already moved the expensive part
+off. There is no main-thread time for slice 3 to reclaim on a stock world. Attempt it only
+with a corpus that measures differently (a material-heavy foreign world is the plausible
+candidate), and say which corpus in the commit.
+
+The same table is the answer to "why is the frame 28 ms": it is GPU-bound, not CPU-bound,
+which is what the grass measurements have said all along.
+
 ### Derived Data Cache
 
 Legacy data should not be converted into modern GPU form on every launch.
