@@ -103,8 +103,17 @@ the tip at the time of writing.
 | Phase 6 | **Slice 3 should not be attempted**, and the table says why | `swap` is 27.171 ms of a 28.686 ms frame. All main-thread CPU work sums to ~1.5 ms and material interpretation is a fraction of the 0.081 ms `land:obj` bucket. There is nothing to reclaim; the frame is GPU-bound |
 | MAT-054 | The converter fix was a **no-op on its first attempt**, and a measurement caught it | The widened deploy gate sat behind an early `return` in the `bcr.empty()` branch: a 400-model Everon export reported 21 materials with "no BCRMap and no BCR_N layer" and **zero** colour-only deploys. MAT-054 had named the right branch; I took the "equivalently" alternative it offered, and the two are only equivalent if control reaches it. Moved, re-run on the same 400 models: **451 .emat / 0 colour-only → 463 .emat / 11 colour-only.** The owner's corpus is unchanged — see the top of this document |
 
+### 06:20-06:50 — the measurement block
+
+| Area | What | Evidence |
+|---|---|---|
+| Phase 3 | **DLSS priced for the first time: ~1.07 ms** | 1072×603 → 1600×900 on the RTX 3070, as the difference between two arms that render the same internal pixel count. Invisible to the profiler because NGX's dispatches are not ours to bracket |
+| Phase 3 | **~2.8 ms of every GPU frame is fixed overhead**, and it does not scale with work | Measured across four scenes: the residual is 2.7-2.9 ms whether the frame is 10.5 ms or 20.1 ms. ~65 µs across each of ~45 pass boundaries. **The lever is fewer, larger passes, not more brackets** — and because it is constant it grows as a share of every improvement made elsewhere: 13% of a heavy frame, 27% of a light one. This ranks **ahead of track B.4**: grass is the biggest *attributed* cost at 6.415 ms / 20.8%, but this block is bigger |
+| Diagnostics | **Two timer regions explained more than the whole frame** | `Water draw` and `Post: god rays` were missing from the containment table, so a naive sum double-counted them — on `perf_water` the "sum of outermost" came to 20.485 ms against a 20.322 ms frame, a **negative** residual. Both open their own render pass on the encoder rather than sitting inside one, which is why they read as standalone; god rays was moved into the colour segment by a recent change and the table did not follow. Fixed, redeployed, re-measured |
+| Phase 1.1 | **The upscaler boundary already existed** — a fourth already-done roadmap item | A vendor-neutral `TemporalUpscaler` trait with an ordered backend chain, from the DLSS work. What was genuinely missing: the orchestration recovered per-backend facts by **string-matching the backend's display label** in three places — §1.1's forbidden branching, spelled in a way the compiler cannot check. Replaced with a declared capability struct. **DLSS verified still genuinely active afterwards** (`route true, active true, quality 2, 1072×603 → 1600×900`, plus the NGX teardown crash as witness) |
+
 Engine suite **240,660** assertions / 0 failures; Foundation **159,282** / 0; renderer
-**204** / 0. All three green.
+**208** / 0 (212 with `--features dlss`). All three green.
 
 Two corrections were issued against my own work in the same session, and both are in the
 history rather than amended away: `97b08a39` corrects `869ce872`, which claimed the
