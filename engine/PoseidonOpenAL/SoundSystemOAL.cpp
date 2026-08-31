@@ -795,12 +795,16 @@ void SoundSystemOAL::ProbeHrtf()
 {
     _canHrtf = false;
     _alcResetDeviceSOFT = nullptr;
+    _alcGetStringiSOFT = nullptr;
+    _hrtfSpecifiers.clear();
     if (!_device)
         return;
     ALCdevice* device = static_cast<ALCdevice*>(_device);
     if (alcIsExtensionPresent(device, "ALC_SOFT_HRTF") != ALC_TRUE)
     {
-        LOG_INFO(Audio, "HRTF: ALC_SOFT_HRTF not available on this device");
+        // Not an error: plenty of drivers (and every non-Soft OpenAL) lack it. The
+        // options row still shows, SetHrtfMode returns false, and nothing else changes.
+        LOG_INFO(Audio, "HRTF: ALC_SOFT_HRTF not available on this device -- headphone mode has no effect");
         return;
     }
     _alcResetDeviceSOFT = reinterpret_cast<void*>(alcGetProcAddress(device, "alcResetDeviceSOFT"));
@@ -810,8 +814,40 @@ void SoundSystemOAL::ProbeHrtf()
         return;
     }
     _canHrtf = true;
+
+    // Dataset enumeration. alcGetStringiSOFT is optional in practice -- the extension
+    // string is what gates alcResetDeviceSOFT, and a driver that exposes one without
+    // the other should degrade to "supported, names unknown", not to unsupported.
+    _alcGetStringiSOFT = reinterpret_cast<void*>(alcGetProcAddress(device, "alcGetStringiSOFT"));
     ALCint count = 0;
     alcGetIntegerv(device, ALC_NUM_HRTF_SPECIFIERS_SOFT, 1, &count);
+    if (count < 0)
+        count = 0;
+    if (_alcGetStringiSOFT)
+    {
+        auto getStringi = reinterpret_cast<LPALCGETSTRINGISOFT>(_alcGetStringiSOFT);
+        _hrtfSpecifiers.reserve(static_cast<size_t>(count));
+        for (ALCint i = 0; i < count; ++i)
+        {
+            const ALCchar* name = getStringi(device, ALC_HRTF_SPECIFIER_SOFT, i);
+            _hrtfSpecifiers.emplace_back(name ? name : "");
+        }
+    }
+
+    if (count == 0)
+    {
+        // Supported but with nothing to load: a forced On will come back Denied. Say so
+        // now, so the later "denied" line has an explanation next to it.
+        LOG_WARN(Audio, "HRTF: supported but the device lists 0 datasets -- forcing On will be denied");
+        return;
+    }
+    if (_hrtfSpecifiers.empty())
+    {
+        LOG_INFO(Audio, "HRTF: supported, {} dataset(s); alcGetStringiSOFT unavailable so names are unknown", count);
+        return;
+    }
+    for (size_t i = 0; i < _hrtfSpecifiers.size(); ++i)
+        LOG_INFO(Audio, "HRTF: dataset [{}] \"{}\"", i, _hrtfSpecifiers[i].c_str());
     LOG_INFO(Audio, "HRTF: supported, {} dataset(s) on this device", count);
 }
 
@@ -836,10 +872,17 @@ bool SoundSystemOAL::ApplyHrtfMode()
         return false;
     }
     const HrtfStatus status = GetHrtfStatus();
-    LOG_INFO(Audio, "HRTF: mode {} applied, now {} ({})",
-             _hrtfMode == HrtfMode::On ? "On" : (_hrtfMode == HrtfMode::Off ? "Off" : "Auto"),
-             status.active ? "ACTIVE" : "inactive",
+    const char* modeText = _hrtfMode == HrtfMode::On ? "On" : (_hrtfMode == HrtfMode::Off ? "Off" : "Auto");
+    LOG_INFO(Audio, "HRTF: mode {} applied, now {} -- {} ({})", modeText, status.active ? "ACTIVE" : "inactive",
+             HrtfDeviceStatusText(status.deviceStatus),
              status.specifier.empty() ? "no dataset" : status.specifier.c_str());
+    // The one case the owner needs to see without reading the whole log: HRTF was
+    // asked for and the device said no. Distinct from mode Off, which is not a warning.
+    if (_hrtfMode == HrtfMode::On && HrtfWasRefused(status.deviceStatus))
+    {
+        LOG_WARN(Audio, "HRTF: requested On but the device refused ({}) -- output stays non-binaural",
+                 HrtfDeviceStatusText(status.deviceStatus));
+    }
     return true;
 }
 
@@ -859,6 +902,24 @@ IAudioSystem::HrtfStatus SoundSystemOAL::GetHrtfStatus() const
     ALCint active = ALC_FALSE;
     alcGetIntegerv(device, ALC_HRTF_SOFT, 1, &active);
     status.active = active == ALC_TRUE;
+
+    // ALC_HRTF_SOFT is a bool and cannot distinguish "off because the user said Off"
+    // from "off because the device refused". ALC_HRTF_STATUS_SOFT can. Seed with a
+    // sentinel so a device that ignores the query reports Unknown rather than
+    // silently reading as Disabled.
+    ALCint raw = -1;
+    alcGetIntegerv(device, ALC_HRTF_STATUS_SOFT, 1, &raw);
+    switch (raw)
+    {
+    case ALC_HRTF_DISABLED_SOFT:            status.deviceStatus = HrtfDeviceStatus::Disabled; break;
+    case ALC_HRTF_ENABLED_SOFT:             status.deviceStatus = HrtfDeviceStatus::Enabled; break;
+    case ALC_HRTF_DENIED_SOFT:              status.deviceStatus = HrtfDeviceStatus::Denied; break;
+    case ALC_HRTF_REQUIRED_SOFT:            status.deviceStatus = HrtfDeviceStatus::Required; break;
+    case ALC_HRTF_HEADPHONES_DETECTED_SOFT: status.deviceStatus = HrtfDeviceStatus::HeadphonesDetected; break;
+    case ALC_HRTF_UNSUPPORTED_FORMAT_SOFT:  status.deviceStatus = HrtfDeviceStatus::UnsupportedFormat; break;
+    default:                                status.deviceStatus = HrtfDeviceStatus::Unknown; break;
+    }
+
     if (status.active)
     {
         const char* name = alcGetString(device, ALC_HRTF_SPECIFIER_SOFT);

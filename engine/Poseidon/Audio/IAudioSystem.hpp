@@ -247,15 +247,64 @@ class IAudioSystem // whole playing system
 	// a forced `On` can still fail on a device with no dataset. Default no-ops so the
 	// Dummy/Text/Capture backends and the dedicated server report Unsupported.
 	enum class HrtfMode { Off = 0, Auto = 1, On = 2 };
+
+	// Mirrors ALC_HRTF_STATUS_SOFT one-for-one so the engine layer never includes AL
+	// headers. `active` alone cannot answer the question that matters in a log the
+	// owner mails in: HRTF being off because the user chose Off (Disabled) and HRTF
+	// being off because the user asked for it and the driver refused (Denied, or
+	// UnsupportedFormat on a surround/multichannel output) look identical from
+	// ALC_HRTF_SOFT. The numeric values are the ALC_HRTF_*_SOFT tokens; `Unknown` is
+	// ours, for "supported but the device did not answer the query".
+	enum class HrtfDeviceStatus
+	{
+		Disabled           = 0, // ALC_HRTF_DISABLED_SOFT
+		Enabled            = 1, // ALC_HRTF_ENABLED_SOFT
+		Denied             = 2, // ALC_HRTF_DENIED_SOFT
+		Required           = 3, // ALC_HRTF_REQUIRED_SOFT
+		HeadphonesDetected = 4, // ALC_HRTF_HEADPHONES_DETECTED_SOFT
+		UnsupportedFormat  = 5, // ALC_HRTF_UNSUPPORTED_FORMAT_SOFT
+		Unknown            = -1,
+	};
+
+	// Human-readable reason, for logs and for the options page. Pure mapping, so it is
+	// unit-testable with no sound device present.
+	static const char* HrtfDeviceStatusText( HrtfDeviceStatus s )
+	{
+		switch (s)
+		{
+		case HrtfDeviceStatus::Disabled:           return "disabled";
+		case HrtfDeviceStatus::Enabled:            return "enabled";
+		case HrtfDeviceStatus::Denied:             return "denied by the device";
+		case HrtfDeviceStatus::Required:           return "required by the device";
+		case HrtfDeviceStatus::HeadphonesDetected: return "enabled, headphones detected";
+		case HrtfDeviceStatus::UnsupportedFormat:  return "unsupported output format";
+		case HrtfDeviceStatus::Unknown:            break;
+		}
+		return "unknown";
+	}
+
+	// True when the user asked for HRTF and the device said no, as opposed to HRTF
+	// simply being switched off. This is the case worth surfacing to the user.
+	static bool HrtfWasRefused( HrtfDeviceStatus s )
+	{
+		return s == HrtfDeviceStatus::Denied || s == HrtfDeviceStatus::UnsupportedFormat;
+	}
+
 	struct HrtfStatus
 	{
 		bool supported = false;   // ALC_SOFT_HRTF present on the playback device
 		bool active = false;      // rendering through HRTF right now
 		std::string specifier;    // dataset name when active, empty otherwise
+		// Why it is (not) active -- see HrtfDeviceStatus. Unknown on backends that
+		// do not implement HRTF at all.
+		HrtfDeviceStatus deviceStatus = HrtfDeviceStatus::Unknown;
 	};
 	virtual bool SetHrtfMode( HrtfMode ) { return false; }
 	virtual HrtfMode GetHrtfMode() const { return HrtfMode::Auto; }
 	virtual HrtfStatus GetHrtfStatus() const { return {}; }
+	// Dataset names the device offers (ALC_NUM_HRTF_SPECIFIERS_SOFT / alcGetStringiSOFT),
+	// enumerated once per device at probe time. Empty when unsupported.
+	virtual std::vector<std::string> ListHrtfSpecifiers() const { return {}; }
 
 	virtual ~IAudioSystem(){}
 

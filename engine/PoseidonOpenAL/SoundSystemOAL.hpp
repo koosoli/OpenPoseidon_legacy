@@ -61,10 +61,19 @@ class SoundSystemOAL : public IAudioSystem
     // rebuild, no wave unload, so the delicate SwitchOutputDevice sequence stays
     // untouched. Unsupported devices keep _canHrtf false and SetHrtfMode returns
     // false without touching anything.
+    // `_alcGetStringiSOFT` is resolved the same way and for the same reason. It cannot
+    // be called directly: OpenALRuntime.hpp shims the base API through macros but has
+    // no SOFT entries, so a direct call binds to the dllimport prototype in alext.h and
+    // fails to link in the game exe -- which the tests cannot see, because they link
+    // OpenAL directly.
     HrtfMode _hrtfMode = HrtfMode::Auto;
     bool _canHrtf = false;
     void* _alcResetDeviceSOFT = nullptr;
-    void ProbeHrtf();          // sets _canHrtf + resolves the reset entry point
+    void* _alcGetStringiSOFT = nullptr;
+    // Dataset names, enumerated once per device in ProbeHrtf so the readout costs
+    // nothing at query time and survives a device that later refuses the query.
+    std::vector<std::string> _hrtfSpecifiers;
+    void ProbeHrtf();          // sets _canHrtf, resolves entry points, enumerates datasets
     bool ApplyHrtfMode();      // pushes _hrtfMode to the device; logs the outcome
 
     // EAX/EFX state (DX8 parity: soundDX8.hpp:349-351,374-375)
@@ -211,6 +220,7 @@ class SoundSystemOAL : public IAudioSystem
     bool SetHrtfMode(HrtfMode mode) override;
     HrtfMode GetHrtfMode() const override { return _hrtfMode; }
     HrtfStatus GetHrtfStatus() const override;
+    std::vector<std::string> ListHrtfSpecifiers() const override { return _hrtfSpecifiers; }
 
     bool EnableHWAccel(bool v) override;
     bool EnableEAX(bool val) override;
