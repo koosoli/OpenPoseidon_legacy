@@ -193,7 +193,18 @@ pub struct GpuTimers {
     // renderer they differ by orders of magnitude. Same -1 = "did not run this frame" convention
     // as the GPU rows, for the same reason: a stale repeated number reads as a live measurement.
     cpu_open: [Cell<Option<std::time::Instant>>; REGION_COUNT],
+    // The frame being RECORDED. Cleared to -1 by begin_frame and filled by cpu_end as the
+    // encoder is built, so at any instant it is a half-written frame.
     cpu_ms: [Cell<f32>; REGION_COUNT],
+    // The last COMPLETE frame -- what readers see. This split is not tidiness, it is a bug
+    // fix: --capture-metrics reported cpu_milliseconds = -1 for all 58 regions, including
+    // ones whose GPU row showed real time, because the capture read after begin_frame had
+    // cleared the accumulator and before the frame's cpu_end calls had refilled it. The GPU
+    // rows were immune only by accident -- they live in an async readback that no per-frame
+    // reset touches. Publishing on begin_frame gives the CPU rows the same property: a reader
+    // at ANY point in the frame sees the previous frame whole, never a partial one and never
+    // a freshly cleared one.
+    cpu_ms_latest: [Cell<f32>; REGION_COUNT],
 }
 
 impl GpuTimers {
@@ -210,6 +221,7 @@ impl GpuTimers {
                 inner: None,
                 cpu_open: std::array::from_fn(|_| Cell::new(None)),
                 cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+                cpu_ms_latest: std::array::from_fn(|_| Cell::new(-1.0)),
             };
         }
         let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
@@ -246,6 +258,7 @@ impl GpuTimers {
             }),
             cpu_open: std::array::from_fn(|_| Cell::new(None)),
             cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+            cpu_ms_latest: std::array::from_fn(|_| Cell::new(-1.0)),
         }
     }
 
@@ -258,10 +271,16 @@ impl GpuTimers {
         if let Some(inner) = &self.inner {
             inner.written.set(0);
         }
-        // CPU rows reset to -1 ("did not run this frame"), NOT to 0 and NOT left alone. Leaving
-        // them alone is the documented trap this repo already paid for once: a one-shot pass keeps
-        // advertising its old cost forever and reads as per-frame work.
+        // PUBLISH the frame that just ended, then clear the accumulator for the new one.
+        //
+        // Reset to -1 ("did not run this frame"), NOT to 0 and NOT left alone. Leaving them
+        // alone is the documented trap this repo already paid for once: a one-shot pass keeps
+        // advertising its old cost forever and reads as per-frame work. But clearing alone was
+        // its own bug -- readers landing between the clear and the frame's cpu_end calls saw
+        // -1 everywhere, which is how --capture-metrics came to report a dead CPU column for
+        // every region. Publish first, then clear, and both properties hold at once.
         for i in 0..REGION_COUNT {
+            self.cpu_ms_latest[i].set(self.cpu_ms[i].get());
             self.cpu_open[i].set(None);
             self.cpu_ms[i].set(-1.0);
         }
@@ -288,7 +307,7 @@ impl GpuTimers {
     /// Copy the latest per-region CPU encode ms into `out` (-1 = not recorded this frame).
     /// Always available — unlike the GPU rows this needs no adapter feature.
     pub fn cpu_timings(&self, out: &mut [f32]) -> u32 {
-        for (dst, src) in out.iter_mut().zip(self.cpu_ms.iter()) {
+        for (dst, src) in out.iter_mut().zip(self.cpu_ms_latest.iter()) {
             *dst = src.get();
         }
         REGION_COUNT as u32
@@ -443,6 +462,81 @@ impl GpuTimers {
 mod tests {
     use super::*;
 
+    // A GpuTimers with no device: `inner` is None, so every GPU row reads -1 and only the
+    // CPU rows are live. That is exactly the surface this test is about, and it needs no
+    // adapter -- which matters, because the bug it pins was invisible to every existing
+    // test precisely because nothing exercised the read/write interleaving.
+    fn cpu_only_timers() -> GpuTimers {
+        GpuTimers {
+            inner: None,
+            cpu_open: std::array::from_fn(|_| Cell::new(None)),
+            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
+            cpu_ms_latest: std::array::from_fn(|_| Cell::new(-1.0)),
+        }
+    }
+
+    // THE BUG: a reader between begin_frame and the frame's cpu_end calls used to see -1
+    // for every region, because begin_frame cleared the very array the reader read. In a
+    // capture that is a whole dead column -- 58 regions reporting "did not run" while their
+    // GPU rows showed real milliseconds.
+    #[test]
+    fn cpu_rows_report_the_previous_complete_frame_not_a_half_built_one() {
+        let t = cpu_only_timers();
+        let mut out = [0.0f32; REGION_COUNT];
+
+        // Frame 1: record something into two regions.
+        t.begin_frame();
+        t.cpu_begin(Region::FftCompose);
+        t.cpu_end(Region::FftCompose);
+        t.cpu_begin(Region::WaterDraw);
+        t.cpu_end(Region::WaterDraw);
+
+        // Read DURING frame 1, before it has been published. The previous frame is empty,
+        // so -1 is correct here -- this is the honest "nothing complete yet" answer, not
+        // the bug.
+        t.cpu_timings(&mut out);
+        assert_eq!(out[Region::FftCompose as usize], -1.0);
+
+        // Frame 2 begins: frame 1 is now complete and must be visible IMMEDIATELY, before
+        // any of frame 2's regions have been recorded. This is the read that used to fail.
+        t.begin_frame();
+        t.cpu_timings(&mut out);
+        assert!(
+            out[Region::FftCompose as usize] >= 0.0,
+            "a region recorded in the previous frame must still be readable at the very              start of the next one; got {}",
+            out[Region::FftCompose as usize]
+        );
+        assert!(out[Region::WaterDraw as usize] >= 0.0);
+
+        // ...and a region that did NOT run in frame 1 still reads -1, so publishing the
+        // previous frame has not resurrected the stale-value trap it replaced.
+        assert_eq!(out[Region::Caustics as usize], -1.0);
+    }
+
+    // The other half of the same contract: a region that stops running must stop reporting.
+    // This is the trap the GPU rows were fixed for (a skipped planar reflection advertising
+    // its old multi-millisecond cost forever) and the fix above must not reintroduce it.
+    #[test]
+    fn a_region_that_stops_running_stops_reporting_after_one_frame() {
+        let t = cpu_only_timers();
+        let mut out = [0.0f32; REGION_COUNT];
+
+        t.begin_frame();
+        t.cpu_begin(Region::Caustics);
+        t.cpu_end(Region::Caustics);
+
+        t.begin_frame(); // publishes the frame that ran Caustics
+        t.cpu_timings(&mut out);
+        assert!(out[Region::Caustics as usize] >= 0.0);
+
+        t.begin_frame(); // publishes a frame in which it did NOT run
+        t.cpu_timings(&mut out);
+        assert_eq!(
+            out[Region::Caustics as usize], -1.0,
+            "a pass that stopped running must read -1, not keep advertising its last cost"
+        );
+    }
+
     // The FFI index contract: WgrGpuTimerRegion in wgpu_renderer.hpp mirrors these
     // discriminants and DebugOverlay's name table is ordered by them. Locking the
     // count + a few pinned indices catches accidental reordering on either side.
@@ -494,25 +588,25 @@ mod tests {
     // still satisfies the FFI contract by reporting 0 regions.
     #[test]
     fn disabled_timers_report_zero_regions() {
-        let timers = GpuTimers {
-            inner: None,
-            cpu_open: std::array::from_fn(|_| Cell::new(None)),
-            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
-        };
+        let timers = cpu_only_timers();
         assert!(!timers.enabled());
         let mut out = [0.0f32; REGION_COUNT];
         assert_eq!(timers.timings(&mut out), 0);
     }
 
-    // PERF-005 — the CPU rows must work with `inner: None` (no timestamp-query adapter), must
-    // ACCUMULATE across repeated brackets, and must reset to -1 (not 0, not stale) each frame.
+    // PERF-005 — the CPU rows must work with `inner: None` (no timestamp-query adapter) and
+    // must ACCUMULATE across repeated brackets within one frame.
+    //
+    // REWRITTEN 2026-08-31, and the rewrite is the point. This test used to assert that the
+    // accumulated value is readable mid-frame and reads -1 again after the next begin_frame.
+    // Both assertions described the bug: readers see the PREVIOUS COMPLETE frame, so a value
+    // is not visible until the frame that recorded it has ended, and it stays visible for the
+    // whole of the next frame rather than vanishing at its start. The old contract is why
+    // --capture-metrics reported a dead cpu_milliseconds column -- a test agreeing with a bug
+    // does not make it a feature.
     #[test]
     fn cpu_rows_accumulate_and_reset_without_a_gpu() {
-        let t = GpuTimers {
-            inner: None,
-            cpu_open: std::array::from_fn(|_| Cell::new(None)),
-            cpu_ms: std::array::from_fn(|_| Cell::new(-1.0)),
-        };
+        let t = cpu_only_timers();
         let mut out = [0.0f32; REGION_COUNT];
         t.begin_frame();
         assert_eq!(t.cpu_timings(&mut out), REGION_COUNT as u32);
@@ -521,12 +615,14 @@ mod tests {
             t.cpu_begin(Region::ObjColorSolid);
             t.cpu_end(Region::ObjColorSolid);
         }
+        // Ending the frame publishes it; two closed brackets accumulate into one total.
+        t.begin_frame();
         t.cpu_timings(&mut out);
-        // Two closed brackets => a non-negative accumulated total, never still -1.
         assert!(out[Region::ObjColorSolid as usize] >= 0.0);
         // A region never bracketed stays "not run" rather than reading 0 ms of real work.
         assert_eq!(out[Region::ObjColorAlpha as usize], -1.0);
-        // Next frame clears it back to "not run" even though it ran last frame.
+        // And the frame AFTER that -- in which it did not run -- clears it back to "not run",
+        // so accumulation never turns into a value that outlives the work it measured.
         t.begin_frame();
         t.cpu_timings(&mut out);
         assert_eq!(out[Region::ObjColorSolid as usize], -1.0);
