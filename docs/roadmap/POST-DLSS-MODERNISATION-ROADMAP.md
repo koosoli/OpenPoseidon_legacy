@@ -402,32 +402,36 @@ track B.4, and it can be worked with a denominator.
 The sky total (1.6-3.4 ms, mostly the cloud march) is second. Shadow cascades are third and
 scale hard with scene content: 0.26 ms on the town against 3.45 ms in combat.
 
-**First measured bottleneck, 2026-08-31: 27% of the GPU frame is attributed to nothing.**
-See `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-20260831.md`.
-On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.5 ms frame
-with DLSS off. The missing time is **fixed per-frame overhead**, established by measuring
-four scenes: the residual is 2.7-2.9 ms whether the frame is 10.5 ms or 20.1 ms, so it
-does not scale with work. Because it is constant it grows as a share of every improvement
-made elsewhere: 13% of a heavy frame, 27% of a light one.
+### How that table was arrived at, and the two wrong turns on the way
 
-**Its cause is open, and one plausible cause has been ruled out.** "Pass-boundary
-overhead" was the first explanation and the arithmetic fitted (2.8 ms ÷ ~45 boundaries ≈
-62 µs). Merging Hi-Z's eleven per-mip compute passes into one made that region 25% cheaper
-— a reproducible 0.042 ms over ten removed boundaries, so **~4 µs per boundary** — and left
-the residual untouched. At that price every boundary in the frame accounts for ~0.18 ms,
-about 6% of it. Do not spend effort merging passes on the strength of this number.
+Full record: `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-20260831.md`.
+Worth reading before the next performance investigation, because both wrong turns were
+plausible and one of them was written into this document as a conclusion.
 
-Getting there required fixing the measurement first: `Water draw` and `Post: god rays`
-were missing from the containment table, so a naive sum double-counted them — on
-`perf_water` the "sum of outermost" came to 20.485 ms against a 20.322 ms frame, a
-negative residual. The same measurement prices DLSS for the first time at **~1.07 ms** (1072×603 →
-1600×900, RTX 3070), invisible to the profiler because NGX's dispatches are not ours to
-bracket.
+The block started at 27% of the frame and took three measurements to explain:
 
-This ranks ahead of track B.4. Grass is the largest *attributed* cost — 6.415 ms across
-its three passes, 20.8% of a 30.853 ms frame — but the unattributed block is bigger than
-grass, and optimising the second-largest cost while the largest is unmeasured is how a day
-goes for 2%.
+1. **The measurement itself was wrong first.** `Water draw` and `Post: god rays` were
+   missing from the timer containment table, so summing the "outermost" rows double-counted
+   them — on `perf_water` the sum came to 20.485 ms against a 20.322 ms frame, a **negative
+   residual**. A partition that over-counts is not a partition.
+2. **"Pass-boundary overhead" was the first explanation and it was wrong.** The arithmetic
+   fitted (2.8 ms ÷ ~45 boundaries ≈ 62 µs). Tested by merging Hi-Z's eleven per-mip compute
+   passes into one: that region got 25% cheaper — a reproducible 0.042 ms over ten removed
+   boundaries, so **~4 µs per boundary**, not 65 — and the residual did not move. Every
+   boundary in the frame is therefore ~0.18 ms. **Do not merge passes for performance on
+   this hardware.**
+3. **The answer was that the atmosphere had no timer region at all.** The clue was that the
+   residual was constant against scene cost, pass count *and resolution* (7.7× the output
+   pixels moved it 12%), so the work had to be fixed-size — which the LUTs, froxel grid,
+   env map and SH coefficients all are. Instrumenting them dropped the residual from 3.13 to
+   1.38 ms and named a 1.812 ms pass; fixing that pass dropped it to 0.3-0.6 ms.
+
+The same work priced **DLSS at ~1.07 ms** (1072×603 → 1600×900, RTX 3070) — the first time
+this repo has had a number for it. It is invisible to the profiler because NGX's dispatches
+are not ours to bracket, so it can only be measured as a difference between arms.
+
+Also worth carrying forward: `WGR_DLSS=0` does **not** give native. It gives **bilinear**
+upscaling of the same reduced render target, so it is not a native baseline.
 
 ### 3.1 Measurement hygiene
 
