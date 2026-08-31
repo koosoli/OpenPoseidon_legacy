@@ -375,9 +375,20 @@ Each of these has already produced wrong numbers at least once in this repositor
   msaa 4, upscaler dlss, dlss_active true`;
 - the farfield bench defaults to 800×600 and overstates play-resolution framerate by
   roughly 25% — its numbers must never be quoted as play performance;
-- one-shot GPU passes leave their timer regions registered, so `--capture-metrics`
+- ~~one-shot GPU passes leave their timer regions registered, so `--capture-metrics`
   reports them as if they ran every frame; only the GPU frame total is re-measured and
-  trustworthy for per-frame attribution;
+  trustworthy for per-frame attribution~~ — **fixed, and re-verified 2026-08-31.** The
+  harvest writes `-1` for any region not bracketed in the frame it resolves, so a pass
+  that stops running stops reporting: a capture on Everon shows `-1` for Whitewater and
+  all three Planar rows. Every GPU row is now per-frame trustworthy, not just the total.
+  The CPU encode column beside it was a different and worse defect and was fixed the same
+  day: it read `-1` for **all 58 regions** in every capture ever written, because
+  `begin_frame` cleared the array the reader reads and the capture lands between that
+  clear and the frame's `cpu_end` calls. The CPU rows are now published on frame end like
+  the GPU ones, and 13 of 58 regions report real time (the other 45 are simply not
+  instrumented). First honest reading: the largest CPU encode region is the 3D colour
+  sub-pass at **0.08 ms** against a 25.6 ms frame — recording the frame is not where the
+  CPU's time goes;
 - `--dev-map` has an empty retained set, so world-space renderer features measure as
   inert there — measure world-scale features on a real world.
 
