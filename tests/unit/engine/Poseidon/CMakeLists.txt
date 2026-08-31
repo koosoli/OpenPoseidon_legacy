@@ -213,6 +213,9 @@ list(APPEND POSEIDON_TEST_SOURCES
     Asset/Formats/BISFramework/test_stream.cpp
     Asset/Formats/BISFramework/test_p3d_integration.cpp
     
+    # Cross-generation compatibility smoke (REN-GL33-002). Reads the local licensed
+    # corpora where they exist and reports itself skipped where they do not.
+    Asset/Compat/test_compat_smoke.cpp
     # Formats tests (isolated format readers)
     Asset/Formats/Common/test_format_detector.cpp
     Asset/Formats/test_wrp.cpp
