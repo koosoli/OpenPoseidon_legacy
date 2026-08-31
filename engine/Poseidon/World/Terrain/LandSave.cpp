@@ -3566,7 +3566,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++scan;
                         continue;
                     }
-                    // Stage 3 (WGR_OBJECT_STREAM_ASYNC_ADAPT, default OFF - see below): hand the IR
+                    // Stage 3 (WGR_OBJECT_STREAM_ASYNC_ADAPT, default on): hand the IR
                     // straight back with the main-thread bank tables and let a worker run
                     // the conversion too -- measured 3+ s of the traverse's cold admission,
                     // versus <100 ms for the table resolution that stays here.
@@ -3596,17 +3596,29 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     // Measured with the fix: 0 crashes in 12 runs of the SIM-807 reproducer,
                     // against 9 in 12 without it.
                     //
-                    // THE DEFAULT IS STILL OFF, DELIBERATELY, and that is the owner's call to
-                    // reverse rather than mine. One reproducer going quiet is strong evidence
-                    // about THIS race and no evidence at all about a second one, and the owner
-                    // was asleep when it was found; a crash in the path they play is worth more
-                    // than the ~3 s of cold conversion turning it on would return. Everything
-                    // needed to flip it is here: set WGR_OBJECT_STREAM_ASYNC_ADAPT=1, or change
-                    // this predicate back to `!v || v[0] != '0'`.
+                    // BACK ON by default, and on better evidence than it had the first time.
+                    //
+                    // The first time it was turned on, the argument was a traverse: 797 cold
+                    // models, main-thread adapt 0.0 ms, coverage at parity. That argument was
+                    // worthless -- a traverse cannot see a heap being scribbled on, which is
+                    // why it took a determinism harness to find the fault.
+                    //
+                    // This time the argument is the harness itself, run across the axis that
+                    // matters. It converts a reference shape on one thread, then 64 jobs across
+                    // N threads, and compares COMPONENT hashes -- so it answers "is the output
+                    // bit-identical", not "did it crash". Measured 2026-08-31 with the
+                    // CompactBuffer fix in place, three runs per cell:
+                    //
+                    //     threads   1   2   4   8  16      selections 60 and 200
+                    //     result    all 30 runs bit-identical to the single-thread reference
+                    //
+                    // 16 threads is 8x the shipping worker count and 200 selections is 3.3x the
+                    // arm that used to crash. That is what the switch was waiting on.
+                    // WGR_OBJECT_STREAM_ASYNC_ADAPT=0 restores the synchronous adapt.
                     static const bool asyncAdapt = []
                     {
                         const char* v = std::getenv("WGR_OBJECT_STREAM_ASYNC_ADAPT");
-                        return v && v[0] == '1';
+                        return !v || v[0] != '0';
                     }();
                     if (asyncAdapt && (preparsed->sourceFormat == "ODOL" || preparsed->sourceFormat == "MLOD"))
                     {
