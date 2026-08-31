@@ -109,6 +109,29 @@ class ObjectStreamPreparer
     {
         uint64_t requested = 0; // Request() calls that actually enqueued
         uint64_t rejectedFull = 0; // Request() refused because the queue was at its limit
+        // REQUEST DEDUPLICATION, MEASURED (roadmap 1.3 "deduplicate simultaneous requests").
+        // Dedup here is structural -- Request() refuses any index that is not Unknown, so a
+        // model asked for by twenty placements in one update is parsed once -- but until
+        // these counters it was invisible, and an invisible coalescer is one nobody can tell
+        // from a coalescer that stopped working. The two are split because only one of them
+        // is a saving:
+        //   coalesced      the index is Queued/Parsing/Ready/Converting/Converted, i.e. the
+        //                  first request is doing the work and this caller rides on it. This
+        //                  is the win; `coalesced / (coalesced + requested)` is the share of
+        //                  asks that cost nothing.
+        //   coalescedStuck the index is sticky NotLoose or Failed. Also refused, also not a
+        //                  duplicate parse -- but the caller falls through to the synchronous
+        //                  main-thread path, so counting it as a saving would overstate the
+        //                  dedup rate by however many PBO-packed models the world has (on a
+        //                  packed world, all of them).
+        uint64_t coalesced = 0;
+        uint64_t coalescedStuck = 0;
+        // THE READY BOUND, MEASURED. ReadyLimit() back-pressure parks a worker that has queue
+        // work but nowhere to put the result. The queue bound next to it has `rejectedFull`;
+        // this one had nothing, so "the workers are idle because the main thread is not
+        // taking" and "the workers are idle because there is nothing to do" looked identical
+        // from outside. Counted once per park, under the mutex, immediately before the wait.
+        uint64_t readyFullParks = 0;
         uint64_t prepared = 0;  // parses that produced an IR
         uint64_t taken = 0;     // IRs handed to the main thread (installed)
         uint64_t notLoose = 0;

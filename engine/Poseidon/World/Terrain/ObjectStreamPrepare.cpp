@@ -176,6 +176,12 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         // ahead, the right thing is to pause here until Take() makes room -- not to discard
         // the oldest Ready (the nearest, most-needed models) or the newest (parsed for
         // nothing). Take() and Reset() notify.
+        // Count the park BEFORE waiting, and only when the ready bound is the thing doing
+        // the blocking: queue work exists, no conversion to run instead, and the ready set
+        // is at its limit. An empty queue is "nothing to do", not back-pressure, and must
+        // not be counted as the bound biting.
+        if (!stop && convertQueue.empty() && !queue.empty() && stats.ready >= ObjectStreamPreparer::ReadyLimit())
+            ++stats.readyFullParks;
         cv.wait(lock, [&] {
             return stop || !convertQueue.empty() ||
                    (!queue.empty() && stats.ready < ObjectStreamPreparer::ReadyLimit());
@@ -553,8 +559,17 @@ bool ObjectStreamPreparer::Request(uint32_t index)
     std::lock_guard<std::mutex> lock(_impl->mutex);
     if (index >= _impl->count || _impl->workers.empty())
         return false;
-    if (_impl->Get(index) != State::Unknown)
+    const State current = _impl->Get(index);
+    if (current != State::Unknown)
+    {
+        // The dedup hit. Split so the reported rate is the rate of asks that actually
+        // saved a parse -- see the comment on Stats::coalesced.
+        if (current == State::NotLoose || current == State::Failed)
+            ++_impl->stats.coalescedStuck;
+        else
+            ++_impl->stats.coalesced;
         return false;
+    }
     if (_impl->queue.size() >= QueueLimit())
     {
         ++_impl->stats.rejectedFull;
