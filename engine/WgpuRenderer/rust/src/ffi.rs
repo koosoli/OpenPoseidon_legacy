@@ -1948,6 +1948,80 @@ pub unsafe extern "C" fn wgr_texture_create(
     .unwrap_or(0)
 }
 
+/// Reserve a bindless slot that outlives any single upload (REN-RES-001). Returns 0 when
+/// the bindless array is at cap; the caller then just uses `wgr_texture_create`.
+///
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_slot_acquire(renderer: *mut WgrRenderer) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *renderer }.texture_slot_acquire()
+    }))
+    .unwrap_or(0)
+}
+
+/// Return a slot lease. Only safe once no registered model can still reference the slot,
+/// i.e. at the death of the logical texture, never at its eviction.
+///
+/// # Safety
+/// `renderer` must be a live pointer from `wgr_create`, or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_texture_slot_release(renderer: *mut WgrRenderer, slot: u32) {
+    if renderer.is_null() {
+        return;
+    }
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        unsafe { &mut *renderer }.texture_slot_release(slot);
+    }));
+}
+
+/// As `wgr_texture_create`, but takes the bindless index `slot` (from
+/// `wgr_texture_slot_acquire`) instead of allocating a fresh one, so a re-upload keeps the
+/// index already baked into every registered model's material. `slot` 0, or a slot that is
+/// not leased, behaves exactly as `wgr_texture_create`.
+///
+/// # Safety
+/// `renderer` must be live; `data` must point to at least `byte_len` bytes (holding
+/// `mip_count` tightly packed mip levels), or be null (in which case 0 is returned).
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn wgr_texture_create_in_slot(
+    renderer: *mut WgrRenderer,
+    width: u32,
+    height: u32,
+    format: i32,
+    mip_count: u32,
+    flags: u32,
+    data: *const u8,
+    byte_len: u32,
+    slot: u32,
+) -> u64 {
+    if renderer.is_null() || data.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let Some(fmt) = TextureFormat::from_i32(format) else {
+            return 0;
+        };
+        let renderer = unsafe { &mut *renderer };
+        let slice = unsafe { std::slice::from_raw_parts(data, byte_len as usize) };
+        renderer.texture_create_in_slot(
+            width,
+            height,
+            fmt,
+            mip_count,
+            flags & TEXTURE_GEN_MIPS != 0,
+            slice,
+            slot,
+        )
+    }))
+    .unwrap_or(0)
+}
+
 /// # Safety
 /// `renderer` must be live; `data` must point to at least `byte_len` bytes, or be null.
 #[unsafe(no_mangle)]

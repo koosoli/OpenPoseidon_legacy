@@ -1804,6 +1804,38 @@ extern "C"
 
     constexpr uint32_t WGR_TEXTURE_GEN_MIPS = 1;
 
+    /* REN-RES-001 -- bindless slot leases.
+     *
+     * `wgr_model_register` resolves each material's texture handle to a dense bindless
+     * slot ONCE and bakes that integer into the retained material table, which is
+     * append-only: a registered model's slot index is final. Destroying a texture and
+     * re-uploading it therefore used to break the model two ways at once -- it fell to
+     * the white fallback forever, AND its old slot went to the next unrelated upload, so
+     * it could come back wearing a stranger's texture.
+     *
+     * A LEASE fixes that without any shader change. It reserves a slot for one logical
+     * texture (one TextureWgpu, i.e. one texture NAME) rather than for one upload of it:
+     * while leased, the slot is never recycled, an eviction merely points it at the white
+     * fallback, and the re-upload reclaims the SAME index. Models never learn a new
+     * number because the number never changes.
+     *
+     * Lifetime: acquire once before the first upload, release at the death of the texture
+     * OBJECT -- never at its eviction. Releasing early returns the slot to the pool where
+     * an unrelated texture can take it, which is exactly the bug this removes. */
+
+    /* Reserve a slot. Returns 0 when the bindless array is at cap; that is not an error,
+     * the caller simply falls back to wgr_texture_create. */
+    WGR_API uint32_t wgr_texture_slot_acquire(WgrRenderer* renderer);
+
+    /* Return a lease to the pool. See the lifetime note above. */
+    WGR_API void wgr_texture_slot_release(WgrRenderer* renderer, uint32_t slot);
+
+    /* As wgr_texture_create, but uploads into `slot` instead of allocating a fresh one.
+     * A `slot` of 0, or one that is not leased, behaves exactly as wgr_texture_create. */
+    WGR_API WgrTexture wgr_texture_create_in_slot(WgrRenderer* renderer, uint32_t width, uint32_t height,
+                                                  int32_t format, uint32_t mip_count, uint32_t flags,
+                                                  const uint8_t* data, uint32_t byte_length, uint32_t slot);
+
     /* Replace the pixels of an existing RGBA8 texture. */
     WGR_API void wgr_texture_update(WgrRenderer* renderer, WgrTexture id, const uint8_t* rgba, uint32_t byte_length);
 

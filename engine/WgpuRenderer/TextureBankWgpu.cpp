@@ -102,14 +102,25 @@ void TextureBankWgpu::TrimResidency()
     if (stats.object_texture_bytes <= textureBudget)
         return;
 
-    // NOTE on the ResidentPins() check below, before anyone relaxes it: a pin means "some
+    // NOTE on the ResidentPins() check below, before anyone relaxes it. A pin means "some
     // REGISTERED model references this", and on DayZ Chernarus that starves this LRU to 1-31
     // candidates while tracked VRAM climbs past twice the budget. Making pinned textures
-    // evictable is the right goal but CANNOT be done from C++ -- wgr_model_register bakes each
-    // material's bindless SLOT INDEX permanently, and destroying the texture both hands that
-    // slot to the next upload (wrong texture, silently, forever) and leaves the model on the
-    // white fallback even after the re-upload. Full argument at TextureMipBias() in
-    // TextureWgpu.cpp; it needs stable slots or a slot indirection on the Rust side first.
+    // evictable is still the goal, and ONE of the two blockers is now gone:
+    //
+    //   * Slot identity -- FIXED (REN-RES-001). wgr_model_register still bakes each material's
+    //     bindless slot permanently, but a slot is now LEASED by the TextureWgpu rather than by
+    //     one upload, so an eviction leaves it reserved-and-white and the re-upload reclaims the
+    //     same index. Evicting a pinned texture no longer corrupts anything.
+    //   * Liveness -- STILL MISSING, and it is why this check stays. _lastUsedFrame is only
+    //     refreshed by EnsureUploaded(), which the direct-draw path calls every frame; the
+    //     GPU-driven path touches a texture at registration and never again. Drop the pin test
+    //     today and every retained texture ages out 120 frames after registration whether or
+    //     not it is visible, is evicted, and is never re-uploaded -- because nothing on the
+    //     retained path asks for a refill. Right slots, white buildings.
+    //
+    // So the remaining work is a per-frame "this registered model drew" signal plus a refill
+    // request, in EngineWgpu's snapshot consumption. Full argument at TextureMipBias() in
+    // TextureWgpu.cpp.
     //
     // NOTE on the budget test above: stats.tracked_bytes is textures + geometry, but only
     // textures are evictable here. A world whose GEOMETRY alone exceeds the budget (Everon is

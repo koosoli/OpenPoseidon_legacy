@@ -31,6 +31,13 @@ class TextureWgpu : public Texture
     uint64_t _gpuHandle = 0;
     uint64_t _lastUsedFrame = 0;
     uint32_t _residentPins = 0;
+    // REN-RES-001: the bindless slot this texture's uploads occupy, reserved for the
+    // lifetime of THIS OBJECT rather than of one upload. Acquired lazily at the first
+    // upload, released in the destructor -- never in EvictGpu, which is the whole point:
+    // an eviction leaves the slot reserved (sampling white) so the re-upload reclaims the
+    // same index and every model that baked it keeps working. 0 = none (array at cap),
+    // which simply degrades to the old per-upload slot behaviour.
+    uint32_t _slotLease = 0;
     // don't keep retrying a texture that fails to load
     bool _uploadTried = false;
     bool _dynamic = false;
@@ -53,6 +60,8 @@ class TextureWgpu : public Texture
 
     int Init();
     void InitDynamic(int w, int h, const void* rgba, uint32_t size);
+    // Reserve _slotLease if not already held; returns it (0 = none available).
+    uint32_t AcquireSlotLease();
 
     // How a needed alpha scan was served. The classification is identical in all three
     // cases; only the work to reach it differs, and the split is what the streaming stats

@@ -243,6 +243,24 @@ pub struct SharedTextures {
     bindless_free: Vec<u32>,
     bindless_retired: Vec<u32>,
     bindless_dirty: bool,
+    // LEASED slots (REN-RES-001). A lease belongs to a logical texture -- one C++
+    // `TextureWgpu`, i.e. one texture NAME -- not to a single GPU upload of it. While a
+    // slot is leased it is never recycled: destroying the upload points the slot at the
+    // white fallback but leaves the index reserved, so a later re-upload of the SAME
+    // texture reclaims the SAME index and every model that baked that integer into its
+    // material keeps working, with no re-registration and no shader indirection.
+    //
+    // This is the whole of the fix: `wgr_model_register` resolves a handle to a slot ONCE
+    // and stores the integer permanently (gfx3d/mod.rs -> SectionMaterialGpu.texture_slot),
+    // and cull.rs's material table is append-only. Before this, eviction did two silent
+    // wrongs -- the model fell to white forever, AND the freed slot went to the next
+    // upload, so the model could come back wearing a stranger's texture.
+    //
+    // Bounded, not leaky: a lease is held for the lifetime of the texture object, so the
+    // high-water mark is the number of distinct texture NAMES ever loaded, not the number
+    // of evict/re-upload CYCLES. Measured worst case in the corpus is DayZ Chernarus at
+    // 3,552 distinct object textures against an `object_cap` of 8,192 (lib.rs).
+    bindless_leased: std::collections::HashSet<u32>,
     object_cap: u32,
     partially_bound: bool,
     // Bindless sampler layout + the 8-variant array bind (frame-constant), for the
@@ -550,6 +568,7 @@ impl SharedTextures {
             bindless_free: Vec::new(),
             bindless_retired: Vec::new(),
             bindless_dirty: false,
+            bindless_leased: std::collections::HashSet::new(),
             object_cap,
             partially_bound,
             sampler_array_layout,
@@ -611,6 +630,65 @@ impl SharedTextures {
         handle
     }
 
+    /// Reserve a bindless slot for one logical texture, held across evict/re-upload
+    /// cycles. Returns 0 when the array is at cap, which is not an error: the caller
+    /// falls back to `create` and gets today's per-upload slot behaviour.
+    ///
+    /// The caller owns the lease and MUST return it with `slot_release` when the logical
+    /// texture dies -- not when an upload of it is destroyed.
+    pub fn slot_acquire(&mut self) -> u32 {
+        match self.alloc_slot() {
+            Some(slot) => {
+                self.bindless_leased.insert(slot);
+                slot
+            }
+            None => 0,
+        }
+    }
+
+    /// Return a lease. The slot goes back to the free list and may be handed to an
+    /// unrelated texture, so this is only safe once no registered model can still be
+    /// baked against it -- i.e. at the death of the logical texture, not its eviction.
+    pub fn slot_release(&mut self, slot: u32) {
+        if slot == 0 || !self.bindless_leased.remove(&slot) {
+            return;
+        }
+        if let Some(entry) = self.bindless_slots.get_mut(slot as usize)
+            && entry.is_some()
+        {
+            *entry = None;
+            self.bindless_dirty = true;
+        }
+        self.bindless_free.push(slot);
+    }
+
+    /// Upload into an already-leased slot, so this texture takes the index its previous
+    /// upload had. A zero or unknown `lease` degrades to `create` rather than failing:
+    /// an out-of-slots renderer must still load textures.
+    pub fn create_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tex: &TextureData,
+        lease: u32,
+    ) -> u64 {
+        if lease == 0 || !self.bindless_leased.contains(&lease) {
+            return self.create(device, queue, tex);
+        }
+        let handle = self
+            .registry
+            .create(device, queue, &self.texture_layout, tex, lease);
+        // On failure the lease is deliberately NOT released: it still belongs to the
+        // caller's texture, which may retry. The slot stays white in the meantime.
+        if handle != 0
+            && let Some(t) = self.registry.get(handle)
+        {
+            self.bindless_slots[lease as usize] = Some(t.view.clone());
+            self.bindless_dirty = true;
+        }
+        handle
+    }
+
     pub fn update_rgba(&mut self, queue: &wgpu::Queue, handle: u64, data: &[u8]) {
         self.registry.update_rgba(queue, handle, data);
     }
@@ -620,8 +698,16 @@ impl SharedTextures {
             let slot = t.slot;
             if slot != 0 && (slot as usize) < self.bindless_slots.len() {
                 self.bindless_slots[slot as usize] = None;
-                self.bindless_retired.push(slot);
                 self.bindless_dirty = true;
+                // TWO rules apply here and they compose (REN-RES-001 + the submit-boundary
+                // retire). A LEASED slot survives its upload entirely: it stays reserved,
+                // now sampling the white fallback, so the re-upload reclaims this exact
+                // index and no model ever learns a new number. An UNLEASED slot may be
+                // reused -- but not before the frame's queue submit, because material
+                // buffers and already-encoded draws still carry the index this frame.
+                if !self.bindless_leased.contains(&slot) {
+                    self.bindless_retired.push(slot);
+                }
             }
         }
         self.registry.destroy(handle);
@@ -784,6 +870,438 @@ pub(crate) fn write_rgba8_mip_chain(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A 1x1 RGBA8 upload, so a slot's identity is readable as a colour.
+    fn texel(rgba: [u8; 4]) -> Vec<u8> {
+        rgba.to_vec()
+    }
+
+    fn data(bytes: &[u8]) -> TextureData<'_> {
+        TextureData {
+            width: 1,
+            height: 1,
+            format: TextureFormat::Rgba8,
+            mip_count: 1,
+            gen_mips: false,
+            bytes,
+        }
+    }
+
+    // Headless device WITH the bindless features SharedTextures needs. Returns None (test
+    // skips) when there is no adapter or the adapter cannot do binding arrays -- the same
+    // convention as gfx3d::cull::tests::headless.
+    fn bindless_headless() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        let needed = wgpu::Features::TEXTURE_BINDING_ARRAY
+            | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        if !adapter.features().contains(needed) {
+            return None;
+        }
+        // The binding-array limit defaults to 0, so it must be asked for explicitly or the
+        // bindless layout fails validation -- the same request lib.rs makes at startup.
+        let mut limits = wgpu::Limits::default();
+        limits.max_binding_array_elements_per_shader_stage = SLOTS + 8;
+        // SharedTextures also builds an 8-sampler binding array.
+        limits.max_binding_array_sampler_elements_per_shader_stage = 8;
+        let have = adapter.limits();
+        if have.max_binding_array_elements_per_shader_stage
+            < limits.max_binding_array_elements_per_shader_stage
+            || have.max_binding_array_sampler_elements_per_shader_stage
+                < limits.max_binding_array_sampler_elements_per_shader_stage
+        {
+            return None;
+        }
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: needed,
+            required_limits: limits,
+            ..Default::default()
+        }))
+        .ok()
+    }
+
+    // Small enough to keep the probe cheap, large enough that slot reuse is observable.
+    const SLOTS: u32 = 64;
+
+    fn shared(device: &wgpu::Device, queue: &wgpu::Queue) -> SharedTextures {
+        SharedTextures::new(device, queue, false, SLOTS, false, &LogSink::none())
+    }
+
+    // Render one pixel by sampling the REAL bindless bind group at `slot`, exactly as the
+    // lit-mesh fragment shader does. This is the point of the test: asserting on
+    // `texture_slot()` alone would only prove this module's own bookkeeping, not that the
+    // GPU sees the right texels behind that index.
+    fn sample_slot(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        shared: &SharedTextures,
+        slot: u32,
+    ) -> [u8; 4] {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("bindless_probe"),
+            source: wgpu::ShaderSource::Wgsl(
+                r#"
+@group(0) @binding(0) var textures: binding_array<texture_2d<f32>>;
+// vec4 so the uniform block is exactly 16 bytes; only .x is meaningful.
+struct Which { slot: vec4<u32> };
+@group(1) @binding(0) var<uniform> which: Which;
+
+@vertex
+fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+    // One full-viewport triangle; the target is 1x1 so any covering triangle works.
+    var p = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+    return vec4<f32>(p[i], 0.0, 1.0);
+}
+
+@fragment
+fn fs() -> @location(0) vec4<f32> {
+    return textureLoad(textures[which.slot.x], vec2<i32>(0, 0), 0);
+}
+"#
+                .into(),
+            ),
+        });
+
+        let which_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let which_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&which_buf, 0, bytemuck::cast_slice(&[slot, 0u32, 0, 0]));
+        let which_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &which_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: which_buf.as_entire_binding(),
+            }],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(&shared.bindless_layout), Some(&which_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        // 256 is the minimum bytes_per_row for a texture->buffer copy.
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut enc =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, shared.bindless_bind(), &[]);
+            pass.set_bind_group(1, &which_bind, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        enc.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(1),
+                },
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(enc.finish()));
+
+        let slice = readback.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        rx.recv().unwrap().unwrap();
+        let mapped = slice.get_mapped_range();
+        [mapped[0], mapped[1], mapped[2], mapped[3]]
+    }
+
+    // THE invariant REN-RES-001 exists for: a model bakes a slot index once, the texture is
+    // evicted and re-uploaded, and the model must still sample ITS OWN texture.
+    //
+    // The "model" here is `baked` -- the integer wgr_model_register would have stored. It is
+    // captured BEFORE the eviction and never refreshed, which is precisely the situation
+    // cull.rs's append-only material table leaves a registered model in.
+    #[test]
+    fn leased_slot_survives_evict_and_reupload() {
+        let Some((device, queue)) = bindless_headless() else {
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+
+        let red = texel([0xFF, 0x00, 0x00, 0xFF]);
+        let lease = shared.slot_acquire();
+        assert_ne!(lease, 0, "a fresh 64-slot array must have a lease to give");
+        let handle = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        assert_ne!(handle, 0);
+
+        // What a model registered NOW would bake, permanently.
+        let baked = shared.texture_slot(handle);
+        assert_eq!(baked, lease);
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, baked),
+            [0xFF, 0x00, 0x00, 0xFF],
+            "the baked slot must show the texture before eviction (guards a vacuous test)"
+        );
+
+        // Evict. The model is untouched and still holds `baked`.
+        shared.destroy(handle);
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, baked),
+            [0xFF, 0xFF, 0xFF, 0xFF],
+            "an evicted texture's slot must fall back to white, not to stale texels"
+        );
+
+        // Re-upload the same logical texture into its lease.
+        let handle2 = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        assert_ne!(handle2, 0);
+        assert_ne!(handle2, handle, "a re-upload is a NEW handle");
+        assert_eq!(
+            shared.texture_slot(handle2),
+            baked,
+            "...but it must reclaim the SAME slot the model baked"
+        );
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, baked),
+            [0xFF, 0x00, 0x00, 0xFF],
+            "the model must sample its own texture again after re-upload"
+        );
+    }
+
+    // The other half, and the one that was silently WRONG rather than merely white: a
+    // texture uploaded while another is evicted must never inherit the evicted one's slot.
+    // Before REN-RES-001 `destroy` pushed the slot onto a LIFO free list that the next
+    // upload popped first, so this was not a rare race -- it was the guaranteed outcome.
+    #[test]
+    fn evicted_slot_is_never_inherited_by_another_texture() {
+        let Some((device, queue)) = bindless_headless() else {
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+
+        let red = texel([0xFF, 0x00, 0x00, 0xFF]);
+        let green = texel([0x00, 0xFF, 0x00, 0xFF]);
+
+        let lease = shared.slot_acquire();
+        let a = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        let baked = shared.texture_slot(a);
+        shared.destroy(a); // evicted; the model still holds `baked`
+
+        // An unrelated texture arrives in between -- the next upload, which is exactly the
+        // one that used to be handed the recycled slot.
+        let b = shared.create(&device, &queue, &data(&green));
+        assert_ne!(b, 0);
+        assert_ne!(
+            shared.texture_slot(b),
+            baked,
+            "an unrelated upload must not be handed a leased slot"
+        );
+
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, baked),
+            [0xFF, 0xFF, 0xFF, 0xFF],
+            "the model's slot must be white, NOT the stranger's green"
+        );
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, shared.texture_slot(b)),
+            [0x00, 0xFF, 0x00, 0xFF],
+            "and the stranger must still be sampleable at its own slot"
+        );
+
+        // The re-upload still lands correctly with a stranger in the array.
+        let a2 = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        assert_eq!(shared.texture_slot(a2), baked);
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, baked),
+            [0xFF, 0x00, 0x00, 0xFF]
+        );
+    }
+
+    // Nothing changes for a texture that never takes a lease: slots are still recycled, so
+    // the array stays as dense as it was. This is the "invisible except under memory
+    // pressure" half of the requirement.
+    //
+    // "Recycled" means AT THE SUBMIT BOUNDARY, not immediately: an unleased slot is
+    // parked in bindless_retired until frame_submitted(), because material buffers and
+    // already-encoded draws of THIS frame still carry the index. The two rules compose
+    // -- lease decides WHETHER a slot ever returns, the retire decides WHEN -- so this
+    // test drives the frame boundary the renderer drives after every queue submit.
+    #[test]
+    fn unleased_slots_are_still_recycled() {
+        let Some((device, queue)) = bindless_headless() else {
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+        let red = texel([0xFF, 0x00, 0x00, 0xFF]);
+
+        let a = shared.create(&device, &queue, &data(&red));
+        let slot_a = shared.texture_slot(a);
+        assert_ne!(slot_a, 0);
+        shared.destroy(a);
+        // The within-frame half of the rule has its own test
+        // (destroyed_slot_is_not_reused_until_frame_submitted); here we only drive the
+        // boundary and assert the slot does come back afterwards.
+        shared.frame_submitted();
+        let b = shared.create(&device, &queue, &data(&red));
+        assert_eq!(
+            shared.texture_slot(b),
+            slot_a,
+            "after the submit boundary an unleased slot is recycled, exactly as before"
+        );
+    }
+
+    // A released lease rejoins the free list, so slot space is bounded by live texture
+    // NAMES rather than leaking one slot per evict/re-upload cycle.
+    #[test]
+    fn released_lease_returns_to_the_pool() {
+        let Some((device, queue)) = bindless_headless() else {
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+        let red = texel([0xFF, 0x00, 0x00, 0xFF]);
+
+        let lease = shared.slot_acquire();
+        let a = shared.create_in_slot(&device, &queue, &data(&red), lease);
+        shared.destroy(a);
+        shared.slot_release(lease);
+
+        let b = shared.create(&device, &queue, &data(&red));
+        assert_eq!(
+            shared.texture_slot(b),
+            lease,
+            "a released lease must be reusable"
+        );
+        // Double release must not corrupt the free list.
+        shared.slot_release(lease);
+        shared.slot_release(lease);
+        let c = shared.create(&device, &queue, &data(&red));
+        assert_ne!(shared.texture_slot(c), shared.texture_slot(b));
+    }
+
+    // Cap exhaustion must degrade, not fail: `create_in_slot` with no lease is `create`.
+    #[test]
+    fn zero_lease_degrades_to_plain_create() {
+        let Some((device, queue)) = bindless_headless() else {
+            return;
+        };
+        let mut shared = shared(&device, &queue);
+        let red = texel([0xFF, 0x00, 0x00, 0xFF]);
+
+        let handle = shared.create_in_slot(&device, &queue, &data(&red), 0);
+        assert_ne!(handle, 0, "a zero lease must still upload the texture");
+        let slot = shared.texture_slot(handle);
+        assert_ne!(slot, 0);
+        shared.ensure_bindless(&device);
+        assert_eq!(
+            sample_slot(&device, &queue, &shared, slot),
+            [0xFF, 0x00, 0x00, 0xFF]
+        );
+        // And an unknown (never-leased) index behaves the same way rather than writing
+        // into someone else's slot.
+        let other = shared.create_in_slot(&device, &queue, &data(&red), 61);
+        assert_ne!(other, 0);
+        assert_ne!(shared.texture_slot(other), 61);
+    }
+}
+
 // 2x2 box-filter downsample of an RGBA8 image to (nw, nh).
 fn downsample_rgba8(src: &[u8], sw: u32, sh: u32, nw: u32, nh: u32) -> Vec<u8> {
     let mut out = vec![0u8; (nw * nh * 4) as usize];
@@ -805,7 +1323,7 @@ fn downsample_rgba8(src: &[u8], sw: u32, sh: u32, nw: u32, nh: u32) -> Vec<u8> {
 }
 
 #[cfg(test)]
-mod tests {
+mod slot_lease_tests {
     use super::*;
 
     fn shared(device: &wgpu::Device, queue: &wgpu::Queue) -> SharedTextures {

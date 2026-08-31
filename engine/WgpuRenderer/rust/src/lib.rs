@@ -5266,6 +5266,43 @@ impl Renderer {
         )
     }
 
+    // REN-RES-001: upload into a slot leased by the caller's logical texture, so an
+    // evicted-and-re-uploaded texture keeps the bindless index every registered model
+    // already baked. See the `bindless_leased` note in textures.rs.
+    #[allow(clippy::too_many_arguments)]
+    fn texture_create_in_slot(
+        &mut self,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        mip_count: u32,
+        gen_mips: bool,
+        data: &[u8],
+        slot: u32,
+    ) -> u64 {
+        self.textures.create_in_slot(
+            &self.device,
+            &self.queue,
+            &TextureData {
+                width,
+                height,
+                format,
+                mip_count,
+                gen_mips,
+                bytes: data,
+            },
+            slot,
+        )
+    }
+
+    fn texture_slot_acquire(&mut self) -> u32 {
+        self.textures.slot_acquire()
+    }
+
+    fn texture_slot_release(&mut self, slot: u32) {
+        self.textures.slot_release(slot);
+    }
+
     fn texture_update(&mut self, handle: u64, data: &[u8]) {
         self.textures.update_rgba(&self.queue, handle, data);
     }

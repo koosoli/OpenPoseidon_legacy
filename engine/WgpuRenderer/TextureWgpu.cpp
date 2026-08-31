@@ -871,13 +871,39 @@ TextureWgpu::TextureWgpu(TextureBankWgpu* bank) : _bank(bank) {}
 
 TextureWgpu::~TextureWgpu()
 {
-    if (_gpuHandle && _bank)
+    if (_bank)
     {
         if (WgrRenderer* r = _bank->Renderer())
         {
-            wgr_texture_destroy(r, _gpuHandle);
+            if (_gpuHandle)
+            {
+                wgr_texture_destroy(r, _gpuHandle);
+            }
+            // The lease outlives every upload and dies with the texture OBJECT. This is
+            // the ONLY place it may be returned: releasing it on eviction would put the
+            // slot back in the pool for an unrelated texture, which is precisely the
+            // identity theft REN-RES-001 removes.
+            if (_slotLease)
+            {
+                wgr_texture_slot_release(r, _slotLease);
+                _slotLease = 0;
+            }
         }
     }
+}
+
+// Reserve this texture's bindless slot on first use. 0 (array at cap) is not an error:
+// wgr_texture_create_in_slot then behaves exactly as wgr_texture_create.
+uint32_t TextureWgpu::AcquireSlotLease()
+{
+    if (_slotLease == 0 && !_dynamic)
+    {
+        if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
+        {
+            _slotLease = wgr_texture_slot_acquire(r);
+        }
+    }
+    return _slotLease;
 }
 
 int TextureWgpu::Init()
@@ -1190,34 +1216,34 @@ Color TextureWgpu::GetPixel(int level, float u, float v) const
 // textures, because they are heavily reused.
 //
 // The RIGHT fix is for a pin to mean "recently drawn" rather than "registered", so the LRU
-// can do its job. That is not this change, and the reason is NOT the one previously written
-// here (a suspected use-after-free on a live bind group). Audited 2026-08-15; the real
-// blocker is that a retained model's texture reference is a BAKED BINDLESS SLOT INDEX, and
-// nothing can re-bake it:
+// can do its job. Half of that is now DONE and half is not; the split matters, so:
 //
-//   * wgr_model_register resolves every material's handle to a dense slot ONCE, at
-//     registration (gfx3d/mod.rs register_model -> textures.texture_slot), and stores the
-//     integer in the retained SectionMaterialGpu table. gpu_driven.wgsl indexes the bindless
-//     array with that integer (`textures[sm.texture_slot]`).
-//   * There is no wgr_model_unregister and no material-update entry point; cull.rs's model /
-//     section / material tables are append-only. A registered model's slot is final.
-//   * SharedTextures::destroy frees the slot onto a LIFO free list (bindless_free) that
-//     alloc_slot pops first, so the NEXT texture uploaded takes the evicted texture's slot.
-//     The still-live retained model then samples that unrelated texture -- permanently, and
-//     on near objects, not just the far ones the LRU meant to demote.
-//   * Even without recycling it does not self-heal: EvictGpu clears _uploadTried, the
-//     re-upload gets a fresh handle and a fresh slot, and the baked material never learns
-//     the new number. The object stays on the white fallback for the rest of the session.
+// SOLVED (REN-RES-001, slot leases -- wgr_texture_slot_acquire / _create_in_slot). The
+// blocker used to be that a retained model's texture reference is a BAKED BINDLESS SLOT
+// INDEX which nothing could re-bake: wgr_model_register resolves each material's handle to
+// a dense slot ONCE (gfx3d/mod.rs register_model -> textures.texture_slot), stores the
+// integer in the append-only SectionMaterialGpu table, and gpu_driven.wgsl indexes the
+// bindless array with it. Destroying the texture then did two wrongs at once -- the freed
+// slot went onto a LIFO free list the next upload popped first (so a live model sampled an
+// unrelated texture, permanently), and the re-upload got a fresh slot the baked material
+// never learned (so the object stayed white for the session).
 //
-// The DIRECT draw path has none of this: gfx3d/mod.rs re-resolves texture_slot(d.texture_id)
-// during material staging every frame, so a destroyed handle costs one white frame and
-// EnsureUploaded restores it. That asymmetry is exactly why unpinned textures are already
-// safe to evict and pinned ones are not.
+// A lease removes both. The slot now belongs to the TextureWgpu, not to one upload: an
+// eviction points it at the white fallback but leaves it reserved, and the re-upload
+// reclaims the same index. Models never learn a new number because it never changes. There
+// is no shader change and no per-fetch cost; the price is that a slot is held while
+// evicted, bounded by distinct texture NAMES (3,552 on Chernarus against a cap of 8,192).
 //
-// Unblocking it needs a Rust-side change, not a C++ one -- either stable slots (reserve the
-// slot per texture identity so a re-upload reclaims it; an FFI that creates into a named
-// slot) or a slot indirection table the shader dereferences per draw. Neither is reachable
-// from the current FFI, which is create/update/destroy with no way to observe or pin a slot.
+// NOT SOLVED, and it is what still gates the pin check in TextureBankWgpu::TrimResidency:
+// there is no LIVENESS signal from the GPU-driven path. `_lastUsedFrame` is refreshed only
+// inside EnsureUploaded(), which the DIRECT draw path calls every frame via UseMipmap, so a
+// direct-draw texture's eviction costs one white frame and self-heals. A retained model's
+// textures are touched at registration and never again -- nothing calls EnsureUploaded for
+// them per frame. Unpin them today and every retained texture becomes an eviction candidate
+// 120 frames after registration regardless of whether it is on screen, gets evicted, and is
+// never re-uploaded: correct slots, white buildings. That is a worse bug than the one being
+// fixed, which is why the check stays until the retained path both marks its textures used
+// and can ask for a refill. That work lives in EngineWgpu's snapshot consumption, not here.
 //
 // Separately, the `Texture with 'wgr_texture' label is invalid` failure seen on Chernarus is
 // most likely NOT an eviction race at all: textures.rs calls device.create_texture with no
@@ -1425,9 +1451,11 @@ uint64_t TextureWgpu::EnsureUploaded()
             // see the size that really exists on the GPU.
             _w = _mipmaps[firstLevel]._w;
             _h = _mipmaps[firstLevel]._h;
-            _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
-                                            static_cast<uint32_t>(levelCount), 0, blocks.data(),
-                                            static_cast<uint32_t>(blocks.size()));
+            // Into this texture's LEASED slot, so a re-upload after an eviction reclaims
+            // the bindless index registered models already baked (REN-RES-001).
+            _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
+                                                    static_cast<uint32_t>(levelCount), 0, blocks.data(),
+                                                    static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
             if (timed)
             {
                 const uint64_t createDelta = NowUs() - createBegan;
@@ -1504,9 +1532,9 @@ uint64_t TextureWgpu::EnsureUploaded()
             DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(Name()));
             if (img.valid())
             {
-                _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height),
-                                                WGR_TEXTURE_RGBA8, 1, WGR_TEXTURE_GEN_MIPS, img.rgba.data(),
-                                                static_cast<uint32_t>(img.rgba.size()));
+                _gpuHandle = wgr_texture_create_in_slot(
+                    r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), WGR_TEXTURE_RGBA8, 1,
+                    WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());
                 _w = img.width;
                 _h = img.height;
                 GTextureStreamStats.frameUploadBytes.fetch_add(img.rgba.size(), std::memory_order_relaxed);
