@@ -1242,6 +1242,26 @@ class TextureBaker
                           << ", no albedo resolved: " << (decalFamily ? "overlay decal shell" : "water-erase surface")
                           << ")" << std::endl;
             }
+            // MAT-054: "no image" is not "nothing bindable". Reforger's baked-LOD
+            // materials -- `*_MLOD`, `*_lod3`, `*_Color_palette` -- are `MatPBRBasic`
+            // carrying a single flat `Color` and no map at all, which is how Enfusion
+            // draws a coarse LOD. EmatMaterialAdapter has synthesised a procedural
+            // `#(argb,8,8,3)color(...)` base colour from `Color` since DZ-002, so such a
+            // material IS bindable; not deploying it left the model naming a pak path
+            // nothing can open, and the section fell to the 1.0 white at bindless slot 0.
+            // Every one of the twelve authored colours MAT-054 measured is between 0.016
+            // and 0.32, so white was the largest error available.
+            //
+            // Not for the two families above: a decal shell or a water-erase surface with
+            // a flat colour is still an overlay that must not be drawn as a surface, and
+            // hideFaces already says so.
+            float flatColour[4] = {};
+            if (_options.emats && !unresolved.hideFaces && emat.Vec4Of("Color", flatColour))
+            {
+                unresolved.ematPath = WriteEmat(ematPath, emat, unresolved, false, std::string());
+                if (!unresolved.ematPath.empty())
+                    _stats.ematsColourOnly++;
+            }
             return unresolved;
         }
         const std::string opacity = emat.TextureOf("OpacityMap");
@@ -1325,16 +1345,17 @@ class TextureBaker
         // So: deploy when there is a baked albedo OR an authored `Color` to stand in for
         // one. The two cases are counted separately, because a colour-only deploy is right
         // for a coarse LOD and would be a disguise for a bake regression.
+        // Reached only when an albedo WAS baked -- the colour-only case returns from the
+        // `bcr.empty()` branch above, which is where its deploy now happens. Putting the
+        // widened gate here instead was my first attempt and it was a no-op: a 400-model
+        // Everon export reported 21 materials with "no BCRMap and no BCR_N layer" and
+        // zero colour-only deploys, because control never reaches this line for them.
+        // MAT-054 named the right branch; I took the "equivalently" alternative it offered
+        // and the two are only equivalent if the code gets there.
         baked.extraTextures = std::move(multi);
-        float flatColour[4] = {};
-        const bool hasFlatColour = emat.Vec4Of("Color", flatColour);
-        if (_options.emats && (!baked.colourPaa.empty() || hasFlatColour))
-        {
+        if (_options.emats)
             baked.ematPath =
                 WriteEmat(ematPath, emat, baked, _imageHasAlpha.count(LowerCopy(baked.colourPaa)) != 0, nmoKey);
-            if (baked.colourPaa.empty() && !baked.ematPath.empty())
-                _stats.ematsColourOnly++;
-        }
         return baked;
     }
 
