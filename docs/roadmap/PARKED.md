@@ -51,6 +51,26 @@ verdict. Unparking means listening again, with that fix in. `AUD-102`.
 
 ---
 
+### The pale, speckled Arma 3 bushes — diagnosed, not fixed
+Owner-reported on Stratis as "flimmert das Gras", then narrowed by them to *"visible in a
+single frame, this plant type only, other grasses work"* — which was the observation that
+cracked it. It is **`a3\plants_fush_neriumo2d_f.p3d`, the DEAD nerium oleander**,
+named three independent ways including a world-free `--test-model` scene standing it beside
+the LIVING oleander, which renders correctly in the same frame.
+
+**The mechanism is geometry, not materials.** The working oleander's LOD0 is a leaf atlas
+plus an opaque bark section; the dead one puts the same alpha atlas on *both* sections, so
+it has no solid geometry anywhere and every pixel rides the Blend→cutout promotion. That
+promotion is measured and then *not applied* (`AlphaMaskDemoteEnabled()` gates it off), so a
+plant made entirely of sub-pixel twigs is left to partial coverage over bright sky — pale
+body, threshold-flipping speckle, flicker.
+
+The main session's hypothesis (a normal map bound as albedo) is **dead**: GL33, which
+applies no cutout at all, renders this bush the correct dark brown of its atlas, and
+suppressing every production material binding leaves the pallor untouched. **Unparks with
+one log line at the end of the alpha ladder**, diffed between the two atlases — that decides
+between the two remaining explanations. `MAT-055`.
+
 ## Parked on evidence — the premise did not survive measurement
 
 ### GPU-cost clamp on the object item budget
