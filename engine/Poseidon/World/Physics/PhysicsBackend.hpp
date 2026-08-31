@@ -40,10 +40,54 @@ struct TerrainField
     float        originZ = 0.0f;
 };
 
+/// What a backend's OWN record/replay facility found. See SIM-808.
+///
+/// This is a second, independent witness and nothing else. The engine's own
+/// divergence report (`Poseidon/Core/StateTimeline.hpp`) sees only what the three
+/// scoped readbacks above hand out; a backend's internal replay sees the state
+/// underneath them -- contacts, islands, sleep sets, the constraint graph -- and
+/// can replay the same recorded call stream under a configuration the engine
+/// cannot otherwise reach. It is strictly narrower in SUBJECT (physics only, and
+/// only given the inputs the engine already chose) and strictly wider in DEPTH.
+///
+/// Deliberately not a getter of anything: nothing here flows into gameplay, and
+/// `Begin` is a diagnostic switch a test throws, not something a frame does.
+struct ReplayAudit
+{
+    /// False when the backend has no replay facility. Not a failure.
+    bool supported = false;
+    /// A recording existed and was replayed to completion (or to a divergence).
+    bool ran = false;
+    /// A recorded state hash did not match on replay.
+    bool diverged = false;
+    /// The FIRST frame whose state hash differed. -1 when none did.
+    int divergentFrame = -1;
+    /// Frames the replay reached.
+    int frameCount = 0;
+    /// Worker count the replay ran at, as the backend clamped it.
+    int replayWorkerCount = 0;
+    /// Recorded stream size, so the cost of this facility is a measured number
+    /// rather than an impression.
+    int recordedBytes = 0;
+};
+
 class PhysicsBackend
 {
 public:
     virtual ~PhysicsBackend() = default;
+
+    /// Begin recording the backend's own call stream, if it can. Returns false
+    /// when the backend has no such facility, which is a supported state.
+    virtual bool BeginReplayRecording() { return false; }
+
+    /// Stop recording, replay the stream into a fresh world at `replayWorkerCount`
+    /// workers, and report the first state-hash mismatch. `supported == false`
+    /// when the backend has no facility; `ran == false` when nothing was recorded.
+    virtual ReplayAudit EndReplayRecordingAndValidate(int replayWorkerCount)
+    {
+        (void)replayWorkerCount;
+        return {};
+    }
 
     virtual bool Create() = 0;
     virtual void Destroy() = 0;

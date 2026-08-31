@@ -675,3 +675,109 @@ TEST_CASE("an ablation at the last tick is reported at the last tick",
         CHECK_FALSE(std::isnan(rv));
     }
 }
+
+// ===========================================================================
+// Section 3 -- the backend's OWN replay facility, as a second witness.
+//
+// box3d ships record/replay and nothing here used it (SIM-804 names it as
+// unwired). It records every API call against a world, seeded by a full snapshot,
+// and stamps a state hash after every step -- FNV-1a over the transform and the
+// linear/angular velocity of every LIVE body, bitwise. Replay re-issues the calls
+// into a fresh world at a chosen worker count and recomputes the hash per frame,
+// so a mismatch names the frame.
+//
+// It is wired because it reaches somewhere the timeline above cannot: the replay
+// world can run at a worker count the live engine never uses. SIM-804 measured our
+// worker count as 1, so box3d's multi-worker solver -- which re-partitions the
+// constraint graph -- has no coverage from anything that steps the live world.
+//
+// It is NOT the oracle, and these cases are written so nobody can mistake it for
+// one. The engine's calls are baked into the recording, so replay reproduces box3d
+// given inputs the engine already chose. A divergence in AI, in scripting or in an
+// event ORDER is invisible here by construction.
+
+TEST_CASE("box3d's own replay agrees with the recorded run at the same worker count",
+          "[physics][determinism][replay]")
+{
+    auto fix = BuildFixture();
+    REQUIRE(fix->backend->BeginReplayRecording());
+
+    Det::StateTimeline live;
+    Record(*fix, live, {}, 60);
+
+    const ReplayAudit audit = fix->backend->EndReplayRecordingAndValidate(1);
+    INFO("replay: frames=" << audit.frameCount << " bytes=" << audit.recordedBytes
+                           << " workers=" << audit.replayWorkerCount
+                           << " divergentFrame=" << audit.divergentFrame);
+
+    CHECK(audit.supported);
+    // Anti-vacuity, and the one that matters most here: a replay that validated
+    // nothing -- an empty recording, a player that refused the stream, a run of
+    // zero frames -- would report `diverged == false` and look like a pass.
+    REQUIRE(audit.ran);
+    REQUIRE(audit.frameCount >= 60);
+    REQUIRE(audit.recordedBytes > 0);
+    CHECK(audit.replayWorkerCount == 1);
+
+    CHECK_FALSE(audit.diverged);
+    CHECK(audit.divergentFrame == -1);
+
+    fix->backend->Destroy();
+}
+
+TEST_CASE("box3d's replay is bit-identical at worker counts the engine never uses",
+          "[physics][determinism][replay]")
+{
+    // The reason this arm exists. Everything else in this file, and everything in
+    // SIM-804, steps a world whose worker count is 1. Replaying the SAME recorded
+    // stream at 2 and 4 exercises the partitioned solver against a hash taken from
+    // the single-threaded run -- which is the roadmap's "same build, same platform,
+    // strict comparison" applied to the one axis nothing else can vary.
+    for (const int workers : {2, 4})
+    {
+        auto fix = BuildFixture();
+        REQUIRE(fix->backend->BeginReplayRecording());
+        Det::StateTimeline live;
+        Record(*fix, live, {}, 60);
+
+        const ReplayAudit audit = fix->backend->EndReplayRecordingAndValidate(workers);
+        INFO("workers=" << workers << " frames=" << audit.frameCount
+                        << " divergentFrame=" << audit.divergentFrame);
+        REQUIRE(audit.ran);
+        REQUIRE(audit.frameCount >= 60);
+        CHECK(audit.replayWorkerCount == workers);
+        // Recorded at 1, replayed at N. If this ever fails, the divergentFrame it
+        // reports is the first step at which the constraint-graph partition changed
+        // the answer, and raising the live worker count is off the table until it
+        // is explained.
+        CHECK_FALSE(audit.diverged);
+        CHECK(audit.divergentFrame == -1);
+
+        fix->backend->Destroy();
+    }
+}
+
+TEST_CASE("the replay audit reports honestly when nothing was recorded",
+          "[physics][determinism][replay]")
+{
+    // A facility that returns a cheerful `diverged == false` when it did no work is
+    // worse than no facility. `ran` is the field that separates "validated and
+    // agreed" from "validated nothing", and the cases above REQUIRE it.
+    auto fix = BuildFixture();
+
+    const ReplayAudit audit = fix->backend->EndReplayRecordingAndValidate(1);
+    CHECK(audit.supported);
+    CHECK_FALSE(audit.ran);
+    CHECK(audit.frameCount == 0);
+    CHECK(audit.recordedBytes == 0);
+    CHECK(audit.divergentFrame == -1);
+
+    // Starting twice is refused rather than leaking the first buffer.
+    REQUIRE(fix->backend->BeginReplayRecording());
+    CHECK_FALSE(fix->backend->BeginReplayRecording());
+
+    // And a Destroy while a recording is live must not leak or crash -- the
+    // recording holds a pointer into the world, so the stop has to happen while
+    // the world still exists.
+    fix->backend->Destroy();
+}

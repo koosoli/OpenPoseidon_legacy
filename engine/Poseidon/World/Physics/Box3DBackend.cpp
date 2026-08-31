@@ -113,6 +113,21 @@ public:
         // hulls allocated and freed over the same region, and a ray still hit the
         // shape afterwards while a control ray still missed. So hulls are freed at
         // creation time now and none are retained here.
+        // A live recording holds a pointer INTO the world; b3World_StopRecording
+        // must run while the world still exists, and the buffer must be freed
+        // whether or not anybody asked for the audit. Destroying a world with a
+        // recording attached and then leaking the buffer is the obvious way to get
+        // this wrong, so both are handled here rather than only on the happy path.
+        if (_recording != nullptr)
+        {
+            if (b3World_IsValid(_world))
+            {
+                b3World_StopRecording(_world);
+            }
+            b3DestroyRecording(_recording);
+            _recording = nullptr;
+        }
+
         if (b3World_IsValid(_world))
         {
             b3DestroyWorld(_world);
@@ -779,6 +794,93 @@ public:
 
     [[nodiscard]] const char* Name() const override { return "box3d 0.1.0"; }
 
+    // ---- box3d's own record/replay. SIM-808. ------------------------------
+    //
+    // box3d records every API call made against a world, seeded by a full world
+    // snapshot, and stamps a StateHash op after every b3World_Step -- FNV-1a over
+    // the transform and the linear/angular velocity of every live body, bitwise.
+    // Replaying the stream into a fresh world re-issues the same calls and
+    // recomputes that hash per step, so a mismatch names the FRAME.
+    //
+    // What makes it worth wiring at all, given the engine already compares its own
+    // readbacks: the replay world can be built at a DIFFERENT worker count.
+    // box3d's header says replaying at another count "re-partitions the constraint
+    // graph", so this reaches a configuration the engine cannot otherwise reach --
+    // SIM-804 measured our live worker count as 1, which means the multi-worker
+    // solver has no coverage from any test that steps the live world.
+    //
+    // What it can NOT see, and why it is a second witness and not the oracle: the
+    // engine's own calls are BAKED INTO the recording. Replay reproduces box3d
+    // given inputs the engine already chose, so a divergence upstream of
+    // SetBodyTransform -- in AI, in scripting, in an event order -- is invisible
+    // here by construction. That is the engine timeline's job.
+
+    bool BeginReplayRecording() override
+    {
+        if (!b3World_IsValid(_world) || _recording != nullptr)
+        {
+            return false;
+        }
+        // A hint, not a cap: b3RecBufAppend doubles on overflow. 1 MiB covers a
+        // few hundred steps of this size of world without a reallocation.
+        _recording = b3CreateRecording(1 << 20);
+        if (_recording == nullptr)
+        {
+            return false;
+        }
+        b3World_StartRecording(_world, _recording);
+        return true;
+    }
+
+    ReplayAudit EndReplayRecordingAndValidate(int replayWorkerCount) override
+    {
+        ReplayAudit audit;
+        audit.supported = true;
+        if (_recording == nullptr)
+        {
+            return audit;
+        }
+
+        if (b3World_IsValid(_world))
+        {
+            b3World_StopRecording(_world);
+        }
+
+        const uint8_t* data = b3Recording_GetData(_recording);
+        const int      size = b3Recording_GetSize(_recording);
+        audit.recordedBytes = size;
+
+        const int workers = std::clamp(replayWorkerCount, 1, B3_MAX_WORKERS);
+        audit.replayWorkerCount = workers;
+
+        if (data != nullptr && size > 0)
+        {
+            // b3ValidateReplay would answer this with a bool. The player is used
+            // instead for one reason: it exposes the diverge FRAME, which is the
+            // whole point of the roadmap item. A bool would tell us no more than
+            // the whole-run hash SIM-804 already has.
+            if (b3RecPlayer* player = b3RecPlayer_Create(data, size, workers))
+            {
+                while (b3RecPlayer_StepFrame(player))
+                {
+                    if (b3RecPlayer_HasDiverged(player))
+                    {
+                        break;
+                    }
+                }
+                audit.ran = true;
+                audit.diverged = b3RecPlayer_HasDiverged(player);
+                audit.divergentFrame = b3RecPlayer_GetDivergeFrame(player);
+                audit.frameCount = b3RecPlayer_GetFrame(player);
+                b3RecPlayer_Destroy(player);
+            }
+        }
+
+        b3DestroyRecording(_recording);
+        _recording = nullptr;
+        return audit;
+    }
+
 private:
     /// Sub-steps per call. Box3D's solver takes these internally; four is its
     /// documented default territory and PHY-010 has no reason to tune it.
@@ -825,6 +927,9 @@ private:
     }
 
     b3WorldId                _world = b3_nullWorldId;
+    /// Non-null only between BeginReplayRecording and EndReplayRecordingAndValidate.
+    /// A test throws this switch; a frame never does.
+    b3Recording* _recording = nullptr;
     std::vector<Slot>        _slots;
     std::vector<std::uint32_t> _free;
     std::vector<b3Vec3>      _scratch;
