@@ -200,6 +200,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Core/test_perf_trace.cpp
     Core/test_scoped_timer.cpp
     Core/test_task_pool.cpp
+    Core/test_worker_determinism.cpp
     Foundation/Math/test_geometry_math.cpp
     
     # BIS Binary Framework tests (split by functionality)

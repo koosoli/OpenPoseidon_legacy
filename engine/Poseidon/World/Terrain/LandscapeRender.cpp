@@ -377,6 +377,37 @@ void Landscape::GenerateSegmentInto(LandSegment* seg, const LandBegEnd& rect, bo
 
     seg->_lodLevel = lodLevel;
 
+    // Reset the caller's segment before refilling it.  This function takes a
+    // caller-owned `LandSegment*` for exactly one reason — so a segment can be
+    // RE-generated rather than reallocated (that is the whole difference from
+    // `GenerateSegment`, which news one and returns it) — but nothing in the
+    // tree regenerates one yet, so the reset had never been exercised and was
+    // incomplete in two places.  Found by the roadmap 8.6 determinism harness
+    // (tests/unit/engine/Poseidon/Core/test_worker_determinism.cpp), which
+    // hashes a segment generated fresh against the same segment regenerated,
+    // and got two different hashes.
+    //
+    //  * The land branch below calls `_table.ClearFaces()` and never clears the
+    //    VERTEX table.  `AddVertex` appends, and the fresh per-call `candidates`
+    //    lists mean nothing is shared with the previous pass, so a second
+    //    generation appended a complete second copy of the mesh.  The new faces
+    //    index the new copy, so it still DRAWS correctly — the symptom is a
+    //    vertex buffer that doubles on every regeneration, unbounded, with no
+    //    visual tell.  (`Compact()` does not help: it shrinks capacity to size,
+    //    it does not drop unreferenced vertices.)  The stale vertices also enter
+    //    `CalculateMinMax`, so the bounding box would be the union of every
+    //    generation the segment has ever held.
+    //  * `_wTable` is only cleared on the branches that go on to refill it, so a
+    //    segment regenerated from wet to dry kept its previous sea mesh.
+    //
+    // Both are latent at this commit: every caller today (`GenerateSegment`, and
+    // `LandCache::Fill` pass 2) hands over a freshly allocated segment.  Clearing
+    // here is a no-op for those and makes segment reuse — the obvious next step
+    // for the LandCache, and what this signature exists for — actually correct.
+    // The redundant `Clear()` calls further down are left as they are.
+    seg->_table.Clear();
+    seg->_wTable.Clear();
+
     seg->_someWater = false;
     seg->_onlyWater = true;
     seg->_seaLevel = 0; //=_seaLevelWave;

@@ -264,6 +264,20 @@ GroundSolid, GroundWater DEFINE_ENUM_END(GroundType) namespace Poseidon
 
         Vector3Val Offset() const { return _offset; }
 
+        // Read-only view of the generated geometry.  Everything above is reachable
+        // only through `friend class Landscape` / `friend class LandCache`, which is
+        // right for mutation but leaves a segment unverifiable from outside the
+        // terrain tree.  Roadmap 8.6 needs to hash the COMPLETE output of
+        // `Landscape::GenerateSegmentInto` at several TaskPool worker counts and
+        // compare it bit for bit (tests/unit/engine/Poseidon/Core/
+        // test_worker_determinism.cpp) — a spot check would not be evidence.  These
+        // are const and add no state; they do not widen the mutation surface.
+        const Shape& GetTable() const { return _table; }
+        const Shape& GetWaterTable() const { return _wTable; }
+        bool SomeWater() const { return _someWater; }
+        bool OnlyWater() const { return _onlyWater; }
+        int GetLodLevel() const { return _lodLevel; }
+
         USE_FAST_ALLOCATOR
     };
 
