@@ -277,14 +277,33 @@ void PublishPresentationSnapshot(const PresentationSnapshot& snap)
 
     // 5.3's bounded-queue rule, enforced in structure. The ring cannot grow, so a
     // producer that outran the consumer does not queue -- it DROPS the un-retired
-    // snapshot by overwriting the slot behind it. That drop is the event worth
-    // counting: it is zero by construction while producer and consumer are the same
-    // thread and strictly alternate, and it is the first thing that will move if step 6
-    // gets the handoff wrong. Counted here rather than asserted because a legitimate
-    // second publish within one frame (world up mid-menu-frame) must not crash a
+    // snapshot by overwriting the slot behind it. That drop is the event worth counting,
+    // and it is the first thing that will move if step 6 gets the handoff wrong.
+    //
+    // IT IS NOT ZERO. The comment here used to say "zero by construction while producer
+    // and consumer are the same thread", and the first capture that displayed the
+    // counter said 1. Measured on perf_abel, two runs, 2026-08-31:
+    //
+    //     run 1: fallback 391, first drop at generation 392
+    //     run 2: fallback 402, first drop at generation 403
+    //
+    // firstDropGeneration == fallback + 1 exactly, both times. So the one drop is the
+    // HANDOVER FRAME: for the whole menu and loading screen the renderer publishes its
+    // own snapshot (CapturePresentationSnapshotIfStale, hence the fallback count), and
+    // the first frame in which the world publishes finds that frame's fallback snapshot
+    // already published and not yet retired. One publish per world load, structural,
+    // harmless -- the dropped snapshot is a menu snapshot nothing was going to draw.
+    //
+    // Which means the counter has a known-good value rather than an assumed one: it
+    // should equal the number of world loads. Anything above that is the real event.
+    // Counted rather than asserted because this legitimate case must not crash a
     // release build.
     if (GSnapshotFresh)
+    {
         ++diag.publishedWithoutConsume;
+        if (diag.firstDropGeneration == 0)
+            diag.firstDropGeneration = GGeneration + 1; // the generation this publish is about to take
+    }
 
     // Write the slot that is NOT current, then flip. Reset to defaults first: the slot
     // holds an older frame's values, and FillPresentationSnapshot only assigns the

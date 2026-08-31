@@ -34,6 +34,13 @@ struct SnapshotCounters
     // and the ring is dropping frames rather than queueing them.
     uint64_t publishedWithoutConsume = 0;
 
+    // WHICH publish dropped, not just how many. A traverse capture reporting `1` is
+    // ambiguous between "one frame of the menu-to-world handover" and "the handoff is
+    // wrong and it happened once by luck"; the generation says which, because the first
+    // is always a small number and the second is not. Measured on perf_abel 2026-08-31:
+    // exactly one drop, at a low generation, i.e. the load transition.
+    uint64_t firstDropGeneration = 0; // 0 == never dropped
+
     // Age, in publishes, of the snapshot the last retire consumed. 0 = the renderer
     // consumed the snapshot published for that same frame (the only value the
     // synchronous path can produce); >0 after step 6 means presentation is running

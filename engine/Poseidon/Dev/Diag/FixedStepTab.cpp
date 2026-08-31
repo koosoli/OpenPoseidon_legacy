@@ -205,8 +205,10 @@ void DrawFixedStepTab()
 
         if (snap.publishedWithoutConsume > 0)
         {
-            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Dropped (published without consume): %llu",
-                               (unsigned long long)snap.publishedWithoutConsume);
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Dropped (published without consume): %llu"
+                                                               "  (first at publish %llu)",
+                               (unsigned long long)snap.publishedWithoutConsume,
+                               (unsigned long long)snap.firstDropGeneration);
         }
         else
         {
@@ -215,9 +217,16 @@ void DrawFixedStepTab()
         if (ImGui::IsItemHovered())
         {
             ImGui::SetTooltip("A publish that found the previous snapshot still un-retired.\n"
-                              "Zero by construction today -- the producer calls the consumer --\n"
-                              "so a nonzero value is the FIRST evidence that the two clocks have\n"
-                              "come apart. It is deliberately not smoothed or hidden.");
+                              "\n"
+                              "EXPECT ONE PER WORLD LOAD, not zero. Through the menu and the\n"
+                              "loading screen the RENDERER publishes its own snapshot; the first\n"
+                              "frame the world publishes finds that frame's fallback snapshot\n"
+                              "already there. Measured: the first drop lands at exactly\n"
+                              "fallback + 1, in both runs of a two-run capture. The snapshot it\n"
+                              "drops is a menu snapshot nothing was going to draw.\n"
+                              "\n"
+                              "A count ABOVE the number of world loads is the real event: it\n"
+                              "means simulation and presentation have come apart.");
         }
 
         ImGui::Text("Fallback captures: %llu", (unsigned long long)snap.fallback);

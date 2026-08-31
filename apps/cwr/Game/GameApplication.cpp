@@ -350,6 +350,7 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(sj, "ring_size", sn.ringSize);
             cJSON_AddNumberToObject(sj, "consumed_age", (double)sn.consumedAge);
             cJSON_AddNumberToObject(sj, "published_without_consume", (double)sn.publishedWithoutConsume);
+            cJSON_AddNumberToObject(sj, "first_drop_generation", (double)sn.firstDropGeneration);
             cJSON_AddNumberToObject(sj, "fallback", (double)sn.fallback);
             cJSON_AddNumberToObject(sj, "resource_epoch", sn.resourceEpoch);
         }
