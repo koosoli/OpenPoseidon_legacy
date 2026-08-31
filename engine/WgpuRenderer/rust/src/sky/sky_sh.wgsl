@@ -1,9 +1,21 @@
 // Projects the sky reflection env map (equirect, linear radiance) into 9 spherical-harmonic RGB
 // coefficients for diffuse sky irradiance (object + terrain ambient — water look plan Stage 4a
-// follow-up). Once per frame, right after the env bake. One workgroup / one thread integrates
-// radiance * Y_i * dOmega over a coarse grid of the env: SH-9 is very low frequency, so a subset
-// suffices and a single serial pass is simplest + trivially correct (the pass is tiny). The lit
-// shaders evaluate irradiance(n) from these coeffs — see frame::sky_irradiance.
+// follow-up). Once per frame, right after the env bake. The lit shaders evaluate irradiance(n)
+// from these coeffs — see frame::sky_irradiance.
+//
+// THIS RAN ON ONE THREAD UNTIL 2026-08-31, and the comment here said "a single serial pass is
+// simplest + trivially correct (the pass is tiny)". It was not tiny. PERF-010 gave the
+// atmosphere its first timer regions and this pass measured **1.812 ms on perf_field at
+// 1600x900 — 16% of the whole GPU frame** — to reduce a coarse 128x64 grid to nine
+// coefficients, because the dispatch was `(1, 1, 1)` against `@workgroup_size(1)`: one lane on
+// a GPU with thousands. Serial was not the wrong call because it was serial; it was the wrong
+// call because nobody had measured it, and the code asserted the answer instead.
+//
+// Now 64 lanes and a tree reduction in workgroup memory. The MATH IS UNCHANGED: same coarse
+// grid, same sample positions, same solid angle, same basis constants. Only the order of
+// summation differs, so the result moves by float-addition-order noise and no more — which is
+// the property to preserve, because these nine numbers are the ambient term of every lit
+// surface in the world and a real change to them would be visible everywhere at once.
 
 @group(0) @binding(0) var env: texture_2d<f32>;
 
@@ -13,9 +25,14 @@ struct Sh {
 @group(0) @binding(1) var<storage, read_write> sh: Sh;
 
 const PI: f32 = 3.14159265359;
+const LANES: u32 = 64u;
 
-@compute @workgroup_size(1)
-fn cs_sky_sh() {
+// Per-lane partial sums. vec3 aligns to 16 bytes in workgroup address space, so this is
+// 64 * 9 * 16 = 9216 bytes -- inside the 16 KiB every WebGPU device guarantees.
+var<workgroup> partial: array<array<vec3<f32>, 9>, LANES>;
+
+@compute @workgroup_size(64)
+fn cs_sky_sh(@builtin(local_invocation_index) lane: u32) {
     let dims = vec2<i32>(textureDimensions(env));
     let w = dims.x;
     let h = dims.y;
@@ -30,7 +47,12 @@ fn cs_sky_sh() {
         c[i] = vec3<f32>(0.0);
     }
 
-    var y = 0;
+    // Each lane owns a stride of ROWS. The row grid is h/sy steps, which is 64 whenever the env
+    // is at least 64 texels tall (the case in every configuration this ships with), so this is
+    // one row per lane; the loop handles a taller grid and the bounds test handles a shorter
+    // one. Rows are the right axis to split on: a lane then walks a contiguous span of x, which
+    // keeps the texture reads coalesced exactly as the serial version's inner loop did.
+    var y = i32(lane) * sy;
     loop {
         if (y >= h) { break; }
         // Texel-centre polar angle (v = 0 at zenith .. 1 at nadir), matching fs_sky_env.
@@ -59,10 +81,33 @@ fn cs_sky_sh() {
             c[8] = c[8] + wr * 0.546274 * (dir.x * dir.x - dir.y * dir.y);
             x = x + sx;
         }
-        y = y + sy;
+        y = y + i32(LANES) * sy;
     }
 
     for (var i = 0; i < 9; i = i + 1) {
-        sh.c[i] = vec4<f32>(c[i], 0.0);
+        partial[lane][i] = c[i];
+    }
+    workgroupBarrier();
+
+    // Tree reduction. The barrier is OUTSIDE the `if`: in WGSL every invocation in the
+    // workgroup must reach the same barrier, and guarding it would be undefined behaviour on
+    // the lanes that skipped it -- a class of bug that usually shows up as one vendor's driver
+    // hanging and another's working.
+    var stride: u32 = LANES / 2u;
+    loop {
+        if (stride == 0u) { break; }
+        if (lane < stride) {
+            for (var i = 0; i < 9; i = i + 1) {
+                partial[lane][i] = partial[lane][i] + partial[lane + stride][i];
+            }
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+
+    if (lane == 0u) {
+        for (var i = 0; i < 9; i = i + 1) {
+            sh.c[i] = vec4<f32>(partial[0][i], 0.0);
+        }
     }
 }
