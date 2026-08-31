@@ -1404,10 +1404,33 @@ grass per frame, drawn three times** (prepass, colour, shadow) — and the near 
   and 0.915 before. The conversion is kept because that argument-buffer mismatch is a real
   latent bug, not because it bought anything.
 
-  So the shadow pass's 0.9 ms is elsewhere — raster into the cascade depth maps, or the
-  placement it shares — and it is now the **largest single grass line**. It is also the
-  most stable number in the whole grass block (±0.007 against ±0.238 for the prepass),
-  which is itself a hint: a cost that does not vary with what the frame is doing.
+  And the 0.9 ms is **not the grass shadow total** — that was the third wrong reading of
+  this line in one afternoon. `draw_shadow` runs once per cascade, and a GPU timer region
+  opened several times in a frame reports the LAST occurrence, not the sum (documented at
+  `GpuTimers::begin` now). So the row is one cascade's grass draw. Its exceptional
+  stability (±0.007 against ±0.238 for the prepass) is that: one fixed draw, not a fixed
+  cost.
+
+  **The cascade-count optimisation this line points at already exists and is on by
+  default.** C++ derives a mask from the cascade split distances and the grass reach, and
+  `WGR_GRASS_SHADOW_CASCADES` *overrides* it rather than intersecting — so `=4` restores
+  the old unconditional behaviour instead of measuring it. That is what the numbers below
+  actually compare, and they are worth keeping because they price the existing
+  optimisation:
+
+  | grass cascades | frame | cascade sum |
+  |---|---:|---:|
+  | forced 4 (old behaviour) | 16.47 ms | 4.021 ms |
+  | forced 3 | 13.89 ms | 3.235 ms |
+  | forced 2 | 11.68 ms | 1.960 ms |
+  | **derived (default)** | **12.22 ms** | — |
+
+  The arithmetic behind the mask, for anyone checking it: `CascadeSplits` is a PSSM blend
+  at λ = 0.90 over `shadowsZ` = 250 m, giving roughly 0.1 / 6.9 / 17.0 / 50.6 / 250 m for
+  four cascades, while the near ring reaches 520 × 0.16 m ÷ 2 = **41.6 m** at 1600×900.
+  Cascade 3 therefore starts beyond the grass entirely. The reach is
+  resolution-derived, so the mask has to be too — which is why it is computed rather than
+  a constant.
 
   A warning for whoever measures grass next: **this scene is noisy and single runs mislead.**
   Frame total is 12.215 ± 0.703 ms and the prepass 1.076 ± 0.238 across four identical
