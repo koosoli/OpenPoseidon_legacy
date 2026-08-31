@@ -18,11 +18,29 @@
 //   file read + P3D parse + Model::compile   ->  ModelCache::LoadLooseFile. Pure std:: plus the
 //                                                header-only readers; no statics, no globals.
 //                                                SAFE on a worker. THIS IS WHAT WORKERS DO.
-//   ShapeAdapter::convertToLODShape           ->  GlobLoadTexture (global texture bank),
-//                                                GTexMaterialBank.New, NewProxyObject /
-//                                                NewObject (recursive ShapeBank::New for
-//                                                proxies), Texture::LoadHeaders, RStringB
-//                                                property tables. MAIN THREAD ONLY.
+//   ShapeAdapter::convertToLODShape           ->  RUNS ON WORKERS since 2026-08-31, and this
+//                                                line said MAIN THREAD ONLY until then.
+//
+//   The three things that made it main-thread-only were each removed rather than worked
+//   around, which is why the rule changed and not merely the practice:
+//     * the global bank lookups (GlobLoadTexture, GTexMaterialBank.New,
+//       Texture::LoadHeaders) were lifted OUT of the conversion into
+//       BuildAdapterBankTables, which the main thread runs first and hands over as a
+//       value (AdapterBankTables);
+//     * the proxy tail (NewProxyObject / NewObject, recursive ShapeBank::New) was split
+//       into FinishOdolAdapterTail, which the main thread runs at install;
+//     * the RStringB property tables were the last hazard and were a genuine bug --
+//       CompactBuffer's reference count was non-atomic, so two workers interning the
+//       same name freed a live buffer (SIM-807). Fixed at the source.
+//
+//   Verified, not assumed: SIM-807's harness converts a reference shape on one thread and
+//   64 jobs on N, comparing component hashes -- 30 of 30 runs bit-identical across 1, 2,
+//   4, 8 and 16 threads at two selection counts. WGR_OBJECT_STREAM_ASYNC_ADAPT=0 restores
+//   the synchronous path.
+//
+//   (Corrected after an ownership audit found this banner still asserting the old rule
+//   while the shipping default contradicted it. A reader trusting it would either
+//   re-serialise a path worth 3+ s of cold admission or revert the default as a bug.)
 //   ShapeBank cache insert + OptimizeOneShape ->  AssetCache (unlocked) + GEngine->
 //                                                CreateVertexBuffer. MAIN THREAD ONLY.
 //   ObjectCreate / AddObject / RegisterGpuModel  MAIN THREAD ONLY.
