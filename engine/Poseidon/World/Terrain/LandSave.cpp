@@ -3614,6 +3614,20 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                     //
                     // 16 threads is 8x the shipping worker count and 200 selections is 3.3x the
                     // arm that used to crash. That is what the switch was waiting on.
+                    //
+                    // Confirmed on the real corpus too, and this time the traverse is evidence
+                    // for the right claim -- not "did it crash" but "what does it buy".
+                    // Reforger Everon (ev_DALL.wrp), 200,000-object budget, freefly, screenshot
+                    // at 35 s, one run per arm:
+                    //
+                    //     adapt on    741 models converted, 0 failed, 97,322 objects resident
+                    //     adapt off   708 models converted, 0 failed, 56,065 objects resident
+                    //
+                    // 73% more of the world admitted by the same wall-clock moment, because the
+                    // conversion no longer blocks the main thread. Zero errors in either log.
+                    // Note this path is inactive on stock CWA worlds -- it runs only for the
+                    // modern/substituted world loader -- so a stock mission exercises none of it.
+                    //
                     // WGR_OBJECT_STREAM_ASYNC_ADAPT=0 restores the synchronous adapt.
                     static const bool asyncAdapt = []
                     {
