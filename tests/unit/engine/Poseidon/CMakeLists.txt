@@ -272,6 +272,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Foundation/Algorithms/test_radixsort.cpp
     Foundation/Algorithms/test_sha256.cpp
     Asset/Cache/test_derived_asset_key.cpp
+    Asset/Cache/test_derived_blob_store.cpp
     Asset/Formats/Material/test_rv_material_source.cpp
     Asset/Formats/Material/test_emat_source.cpp
     Asset/Formats/Material/test_emat_material_adapter.cpp
