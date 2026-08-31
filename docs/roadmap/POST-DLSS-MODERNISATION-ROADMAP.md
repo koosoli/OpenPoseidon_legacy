@@ -376,6 +376,20 @@ Maintain comparable captures for:
 Every later optimisation must identify the recorded cost that it attacks and define a
 before/after acceptance test.
 
+**First measured bottleneck, 2026-08-31: 27% of the GPU frame is attributed to nothing.**
+See `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-20260831.md`.
+On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.4 ms frame
+with DLSS off; the missing 2.8 ms is either inter-pass overhead across 44 pass boundaries
+(64 µs each, the right order) or genuinely un-bracketed work, and nobody has separated the
+two. The same measurement prices DLSS for the first time at **~1.07 ms** (1072×603 →
+1600×900, RTX 3070), invisible to the profiler because NGX's dispatches are not ours to
+bracket.
+
+This ranks ahead of track B.4. Grass is the largest *attributed* cost — 6.415 ms across
+its three passes, 20.8% of a 30.853 ms frame — but the unattributed block is bigger than
+grass, and optimising the second-largest cost while the largest is unmeasured is how a day
+goes for 2%.
+
 ### 3.1 Measurement hygiene
 
 Each of these has already produced wrong numbers at least once in this repository:
