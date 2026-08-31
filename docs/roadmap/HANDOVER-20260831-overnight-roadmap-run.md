@@ -16,12 +16,26 @@ as bit-divergence rather than as a crash. That is why the traverse I "verified" 
 with saw nothing: 797 cold models, main-thread adapt 0.0 ms, coverage at parity, and a
 heap being scribbled on throughout.
 
-**The default is off again** (commit `00aa5870`, deployed). It costs about three seconds of
-cold load and removes a crash from the path you play. The exact write is not yet found —
-it correlates with a model's named-selection count — and the next step is ASan, whose
-Windows preset does not configure. A genuinely unguarded race in `FastCAlloc`'s global
-instance registry was found and fixed while hunting it, and honestly reported as *not* the
-fix, because 5 of 8 runs still crashed after it.
+**The default went off** (commit `00aa5870`), and then **the cause was found and fixed**
+(commit `8baf5d98`, deployed): `CompactBuffer`'s reference count was a plain non-atomic
+`int`, and `CompactBuffer<char>` is `String` — the buffer behind **every** `RString` and
+therefore every interned `RStringB`. The bank's mutex guards the *map*; the string it hands
+back is reference-counted entirely outside that lock. Two workers interning the same
+selection name lost an increment and freed a buffer somebody still held. Measured: **0
+crashes in 12 runs, against 9 in 12 before.**
+
+That also explains why it hid so well. The ruled-out list had checked `RefCount`, which
+*is* atomic — and `CompactBuffer` deliberately does not derive from it, to avoid a vtable,
+so it never inherited that fix. Two reference-count implementations in the codebase, one of
+them made thread-safe years apart from the other. A second genuinely unguarded race, in
+`FastCAlloc`'s global instance registry, was found and fixed on the way and reported as
+*not* the cause, because 5 of 8 runs still crashed after it.
+
+**`WGR_OBJECT_STREAM_ASYNC_ADAPT` is still off by default, and that is yours to reverse.**
+One reproducer going quiet is strong evidence about *that* race and none at all about a
+second one, and you were asleep when it was found. Turning it on is worth about three
+seconds of cold load; `WGR_OBJECT_STREAM_ASYNC_ADAPT=1`, or say the word and I will change
+the default and re-run the traverse.
 
 **And the frame got 2.55 ms faster**, which is unrelated and much happier: the sky's
 spherical-harmonic projection was running on **one GPU lane** — `dispatch(1,1,1)` against
