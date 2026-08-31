@@ -995,6 +995,38 @@ class EngineWgpu : public EngineDummy
     // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
     void ApplyPendingRendererSettings();
 
+    // REN-THR-007 -- the instance half of the handoff (REN-THR-001 shape 2). The producer no
+    // longer holds renderer slots at all: it holds ITS OWN handles, allocated here, and every
+    // add/update/remove is a queued op executed in FIFO order at the drain, where the handle
+    // is translated to the renderer slot the queued add obtained.
+    //
+    // FIFO order is what makes handle reuse sound: Remove(h) frees h at ENQUEUE time, so a
+    // later Add in the same frame may get h back -- and at the drain the remove still
+    // translates through the OLD slot before the add overwrites the mapping. Reordering the
+    // queue would break exactly this, which is why there is one vector and not three.
+    //
+    // The renderer's own slot generations (ID-3) stay untouched underneath: a bug here shows
+    // up as the stale_instance_ops ANOMALY line, not as silent corruption.
+    struct InstanceOp
+    {
+        enum Kind : uint8_t
+        {
+            Add,
+            Update,
+            Remove
+        };
+        Kind kind;
+        uint32_t handle;
+        WgrInstance inst; // Add / Update payload; unused for Remove
+    };
+    std::vector<InstanceOp> _instanceOps;
+    std::vector<uint32_t> _instSlotOf;       // producer handle -> renderer slot (valid after drain)
+    std::vector<uint32_t> _instFreeHandles;  // recycled producer handles
+    uint32_t EnqueueInstanceAdd(const WgrInstance& inst);
+    void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst);
+    void EnqueueInstanceRemove(uint32_t handle);
+    void DrainInstanceOps();
+
     // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
     // and answered "unmeasured" twice, in the two places where the answer decides the
     // design. These count it. A mean alone would hide the shape -- streaming is bursty by

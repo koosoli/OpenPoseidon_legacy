@@ -1678,11 +1678,71 @@ void EngineWgpu::ApplyPendingRendererSettings()
     }
 }
 
+uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst)
+{
+    uint32_t handle;
+    if (!_instFreeHandles.empty())
+    {
+        handle = _instFreeHandles.back();
+        _instFreeHandles.pop_back();
+    }
+    else
+    {
+        handle = static_cast<uint32_t>(_instSlotOf.size());
+        _instSlotOf.push_back(0);
+    }
+    _instanceOps.push_back(InstanceOp{InstanceOp::Add, handle, inst});
+    return handle;
+}
+
+void EngineWgpu::EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst)
+{
+    _instanceOps.push_back(InstanceOp{InstanceOp::Update, handle, inst});
+}
+
+void EngineWgpu::EnqueueInstanceRemove(uint32_t handle)
+{
+    _instanceOps.push_back(InstanceOp{InstanceOp::Remove, handle, {}});
+    // Freed at enqueue, translated at drain: FIFO order guarantees the remove reads the old
+    // slot before any same-frame reuse of this handle writes the new one.
+    _instFreeHandles.push_back(handle);
+}
+
+void EngineWgpu::DrainInstanceOps()
+{
+    if (_instanceOps.empty())
+        return;
+    if (!_renderer)
+    {
+        // No renderer, nothing to translate into; dropping the ops matches what the old
+        // direct calls did behind their own null checks.
+        _instanceOps.clear();
+        return;
+    }
+    for (const InstanceOp& op : _instanceOps)
+    {
+        switch (op.kind)
+        {
+        case InstanceOp::Add:
+            _instSlotOf[op.handle] = wgr_instance_add(_renderer, &op.inst);
+            break;
+        case InstanceOp::Update:
+            wgr_instance_update(_renderer, _instSlotOf[op.handle], &op.inst);
+            break;
+        case InstanceOp::Remove:
+            wgr_instance_remove(_renderer, _instSlotOf[op.handle]);
+            break;
+        }
+    }
+    _instanceOps.clear();
+}
+
 void EngineWgpu::NextFrame()
 {
     if (_renderer)
     {
         ApplyPendingRendererSettings();
+        DrainInstanceOps();
         SyncWaterLookProfile();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
         // into _tonemap / _sky (auto mode only; manual override holds the tabs' values).
@@ -6391,7 +6451,7 @@ bool EngineWgpu::EmitGpuProxies(Object* parent, LODShapeWithShadow* shape)
         const Matrix4 world = parentT * proxy.obj->Transform();
         const WgrInstance inst = BuildGpuProxyInstance(world, pmodel);
         _ops.instanceAdd++;
-        const uint32_t slot = wgr_instance_add(_renderer, &inst);
+        const uint32_t slot = EnqueueInstanceAdd(inst);
         RetainGpuModel(pshape);
         if (render::GObjectAdmitProfile.active)
             ++render::GObjectAdmitProfile.proxyModels;
@@ -6414,7 +6474,7 @@ void EngineWgpu::RemoveGpuProxies(const Object* parent)
     for (const auto& child : it->second.children)
     {
         _ops.instanceRemove++;
-        wgr_instance_remove(_renderer, child.slot);
+        EnqueueInstanceRemove(child.slot);
         ReleaseGpuModel(child.shape);
     }
     _gpuProxies.erase(it);
@@ -6473,7 +6533,7 @@ void EngineWgpu::SceneObjectCreated(Object* obj)
     const WgrInstance inst = BuildGpuInstance(*obj, model, cp);
     TraceGpuInstance("created", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, model);
     _ops.instanceAdd++;
-    const uint32_t slot = wgr_instance_add(_renderer, &inst);
+    const uint32_t slot = EnqueueInstanceAdd(inst);
     RetainGpuModel(shape);
     // Full (whole object on the GPU) vs Partial (GPU owns the opaque geometry; the CPU still
     // draws proxies + blend/decal sections) — base decision per shape in RegisterGpuModel.
@@ -6616,7 +6676,7 @@ void EngineWgpu::SceneObjectRemoved(Object* obj)
         return;
     }
     _ops.instanceRemove++;
-    wgr_instance_remove(_renderer, it->second.slot);
+    EnqueueInstanceRemove(it->second.slot);
     const LODShapeWithShadow* shape = it->second.shape;
     _gpuInstances.erase(it);
     ReleaseGpuModel(shape);
@@ -6640,7 +6700,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     if (!shape || shape != it->second.shape || obj->IsDestroyed())
     {
         _ops.instanceRemove++;
-        wgr_instance_remove(_renderer, it->second.slot);
+        EnqueueInstanceRemove(it->second.slot);
         const LODShapeWithShadow* residentShape = it->second.shape;
         _gpuInstances.erase(it);
         obj->SetGpuCoverage(static_cast<int>(GpuDrawCoverage::None)); // dropped to the CPU path
@@ -6655,7 +6715,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
     const WgrInstance inst = BuildGpuInstance(*obj, it->second.model, cp);
     TraceGpuInstance("updated", shape->Name(), obj->Transform(), shape->BoundingSphere(), cp, it->second.model);
     _ops.instanceUpdate++;
-    wgr_instance_update(_renderer, it->second.slot, &inst);
+    EnqueueInstanceUpdate(it->second.slot, inst);
     it->second.pos = obj->Transform().Position();
     it->second.mode = cp.mode;
     // §12d: the parent moved, so its furniture children's composite transforms change too.
@@ -6678,7 +6738,7 @@ void EngineWgpu::SceneObjectMoved(Object* obj)
             const Matrix4 world = parentT * proxy.obj->Transform();
             const WgrInstance pinst = BuildGpuProxyInstance(world, child.model);
             _ops.instanceUpdate++;
-            wgr_instance_update(_renderer, child.slot, &pinst);
+            EnqueueInstanceUpdate(child.slot, pinst);
         }
     }
 }
