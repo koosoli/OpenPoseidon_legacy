@@ -10,7 +10,35 @@
 // engine method names).
 #ifdef _WIN32
 #include <Poseidon/Foundation/Common/Win.h>
+#include <Poseidon/Foundation/Framework/Log.hpp>
+#include <atomic>
+#include <thread>
 #endif
+
+// Phase 8.2 guard: the sequential entry points share one mutable stream, so using
+// them from two threads is both a data race and a scheduler-order dependency. The
+// first thread to arrive is recorded as the owner (the main thread in every path
+// audited on 2026-08-31); any later thread reports itself once. Deliberately a
+// report and not a lock -- see the header for why serialising would hide the bug.
+void RandomGenerator::NoteSequentialUse()
+{
+    static std::atomic<std::thread::id> owner{std::thread::id()};
+    static std::atomic<bool> reported{false};
+    const std::thread::id self = std::this_thread::get_id();
+    std::thread::id expected{};
+    if (owner.compare_exchange_strong(expected, self, std::memory_order_relaxed))
+        return; // first caller: this is the owning thread
+    if (expected == self || reported.load(std::memory_order_relaxed))
+        return;
+    if (!reported.exchange(true, std::memory_order_relaxed))
+    {
+        LOG_WARN(Core,
+                 "RandomGenerator: the SEQUENTIAL random stream was used from a second thread. "
+                 "It is one shared mutable seed, so this is a data race and makes results depend "
+                 "on scheduler order. Use the positional form (RandomValue(x,z[,y])) or give the "
+                 "system its own stream -- see roadmap 8.2 / SIM-802.");
+    }
+}
 
 float RandomGenerator::RandomValue(int seed) const
 {

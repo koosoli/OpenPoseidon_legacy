@@ -25,19 +25,53 @@ class RandomTable
     int SeedRef(int x, int z) const;
 };
 
+// TWO KINDS OF RANDOM LIVE HERE, and roadmap Phase 8.2 turns on telling them apart
+// (docs/roadmap/decisions/SIM-802-random-number-ownership-20260831.md).
+//
+//   POSITIONAL / SEEDED  — RandomValue(seed), RandomValue(x,z), RandomValue(x,z,y),
+//     GetSeed(...). Pure functions of their arguments: same input, same output, no
+//     shared state touched. Safe to call from any thread, in any order, and the
+//     result cannot depend on who got there first. This is the pattern the roadmap
+//     asks new parallel work to use, and it is already how terrain generation works
+//     (Landscape::InitRandomization precomputes a positional table that
+//     GenerateSegmentInto then reads on TaskPool workers -- no live RNG involved).
+//
+//   SEQUENTIAL / STREAM  — RandomValue(), Gauss(), PlusMinus(), SetSeed(). These
+//     advance `_seed`, a single shared mutable stream. Calling them from two threads
+//     at once is a data race on that int AND makes the values depend on scheduler
+//     order, which is exactly what Phase 8 must not allow to appear by accident.
+//
+// AUDITED 2026-08-31 (276 call sites): no worker thread reaches the sequential path
+// today. Terrain generation is positional as described; the streamed-object preparer
+// workers (parse + ShapeAdapter conversion) contain no RNG call at all. The guard
+// below exists so that stays true by construction rather than by luck: the first
+// worker-thread call to a sequential entry point says so, loudly, once.
 class RandomGenerator
 {
     mutable int _seed;
     RandomTable _seedTable;
     RandomTable _valueTable;
 
+    // Reports (once) when a sequential entry point is used off the thread that first
+    // used it -- in practice the main thread, which is where the engine's simulation
+    // and the legacy call sites live. Not a lock: making the stream thread-safe would
+    // hide the ordering problem rather than surface it, and the fix Phase 8.2 wants is
+    // a per-system stream or a positional seed at the CALL SITE, not a mutex here.
+    static void NoteSequentialUse();
+
   public:
     RandomGenerator(int seed1, int seed2);
     RandomGenerator();
+    // --- positional: pure, thread-safe, order-independent ---
     float RandomValue(int seed) const;
     float RandomValue(int x, int z) const { return RandomValue(GetSeed(x, z)); }
     float RandomValue(int x, int z, int y) const { return RandomValue(GetSeed(x, z, y)); }
-    void SetSeed(int seed) { _seed = seed; }
+    // --- sequential: shared mutable stream, MAIN THREAD ONLY (see the note above) ---
+    void SetSeed(int seed)
+    {
+        NoteSequentialUse();
+        _seed = seed;
+    }
     float RandomValue() const;
     float Gauss(float min, float mid, float max) const;
     float PlusMinus(float a, float b) const;
