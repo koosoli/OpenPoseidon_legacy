@@ -1395,12 +1395,24 @@ grass per frame, drawn three times** (prepass, colour, shadow) — and the near 
   Identical geometry by construction; the index table is tested against the old decode
   kept verbatim as an oracle.
 
-  **Grass shadow did not improve in that first pass, and the reason was not the one first
-  written here.** "That pass is not vertex-bound" was wrong: `draw_shadow` was still
-  calling `draw_indirect`, so the shadow pass kept issuing all 30 vertices per blade while
-  the other two consumed 12 — and it was reading an *indexed* argument buffer with a
-  non-indexed draw, which only works because the trailing fields happen to be zero. Both
-  shadow draws are indexed now. Also note the
+  **Grass shadow does not improve, and it really is not vertex-bound.** This entry briefly
+  said otherwise and that was a wrong correction, so both halves are recorded. The code
+  observation was true — `draw_shadow` was still calling `draw_indirect`, issuing all 30
+  vertices per blade, and reading an *indexed* argument buffer with a non-indexed draw,
+  which only works because the trailing fields happen to be zero. But converting it
+  measured **nothing**: `Grass shadow` is 0.903 ± 0.007 ms over four runs, against 0.895
+  and 0.915 before. The conversion is kept because that argument-buffer mismatch is a real
+  latent bug, not because it bought anything.
+
+  So the shadow pass's 0.9 ms is elsewhere — raster into the cascade depth maps, or the
+  placement it shares — and it is now the **largest single grass line**. It is also the
+  most stable number in the whole grass block (±0.007 against ±0.238 for the prepass),
+  which is itself a hint: a cost that does not vary with what the frame is doing.
+
+  A warning for whoever measures grass next: **this scene is noisy and single runs mislead.**
+  Frame total is 12.215 ± 0.703 ms and the prepass 1.076 ± 0.238 across four identical
+  runs. One run "showed" the shadow conversion making the prepass and colour worse; four
+  showed it was variance. Take at least three. Also note the
   clump renderer was already the cheaper of the two procedural looks (360 vertices but
   centres 3.20x apart against 180 at 1.72x — net 1.7x fewer vertices), so that is not a
   lever either.
