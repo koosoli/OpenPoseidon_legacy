@@ -5781,8 +5781,15 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
     if (eligible && !lods.empty() && !sections.empty())
     {
         AdmitTimer ffiTimer(&render::GObjectAdmitProfile.modelRegisterMs);
+        // REN-BUG 2026-08-31: a scripted counter insertion landed BETWEEN `model =` and the
+        // call, making `model = _ops.modelRegister++;` -- every registered model's handle
+        // became the counter value and the real id was discarded. It survived the Abel bench
+        // because on a fresh run both sequences count 0,1,2,... in step; on Everon, where
+        // eviction re-registers models out of order, every building drew with a stranger's
+        // id or none: walls gone, floating windows and ivy. The counter goes on its own
+        // statement, ABOVE the assignment, where it can never eat one again.
+        _ops.modelRegister++;
         model =
-            _ops.modelRegister++;
             wgr_model_register(_renderer, shape->BoundingSphere(), WgrSlice<WgrModelLod>{lods.data(), U32(lods.size())},
                                WgrSlice<WgrModelSection>{sections.data(), U32(sections.size())},
                                WgrSlice<WgrModelMaterial>{materials.data(), U32(materials.size())},
@@ -6204,9 +6211,15 @@ uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
     {
         for (uint64_t mesh : found->second)
         {
+            // Same scripted insertion broke this brace-less if: the counter became the
+            // guarded statement and the destroy ran unconditionally. wgr_mesh_destroy
+            // tolerates a null renderer so nothing visible came of it, but braces now,
+            // so the next inserted line cannot change the meaning again.
             if (_renderer)
+            {
                 _ops.meshDestroy++;
                 wgr_mesh_destroy(_renderer, mesh);
+            }
             _gpuMeshes.erase(mesh);
             ++releasedMeshes;
         }
