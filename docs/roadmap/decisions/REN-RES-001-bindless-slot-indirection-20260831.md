@@ -157,3 +157,23 @@ so no run was made. What still needs an in-game check is stated in the handover:
 a memory-pressure run with `WGR_DYNAMIC_VRAM_MB` lowered far enough that the LRU
 actually evicts, confirming buildings keep their textures rather than turning
 white or swapping.
+
+## Verified in-game 2026-08-31 (main agent, after integration)
+
+Composed with the submit-boundary retire that landed separately (`d4dfdf4f`): a slot
+now has two rules and they stack — the LEASE decides whether a slot ever returns at
+all, the RETIRE decides when an unleased one may. `destroy()` parks an unleased slot
+in `bindless_retired` (reusable at the next `frame_submitted()`), and skips a leased
+one entirely.
+
+**Eviction was genuinely exercised**, not assumed: `WGR_DYNAMIC_VRAM_MB=900` on the
+30 m/s Everon traverse produced 18 `Wgpu texture LRU: evicted=` rows. Buildings render
+**white** in that run — and an A/B against the pre-lease build (`aa2eea3e`, same flags,
+same route) shows the identical white buildings, so this is the pre-existing liveness
+gap this note already names (`_lastUsedFrame` is refreshed only by the direct-draw
+path, so a retained model's textures age out and nothing ever asks for a refill), NOT
+a regression from the lease. At the default 2,048 MB budget nothing goes white.
+
+That A/B is the reason the pin check must stay until the liveness signal exists: the
+lease makes eviction *safe to attempt*, it does not make the retained path *ask for
+its textures back*.
