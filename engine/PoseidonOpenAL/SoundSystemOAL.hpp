@@ -3,6 +3,7 @@
 #include <Poseidon/Foundation/Common/Global.hpp>
 #include <Poseidon/Audio/IAudioSystem.hpp>
 #include <Poseidon/Audio/Shared/PcmCache.hpp>
+#include <Poseidon/Audio/Core/VoiceHandle.hpp>
 #include <Poseidon/Foundation/Math/Math3D.hpp>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -29,6 +30,15 @@ class SoundSystemOAL : public IAudioSystem
     bool _contextSuspended = false;
 
     std::vector<WaveOAL*> _waves;
+
+    // Stable identity for every registered wave (roadmap A.2). RegisterWave
+    // acquires, UnregisterWave releases and bumps the slot's generation, so a
+    // handle taken before a wave died refuses to resolve afterwards -- including
+    // when the allocator has since put a DIFFERENT wave at the same address.
+    // Guarded by _audioMutex, which already covers _waves; the table has no lock
+    // of its own on purpose (a second lock over the same data is a second lock
+    // order to get wrong). See Poseidon/Audio/Core/VoiceHandle.hpp.
+    Audio::VoiceHandleTable<WaveOAL> _voiceHandles;
 
     // Streaming-pump thread (fixes "sound jitters under stress").  Streamed
     // sources (OGG music/speech) refill their AL buffer ring from this thread on
@@ -130,9 +140,17 @@ class SoundSystemOAL : public IAudioSystem
     Ref<IWave> _previewEax;
 
     // Per-wave gain suppression for the duration of the Audio screen.
-    // Each entry is a wave whose _previewMute flag was set; Resume
-    // clears the flag.  Empty when not suppressed.
-    std::vector<WaveOAL*> _suppressedMusic;
+    // Each entry is the VOICE HANDLE of a wave whose _previewMute flag was set;
+    // Resume resolves it and clears the flag.  Empty when not suppressed.
+    //
+    // These were raw WaveOAL* until 2026-08-31, and Resume proved liveness by
+    // finding the pointer again in _waves.  That check cannot see the case it
+    // most needs to: a suppressed music wave freed while the Audio screen is
+    // open, whose block the allocator hands to the next wave of the same size
+    // class.  The find() then succeeds against a different, innocent voice and
+    // Resume clears ITS preview-mute and rewrites ITS gain.  A generation-checked
+    // handle refuses that; a pointer cannot.
+    std::vector<Audio::VoiceHandle> _suppressedMusic;
 
     // Session-cumulative count of AL alloc failures (alBufferData /
     // alGenSources / alGenBuffers)

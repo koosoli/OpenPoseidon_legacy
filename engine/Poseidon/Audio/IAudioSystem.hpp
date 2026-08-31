@@ -187,6 +187,15 @@ struct AudioCounters
 	int evictedThisFrame = 0;    // 3D waves stopped by budget this AdvanceAll
 	int pausedThisFrame = 0;     // waves transitioned to Paused this AdvanceAll
 	int allocFailures = 0;       // session-cumulative AL alloc failures (A-23)
+	// Session-cumulative count of voice handles that were refused because their
+	// slot had been released (roadmap A.2).  Readable, not just incremented:
+	// without a reader a test cannot tell a rejection from a no-op that happened
+	// to leave the data alone -- the gap REN-ID-001 found in the renderer's
+	// equivalent check.  A non-zero value is NORMAL and means the guard did its
+	// job (a suppressed music wave ended while the Audio screen was open); it is
+	// evidence, not an error.
+	int staleVoiceHandles = 0;
+	int liveVoices = 0;          // slots currently held in the voice handle table
 };
 
 // Sound environment types for 3D audio effects (reverb, echo, etc.)

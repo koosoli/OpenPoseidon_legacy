@@ -325,8 +325,13 @@ void SoundSystemOAL::StreamPumpLoop()
 void SoundSystemOAL::RegisterWave(WaveOAL* wave)
 {
     std::lock_guard<std::recursive_mutex> lk(_audioMutex);
-    if (wave)
-        _waves.push_back(wave);
+    if (!wave)
+        return;
+    _waves.push_back(wave);
+    // Issue the voice's stable identity here, not in the WaveOAL ctor: the
+    // handle's lifetime is exactly its registered lifetime, so acquire and
+    // release sit on the two calls that bracket that.
+    wave->_voiceHandle = _voiceHandles.Acquire(wave);
 }
 
 void SoundSystemOAL::UnregisterWave(WaveOAL* wave)
@@ -335,6 +340,14 @@ void SoundSystemOAL::UnregisterWave(WaveOAL* wave)
     auto it = std::find(_waves.begin(), _waves.end(), wave);
     if (it != _waves.end())
         _waves.erase(it);
+    if (wave)
+    {
+        // Bumps the slot's generation, so every handle anyone still holds for
+        // this voice is dead from this instant -- whatever the allocator does
+        // with the memory next.
+        _voiceHandles.Release(wave->_voiceHandle);
+        wave->_voiceHandle = Audio::kInvalidVoiceHandle;
+    }
 }
 
 float SoundSystemOAL::GetWaveDuration(const char* filename)
@@ -1243,6 +1256,8 @@ AudioCounters SoundSystemOAL::GetCounters() const
     AudioCounters c;
     c.suppressedMusic = static_cast<int>(_suppressedMusic.size());
     c.allocFailures = _allocFailures;
+    c.staleVoiceHandles = static_cast<int>(_voiceHandles.StaleOps());
+    c.liveVoices = _voiceHandles.LiveCount();
     c.evictedThisFrame = _evictedThisFrame;
     c.pausedThisFrame = _pausedThisFrame;
     for (auto* w : _waves)
@@ -1430,7 +1445,7 @@ void SoundSystemOAL::SuppressMusicForPreview()
             continue;
         if (!w->_playing)
             continue;
-        _suppressedMusic.push_back(w);
+        _suppressedMusic.push_back(w->_voiceHandle);
         w->_previewMute = true;
         // Force AL_GAIN=0 immediately so we don't wait one mixer tick
         // for SoundScene::Simulate to call SetVolume → ApplyVolume.
@@ -1444,13 +1459,14 @@ void SoundSystemOAL::ResumeMusicForPreview()
     std::lock_guard<std::recursive_mutex> lk(_audioMutex);
     if (_suppressedMusic.empty())
         return;
-    for (WaveOAL* wave : _suppressedMusic)
+    for (Audio::VoiceHandle h : _suppressedMusic)
     {
-        // The wave may have been deleted while suppressed.  Cross-check
-        // against the live registry — UnregisterWave erases from _waves
-        // on destruction, so membership there proves the pointer is
-        // still valid.
-        if (std::find(_waves.begin(), _waves.end(), wave) == _waves.end())
+        // The wave may have been deleted while suppressed.  Resolve refuses a
+        // handle whose slot has been released and re-issued, which is the case
+        // the previous registry-membership check could not see: it compared
+        // addresses, and a recycled address belongs to a different voice.
+        WaveOAL* wave = _voiceHandles.Resolve(h);
+        if (!wave)
             continue;
         wave->_previewMute = false;
         wave->ApplyVolume();

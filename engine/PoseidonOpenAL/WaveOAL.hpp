@@ -3,6 +3,7 @@
 #include <Poseidon/Foundation/Common/Global.hpp>
 #include <Poseidon/Audio/IAudioSystem.hpp>
 #include <Poseidon/Audio/Core/AudioState.hpp>
+#include <Poseidon/Audio/Core/VoiceHandle.hpp>
 #include <Poseidon/Audio/Streaming/WaveStream.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
@@ -114,6 +115,14 @@ class WaveOAL : public IWave
     // can't undo the mute.  ApplyVolume short-circuits to gain 0 when
     // set; the wave keeps playing so its timeline advances.
     bool _previewMute = false;
+    // Stable, generation-checked identity for this voice (roadmap A.2).
+    // Issued by SoundSystemOAL::RegisterWave and retired by UnregisterWave, so
+    // it is valid for exactly the wave's registered lifetime. Anything that has
+    // to remember a voice ACROSS TIME -- a preview suppression list, a future
+    // audio thread's command queue -- must store this and not `WaveOAL*`: the
+    // pointer cannot tell a live voice from a different voice that inherited its
+    // address. See Poseidon/Audio/Core/VoiceHandle.hpp.
+    ::Poseidon::Audio::VoiceHandle _voiceHandle = ::Poseidon::Audio::kInvalidVoiceHandle;
     WaveKind _kind = WaveEffect;
 
     Vector3 _position;
