@@ -112,6 +112,30 @@ the tip at the time of writing.
 | Diagnostics | **Two timer regions explained more than the whole frame** | `Water draw` and `Post: god rays` were missing from the containment table, so a naive sum double-counted them — on `perf_water` the "sum of outermost" came to 20.485 ms against a 20.322 ms frame, a **negative** residual. Both open their own render pass on the encoder rather than sitting inside one, which is why they read as standalone; god rays was moved into the colour segment by a recent change and the table did not follow. Fixed, redeployed, re-measured |
 | Phase 1.1 | **The upscaler boundary already existed** — a fourth already-done roadmap item | A vendor-neutral `TemporalUpscaler` trait with an ordered backend chain, from the DLSS work. What was genuinely missing: the orchestration recovered per-backend facts by **string-matching the backend's display label** in three places — §1.1's forbidden branching, spelled in a way the compiler cannot check. Replaced with a declared capability struct. **DLSS verified still genuinely active afterwards** (`route true, active true, quality 2, 1072×603 → 1600×900`, plus the NGX teardown crash as witness) |
 
+### 06:50-07:05 — testing my own conclusion, and withdrawing it
+
+PERF-010 said the ~2.8 ms block was pass-boundary overhead and that the lever was fewer,
+larger passes. The arithmetic fitted (2.8 ms ÷ ~45 boundaries ≈ 62 µs) and it was a
+hypothesis written as a conclusion — the residual never actually correlated with region
+count, since `combat` and `field` both ran 43 regions with residuals of 3.80 and 2.77 ms.
+
+So I tested it. `hiz.rs` built its depth pyramid with **one compute pass per mip level**,
+eleven of them; merging into a single pass removes ten boundaries and changes nothing else.
+
+| | Hi-Z region | frame | residual |
+|---|---:|---:|---:|
+| before | 0.170 ms | 10.529 ms | 2.878 ms |
+| after ×3 | 0.125 / 0.130 / 0.128 ms | 10.73 / 10.95 / 10.70 ms | 3.09 / 3.34 / 3.11 ms |
+
+The Hi-Z region got **25% cheaper** — reproducibly — and **the residual did not move**.
+That prices a compute pass boundary at **~4 µs, not 65**, so every boundary in the frame
+accounts for ~0.18 ms: about 6% of the residual, not all of it. The merge is kept for the
+25%, not for a frame-level win it did not deliver (frame totals across those runs span
+10.53–10.95 ms, which is noise), and the residual's cause is **back to open** with pass
+overhead ruled out. Screenshot checked: occlusion culling intact.
+
+**Do not act on "fewer, larger passes" — that advice is withdrawn.**
+
 Engine suite **240,660** assertions / 0 failures; Foundation **159,282** / 0; renderer
 **208** / 0 (212 with `--features dlss`). All three green.
 
