@@ -7627,7 +7627,30 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     sl[4] = HashSlice(kBasis, frame.batches);
     sl[5] = HashSlice(kBasis, frame.cmds);
     sl[6] = HashSlice(kBasis, frame.palette);
-    sl[7] = HashSlice(kBasis, frame.shadow_casters);
+    // shadow_casters carries a mesh AND a texture handle too, and masking draws3d while
+    // leaving these unmasked made the oracle report a phantom regression: under machine load
+    // (an agent compiling) the two runs assigned handles in a different order, sl[7] moved in
+    // every frame, and the gate failed for a change that had touched neither the renderer nor
+    // the simulation -- which was bit-identical in the same pair. Same rule as draws3d: hash
+    // what is drawn, not what it is labelled.
+    if (maskIds)
+    {
+        uint64_t h7 = kBasis;
+        const uint32_t n7 = frame.shadow_casters.length;
+        h7 = HashBytes(h7, &n7, sizeof(n7));
+        for (uint32_t i = 0; i < n7; i++)
+        {
+            WgrShadowCaster c = frame.shadow_casters.data[i];
+            c.mesh = 0;
+            c.texture_id = 0;
+            h7 = HashBytes(h7, &c, sizeof(c));
+        }
+        sl[7] = h7;
+    }
+    else
+    {
+        sl[7] = HashSlice(kBasis, frame.shadow_casters);
+    }
     sl[8] = HashSlice(kBasis, frame.overlay_verts);
     sl[9] = HashSlice(kBasis, frame.overlay_indices);
     sl[10] = HashSlice(kBasis, frame.overlay_draws);
