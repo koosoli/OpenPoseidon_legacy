@@ -381,10 +381,15 @@ See `docs/roadmap/decisions/PERF-010-a-quarter-of-the-gpu-frame-has-no-timer-202
 On `perf_field.eden` at 1600×900 the timer regions account for 7.6 ms of a 10.5 ms frame
 with DLSS off. The missing time is **fixed per-frame overhead**, established by measuring
 four scenes: the residual is 2.7-2.9 ms whether the frame is 10.5 ms or 20.1 ms, so it
-does not scale with work. That is ~65 µs across each of ~45 pass boundaries — setup,
-teardown, barriers, target transitions. **The lever is fewer, larger passes, not more
-timer brackets**, and because the cost is constant it grows as a share of every
-improvement made elsewhere: 13% of a heavy frame, 27% of a light one.
+does not scale with work. Because it is constant it grows as a share of every improvement
+made elsewhere: 13% of a heavy frame, 27% of a light one.
+
+**Its cause is open, and one plausible cause has been ruled out.** "Pass-boundary
+overhead" was the first explanation and the arithmetic fitted (2.8 ms ÷ ~45 boundaries ≈
+62 µs). Merging Hi-Z's eleven per-mip compute passes into one made that region 25% cheaper
+— a reproducible 0.042 ms over ten removed boundaries, so **~4 µs per boundary** — and left
+the residual untouched. At that price every boundary in the frame accounts for ~0.18 ms,
+about 6% of it. Do not spend effort merging passes on the strength of this number.
 
 Getting there required fixing the measurement first: `Water draw` and `Post: god rays`
 were missing from the containment table, so a naive sum double-counted them — on

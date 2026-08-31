@@ -245,16 +245,35 @@ impl HiZ {
         // Reduce down the chain: mip m is a 2x2 min of mip m-1. Nested group so the (potentially
         // ~11) reduce dispatches collapse under one node in a capture.
         encoder.push_debug_group("wgr_hiz_reduce");
-        for m in 1..self.mips as usize {
+        // ONE compute pass for the whole chain, not one per level.
+        //
+        // This used to open a pass per mip -- "(potentially ~11) reduce dispatches", as the
+        // comment above still says of the dispatch count. PERF-010 measured what a pass
+        // boundary costs on this hardware: the GPU frame carries ~2.8 ms that belongs to no
+        // timer region, near-constant across frames from 10 to 20 ms, which works out at
+        // roughly 65 us per boundary across ~45 of them. Eleven boundaries here is ~0.7 ms
+        // of a 10 ms frame for a pyramid whose actual work is a few hundred microseconds.
+        //
+        // Merging is legal, and the reason is worth stating because it looks like it should
+        // race. WebGPU's usage scope for a compute pass is ONE DISPATCH, not the pass, so
+        // reading mip m-1 while writing mip m across successive dispatches is valid even
+        // though both views belong to the same texture. Dispatches within a pass execute in
+        // submission order, and the implementation inserts the read-after-write barriers
+        // between them; what a separate pass would add is the pass setup, which is exactly
+        // the cost being removed. Nothing about the reduction changes -- same pipeline, same
+        // bind groups, same dispatch sizes, same order.
+        {
             let mut cp = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("wgr_hiz_reduce"),
                 timestamp_writes: None,
             });
             cp.set_pipeline(&self.reduce_pipeline);
-            cp.set_bind_group(0, &self.reduce_binds[m - 1], &[]);
-            let mw = (self.size.0 >> m).max(1);
-            let mh = (self.size.1 >> m).max(1);
-            cp.dispatch_workgroups(mw.div_ceil(8), mh.div_ceil(8), 1);
+            for m in 1..self.mips as usize {
+                cp.set_bind_group(0, &self.reduce_binds[m - 1], &[]);
+                let mw = (self.size.0 >> m).max(1);
+                let mh = (self.size.1 >> m).max(1);
+                cp.dispatch_workgroups(mw.div_ceil(8), mh.div_ceil(8), 1);
+            }
         }
         encoder.pop_debug_group(); // wgr_hiz_reduce
         encoder.pop_debug_group(); // wgr_hiz

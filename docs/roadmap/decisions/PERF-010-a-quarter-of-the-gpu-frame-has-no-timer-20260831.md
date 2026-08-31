@@ -71,12 +71,47 @@ is **near-constant in absolute terms** — 2.7 to 2.9 ms — across frames of 10
 fix (corrected arithmetically) it is 2.86 / 3.04 / 3.80 / 2.77 ms. It does not scale with
 work.
 
-So it is **fixed per-frame overhead**, not un-bracketed scene work: pass setup and
-teardown, barriers, render-target transitions across ~43-48 pass boundaries, which is
-~65 µs each. The consequence for planning is sharper than the original finding. A constant
-3 ms is 13% of a heavy frame and **27% of a light one** — it does not shrink as everything
-else is optimised, so it grows as a share of every improvement made elsewhere. The lever
-is fewer, larger passes; it is not more timer brackets.
+So it is **fixed per-frame overhead**, not un-bracketed scene work. A constant 3 ms is 13%
+of a heavy frame and **27% of a light one** — it does not shrink as everything else is
+optimised, so it grows as a share of every improvement made elsewhere.
+
+## SECOND CORRECTION: "fewer, larger passes" was wrong, and here is the number that killed it
+
+The paragraph above originally continued: *"pass setup and teardown, barriers,
+render-target transitions across ~43-48 pass boundaries, which is ~65 µs each. The lever is
+fewer, larger passes."* That arithmetic works (2.8 ms ÷ 45 ≈ 62 µs) and it is wrong. It was
+a hypothesis stated as a conclusion, and the residual never actually correlated with the
+region count — `combat` and `field` both ran 43 regions with residuals of 3.80 and 2.77 ms.
+
+**Tested directly.** `hiz.rs` built its depth pyramid with **one compute pass per mip
+level** — ~11 of them at 1072×603 internal. Merged into a single pass (legal: WebGPU's
+compute usage scope is one *dispatch*, and dispatches within a pass run in order with
+implementation-inserted barriers). Same pipeline, same bind groups, same dispatch sizes,
+same order; ten pass boundaries removed. `perf_field`, DLSS off, 1600×900:
+
+| | Hi-Z region | frame | residual |
+|---|---:|---:|---:|
+| before | 0.170 ms | 10.529 ms | 2.878 ms |
+| after, run 1 | 0.125 ms | 10.726 ms | 3.090 ms |
+| after, run 2 | 0.130 ms | 10.954 ms | 3.341 ms |
+| after, run 3 | 0.128 ms | 10.697 ms | 3.112 ms |
+
+**The Hi-Z region got 25% cheaper — a reproducible 0.042 ms — and the residual did not
+move.** Which gives the number this whole section was missing: 0.042 ms across ten removed
+boundaries is **~4 µs per compute pass boundary**, not 65. At that price the ~45 boundaries
+in a frame cost about **0.18 ms — roughly 6% of the residual**, not all of it.
+
+So the residual's cause is **still open**. What is now established:
+
+- it is fixed per frame (2.7–3.3 ms across scenes costing 10 to 20 ms);
+- it is **not** pass-boundary overhead, which is 20× too small to explain it;
+- pass-count reduction is a real but small optimisation, worth taking where it is free
+  (the Hi-Z merge is kept for that reason, not for a frame-level win it did not deliver —
+  frame totals across these four runs, 10.53 to 10.95 ms, are noise).
+
+Candidates that survive: swapchain acquire/present inside the frame bracket, and work the
+GPU does between the last timestamp and the frame-total close. Neither has been measured.
+**Do not act on this section's advice until one of them has.**
 
 ## The two hypotheses as originally written, kept for the record
 
