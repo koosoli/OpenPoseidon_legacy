@@ -1393,8 +1393,14 @@ grass per frame, drawn three times** (prepass, colour, shadow) — and the near 
   | GPU frame | 13.34 ms | **12.15 ms** |
 
   Identical geometry by construction; the index table is tested against the old decode
-  kept verbatim as an oracle. **Grass shadow did not improve** — that pass is not
-  vertex-bound, and it is now the largest single grass line at 0.895 ms. Also note the
+  kept verbatim as an oracle.
+
+  **Grass shadow did not improve in that first pass, and the reason was not the one first
+  written here.** "That pass is not vertex-bound" was wrong: `draw_shadow` was still
+  calling `draw_indirect`, so the shadow pass kept issuing all 30 vertices per blade while
+  the other two consumed 12 — and it was reading an *indexed* argument buffer with a
+  non-indexed draw, which only works because the trailing fields happen to be zero. Both
+  shadow draws are indexed now. Also note the
   clump renderer was already the cheaper of the two procedural looks (360 vertices but
   centres 3.20x apart against 180 at 1.72x — net 1.7x fewer vertices), so that is not a
   lever either.
