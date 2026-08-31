@@ -1259,12 +1259,19 @@ EngineWgpu::~EngineWgpu()
     if (_renderer)
     {
         // Release the retained scene's owned pool meshes before tearing down the renderer.
+        // _gpuMeshes holds PRODUCER handles (REN-THR-008); translate through the drain map.
+        // A handle with no mapping is a create that never drained -- it never reached the
+        // renderer, so there is nothing to destroy.
         for (uint64_t mesh : _gpuMeshes)
         {
-            _ops.meshDestroy++;
-            wgr_mesh_destroy(_renderer, mesh);
+            if (const auto it = _meshIdOf.find(mesh); it != _meshIdOf.end())
+            {
+                _ops.meshDestroy++;
+                wgr_mesh_destroy(_renderer, it->second);
+            }
         }
         _gpuMeshes.clear();
+        _meshIdOf.clear();
         wgr_destroy(_renderer);
         _renderer = nullptr;
     }
@@ -1708,6 +1715,66 @@ void EngineWgpu::EnqueueInstanceRemove(uint32_t handle)
     _instFreeHandles.push_back(handle);
 }
 
+void EngineWgpu::DrainResourceOps()
+{
+    if (_resourceOps.empty())
+        return;
+    if (!_renderer)
+    {
+        _resourceOps.clear();
+        return;
+    }
+    for (ResourceOp& op : _resourceOps)
+    {
+        switch (op.kind)
+        {
+        case ResourceOp::MeshCreate:
+        {
+            // Crown centres first: their base is baked into the vertex data, which is why
+            // the registration could never be queued on its own (REN-THR-008).
+            if (!op.crownCentres.empty())
+            {
+                const uint32_t base = wgr_register_crown_centres(
+                    _renderer, WgrSlice<WgrVec4>{op.crownCentres.data(), U32(op.crownCentres.size())});
+                for (size_t vi = 0; vi < op.verts.size() && vi < op.crownComp.size(); vi++)
+                {
+                    op.verts[vi].conform = base + op.crownComp[vi];
+                }
+            }
+            _meshIdOf[op.mesh] = wgr_mesh_create(
+                _renderer, AsMeshVerts(op.verts),
+                WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(op.indices.data()), U32(op.indices.size())});
+            break;
+        }
+        case ResourceOp::MeshDestroy:
+        {
+            const auto it = _meshIdOf.find(op.mesh);
+            if (it != _meshIdOf.end())
+            {
+                wgr_mesh_destroy(_renderer, it->second);
+                _meshIdOf.erase(it);
+            }
+            break;
+        }
+        case ResourceOp::ModelRegister:
+        {
+            // The sections carry producer mesh handles; the renderer gets real ones.
+            for (WgrModelSection& sec : op.sections)
+            {
+                const auto it = _meshIdOf.find(sec.mesh);
+                sec.mesh = it != _meshIdOf.end() ? it->second : 0;
+            }
+            _modelIdOf[op.model] = wgr_model_register(
+                _renderer, op.sphereRadius, WgrSlice<WgrModelLod>{op.lods.data(), U32(op.lods.size())},
+                WgrSlice<WgrModelSection>{op.sections.data(), U32(op.sections.size())},
+                WgrSlice<WgrModelMaterial>{op.materials.data(), U32(op.materials.size())}, op.name.c_str());
+            break;
+        }
+        }
+    }
+    _resourceOps.clear();
+}
+
 void EngineWgpu::DrainInstanceOps()
 {
     if (_instanceOps.empty())
@@ -1724,11 +1791,30 @@ void EngineWgpu::DrainInstanceOps()
         switch (op.kind)
         {
         case InstanceOp::Add:
-            _instSlotOf[op.handle] = wgr_instance_add(_renderer, &op.inst);
-            break;
         case InstanceOp::Update:
-            wgr_instance_update(_renderer, _instSlotOf[op.handle], &op.inst);
+        {
+            // The payload's model field is a PRODUCER handle; the renderer gets the real id.
+            // An untranslatable one is a bug on this side of the boundary and must be loud:
+            // passing it through would draw a stranger's model, which is precisely the
+            // failure mode the ids exist to prevent.
+            WgrInstance inst = op.inst;
+            const auto it = _modelIdOf.find(inst.model);
+            if (it == _modelIdOf.end())
+            {
+                static uint32_t reported = 0;
+                if (reported++ < 8)
+                    LOG_ERROR(Graphics,
+                              "ANOMALY instance op carries unknown producer model handle {} -- op dropped",
+                              inst.model);
+                break;
+            }
+            inst.model = it->second;
+            if (op.kind == InstanceOp::Add)
+                _instSlotOf[op.handle] = wgr_instance_add(_renderer, &inst);
+            else
+                wgr_instance_update(_renderer, _instSlotOf[op.handle], &inst);
             break;
+        }
         case InstanceOp::Remove:
             wgr_instance_remove(_renderer, _instSlotOf[op.handle]);
             break;
@@ -1742,6 +1828,10 @@ void EngineWgpu::NextFrame()
     if (_renderer)
     {
         ApplyPendingRendererSettings();
+        // Resources before instances: a queued add may reference a model whose queued
+        // registration precedes it, and that is the only cross-queue dependency direction
+        // the producer can create.
+        DrainResourceOps();
         DrainInstanceOps();
         SyncWaterLookProfile();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
@@ -5496,20 +5586,14 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         // vertex's crown-centre index into its conform word (forests are mode 0/1 conform, which
         // never read the ClipLand per-vertex selector, so the word is free). vs_gpu reads it to get
         // a per-tree radial-normal centre from the crown_centres table instead of inst.center.
+        // Captured for the queued create rather than registered here: the table BASE the
+        // registration returns is baked into vertex data, so the patch happens at the drain,
+        // where the real base exists (REN-THR-008).
+        std::vector<WgrVec4> crownCentres;
+        std::vector<uint32_t> crownComp;
         if (isForest)
         {
-            std::vector<WgrVec4> centres;
-            std::vector<uint32_t> comp;
-            const uint32_t ncomp = BuildForestCrownComponents(verts, indices, centres, comp);
-            if (ncomp > 0)
-            {
-                const uint32_t base =
-                    wgr_register_crown_centres(_renderer, WgrSlice<WgrVec4>{centres.data(), U32(centres.size())});
-                for (size_t vi = 0; vi < verts.size(); vi++)
-                {
-                    verts[vi].conform = base + comp[vi];
-                }
-            }
+            BuildForestCrownComponents(verts, indices, crownCentres, crownComp);
         }
         // Both halves of this are 32-bit now: VertexIndex (Core/Types.hpp) and the
         // wgr_mesh_create index slice. The pool buffer was always Uint32 and merely
@@ -5537,17 +5621,27 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             LOG_INFO(Graphics, "GpuModel lod name={} lod={} res={} vertices={} indices={} sections={} radius={}",
                      shape->Name(), level, shape->Resolution(level), nv, ni, s->NSections(), shape->BoundingSphere());
         }
+        // The empty-input check is the ONLY failure wgr_mesh_create had (REN-THR-001,
+        // pool.rs:468), so with it done here the queued create cannot fail and the
+        // producer handle can stand in for the id everywhere downstream.
+        if (verts.empty() || ni <= 0)
+        {
+            eligible = false;
+            break;
+        }
         uint64_t mesh = 0;
         {
             AdmitTimer createTimer(&render::GObjectAdmitProfile.meshCreateMs);
             _ops.meshCreate++;
-            mesh = wgr_mesh_create(_renderer, AsMeshVerts(verts),
-                                   WgrSlice<uint32_t>{reinterpret_cast<const uint32_t*>(indices.data()), U32(ni)});
-        }
-        if (!mesh)
-        {
-            eligible = false;
-            break;
+            ResourceOp op;
+            op.kind = ResourceOp::MeshCreate;
+            op.mesh = _nextMeshHandle++;
+            op.verts = std::move(verts);
+            op.indices = std::move(indices);
+            op.crownCentres = std::move(crownCentres);
+            op.crownComp = std::move(crownComp);
+            mesh = op.mesh;
+            _resourceOps.push_back(std::move(op));
         }
         _gpuMeshes.insert(mesh);
         modelMeshes.push_back(mesh);
@@ -5904,11 +5998,20 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         // id or none: walls gone, floating windows and ivy. The counter goes on its own
         // statement, ABOVE the assignment, where it can never eat one again.
         _ops.modelRegister++;
-        model =
-            wgr_model_register(_renderer, shape->BoundingSphere(), WgrSlice<WgrModelLod>{lods.data(), U32(lods.size())},
-                               WgrSlice<WgrModelSection>{sections.data(), U32(sections.size())},
-                               WgrSlice<WgrModelMaterial>{materials.data(), U32(materials.size())},
-                               static_cast<const char*>(shape->Name()));
+        ResourceOp op;
+        op.kind = ResourceOp::ModelRegister;
+        // WGR_INVALID_MODEL must never be allocated as a handle, or an ineligible shape and a
+        // real one would collide in _modelIdOf.
+        if (_nextModelHandle == WGR_INVALID_MODEL)
+            _nextModelHandle++;
+        op.model = _nextModelHandle++;
+        op.sphereRadius = shape->BoundingSphere();
+        op.lods = std::move(lods);
+        op.sections = std::move(sections); // .mesh fields are producer handles; drain translates
+        op.materials = std::move(materials);
+        op.name = static_cast<const char*>(shape->Name());
+        model = op.model;
+        _resourceOps.push_back(std::move(op));
     }
     _gpuModels[shape] = model;
     // Cache coverage so SceneObjectCreated can tag each instance and GpuDrivenCoverage can tell
@@ -5953,7 +6056,10 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
         for (uint64_t mesh : modelMeshes)
         {
             _ops.meshDestroy++;
-            wgr_mesh_destroy(_renderer, mesh);
+            ResourceOp op;
+            op.kind = ResourceOp::MeshDestroy;
+            op.mesh = mesh;
+            _resourceOps.push_back(std::move(op));
             _gpuMeshes.erase(mesh);
         }
     }
@@ -6333,7 +6439,10 @@ uint32_t EngineWgpu::DestroyGpuModelMeshes(const LODShapeWithShadow* shape)
             if (_renderer)
             {
                 _ops.meshDestroy++;
-                wgr_mesh_destroy(_renderer, mesh);
+                ResourceOp op;
+                op.kind = ResourceOp::MeshDestroy;
+                op.mesh = mesh;
+                _resourceOps.push_back(std::move(op));
             }
             _gpuMeshes.erase(mesh);
             ++releasedMeshes;

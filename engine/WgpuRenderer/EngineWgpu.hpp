@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Poseidon/Graphics/Core/MatrixConversion.hpp>
+#include <Poseidon/Graphics/Core/MeshVertex.hpp> // SVertex, for the queued mesh-create payloads (REN-THR-008)
+#include <Poseidon/Core/Types.hpp>               // VertexIndex, same
 #include <Poseidon/Graphics/Core/TLVertex.hpp> // TLMaterial (per-draw lighting capture)
 #include <Poseidon/Graphics/Dummy/EngineDummy.hpp>
 #include <Poseidon/Graphics/GraphicsEngineFactory.hpp> // GraphicsEngineParams
@@ -1026,6 +1028,45 @@ class EngineWgpu : public EngineDummy
     void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst);
     void EnqueueInstanceRemove(uint32_t handle);
     void DrainInstanceOps();
+
+    // REN-THR-008 -- shape 3, the RETAINED-model half: mesh creates and destroys, crown
+    // centres and model registration cross the frame as queued ops with producer handles,
+    // translated at the drain. Two things made this possible (REN-THR-001): Pool::alloc's
+    // only failure is empty input, which the producer checks itself, and the crown-centre
+    // BASE -- which is baked into vertex data -- is applied at the drain, where the real
+    // base exists, via the op's crownComp offsets.
+    //
+    // Deliberately NOT covered: the CPU-path VertexBufferWgpu meshes (their handles ride
+    // inside WgrDraw3D payloads and their per-frame wgr_mesh_update is upload traffic, not
+    // bookkeeping -- the right thread answer there is a genuinely Send upload path, not a
+    // queue that copies vertex arrays), and the overlay textures (UI, same story).
+    struct ResourceOp
+    {
+        enum Kind : uint8_t
+        {
+            MeshCreate,
+            MeshDestroy,
+            ModelRegister
+        };
+        Kind kind = MeshCreate;
+        uint64_t mesh = 0;  // MeshCreate: the producer handle being defined; MeshDestroy: the one dying
+        uint32_t model = 0; // ModelRegister: the producer handle being defined
+        float sphereRadius = 0.0f;
+        std::vector<SVertex> verts;        // MeshCreate (moved in, zero-copy)
+        std::vector<VertexIndex> indices;  // MeshCreate
+        std::vector<WgrVec4> crownCentres; // MeshCreate, optional: register, then patch
+        std::vector<uint32_t> crownComp;   //   verts[i].conform = base + crownComp[i]
+        std::vector<WgrModelLod> lods;             // ModelRegister
+        std::vector<WgrModelSection> sections;     // ModelRegister; .mesh holds PRODUCER handles
+        std::vector<WgrModelMaterial> materials;   // ModelRegister (texture handles baked, see cpp)
+        std::string name;
+    };
+    std::vector<ResourceOp> _resourceOps;
+    uint64_t _nextMeshHandle = 1;  // 0 stays "no mesh", matching the FFI's failure value
+    uint32_t _nextModelHandle = 0; // WGR_INVALID_MODEL is the sentinel and is never allocated
+    std::unordered_map<uint64_t, uint64_t> _meshIdOf;  // producer -> renderer (post-drain)
+    std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
+    void DrainResourceOps();
 
     // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
     // and answered "unmeasured" twice, in the two places where the answer decides the
