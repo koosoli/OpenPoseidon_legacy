@@ -94,7 +94,16 @@ the tip at the time of writing.
 | Phase 1.4 | **EFX item 2 turned out to be 25 years old and already rejected** | Four of the five classifications shipped in *Operation Flashpoint* in 2001; the fifth and the crossfade landed 2026-08-30 and were parked hours later behind `POSEIDON_EXPERIMENTAL_EAX=1` after the owner's verdict. The agent found one checkable thing wrong inside it: interiors ran at a modal density of 0.02–0.08 against the 0.4287 the ROOM preset ships with |
 | Diagnostics | **The same defect, three times in one night** | The dead `cpu_milliseconds` column; the snapshot drop counter whose documented correct value was 0 when the truth is one per world load; and my own new `per_object_kb`, which reported a flat 0 on missions that do not use object streaming at all. Worth naming: **a diagnostic that cannot say "did not run" will be read as "ran"** |
 
-Engine suite **240,324** assertions / 0 failures; Foundation **159,282** / 0; renderer
+### 06:00-06:20
+
+| Area | What | Evidence |
+|---|---|---|
+| Phase 2.1 | **Eight more freeze reference scenes**, GL33 and WGPU from the same camera | Gate bullet 6 said two scenes "is not important visual reference scenes; it is the first two entries". Town, water, combat, field, all pairs, in `docs/roadmap/evidence/gl33-freeze/`. The water pair states the capability gap plainly: WGPU draws grass, volumetric cloud and a coloured sea with a shoreline gradient where GL33 draws none, a flat sky and flat grey water |
+| Phase 2.2 | **The compat gate bullet finally has a test that can fail** | 9 worlds across 4 generations and 5 OPRW revisions, plus one model PBO per generation and the whole installed Reforger `.pak` corpus. Proven by mutation: changing `Oprw25.hpp`'s version check left the ENTIRE pre-existing suite green and failed only the new file. It was possible to break the Arma 2 and DayZ world readers without one existing assertion noticing. **Still only PARTIAL** — this is asset compatibility; it draws no pixels, and the bullet sits in a renderer gate |
+| Phase 6 | **Slice 3 should not be attempted**, and the table says why | `swap` is 27.171 ms of a 28.686 ms frame. All main-thread CPU work sums to ~1.5 ms and material interpretation is a fraction of the 0.081 ms `land:obj` bucket. There is nothing to reclaim; the frame is GPU-bound |
+| MAT-054 | The converter fix was a **no-op on its first attempt**, and a measurement caught it | The widened deploy gate sat behind an early `return` in the `bcr.empty()` branch: a 400-model Everon export reported 21 materials with "no BCRMap and no BCR_N layer" and **zero** colour-only deploys. MAT-054 had named the right branch; I took the "equivalently" alternative it offered, and the two are only equivalent if control reaches it. Moved and re-running |
+
+Engine suite **240,660** assertions / 0 failures; Foundation **159,282** / 0; renderer
 **204** / 0. All three green.
 
 Two corrections were issued against my own work in the same session, and both are in the
