@@ -3566,20 +3566,39 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                         ++scan;
                         continue;
                     }
-                    // Stage 3 (WGR_OBJECT_STREAM_ASYNC_ADAPT, default on): hand the IR
+                    // Stage 3 (WGR_OBJECT_STREAM_ASYNC_ADAPT, default OFF - see below): hand the IR
                     // straight back with the main-thread bank tables and let a worker run
                     // the conversion too -- measured 3+ s of the traverse's cold admission,
                     // versus <100 ms for the table resolution that stays here.
-                    // Default ON again since the tail split (FinishOdolAdapterTail):
-                    // the worker conversion now stops BEFORE the proxy point and the
-                    // install runs proxies + OptimizeShapes in the required order.
-                    // Verified on the ev_DALL traverse: 797 cold models all async,
-                    // main-thread adapt 0.0 ms, coverage at parity.
-                    // WGR_OBJECT_STREAM_ASYNC_ADAPT=0 restores the synchronous adapt.
+                    // DEFAULT OFF AGAIN SINCE 2026-08-31, and this is a safety decision about
+                    // my own change, not a performance one.
+                    //
+                    // It was turned back on after the tail split (FinishOdolAdapterTail) on the
+                    // strength of a traverse: 797 cold models all async, main-thread adapt
+                    // 0.0 ms, coverage at parity. What that traverse could not see is that
+                    // running convertToLODShape on TWO THREADS CORRUPTS THE PROCESS HEAP.
+                    // SIM-807 built the harness that can: with two workers converting
+                    // concurrently -- the shipping configuration -- the process dies inside
+                    // mimalloc at a different site each run, roughly one run in three, and it
+                    // first showed as bit-divergence rather than a crash. Reproduce with
+                    // SIM807_CONCURRENT_ADAPT=1 on the [race] tag.
+                    //
+                    // The write has NOT been found. It correlates with the model's named
+                    // selection count and disappears when selections are cleared, which points
+                    // at ShapeAdapter.cpp's selection loop or something it allocates alongside;
+                    // a genuine unguarded registration in FastCAlloc's global instance list was
+                    // found and fixed while hunting it, and did NOT fix this (5 of 8 runs still
+                    // crash). ASan would settle it and the Windows sanitizer preset does not
+                    // configure -- that is the next step.
+                    //
+                    // A crash in the default path is worse than a slow load. This costs the
+                    // ~3 s of cold conversion the tail split moved off the main thread; the
+                    // tail split itself stands, and the switch comes back the day the write is
+                    // found. WGR_OBJECT_STREAM_ASYNC_ADAPT=1 re-enables it for that hunt.
                     static const bool asyncAdapt = []
                     {
                         const char* v = std::getenv("WGR_OBJECT_STREAM_ASYNC_ADAPT");
-                        return !v || v[0] != '0';
+                        return v && v[0] == '1';
                     }();
                     if (asyncAdapt && (preparsed->sourceFormat == "ODOL" || preparsed->sourceFormat == "MLOD"))
                     {

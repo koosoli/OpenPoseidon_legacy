@@ -1,3 +1,4 @@
+#include <mutex>
 #include <Poseidon/Foundation/platform.hpp>
 #include <Poseidon/Foundation/Memory/FastAlloc.hpp>
 #include <Poseidon/Foundation/Containers/SmallArray.hpp>
@@ -306,6 +307,33 @@ static VerySmallArray<InitPtr<FastCAlloc>, 1024 * sizeof(InitPtr<FastCAlloc>)>& 
     return instances;
 }
 
+// THE REGISTRY IS NOT THE POOL, and that distinction is what this lock is for.
+//
+// Each pool's own `_mtx` (FastAlloc) protects its free list, and the note there reasons that
+// contention is only ever between threads allocating the SAME class. True, and it misses this:
+// the per-class allocator is a function-local static, so C++ guarantees its construction is
+// thread-safe FOR THAT CLASS -- but two threads first-touching two DIFFERENT pooled classes
+// construct two different statics concurrently, and both constructors push onto this one shared
+// array. `Add` reads the size, writes an element and increments, and may reallocate; run twice
+// at once it drops an entry or writes past the end, which surfaces later as heap corruption
+// somewhere else entirely.
+//
+// Measured 2026-08-31: converting models on two preparer workers -- the DEFAULT shipping
+// configuration since the Phase 6 tail split -- crashed roughly one run in three inside
+// mimalloc, at a different site each time. The number of distinct pooled classes touched during
+// a conversion is what makes it likely, which is why it correlated with the model's named
+// selection count and vanished when selections were cleared.
+//
+// A plain mutex, not a lock-free array: registration happens once per class per process, so
+// contention is nil and the cost is unmeasurable. Nothing takes a pool's `_mtx` while holding
+// this one except CleanUpAll, which takes them one at a time and in one direction, so there is
+// no cycle to deadlock on.
+static std::mutex& GetAllInstancesMutex()
+{
+    [[clang::no_destroy]] static std::mutex mtx;
+    return mtx;
+}
+
 FastCAlloc::FastCAlloc(size_t n, const char* name)
     // CAlloc returns (element + sizeof(void*)) — the element carries a chunk-pointer
     // header. mem[] is 16B-aligned and esize is a multiple of 16 for objects > 32B, so
@@ -314,11 +342,13 @@ FastCAlloc::FastCAlloc(size_t n, const char* name)
     // at +4 mod 16 — misaligned — which is what crashed FastAlloc on x64.)
     : base(n, name, 16 - (int)sizeof(void*))
 {
+    std::lock_guard<std::mutex> lock(GetAllInstancesMutex());
     GetAllInstances().Add(this);
 }
 
 FastCAlloc::~FastCAlloc()
 {
+    std::lock_guard<std::mutex> lock(GetAllInstancesMutex());
     for (int i = 0; i < GetAllInstances().Size(); i++)
     {
         FastCAlloc* ii = GetAllInstances()[i];
@@ -354,6 +384,7 @@ void FastCAlloc::CFree(void* pAlloc)
 
 void FastCAlloc::CleanUpAll()
 {
+    std::lock_guard<std::mutex> lock(GetAllInstancesMutex());
     for (int i = 0; i < GetAllInstances().Size(); i++)
     {
         GetAllInstances()[i]->CleanUp();
