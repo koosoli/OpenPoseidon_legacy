@@ -956,6 +956,13 @@ struct TextureStats
     size_t rvmatsWritten = 0;               //!< distinct `.rvmat` files on disk
     size_t ematsWritten = 0;                //!< distinct deployed `.emat` files on disk
     size_t ematsCutout = 0;                 //!< of those, the ones that say they are alpha-tested
+    //!< of those, the ones deployed with NO baked image, carrying only their authored
+    //!< flat `Color`. Counted apart on purpose: this path is correct for Enfusion's
+    //!< baked-LOD materials, which genuinely have no map, but it would also quietly
+    //!< absorb a material whose albedo bake REGRESSED -- that object would render in a
+    //!< plausible flat colour instead of an obvious white. If this number jumps, the
+    //!< question is whether the corpus gained coarse LODs or the baker lost textures.
+    size_t ematsColourOnly = 0;
     size_t materialsHidden = 0;             //!< unresolvable decal/water-erase materials whose faces are dropped
     std::map<std::string, size_t> packings; //!< detected NMO packing -> distinct textures
     //! Whether the BCR's alpha channel varies. Recorded, NOT bound: Enfusion is
@@ -1297,13 +1304,37 @@ class TextureBaker
         // already reads, naming the files this converter just wrote.
         if (_options.rvmats && !baked.normalPaa.empty())
             baked.rvmatPath = WriteRvmat(ematPath, baked);
-        // The `.emat` itself, deployed. Written whenever an albedo was baked -- a
-        // material with nothing bindable in it would only be an empty file the engine
-        // opens, translates, and reports as binding nothing.
+        // The `.emat` itself, deployed.
+        //
+        // This used to be gated on "an albedo was baked", on the reasoning that a material
+        // with nothing bindable would be an empty file the engine opens and reports as
+        // binding nothing. That reasoning was wrong for one large class of material, and
+        // MAT-054 is the measurement: 40 distinct `.emat` files drew UNTEXTURED on Everon,
+        // and twelve of them are Reforger's BAKED-LOD materials (`*_MLOD`, `*_lod3`,
+        // `*_Color_palette`) -- `MatPBRBasic` carrying a single flat `Color` and no map at
+        // all. That is not a broken asset, it is how Enfusion draws a coarse LOD.
+        //
+        // And it IS bindable: EmatMaterialAdapter has synthesised a procedural
+        // `#(argb,8,8,3)color(...)` base colour from `Color` since DZ-002, for exactly the
+        // no-albedo case (that is how DayZ's pond water gets its colour). The gate meant the
+        // engine never got the chance -- the model kept the raw pak path in its MATERIAL
+        // field, nothing opened, and the section fell to the 1.0 white at bindless slot 0.
+        // Every one of the twelve authored colours is between 0.016 and 0.32, so white was
+        // the largest error available.
+        //
+        // So: deploy when there is a baked albedo OR an authored `Color` to stand in for
+        // one. The two cases are counted separately, because a colour-only deploy is right
+        // for a coarse LOD and would be a disguise for a bake regression.
         baked.extraTextures = std::move(multi);
-        if (_options.emats && !baked.colourPaa.empty())
+        float flatColour[4] = {};
+        const bool hasFlatColour = emat.Vec4Of("Color", flatColour);
+        if (_options.emats && (!baked.colourPaa.empty() || hasFlatColour))
+        {
             baked.ematPath =
                 WriteEmat(ematPath, emat, baked, _imageHasAlpha.count(LowerCopy(baked.colourPaa)) != 0, nmoKey);
+            if (baked.colourPaa.empty() && !baked.ematPath.empty())
+                _stats.ematsColourOnly++;
+        }
         return baked;
     }
 
@@ -2667,6 +2698,12 @@ void PrintTextureReport(const TextureStats& stats, size_t partsTextured, size_t 
     if (stats.ematsWritten)
         std::cout << "Materials:  " << stats.ematsWritten << " .emat deployed under the texture prefix ("
                   << stats.ematsCutout << " alpha-tested); sections name them instead of the pak path.\n";
+    if (stats.ematsColourOnly)
+        std::cout << "            " << stats.ematsColourOnly
+                  << " of those carry a flat Color and NO baked image -- Enfusion's coarse-LOD\n"
+                     "            materials, which the engine renders through a procedural colour texture.\n"
+                     "            Before MAT-054 these were not deployed at all and drew WHITE. A sharp\n"
+                     "            rise here with no new coarse LODs means the albedo baker regressed.\n";
     if (stats.materialsHidden)
         std::cout << "            " << stats.materialsHidden
                   << " unresolvable overlay materials (decal shells / water-erase) had their faces DROPPED --\n"
