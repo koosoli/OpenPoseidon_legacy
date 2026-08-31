@@ -9678,9 +9678,16 @@ fn sky_bake_cache_write(path: &std::path::Path, vis: &[[f32; 4]], bmin: &[f32; 3
         }
     }
     // Write-then-rename so a crash mid-write can never leave a torn file a later run trusts.
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, &data).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
+    // The temp name must be PRIVATE to this writer: `path.with_extension("tmp")` is one name
+    // for every process baking this key, so two writers interleave into a single file and the
+    // rename then publishes the mixture -- which is the exact failure the rename was added to
+    // prevent. pid plus a process-local counter makes each attempt its own file.
+    static TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp{}-{}", std::process::id(), seq));
+    if std::fs::write(&tmp, &data).is_ok() && std::fs::rename(&tmp, path).is_err() {
+        // A private temp that never got published is litter, not a cache entry.
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
