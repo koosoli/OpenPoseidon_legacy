@@ -64,3 +64,40 @@ before any concurrency exists to blame. The drain-to-`wgr_render_frame` span is 
 window a render thread would own; making that literal requires the table above to empty and
 the equivalence oracle's remaining simulation divergence (REN-THR-005, SIM-815 in flight) to
 be closed or bounded.
+
+---
+
+## Addendum — the oracle used for its actual purpose: build against build
+
+Everything above was verified the only way available at the time: identical counts, identical
+image, zero stale-handle refusals, per slice, serially. That is a good gate and it is not the
+gate Phase 5 step 6 asks for, which is *this restructuring published the same frames*.
+
+With SIM-816's determinism mode and the handle-masking hash, that comparison is now possible
+**between two different binaries**, and the slice that could least be verified headlessly —
+the overlay textures (REN-THR-010), whose translation path never fires without an open
+dev-panel window — was measured retroactively.
+
+Two builds differing only in `EngineWgpu.{cpp,hpp}` (`4d59e813` versus `075f3dba`), each run
+once under `POSEIDON_LOCKSTEP_HZ=60 WGR_LOD_GOVERNOR_RANGE=1 WGR_FRAME_HASH_MASK_IDS=1`,
+frames aligned by simulation tick:
+
+| | |
+|---|---:|
+| tick-aligned frames compared | 901 |
+| **content-identical across all seventeen slices** | **900 (99.9%)** |
+| differing | `verts`, in one frame |
+
+That is the same figure as two runs of the *same* build (SIM-816), and the same single `verts`
+frame — so the overlay slice contributed **no** observable difference, and the one outlier is
+the pre-existing run-to-run blip rather than anything this change did. A cross-build
+comparison that lands exactly on the run-to-run noise floor is the strongest statement this
+oracle can currently make.
+
+**A trap worth recording, because it nearly invalidated the measurement.** Arm A was built by
+checking out the two files at the older commit while `HEAD` stayed where it was — and
+`Deploy.ps1` stamps `DEPLOYED-FROM.txt` from **HEAD**, not from what was compiled. The stamp
+read `075f3dba` while the binary was the `4d59e813` renderer. The stamp is a guard against
+deploying a stale *tree*; it cannot see a patched working copy, and rule 0's "suspect the
+binary" advice depends on the stamp being true. For an A/B built this way the bookkeeping has
+to be the operator's, and the arm names have to carry it.
