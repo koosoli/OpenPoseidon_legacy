@@ -5,7 +5,32 @@ after every milestone. Everything below is on `safety/asset-obs-001` and is
 **deployed** — check `DEPLOYED-FROM.txt` in the game folder before trusting any
 of it; the tip at the time of writing is what is installed.
 
-## Read this first: what needs the owner's eyes
+## Read this first
+
+**A crash risk was found in my own work and removed from your build.** Worker-side model
+conversion (`WGR_OBJECT_STREAM_ASYNC_ADAPT`) has been ON by default since the Phase 6 tail
+split. A determinism harness written overnight showed that running the conversion on two
+threads — the shipping configuration — **corrupts the process heap**: the process dies
+inside mimalloc at a different site each run, roughly one run in three, and it first shows
+as bit-divergence rather than as a crash. That is why the traverse I "verified" the switch
+with saw nothing: 797 cold models, main-thread adapt 0.0 ms, coverage at parity, and a
+heap being scribbled on throughout.
+
+**The default is off again** (commit `00aa5870`, deployed). It costs about three seconds of
+cold load and removes a crash from the path you play. The exact write is not yet found —
+it correlates with a model's named-selection count — and the next step is ASan, whose
+Windows preset does not configure. A genuinely unguarded race in `FastCAlloc`'s global
+instance registry was found and fixed while hunting it, and honestly reported as *not* the
+fix, because 5 of 8 runs still crashed after it.
+
+**And the frame got 2.55 ms faster**, which is unrelated and much happier: the sky's
+spherical-harmonic projection was running on **one GPU lane** — `dispatch(1,1,1)` against
+`workgroup_size(1)` — and cost 1.812 ms of an 11.5 ms frame to produce nine numbers. Now
+64 lanes with a tree reduction: **1.812 ms → 0.056 ms, 32×**, and the whole GPU frame drops
+from 11.530 to 8.978 ms. The maths is unchanged; mean frame brightness moved 0.1%, against
+0.03% of run-to-run noise, which is what reordering an 8192-term float sum does.
+
+## Read this second: what needs the owner's eyes
 
 Nothing here is blocked on the owner, but three things are worth their attention:
 
