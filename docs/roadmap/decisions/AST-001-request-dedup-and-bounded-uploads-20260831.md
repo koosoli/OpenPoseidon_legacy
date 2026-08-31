@@ -174,3 +174,34 @@ it is a capture, and it needs somebody who owns the game folder.
 Step 6 should be marked done *with the audit attached*, not re-attempted. The one open action is a
 traverse capture on Everon reading `admit_stop_*` with `WGR_OBJECT_STREAM_UPLOAD_MB=16`, which would
 settle the default-off decision at the cost of one run instead of two.
+
+
+---
+
+## Addendum, same day: the traverse this record asked for
+
+AST-001 left one open action for whoever owns the game folder — an Everon traverse with
+`WGR_OBJECT_STREAM_UPLOAD_MB=16` reading `admit_stop_*`, on the claim that it *"settles the
+default in one run instead of two"*. Run: `ev_DALL.wrp`, 200,000-object budget, freefly,
+screenshot at 35 s, **three runs per arm**.
+
+| | resident objects | `admit_stop_upload` |
+|---|---|---|
+| cap off (default) | 76,719 / 68,540 / 101,323 — mean **82,194** | key absent, all three |
+| cap 16 MB | 119,312 / 75,776 / 87,114 — mean **94,067** | **19 / 18 / 17** |
+
+**Half the claim holds, and it is the important half.** The stop-reason tally is stable to
+±1 across runs and settles *"does the cap ever fire"* — 17 to 19 times a traverse —
+definitively, in one run, where before it took two full captures to conclude "changed
+NOTHING". The counter did exactly what it was built for.
+
+**The other half does not.** *"Should the default change"* is not settled and three runs per
+arm cannot settle it: the spreads (68k–101k against 76k–119k) overlap almost completely, so
+the 12k gap between the means is not distinguishable from noise on this scene. That is not a
+failure of the counters — it is the difference between a question about the code, which a
+counter answers, and a question about the world, which needs a quieter measurement than this
+scene offers. **The default stays off** until somebody makes that measurement; the honest
+statement today is "the cap works and we do not know whether it helps".
+
+The n/a discipline also held under test: with the cap off the JSON key is **absent**, not
+zero, in all three runs.
