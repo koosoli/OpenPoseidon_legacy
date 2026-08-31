@@ -34,6 +34,8 @@ set(POSEIDON_CORE_TEST_SOURCES
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_pbo_game_scan.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_pbo_roundtrip.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/Streams/test_qstream_pbo_content_hash.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Cache/test_ast004_producer_cost.cpp
+    ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/Asset/Cache/test_ast004_model_ddc.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/ParamFile/test_paramfile.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/ParamFile/test_paramfile_access.cpp
     ${CMAKE_SOURCE_DIR}/tests/unit/engine/Poseidon/IO/ParamFile/test_paramfile_api.cpp

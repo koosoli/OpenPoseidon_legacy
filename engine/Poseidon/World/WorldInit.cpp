@@ -38,6 +38,7 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 #include <Poseidon/World/Terrain/Visibility.hpp>
+#include <Poseidon/World/Model/ModelDerivedCache.hpp>
 #include <Poseidon/World/Weather/WindModel.hpp>
 #include <Random/randomGen.hpp>
 #include <Poseidon/World/Scene/Camera/CamEffects.hpp>
@@ -840,6 +841,21 @@ static void GetPosArray(AutoArray<Vector3>& tgt, const ParamEntry& cfg)
 
 void World::InitLandscape(Landscape* landscape)
 {
+    // AST-004 -- the derived model cache's only eviction point.
+    //
+    // It is HERE, at a level change, and not on every Put, for two reasons.
+    // Prune() walks the whole tree and sorts it; paying that inside a model load
+    // puts a directory enumeration in the middle of a frame. And this is the
+    // moment it is most useful: the previous world's models are the coldest
+    // entries in the store and the next world is about to write its own, so
+    // making room before the fill is what stops the budget being enforced by
+    // evicting things this world has just cached.
+    //
+    // Before the fill, not after: an eviction pass that ran at the END of a load
+    // would be sorting entries whose mtimes are all seconds old and would throw
+    // away exactly what is about to be asked for again.
+    ModelDerivedCache::Instance().Prune();
+
     _preloadedVType[VTypeStatic] = NewAIType("Static");
     _preloadedVType[VTypeBuilding] = NewAIType("Building");
     _preloadedVType[VTypeStrategic] = NewAIType("Strategic");
