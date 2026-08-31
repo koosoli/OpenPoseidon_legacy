@@ -109,9 +109,45 @@ So the residual's cause is **still open**. What is now established:
   (the Hi-Z merge is kept for that reason, not for a frame-level win it did not deliver —
   frame totals across these four runs, 10.53 to 10.95 ms, are noise).
 
-Candidates that survive: swapchain acquire/present inside the frame bracket, and work the
-GPU does between the last timestamp and the frame-total close. Neither has been measured.
-**Do not act on this section's advice until one of them has.**
+## Third measurement: it is independent of resolution too
+
+Same scene, same binary, DLSS off, three output resolutions:
+
+| output | pixels | frame | attributed | residual |
+|---|---:|---:|---:|---:|
+| 800×600 | 0.48 M | 8.443 ms | 5.463 ms | **2.980 ms** (35.3%) |
+| 1600×900 | 1.44 M | 10.743 ms | 7.612 ms | **3.130 ms** (29.1%) |
+| 2560×1440 | 3.69 M | 13.217 ms | 9.873 ms | **3.343 ms** (25.3%) |
+
+**7.7× the pixels for 12% more residual.** So it is not the composite blit, not present
+bandwidth, not fill rate, and not anything that scales with output area — the same way it
+is not pass boundaries and not scene cost.
+
+## What is left, and how to test it
+
+Three properties are now established, and together they are quite constraining. The
+residual is **constant** at ~3 ms: independent of scene cost (10 → 20 ms frames),
+independent of pass count (ten boundaries removed changed nothing), independent of
+resolution (7.7× pixels changed it by 12%).
+
+A fixed per-frame quantity that no amount of work moves looks less like *cost* and more
+like **idle inside the frame-total bracket** — GPU timeline time in which nothing is
+running. The surviving candidate is the **number of queue submits per frame**. There are
+35 `queue.submit` sites in the renderer; the main frame path submits once (`lib.rs:5326`)
+but several others are on the per-frame path too — the cull stats encoder (`cull.rs:3323`),
+the geometry pool, exposure — and each submit is a point at which the GPU can run dry
+waiting for the CPU to hand it the next command buffer. That would be constant per frame
+and indifferent to everything measured above, which is exactly the shape observed.
+
+**The test, which nobody has run:** count submits per frame at runtime (a static counter
+incremented at each `queue.submit` site, reported once a second), then merge the small
+per-frame encoders into the main one and re-measure the residual. If the residual falls
+with the submit count, that is the answer. If it does not, the remaining candidate is the
+gap between the frame-total's opening timestamp and the first sub-region's — which would
+mean the bracket is measuring a wait, and the honest fix is to move where it opens.
+
+**Until one of those has been run, do not spend effort on this block.** Two explanations
+have already been proposed here and one of them was wrong.
 
 ## The two hypotheses as originally written, kept for the record
 
