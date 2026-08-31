@@ -3,6 +3,7 @@
 
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AIGroupScanBudget.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-014
 #include <Poseidon/AI/Path/AIDefs.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
@@ -499,12 +500,21 @@ void AICenter::UpdateGroup()
     // created inside Think(), which is what the clock was really catching).
     Determinism::GroupScanBudget budget(NGroups());
 
+    // PERF-014. GroupScan is INCLUSIVE of everything below it; GroupThink is taken
+    // separately at the `Think()` call, so `groupScan - groupThink` is the cost of the
+    // oldest-group selection alone -- the O(NGroups) rescan performed once per loop entry.
+    // `scanIters` and `groupsSeen` are its denominators: the selection's real work is
+    // iterations x groups, and neither number alone says what it is.
+    AICost::ScopedCost scanCost(AICost::Bucket::GroupScan);
+
     for (int i = 0; i < GroupsPerCycle;)
     {
         if (budget.Exhausted())
         {
             break;
         }
+        AICost::AICosts().scanIters++;
+        AICost::AICosts().groupsSeen += static_cast<std::uint64_t>(NGroups() > 0 ? NGroups() : 0);
 
         // search for oldest non-updated group
         float maxAge = 0;
@@ -529,7 +539,12 @@ void AICenter::UpdateGroup()
             _lastUpdateTime = Glob.time;
             break; // no more group to update
         }
-        bool think = maxGrp->Think();
+        AICost::AICosts().groupThinks++;
+        bool think = [&]
+        {
+            AICost::ScopedCost cost(AICost::Bucket::GroupThink);
+            return maxGrp->Think();
+        }();
 
         if (think)
         {
@@ -550,38 +565,54 @@ void AICenter::Think()
         return;
     }
 
-    // Update database - remove targets older than AccuracyLast
-    for (int i = 0; i < _targets.Size();)
+    // PERF-014. Four buckets across this function, at the four boundaries the 2001 code
+    // already draws: the target-database bookkeeping (expiry walk + the two exposure
+    // passes), the map update, the two conditional refreshes, and the group walk. Finer
+    // than that would be a timer per statement; coarser would put the map's dirty-field
+    // sweep and the target walk in one number and answer nothing.
     {
-        AITargetInfo& info = _targets[i];
-        if (info._exposure)
+        AICost::ScopedCost cost(AICost::Bucket::Exposure);
+        // Update database - remove targets older than AccuracyLast
+        for (int i = 0; i < _targets.Size();)
         {
-            i++;
-            continue; // cannot delete
+            AITargetInfo& info = _targets[i];
+            if (info._exposure)
+            {
+                i++;
+                continue; // cannot delete
+            }
+
+            if (Glob.time > info._time + AccuracyLast)
+            {
+                _targets.Delete(i);
+            }
+            else
+            {
+                i++;
+            }
         }
 
-        if (Glob.time > info._time + AccuracyLast)
-        {
-            _targets.Delete(i);
-        }
-        else
-        {
-            i++;
-        }
+        RemoveOldExposures();
     }
-
-    RemoveOldExposures();
-    UpdateMap();
+    {
+        AICost::ScopedCost cost(AICost::Bucket::Map);
+        UpdateMap();
+    }
     if (Glob.time >= _guardingValid)
     {
+        AICost::ScopedCost cost(AICost::Bucket::Guarding);
         UpdateGuarding();
     }
     if (Glob.time >= _supportValid)
     {
+        AICost::ScopedCost cost(AICost::Bucket::Support);
         UpdateSupport();
     }
     UpdateGroup();
-    AddNewExposures();
+    {
+        AICost::ScopedCost cost(AICost::Bucket::Exposure);
+        AddNewExposures();
+    }
 
     PoseidonAssert(AssertValid());
 }

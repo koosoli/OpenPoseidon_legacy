@@ -12,6 +12,7 @@
 #include <Poseidon/Dev/Diag/PhysicsProbe.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/SimStageGraph.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-014: the AI stage's per-bucket accumulator
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -966,6 +967,34 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          _simulationSteps.MaxCatchUpSteps());
             }
             Sim::ResetSimStageCosts();
+
+            // PERF-014: the same window, one level down. Printed here and not in its own
+            // timer so the two lines share a denominator by construction -- `aiTicks`
+            // below and the `over N ticks` above are the same window, and a discrepancy
+            // between them means the AI stage was skipped on some ticks rather than that
+            // one of the two clocks drifted.
+            AICost::CostAccum& ai = AICost::AICosts();
+            if (ai.ticks > 0)
+            {
+                const double aiInv = 1.0 / static_cast<double>(ai.ticks);
+                LOG_INFO(World,
+                         "AI ms/tick over {} aiTicks: radio={:.3f} exposure={:.3f} map={:.3f} guarding={:.3f} "
+                         "support={:.3f} groupScan={:.3f} [groupThink={:.3f} [groupExpensive={:.3f} "
+                         "subThink={:.3f} [unitThink={:.3f}]]] endMission={:.3f}",
+                         ai.ticks, ai.ms[0] * aiInv, ai.ms[1] * aiInv, ai.ms[2] * aiInv, ai.ms[3] * aiInv,
+                         ai.ms[4] * aiInv, ai.ms[5] * aiInv, ai.ms[6] * aiInv, ai.ms[7] * aiInv, ai.ms[8] * aiInv,
+                         ai.ms[9] * aiInv, ai.ms[10] * aiInv);
+                LOG_INFO(World,
+                         "AI counts/tick over {} aiTicks: centers={:.2f} radioGroups={:.2f} scanIters={:.2f} "
+                         "groupsPerScan={:.2f} groupThinks={:.2f} groupExpensives={:.2f} subThinks={:.2f} "
+                         "unitThinks={:.2f}",
+                         ai.ticks, ai.centers * aiInv, ai.radioGroups * aiInv, ai.scanIters * aiInv,
+                         ai.scanIters > 0 ? static_cast<double>(ai.groupsSeen) / static_cast<double>(ai.scanIters)
+                                          : 0.0,
+                         ai.groupThinks * aiInv, ai.groupExpensives * aiInv, ai.subThinks * aiInv,
+                         ai.unitThinks * aiInv);
+            }
+            AICost::ResetAICosts();
         }
     }
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so

@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-014
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/Core/Global.hpp>
@@ -1344,6 +1345,14 @@ bool AIGroup::Think()
     // if we have fresh assignement, do not assign anything
     if (Glob.time > _expensiveThinkTime)
     {
+        // PERF-014. The 2001 comment below calls this block expensive and rations it to
+        // once a second per group. `groupExpensive` says whether that is still true and
+        // `groupExpensives` says how many groups paid it in the window -- which together
+        // decide whether the rationing is what keeps the AI stage's cost where it is, or
+        // whether the cost is somewhere the authors were not worried about.
+        AICost::ScopedCost cost(AICost::Bucket::GroupExpensive);
+        AICost::AICosts().groupExpensives++;
+
         // many functions need not be performed in every thing
         // once per second is enough for them
 
@@ -1447,6 +1456,8 @@ bool AIGroup::Think()
         // do not destroy subgroup during Think
         Ref<AISubgroup> subgrp = GetSubgroup(i);
         ThinkImportance prec = subgrp->CalculateImportance();
+        AICost::ScopedCost cost(AICost::Bucket::SubThink); // PERF-014, nested inside GroupThink
+        AICost::AICosts().subThinks++;
         if (subgrp->Think(prec))
         {
             someOperPath = true;

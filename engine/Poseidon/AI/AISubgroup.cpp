@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-014
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Entities/Infantry/Person.hpp>
@@ -1589,6 +1590,11 @@ bool AISubgroup::Think(ThinkImportance prec)
         {
             continue;
         }
+        // PERF-014, nested inside SubThink. This is the leaf of the AI call chain and the
+        // only place `OperPath` is reached from, so `subThink - unitThink` separates the
+        // subgroup FSM and formation work from the per-unit AI underneath it.
+        AICost::ScopedCost cost(AICost::Bucket::UnitThink);
+        AICost::AICosts().unitThinks++;
         if (unit->Think(prec))
         {
             path = true;

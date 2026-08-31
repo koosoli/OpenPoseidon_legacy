@@ -11,6 +11,7 @@
 #include <Poseidon/UI/UIActiveDisplay.hpp>
 #include <Poseidon/UI/OptionsUICommon.hpp>
 #include <Poseidon/World/World.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-014: the AI stage's per-bucket accumulator
 #include <Poseidon/World/Scene/Scene.hpp>
 #include <Poseidon/Dev/Diag/DiagPause.hpp>
 #include <Poseidon/World/Effects/SmokeWorldQuery.hpp> // IndoorRoomAt/IndoorClearanceAt: the SERoom producer
@@ -426,6 +427,27 @@ bool disableUnitAI = false;
 bool disableSimpleSim = false;
 #endif
 
+namespace
+{
+/// PERF-014. The per-group radio walk, which `PerformAI` performs identically for each of
+/// the four fighting centers. Extracted only so the timer and the count are written once;
+/// the body is the 2001 loop unchanged, and it still runs where it always ran -- AFTER the
+/// center's `Think()`, not before it.
+void SimulateGroupRadios(AICenter* center, float deltaT)
+{
+    AICost::ScopedCost cost(AICost::Bucket::Radio);
+    for (int i = 0; i < center->NGroups(); i++)
+    {
+        AIGroup* grp = center->GetGroup(i);
+        if (grp)
+        {
+            AICost::AICosts().radioGroups++;
+            grp->GetRadio().Simulate(deltaT);
+        }
+    }
+}
+} // namespace
+
 void World::PerformAI(float deltaT, float noAccDeltaT)
 {
     auto& input = InputSubsystem::Instance();
@@ -452,68 +474,66 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
 #endif
     )
     {
-        GetRadio().Simulate(deltaT);
+        // PERF-014: the stage's own tick count, so every bucket below has a denominator.
+        // Counted here rather than at the top of the function because a tick with
+        // `deltaT == 0` (or `disableAI`) runs none of this, and a mean over ticks that did
+        // not run the work is a lie of exactly the kind PERF-013 was written to stop.
+        AICost::AICosts().ticks++;
+        {
+            AICost::ScopedCost cost(AICost::Bucket::Radio);
+            GetRadio().Simulate(deltaT);
+        }
         if (_eastCenter)
         {
-            _eastCenter->GetRadio().Simulate(deltaT);
-            _eastCenter->Think();
-            int i;
-            for (i = 0; i < _eastCenter->NGroups(); i++)
             {
-                AIGroup* grp = _eastCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
+                AICost::ScopedCost cost(AICost::Bucket::Radio);
+                _eastCenter->GetRadio().Simulate(deltaT);
             }
+            AICost::AICosts().centers++;
+            _eastCenter->Think();
+            SimulateGroupRadios(_eastCenter, deltaT);
         }
         if (_westCenter)
         {
-            _westCenter->GetRadio().Simulate(deltaT);
-            _westCenter->Think();
-            int i;
-            for (i = 0; i < _westCenter->NGroups(); i++)
             {
-                AIGroup* grp = _westCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
+                AICost::ScopedCost cost(AICost::Bucket::Radio);
+                _westCenter->GetRadio().Simulate(deltaT);
             }
+            AICost::AICosts().centers++;
+            _westCenter->Think();
+            SimulateGroupRadios(_westCenter, deltaT);
         }
         if (_guerrilaCenter)
         {
-            _guerrilaCenter->GetRadio().Simulate(deltaT);
-            _guerrilaCenter->Think();
-            int i;
-            for (i = 0; i < _guerrilaCenter->NGroups(); i++)
             {
-                AIGroup* grp = _guerrilaCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
+                AICost::ScopedCost cost(AICost::Bucket::Radio);
+                _guerrilaCenter->GetRadio().Simulate(deltaT);
             }
+            AICost::AICosts().centers++;
+            _guerrilaCenter->Think();
+            SimulateGroupRadios(_guerrilaCenter, deltaT);
         }
         if (_civilianCenter)
         {
-            _civilianCenter->GetRadio().Simulate(deltaT);
-            _civilianCenter->Think();
-            int i;
-            for (i = 0; i < _civilianCenter->NGroups(); i++)
             {
-                AIGroup* grp = _civilianCenter->GetGroup(i);
-                if (grp)
-                {
-                    grp->GetRadio().Simulate(deltaT);
-                }
+                AICost::ScopedCost cost(AICost::Bucket::Radio);
+                _civilianCenter->GetRadio().Simulate(deltaT);
             }
+            AICost::AICosts().centers++;
+            _civilianCenter->Think();
+            SimulateGroupRadios(_civilianCenter, deltaT);
         }
         if (_logicCenter)
         {
+            AICost::AICosts().centers++;
             _logicCenter->Think();
         }
 
+        // PERF-014: the end-mission scan walks every sensor in the mission once a tick. It
+        // is not AI, but it is inside `PerformAI` and therefore inside the 21-34 ms
+        // PERF-013 attributed to the AI stage, so it gets its own bucket rather than
+        // silently inflating one.
+        AICost::ScopedCost endMissionCost(AICost::Bucket::EndMission);
         if (_endMission == EMContinue)
         {
             if (input.CheatActivated() == CheatWinMission)
