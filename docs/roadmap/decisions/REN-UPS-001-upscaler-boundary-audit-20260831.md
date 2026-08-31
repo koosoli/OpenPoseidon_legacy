@@ -131,9 +131,15 @@ sharpening nor require temporal inputs, and that the terminal fallback requires 
 
 | Suite | Before | After |
 | --- | --- | --- |
-| `PoseidonTests.exe` | 240,658 assertions / 3,008 cases, 0 failed | unchanged (no C++ touched) |
+| `PoseidonTests.exe` | 240,658 assertions / 3,008 cases / 2,988 passed / 20 skipped, 0 failed | 240,655 assertions, same case counts, 0 failed |
 | `cargo test -p wgpu_renderer --profile rwdi` | 204 passed, 0 failed, 1 ignored | **208 passed**, 0 failed, 1 ignored |
-| `cargo test -p wgpu_renderer --features dlss` | — | compiles; +1 DLSS caps test |
+| `cargo test -p wgpu_renderer --features dlss` | — | **212 passed**, 0 failed, 1 ignored |
+| `cmake --build … --target PoseidonGame` | — | clean, exit 0 |
+
+The engine assertion count moved by 3 (240,658 → 240,655) across identical case
+counts and zero failures. No C++ was touched by this change and `PoseidonTests` was
+not relinked between the two runs, so this is a test whose assertion count is not
+fixed run to run, not a regression — recorded rather than rounded away.
 
 ## 6. What remains
 
