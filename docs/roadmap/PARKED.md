@@ -174,11 +174,33 @@ of a recycled address is a leak. A separate, real defect surfaced in the audit: 
 motion-vector id folds to a **16-bit lane**, so two live objects 65,535 ids apart share one
 history slot. `REN-ID-001`.
 
-The largest remaining blocker is that the **push path is still single-buffered**: `_draws3d`, `_verts`,
-`_cmds`, `_palette`, `_cameras`, `_shadowCasters` are cleared in `InitDraw` and appended to
-by the world traversal on the same thread. Deliberately **not** built ahead of its
-consumer — doubling that storage before a render thread exists buys nothing and costs
-memory.
+**The single-buffered push path is no longer the blocker — it was closed on 2026-08-31**
+(`84a44e79`). The fifteen per-frame arrays plus `cameras`, which was a local and would have
+been *gone* rather than merely overwritten, now swap into a two-slot ring at publication.
+Verified by identical counts across three runs per arm (98,684 registered / 452 main /
+25,992 tris either way). That also closed blocker 3 by placement rather than by locking: the
+two readers of `_gpuInstances` both sit producer-side of `wgr_render_frame`, so the renderer
+never touches the live map and no mutex was needed.
+
+**What blocks it now is two things, both measured the same day and both larger.**
+
+*The handle is exclusive.* 62 of 79 `wgr_*` entry points form `&mut *renderer`, so two
+threads in any two of them alias an exclusive reference — UB in Rust's model, invisible to
+wgpu's validation. Only about ten call sites are actually in the way (the ones the producer
+makes while a frame renders), and they collapse to one mechanism: a queue drained at one
+point per frame. Creates cannot merely move threads, because `mesh_create` clears a bind
+cache the draw path reads. `REN-THR-001` has the counts, the call-site table and the
+per-frame traffic — which is **zero on Abel and 94–513 instance adds per frame on Everon**,
+so the bench scene is precisely the one that would have sized the queue wrong.
+
+*And there is no way to prove such a restructuring is equivalent.* Phase 5 step 6 requires
+it. The instrument now exists — the published `WgrFrame` is hashed at the publish point
+(`WGR_FRAME_HASH=1`) and is not vacuous — but three back-to-back runs of one scene agree for
+only ~24 frames past the load and then diverge absorbingly: by frame 800 they share not one
+frame hash. Pinning the simulation's `deltaT` does not help (24 → 19), nor does forcing the
+object stream to a fixed synchronous batch. `REN-THR-002`. **Finding what makes two runs of
+the same scene publish different frames is now the gating item**, ahead of the queue, since
+the queue is the first change that would need proving.
 
 ### GL33 retirement
 Evidence gathered, recommendation is **do not retire**: CI runs 111 of 117 Trident scenarios
