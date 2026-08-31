@@ -83,11 +83,26 @@ the tip at the time of writing.
 | Phase 1.4 | **HRTF probe and modes** merged in from the audio agent | `ALC_HRTF_STATUS_SOFT` was never queried, so "user chose Off" and "driver refused" logged identically. Now distinguishable. Measured here: 1 dataset, `Built-In HRTF`, and Auto ≡ On on this device because HRTF is already on before anything touches it |
 | Phase 8.6 | **Worker-count determinism harness** merged in from the determinism agent | Terrain generation is bit-identical at serial/1/2/4/8/32 workers. The negative control found a latent bug nothing had exercised: regenerating into a reused segment appended a second copy of the mesh (571 → 1056 → 1541 → 2026 vertices) and kept a stale water table |
 
-Engine suite **235,216** assertions / 0 failures; Foundation **159,282** / 0; renderer
+### 05:30-06:00
+
+| Area | What | Evidence |
+|---|---|---|
+| Phase 4.3 | **Audited: every clause already met**, and not by the mechanism the call site suggests | No explicit `Texture::destroy()` anywhere; handles are dropped and wgpu's tracker defers the free. The 120-frame eviction window is a thrash heuristic, not a safety margin |
+| MAT-054 | **The converter now deploys a colour-only material** | The deploy gate was "an albedo was baked". Reforger's baked-LOD materials are `MatPBRBasic` with one flat `Color` and no map — the engine has synthesised a procedural colour from that since DZ-002 and never got the chance, so twelve materials fell to the 1.0 white at bindless slot 0. **The owner's deployed corpus is unchanged until a re-export runs** |
+| 5.1 / sky | **The sky eased four times faster on a fast machine** | `alpha = 0.1` per FRAME makes the settling time a frame count: 0.33 s at 30 fps, 0.083 s at 120. Now a time constant, tuned so 60 fps is unchanged to three decimals. A steady clock, not the snapshot's float mission clock, whose representable step decays to 2 ms after eight hours of play |
+| Phase 8.4 | **Physics boundary audited; no restructuring warranted** | The backend is box3d (not Bullet), `workerCount` measures 1, physics steps once per fixed tick. But the negative controls found two real bugs in paths nothing calls: `RemoveBody` left a destroyed body in `_probes` (measured SIGSEGV), and `CastRay` used generation parity as a liveness test while slots are reused without re-bumping — so after any removal the next occupant of that slot reported "no body" for its whole life, and that answer feeds shell penetration |
+| Phase 1.4 | **EFX item 2 turned out to be 25 years old and already rejected** | Four of the five classifications shipped in *Operation Flashpoint* in 2001; the fifth and the crossfade landed 2026-08-30 and were parked hours later behind `POSEIDON_EXPERIMENTAL_EAX=1` after the owner's verdict. The agent found one checkable thing wrong inside it: interiors ran at a modal density of 0.02–0.08 against the 0.4287 the ROOM preset ships with |
+| Diagnostics | **The same defect, three times in one night** | The dead `cpu_milliseconds` column; the snapshot drop counter whose documented correct value was 0 when the truth is one per world load; and my own new `per_object_kb`, which reported a flat 0 on missions that do not use object streaming at all. Worth naming: **a diagnostic that cannot say "did not run" will be read as "ran"** |
+
+Engine suite **240,324** assertions / 0 failures; Foundation **159,282** / 0; renderer
 **204** / 0. All three green.
 
-One correction was issued against my own work: commit `97b08a39` corrects `869ce872`,
-which claimed the priority bug had a live impact it did not have.
+Two corrections were issued against my own work in the same session, and both are in the
+history rather than amended away: `97b08a39` corrects `869ce872`, which claimed the
+thread-priority bug had a live impact it did not have, and `34289573` corrects the commit
+immediately before it, which called a closed blocker open because I read the design
+document instead of the code — in a commit whose whole point was that the design document
+had gone stale.
 
 ## Open, in priority order
 
