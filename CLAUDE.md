@@ -28,6 +28,15 @@
 > 0d. **THE HOOKS PROTECT AGAINST DIVERGENCE. THEY DO NOT PROTECT AGAINST A SHARED INDEX.** 0c is about not starting from a stale commit. This one is about the three ways concurrent agents corrupt each other's *commits*, none of which any hook can catch, and all three of which happened on 2026-08-27/28.
 >    - **Work in your OWN worktree.** `git worktree add .claude/worktrees/<name> -b <branch>` — own directory, own index, own branch, shared object store, no second clone. Several already exist and every agent still worked in the main checkout, which is what made the rest of this rule necessary. Build from *your* worktree's build directory: tests have gone green in the main checkout against source the worktree never changed.
 >    - **NEVER `git add -A` or `git add .`** — stage explicit paths only, then run `git status --porcelain`. Anything still showing as modified that you did not write belongs to someone else; leave it. (`git add -A engine/` swept an uncommitted `TransportCore.cpp` into a depth-of-field commit. It had to be backed out in a second commit, and by then it was already compiled into the binary the owner was playing.)
+>    - **`git add` DOES NOT SCOPE YOUR COMMIT. `git commit` writes the whole INDEX.**
+>      Staging one explicit path and then committing takes everything anyone else has
+>      staged too. In a shared worktree that is a live hazard, not a theoretical one: on
+>      2026-09-01 a commit meant to carry one roadmap document carried twelve of another
+>      agent’s renderer files with it, and was pushed before either side noticed. The rule
+>      above says never `git add -A`; that is not enough on its own, because the danger is
+>      not what YOU staged. **Commit with an explicit pathspec — `git commit -- <paths>` —**
+>      which ignores the rest of the index whatever is in it, then read `git show --stat`
+>      before pushing.
 >    - **Check the commit is COMPLETE, not just that your tree builds.** `git diff --stat HEAD` after committing: a file listed there that belongs to the change was never staged. For anything larger than a one-liner, build the committed tree separately rather than the working copy. (A commit landed with the `.cpp` and without the `.hpp` it needs. It built for its author — the header was sitting unstaged in their working copy — and could not build for anyone else.)
 >    - **Push as soon as it stands on its own.** A hook can only compare against what the remote knows, so an unpushed commit is invisible to every other agent and to every guard. Four commits sat local-only for hours in one session, including another agent's work that a disk failure would have taken with it.
 >    - **Committing someone else's work is allowed — but SAY SO in the first line.** Sometimes it must happen: an uncommitted foreign change was already inside a deployed binary and recorded nowhere. Discarding it is worse than recording it; the requirement is that the message names it as foreign work and says why you are entering it, so authorship stays readable.
