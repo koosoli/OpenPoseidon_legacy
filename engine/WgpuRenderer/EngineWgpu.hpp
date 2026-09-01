@@ -1169,6 +1169,27 @@ class EngineWgpu : public EngineDummy
     std::unordered_map<uint64_t, uint64_t> _overlayTexIdOf;
     void DrainOverlayTexOps();
 
+    // REN-THR-012 -- the READ half of the boundary. Nineteen call sites read renderer
+    // counters; seventeen are the dev panel, the streaming diagnostics and the capture JSON
+    // (REN-THR-006's audit). They ran the FFI live, from the main thread, at whatever moment
+    // the panel happened to draw -- which is a read of renderer state from outside the
+    // renderer's frame, and the last one on the wrong side of the line.
+    //
+    // They now read a copy published once per frame, immediately after wgr_render_frame,
+    // where the async readbacks have just landed. A reader therefore sees the frame that was
+    // last COMPLETED, which is the same thing it saw before and is what a counter display
+    // wants. Cheaper too: three FFI calls a frame instead of one per consumer.
+    ObjectStatsOut _publishedObjectStats;
+    GrassStatsOut _publishedGrassStats;
+    GpuMemoryStatsOut _publishedMemoryStats;
+    bool _publishedObjectStatsValid = false;
+    bool _publishedGrassStatsValid = false;
+    bool _publishedMemoryStatsValid = false;
+    void PublishRendererStats();
+    bool GetObjectStatsFromRenderer(ObjectStatsOut& out) const;
+    bool GetGrassStatsFromRenderer(GrassStatsOut& out) const;
+    bool GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const;
+
     // REN-THR-001 asked how often the producer mutates renderer state outside NextFrame,
     // and answered "unmeasured" twice, in the two places where the answer decides the
     // design. These count it. A mean alone would hide the shape -- streaming is bursty by

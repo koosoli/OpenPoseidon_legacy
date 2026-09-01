@@ -2597,6 +2597,7 @@ void EngineWgpu::NextFrame()
         frame.grass_batches = backing.grassBatches;
         HashPublishedFrame(frame);
         wgr_render_frame(_renderer, &frame);
+        PublishRendererStats();
         LogObjectPerfRow();
         LogDrawSectionStats();
         if (_wbank)
@@ -8061,7 +8062,43 @@ int EngineWgpu::GetCpuTimings(float* outMs, int maxCount) const
     return (int)wgr_get_cpu_timings(_renderer, outMs, (uint32_t)maxCount);
 }
 
+// REN-THR-012: the published copies. Readers get the last COMPLETED frame's counters,
+// which is what they saw before -- the async readbacks land during the frame, so a live
+// read from a dev panel was already showing a frame that had finished.
 bool EngineWgpu::GetObjectStats(ObjectStatsOut& out) const
+{
+    if (!_publishedObjectStatsValid)
+        return false;
+    out = _publishedObjectStats;
+    return true;
+}
+
+bool EngineWgpu::GetGrassStats(GrassStatsOut& out) const
+{
+    if (!_publishedGrassStatsValid)
+        return false;
+    out = _publishedGrassStats;
+    return true;
+}
+
+bool EngineWgpu::GetGpuMemoryStats(GpuMemoryStatsOut& out) const
+{
+    if (!_publishedMemoryStatsValid)
+        return false;
+    out = _publishedMemoryStats;
+    return true;
+}
+
+// Called once per frame, right after wgr_render_frame, where the readbacks have just
+// landed. Three FFI calls a frame instead of one per consumer.
+void EngineWgpu::PublishRendererStats()
+{
+    _publishedObjectStatsValid = GetObjectStatsFromRenderer(_publishedObjectStats);
+    _publishedGrassStatsValid = GetGrassStatsFromRenderer(_publishedGrassStats);
+    _publishedMemoryStatsValid = GetGpuMemoryStatsFromRenderer(_publishedMemoryStats);
+}
+
+bool EngineWgpu::GetObjectStatsFromRenderer(ObjectStatsOut& out) const
 {
     if (!_renderer)
         return false;
@@ -8098,7 +8135,7 @@ bool EngineWgpu::GetObjectStats(ObjectStatsOut& out) const
     return true;
 }
 
-bool EngineWgpu::GetGrassStats(GrassStatsOut& out) const
+bool EngineWgpu::GetGrassStatsFromRenderer(GrassStatsOut& out) const
 {
     if (!_renderer)
         return false;
@@ -8117,7 +8154,7 @@ bool EngineWgpu::GetGrassStats(GrassStatsOut& out) const
     return true;
 }
 
-bool EngineWgpu::GetGpuMemoryStats(GpuMemoryStatsOut& out) const
+bool EngineWgpu::GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const
 {
     if (!_renderer)
         return false;
