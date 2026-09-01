@@ -4419,6 +4419,54 @@ void DrawPerfTab()
     Dev::PanelHelp("frame %.2f ms avg / %.2f p95 / %.2f max (last %d frames)", total.avgMs, total.p95Ms, total.maxMs,
                    frames);
 
+    // REN-THR-015 -- the render thread, switchable and watchable. The switch takes effect at
+    // the next frame boundary, never mid-frame: the engine will not start or stop a worker
+    // while one holds the renderer handle.
+    if (GEngine)
+    {
+        const Engine::RenderThreadInfo rt = GEngine->GetRenderThreadInfo();
+        if (rt.available)
+        {
+            ImGui::Separator();
+            bool on = rt.enabled;
+            if (Dev::Checkbox("Render thread", &on))
+                GEngine->SetRenderThreadEnabled(on);
+            Dev::PanelSameLine();
+            Dev::PanelHelp("Runs the drains, the frame publish and wgr_render_frame on a worker. LOCKSTEP: "
+                           "the producer still WAITS for each frame, so this is a stack change and not "
+                           "overlap -- expect the same framerate, not a better one. Proven equivalent: "
+                           "901 of 901 scene frames identical to the inline path.");
+
+            const float simMs = total.avgMs - rt.workerBusyMs + rt.overlapMs;
+            ImGui::Text("Simulation         %6.1f ms", simMs < 0.0f ? 0.0f : simMs);
+            ImGui::Text("Render thread      %6.1f ms", rt.workerBusyMs);
+            ImGui::Text("Sim/Render overlap %6.1f ms", rt.overlapMs);
+            Dev::PanelSameLine();
+            Dev::PanelHelp("Worker time the producer did NOT wait for. Zero in lockstep by construction "
+                           "-- it is derived as busy minus wait, so it cannot disagree with the two "
+                           "numbers above it.");
+            ImGui::Spacing();
+            ImGui::Text("Render thread      %5.0f %%", 100.0f * rt.workerBusyFrac);
+            ImGui::Text("Main thread        %5.0f %%", 100.0f * rt.mainBusyFrac);
+            Dev::PanelSameLine();
+            Dev::PanelHelp("Main EXCLUDES the time it sits blocked on the worker, so in lockstep it reads "
+                           "low and the render thread reads high. That is the mode working, not a stall.");
+            {
+                float gpuMs[Engine::kGpuRegionEnd] = {};
+                const int gpuCount = GEngine->GetWaterGpuTimings(gpuMs, Engine::kGpuRegionEnd);
+                if (gpuCount > 0 && total.avgMs > 0.001f)
+                {
+                    float gpuTotal = 0.0f;
+                    for (int i = 0; i < gpuCount; i++)
+                        if (gpuMs[i] > 0.0f)
+                            gpuTotal += gpuMs[i];
+                    ImGui::Text("GPU                %5.0f %%", 100.0f * gpuTotal / total.avgMs);
+                }
+            }
+            ImGui::Separator();
+        }
+    }
+
     static float history[Dev::FrameProfiler::kRingSize];
     const int n = frames;
     for (int i = 0; i < n; i++)

@@ -1210,6 +1210,27 @@ class EngineWgpu : public EngineDummy
     bool _renderQuit = false;
     bool _renderThreadOn = false;
     void RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing);
+
+    // REN-THR-015: switching at a frame boundary. The panel writes the REQUEST; NextFrame
+    // acts on it at the top, where no work is in flight and no one holds the handle. A
+    // toggle applied anywhere else would have to stop a worker mid-frame.
+    bool _renderThreadRequested = false;
+    // Timing, accumulated over the reporting window. Written by the worker (busy) and the
+    // producer (wait); read by the panel. Plain floats: they are a diagnostic and a torn
+    // read costs a wrong pixel in a readout, not a wrong frame.
+    double _rtLastBusyMs = 0.0;
+    double _rtBusyMsAccum = 0.0;
+    double _rtWaitMsAccum = 0.0;
+    double _rtWindowMsAccum = 0.0;
+    uint32_t _rtWindowFrames = 0;
+    float _rtBusyMs = 0.0f, _rtWaitMs = 0.0f, _rtBusyFrac = 0.0f, _rtMainFrac = 0.0f;
+    void AccumulateRenderThreadTiming(double busyMs, double waitMs, double frameMs);
+
+  public:
+    RenderThreadInfo GetRenderThreadInfo() const override;
+    void SetRenderThreadEnabled(bool on) override { _renderThreadRequested = on; }
+
+  private:
     void RenderThreadMain();
     void StartRenderThread();
     void StopRenderThread();

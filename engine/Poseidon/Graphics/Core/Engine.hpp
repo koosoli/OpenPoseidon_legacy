@@ -2718,6 +2718,32 @@ class Engine : public IGraphicsEngine
 
     // REN-TEMP-001 §6.7 — live temporal/upscaler tuning. APPENDED at the class end
     // (vtable-slot note above). Wgpu-only; the base is inert so GL33/tools need nothing.
+    // REN-THR-015 -- the render thread, as something the dev panel can switch and watch.
+    //
+    // The three times are measured, not modelled. `workerBusyMs` is wall time inside the
+    // consumer block on whichever thread ran it. `mainWaitMs` is how long the producer sat
+    // blocked on it. `overlapMs` is the DIFFERENCE -- worker time the producer did NOT wait
+    // for -- which is zero by construction in lockstep and is the whole point of the mode
+    // that follows it. Deriving overlap rather than timing it separately means the three can
+    // never disagree with each other.
+    struct RenderThreadInfo
+    {
+        bool available = false; // backend can run one at all (WGPU yes, GL33 no)
+        bool enabled = false;   // one is running right now
+        float workerBusyMs = 0.0f;
+        float mainWaitMs = 0.0f;
+        float overlapMs = 0.0f;
+        // Busy fraction over the reporting window, 0..1. `mainBusy` excludes the wait, so a
+        // producer that spends its frame blocked reads LOW here and the render thread reads
+        // high -- which is the picture lockstep should paint.
+        float workerBusyFrac = 0.0f;
+        float mainBusyFrac = 0.0f;
+    };
+    virtual RenderThreadInfo GetRenderThreadInfo() const { return {}; }
+    /// Switch the render thread at a frame boundary. Takes effect on the next frame; the
+    /// engine never starts or stops a worker while one holds the renderer handle.
+    virtual void SetRenderThreadEnabled(bool /*on*/) {}
+
     virtual bool SupportsTemporalTuning() const { return false; }
     virtual TemporalSettings GetTemporalTuning() const { return {}; }
     virtual void SetTemporalTuning(const TemporalSettings& /*t*/) {}

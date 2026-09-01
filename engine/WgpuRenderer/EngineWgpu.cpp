@@ -2097,6 +2097,7 @@ void EngineWgpu::DrainInstanceOps()
 // that create what it resolves and precedes the hash that walks what it patches.
 void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing)
 {
+    const auto blockStart = std::chrono::steady_clock::now();
     ApplyPendingRendererSettings();
     DrainResourceOps();
     DrainInstanceOps();
@@ -2107,6 +2108,42 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing)
     HashPublishedFrame(frame);
     wgr_render_frame(_renderer, &frame);
     PublishRendererStats();
+    _rtLastBusyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blockStart).count();
+}
+
+// Window of one second, so the readout is stable enough to read while the game runs.
+void EngineWgpu::AccumulateRenderThreadTiming(double busyMs, double waitMs, double frameMs)
+{
+    _rtBusyMsAccum += busyMs;
+    _rtWaitMsAccum += waitMs;
+    _rtWindowMsAccum += frameMs;
+    _rtWindowFrames++;
+    if (_rtWindowMsAccum < 1000.0)
+        return;
+    const double invFrames = 1.0 / static_cast<double>(_rtWindowFrames);
+    _rtBusyMs = static_cast<float>(_rtBusyMsAccum * invFrames);
+    _rtWaitMs = static_cast<float>(_rtWaitMsAccum * invFrames);
+    const double window = _rtWindowMsAccum > 0.0 ? _rtWindowMsAccum : 1.0;
+    _rtBusyFrac = static_cast<float>(_rtBusyMsAccum / window);
+    // The producer's own busy time is the window minus what it spent BLOCKED on the worker.
+    _rtMainFrac = static_cast<float>((_rtWindowMsAccum - _rtWaitMsAccum) / window);
+    _rtBusyMsAccum = _rtWaitMsAccum = _rtWindowMsAccum = 0.0;
+    _rtWindowFrames = 0;
+}
+
+Engine::RenderThreadInfo EngineWgpu::GetRenderThreadInfo() const
+{
+    RenderThreadInfo info;
+    info.available = _renderer != nullptr;
+    info.enabled = _renderThreadOn;
+    info.workerBusyMs = _rtBusyMs;
+    info.mainWaitMs = _rtWaitMs;
+    // Worker time the producer did NOT wait for. Zero in lockstep by construction, which is
+    // the honest reading: the mode exists to prove the mechanics, not to overlap.
+    info.overlapMs = _rtBusyMs > _rtWaitMs ? _rtBusyMs - _rtWaitMs : 0.0f;
+    info.workerBusyFrac = _rtBusyFrac;
+    info.mainBusyFrac = _rtMainFrac;
+    return info;
 }
 
 void EngineWgpu::RenderThreadMain()
@@ -2163,6 +2200,17 @@ void EngineWgpu::NextFrame()
 {
     if (_renderer)
     {
+        // REN-THR-015: apply a panel toggle HERE -- top of the frame, nothing in flight,
+        // nobody holding the handle. Anywhere else would mean stopping a worker mid-frame.
+        if (_renderThreadRequested != _renderThreadOn)
+        {
+            if (_renderThreadRequested)
+                StartRenderThread();
+            else
+                StopRenderThread();
+        }
+        const auto frameStartForRt = std::chrono::steady_clock::now();
+        double waitMs = 0.0;
         SyncWaterLookProfile();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
         // into _tonemap / _sky (auto mode only; manual override holds the tabs' values).
@@ -2712,13 +2760,20 @@ void EngineWgpu::NextFrame()
                 _renderHasWork = true;
             }
             _renderCv.notify_one();
-            std::unique_lock<std::mutex> lock(_renderMutex);
-            _renderCv.wait(lock, [this] { return !_renderHasWork; });
+            const auto waitStart = std::chrono::steady_clock::now();
+            {
+                std::unique_lock<std::mutex> lock(_renderMutex);
+                _renderCv.wait(lock, [this] { return !_renderHasWork; });
+            }
+            waitMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
         }
         else
         {
             RunConsumerBlock(frame, backing);
         }
+        AccumulateRenderThreadTiming(_rtLastBusyMs, waitMs,
+                                     std::chrono::duration<double, std::milli>(
+                                         std::chrono::steady_clock::now() - frameStartForRt).count());
         LogObjectPerfRow();
         LogDrawSectionStats();
         if (_wbank)
