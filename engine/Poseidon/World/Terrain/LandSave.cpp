@@ -3262,8 +3262,29 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     centerX = (centerX / QuantizeCells) * QuantizeCells;
     centerZ = (centerZ / QuantizeCells) * QuantizeCells;
     const bool centerChanged = centerX != _modernObjectCenterX || centerZ != _modernObjectCenterZ;
+
+    // PRELOAD MODE. Off by default; WGR_OBJECT_STREAM_PRELOAD=1 turns it on.
+    //
+    // The per-update caps exist to keep a frame short, and they do: the world fills in
+    // gradually behind the camera. The cost is that the fill-in TAKES that long. This mode
+    // trades the shape of that cost rather than its size -- pay it in a few very long
+    // frames at the start, when nobody is aiming at anything, instead of in hundreds of
+    // merely bad ones while they are. Measured on Stratis: full residency in 8 update
+    // rounds against 21.
+    // Generous against the 7-8 updates a full window takes, and small enough that the mode
+    // cannot survive into play on a world that never goes idle.
+    constexpr uint64_t kPreloadMaxUpdates = 64;
+    static const bool preloadRequested = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_PRELOAD");
+        return v != nullptr && v[0] == '1';
+    }();
+    const bool preloading = preloadRequested && !_modernObjectPreloadDone;
+
     if (!centerChanged && !_modernObjectResidencyPending)
+    {
         return;
+    }
     if (centerChanged)
     {
         _modernObjectCenterX = centerX;
@@ -3456,8 +3477,12 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // time budget only lets a slow frame admit MORE. The hard cap bounds the worst
     // case, because each create is a synchronous model decode + texture transcode.
     const auto admitStart = std::chrono::steady_clock::now();
-    const float admitBudgetMs = ObjectStreamBudgetMs();
-    const uint32_t admitCap = _modernObjectCreatesPerUpdate * ObjectStreamMaxBatchScale();
+    // The budget is consulted as a millisecond ceiling, so "no ceiling" is a large number
+    // rather than a flag: every comparison downstream keeps working unchanged.
+    const float admitBudgetMs = preloading ? 1.0e9f : ObjectStreamBudgetMs();
+    const uint32_t admitCap =
+        preloading ? std::numeric_limits<uint32_t>::max()
+                   : _modernObjectCreatesPerUpdate * ObjectStreamMaxBatchScale();
     // THE FLOOR, NOT THE BUDGET, IS WHAT MAKES THE FILL-IN STUTTER.
     //
     // The time budget cannot be consulted until `floor` objects have been attempted, so a
@@ -3497,6 +3522,10 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // once a bound is spent (the outer cell loop re-enters), so counting every true would
     // count cells, not stops. See the member declarations in Landscape.hpp.
     ++_modernObjectAdmitUpdates;
+    if (preloading)
+    {
+        ++_modernObjectPreloadUpdates;
+    }
     bool admitStopRecorded = false;
     auto admitBudgetSpent = [&]
     {
@@ -3886,6 +3915,46 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     _modernResidentObjectCount = released > _modernResidentObjectCount + created
                                      ? 0
                                      : _modernResidentObjectCount + created - released;
+    // CONVERGENCE. Counted idle updates, not `pending`, and that is the whole lesson of
+    // this function: two earlier versions latched on `!_modernObjectResidencyPending` and
+    // neither ever fired in a 1500-frame run, because a world whose requested set sits just
+    // under the resident budget (19994 of 20000 on the world this was measured on) keeps at
+    // least one desired-but-inactive cell for ever. `pending` is therefore not a statement
+    // about the FILL being finished; it is a statement about the budget being tight.
+    //
+    // Three consecutive updates that created nothing is. It cannot be starved by a cell that
+    // will never be admitted, and it is a counter, so it means the same thing on every
+    // machine.
+    // WHEN THE MODE ENDS, and it took three attempts to get this right. Both obvious
+    // conditions are wrong on a real world:
+    //
+    //  * `!_modernObjectResidencyPending` never becomes true when the requested set sits
+    //    just under the resident budget (19994 of 20000 on the world this was measured on):
+    //    at least one desired cell can never be admitted, so `pending` is a statement about
+    //    the budget being tight, not about the fill being finished.
+    //  * "three updates that created nothing" never becomes true either, for the same
+    //    reason -- at the budget ceiling the streamer evicts and re-admits continuously and
+    //    `created` is never 0.
+    //
+    // So the bound is a COUNT OF UPDATES, which is the one thing that cannot be starved by
+    // either. kPreloadMaxUpdates is generous next to the 7-8 rounds a full window actually
+    // takes, and it is what makes the mode safe to ship: it lifts the per-frame caps for a
+    // bounded prefix of the run and then hands them back, whatever the world does.
+    if (preloading)
+    {
+        const bool idle = created == 0 && ++_modernObjectPreloadIdleUpdates >= 3;
+        if (created != 0)
+        {
+            _modernObjectPreloadIdleUpdates = 0;
+        }
+        if (idle || _modernObjectPreloadUpdates >= kPreloadMaxUpdates)
+        {
+            _modernObjectPreloadDone = true;
+            LOG_INFO(World, "Modern object preload: ended after {} updates ({}); per-update caps back on",
+                     _modernObjectPreloadUpdates, idle ? "window idle" : "update bound reached");
+        }
+    }
+
     _modernObjectResidencyPending = false;
     for (const CellCandidate& cell : candidates)
     {

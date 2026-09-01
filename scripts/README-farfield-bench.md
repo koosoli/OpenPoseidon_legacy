@@ -69,6 +69,15 @@ simulation roughly **fifteenfold** on `perf_combat` — measured, same build, sa
 | tick rate | 40 of 60 | **60–63 of 60** |
 | catch-up steps discarded per second | 23–35 | **0** |
 
+**`dist/` staging fails SILENTLY while the game is running.** CMake stages
+`wgpu_renderer.dll` into `dist/` after every link; a live game instance holds that DLL, the
+copy fails, and **the exe in `dist/` keeps its old timestamp** while the build reports
+success. Measured 2026-09-01: three consecutive "successful" builds, and `dist` never moved
+off 16:06 — two measurement rounds were spent explaining behaviour of code that was not in
+the binary. The build DOES say `Error copying file ... wgpu_renderer.dll`, but it has no
+colon after "Error", so the usual `grep -E "error:"` filter hides it. Check the exe
+timestamp, or grep the binary for a string you just added.
+
 **`frame_max` is the screenshot, not a hitch.** `FlushPendingScreenshot()` is inside
 `NextFrame`, so the readback lands in that frame's `swap`; the harness takes one at the end of
 the run and the 256-frame phase ring closes there too, so the capture frame is inside the ring

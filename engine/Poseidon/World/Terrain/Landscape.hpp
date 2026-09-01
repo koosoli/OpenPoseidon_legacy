@@ -778,6 +778,14 @@ class Landscape : public SerializeClass
     // `_modernObjectAdmitUpdates` is the denominator; updates that drained every candidate
     // without hitting anything are `updates - (sum of the four)`.
     uint64_t _modernObjectAdmitUpdates = 0;
+
+    // WGR_OBJECT_STREAM_PRELOAD. True once the residency window has stopped growing, after
+    // which the ordinary per-update caps apply again -- the mode lifts the bound for the
+    // FILL, not for play. Latched rather than recomputed so a later camera move into new
+    // terrain cannot silently re-enter it and produce a second stall.
+    bool _modernObjectPreloadDone = false;
+    uint64_t _modernObjectPreloadUpdates = 0;
+    uint32_t _modernObjectPreloadIdleUpdates = 0;
     uint64_t _modernObjectAdmitStopCap = 0;      // attempted >= admitCap
     uint64_t _modernObjectAdmitStopUpload = 0;   // frame upload bytes >= WGR_OBJECT_STREAM_UPLOAD_MB
     uint64_t _modernObjectAdmitStopCeiling = 0;  // elapsed >= WGR_OBJECT_STREAM_MAX_MS
