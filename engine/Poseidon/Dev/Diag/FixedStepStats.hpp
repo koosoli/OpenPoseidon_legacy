@@ -33,6 +33,11 @@ struct FixedStepFrame
     /// True while the world is stepping at all -- a paused world publishes false
     /// and resets, and its zero-step frames are not a stall.
     bool running = false;
+    /// Cumulative ticks since the process started. The per-frame `steps` above cannot align
+    /// two runs -- and counting log lines cannot either once the frame hash is written by the
+    /// RENDER THREAD, because the interleaving changes. This is the alignment key: it
+    /// identifies the simulation state a published frame belongs to, whoever writes the line.
+    std::uint64_t totalTicks = 0;
 };
 
 /// Called once per rendered frame from World::Simulate. Cheap by construction.

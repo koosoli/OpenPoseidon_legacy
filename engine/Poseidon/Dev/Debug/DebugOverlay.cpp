@@ -4440,11 +4440,28 @@ void DrawPerfTab()
             const float simMs = total.avgMs - rt.workerBusyMs + rt.overlapMs;
             ImGui::Text("Simulation         %6.1f ms", simMs < 0.0f ? 0.0f : simMs);
             ImGui::Text("Render thread      %6.1f ms", rt.workerBusyMs);
+            if (rt.overlapAvailable)
+            {
+                bool ov = rt.overlapEnabled;
+                if (Dev::Checkbox("Overlap sim and render", &ov))
+                    GEngine->SetRenderOverlapEnabled(ov);
+                Dev::PanelSameLine();
+                Dev::PanelHelp("Lets the simulation run ahead instead of waiting for each frame. The ring "
+                               "is two deep, so it may lead by at most one frame; past that the producer "
+                               "blocks and that block shows up as Queue waiting below.");
+            }
             ImGui::Text("Sim/Render overlap %6.1f ms", rt.overlapMs);
             Dev::PanelSameLine();
             Dev::PanelHelp("Worker time the producer did NOT wait for. Zero in lockstep by construction "
                            "-- it is derived as busy minus wait, so it cannot disagree with the two "
                            "numbers above it.");
+            ImGui::Text("Render lag         %4.0f / %d frames", rt.lagFrames, 1);
+            ImGui::Text("Queue waiting      %6.1f ms", rt.queueWaitMs);
+            Dev::PanelSameLine();
+            Dev::PanelHelp("How long the producer BLOCKED. In lockstep that is the whole render, because "
+                           "it waits for all of it. With overlap on it is only what the renderer could "
+                           "not absorb -- so above zero here means the renderer cannot keep up, and lag "
+                           "sitting at 1 with waiting at 0 means it is a frame behind but keeping pace.");
             ImGui::Spacing();
             ImGui::Text("Render thread      %5.0f %%", 100.0f * rt.workerBusyFrac);
             ImGui::Text("Main thread        %5.0f %%", 100.0f * rt.mainBusyFrac);

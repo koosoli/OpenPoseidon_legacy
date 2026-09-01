@@ -2738,11 +2738,24 @@ class Engine : public IGraphicsEngine
         // high -- which is the picture lockstep should paint.
         float workerBusyFrac = 0.0f;
         float mainBusyFrac = 0.0f;
+        // REN-THR-016. `overlapEnabled` is the mode; `lagFrames` is how far the worker was
+        // behind when the producer last published (0 kept up, 1 still on the previous
+        // frame); `queueWaitMs` is how long the producer BLOCKED because both ring slots
+        // were busy. In lockstep queueWaitMs is the whole render, because the producer waits
+        // for all of it; in overlap it is only the part the renderer could not absorb, so it
+        // going above zero is the direct reading of "the renderer cannot keep up".
+        bool overlapAvailable = false;
+        bool overlapEnabled = false;
+        float lagFrames = 0.0f;
+        float queueWaitMs = 0.0f;
     };
     virtual RenderThreadInfo GetRenderThreadInfo() const { return {}; }
     /// Switch the render thread at a frame boundary. Takes effect on the next frame; the
     /// engine never starts or stops a worker while one holds the renderer handle.
     virtual void SetRenderThreadEnabled(bool /*on*/) {}
+    /// Let the producer run ahead instead of waiting for each frame. Requires the render
+    /// thread; switched at the same frame boundary and drained before it is turned off.
+    virtual void SetRenderOverlapEnabled(bool /*on*/) {}
 
     virtual bool SupportsTemporalTuning() const { return false; }
     virtual TemporalSettings GetTemporalTuning() const { return {}; }

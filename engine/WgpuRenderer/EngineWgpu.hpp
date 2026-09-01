@@ -972,6 +972,14 @@ class EngineWgpu : public EngineDummy
     // when the threads split and the counters show the drop, not before.
     struct PushFrameBacking
     {
+        // The alignment key for comparing two runs, captured HERE -- on the producer, at the
+        // instant the frame is handed over. Reading the global tick counter inside the
+        // consumer instead reports where the SIMULATION had got to by the time the worker ran,
+        // which under overlap is a frame or more later: the first attempt at this logged every
+        // second tick and made overlap look as though it dropped half its frames.
+        std::uint64_t totalTicks = 0;
+        std::uint32_t steps = 0;
+
         std::vector<WgrVertex2D> verts;
         std::vector<WgrDraw2DBatch> batches;
         std::vector<WgrDraw3D> draws3d;
@@ -1038,7 +1046,7 @@ class EngineWgpu : public EngineDummy
     };
     PendingRendererSettings _pendingSet;
     // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
-    void ApplyPendingRendererSettings();
+    void ApplyPendingRendererSettings(PendingRendererSettings& p);
 
     // REN-THR-007 -- the instance half of the handoff (REN-THR-001 shape 2). The producer no
     // longer holds renderer slots at all: it holds ITS OWN handles, allocated here, and every
@@ -1070,7 +1078,7 @@ class EngineWgpu : public EngineDummy
     uint32_t EnqueueInstanceAdd(const WgrInstance& inst);
     void EnqueueInstanceUpdate(uint32_t handle, const WgrInstance& inst);
     void EnqueueInstanceRemove(uint32_t handle);
-    void DrainInstanceOps();
+    void DrainInstanceOps(std::vector<InstanceOp>& ops);
 
     // REN-THR-008 -- shape 3, the RETAINED-model half: mesh creates and destroys, crown
     // centres and model registration cross the frame as queued ops with producer handles,
@@ -1116,7 +1124,7 @@ class EngineWgpu : public EngineDummy
     uint32_t _nextModelHandle = 0; // WGR_INVALID_MODEL is the sentinel and is never allocated
     std::unordered_map<uint64_t, uint64_t> _meshIdOf;  // producer -> renderer (post-drain)
     std::unordered_map<uint32_t, uint32_t> _modelIdOf; // producer -> renderer (post-drain)
-    void DrainResourceOps();
+    void DrainResourceOps(std::vector<ResourceOp>& ops);
 
     // REN-THR-011 -- CPU-path meshes translate by SLOT, not through _meshIdOf, and the
     // handles they leave in the draw arrays are patched at the publish point.
@@ -1138,7 +1146,8 @@ class EngineWgpu : public EngineDummy
     };
     std::vector<PendingMeshRef> _draws3dPendingMesh;
     std::vector<PendingMeshRef> _castersPendingMesh;
-    void PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters);
+    void PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters,
+                                 std::vector<PendingMeshRef>& drawRefs, std::vector<PendingMeshRef>& casterRefs);
     uint32_t _droppedUndefinedMeshDraws = 0;
     // Nulled by ~EngineWgpu; see CpuMeshLink.
     std::shared_ptr<CpuMeshLink> _cpuMeshLink = std::make_shared<CpuMeshLink>();
@@ -1168,9 +1177,44 @@ class EngineWgpu : public EngineDummy
         std::vector<uint8_t> rgba; // Create/Update payload (copied; UI-sized, rare)
     };
     std::vector<OverlayTexOp> _overlayTexOps;
+
+    // REN-THR-016 -- OVERLAP. In lockstep the producer waits, so one set of queues is safe:
+    // the worker finishes before the producer touches them again. Without the wait it is
+    // not, so each ring slot gets its own set and the producer fills the next slot's while
+    // the worker drains this one's. Indexed like _pushRing, deliberately a separate array
+    // rather than a member of PushFrameBacking, which is declared above these types.
+    //
+    // The ring is two deep, so the producer may run at most ONE frame ahead. When it would
+    // run two ahead it blocks -- and that block is the honest reading of "the renderer
+    // cannot keep up", which is why it is measured and shown rather than hidden.
+    struct FrameQueues
+    {
+        PendingRendererSettings settings;
+        std::vector<ResourceOp> resourceOps;
+        std::vector<InstanceOp> instanceOps;
+        std::vector<OverlayTexOp> overlayTexOps;
+        std::vector<PendingMeshRef> draws3dPendingMesh;
+        std::vector<PendingMeshRef> castersPendingMesh;
+        // The published frame itself, NOT a stack local. Its slices point into this slot's
+        // backing arrays, so it belongs in the slot with them. It was a local in NextFrame
+        // while the producer waited -- and the first overlap run crashed inside
+        // wgr_render_frame on the worker for exactly that reason: the producer returned and
+        // the local died underneath it.
+        WgrFrame published{};
+    };
+    FrameQueues _queueRing[kPushFrameRing];
+    bool _overlapRequested = false;
+    bool _overlapOn = false;
+    // Frames the worker is behind when the producer publishes: 0 = it kept up, 1 = it is
+    // still on the previous frame. Bounded by the ring depth.
+    uint32_t _renderLagFrames = 0;
+    float _renderLagShown = 0.0f;
+    void MoveQueuesInto(FrameQueues& q);
+    int _renderBusySlot = -1;   // ring slot the worker holds, -1 = idle
+    int _renderSubmitSlot = -1; // slot handed over with the current work item
     uint64_t _nextOverlayTexHandle = 1; // 0 stays "built-in white"
     std::unordered_map<uint64_t, uint64_t> _overlayTexIdOf;
-    void DrainOverlayTexOps();
+    void DrainOverlayTexOps(std::vector<OverlayTexOp>& ops);
     void TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws);
 
     // REN-THR-012 -- the READ half of the boundary. Nineteen call sites read renderer
@@ -1209,7 +1253,7 @@ class EngineWgpu : public EngineDummy
     bool _renderHasWork = false;
     bool _renderQuit = false;
     bool _renderThreadOn = false;
-    void RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing);
+    void RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, FrameQueues& q);
 
     // REN-THR-015: switching at a frame boundary. The panel writes the REQUEST; NextFrame
     // acts on it at the top, where no work is in flight and no one holds the handle. A
@@ -1229,6 +1273,7 @@ class EngineWgpu : public EngineDummy
   public:
     RenderThreadInfo GetRenderThreadInfo() const override;
     void SetRenderThreadEnabled(bool on) override { _renderThreadRequested = on; }
+    void SetRenderOverlapEnabled(bool on) override { _overlapRequested = on; }
 
   private:
     void RenderThreadMain();
@@ -1287,7 +1332,7 @@ class EngineWgpu : public EngineDummy
     // question about the engine, not about this code, and is answered by running it. Enabled
     // by WGR_FRAME_HASH=1 and off otherwise: it walks every published byte.
     static constexpr int kFrameHashSlices = 17; // scalars + the sixteen slices
-    void HashPublishedFrame(const WgrFrame& frame);
+    void HashPublishedFrame(const WgrFrame& frame, const PushFrameBacking& backing);
     bool _frameHashOn = false;
     uint64_t _frameHashRun = 0;   // folded over every frame so far this run
     uint64_t _frameHashLast = 0;  // the last single frame, so a stuck value is visible

@@ -1044,6 +1044,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so
     // sampling it earlier would report the previous frame's leftover.
     stepFrame.alpha = static_cast<float>(_simulationSteps.Alpha());
+    {
+        // Cumulative, so a published frame can name the simulation state it belongs to --
+        // the only alignment key that survives the frame hash moving to the render thread.
+        static std::uint64_t totalTicks = 0;
+        totalTicks += stepFrame.steps;
+        stepFrame.totalTicks = totalTicks;
+    }
     Dev::PublishFixedStepFrame(stepFrame);
 
     if (IsSimulationEnabled())

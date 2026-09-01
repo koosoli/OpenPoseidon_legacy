@@ -45,12 +45,17 @@ std::atomic<bool> g_fixedStepScripts{[]
 
 } // namespace
 
+std::atomic<std::uint64_t> g_totalTicks{0};
+
 void PublishFixedStepFrame(const FixedStepFrame& frame)
 {
     g_steps.store(frame.steps, std::memory_order_relaxed);
     g_alpha.store(frame.alpha, std::memory_order_relaxed);
     g_stepSeconds.store(frame.stepSeconds, std::memory_order_relaxed);
     g_running.store(frame.running, std::memory_order_relaxed);
+    // Field-by-field into atomics, so a new member of FixedStepFrame is NOT published until
+    // it is added here. `totalTicks` read as 0 for a whole measurement round because of that.
+    g_totalTicks.store(frame.totalTicks, std::memory_order_relaxed);
 
     // A paused world is not a measurement. Counting its frames would drag the
     // ticks-per-frame average toward zero and make a healthy session look starved.
@@ -83,6 +88,7 @@ FixedStepFrame LastFixedStepFrame()
     frame.alpha = g_alpha.load(std::memory_order_relaxed);
     frame.stepSeconds = g_stepSeconds.load(std::memory_order_relaxed);
     frame.running = g_running.load(std::memory_order_relaxed);
+    frame.totalTicks = g_totalTicks.load(std::memory_order_relaxed);
     return frame;
 }
 

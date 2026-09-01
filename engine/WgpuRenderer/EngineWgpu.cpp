@@ -841,6 +841,12 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     if (const char* v = std::getenv("WGR_RENDER_THREAD"); v && v[0] && v[0] != '0')
     {
         StartRenderThread();
+        _renderThreadRequested = true;
+        // WGR_RENDER_OVERLAP=1 additionally lets the producer run a frame ahead. Separate
+        // flag: the thread is provable on its own, and overlap is the change that alters
+        // WHEN work happens rather than only where.
+        if (const char* o = std::getenv("WGR_RENDER_OVERLAP"); o && o[0] && o[0] != '0')
+            _overlapRequested = true;
     }
     if (const char* v = std::getenv("WGR_FRAME_HASH"); v && v[0] && v[0] != '0')
     {
@@ -1751,11 +1757,13 @@ static void LogDrawSectionStats()
 // will begin. Order between entries is irrelevant by construction -- each writes disjoint
 // renderer state -- and order within an entry is last-write-wins, which is what back-to-back
 // direct calls already meant.
-void EngineWgpu::ApplyPendingRendererSettings()
+// REN-THR-016: takes the FRAME's queues, never the members. With overlap the producer is
+// already enqueueing the next frame into the members while this runs -- the second overlap
+// crash was exactly that, inside DrainResourceOps hashing a map the producer was growing.
+void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
 {
     if (!_renderer)
         return;
-    PendingRendererSettings& p = _pendingSet;
     if (p.suppressWorldDirty)
     {
         wgr_set_suppress_world_objects(_renderer, p.suppressWorld);
@@ -1823,16 +1831,16 @@ void EngineWgpu::EnqueueInstanceRemove(uint32_t handle)
     _instFreeHandles.push_back(handle);
 }
 
-void EngineWgpu::DrainResourceOps()
+void EngineWgpu::DrainResourceOps(std::vector<ResourceOp>& ops)
 {
-    if (_resourceOps.empty())
+    if (ops.empty())
         return;
     if (!_renderer)
     {
-        _resourceOps.clear();
+        ops.clear();
         return;
     }
-    for (ResourceOp& op : _resourceOps)
+    for (ResourceOp& op : ops)
     {
         switch (op.kind)
         {
@@ -1913,7 +1921,7 @@ void EngineWgpu::DrainResourceOps()
         }
         }
     }
-    _resourceOps.clear();
+    ops.clear();
     // The overlay drain is NOT called from here any more. It is one step of the consumer
     // block's explicit sequence in NextFrame, where the order it depends on is visible --
     // a nested call made the order a property of two functions instead of one list.
@@ -1929,7 +1937,7 @@ void EngineWgpu::EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::v
     op.verts = std::move(verts);
     op.bones = std::move(bones);
     op.weights = std::move(weights);
-    _resourceOps.push_back(std::move(op));
+    _resourceOps.push_back(std::move(op)); // producer side: enqueues into the members
 }
 
 // REN-THR-011 -- see PendingMeshRef in the header for why this exists and why it runs here.
@@ -1942,9 +1950,11 @@ void EngineWgpu::EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::v
 // gate: both runs drop the same draws and compare equal, which is exactly what happened
 // when the drains first moved (2 records a frame silently dropped, visible only in this
 // function's own log line).
-void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters)
+void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters,
+                                         std::vector<PendingMeshRef>& drawRefs,
+                                         std::vector<PendingMeshRef>& casterRefs)
 {
-    for (const PendingMeshRef& ref : _draws3dPendingMesh)
+    for (const PendingMeshRef& ref : drawRefs)
     {
         if (ref.index >= draws.size() || !ref.slot)
             continue;
@@ -1957,7 +1967,7 @@ void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vec
         if (ref.slot->renderer == 0)
             _droppedUndefinedMeshDraws++;
     }
-    for (const PendingMeshRef& ref : _castersPendingMesh)
+    for (const PendingMeshRef& ref : casterRefs)
     {
         if (ref.index >= casters.size() || !ref.slot)
             continue;
@@ -1965,8 +1975,8 @@ void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vec
         if (ref.slot->renderer == 0)
             _droppedUndefinedMeshDraws++;
     }
-    _draws3dPendingMesh.clear();
-    _castersPendingMesh.clear();
+    drawRefs.clear();
+    casterRefs.clear();
     if (_droppedUndefinedMeshDraws != 0)
     {
         static uint32_t reported = 0;
@@ -1986,14 +1996,14 @@ void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vec
 // drains), and SubmitOverlay translates handles in the same frame -- so SubmitOverlay
 // drains any ops enqueued since. Both call sites are producer-serial today and both sit at
 // what will be the render thread's frame boundary.
-void EngineWgpu::DrainOverlayTexOps()
+void EngineWgpu::DrainOverlayTexOps(std::vector<OverlayTexOp>& ops)
 {
     if (!_renderer)
     {
-        _overlayTexOps.clear();
+        ops.clear();
         return;
     }
-    for (OverlayTexOp& op : _overlayTexOps)
+    for (OverlayTexOp& op : ops)
     {
         switch (op.kind)
         {
@@ -2014,7 +2024,7 @@ void EngineWgpu::DrainOverlayTexOps()
             break;
         }
     }
-    _overlayTexOps.clear();
+    ops.clear();
 }
 
 // REN-THR-013: overlay draws carry producer texture handles out of SubmitOverlay; this
@@ -2041,18 +2051,18 @@ void EngineWgpu::TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws)
     }
 }
 
-void EngineWgpu::DrainInstanceOps()
+void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
 {
-    if (_instanceOps.empty())
+    if (ops.empty())
         return;
     if (!_renderer)
     {
         // No renderer, nothing to translate into; dropping the ops matches what the old
         // direct calls did behind their own null checks.
-        _instanceOps.clear();
+        ops.clear();
         return;
     }
-    for (const InstanceOp& op : _instanceOps)
+    for (const InstanceOp& op : ops)
     {
         switch (op.kind)
         {
@@ -2086,7 +2096,7 @@ void EngineWgpu::DrainInstanceOps()
             break;
         }
     }
-    _instanceOps.clear();
+    ops.clear();
 }
 
 // REN-THR-014: THE CONSUMER BLOCK, as one function. Every call in it touches the renderer
@@ -2095,17 +2105,17 @@ void EngineWgpu::DrainInstanceOps()
 // instance add may name a model whose registration is queued behind it; overlay textures
 // precede the draw translation that resolves them; the CPU-mesh patch follows the drains
 // that create what it resolves and precedes the hash that walks what it patches.
-void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing)
+void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, FrameQueues& q)
 {
     const auto blockStart = std::chrono::steady_clock::now();
-    ApplyPendingRendererSettings();
-    DrainResourceOps();
-    DrainInstanceOps();
-    DrainOverlayTexOps();
+    ApplyPendingRendererSettings(q.settings);
+    DrainResourceOps(q.resourceOps);
+    DrainInstanceOps(q.instanceOps);
+    DrainOverlayTexOps(q.overlayTexOps);
     TranslateOverlayDrawHandles(backing.overlayDraws);
-    PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters);
+    PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters, q.draws3dPendingMesh, q.castersPendingMesh);
 
-    HashPublishedFrame(frame);
+    HashPublishedFrame(frame, backing);
     wgr_render_frame(_renderer, &frame);
     PublishRendererStats();
     _rtLastBusyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blockStart).count();
@@ -2129,6 +2139,7 @@ void EngineWgpu::AccumulateRenderThreadTiming(double busyMs, double waitMs, doub
     _rtMainFrac = static_cast<float>((_rtWindowMsAccum - _rtWaitMsAccum) / window);
     _rtBusyMsAccum = _rtWaitMsAccum = _rtWindowMsAccum = 0.0;
     _rtWindowFrames = 0;
+    _renderLagShown = static_cast<float>(_renderLagFrames);
 }
 
 Engine::RenderThreadInfo EngineWgpu::GetRenderThreadInfo() const
@@ -2143,7 +2154,29 @@ Engine::RenderThreadInfo EngineWgpu::GetRenderThreadInfo() const
     info.overlapMs = _rtBusyMs > _rtWaitMs ? _rtBusyMs - _rtWaitMs : 0.0f;
     info.workerBusyFrac = _rtBusyFrac;
     info.mainBusyFrac = _rtMainFrac;
+    info.overlapAvailable = _renderThreadOn;
+    info.overlapEnabled = _overlapOn;
+    info.lagFrames = _renderLagShown;
+    info.queueWaitMs = _rtWaitMs;
     return info;
+}
+
+// REN-THR-016: the producer's queues become the frame's. Moves, not copies -- the vectors
+// keep their capacity and come back on the slot's next turn.
+void EngineWgpu::MoveQueuesInto(FrameQueues& q)
+{
+    q.settings = _pendingSet;
+    _pendingSet = PendingRendererSettings{};
+    q.resourceOps.swap(_resourceOps);
+    _resourceOps.clear();
+    q.instanceOps.swap(_instanceOps);
+    _instanceOps.clear();
+    q.overlayTexOps.swap(_overlayTexOps);
+    _overlayTexOps.clear();
+    q.draws3dPendingMesh.swap(_draws3dPendingMesh);
+    _draws3dPendingMesh.clear();
+    q.castersPendingMesh.swap(_castersPendingMesh);
+    _castersPendingMesh.clear();
 }
 
 void EngineWgpu::RenderThreadMain()
@@ -2159,14 +2192,21 @@ void EngineWgpu::RenderThreadMain()
                 return;
             frame = _renderFrame;
             backing = _renderBacking;
-        }
-        if (frame && backing)
-            RunConsumerBlock(*frame, *backing);
-        {
-            std::lock_guard<std::mutex> lock(_renderMutex);
+            _renderBusySlot = _renderSubmitSlot;
+            // CLAIMED, not finished. Clearing the flag here is what lets the producer build the
+            // next frame while this one renders; clearing it after the render instead would make
+            // the producer wait for the whole block and there would be no overlap at all.
             _renderHasWork = false;
             _renderFrame = nullptr;
             _renderBacking = nullptr;
+        }
+        _renderCv.notify_one();
+        // The slot is the worker's for the duration: the producer waits before reusing it.
+        if (frame && backing && _renderBusySlot >= 0)
+            RunConsumerBlock(*frame, *backing, _queueRing[_renderBusySlot]);
+        {
+            std::lock_guard<std::mutex> lock(_renderMutex);
+            _renderBusySlot = -1;
         }
         _renderCv.notify_one();
     }
@@ -2208,6 +2248,18 @@ void EngineWgpu::NextFrame()
                 StartRenderThread();
             else
                 StopRenderThread();
+        }
+        if (_overlapRequested != _overlapOn)
+        {
+            // Leaving overlap has to drain first: the producer is about to start waiting for
+            // every frame again, and a worker still holding a slot would make the first such
+            // wait a deadlock rather than a wait.
+            if (_overlapOn)
+            {
+                std::unique_lock<std::mutex> lock(_renderMutex);
+                _renderCv.wait(lock, [this] { return !_renderHasWork; });
+            }
+            _overlapOn = _renderThreadOn && _overlapRequested;
         }
         const auto frameStartForRt = std::chrono::steady_clock::now();
         double waitMs = 0.0;
@@ -2622,8 +2674,33 @@ void EngineWgpu::NextFrame()
         _opsFrames++;
         _ops = MutationOps{};
 
-        PushFrameBacking& backing = _pushRing[_pushSlot];
+        const int publishSlot = _pushSlot;
+        if (_renderThreadOn && _overlapOn)
+        {
+            // The producer may run at most one frame ahead: it must not swap into a slot the
+            // worker still holds. Blocking here IS "the renderer cannot keep up", so it is
+            // timed and shown rather than hidden.
+            const auto slotWaitStart = std::chrono::steady_clock::now();
+            {
+                std::unique_lock<std::mutex> lock(_renderMutex);
+                _renderLagFrames = _renderBusySlot >= 0 ? 1u : 0u;
+                // TWO conditions, and the second one is easy to miss. The slot must be free --
+                // that is the ring. But the SUBMISSION must also have been claimed: _renderFrame
+                // and _renderSubmitSlot are single variables, so publishing twice before the
+                // worker wakes overwrites the first frame and it is never drawn. Nothing reports
+                // that; the frames simply are not there. It cost 50% of the frames under overlap
+                // and was invisible until two runs were aligned by publication tick, because
+                // every frame that DID survive was byte-identical to the inline path.
+                _renderCv.wait(lock, [this, publishSlot]
+                               { return !_renderHasWork && _renderBusySlot != publishSlot; });
+            }
+            waitMs +=
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - slotWaitStart).count();
+        }
+        PushFrameBacking& backing = _pushRing[publishSlot];
         _pushSlot = (_pushSlot + 1) % kPushFrameRing;
+        backing.totalTicks = Dev::LastFixedStepFrame().totalTicks;
+        backing.steps = static_cast<std::uint32_t>(Dev::LastFixedStepFrame().steps);
         backing.verts.swap(_verts);
         backing.batches.swap(_batches);
         backing.draws3d.swap(_draws3d);
@@ -2644,7 +2721,10 @@ void EngineWgpu::NextFrame()
         // consumer must never ask `_gpuInstances` itself -- see PushFrameBacking.
         backing.retainedInstances = static_cast<uint32_t>(_gpuInstances.size());
 
-        WgrFrame frame{};
+        // Lives in the ring slot, not on this stack: with overlap the producer returns
+        // from NextFrame while the worker is still reading it.
+        WgrFrame& frame = _queueRing[publishSlot].published;
+        frame = WgrFrame{};
         frame.clear = {_clear[0], _clear[1], _clear[2], _clear[3]};
         frame.fog_color = {fog.R(), fog.G(), fog.B()};
         frame.cameras = backing.cameras;
@@ -2749,27 +2829,40 @@ void EngineWgpu::NextFrame()
         // a model whose queued registration precedes it, and that is the only cross-queue
         // dependency the producer can create. Then the overlay textures, and only then the
         // translation of the overlay draws that refer to them.
+        // BOTH paths, not just the threaded one. The drains read the FRAME's queues now, so
+        // an inline frame whose queues were never moved drains empty vectors and publishes a
+        // frame with none of its settings, instances or overlay ops applied -- which is what
+        // the first version did, and the equivalence gate caught it as `bat` differing in
+        // every frame between the inline and threaded paths.
+        MoveQueuesInto(_queueRing[publishSlot]);
         if (_renderThreadOn)
         {
-            // Hand the block to the worker and wait for it. The wait is what makes this
-            // step provable: the same work in the same order, on another stack.
             {
                 std::lock_guard<std::mutex> lock(_renderMutex);
                 _renderFrame = &frame;
                 _renderBacking = &backing;
+                _renderSubmitSlot = publishSlot;
                 _renderHasWork = true;
             }
             _renderCv.notify_one();
-            const auto waitStart = std::chrono::steady_clock::now();
+            if (!_overlapOn)
             {
-                std::unique_lock<std::mutex> lock(_renderMutex);
-                _renderCv.wait(lock, [this] { return !_renderHasWork; });
+                // LOCKSTEP: wait for the whole block. Overlap measures zero by construction,
+                // which is the point -- the mode proves the mechanics, it does not hide work.
+                const auto waitStart = std::chrono::steady_clock::now();
+                {
+                    std::unique_lock<std::mutex> lock(_renderMutex);
+                    // Finished, not merely claimed -- lockstep means the producer owns the
+                    // renderer again before it returns.
+                    _renderCv.wait(lock, [this] { return !_renderHasWork && _renderBusySlot < 0; });
+                }
+                waitMs =
+                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
             }
-            waitMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
         }
         else
         {
-            RunConsumerBlock(frame, backing);
+            RunConsumerBlock(frame, backing, _queueRing[publishSlot]);
         }
         AccumulateRenderThreadTiming(_rtLastBusyMs, waitMs,
                                      std::chrono::duration<double, std::milli>(
@@ -7928,7 +8021,7 @@ inline uint64_t HashSlice(uint64_t h, const WgrSlice<T>& s)
 // declaration for why this exists; the short version is that every remaining Phase 5 step
 // restructures the producer, and "it still publishes the same frame" is the only claim that
 // makes such a restructuring provable rather than plausible.
-void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
+void EngineWgpu::HashPublishedFrame(const WgrFrame& frame, const PushFrameBacking& backing)
 {
     if (!_frameHashOn)
         return;
@@ -8075,8 +8168,9 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
         // different bugs. STEPS: how many fixed simulation ticks this frame ran -- if the
         // parting frame is where two runs first take a different number, the one-frame lead
         // of the 2D path over the world is explained and needs no further candidate.
-        LOG_INFO(Graphics, "Wgpu frame len[{}]: steps={} vert={} bat={} cmd={} d3d={} tn={} grass={}",
-                 _frameHashCount, Dev::LastFixedStepFrame().steps, frame.verts.length, frame.batches.length,
+        LOG_INFO(Graphics, "Wgpu frame len[{}]: tick={} steps={} vert={} bat={} cmd={} d3d={} tn={} grass={}",
+                 _frameHashCount, backing.totalTicks, backing.steps,
+                 frame.verts.length, frame.batches.length,
                  frame.cmds.length, frame.draws3d.length, frame.terrain_nodes.length,
                  frame.grass_batches.length);
         LOG_INFO(Graphics,
