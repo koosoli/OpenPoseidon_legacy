@@ -1623,6 +1623,18 @@ void GameApplication::RunMainLoop()
         {
             if (Poseidon::Foundation::GlobalTickCount() - splashStart >= splashLimitMs)
             {
+                // CUT THE EFFECT, NOT JUST THE SCRIPT. `titleRsc` puts a full-screen title
+                // effect on the world, and the only thing that ever clears one is the sweep
+                // inside ProgressSystem::Refresh -- which itself only runs while the progress
+                // script is alive. Freeing the script on its own therefore strands a title
+                // effect that nothing will ever terminate: it sits over the game and swallows
+                // mouse and keyboard, while the dev panel keeps working because ImGui draws
+                // above it. That is exactly the symptom the owner reported twice.
+                if (GWorld)
+                {
+                    GWorld->SetTitleEffect(nullptr);
+                    GWorld->SetCutEffect(nullptr);
+                }
                 Poseidon::ProgressScript.Free();
                 break;
             }
