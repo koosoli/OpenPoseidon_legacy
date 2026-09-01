@@ -1263,6 +1263,12 @@ class EngineWgpu : public EngineDummy
     // producer (wait); read by the panel. Plain floats: they are a diagnostic and a torn
     // read costs a wrong pixel in a readout, not a wrong frame.
     double _rtLastBusyMs = 0.0;
+    /// PERF-019. Report any renderer frame or consumer block at or above this many
+    /// milliseconds (WGR_SLOW_BLOCK_MS, default 100; 0 switches the reports off).
+    double _slowBlockMs = 100.0;
+    double _lastTrimMs = 0.0;
+    double _lastInvalidateMs = 0.0;
+    std::uint32_t _lastInvalidateStale = 0;
     double _rtBusyMsAccum = 0.0;
     double _rtWaitMsAccum = 0.0;
     double _rtWindowMsAccum = 0.0;

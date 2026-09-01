@@ -69,6 +69,12 @@ simulation roughly **fifteenfold** on `perf_combat` — measured, same build, sa
 | tick rate | 40 of 60 | **60–63 of 60** |
 | catch-up steps discarded per second | 23–35 | **0** |
 
+**`frame_max` is the screenshot, not a hitch.** `FlushPendingScreenshot()` is inside
+`NextFrame`, so the readback lands in that frame's `swap`; the harness takes one at the end of
+the run and the 256-frame phase ring closes there too, so the capture frame is inside the ring
+of every measurement. Measured: 298.5 ms of which 271.3 is the readback. **Read p95 and below;
+the maximum is the shutter.** (PERF-018's correction.)
+
 **And do not touch the window either.** A behaviour recording
 (`POSEIDON_AI_TIMELINE`, PERF-017) diverged at tick 306 between two runs of the same build
 with the same seed, because the camera was nudged while one of them was running. The camera is

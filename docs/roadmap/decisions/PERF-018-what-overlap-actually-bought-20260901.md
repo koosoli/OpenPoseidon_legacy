@@ -1,5 +1,34 @@
 # PERF-018 — What render/simulation overlap actually bought
 
+> ## ⚠ CORRECTION, same day: the 318 ms "spike" is this harness photographing itself
+>
+> This document made `frame_max` its most emphatic point — 318 ms before overlap, 318 ms after,
+> "the largest unexplained cost in the engine". **It is the screenshot.**
+>
+> `FlushPendingScreenshot()` runs at the end of `EngineWgpu::NextFrame`, so the readback is
+> booked into the `swap` phase of the frame that takes it. The harness takes exactly one, at the
+> end of the run — and `cpu_frame_phases_ms` is a 256-frame ring that also ends there. So the
+> capture frame is inside the ring of **every** measurement this harness has ever produced, and
+> `frame_max` has always been that frame.
+>
+> Proven by instrumenting the whole of `NextFrame`: `whole=298.5 ms | slotWait=27.1 block=33.7
+> trim=0.0 invalidate=0.1 rest=271.3`, and the log line sits between "wgpu screenshot readback
+> completed" and "AUTO-TEST SUCCESS", 14 lines from the end of a 2774-line log.
+>
+> **Withdrawn:** "the spike is the largest unexplained cost in the engine", and the whole of
+> point 2 under *What follows*. There is no evidence here of a recurring 300 ms hitch, and the
+> claim that overlap "did nothing for the worst frame" compared two screenshots.
+>
+> **Unaffected:** the mean and p95 columns, and every conclusion drawn from them. Those are
+> ordinary frames — 43.50 → 33.91 ms and 46.97 → 36.07 ms — and the three-runs-per-arm ranges
+> still do not overlap.
+>
+> **The rule that follows:** `frame_max` out of `--capture-metrics` is not a spike metric and
+> never was. Percentiles up to p95 are usable; the maximum is the instrument's own shutter.
+> This is the same family as PERF-013's load-window error, in a costume nobody recognised:
+> the window did not include the load this time, it included the photograph.
+
+
 **Date:** 2026-09-01
 **Branch:** `asset-obs-001`
 **Follows:** PERF-012 (predicted ceiling), REN-THR-016 (overlap landed and proven equivalent)

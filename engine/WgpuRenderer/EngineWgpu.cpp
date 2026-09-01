@@ -2107,18 +2107,58 @@ void EngineWgpu::DrainInstanceOps(std::vector<InstanceOp>& ops)
 // that create what it resolves and precedes the hash that walks what it patches.
 void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, FrameQueues& q)
 {
+    // PERF-018 left one question open and it is the biggest number in the frame: a ~300 ms
+    // stall recurring roughly once per 250 frames, unchanged by overlap, sitting inside what
+    // the profiler calls `swap`. `swap` is this whole block, not the present call, so the
+    // profiler cannot say which part of it -- a texture upload burst and a driver pipeline
+    // compile look identical from outside.
+    //
+    // Six clocks, and a line only when the block overruns. Threshold in ms via
+    // WGR_SLOW_BLOCK_MS (default 100); set it to 0 to switch the report off entirely. The
+    // steady-state cost is six steady_clock reads on a block that costs milliseconds.
+    // Threshold read once into the member so BOTH reports -- this one and the producer's
+    // in NextFrame -- share it and cannot drift apart.
+    [[maybe_unused]] static const bool once = [this]
+    {
+        const char* v = std::getenv("WGR_SLOW_BLOCK_MS");
+        _slowBlockMs = (v != nullptr && v[0] != 0) ? std::atof(v) : 100.0;
+        return true;
+    }();
+
     const auto blockStart = std::chrono::steady_clock::now();
     ApplyPendingRendererSettings(q.settings);
+    const auto afterSettings = std::chrono::steady_clock::now();
     DrainResourceOps(q.resourceOps);
+    const auto afterResources = std::chrono::steady_clock::now();
     DrainInstanceOps(q.instanceOps);
     DrainOverlayTexOps(q.overlayTexOps);
     TranslateOverlayDrawHandles(backing.overlayDraws);
     PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters, q.draws3dPendingMesh, q.castersPendingMesh);
+    const auto afterDrains = std::chrono::steady_clock::now();
 
     HashPublishedFrame(frame, backing);
+    const auto afterHash = std::chrono::steady_clock::now();
     wgr_render_frame(_renderer, &frame);
+    const auto afterRender = std::chrono::steady_clock::now();
     PublishRendererStats();
-    _rtLastBusyMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - blockStart).count();
+    const auto blockEnd = std::chrono::steady_clock::now();
+
+    const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    _rtLastBusyMs = ms(blockStart, blockEnd);
+
+    if (_slowBlockMs > 0.0 && _rtLastBusyMs >= _slowBlockMs)
+    {
+        // The op COUNTS as well as the times. A 300 ms resource drain of four ops and a
+        // 300 ms drain of four thousand are different bugs, and the times alone cannot
+        // tell them apart.
+        LOG_INFO(Graphics,
+                 "Wgpu slow block: total={:.1f} ms | settings={:.1f} resources={:.1f} (ops={}) "
+                 "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={}",
+                 _rtLastBusyMs, ms(blockStart, afterSettings), ms(afterSettings, afterResources),
+                 q.resourceOps.size(), ms(afterResources, afterDrains), ms(afterDrains, afterHash),
+                 ms(afterHash, afterRender), ms(afterRender, blockEnd), frame.draws3d.length,
+                 frame.verts.length, frame.shadow_casters.length);
+    }
 }
 
 // Window of one second, so the readout is stable enough to read while the game runs.
@@ -2264,6 +2304,7 @@ void EngineWgpu::NextFrame()
         const auto frameStartForRt = std::chrono::steady_clock::now();
         double waitMs = 0.0;
         SyncWaterLookProfile();
+        const auto tLook = std::chrono::steady_clock::now();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
         // into _tonemap / _sky (auto mode only; manual override holds the tabs' values).
         UpdateAutoTonemap();
@@ -2282,8 +2323,10 @@ void EngineWgpu::NextFrame()
         // Build + flatten the ImGui frame; SubmitOverlay fills the _overlay*
         // vectors the WgrFrame below points at. Composites over everything,
         // same placement as GL33's BackToFront (pre-present).
+        const auto tParams = std::chrono::steady_clock::now();
         Dev::DebugOverlay::NewFrame();
         Dev::DebugOverlay::Render();
+        const auto tOverlay = std::chrono::steady_clock::now();
 
         static_assert(sizeof(CameraEntry::proj) == 64 && sizeof(CameraEntry::view) == 64,
                       "CameraEntry matrices must be 16 floats to match WgrCamera");
@@ -2864,20 +2907,28 @@ void EngineWgpu::NextFrame()
         {
             RunConsumerBlock(frame, backing, _queueRing[publishSlot]);
         }
-        AccumulateRenderThreadTiming(_rtLastBusyMs, waitMs,
-                                     std::chrono::duration<double, std::milli>(
-                                         std::chrono::steady_clock::now() - frameStartForRt).count());
+        const auto tEnd = std::chrono::steady_clock::now();
+        const double frameMs = std::chrono::duration<double, std::milli>(tEnd - frameStartForRt).count();
+        AccumulateRenderThreadTiming(_rtLastBusyMs, waitMs, frameMs);
+
         LogObjectPerfRow();
         LogDrawSectionStats();
+        const auto tLogs = std::chrono::steady_clock::now();
         if (_wbank)
         {
             // BEFORE the trim: this is what makes _lastUsedFrame mean anything on the retained
             // path, and the LRU immediately below is its only consumer.
             MarkRetainedModelLiveness();
             _wbank->TrimResidency();
+            _lastTrimMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tLogs).count();
             // Immediately after the trim and before the next frame's admits, which is the only
             // window where dropping a live registration is safe: this frame is already recorded.
-            if (const uint32_t stale = InvalidateStaleGpuModels())
+            const auto tBeforeInvalidate = std::chrono::steady_clock::now();
+            const uint32_t stale = InvalidateStaleGpuModels();
+            _lastInvalidateMs =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tBeforeInvalidate).count();
+            _lastInvalidateStale = stale;
+            if (stale)
                 LOG_INFO(Graphics, "Wgpu model residency: {} models re-registering after a texture eviction",
                          stale);
         }
@@ -2897,6 +2948,38 @@ void EngineWgpu::NextFrame()
             }
         }
         FlushPendingScreenshot();
+        // The WHOLE of NextFrame, reported at its true end. The first two versions of this
+        // stopped at AccumulateRenderThreadTiming and found nothing above 80 ms while the
+        // profiler's `swap` -- which is this entire function -- still peaked near 300 ms.
+        // Everything past that point was simply unmeasured, TrimResidency included, and a
+        // timer that stops before the suspect cannot clear it.
+        if (_slowBlockMs > 0.0)
+        {
+            const auto   nowEnd = std::chrono::steady_clock::now();
+            const double wholeMs = std::chrono::duration<double, std::milli>(nowEnd - frameStartForRt).count();
+            if (wholeMs >= _slowBlockMs)
+            {
+                const auto ms = [](auto a, auto b)
+                { return std::chrono::duration<double, std::milli>(b - a).count(); };
+                LOG_INFO(Graphics,
+                         "Wgpu slow frame: whole={:.1f} ms | look={:.1f} params={:.1f} overlay={:.1f} "
+                         "build={:.1f} slotWait={:.1f} block={:.1f} logs={:.1f} trim={:.1f} invalidate={:.1f} "
+                         "(stale={}) rest={:.1f} | thread={} overlap={}",
+                         wholeMs, ms(frameStartForRt, tLook), ms(tLook, tParams), ms(tParams, tOverlay),
+                         // Subtract the consumer block ONLY when this thread ran it. Under
+                         // overlap _rtLastBusyMs belongs to the worker and to another frame,
+                         // and subtracting it printed a negative duration -- which is how the
+                         // mistake announced itself.
+                         ms(tOverlay, tEnd) - waitMs - (_overlapOn ? 0.0 : _rtLastBusyMs), waitMs,
+                         _rtLastBusyMs, ms(tEnd, tLogs), _lastTrimMs, _lastInvalidateMs,
+                         _lastInvalidateStale, ms(tLogs, nowEnd) - _lastTrimMs - _lastInvalidateMs,
+                         _renderThreadOn ? 1 : 0, _overlapOn ? 1 : 0);
+            }
+            _lastTrimMs = 0.0;
+            _lastInvalidateMs = 0.0;
+            _lastInvalidateStale = 0;
+        }
+
     }
     _verts.clear();
     _batches.clear();
