@@ -1669,7 +1669,16 @@ After those shared foundations, **split the architecture work rather than serial
 
 10S. Introduce the serial deterministic-effects simulation task graph.  
 11S. Audit worker FPU/RNG/iteration rules and validate across worker counts.  
-12S. Parallelise measured query, AI, navigation, animation and vehicle workloads.  
+12S. Parallelise measured query, AI, navigation, animation and vehicle workloads.
+     - **Ration before you parallelise.** PERF-016 reviews Arma 3 2.20's OPREP against what is
+       measured here. 68% of the AI stage is one loop whose throttle exists, is written, and is
+       never read; enabling it deletes the work instead of distributing it, and what remains
+       afterwards should decide whether a dependency job system is worth building at all.
+       Enabling it changes AI behaviour, so it is gated on the `StateTimeline` oracle and
+       behavioural tests — that gate, not the job system, is the next task on this line.
+     - Scope any such system against `perf_combat`. Three of four bench scenes are GPU-bound
+       (PERF-012), and `perf_abel` — the scene most historical figures were taken on — would
+       show none of it.  
 13S. Evaluate subsystem-specific AI simulation LOD where large-battle measurements justify it.
 
 ### Asset/streaming track
