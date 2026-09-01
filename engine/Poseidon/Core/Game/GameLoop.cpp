@@ -20,6 +20,8 @@
 #include <Poseidon/Foundation/Types/Memtype.h>
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/platform.hpp>
+#include <Poseidon/Foundation/Framework/PoTime.hpp>
+#include <Poseidon/Foundation/Threads/PreciseSleep.hpp>
 
 using namespace Poseidon::Dev;
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -53,45 +55,41 @@ int gUserFpsCap = 0;
 
 // Sleep out the remainder of a frame so the loop averages `targetFps`.
 //
-// The arithmetic used to be `1000 / targetFps` in INTEGER milliseconds, which
-// truncates, and truncation on a frame period is a large error: a 144 cap became
-// 1000/144 = 6 ms = 166.7 fps (+16%), 90 became 11 ms = 90.9, and 60 became 16 ms
-// = 62.5. Every cap in the allowed set except 30 and 240 ran fast, so a player who
-// capped to their refresh rate to steady the frame time got a cap ABOVE it and kept
-// the tearing they were trying to remove.
+// The arithmetic runs entirely in microseconds. It used to be `1000 / targetFps` in
+// INTEGER milliseconds, which truncates, and truncation on a frame period is a large
+// error: a 144 cap became 1000/144 = 6 ms = 166.7 fps (+16%), 90 became 11 ms = 90.9,
+// and 60 became 16 ms = 62.5 -- patched over with a fractional-millisecond carry so
+// the AVERAGE came out right while individual frames still landed on whole
+// milliseconds. In microseconds the same truncation is 1'000'000/144 = 6944 vs
+// 6944.44, i.e. under a microsecond per frame (< 0.01% on the cap), which is below
+// what any frame-time measurement here can resolve, so no carry is needed and every
+// frame gets the same budget.
 //
-// Carrying the fractional millisecond forward fixes the average without needing a
-// sub-millisecond clock: 144 fps alternates 7/7/7/6 ms and averages 6.944.
-static void PaceToFps(int targetFps, DWORD frameStartMs)
+// SleepUs is the piece that makes the precision real: the previous Sleep(ms) could
+// only land on scheduler ticks, so the pacer alternated 6/7 ms frames to fake 6.944.
+// A waitable-timer sleep hits the fractional deadline directly, which steadies
+// frame-to-frame delivery -- the thing a player capping to their refresh rate is
+// actually after.
+static void PaceToFps(int targetFps, Foundation::unsigned64 frameStartUs)
 {
     if (targetFps <= 0)
         return;
 
-    const double periodMs = 1000.0 / static_cast<double>(targetFps);
-    static double carryMs = 0.0;
-    static int lastTarget = 0;
-    if (targetFps != lastTarget)
-    {
-        lastTarget = targetFps;
-        carryMs = 0.0;
-    }
-
-    const double budgetMs = periodMs + carryMs;
-    const int wholeMs = static_cast<int>(budgetMs);
-    carryMs = budgetMs - static_cast<double>(wholeMs);
-
-    const int elapsedMs = static_cast<int>(Poseidon::Foundation::GlobalTickCount() - frameStartMs);
-    const int sleepMs = wholeMs - elapsedMs;
-    if (sleepMs > 0)
-        Sleep(sleepMs);
+    const int64_t periodUs = 1'000'000 / targetFps;
+    const int64_t elapsedUs = static_cast<int64_t>(Poseidon::Foundation::getSystemTime() - frameStartUs);
+    const int64_t sleepUs = periodUs - elapsedUs;
+    if (sleepUs > 0)
+        Foundation::SleepUs(sleepUs);
 }
 
-// Sleep() honours the process timer resolution, which on Windows defaults to
-// ~15.6 ms. A frame pacer built on it therefore overshoots its target by up to a
-// full tick and does so unevenly -- which is visible as exactly the symptom a cap
-// is meant to cure. winmm is already linked; ask for 1 ms while a cap is active and
-// give it back when it is not, so an uncapped session keeps the default (raising it
-// costs battery on a laptop and there is nothing to gain when nothing sleeps).
+// Safety net for the pacer's degraded modes. SleepUs normally waits on a
+// high-resolution timer that ignores the process timer resolution entirely, but on
+// a kernel without that timer it degrades to waits quantized by the timer interrupt
+// -- 15.6 ms by default, which overshoots a frame budget by up to a full tick and
+// does so unevenly, exactly the symptom a cap is meant to cure. winmm is already
+// linked; ask for 1 ms while a cap is active and give it back when it is not, so an
+// uncapped session keeps the default (raising it costs battery on a laptop and
+// there is nothing to gain when nothing sleeps).
 static void SetFrameCapTimerResolution(bool wanted)
 {
 #ifdef _WIN32
@@ -165,7 +163,10 @@ void RenderFrame(float deltaT, bool enableDraw)
         return;
     }
 
-    int startTime = Poseidon::Foundation::GlobalTickCount();
+    // Microsecond stamp (QPC-backed) rather than the millisecond tick count: the
+    // frame pacer at the bottom sleeps with sub-millisecond precision, and a pacer
+    // whose elapsed-time input is quantized to 1 ms would throw away most of that.
+    const Foundation::unsigned64 frameStartUs = Poseidon::Foundation::getSystemTime();
     GDebugger.NextAliveExpected(10000);
 
     GWorld->SetSimulationFocus(enableDraw);
@@ -211,17 +212,18 @@ void RenderFrame(float deltaT, bool enableDraw)
         const int maxFps = 50;
 #endif
         SetFrameCapTimerResolution(true);
-        PaceToFps(maxFps, startTime);
+        PaceToFps(maxFps, frameStartUs);
     }
     else if (gUserFpsCap > 0)
     {
         // User-driven FPS cap from the Graphics screen — same sleep-
         // to-target shape as the unfocused / debug-limit branches
         // above, but applied during normal gameplay rendering.  Soft
-        // cap (sleep-based): accurate to the OS scheduler granularity,
-        // which is why the branch asks for 1 ms resolution first.
+        // cap (sleep-based).  The 1 ms timer resolution is still
+        // requested for the machines where SleepUs has to degrade to
+        // a scheduler-granular wait (no high-resolution timer).
         SetFrameCapTimerResolution(true);
-        PaceToFps(gUserFpsCap, startTime);
+        PaceToFps(gUserFpsCap, frameStartUs);
     }
     else
     {
