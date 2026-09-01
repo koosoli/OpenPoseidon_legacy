@@ -62,6 +62,9 @@ enum class FieldKind : std::uint8_t
 /// two timelines intern independently and their id spaces need not agree.
 using NameId = std::uint32_t;
 
+class StateTimeline;
+std::string ReadTimeline(StateTimeline& out, const std::string& path);
+
 class StateTimeline
 {
 public:
@@ -119,6 +122,11 @@ public:
     [[nodiscard]] const Entry& EntryAt(int tick, int index) const;
 
 private:
+    // The reader replays raw entries -- stream, field, key, bits and kind straight from
+    // the file -- which is precisely what `Push` does and what no public overload can do
+    // (the typed setters would re-encode the value and a NaN or a -0.0 would not survive).
+    friend std::string ReadTimeline(StateTimeline& out, const std::string& path);
+
     void Push(NameId stream, std::uint32_t key, NameId field, std::uint64_t bits, FieldKind kind);
 
     struct TickSpan
@@ -199,5 +207,31 @@ struct Divergence
 ///
 /// Strict. There is no tolerance parameter and there will not be one.
 [[nodiscard]] Divergence CompareTimelines(const StateTimeline& lhs, const StateTimeline& rhs);
+
+// ---------------------------------------------------------------------------------
+// Recording a timeline to a file, so the comparison can be made between two RUNS.
+//
+// Until this existed the class could only compare two timelines held in one process,
+// which restricted it to unit tests -- and the questions it was built for are about
+// whole missions. "Does rationing this AI loop change what the AI does" cannot be
+// answered in a fixture; it needs two runs of a real scene and a byte-exact diff.
+//
+// The format is deliberately dull and self-describing: a magic, a version, the name
+// table, then the ticks. It is NOT a compatibility surface -- a timeline is written
+// and read by the same build, and `ReadTimeline` refuses a version it does not know
+// rather than guessing. Bits are stored little-endian as they sit in memory; the
+// class stores bit patterns precisely so nothing has to interpret them here.
+//
+// Errors are returned, never thrown and never logged: the caller knows whether a
+// missing file is a failure (a gate) or expected (a first recording).
+// ---------------------------------------------------------------------------------
+
+/// Empty on success, otherwise a human-readable reason.
+[[nodiscard]] std::string WriteTimeline(const StateTimeline& timeline, const std::string& path);
+
+/// Empty on success. `out` is cleared first, and is left EMPTY on any failure --
+/// never partially filled, so a truncated file cannot read as a short run that
+/// happens to agree.
+[[nodiscard]] std::string ReadTimeline(StateTimeline& out, const std::string& path);
 
 } // namespace Poseidon::Determinism

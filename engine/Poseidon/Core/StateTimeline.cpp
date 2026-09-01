@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <type_traits>
+#include <unordered_map>
+#include <vector>
 
 namespace Poseidon::Determinism
 {
@@ -374,6 +378,224 @@ Divergence CompareTimelines(const StateTimeline& lhs, const StateTimeline& rhs)
     }
 
     return d;
+}
+
+
+// ---------------------------------------------------------------------------------
+// File format. See the header for why it exists and why it is not a compatibility
+// surface.
+// ---------------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr std::uint32_t kMagic = 0x4c545350u; // 'PSTL'
+constexpr std::uint32_t kVersion = 1u;
+
+template <typename T> void PutRaw(std::vector<char>& buf, T v)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    const char* p = reinterpret_cast<const char*>(&v);
+    buf.insert(buf.end(), p, p + sizeof(T));
+}
+
+void PutStr(std::vector<char>& buf, std::string_view s)
+{
+    PutRaw<std::uint32_t>(buf, static_cast<std::uint32_t>(s.size()));
+    buf.insert(buf.end(), s.begin(), s.end());
+}
+
+/// Bounds-checked read. Every getter goes through this, so a truncated or corrupt
+/// file fails at the first short read instead of reading past the buffer -- the
+/// alternative is a file that parses into a plausible short timeline, which would
+/// then COMPARE EQUAL to another short one and pass a gate it should have failed.
+struct Reader
+{
+    const char* p = nullptr;
+    const char* end = nullptr;
+    bool        ok = true;
+
+    template <typename T> T Get()
+    {
+        T v{};
+        if (!ok || static_cast<std::size_t>(end - p) < sizeof(T))
+        {
+            ok = false;
+            return v;
+        }
+        std::memcpy(&v, p, sizeof(T));
+        p += sizeof(T);
+        return v;
+    }
+
+    std::string GetStr()
+    {
+        const std::uint32_t n = Get<std::uint32_t>();
+        if (!ok || static_cast<std::size_t>(end - p) < n)
+        {
+            ok = false;
+            return {};
+        }
+        std::string s(p, p + n);
+        p += n;
+        return s;
+    }
+};
+
+} // namespace
+
+std::string WriteTimeline(const StateTimeline& timeline, const std::string& path)
+{
+    std::vector<char> buf;
+    PutRaw(buf, kMagic);
+    PutRaw(buf, kVersion);
+
+    // The name table is written from the entries rather than from the class's own
+    // table, because a label interned but never used carries no state and its
+    // presence would make two otherwise identical runs differ.
+    std::vector<std::string>                     names;
+    std::unordered_map<std::string, std::uint32_t> index;
+    const auto nameSlot = [&](std::string_view n) {
+        std::string key(n);
+        auto        it = index.find(key);
+        if (it != index.end())
+        {
+            return it->second;
+        }
+        const auto slot = static_cast<std::uint32_t>(names.size());
+        names.push_back(key);
+        index.emplace(std::move(key), slot);
+        return slot;
+    };
+
+    std::vector<char> body;
+    PutRaw<std::uint32_t>(body, static_cast<std::uint32_t>(timeline.TickCount()));
+    for (int t = 0; t < timeline.TickCount(); t++)
+    {
+        const int n = timeline.EntryCountInTick(t);
+        PutRaw<std::uint32_t>(body, static_cast<std::uint32_t>(n));
+        for (int i = 0; i < n; i++)
+        {
+            const StateTimeline::Entry& e = timeline.EntryAt(t, i);
+            PutRaw<std::uint32_t>(body, nameSlot(timeline.Name(e.stream)));
+            PutRaw<std::uint32_t>(body, nameSlot(timeline.Name(e.field)));
+            PutRaw<std::uint32_t>(body, e.key);
+            PutRaw<std::uint64_t>(body, e.bits);
+            PutRaw<std::uint8_t>(body, static_cast<std::uint8_t>(e.kind));
+        }
+    }
+
+    PutRaw<std::uint32_t>(buf, static_cast<std::uint32_t>(names.size()));
+    for (const std::string& n : names)
+    {
+        PutStr(buf, n);
+    }
+    buf.insert(buf.end(), body.begin(), body.end());
+
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f)
+    {
+        return "cannot open for writing: " + path;
+    }
+    f.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    if (!f)
+    {
+        return "write failed: " + path;
+    }
+    return {};
+}
+
+std::string ReadTimeline(StateTimeline& out, const std::string& path)
+{
+    out.Clear();
+
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f)
+    {
+        return "cannot open for reading: " + path;
+    }
+    const auto size = f.tellg();
+    if (size < 0)
+    {
+        return "cannot size: " + path;
+    }
+    std::vector<char> buf(static_cast<std::size_t>(size));
+    f.seekg(0);
+    if (size > 0 && !f.read(buf.data(), size))
+    {
+        return "read failed: " + path;
+    }
+
+    Reader r{buf.data(), buf.data() + buf.size(), true};
+    if (r.Get<std::uint32_t>() != kMagic || !r.ok)
+    {
+        return "not a state timeline: " + path;
+    }
+    const std::uint32_t version = r.Get<std::uint32_t>();
+    if (!r.ok || version != kVersion)
+    {
+        // Refused, not guessed. A timeline is written and read by the same build.
+        return "unsupported timeline version " + std::to_string(version) + " in " + path;
+    }
+
+    const std::uint32_t nameCount = r.Get<std::uint32_t>();
+    if (!r.ok)
+    {
+        return "truncated name table: " + path;
+    }
+    std::vector<NameId> slots;
+    slots.reserve(nameCount);
+    for (std::uint32_t i = 0; i < nameCount; i++)
+    {
+        const std::string n = r.GetStr();
+        if (!r.ok)
+        {
+            out.Clear();
+            return "truncated name table: " + path;
+        }
+        slots.push_back(out.Intern(n));
+    }
+
+    const std::uint32_t tickCount = r.Get<std::uint32_t>();
+    if (!r.ok)
+    {
+        out.Clear();
+        return "truncated tick count: " + path;
+    }
+    for (std::uint32_t t = 0; t < tickCount; t++)
+    {
+        const std::uint32_t n = r.Get<std::uint32_t>();
+        if (!r.ok)
+        {
+            out.Clear();
+            return "truncated tick header: " + path;
+        }
+        out.BeginTick();
+        for (std::uint32_t i = 0; i < n; i++)
+        {
+            const std::uint32_t stream = r.Get<std::uint32_t>();
+            const std::uint32_t field = r.Get<std::uint32_t>();
+            const std::uint32_t key = r.Get<std::uint32_t>();
+            const std::uint64_t bits = r.Get<std::uint64_t>();
+            const std::uint8_t  kind = r.Get<std::uint8_t>();
+            if (!r.ok || stream >= slots.size() || field >= slots.size() || kind > 1)
+            {
+                out.Clear();
+                return "corrupt entry: " + path;
+            }
+            out.Push(slots[stream], key, slots[field], bits, static_cast<FieldKind>(kind));
+        }
+        out.EndTick();
+    }
+
+    // Trailing bytes mean the writer and the reader disagree about the format, which
+    // is exactly the situation where a silently-accepted file does the most damage.
+    if (r.p != r.end)
+    {
+        out.Clear();
+        return "trailing bytes: " + path;
+    }
+    return {};
 }
 
 } // namespace Poseidon::Determinism
