@@ -1601,8 +1601,31 @@ void GameApplication::RunMainLoop()
     {
         // I_AM_ALIVE() triggers GlobalAliveImplementation::Alive() → ProgressSystem::Refresh() → Draw() →
         // ProgressScript->Simulate()
+        // A CEILING, NOT A FLOOR. This loop used to run the startup script to completion,
+        // and that script is a hard-coded eight-second animation. By the time control reaches
+        // here the world is already loaded -- so the game sat finished, drawing a logo, for as
+        // long as the logo asked.
+        //
+        // Measured: the stretch from "initialization complete" to "mission runtime entered"
+        // was 8.38 s on Chernarus+, of which 5.33 s was this wait and 3.03 s was every piece
+        // of real work put together. On stock Everon the same wait was ~6.3 s against 1.47 s
+        // of work. Roughly 60% of what a player experiences as loading was this.
+        //
+        // The logo still plays for the whole load, which is where it belongs and where a slow
+        // world gives it its full run. What it no longer does is hold the mission back once
+        // there is nothing left to wait for. `--splash-wait <seconds>` restores a bounded wait
+        // for anyone who wants the animation finished; the default 0 means "the load is the
+        // budget".
+        const float splashWaitSeconds = AppConfig::Instance().SplashWaitSeconds();
+        const DWORD splashStart = Poseidon::Foundation::GlobalTickCount();
+        const DWORD splashLimitMs = static_cast<DWORD>(splashWaitSeconds * 1000.0f);
         while (Poseidon::ProgressScript)
         {
+            if (Poseidon::Foundation::GlobalTickCount() - splashStart >= splashLimitMs)
+            {
+                Poseidon::ProgressScript.Free();
+                break;
+            }
             I_AM_ALIVE();
             if (Poseidon::ProgressScript && Poseidon::ProgressScript->IsTerminated())
             {

@@ -63,6 +63,13 @@ class AppConfig
 
     bool NoSplash() const { return _noSplash; }
 
+    /// How long the main loop may wait for the startup animation AFTER the world is
+    /// loaded. Zero -- the default -- means it does not wait at all: the logo plays for
+    /// the duration of the load and stops being a reason to hold the mission back.
+    /// Measured before this existed, the wait was 5.3 s of an 8.4 s load on a heavy
+    /// world and ~6.3 s of 7.8 s on a stock one.
+    float SplashWaitSeconds() const { return _splashWaitSeconds; }
+
     /// Check if the ASCII-art dedicated-server startup banner should be skipped
     bool NoBanner() const { return _noBanner; }
 
@@ -403,6 +410,7 @@ class AppConfig
     bool _widthExplicit = false;
     bool _heightExplicit = false;
     bool _noSplash = false;
+    float _splashWaitSeconds = 0.0f;
     bool _noBanner = false;
     bool _noMenuScene = false;
     // WGPU is the default backend. GL33 remains fully supported and is one flag away

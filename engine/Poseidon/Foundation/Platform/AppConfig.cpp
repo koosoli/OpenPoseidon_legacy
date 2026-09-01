@@ -352,6 +352,10 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
 
         bool showSplash = true;
         displayGroup->add_flag("--splash,!--no-splash", showSplash, "Show splash screens on startup");
+        displayGroup->add_option("--splash-wait", _splashWaitSeconds,
+                                 "Seconds the loader may wait for the startup animation after the world is "
+                                 "ready (default 0: do not wait)")
+            ->check(CLI::Range(0.0f, 30.0f));
         bool showMenuScene = true;
         displayGroup->add_flag("--menu-scene,!--no-menu-scene", showMenuScene, "Show 3D background scene in menu");
 
