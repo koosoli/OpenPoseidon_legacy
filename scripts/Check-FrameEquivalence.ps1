@@ -10,6 +10,20 @@
     Exits 0 when they are, 1 when they are not, 2 when a run failed or produced
     nothing to compare. So it is usable as a gate, not only as a readout.
 
+    IT IS A DETERMINISM ORACLE, NOT A CORRECTNESS ORACLE. It asks whether two runs
+    publish the same frames -- not whether those frames are RIGHT. A change that
+    breaks both runs identically passes at 100%.
+
+    That is not hypothetical. Moving the drains next to the render call left the
+    CPU-mesh handle patch running before the creates it resolves, so every mesh
+    created and drawn in the same frame lost its draw. This gate returned 901 of
+    901 identical through the whole regression, because both runs dropped the same
+    draws. What caught it was a counter that refuses to drop a draw silently.
+
+    So: use this to prove a restructuring did not CHANGE anything, and use the
+    engine's own anomaly counters and a capture you look at to prove it did not
+    BREAK anything. Neither substitutes for the other.
+
     Two rules are built in, and both were learned the expensive way:
 
       * ALIGN BY TICK, NEVER BY FRAME INDEX. The mission load takes a variable
