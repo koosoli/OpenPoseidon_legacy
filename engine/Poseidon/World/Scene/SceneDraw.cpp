@@ -1672,6 +1672,8 @@ std::atomic<uint64_t> gVetoProxies{0};
 std::atomic<uint64_t> gVetoRouting{0};
 std::atomic<uint64_t> gRunsShort{0};
 std::atomic<uint64_t> gRunShortLen{0};
+std::atomic<uint64_t> gSecClassCalls{0};
+std::atomic<uint64_t> gSecClassMisses{0};
 std::atomic<uint64_t> gWouldRuns{0};
 std::atomic<uint64_t> gWouldObjs{0};
 std::atomic<uint64_t> gWouldMaxLen{0};
@@ -1880,6 +1882,17 @@ void ReportPass1Stats()
                            static_cast<double>(P1S::gWouldRuns.load(std::memory_order_relaxed))
                      : 0.0,
                  P1S::gWouldMaxLen.load(std::memory_order_relaxed));
+        // PERF-015. Says whether the per-section classification cache was ON and how well it
+        // held, so a null A/B result cannot be read as "caching does not help" when what
+        // actually happened is that the lever was off in both arms. `calls=0` means the cache
+        // was never entered at all.
+        const uint64_t ccCalls = P1S::gSecClassCalls.load(std::memory_order_relaxed);
+        const uint64_t ccMiss = P1S::gSecClassMisses.load(std::memory_order_relaxed);
+        LOG_INFO(Graphics,
+                 "PERF section class cache: enabled={} calls/frame={:.0f} misses/frame={:.2f} hitRate={:.3f}% "
+                 "(cumulative calls={} misses={})",
+                 ccCalls > 0 ? 1 : 0, ccCalls / f, ccMiss / f,
+                 ccCalls > 0 ? (ccCalls - ccMiss) * 100.0 / static_cast<double>(ccCalls) : 0.0, ccCalls, ccMiss);
     }
     LOG_INFO(Graphics,
              "PERF pass2: surfSort={:.3f} surfDraw={:.3f} shadow={:.3f} alphaSort={:.3f} alphaDraw={:.3f} ms/frame "

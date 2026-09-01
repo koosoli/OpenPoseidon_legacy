@@ -95,6 +95,19 @@ extern std::atomic<uint64_t> gWouldRuns;   // runs of >= 4 the sorted list conta
 extern std::atomic<uint64_t> gWouldObjs;   // objects inside those runs
 extern std::atomic<uint64_t> gWouldMaxLen; // longest such run seen in any frame
 
+// PERF-015. The per-section material/texture classification cache in the wgpu backend, whose
+// A/B lever is WGR_SECTION_CLASS_CACHE. These exist to answer the question a bare before/after
+// cannot: whether the thing being measured was ON. `calls` counts classification questions the
+// cache fielded and `misses` the ones it had to recompute from the path text; with the lever
+// OFF both stay at 0 because the cache is never entered, which is how a run that measured
+// nothing is told apart from a change that did nothing.
+//
+// Unlike every counter above these are NOT gated on the submission loop: the classifiers also
+// run during model registration, and a denominator that silently excluded that would misstate
+// the miss rate on exactly the frames where loading is happening.
+extern std::atomic<uint64_t> gSecClassCalls;
+extern std::atomic<uint64_t> gSecClassMisses;
+
 bool Enabled();
 
 inline uint64_t NowNs()

@@ -313,6 +313,7 @@ list(APPEND POSEIDON_TEST_SOURCES
     Graphics/Rendering/test_render_flags.cpp
     Graphics/Rendering/test_render_pass_descriptor.cpp
     Graphics/Rendering/test_build_render_pass_descriptor.cpp
+    Graphics/Rendering/test_ascii_search.cpp
     Graphics/Rendering/test_validate_render_pass_descriptor.cpp
     Graphics/Rendering/test_render_frame_invariants.cpp
     Graphics/Rendering/test_render_frame_buffers.cpp

@@ -18,6 +18,8 @@
 #include <Poseidon/Graphics/Rendering/Primitives/Draw2DGeometry.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/MeshBuild.hpp>
 #include <Poseidon/Graphics/Rendering/BuildRenderPassDescriptor.hpp>
+#include <Poseidon/Graphics/Rendering/AsciiSearch.hpp>
+#include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/Graphics/Rendering/Primitives/Poly.hpp>
 #include <Poseidon/Graphics/Rendering/Lighting/Lights.hpp>
 #include <Poseidon/Graphics/Rendering/RenderFlags.hpp>
@@ -83,6 +85,8 @@ namespace
 bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat);
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture);
 bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture);
+bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat);
+bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture);
 
 // Narrowing conversion to the 32-bit width the FFI uses for counts / indices.
 template <typename T>
@@ -140,7 +144,25 @@ static const Asset::Material::TranslatedSlot* EffectiveBaseColourStage(
     return nullptr;
 }
 
-bool ContainsNoCase(const char* text, const std::string& part)
+// PERF-015 A/B lever, and it governs BOTH halves of the per-section classification cost:
+// this search's allocations, and the material/texture classification caches below. One
+// switch, because they are one change -- measuring them apart would report two numbers
+// neither of which is what the frame does. `WGR_SECTION_CLASS_CACHE=0` restores the
+// 2026-09-01 behaviour exactly, in the same binary, so the A/B needs no rebuild.
+static bool SectionClassCacheEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SECTION_CLASS_CACHE");
+        return !(v && v[0] == '0' && v[1] == '\0');
+    }();
+    return on;
+}
+
+// The pre-PERF-015 spelling, kept ONLY so the lever can measure what it removed. Two heap
+// allocations and two full lowercase passes per question asked; the classifiers below ask
+// between two and six each, per section, per frame.
+bool ContainsNoCaseAllocating(const char* text, const std::string& part)
 {
     if (!text || part.empty())
         return false;
@@ -151,6 +173,12 @@ bool ContainsNoCase(const char* text, const std::string& part)
     std::transform(needle.begin(), needle.end(), needle.begin(),
                    [](unsigned char ch) { return char(std::tolower(ch)); });
     return haystack.find(needle) != std::string::npos;
+}
+
+bool ContainsNoCase(const char* text, const std::string& part)
+{
+    return SectionClassCacheEnabled() ? render::ContainsNoCaseAscii(text, part)
+                                      : ContainsNoCaseAllocating(text, part);
 }
 
 // Small imported lamp meshes use an emissive material as a legacy visibility marker. In HDR the
@@ -165,7 +193,7 @@ bool ContainsNoCase(const char* text, const std::string& part)
 // overflows the f16 scene target and clears the 1.0 bloom knee by orders of magnitude. The
 // retained path already clamps by peak (gpu_driven.wgsl, emissive * min(1, 0.50/peak)); this
 // gives the direct path the same shape, per family.
-float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
+float StaticEmitterRadianceTargetUncached(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return 1.0f;
@@ -244,12 +272,79 @@ static bool LegacyPlantFallbackEnabled()
 
 // BI uses Czech `okno`/`okna` for windows. Keep this spelling-based classification here so the
 // retained-path admission decision and the night-emissive policy cannot slowly diverge.
-bool MaterialIsWindow(const Ref<TexMaterial>& surfMat)
+bool MaterialIsWindowUncached(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
         return false;
     const char* path = surfMat->GetName().Data();
     return ContainsNoCase(path, "okn") || ContainsNoCase(path, "window");
+}
+
+// PERF-015 -- the per-material answers, computed once per distinct material instead of once
+// per section per frame.
+//
+// Every classification above is a PURE FUNCTION OF THE MATERIAL'S PATH TEXT. Recomputing it
+// per section per frame is what made these the largest single term in `land:obj` on
+// Chernarus+: StaticEmitterRadianceTarget alone asks six case-insensitive questions, each of
+// which built and lowercased two std::strings, and DrawSectionTL reaches it TWICE per section
+// (once through the emissive scale, once through MaterialEmitsAtNight) on top of the window
+// test and the bark test.
+//
+// KEYED ON THE MATERIAL'S ADDRESS, VALIDATED ON ITS PATH. The address alone would be unsafe:
+// a material can be released and another allocated at the same address, and the entry would
+// then answer for the wrong asset. Storing the path settles that without depending on object
+// lifetimes at all -- the answers are a function of the path, so an entry whose path still
+// compares equal IS the correct answer whatever object now occupies the address, and a
+// mismatch simply recomputes. The cache is therefore correct by construction rather than by
+// an argument about when materials are freed.
+//
+// thread_local, so the per-section path takes no lock. The string-keyed leaf-card cache this
+// fronts holds a mutex, and a mutex acquisition per section per frame is exactly the class of
+// cost being removed here.
+struct MaterialClass
+{
+    std::string path;
+    float       emitterTarget = 1.0f;
+    bool        isWindow = false;
+    bool        leafCards = false;
+    bool        leafCardsResolved = false;
+};
+
+// Null when the cache does not apply (lever off, no material, no path); callers fall back to
+// the uncached form, which returns the same answer for those inputs.
+MaterialClass* MaterialClassSlot(const Ref<TexMaterial>& surfMat)
+{
+    if (!SectionClassCacheEnabled() || surfMat.IsNull())
+        return nullptr;
+    const char* path = surfMat->GetName().Data();
+    if (!path || !*path)
+        return nullptr;
+    thread_local std::unordered_map<const void*, MaterialClass> cache;
+    MaterialClass& slot = cache[static_cast<const void*>(surfMat.GetRef())];
+    Pass1Submit::gSecClassCalls.fetch_add(1, std::memory_order_relaxed);
+    if (slot.path.empty() || slot.path != path)
+    {
+        Pass1Submit::gSecClassMisses.fetch_add(1, std::memory_order_relaxed);
+        slot.path = path;
+        slot.emitterTarget = StaticEmitterRadianceTargetUncached(surfMat);
+        slot.isWindow = MaterialIsWindowUncached(surfMat);
+        slot.leafCardsResolved = false;
+    }
+    return &slot;
+}
+
+float StaticEmitterRadianceTarget(const Ref<TexMaterial>& surfMat)
+{
+    if (const MaterialClass* cached = MaterialClassSlot(surfMat))
+        return cached->emitterTarget;
+    return StaticEmitterRadianceTargetUncached(surfMat);
+}
+
+bool MaterialIsWindow(const Ref<TexMaterial>& surfMat)
+{
+    if (const MaterialClass* cached = MaterialClassSlot(surfMat))
+        return cached->isWindow;
+    return MaterialIsWindowUncached(surfMat);
 }
 
 // Is this material's emissive REAL light -- a fixture that should still glow at midnight? Only
@@ -4636,7 +4731,25 @@ namespace
 // Texture alpha statistics cannot distinguish a blended surface from an anti-aliased
 // alpha-tested leaf card. Shape::Draw resolves that ambiguity from the authored RVMAT shader
 // family; retained sections must use the same authority or TreeAdv pines become solid cards.
+// PERF-015 front cache. The string-keyed cache below is correct but costs a std::string
+// construction, a mutex acquisition and a string hash on EVERY section of EVERY draw -- it
+// removed the RVMAT parse, not the lookup. This removes the lookup too, and falls through to
+// it (and so to the parse) on the first section of each distinct material.
 bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat)
+{
+    if (MaterialClass* cached = MaterialClassSlot(surfMat))
+    {
+        if (!cached->leafCardsResolved)
+        {
+            cached->leafCards = GpuSectionMaterialUsesLeafCardsUncached(surfMat);
+            cached->leafCardsResolved = true;
+        }
+        return cached->leafCards;
+    }
+    return GpuSectionMaterialUsesLeafCardsUncached(surfMat);
+}
+
+bool GpuSectionMaterialUsesLeafCardsUncached(const Ref<TexMaterial>& surfMat)
 {
     if (surfMat.IsNull())
     {
@@ -4693,12 +4806,36 @@ bool GpuSectionMaterialUsesLeafCards(const Ref<TexMaterial>& surfMat)
 // apart.  The texture's authored role can: every A3 bark map lives in _bark or
 // carries a bark/trunk name.  Keep it opaque while the actual polyplane cards
 // retain the TreeAdv alpha test.
-bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture)
+bool GpuTextureIsBarkOrTrunkUncached(const TextureWgpu* texture)
 {
     const char* path = texture ? texture->Name() : nullptr;
     return path && (ContainsNoCase(path, "\\_bark\\") || ContainsNoCase(path, "bark_") ||
                     ContainsNoCase(path, "_bark") || ContainsNoCase(path, "\\trunk") ||
                     ContainsNoCase(path, "_trunk"));
+}
+
+// PERF-015: five substring scans of a full texture path, per section, per frame. Same
+// address-keyed / path-validated scheme as MaterialClassSlot, for the same reason.
+bool GpuTextureIsBarkOrTrunk(const TextureWgpu* texture)
+{
+    const char* path = texture ? texture->Name() : nullptr;
+    if (!SectionClassCacheEnabled() || !path || !*path)
+        return GpuTextureIsBarkOrTrunkUncached(texture);
+    struct TextureClass
+    {
+        std::string path;
+        bool        barkOrTrunk = false;
+    };
+    thread_local std::unordered_map<const void*, TextureClass> cache;
+    TextureClass& slot = cache[static_cast<const void*>(texture)];
+    Pass1Submit::gSecClassCalls.fetch_add(1, std::memory_order_relaxed);
+    if (slot.path.empty() || slot.path != path)
+    {
+        Pass1Submit::gSecClassMisses.fetch_add(1, std::memory_order_relaxed);
+        slot.path = path;
+        slot.barkOrTrunk = GpuTextureIsBarkOrTrunkUncached(texture);
+    }
+    return slot.barkOrTrunk;
 }
 
 bool GpuSectionMaterialIsCutout(const Ref<TexMaterial>& surfMat, TextureWgpu* texture)
