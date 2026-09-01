@@ -1135,7 +1135,7 @@ class EngineWgpu : public EngineDummy
     };
     std::vector<PendingMeshRef> _draws3dPendingMesh;
     std::vector<PendingMeshRef> _castersPendingMesh;
-    void PatchPendingMeshHandles();
+    void PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters);
     uint32_t _droppedUndefinedMeshDraws = 0;
     // Nulled by ~EngineWgpu; see CpuMeshLink.
     std::shared_ptr<CpuMeshLink> _cpuMeshLink = std::make_shared<CpuMeshLink>();

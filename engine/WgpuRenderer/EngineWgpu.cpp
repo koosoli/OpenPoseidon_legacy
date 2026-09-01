@@ -1929,26 +1929,32 @@ void EngineWgpu::EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::v
 // Called from NextFrame after every drain and before the frame is described, so what is
 // published (and hashed) carries renderer handles exactly as a direct wgr_mesh_create would
 // have left them. Costs nothing on a frame that created no CPU mesh, which is most of them.
-void EngineWgpu::PatchPendingMeshHandles()
+// Takes the arrays explicitly because it must run AFTER the drains -- which is after the
+// producer's vectors have been swapped into the ring slot, so the records to patch are the
+// BACKING's, not `_draws3d`'s. Getting that order wrong is not caught by the equivalence
+// gate: both runs drop the same draws and compare equal, which is exactly what happened
+// when the drains first moved (2 records a frame silently dropped, visible only in this
+// function's own log line).
+void EngineWgpu::PatchPendingMeshHandles(std::vector<WgrDraw3D>& draws, std::vector<WgrShadowCaster>& casters)
 {
     for (const PendingMeshRef& ref : _draws3dPendingMesh)
     {
-        if (ref.index >= _draws3d.size() || !ref.slot)
+        if (ref.index >= draws.size() || !ref.slot)
             continue;
         // Still 0 means the create was cancelled (the buffer died inside this same draw
         // phase). The renderer ignores an unknown mesh, so a 0 here drops the draw -- which
         // is what happened before this change too, by a longer road: the destructor's
         // deferred destroy is drained at the TOP of wgr_render_frame, so the handle the draw
         // carried was already freed by the time the draw was read.
-        _draws3d[ref.index].mesh = ref.slot->renderer;
+        draws[ref.index].mesh = ref.slot->renderer;
         if (ref.slot->renderer == 0)
             _droppedUndefinedMeshDraws++;
     }
     for (const PendingMeshRef& ref : _castersPendingMesh)
     {
-        if (ref.index >= _shadowCasters.size() || !ref.slot)
+        if (ref.index >= casters.size() || !ref.slot)
             continue;
-        _shadowCasters[ref.index].mesh = ref.slot->renderer;
+        casters[ref.index].mesh = ref.slot->renderer;
         if (ref.slot->renderer == 0)
             _droppedUndefinedMeshDraws++;
     }
@@ -2491,13 +2497,6 @@ void EngineWgpu::NextFrame()
         _opsFrames++;
         _ops = MutationOps{};
 
-        // REN-THR-011 -- resolve every CPU-mesh handle recorded before this frame's drain,
-        // BEFORE the arrays are swapped into the ring and before HashPublishedFrame walks
-        // them. draws3d masks its mesh field under WGR_FRAME_HASH_MASK_IDS; shadow_casters
-        // does NOT, so a published producer-side placeholder would move the caster slice's
-        // hash and quietly break the cross-build equivalence oracle.
-        PatchPendingMeshHandles();
-
         PushFrameBacking& backing = _pushRing[_pushSlot];
         _pushSlot = (_pushSlot + 1) % kPushFrameRing;
         backing.verts.swap(_verts);
@@ -2630,6 +2629,10 @@ void EngineWgpu::NextFrame()
         DrainInstanceOps();
         DrainOverlayTexOps();
         TranslateOverlayDrawHandles(backing.overlayDraws);
+        // REN-THR-011: resolve every CPU-mesh handle recorded during this frame's draw
+        // phase. It has to come after the drains -- the creates it resolves are IN them --
+        // and before the hash, which walks the arrays it patches.
+        PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters);
 
         HashPublishedFrame(frame);
         wgr_render_frame(_renderer, &frame);
