@@ -838,6 +838,10 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
     // an unreachable feature is one nobody can show anybody else.
     //   POSEIDON_DOF=1  POSEIDON_DOF_FOCUS=<m>  POSEIDON_DOF_BLUR=<px>  POSEIDON_DOF_BAND=<m>
+    if (const char* v = std::getenv("WGR_RENDER_THREAD"); v && v[0] && v[0] != '0')
+    {
+        StartRenderThread();
+    }
     if (const char* v = std::getenv("WGR_FRAME_HASH"); v && v[0] && v[0] != '0')
     {
         _frameHashOn = true;
@@ -1356,6 +1360,9 @@ EngineWgpu::~EngineWgpu()
     }
     if (_renderer)
     {
+        // The worker must be gone before anything the renderer owns is torn down: it is the
+        // only other thread that touches the handle.
+        StopRenderThread();
         // Release the retained scene's owned pool meshes before tearing down the renderer.
         // _gpuMeshes holds PRODUCER handles (REN-THR-008); translate through the drain map.
         // A handle with no mapping is a create that never drained -- it never reached the
@@ -2082,6 +2089,76 @@ void EngineWgpu::DrainInstanceOps()
     _instanceOps.clear();
 }
 
+// REN-THR-014: THE CONSUMER BLOCK, as one function. Every call in it touches the renderer
+// handle and nothing outside it does. The order is load-bearing and each step says why:
+// settings configure what the draws will do; resources precede instances because a queued
+// instance add may name a model whose registration is queued behind it; overlay textures
+// precede the draw translation that resolves them; the CPU-mesh patch follows the drains
+// that create what it resolves and precedes the hash that walks what it patches.
+void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing)
+{
+    ApplyPendingRendererSettings();
+    DrainResourceOps();
+    DrainInstanceOps();
+    DrainOverlayTexOps();
+    TranslateOverlayDrawHandles(backing.overlayDraws);
+    PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters);
+
+    HashPublishedFrame(frame);
+    wgr_render_frame(_renderer, &frame);
+    PublishRendererStats();
+}
+
+void EngineWgpu::RenderThreadMain()
+{
+    for (;;)
+    {
+        WgrFrame* frame = nullptr;
+        PushFrameBacking* backing = nullptr;
+        {
+            std::unique_lock<std::mutex> lock(_renderMutex);
+            _renderCv.wait(lock, [this] { return _renderHasWork || _renderQuit; });
+            if (_renderQuit && !_renderHasWork)
+                return;
+            frame = _renderFrame;
+            backing = _renderBacking;
+        }
+        if (frame && backing)
+            RunConsumerBlock(*frame, *backing);
+        {
+            std::lock_guard<std::mutex> lock(_renderMutex);
+            _renderHasWork = false;
+            _renderFrame = nullptr;
+            _renderBacking = nullptr;
+        }
+        _renderCv.notify_one();
+    }
+}
+
+void EngineWgpu::StartRenderThread()
+{
+    if (_renderThread.joinable())
+        return;
+    _renderThreadOn = true;
+    _renderThread = std::thread([this] { RenderThreadMain(); });
+    LOG_INFO(Graphics,
+             "Wgpu render thread: ON (WGR_RENDER_THREAD). Lockstep -- the producer waits for "
+             "each frame, so this is a stack change, not overlap.");
+}
+
+void EngineWgpu::StopRenderThread()
+{
+    if (!_renderThread.joinable())
+        return;
+    {
+        std::lock_guard<std::mutex> lock(_renderMutex);
+        _renderQuit = true;
+    }
+    _renderCv.notify_all();
+    _renderThread.join();
+    _renderThreadOn = false;
+}
+
 void EngineWgpu::NextFrame()
 {
     if (_renderer)
@@ -2624,19 +2701,24 @@ void EngineWgpu::NextFrame()
         // a model whose queued registration precedes it, and that is the only cross-queue
         // dependency the producer can create. Then the overlay textures, and only then the
         // translation of the overlay draws that refer to them.
-        ApplyPendingRendererSettings();
-        DrainResourceOps();
-        DrainInstanceOps();
-        DrainOverlayTexOps();
-        TranslateOverlayDrawHandles(backing.overlayDraws);
-        // REN-THR-011: resolve every CPU-mesh handle recorded during this frame's draw
-        // phase. It has to come after the drains -- the creates it resolves are IN them --
-        // and before the hash, which walks the arrays it patches.
-        PatchPendingMeshHandles(backing.draws3d, backing.shadowCasters);
-
-        HashPublishedFrame(frame);
-        wgr_render_frame(_renderer, &frame);
-        PublishRendererStats();
+        if (_renderThreadOn)
+        {
+            // Hand the block to the worker and wait for it. The wait is what makes this
+            // step provable: the same work in the same order, on another stack.
+            {
+                std::lock_guard<std::mutex> lock(_renderMutex);
+                _renderFrame = &frame;
+                _renderBacking = &backing;
+                _renderHasWork = true;
+            }
+            _renderCv.notify_one();
+            std::unique_lock<std::mutex> lock(_renderMutex);
+            _renderCv.wait(lock, [this] { return !_renderHasWork; });
+        }
+        else
+        {
+            RunConsumerBlock(frame, backing);
+        }
         LogObjectPerfRow();
         LogDrawSectionStats();
         if (_wbank)

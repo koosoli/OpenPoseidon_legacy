@@ -23,6 +23,9 @@
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
+#include <thread>
+#include <mutex>
+#include <condition_variable>
 #include <vector>
 
 struct SDL_Window;
@@ -1187,6 +1190,29 @@ class EngineWgpu : public EngineDummy
     bool _publishedGrassStatsValid = false;
     bool _publishedMemoryStatsValid = false;
     void PublishRendererStats();
+
+    // REN-THR-014 -- the render thread. Everything that touches the renderer handle is one
+    // function now (RunConsumerBlock); this runs it on a worker instead of inline.
+    //
+    // LOCKSTEP FIRST, deliberately: the producer signals and then WAITS. That changes
+    // nothing observable -- the same work happens in the same order, on a different stack --
+    // which is exactly what makes it provable with the equivalence gate before any overlap
+    // exists to blame. Overlap is a separate step and a separate flag.
+    //
+    // Opt-in (WGR_RENDER_THREAD=1). Off, the block runs inline exactly as before, so the
+    // default path keeps no thread and no synchronisation at all.
+    std::thread _renderThread;
+    std::mutex _renderMutex;
+    std::condition_variable _renderCv;
+    WgrFrame* _renderFrame = nullptr;         // borrowed; the producer waits, so it outlives the call
+    PushFrameBacking* _renderBacking = nullptr;
+    bool _renderHasWork = false;
+    bool _renderQuit = false;
+    bool _renderThreadOn = false;
+    void RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing);
+    void RenderThreadMain();
+    void StartRenderThread();
+    void StopRenderThread();
     bool GetObjectStatsFromRenderer(ObjectStatsOut& out) const;
     bool GetGrassStatsFromRenderer(GrassStatsOut& out) const;
     bool GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const;
