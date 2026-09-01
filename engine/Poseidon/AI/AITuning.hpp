@@ -34,4 +34,30 @@ void                SetTrackNearTargetsPeriod(float seconds);
 /// measurement gets attributed to the wrong setting.
 [[nodiscard]] bool TrackNearTargetsFromEnvironment();
 
+/// The sentinel that means "no bound at all": `AIGroup::CreateTargetList` runs the whole
+/// pass in the call it was made from.
+///
+/// It is negative rather than a large positive number on purpose. A caller that needs the
+/// finished list -- `AICenter::InitSensors` builds the world's sensors from it before the
+/// first tick, and a script asking what a group can see cannot be told "half of it" -- must
+/// be able to say so in a way that no arithmetic on the counter can accidentally satisfy.
+inline constexpr int kTargetListBudgetUnlimited = -1;
+
+/// Counted units of target-list work one `AIGroup::Think` may spend, or
+/// `kTargetListBudgetUnlimited`.
+///
+/// A "unit" is one examined item: a unit slot in the visibility scan, an entry in the
+/// report walk, an entry in the centre-database walk, an entry in the subjective-cost walk.
+/// It is deliberately NOT milliseconds. `AIGroup::CreateTargetList` decides what the group
+/// perceives, and SIM-813 removed the last wall clock from that decision -- a millisecond
+/// budget here would put it straight back, and make "what does this group know" a function
+/// of how fast the machine ran. A counted budget is the same on every machine and in every
+/// replay of the same simulation state.
+///
+/// Defaults to the sentinel, so the shipped behaviour is the 2001 behaviour: every pass
+/// completes in the call that started it.
+[[nodiscard]] int  TargetListBudget();
+void               SetTargetListBudget(int units);
+[[nodiscard]] bool TargetListBudgetFromEnvironment();
+
 } // namespace Poseidon::AITuning

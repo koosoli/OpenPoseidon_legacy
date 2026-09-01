@@ -32,6 +32,7 @@
 #include <Poseidon/Foundation/Types/LLinks.hpp>
 #include <Poseidon/Foundation/Types/Pointers.hpp>
 
+#include <Poseidon/AI/AIGroupScanBudget.hpp>
 #include <Poseidon/Game/UiActions.hpp>
 #include <Poseidon/World/Entities/Infantry/MoveActions.hpp>
 #include <Poseidon/AI/Path/AIDefs.hpp>
@@ -454,71 +455,291 @@ void AIGroup::ReactToEnemyDetected()
     }
 }
 
-bool AIGroup::CreateTargetList(bool initialize, bool report)
+// Roadmap step 12S. `CreateTargetList` was one monolithic call: it scanned every unit's
+// visibility, managed the target list, walked it three more times and sorted it, all before
+// returning. PERF-015 measured the walk it feeds and named this region O(units x targets),
+// with `TargetList::Manage` (World/Detection/Target.cpp) placing no ceiling on the second
+// factor -- so its cost is a scene property, and on a busy scene the whole of it lands in
+// one tick.
+//
+// It is now a state machine over six stages with a cursor inside the walking ones, bounded
+// by a budget of COUNTED EXAMINED ITEMS. Three properties are load-bearing:
+//
+//  * **The bound is a count, never a clock.** SIM-813 removed the last wall clock from the
+//    AI's decisions -- the QueryPerformanceCounter that decided which groups thought -- and
+//    a millisecond budget here would reintroduce exactly that defect one level down: what a
+//    group perceives would become a function of how fast the machine ran, and no replay or
+//    savegame could reproduce it. A count suspends at the same item on every machine.
+//
+//  * **The resume point is state, so it is serialized.** `_targetListStage` and the cursor
+//    are written by AIGroup::Serialize. A save taken mid-pass that reloaded at stage 0
+//    would re-run the report walk over targets already reported.
+//
+//  * **The default is unbounded and therefore unchanged.** With
+//    `kTargetListBudgetUnlimited` every stage runs to its end in the call that started it,
+//    in the order it always ran, and the function is the 2001 one plus a branch per item.
+//    Only a caller that passes a finite budget can observe a partial pass, and a partial
+//    pass reports partial counts -- that is the trade, not a bug.
+//
+// The indivisible stages (Manage, and the sort) are allowed to overrun the budget rather
+// than be split. A step that must run whole and cannot afford itself would otherwise never
+// run at any budget, and the pass would stall forever.
+bool AIGroup::CreateTargetList(bool initialize, bool report, int budget)
 {
-    float nearestEnemyDist2 = 1e10;
-    for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
+    const int passFlags = (initialize ? 1 : 0) | (report ? 2 : 0);
+
+    // A pass in progress is resumed only if it was started with the same flags. `report`
+    // and `initialize` change what the walk DOES to each entry -- whether it sends radio
+    // reports, whether it resets report timestamps -- so finishing a report=true pass with
+    // report=false semantics would produce a list neither caller asked for. Restarting is
+    // the honest answer, and the only caller that can trigger it (AICenter::InitSensors,
+    // which passes report=false) runs unbounded and therefore finishes before returning.
+    if (_targetListStage == TLSIdle || _targetListFlags != passFlags)
     {
-        AIUnit* unit = _units[i];
-        if (!unit)
-        {
-            continue;
-        }
-        if (!unit->IsUnit())
-        {
-            continue;
-        }
-        if (unit->GetLifeState() != AIUnit::LSAlive)
-        {
-            continue;
-        }
-        if (!unit->GetVehicle())
-        {
-            continue;
-        }
-        unit->GetVehicle()->WhatIsVisible(_targetList, initialize);
-        // check unit for nearestEnemyDist2
-        saturateMin(nearestEnemyDist2, unit->GetNearestEnemyDist2());
+        _targetListStage = TLSScan;
+        _targetListCursor = 0;
+        _targetListCount = 0;
+        _targetListFlags = passFlags;
+        _targetListSomeTarget = 0;
+        _targetListNearest2 = 1e10f;
     }
 
-    _nearestEnemyDist2 = nearestEnemyDist2;
-
-    _targetList.Manage(this);
-
-    _enemiesDetected = 0;
-    _unknownsDetected = 0;
+    Determinism::WorkBudget work(budget);
 
     AICenter* center = GetCenter();
 
-    bool someTarget = false;
-    int n = _targetList.Size();
-    for (int i = 0; i < n; i++)
+    if (_targetListStage == TLSScan)
     {
-        Target* vtar = _targetList[i];
-        // any target that is vanished or destroyed should be updated
-        // and no more processing is required
-        if (vtar->vanished || vtar->destroyed)
+        while (_targetListCursor < MAX_UNITS_PER_GROUP)
         {
-            SendReport(ReportDestroy, *vtar);
-            // we might also send radio report
-
-            if (vtar->destroyed && vtar->isKnown && vtar->idKiller && vtar->timeReported <= TIME_MIN && vtar->idExact &&
-                vtar->idExact->IsInLandscape())
+            const int i = _targetListCursor++;
+            AIUnit*   unit = _units[i];
+            if (unit && unit->IsUnit() && unit->GetLifeState() == AIUnit::LSAlive && unit->GetVehicle())
             {
-                AIUnit* killer = vtar->idKiller->CommanderUnit();
-                if (killer && killer->IsLocal() && !killer->IsAnyPlayer())
-                {
-                    if (killer->GetLifeState() == AIUnit::LSAlive)
+                unit->GetVehicle()->WhatIsVisible(_targetList, initialize);
+                // check unit for nearestEnemyDist2
+                saturateMin(_targetListNearest2, unit->GetNearestEnemyDist2());
+            }
+            // Charged after the slot, not before: a budget too small to pay for one item
+            // must still buy one, or a pass suspended here never advances.
+            if (work.Spend(1))
+            {
+                return _targetListSomeTarget != 0;
+            }
+        }
+
+        // Published only once the whole scan is done. The group's nearest enemy is a MINIMUM
+        // over its units, and a minimum over half of them is not a smaller number -- it is a
+        // larger one, and this field gates the near-target tracking block in Think(). A
+        // partially-scanned value would open that gate on the wrong ticks.
+        _nearestEnemyDist2 = _targetListNearest2;
+        _targetListStage = TLSManage;
+        _targetListCursor = 0;
+    }
+
+    if (_targetListStage == TLSManage)
+    {
+        // Indivisible: Manage adds, removes and re-times entries, so a cursor into the list
+        // means nothing until it has finished. It also fixes the size the report walk below
+        // is planned against.
+        _targetList.Manage(this);
+
+        _enemiesDetected = 0;
+        _unknownsDetected = 0;
+
+        _targetListCount = _targetList.Size();
+        _targetListStage = TLSReport;
+        _targetListCursor = 0;
+        if (work.Spend(_targetListCount > 0 ? _targetListCount : 1))
+        {
+            return _targetListSomeTarget != 0;
+        }
+    }
+
+    if (_targetListStage == TLSReport)
+    {
+        // `_targetListCount` is the size Manage left, which is the `n` this walk was planned
+        // against -- the 2001 loop also fixed it once rather than re-reading it, so an entry
+        // appended by AddTarget partway through is not visited by the pass that is already
+        // running. The second bound is the live size, because between two halves of one
+        // suspended pass the list can have shrunk and the stored count would then index off
+        // the end.
+        while (_targetListCursor < _targetListCount && _targetListCursor < _targetList.Size())
+        {
+            Target* vtar = _targetList[_targetListCursor++];
+            ReportTargetEntry(vtar, center, initialize, report);
+            if (work.Spend(1))
+            {
+                return _targetListSomeTarget != 0;
+            }
+        }
+        _targetListStage = TLSCenterDBase;
+        _targetListCursor = 0;
+    }
+
+    if (_targetListStage == TLSCenterDBase)
+    {
+        // check center database sometimes
+        //
+        // The gate is evaluated on entry only. It is a 10 s ration that arms itself by
+        // writing `_checkCenterDBase`, so re-testing it on every resume would find it shut
+        // by its own arming and abandon a walk it had already started.
+        if (_targetListCursor == 0)
+        {
+            if (Glob.time > _checkCenterDBase + 10 && !IsAnyPlayerGroup())
+            {
+                // use AICenter database for target recognition
+                _checkCenterDBase = Glob.time;
+            }
+            else
+            {
+                _targetListStage = TLSSubjective;
+            }
+        }
+
+        if (_targetListStage == TLSCenterDBase)
+        {
+            while (_targetListCursor < _targetList.Size())
+            {
+                Target* tar = _targetList[_targetListCursor++];
+
+                float sideAccuracy = tar->FadingSideAccuracy();
+                float typeAccuracy = tar->FadingSideAccuracy();
+
+                if (sideAccuracy < 1.5 || typeAccuracy < 1.5 || tar->side == TSideUnknown)
+                { // inaccurate info, consult AICenter
+                    const AITargetInfo* tgt = center->FindTargetInfo(tar->idExact);
+                    if (tgt)
                     {
-                        SendObjectDestroyed(killer, vtar->type);
+                        if (tgt->FadingSideAccuracy() > sideAccuracy)
+                        {
+                            tar->side = tgt->_side;
+                            tar->sideAccuracy = tgt->_accuracySide;
+                            tar->sideAccuracyTime = tgt->_timeSide;
+                            if (tar->sideAccuracy > 1.5f)
+                            {
+                                tar->sideChecked = true;
+                            }
+                        }
+                        if (tgt->FadingTypeAccuracy() > typeAccuracy)
+                        {
+                            tar->type = tgt->_type;
+                            tar->accuracy = tgt->_accuracyType;
+                            tar->accuracyTime = tgt->_timeType;
+                        }
                     }
-                    vtar->timeReported = Glob.time;
-                    vtar->posReported = vtar->position;
+                }
+                if (work.Spend(1))
+                {
+                    return _targetListSomeTarget != 0;
                 }
             }
-
-            continue;
+            _targetListStage = TLSSubjective;
+            _targetListCursor = 0;
         }
+    }
+
+    if (_targetListStage == TLSSubjective)
+    {
+        // prepare subjective costs
+        while (_targetListCursor < _targetList.Size())
+        {
+            Target* tar = _targetList[_targetListCursor++];
+
+            if (!tar->idExact || !tar->IsKnown() || tar->destroyed || tar->vanished ||
+                tar->State(Leader()) < TargetEnemyCombat)
+            {
+                // reset subjective cost
+                tar->dammagePerMinute = 0;
+                tar->subjectiveCost = -1e10;
+            }
+            else if (center->IsEnemy(tar->side))
+            {
+                // calculate dammagePerMinute and subjectiveCost
+                tar->dammagePerMinute = GetDammagePerMinute(tar);
+                tar->subjectiveCost = GetSubjectiveCost(tar);
+            }
+            else if (tar->side == TSideUnknown)
+            {
+                tar->dammagePerMinute = 0;
+                tar->subjectiveCost = 0;
+            }
+            else
+            {
+                // friendly or unknown - no need to test it
+                tar->dammagePerMinute = 0;
+                tar->subjectiveCost = -1e5;
+            }
+            if (work.Spend(1))
+            {
+                return _targetListSomeTarget != 0;
+            }
+        }
+        _targetListStage = TLSSort;
+        _targetListCursor = 0;
+    }
+
+    // Indivisible, and last for a reason: the sort permutes the list, so no cursor taken
+    // before it survives it. Suspending here would leave the group with a half-ordered
+    // ranking, and SIM-803 established that this list's ORDER is gameplay-observable
+    // because AssignTargets walks it in order.
+    //
+    // sort (stable: equal subjectiveCost keeps existing index order -- SIM-803)
+    _targetList.SortBySubjectiveCost();
+
+    // realloc target list if allocated space is too big
+    int allocSize = _targetList.MaxSize();
+    if (allocSize > 32 && allocSize > _targetList.Size() * 4)
+    {
+        _targetList.Realloc(_targetList.Size() * 2);
+    }
+
+#if LOG_THINK
+    Log("Group %s, %d enemies, %d visible", (const char*)GetDebugName(), _targetList.Size(), visibleList.Size());
+#endif
+
+    const bool someTarget = _targetListSomeTarget != 0;
+
+    _targetListStage = TLSIdle;
+    _targetListCursor = 0;
+    _targetListCount = 0;
+    _targetListFlags = 0;
+    _targetListSomeTarget = 0;
+    _targetListNearest2 = 1e10f;
+
+    return someTarget;
+}
+
+// One entry of the report walk, lifted out of `CreateTargetList` so the walk's loop is a
+// cursor, a call and a budget charge rather than two hundred lines the suspension points
+// have to be threaded through. The body is the 2001 one; the only change is that its early
+// `continue` became the `else` it always meant, because there is no loop here to continue.
+void AIGroup::ReportTargetEntry(Target* vtar, AICenter* center, bool initialize, bool report)
+{
+    // any target that is vanished or destroyed should be updated
+    // and no more processing is required
+    if (vtar->vanished || vtar->destroyed)
+    {
+        SendReport(ReportDestroy, *vtar);
+        // we might also send radio report
+
+        if (vtar->destroyed && vtar->isKnown && vtar->idKiller && vtar->timeReported <= TIME_MIN && vtar->idExact &&
+            vtar->idExact->IsInLandscape())
+        {
+            AIUnit* killer = vtar->idKiller->CommanderUnit();
+            if (killer && killer->IsLocal() && !killer->IsAnyPlayer())
+            {
+                if (killer->GetLifeState() == AIUnit::LSAlive)
+                {
+                    SendObjectDestroyed(killer, vtar->type);
+                }
+                vtar->timeReported = Glob.time;
+                vtar->posReported = vtar->position;
+            }
+        }
+    }
+    else
+    {
         bool doReport = report ? vtar->IsKnown() : vtar->isKnown;
         // report only recently seen targets
         if (report && doReport)
@@ -597,7 +818,10 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
         {
             if (vtar->side == TSideUnknown)
             {
-                someTarget = true;
+                // Accumulated on the group rather than in a local: the walk this belongs to
+                // can be suspended between two entries, and a local would be lost with the
+                // stack frame that held it.
+                _targetListSomeTarget = 1;
                 _unknownsDetected++;
             }
             else if (center->IsEnemy(vtar->side))
@@ -607,97 +831,10 @@ bool AIGroup::CreateTargetList(bool initialize, bool report)
                 { // calculate only dangerous enemies
                     _enemiesDetected++;
                 }
-                someTarget = true;
+                _targetListSomeTarget = 1;
             }
         }
     }
-
-    // check center database sometimes
-    if (Glob.time > _checkCenterDBase + 10 && !IsAnyPlayerGroup())
-    {
-        // use AICenter database for target recognition
-        _checkCenterDBase = Glob.time;
-
-        for (int i = 0; i < _targetList.Size(); i++)
-        {
-            Target* tar = _targetList[i];
-
-            float sideAccuracy = tar->FadingSideAccuracy();
-            float typeAccuracy = tar->FadingSideAccuracy();
-
-            if (sideAccuracy < 1.5 || typeAccuracy < 1.5 || tar->side == TSideUnknown)
-            { // inaccurate info, consult AICenter
-                const AITargetInfo* tgt = center->FindTargetInfo(tar->idExact);
-                if (tgt)
-                {
-                    if (tgt->FadingSideAccuracy() > sideAccuracy)
-                    {
-                        tar->side = tgt->_side;
-                        tar->sideAccuracy = tgt->_accuracySide;
-                        tar->sideAccuracyTime = tgt->_timeSide;
-                        if (tar->sideAccuracy > 1.5f)
-                        {
-                            tar->sideChecked = true;
-                        }
-                    }
-                    if (tgt->FadingTypeAccuracy() > typeAccuracy)
-                    {
-                        tar->type = tgt->_type;
-                        tar->accuracy = tgt->_accuracyType;
-                        tar->accuracyTime = tgt->_timeType;
-                    }
-                }
-            }
-        }
-    }
-    // prepare subjective costs
-    for (int i = 0; i < _targetList.Size(); i++)
-    {
-        Target* tar = _targetList[i];
-
-        if (!tar->idExact || !tar->IsKnown() || tar->destroyed || tar->vanished ||
-            tar->State(Leader()) < TargetEnemyCombat)
-        {
-            // reset subjective cost
-            tar->dammagePerMinute = 0;
-            tar->subjectiveCost = -1e10;
-            continue;
-        }
-
-        if (center->IsEnemy(tar->side))
-        {
-            // calculate dammagePerMinute and subjectiveCost
-            tar->dammagePerMinute = GetDammagePerMinute(tar);
-            tar->subjectiveCost = GetSubjectiveCost(tar);
-        }
-        else if (tar->side == TSideUnknown)
-        {
-            tar->dammagePerMinute = 0;
-            tar->subjectiveCost = 0;
-        }
-        else
-        {
-            // friendly or unknown - no need to test it
-            tar->dammagePerMinute = 0;
-            tar->subjectiveCost = -1e5;
-        }
-    }
-
-    // sort (stable: equal subjectiveCost keeps existing index order -- SIM-803)
-    _targetList.SortBySubjectiveCost();
-
-    // realloc target list if allocated space is too big
-    int allocSize = _targetList.MaxSize();
-    if (allocSize > 32 && allocSize > _targetList.Size() * 4)
-    {
-        _targetList.Realloc(_targetList.Size() * 2);
-    }
-
-#if LOG_THINK
-    Log("Group %s, %d enemies, %d visible", (const char*)GetDebugName(), _targetList.Size(), visibleList.Size());
-#endif
-
-    return someTarget;
 }
 
 Target* AIGroup::AddTarget(EntityAI* object, float accuracy, float sideAccuracy, float delay, const Vector3* pos,

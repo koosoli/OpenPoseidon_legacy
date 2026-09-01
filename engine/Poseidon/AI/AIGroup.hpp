@@ -5,6 +5,7 @@
 
 #include <Poseidon/AI/Path/ArcadeWaypoint.hpp>
 #include <Poseidon/AI/AIUnit.hpp>
+#include <Poseidon/AI/AITuning.hpp>
 #include <Poseidon/Game/Scripting/Scripts.hpp>
 namespace Poseidon::Dev::DebugCommands { class Command; }
 
@@ -401,6 +402,32 @@ protected:
 
 	Foundation::Time _checkCenterDBase; // time when center dbase was last checked
 
+	// Roadmap step 12S. Resume state for a CreateTargetList pass that ran out of work
+	// budget partway through. Deliberately plain integers and one float: a cursor that
+	// held a Target* or an iterator would be a dangling pointer the moment Manage() or
+	// AddTarget() touched the list between two halves of one pass, and it could not be
+	// written to a savegame at all. All of these ARE serialized (AIGroup::Serialize) --
+	// a game saved mid-pass that reloaded at stage 0 would re-run the report walk over
+	// targets it had already reported, which is a duplicate radio call for every enemy
+	// the group had found.
+	enum TargetListStage
+	{
+		TLSIdle = -1,     // no pass in progress; the next call starts a fresh one
+		TLSScan = 0,      // WhatIsVisible over the unit slots
+		TLSManage,        // TargetList::Manage + counter reset (indivisible)
+		TLSReport,        // the report / detection walk
+		TLSCenterDBase,   // the once-per-10s centre database consultation
+		TLSSubjective,    // subjective cost preparation
+		TLSSort,          // sort + realloc (indivisible)
+	};
+
+	int _targetListStage;      // TargetListStage; TLSIdle when no pass is in progress
+	int _targetListCursor;     // index reached within the current stage's walk
+	int _targetListCount;      // size the report walk was planned against (see below)
+	int _targetListFlags;      // bit 0 = initialize, bit 1 = report, of the pass in progress
+	int _targetListSomeTarget; // `someTarget` accumulated so far in the current pass
+	float _targetListNearest2; // nearest enemy distance^2 accumulated so far in the scan
+
 	void ExpensiveThinkDone(); // calculate time of next expensive think
 
 	Foundation::Time _lastSendTargetTime;
@@ -701,9 +728,38 @@ public:
 	void RessurectUnit(AIUnit *unit);
 
 	void ReactToEnemyDetected();
+	/// True while a CreateTargetList pass has been suspended and not yet finished.
+	///
+	/// The 1 Hz "expensive think" gate is not enough to drive a suspended pass to
+	/// completion -- it would advance it once a second, so a budget of a few items would
+	/// take minutes to finish one pass and the group's perception would lag that far
+	/// behind the world. A pass in progress is therefore resumed on EVERY think until it
+	/// closes. With the default unbounded budget this is always false and the extra branch
+	/// is all that changes.
+	bool TargetListPassInProgress() const { return _targetListStage != TLSIdle; }
+
 protected:
 	// implementation
-	bool CreateTargetList(bool initialize = false, bool report = true);
+
+	/// Build the group's target list, spending at most `budget` counted items.
+	///
+	/// `budget` is a count of examined items (unit slots, target entries), never a
+	/// duration -- see Poseidon::AITuning::kTargetListBudgetUnlimited, which is the
+	/// default and means "finish the whole pass in this call". Under a finite budget the
+	/// pass suspends at a stage ordinal and a cursor and the next call picks it up there.
+	///
+	/// The return value is `someTarget` as far as the pass has got. A suspended pass
+	/// therefore reports what it has found so far, not what it will find -- and
+	/// `_enemiesDetected` / `_unknownsDetected` are likewise partial until the report walk
+	/// completes. That is inherent in spreading the walk over ticks and is why the default
+	/// is unbounded.
+	bool CreateTargetList(bool initialize = false, bool report = true,
+	                      int budget = Poseidon::AITuning::kTargetListBudgetUnlimited);
+
+	/// One entry of CreateTargetList's report walk. Writes `_enemiesDetected`,
+	/// `_unknownsDetected` and `_targetListSomeTarget`, which is why those three live on the
+	/// group: the walk they accumulate over can be suspended between any two entries.
+	void ReportTargetEntry(Target *vtar, AICenter *center, bool initialize, bool report);
 
 	void InitUnitSlot(int i); // i is ID-1
 	void CopyUnitSlot(int from, int to); // i is ID-1

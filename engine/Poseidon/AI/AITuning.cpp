@@ -15,6 +15,9 @@ struct State
 {
     std::atomic<float> trackNearTargets{kTrackNearTargetsDefault};
     bool               fromEnvironment = false;
+
+    std::atomic<int> targetListBudget{kTargetListBudgetUnlimited};
+    bool             targetListFromEnvironment = false;
 };
 
 State& Get()
@@ -38,6 +41,19 @@ State& Get()
                 s.fromEnvironment = true;
             }
         }
+        // Same rule for the target-list budget: a malformed value leaves the sentinel in
+        // place rather than being parsed to zero. Zero would be a budget that can never buy
+        // anything, and the pass would stall forever instead of merely being unbounded.
+        if (const char* v = std::getenv("POSEIDON_AI_TARGETLIST_BUDGET"); v != nullptr && v[0] != '\0')
+        {
+            char*          end = nullptr;
+            const long int parsed = std::strtol(v, &end, 10);
+            if (end != v && *end == '\0' && parsed >= -1 && parsed != 0 && parsed <= 1000000)
+            {
+                s.targetListBudget.store(static_cast<int>(parsed), std::memory_order_relaxed);
+                s.targetListFromEnvironment = true;
+            }
+        }
         return true;
     }();
     (void)once;
@@ -59,6 +75,25 @@ void SetTrackNearTargetsPeriod(float seconds)
 bool TrackNearTargetsFromEnvironment()
 {
     return Get().fromEnvironment;
+}
+
+int TargetListBudget()
+{
+    return Get().targetListBudget.load(std::memory_order_relaxed);
+}
+
+void SetTargetListBudget(int units)
+{
+    // Anything that is not a positive count collapses to the sentinel. In particular a
+    // zero: a budget of zero examined items cannot advance a pass, so a suspended pass
+    // would never finish and the group's perception would freeze at whatever it last saw.
+    const int value = (units < 1) ? kTargetListBudgetUnlimited : units;
+    Get().targetListBudget.store(value, std::memory_order_relaxed);
+}
+
+bool TargetListBudgetFromEnvironment()
+{
+    return Get().targetListFromEnvironment;
 }
 
 } // namespace Poseidon::AITuning

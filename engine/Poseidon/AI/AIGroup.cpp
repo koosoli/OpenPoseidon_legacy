@@ -83,6 +83,14 @@ AIGroup::AIGroup() : _radio(CCGroup, this, RNRadio)
 
     _nearestEnemyDist2 = 100; // unless we know better, assume 100 m
 
+    // Step 12S: no target-list pass in progress on a fresh group.
+    _targetListStage = TLSIdle;
+    _targetListCursor = 0;
+    _targetListCount = 0;
+    _targetListFlags = 0;
+    _targetListSomeTarget = 0;
+    _targetListNearest2 = 1e10f;
+
     _guardPosition = VZero;
 }
 
@@ -236,6 +244,21 @@ LSError AIGroup::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("expensiveThinkFrac", _expensiveThinkFrac, 1, 0));
     PARAM_CHECK(ar.Serialize("expensiveThinkTime", _expensiveThinkTime, 1, Time(0)));
     PARAM_CHECK(ar.Serialize("checkCenterDBase", _checkCenterDBase, 1, Time(0)));
+
+    // Step 12S: the resume point of a CreateTargetList pass that was suspended by its work
+    // budget. This has to be saved with the rest of the group's state, not rebuilt on load:
+    // a save taken mid-pass that reloaded at stage 0 would run the report walk a second
+    // time over the targets it had already reported, sending a duplicate contact report for
+    // every enemy the group had found, and the subjective-cost walk would run against a
+    // list the report walk had not finished classifying. Defaulted so an old savegame -- in
+    // which no pass could have been in progress, the budget being unbounded there -- loads
+    // as idle rather than as a pass suspended at stage 0.
+    PARAM_CHECK(ar.Serialize("targetListStage", _targetListStage, 1, TLSIdle));
+    PARAM_CHECK(ar.Serialize("targetListCursor", _targetListCursor, 1, 0));
+    PARAM_CHECK(ar.Serialize("targetListCount", _targetListCount, 1, 0));
+    PARAM_CHECK(ar.Serialize("targetListFlags", _targetListFlags, 1, 0));
+    PARAM_CHECK(ar.Serialize("targetListSomeTarget", _targetListSomeTarget, 1, 0));
+    PARAM_CHECK(ar.Serialize("targetListNearest2", _targetListNearest2, 1, 1e10f));
     // state
     PARAM_CHECK(ar.Serialize("lastUpdateTime", _lastUpdateTime, 1))
     PARAM_CHECK(ar.Serialize("checkTime", _checkTime, 1)) // used in seek and destroy waypoint
@@ -1233,10 +1256,20 @@ bool AIGroup::Think()
     {
         AICost::AICosts().groupThinksRemote++;
         // only update target list
-        if (Glob.time > _expensiveThinkTime)
+        //
+        // Step 12S: a pass suspended by its work budget is finished before another is
+        // started, and it is finished on every think rather than on the 1 Hz gate -- a
+        // suspended pass driven at 1 Hz would take as many seconds to close as it took
+        // suspensions, and the group's picture of the world would lag that far behind it.
+        // With the default unbounded budget the first branch is never taken.
+        if (TargetListPassInProgress())
+        {
+            CreateTargetList(false, true, AITuning::TargetListBudget());
+        }
+        else if (Glob.time > _expensiveThinkTime)
         {
             ExpensiveThinkDone();
-            CreateTargetList();
+            CreateTargetList(false, true, AITuning::TargetListBudget());
         }
         return false;
     }
@@ -1398,6 +1431,25 @@ bool AIGroup::Think()
         }
     }
 
+    // Step 12S. A target-list pass suspended by its work budget is resumed here, on every
+    // think, ahead of the 1 Hz expensive block -- see the same construction in the non-local
+    // branch above for why the 1 Hz gate cannot be the thing that drives it to completion.
+    //
+    // `ReactToEnemyDetected` is triggered off the same before/after test the expensive block
+    // uses, because the reaction belongs to the DETECTION, not to the block: a resumed pass
+    // that is the one to find the first enemy must still make the group react to it, on the
+    // tick it found it. With the default unbounded budget this branch is never taken.
+    if (TargetListPassInProgress())
+    {
+        AICost::ScopedCost cost(AICost::Bucket::GroupExpensive);
+        int                oldEDResume = _enemiesDetected;
+        CreateTargetList(false, true, AITuning::TargetListBudget());
+        if (oldEDResume == 0 && _enemiesDetected > 0 && !IsAnyPlayerGroup())
+        {
+            ReactToEnemyDetected();
+        }
+    }
+
     // visible enemy targets
     // if we have fresh assignement, do not assign anything
     if (Glob.time > _expensiveThinkTime)
@@ -1416,7 +1468,7 @@ bool AIGroup::Think()
         ExpensiveThinkDone();
 
         int oldED = _enemiesDetected;
-        CreateTargetList();
+        CreateTargetList(false, true, AITuning::TargetListBudget());
 
         if (oldED == 0 && _enemiesDetected > 0 && !IsAnyPlayerGroup())
         {

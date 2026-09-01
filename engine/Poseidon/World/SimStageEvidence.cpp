@@ -134,7 +134,7 @@ std::vector<SimEvidence> BuildEvidence()
                      {kAIWalkToGroup[0],
                       kAIWalkToGroup[1],
                       kAIWalkToGroup[2],
-                      {"AI/AIGroup.cpp", "bool AIGroup::Think()", "CreateTargetList();"},
+                      {"AI/AIGroup.cpp", "bool AIGroup::Think()", "CreateTargetList(false, true,"},
                       {"AI/AIGroupImpl.cpp", "bool AIGroup::CreateTargetList(", "WhatIsVisible("},
                       {kTarget, "void EntityAI::WhatIsVisible(", "TrackTargets("},
                       {kTarget, "void EntityAI::TrackTargets(TargetList& res, AIUnit* unit", "CalcVisibility("},
@@ -145,7 +145,7 @@ std::vector<SimEvidence> BuildEvidence()
                      {kAIWalkToGroup[0],
                       kAIWalkToGroup[1],
                       kAIWalkToGroup[2],
-                      {"AI/AIGroup.cpp", "bool AIGroup::Think()", "CreateTargetList();"},
+                      {"AI/AIGroup.cpp", "bool AIGroup::Think()", "CreateTargetList(false, true,"},
                       {"AI/AIGroupImpl.cpp", "bool AIGroup::CreateTargetList(", "WhatIsVisible("},
                       {kTarget, "void EntityAI::WhatIsVisible(", "TrackTargets("},
                       {kTarget, "void EntityAI::TrackTargets(TargetList& res, AIUnit* unit", "ai->Position()"}}));

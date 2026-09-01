@@ -83,4 +83,53 @@ class GroupScanBudget
     int _visited = 0;
 };
 
+/// A counted allowance of examined items, for a walk that can be suspended and resumed.
+///
+/// `GroupScanBudget` above bounds a walk whose ceiling is derivable from simulation state.
+/// This one bounds a walk whose natural size is a scene property with no ceiling at all --
+/// `AIGroup::CreateTargetList` is O(units x targets) and `TargetList::Manage` puts no limit
+/// on the second factor -- so the bound has to be given to it from outside. The requirement
+/// they share is the one that matters: the number spent is a count of items, so two runs of
+/// the same simulation state suspend at exactly the same item, and a saved game resumes at
+/// the item it was saved on. A millisecond budget would satisfy neither.
+///
+/// A negative allowance means unbounded, and `Exhausted()` then never becomes true.
+class WorkBudget
+{
+  public:
+    explicit WorkBudget(int units) : _remaining(units < 0 ? -1 : (units < 1 ? 1 : units)) {}
+
+    [[nodiscard]] bool Unbounded() const { return _remaining < 0; }
+
+    /// Charge `items` examined items. Returns `true` if the budget is now spent.
+    ///
+    /// An indivisible step may charge more than is left; it is allowed to overrun rather
+    /// than be split, because a step that must run whole and cannot afford itself would
+    /// otherwise never run at any budget. Overrunning costs one step of accuracy; refusing
+    /// costs forward progress, and forward progress is not negotiable.
+    bool Spend(int items)
+    {
+        if (_remaining < 0)
+        {
+            return false;
+        }
+        _spent += items;
+        _remaining -= items;
+        if (_remaining < 0)
+        {
+            _remaining = 0;
+        }
+        return _remaining == 0;
+    }
+
+    [[nodiscard]] bool Exhausted() const { return _remaining == 0; }
+
+    /// Items charged so far. For diagnostics and tests; nothing gates on it.
+    [[nodiscard]] int Spent() const { return _spent; }
+
+  private:
+    int _remaining = -1;
+    int _spent = 0;
+};
+
 } // namespace Poseidon::Determinism
