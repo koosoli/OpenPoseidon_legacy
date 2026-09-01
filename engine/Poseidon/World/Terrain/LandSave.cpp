@@ -1808,6 +1808,12 @@ bool Landscape::LoadOprwModern(const char* path)
         return false;
     }
 
+    // WHERE A BIG WORLD'S LOAD TIME GOES, with denominators. Chernarus+ spends over ten
+    // seconds inside this function with nothing logged above LOG_DEBUG, so "loading is slow"
+    // has never had a breakdown attached to it. Milliseconds alone would not help either:
+    // 2.9 million placements and 12 thousand are the same total at very different per-item
+    // costs, and only the ratio says which one to attack.
+    const DWORD parseStart = Poseidon::Foundation::GlobalTickCount();
     Fmt::World::Oprw25World world;
     try
     {
@@ -1818,6 +1824,11 @@ bool Landscape::LoadOprwModern(const char* path)
         RptF("LoadOprwModern: %s failed to parse: %s", path, e.what());
         return false;
     }
+
+    const DWORD parseMs = Poseidon::Foundation::GlobalTickCount() - parseStart;
+    LOG_INFO(World, "World load: OPRW rev {} parsed in {} ms -- {} objects, {} models, terrain {}x{}",
+             revision, parseMs, world.objects.size(), world.models.size(), world.header.terrainRangeX,
+             world.header.terrainRangeX);
 
     const int terrain = world.header.terrainRangeX;
     const int land = world.header.landRangeX;
