@@ -1376,6 +1376,7 @@ bool AIGroup::Think()
             if (unit->GetNearestEnemyDist2() < Square(100))
             {
                 AICost::AICosts().trackCalls++;
+                AICost::AICosts().trackPairs += static_cast<std::uint64_t>(_targetList.Size());
                 unit->GetVehicle()->TrackNearTargets(_targetList);
             }
         }

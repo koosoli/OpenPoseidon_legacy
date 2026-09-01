@@ -1030,11 +1030,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 LOG_INFO(World,
                          "AI group body counts/tick over {} aiTicks: groupThinks={:.2f} [noLeader={:.2f} "
                          "logic={:.2f} remote={:.2f} destroyed={:.2f} full={:.2f} (ofWhichTrue={:.2f})] "
-                         "trackScans={:.2f} trackCalls={:.2f}",
+                         "trackScans={:.2f} trackCalls={:.2f} trackPairs={:.2f} targetsPerCall={:.2f}",
                          ai.ticks, ai.groupThinks * aiInv, ai.groupThinksNoLeader * aiInv,
                          ai.groupThinksLogic * aiInv, ai.groupThinksRemote * aiInv, ai.groupThinksDestroyed * aiInv,
                          ai.groupThinksFull * aiInv, ai.groupThinksTrue * aiInv, ai.trackScans * aiInv,
-                         ai.trackCalls * aiInv);
+                         ai.trackCalls * aiInv, ai.trackPairs * aiInv,
+                         ai.trackCalls > 0 ? static_cast<double>(ai.trackPairs) / static_cast<double>(ai.trackCalls)
+                                           : 0.0);
             }
             AICost::ResetAICosts();
         }

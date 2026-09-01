@@ -204,6 +204,13 @@ struct CostAccum
     /// `TrackNearTargets` calls inside that block. Its own denominator: `trackCalls /
     /// trackScans` is the mean number of engaged units per group.
     std::uint64_t trackCalls = 0;
+    /// Sum of `_targetList.Size()` over those calls -- the number of (unit, target) pairs
+    /// the block actually visits, which is the work `groupTrack` measures. `TargetList` has
+    /// no size cap: `TargetList::Manage` (Target.cpp:387) keeps every entry within
+    /// TACTICAL_VISIBILITY of any group member, so the list length is a scene property and
+    /// `trackCalls` alone cannot say how big the walk was. `groupTrack / trackPairs` is the
+    /// per-pair cost and is the number that says whether this scales.
+    std::uint64_t trackPairs = 0;
 };
 
 /// The process-wide accumulator. Read it, print it, `ResetAICosts()` to start a window.
