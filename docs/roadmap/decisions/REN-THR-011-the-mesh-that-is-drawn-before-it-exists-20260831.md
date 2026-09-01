@@ -342,3 +342,25 @@ is the honest gap in this verification rather than a formality. Four freefly att
 to frame the units: the terrain at the mission's unit cluster is at **147 m**, so cameras
 placed at 12–62 m were underground or inside the grass canopy — `SurfaceY` at the target is
 worth reading out of the log (`grounded the player at …`) before choosing an altitude.
+
+
+### Owner smoke test, 2026-09-01 — checks 1, 2 and 3 pass
+
+Eight minutes of interactive play on `perf_combat.eden` (97 soldiers, 24 move waypoints),
+real-time pacing, dev panel enabled. The owner's verdict on the animated geometry, its
+appearance on becoming visible, and its shadows: **all correct.**
+
+The log agrees and adds the parts an eye cannot check, over the whole session:
+
+| | |
+|---|---:|
+| `create was cancelled` | **0** |
+| stale instance handles refused | **0** |
+| `ANOMALY` lines of any kind | **0** |
+| one-second pacing windows at 60–61 ticks | **322 of 325** (the other three: 52, 54, 57) |
+
+So the three checks this document could not make headlessly are made, and the pacing figure
+is worth keeping for its own sake: sustained combat with a hundred units holds real time,
+with the catch-up cap discarding nothing outside the mission load. That is the direct
+refutation of the slow-motion claim PERF-013 made before its numbers were found to be
+contention with a compiler.

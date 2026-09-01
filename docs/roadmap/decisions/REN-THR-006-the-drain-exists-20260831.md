@@ -64,7 +64,11 @@ font atlas from inside `NextFrame`, after the frame's main drains, so `SubmitOve
 again before translating the handles it copies into `WgrOverlayDraw`. An unknown handle draws
 white *and* logs an ANOMALY, because a white panel is otherwise indistinguishable from a UI
 that legitimately has no texture. Verified after the fact by the cross-build comparison in the
-addendum below.
+addendum below, and then **by the owner on 2026-09-01**: eight minutes of interactive play
+with the dev panel enabled, panel text and icons normal, **zero** unknown-handle anomalies,
+and the texture counter confirming the path was actually exercised (`texture=1.00/1` — the
+font atlas created and drained). That closes the gap this slice shipped with, which was that
+no headless capture can reach the translation at all.
 
 ## The reads, audited — 19 call sites, and 17 of them are diagnostics
 
