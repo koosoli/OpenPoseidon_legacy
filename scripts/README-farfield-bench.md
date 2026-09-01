@@ -69,6 +69,12 @@ simulation roughly **fifteenfold** on `perf_combat` — measured, same build, sa
 | tick rate | 40 of 60 | **60–63 of 60** |
 | catch-up steps discarded per second | 23–35 | **0** |
 
+**And do not touch the window either.** A behaviour recording
+(`POSEIDON_AI_TIMELINE`, PERF-017) diverged at tick 306 between two runs of the same build
+with the same seed, because the camera was nudged while one of them was running. The camera is
+not obviously part of the simulation and it is; a run being measured must be left alone, not
+merely left unbuilt.
+
 That is enough to invent findings out of nothing: it produced a whole decision document
 claiming the AI stage cost 21–34 ms/tick and that the world ran at two thirds speed, both of
 which are artefacts (see the correction banner on `PERF-013`). The GPU-side figures move far
