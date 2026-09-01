@@ -867,8 +867,13 @@ void World::InitLandscape(Landscape* landscape)
     // Before the fill, not after: an eviction pass that ran at the END of a load
     // would be sorting entries whose mtimes are all seconds old and would throw
     // away exactly what is about to be asked for again.
+    const DWORD tInitLandscape = Poseidon::Foundation::GlobalTickCount();
+    DWORD tStep = tInitLandscape;
     ModelDerivedCache::Instance().Prune();
+    LOG_INFO(Core, "InitLandscape phase: ModelDerivedCache::Prune {} ms",
+             Poseidon::Foundation::GlobalTickCount() - tStep);
 
+    tStep = Poseidon::Foundation::GlobalTickCount();
     _preloadedVType[VTypeStatic] = NewAIType("Static");
     _preloadedVType[VTypeBuilding] = NewAIType("Building");
     _preloadedVType[VTypeStrategic] = NewAIType("Strategic");
@@ -883,9 +888,14 @@ void World::InitLandscape(Landscape* landscape)
     _preloadedVType[VTypeTank] = NewAIType("Tank");
     _preloadedVType[VTypeCar] = NewAIType("Car");
     _preloadedVType[VTypeMan] = NewAIType("Man");
+    LOG_INFO(Core, "InitLandscape phase: preload 14 AI types {} ms",
+             Poseidon::Foundation::GlobalTickCount() - tStep);
 
+    tStep = Poseidon::Foundation::GlobalTickCount();
     Clear();
+    LOG_INFO(Core, "InitLandscape phase: World::Clear {} ms", Poseidon::Foundation::GlobalTickCount() - tStep);
 
+    tStep = Poseidon::Foundation::GlobalTickCount();
     if (!ENGINE_CONFIG.landEditor || (Pars >> "CfgWorlds").FindEntry(Glob.header.worldname))
     {
         const ParamEntry& world = Pars >> "CfgWorlds" >> Glob.header.worldname;
@@ -913,8 +923,12 @@ void World::InitLandscape(Landscape* landscape)
         GetPosArray(_taxiInPathsWest, world >> "ilsTaxiIn");
         GetPosArray(_taxiOffPathsWest, world >> "ilsTaxiOff");
     }
+    LOG_INFO(Core, "InitLandscape phase: CfgWorlds InitGeneral+ILS {} ms",
+             Poseidon::Foundation::GlobalTickCount() - tStep);
 
+    tStep = Poseidon::Foundation::GlobalTickCount();
     _scene.Init(_engine, landscape);
+    LOG_INFO(Core, "InitLandscape phase: Scene::Init {} ms", Poseidon::Foundation::GlobalTickCount() - tStep);
 
     ProgressRefresh();
 
@@ -929,32 +943,50 @@ void World::InitLandscape(Landscape* landscape)
     if (!ENGINE_CONFIG.landEditor || (Pars >> "CfgWorlds").FindEntry(Glob.header.worldname))
     {
         const ParamEntry& world = Pars >> "CfgWorlds" >> Glob.header.worldname;
+        tStep = Poseidon::Foundation::GlobalTickCount();
         _scene.GetLandscape()->InitDynSounds(world >> "Sounds");
+        LOG_INFO(Core, "InitLandscape phase: InitDynSounds {} ms",
+                 Poseidon::Foundation::GlobalTickCount() - tStep);
 
         ProgressRefresh();
 
+        tStep = Poseidon::Foundation::GlobalTickCount();
         _scene.GetLandscape()->InitGeography();
+        LOG_INFO(Core, "InitLandscape phase: InitGeography {} ms",
+                 Poseidon::Foundation::GlobalTickCount() - tStep);
 
         ProgressRefresh();
 
+        tStep = Poseidon::Foundation::GlobalTickCount();
         InitEnvSounds(world >> "EnvSounds");
+        InsertSeaGulls();
+        LOG_INFO(Core, "InitLandscape phase: InitEnvSounds+SeaGulls {} ms",
+                 Poseidon::Foundation::GlobalTickCount() - tStep);
 
         ProgressRefresh();
-
-        InsertSeaGulls();
     }
 
     ProgressRefresh();
 
+    tStep = Poseidon::Foundation::GlobalTickCount();
     InitFinish();
+    LOG_INFO(Core, "InitLandscape phase: InitFinish {} ms", Poseidon::Foundation::GlobalTickCount() - tStep);
+
+    tStep = Poseidon::Foundation::GlobalTickCount();
     _scene.GetLandscape()->InitObjectVehicles();
+    LOG_INFO(Core, "InitLandscape phase: InitObjectVehicles {} ms",
+             Poseidon::Foundation::GlobalTickCount() - tStep);
 
     ProgressRefresh();
 
     _showMap = false;
     _forceMap = false;
     Log("InitLandscape ResetIDs");
+    tStep = Poseidon::Foundation::GlobalTickCount();
     ResetIDs();
+    LOG_INFO(Core, "InitLandscape phase: ResetIDs {} ms; InitLandscape total {} ms",
+             Poseidon::Foundation::GlobalTickCount() - tStep,
+             Poseidon::Foundation::GlobalTickCount() - tInitLandscape);
 }
 
 void World::InitFinish()

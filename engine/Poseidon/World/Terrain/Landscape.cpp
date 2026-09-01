@@ -2466,6 +2466,14 @@ void Landscape::MoveObject(Object* obj, Vector3Par pos)
 
 void Landscape::InitObjectVehicles()
 {
+    // Two costs hide in this walk and only counting separates them: the number of
+    // objects visited (cheap per item, enormous in total on a streamed world) and
+    // the number whose GetShape() had to resolve. A bare millisecond figure cannot
+    // tell a long cheap walk from a short expensive one.
+    const DWORD walkStart = Poseidon::Foundation::GlobalTickCount();
+    long long visited = 0;
+    long long primaries = 0;
+    long long withShape = 0;
     RefArray<Object> changed;
     for (int x = 0; x < _landRange; x++)
     {
@@ -2475,6 +2483,7 @@ void Landscape::InitObjectVehicles()
             for (int i = 0; i < list.Size(); i++)
             {
                 Object* obj = list[i];
+                ++visited;
                 if (!obj)
                 {
                     continue;
@@ -2483,10 +2492,12 @@ void Landscape::InitObjectVehicles()
                 {
                     continue;
                 }
+                ++primaries;
                 if (!obj->GetShape())
                 {
                     continue;
                 }
+                ++withShape;
                 const char* className = obj->GetShape()->GetPropertyClass();
                 if (className && *className)
                 {
@@ -2496,6 +2507,9 @@ void Landscape::InitObjectVehicles()
             }
         }
     }
+    const DWORD scanMs = Poseidon::Foundation::GlobalTickCount() - walkStart;
+    const DWORD promoteStart = Poseidon::Foundation::GlobalTickCount();
+    long long promoted = 0;
     for (int i = 0; i < changed.Size(); i++)
     {
         // add all vehicles to vehicle list
@@ -2508,8 +2522,14 @@ void Landscape::InitObjectVehicles()
             // GWorld->AddSlowVehicle(vehicle);
             // GWorld->AddVehicle(vehicle);
             GWorld->AddBuilding(vehicle);
+            ++promoted;
         }
     }
+    LOG_INFO(World,
+             "InitObjectVehicles: scanned {} object slots in {}x{} land cells ({} primary, {} with a resolved "
+             "shape, {} named a class) in {} ms; promoted {} to buildings in {} ms",
+             visited, _landRange, _landRange, primaries, withShape, (long long)changed.Size(), scanMs, promoted,
+             Poseidon::Foundation::GlobalTickCount() - promoteStart);
 }
 
 Object* Landscape::AddObject(Vector3Par pos, float head, LODShapeWithShadow* shape, void* user)

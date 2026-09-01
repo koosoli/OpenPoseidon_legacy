@@ -1477,16 +1477,19 @@ void World::SwitchLandscape(const char* name)
         float grid = cls >> "LandGrid";
         DWORD tLoad = GetTickCount();
         land->LoadData(name, grid);
-        LOG_DEBUG(Core, "LOAD: LoadData {}ms", GetTickCount() - tLoad);
+        LOG_INFO(Core, "World load phase: Landscape::LoadData {} ms -- '{}'", GetTickCount() - tLoad, name);
 
         DWORD tCfg = GetTickCount();
         ParseCfgWorld();
-        LOG_DEBUG(Core, "LOAD: ParseCfgWorld {}ms", GetTickCount() - tCfg);
+        LOG_INFO(Core, "World load phase: ParseCfgWorld {} ms", GetTickCount() - tCfg);
 
         DWORD tInit = GetTickCount();
         InitLandscape(land);
+        const DWORD initLandscapeMs = GetTickCount() - tInit;
+        DWORD tIds = GetTickCount();
         land->RebuildIDCache();
-        LOG_DEBUG(Core, "LOAD: InitLandscape+RebuildIDCache {}ms", GetTickCount() - tInit);
+        LOG_INFO(Core, "World load phase: InitLandscape {} ms, RebuildIDCache {} ms", initLandscapeMs,
+                 GetTickCount() - tIds);
     }
     else
     {
@@ -1506,14 +1509,17 @@ void World::SwitchLandscape(const char* name)
 
     InputSubsystem::Instance().ResetLookAroundToggle();
 
+    DWORD tSim = GetTickCount();
     GLandscape->Simulate(0);
     GScene->ResetFog();
+    LOG_INFO(Core, "World load phase: Landscape::Simulate(0)+ResetFog {} ms", GetTickCount() - tSim);
 
     DWORD tFlush = GetTickCount();
     _engine->TextBank()->FlushTextures();
     GetNetworkManager().CleanUpMemory();
     MemoryCleanUp();
-    LOG_DEBUG(Core, "LOAD: SwitchLandscape total {}ms (flush {}ms)", GetTickCount() - t0, GetTickCount() - tFlush);
+    LOG_INFO(Core, "World load phase: FlushTextures+MemoryCleanUp {} ms; SwitchLandscape total {} ms",
+             GetTickCount() - tFlush, GetTickCount() - t0);
 }
 
 void World::AddVehicle(Entity* vehicle)

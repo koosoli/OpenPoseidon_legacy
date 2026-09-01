@@ -2028,6 +2028,11 @@ void StartMission()
 
 bool StartAutoTest()
 {
+    // Mission-start phase budget. Every line reports a COUNT next to its
+    // milliseconds: a phase that reports "0 ms over 0 items" did not run, and a
+    // phase that reports "0 ms over 2971218 items" is genuinely free. Without the
+    // denominator the two are the same log line.
+    const DWORD autoTestStart = Poseidon::Foundation::GlobalTickCount();
     CurrentTemplate.Clear();
     if (GWorld->UI())
     {
@@ -2035,6 +2040,7 @@ bool StartAutoTest()
     }
 
     bool introOnly = false;
+    const DWORD tParse = Poseidon::Foundation::GlobalTickCount();
     if (!ParseMission(false) || CurrentTemplate.groups.Size() == 0)
     {
         CurrentTemplate.Clear();
@@ -2044,11 +2050,30 @@ bool StartAutoTest()
         }
         introOnly = true;
     }
+    LOG_INFO(Core, "Mission start phase: ParseMission {} ms -- {} groups, {} addOns, intro-only={}",
+             Poseidon::Foundation::GlobalTickCount() - tParse, CurrentTemplate.groups.Size(),
+             CurrentTemplate.addOns.Size(), introOnly ? 1 : 0);
 
+    const DWORD tLand = Poseidon::Foundation::GlobalTickCount();
     GWorld->SwitchLandscape(GetWorldName(Glob.header.worldname));
+    LOG_INFO(Core, "Mission start phase: SwitchLandscape {} ms -- world '{}'",
+             Poseidon::Foundation::GlobalTickCount() - tLand, (const char*)Glob.header.worldname);
+
+    const DWORD tAddons = Poseidon::Foundation::GlobalTickCount();
     GWorld->ActivateAddons(CurrentTemplate.addOns);
+    LOG_INFO(Core, "Mission start phase: ActivateAddons {} ms -- {} addOns",
+             Poseidon::Foundation::GlobalTickCount() - tAddons, CurrentTemplate.addOns.Size());
+
+    const DWORD tGeneral = Poseidon::Foundation::GlobalTickCount();
     GWorld->InitGeneral(CurrentTemplate.intel);
-    if (!GWorld->InitVehicles(introOnly ? GModeIntro : GModeArcade, CurrentTemplate))
+    LOG_INFO(Core, "Mission start phase: InitGeneral {} ms", Poseidon::Foundation::GlobalTickCount() - tGeneral);
+
+    const DWORD tVehicles = Poseidon::Foundation::GlobalTickCount();
+    const bool vehiclesOk = GWorld->InitVehicles(introOnly ? GModeIntro : GModeArcade, CurrentTemplate);
+    LOG_INFO(Core, "Mission start phase: InitVehicles {} ms -- {} groups, {} markers, ok={}",
+             Poseidon::Foundation::GlobalTickCount() - tVehicles, CurrentTemplate.groups.Size(),
+             CurrentTemplate.markers.Size(), vehiclesOk ? 1 : 0);
+    if (!vehiclesOk)
     {
         return false;
     }
@@ -2071,6 +2096,7 @@ bool StartAutoTest()
     {
         return false;
     }
+    const DWORD tDisplay = Poseidon::Foundation::GlobalTickCount();
     if (introOnly)
     {
         options->CreateChild(new DisplayIntro(options, DisplayIntro::noInit));
@@ -2079,6 +2105,11 @@ bool StartAutoTest()
     {
         options->CreateChild(new DisplayMission(options));
     }
+    LOG_INFO(Core, "Mission start phase: create {} {} ms", introOnly ? "DisplayIntro" : "DisplayMission",
+             Poseidon::Foundation::GlobalTickCount() - tDisplay);
+    LOG_INFO(Core, "Mission start phase: StartAutoTest total {} ms -- frames from here to 'mission runtime entered' "
+                   "are main-loop time, not load time",
+             Poseidon::Foundation::GlobalTickCount() - autoTestStart);
     return true;
 }
 

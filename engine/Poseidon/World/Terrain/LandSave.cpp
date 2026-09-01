@@ -1788,6 +1788,7 @@ bool Landscape::LoadOprwModern(const char* path)
 {
     namespace Fmt = Poseidon::Asset::Formats;
 
+    const DWORD oprwStart = Poseidon::Foundation::GlobalTickCount();
     QIFStream file;
     file.open(path);
     if (file.fail())
@@ -1857,8 +1858,12 @@ bool Landscape::LoadOprwModern(const char* path)
     _tidal = false;
 
     const float landGrid = terrainGrid * ratio;
+    const DWORD tDim = Poseidon::Foundation::GlobalTickCount();
     Dim(land, land, terrain, terrain, landGrid);
     FlushCache();
+    LOG_INFO(World, "World load: Dim+FlushCache {} ms -- land {}x{}, terrain {}x{}",
+             Poseidon::Foundation::GlobalTickCount() - tDim, land, land, terrain, terrain);
+    const DWORD tGrids = Poseidon::Foundation::GlobalTickCount();
 
     // Elevation is already per terrain cell, so it transfers one to one.
     for (int z = 0; z < terrain; ++z)
@@ -1902,8 +1907,12 @@ bool Landscape::LoadOprwModern(const char* path)
              "Modern world dual grid: land {}x{} at {}m, terrain {}x{} at {}m; semantic cells reduced {}x "
              "versus the compatibility bridge",
              land, land, landGrid, terrain, terrain, terrainGrid, ratio * ratio);
+    LOG_INFO(World, "World load: grid fill {} ms -- {} elevation samples, {} geography+material cells",
+             Poseidon::Foundation::GlobalTickCount() - tGrids, (long long)terrain * terrain,
+             (long long)land * land);
     ProgressRefresh();
 
+    const DWORD tMaterials = Poseidon::Foundation::GlobalTickCount();
     _mountains.Realloc(static_cast<int>(world.mountains.size()));
     _mountains.Resize(static_cast<int>(world.mountains.size()));
     for (size_t i = 0; i < world.mountains.size(); ++i)
@@ -2200,7 +2209,11 @@ bool Landscape::LoadOprwModern(const char* path)
                  path, withSatellite, withMask, surfaces, holes, sixSlot, withSurfaceNormals, withTileNormal,
                  _a3TerrainMaterials.Size());
     }
+    LOG_INFO(World, "World load: mountains+terrain materials {} ms -- {} mountains, {} RVMATs",
+             Poseidon::Foundation::GlobalTickCount() - tMaterials, world.mountains.size(),
+             world.materials.size());
     ProgressRefresh();
+    const DWORD tPlacements = Poseidon::Foundation::GlobalTickCount();
 
     // Retain modern placements as compact authored rows and create only a
     // camera-centred working set. The opt-out is diagnostic: it preserves the
@@ -2347,6 +2360,9 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectCenterX = -0x3fffffff;
         _modernObjectCenterZ = -0x3fffffff;
         _modernResidentObjectCount = 0;
+        LOG_INFO(World, "World load: placement retention {} ms -- {} placements binned into {} land cells, {} models",
+                 Poseidon::Foundation::GlobalTickCount() - tPlacements, _modernObjectPlacements.size(),
+                 _modernObjectCells.size(), _modernObjectModels.size());
 
         // FAR INSTANCE TIER — one cheap proxy per placement, built ONCE, here, because this
         // is the only point at which the complete authored placement list exists.
@@ -2480,7 +2496,11 @@ bool Landscape::LoadOprwModern(const char* path)
                  _modernObjectPreparer && _modernObjectPreparer->Running() ? "on" : "off",
                  ObjectStreamPreparer::WorkerCount(), ObjectStreamPreparer::QueueLimit(),
                  ObjectStreamPreparer::ReadyLimit());
+        const DWORD tFinish = Poseidon::Foundation::GlobalTickCount();
         ProgressFinish();
+        LOG_INFO(World, "World load: LoadOprwModern total {} ms (ProgressFinish {} ms)",
+                 Poseidon::Foundation::GlobalTickCount() - oprwStart,
+                 Poseidon::Foundation::GlobalTickCount() - tFinish);
         return true;
     }
 
@@ -4352,6 +4372,9 @@ void Landscape::ClearIDCache()
 void Landscape::RebuildIDCache()
 {
     Log("Landscape::RebuildIDCache");
+    const DWORD idStart = Poseidon::Foundation::GlobalTickCount();
+    long long walked = 0;
+    long long cached = 0;
     int x, z;
     int maxId = -1;
     for (x = 0; x < _landRange; x++)
@@ -4362,10 +4385,12 @@ void Landscape::RebuildIDCache()
             for (int i = 0; i < list.Size(); i++)
             {
                 Object* obj = list[i];
+                ++walked;
                 int id = obj->ID();
                 if (id >= 0)
                 {
                     _objectIds[id] = obj;
+                    ++cached;
                     if (id > maxId)
                     {
                         maxId = id;
@@ -4380,6 +4405,8 @@ void Landscape::RebuildIDCache()
         }
     }
     SetLastObjectID(maxId);
+    LOG_INFO(World, "RebuildIDCache: walked {} objects in {}x{} land cells, cached {} ids (max id {}) in {} ms",
+             walked, _landRange, _landRange, cached, maxId, Poseidon::Foundation::GlobalTickCount() - idStart);
 }
 
 void Landscape::AddToIDCache(Object* object)
