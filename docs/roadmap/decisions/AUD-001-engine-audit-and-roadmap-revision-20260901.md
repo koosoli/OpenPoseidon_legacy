@@ -27,6 +27,14 @@ SIM-813's claim ("the last wall-clock budget in the simulation") holds for the A
 | `engine/Poseidon/World/WorldInit.cpp:154-156` | `GRandGen.SetSeed(GlobalTickCount() + seconds)` unless `POSEIDON_RNG_SEED` (`engine/Random/randomGen.cpp:230`) | decision (seed) |
 | `engine/Poseidon/Core/Game/GameLoop.cpp:292-309` | `GlobalTickCount` to `deltaT` to number of fixed steps | expected; the fixed step is the design |
 
+**Reconciliation with ARCH-001 (same day).** ARCH-001 measured that the admission budget does
+not reach an *AI* decision on `perf_combat` (streaming budget 128x apart, AI behaviour oracle
+EQUIVALENT over 902 ticks) and noted a floor guarantees every object is eventually admitted.
+Both statements hold: the clock decides the *rate* and therefore *which* objects are resident on
+a given tick, which is machine-dependent state visible to rendering, collision and replay even
+when the AI oracle cannot see it on that scene. The replay-blocker framing here is about the
+resident set, not about AI perception; ARCH-001's experiment does not retire it.
+
 Diagnostic-only (checked, no decision reached): `SimStageGraph.cpp:229-232` (header `:205-215` forbids
 decisions), `AICostAccum.cpp:18`, `Pass1Submit.hpp:138`, `SceneDraw.cpp:1791`, `LandscapeRender.cpp:1590`,
 `PhysicsWorld.cpp:84-87` (steps with sim delta), `RainVolume.cpp:647-673` (integrates `Glob.time`),
