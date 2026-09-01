@@ -308,7 +308,44 @@ struct MaterialClass
     bool        isWindow = false;
     bool        leafCards = false;
     bool        leafCardsResolved = false;
+
+    // PERF-016 -- the per-material half of DrawSectionTL's binding block, resolved once and
+    // replayed per section. Everything here is a pure function of the material's path (the
+    // translated material a path loads to is deterministic for a run), so the same
+    // address-keyed / path-validated contract as the fields above covers it. What is
+    // deliberately NOT cached: texture handles. The bank Load() + EnsureUploaded() pair runs
+    // per section on the fast path too, because that is what keeps residency honest -- Load
+    // marks the texture used, EnsureUploaded re-uploads after an eviction, and a cached
+    // handle would silently outlive both.
+    enum BaseKind : uint8_t
+    {
+        BaseNone = 0,     // no bindable Stage0: section keeps its face texture
+        BaseImage = 1,    // a real image stage: always bind
+        BaseConstant = 2, // procedural constant: bind only when the section has no face texture
+                          // (or the material is CalmWater) -- the DZ-006 precedence
+    };
+    bool     bindResolved = false;
+    BaseKind baseKind = BaseNone;
+    bool     isCalmWater = false;
+    bool     reflective = false; // shaderFamily == CalmWater (DZ-003)
+    bool     hasNormal = false;
+    RStringB baseLoadName;
+    RStringB normalLoadName;
 };
+
+// PERF-016 A/B lever. ON by default; `WGR_SECTION_BIND_CACHE=0` restores the per-section
+// re-resolution exactly, in the same binary. Independent of WGR_SECTION_CLASS_CACHE only
+// downward: the bind cache lives in the MaterialClass slot, so turning the class cache off
+// turns this off too (MaterialClassSlot returns null and every caller falls back).
+static bool SectionBindCacheEnabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("WGR_SECTION_BIND_CACHE");
+        return !(v && v[0] == '0' && v[1] == '\0');
+    }();
+    return on;
+}
 
 // Null when the cache does not apply (lever off, no material, no path); callers fall back to
 // the uncached form, which returns the same answer for those inputs.
@@ -329,6 +366,14 @@ MaterialClass* MaterialClassSlot(const Ref<TexMaterial>& surfMat)
         slot.emitterTarget = StaticEmitterRadianceTargetUncached(surfMat);
         slot.isWindow = MaterialIsWindowUncached(surfMat);
         slot.leafCardsResolved = false;
+        // PERF-016: the binding half re-resolves too -- it is a function of the same path.
+        slot.bindResolved = false;
+        slot.baseKind = MaterialClass::BaseNone;
+        slot.isCalmWater = false;
+        slot.reflective = false;
+        slot.hasNormal = false;
+        slot.baseLoadName = RStringB();
+        slot.normalLoadName = RStringB();
     }
     return &slot;
 }
@@ -3809,6 +3854,13 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         ++GDrawSectionCalls;
     }
+    // PERF-016 attribution (WGR_PASS1_STATS): the whole body, subdivided further below.
+    // The Scope self-gates on the Pass1 submission loop, so Pass2 / shadow calls stay out.
+    Pass1Submit::Scope p1sTL(Pass1Submit::gSecTLNs);
+    if (p1sTL.sink)
+    {
+        Pass1Submit::gSecTLCalls.fetch_add(1, std::memory_order_relaxed);
+    }
     if (!_renderer)
     {
         return;
@@ -3926,6 +3978,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
         }
     }
 
+    Pass1Submit::Scope p1sDesc(Pass1Submit::gSecDescNs);
     const int sectionSpec = sMesh.GetSection(beg).properties.Special();
     const int effectiveSpec = _meshSpec | sectionSpec;
     const render::LegacySpec splitSpec = render::SplitLegacy(effectiveSpec);
@@ -3934,6 +3987,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     ctx.isIn3DPass = true;
     ctx.shadowAlphaRef = static_cast<std::uint8_t>(std::min(255, (GetShadowFactor() * 7) >> 4));
     const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(splitSpec, ctx);
+    p1sDesc.Close();
 
     if (_smEnabledFrame && desc.blend == render::BlendMode::Shadow)
     {
@@ -4000,6 +4054,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                   : 0) |
              (CurrentDrawObjectId() << 16);
     _materialDebugInfo = {};
+    Pass1Submit::Scope p1sBind(Pass1Submit::gSecBindNs);
     if (unassignedMaterialTarget)
     {
         // Some official source MLODs intentionally carry only per-face legacy
@@ -4040,6 +4095,52 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     {
         const char* materialPath = section.surfMat->GetName().Data();
         if (materialPath && *materialPath)
+        {
+            Pass1Submit::gSecBindCalls.fetch_add(1, std::memory_order_relaxed);
+        }
+        // PERF-016 fast path: this material's binding answers were resolved once below and
+        // are a pure function of its path, so replay them. Only the bank Load() +
+        // EnsureUploaded() pair stays per-section -- Load marks the texture used and
+        // EnsureUploaded repairs an eviction, which is what keeps residency honest without
+        // caching a handle. Any material-debug selector keeps every section on the full
+        // path below, so every diagnostic behaves exactly as before.
+        bool bindServed = false;
+        if (materialPath && *materialPath && !materialDebugTarget && SectionBindCacheEnabled())
+        {
+            if (MaterialClass* bindSlot = MaterialClassSlot(section.surfMat); bindSlot && bindSlot->bindResolved)
+            {
+                bindServed = true;
+                Pass1Submit::gSecBindFast.fetch_add(1, std::memory_order_relaxed);
+                if (bindSlot->baseKind == MaterialClass::BaseImage ||
+                    (bindSlot->baseKind == MaterialClass::BaseConstant &&
+                     (d.texture_id == 0 || bindSlot->isCalmWater)))
+                {
+                    Ref<Texture> baseTexture = _wbank->Load(bindSlot->baseLoadName);
+                    auto* wgpuBaseTexture = static_cast<TextureWgpu*>(baseTexture.GetRef());
+                    if (const uint64_t baseHandle = wgpuBaseTexture ? wgpuBaseTexture->EnsureUploaded() : 0)
+                    {
+                        d.texture_id = baseHandle;
+                    }
+                }
+                if (bindSlot->hasNormal)
+                {
+                    // Loaded even when normal maps are disabled, exactly like the full path:
+                    // the Load is what keeps the texture's residency mark fresh.
+                    Ref<Texture> normalTexture = _wbank->Load(bindSlot->normalLoadName);
+                    auto* wgpuNormalTexture = static_cast<TextureWgpu*>(normalTexture.GetRef());
+                    const uint64_t normalHandle = wgpuNormalTexture ? wgpuNormalTexture->EnsureUploaded() : 0;
+                    const bool enableNormal =
+                        _materialDebug.view == MaterialDebugSettings::View::NormalMap ||
+                        (_materialDebug.view == MaterialDebugSettings::View::FullMaterial &&
+                         !_materialDebug.disableNormalMap);
+                    if (enableNormal && normalHandle)
+                    {
+                        d.normal_texture_id = normalHandle;
+                    }
+                }
+            }
+        }
+        if (materialPath && *materialPath && !bindServed)
         {
             if (materialDebugTarget)
             {
@@ -4238,6 +4339,43 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                 }
                 else
                     _materialDebugInfo.normalStatus = "no translated NormalMap stage";
+                // PERF-016: record the per-material answers so the next section of this
+                // material replays them above without the map find, the slot scans, or the
+                // std::string builds. Production bindings only -- a debug selector keeps
+                // every section on this full path -- and only after the whole resolution
+                // succeeded, so an exception leaves nothing half-cached.
+                if (!materialDebugTarget && SectionBindCacheEnabled())
+                {
+                    if (MaterialClass* bindSlot = MaterialClassSlot(section.surfMat))
+                    {
+                        bindSlot->baseKind = MaterialClass::BaseNone;
+                        bindSlot->baseLoadName = RStringB();
+                        if (baseIsImage)
+                        {
+                            bindSlot->baseKind = MaterialClass::BaseImage;
+                            bindSlot->baseLoadName = RStringB(base->texture.path.canonical().c_str());
+                        }
+                        else if (base && base->texture.isProcedural &&
+                                 render::procedural::Parse(base->texture.raw.c_str()).generated)
+                        {
+                            // The section-dependent half of DZ-006 (face texture present,
+                            // CalmWater exception) is re-applied per section above; only the
+                            // parseability of the constant is per-material.
+                            bindSlot->baseKind = MaterialClass::BaseConstant;
+                            bindSlot->baseLoadName = RStringB(base->texture.raw.c_str());
+                        }
+                        bindSlot->isCalmWater = Asset::Material::IsCalmWater(translated);
+                        bindSlot->reflective = translated.shaderFamily == "CalmWater";
+                        const auto* normalSlot = translated.Find(Asset::Material::MaterialSlot::NormalMap);
+                        bindSlot->hasNormal =
+                            normalSlot && !normalSlot->texture.isProcedural && !normalSlot->texture.path.empty();
+                        bindSlot->normalLoadName = bindSlot->hasNormal
+                                                       ? RStringB(normalSlot->texture.path.canonical().c_str())
+                                                       : RStringB();
+                        bindSlot->bindResolved = true;
+                        Pass1Submit::gSecBindResolves.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
             }
             catch (const std::exception& error)
             {
@@ -4284,6 +4422,8 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // reads as snow, not water -- much harder to recognise as a defect than the dull unreflective
     // look it replaces. Ordered after MaterialIsReflective so its one-line-per-material
     // diagnostic still runs and the log still says which materials asked.
+    p1sBind.Close();
+    Pass1Submit::Scope p1sRefl(Pass1Submit::gSecReflNs);
     const bool reflectiveMaterial =
         materialBindingTarget && MaterialIsReflective(sMesh.GetSection(beg)) && d.texture_id != 0;
     if (materialBindingTarget && d.texture_id == 0 && MaterialIsReflective(sMesh.GetSection(beg)))
@@ -4296,6 +4436,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
                      "so the section is on the white fallback and a reflection would blow it out",
                      rp);
     }
+    p1sRefl.Close();
     // MAT-050 -- THE MISSING DIAGNOSTIC, and the correction that goes with it.
     //
     // Until now there was NO untextured warning on this path at all. The retained path has had
@@ -4415,6 +4556,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // long-standing see-through grill/badge bug. Force the Cutout class to a hard alpha-test
     // (opaque blend, mid alpha-ref): the holes discard and the solid occludes + depth-writes,
     // so the geometry behind shows through the holes and MSAA A2C still anti-aliases the edges.
+    Pass1Submit::Scope p1sAlpha(Pass1Submit::gSecAlphaNs);
     render::BlendMode blend = desc.blend;
     float alphaRef = AlphaRefFromDesc(desc);
     // TreeAdv leaf cards are authored with antialiased alpha, which the texture
@@ -4481,6 +4623,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     d.sampler = U32(SamplerForSpec(effectiveSpec));
     d.depth = DepthFromDesc(desc.depth);
     d.alpha_ref = alphaRef;
+    p1sAlpha.Close();
     if (LegacyTextureTraceEnabled())
     {
         if (const Texture* t = sMesh.GetSection(beg).properties.GetTexture())
@@ -4590,6 +4733,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // the sun-enable (!DisableSun) multiplied into the sun terms (emissive shows
     // regardless). The lit shader does emissive + sun_ambient + sun_diffuse * N.L,
     // clamped, x texture — the per-fragment analogue of GL33's VSNormal + PSNormal.
+    Pass1Submit::Scope p1sLight(Pass1Submit::gSecLightNs);
     Color sunDif = HWhite;
     Color sunAmb = HWhite;
     {
@@ -4659,6 +4803,7 @@ void EngineWgpu::DrawSectionTL(const Shape& sMesh, int beg, int end)
     // shader receives tree vs bush so it can use the matching radial-crown normal. This rides the
     // otherwise unused .w lane; fs_main treats any positive value as vegetation.
     d.mat_sun_ambient.w = GCurrentFoliageKind;
+    p1sLight.Close();
 
     // WGR_KILL_TEX=<comma-separated substrings>: DROP every draw whose texture path
     // contains one of them. Diagnostic only, and the decisive one: whatever vanishes
@@ -5535,15 +5680,37 @@ bool EngineWgpu::MaterialIsReflective(const ShapeSection& section)
     const char* materialPath = section.surfMat->GetName().Data();
     if (!materialPath || !*materialPath)
         return false;
-    const auto cached = _materialBindings.find(materialPath);
-    if (cached == _materialBindings.end())
-        return false; // ResolveMaterialBaseColour fills the cache first
+    // PERF-016: DrawSectionTL reaches this twice per section, and the map find below hashes
+    // the full path string each time. The answer is recorded with the material's other
+    // per-path classifications at binding resolution; replay it when it is there. The
+    // fallback below is what fills it (bindResolved is set only after the binding block has
+    // run, which is also when the map entry this reads is guaranteed to exist).
+    if (SectionBindCacheEnabled())
+    {
+        if (const MaterialClass* bindSlot = MaterialClassSlot(section.surfMat); bindSlot && bindSlot->bindResolved)
+        {
+            if (!bindSlot->reflective)
+                return false;
+        }
+        else
+        {
+            const auto uncached = _materialBindings.find(materialPath);
+            if (uncached == _materialBindings.end() || uncached->second.shaderFamily != "CalmWater")
+                return false;
+        }
+    }
+    else
+    {
+        const auto cached = _materialBindings.find(materialPath);
+        if (cached == _materialBindings.end())
+            return false; // ResolveMaterialBaseColour fills the cache first
 
-    // The `.emat` substitution deliberately keeps the rvmat's own family string rather
-    // than inventing one (EmatMaterialAdapter::TranslateEmat), so this test reads the
-    // same on a water_bliss surface and on a bare water one.
-    if (cached->second.shaderFamily != "CalmWater")
-        return false;
+        // The `.emat` substitution deliberately keeps the rvmat's own family string rather
+        // than inventing one (EmatMaterialAdapter::TranslateEmat), so this test reads the
+        // same on a water_bliss surface and on a bare water one.
+        if (cached->second.shaderFamily != "CalmWater")
+            return false;
+    }
     static std::unordered_set<std::string> logged;
     if (logged.insert(materialPath).second)
     {

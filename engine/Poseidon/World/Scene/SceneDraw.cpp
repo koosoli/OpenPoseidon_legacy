@@ -1674,6 +1674,16 @@ std::atomic<uint64_t> gRunsShort{0};
 std::atomic<uint64_t> gRunShortLen{0};
 std::atomic<uint64_t> gSecClassCalls{0};
 std::atomic<uint64_t> gSecClassMisses{0};
+std::atomic<uint64_t> gSecTLNs{0};
+std::atomic<uint64_t> gSecTLCalls{0};
+std::atomic<uint64_t> gSecBindNs{0};
+std::atomic<uint64_t> gSecBindCalls{0};
+std::atomic<uint64_t> gSecReflNs{0};
+std::atomic<uint64_t> gSecDescNs{0};
+std::atomic<uint64_t> gSecAlphaNs{0};
+std::atomic<uint64_t> gSecLightNs{0};
+std::atomic<uint64_t> gSecBindFast{0};
+std::atomic<uint64_t> gSecBindResolves{0};
 std::atomic<uint64_t> gWouldRuns{0};
 std::atomic<uint64_t> gWouldObjs{0};
 std::atomic<uint64_t> gWouldMaxLen{0};
@@ -1893,6 +1903,36 @@ void ReportPass1Stats()
                  "(cumulative calls={} misses={})",
                  ccCalls > 0 ? 1 : 0, ccCalls / f, ccMiss / f,
                  ccCalls > 0 ? (ccCalls - ccMiss) * 100.0 / static_cast<double>(ccCalls) : 0.0, ccCalls, ccMiss);
+        // PERF-016. The DrawSectionTL subdivision, with per-call microseconds against the
+        // gSecTLCalls denominator so "many cheap sections" and "few dear ones" stay
+        // distinguishable. `other` is the body minus the named buckets: the early header,
+        // the trace getenv tests, the memcpy/conform fill and the push_backs -- plus this
+        // instrumentation's own inner clock reads, so it is an upper bound on the
+        // unattributed remainder. The bindCache pair is the WGR_SECTION_BIND_CACHE lever
+        // counting itself: fast+resolve = 0 means the lever was OFF, not ineffective.
+        const uint64_t tlNs = P1S::gSecTLNs.load(std::memory_order_relaxed);
+        const uint64_t namedNs = P1S::gSecBindNs.load(std::memory_order_relaxed) +
+                                 P1S::gSecReflNs.load(std::memory_order_relaxed) +
+                                 P1S::gSecDescNs.load(std::memory_order_relaxed) +
+                                 P1S::gSecAlphaNs.load(std::memory_order_relaxed) +
+                                 P1S::gSecLightNs.load(std::memory_order_relaxed);
+        const double tlCalls = static_cast<double>(P1S::gSecTLCalls.load(std::memory_order_relaxed));
+        const auto perCallUs = [&](uint64_t v) { return tlCalls > 0.0 ? v / tlCalls / 1000.0 : 0.0; };
+        LOG_INFO(Graphics,
+                 "PERF drawSection: calls/frame={:.0f} bindCalls/frame={:.0f} | total={:.3f} bind={:.3f} "
+                 "refl={:.3f} desc={:.3f} alpha={:.3f} light={:.3f} other={:.3f} ms/frame | per call us: "
+                 "total={:.3f} bind={:.3f} refl={:.3f} desc={:.3f} alpha={:.3f} light={:.3f} other={:.3f} "
+                 "| bindCache fast/frame={:.0f} resolves={}",
+                 cnt(P1S::gSecTLCalls), cnt(P1S::gSecBindCalls), ns(P1S::gSecTLNs), ns(P1S::gSecBindNs),
+                 ns(P1S::gSecReflNs), ns(P1S::gSecDescNs), ns(P1S::gSecAlphaNs), ns(P1S::gSecLightNs),
+                 (tlNs - std::min(tlNs, namedNs)) / f / 1e6, perCallUs(tlNs),
+                 perCallUs(P1S::gSecBindNs.load(std::memory_order_relaxed)),
+                 perCallUs(P1S::gSecReflNs.load(std::memory_order_relaxed)),
+                 perCallUs(P1S::gSecDescNs.load(std::memory_order_relaxed)),
+                 perCallUs(P1S::gSecAlphaNs.load(std::memory_order_relaxed)),
+                 perCallUs(P1S::gSecLightNs.load(std::memory_order_relaxed)),
+                 perCallUs(tlNs - std::min(tlNs, namedNs)),
+                 cnt(P1S::gSecBindFast), P1S::gSecBindResolves.load(std::memory_order_relaxed));
     }
     LOG_INFO(Graphics,
              "PERF pass2: surfSort={:.3f} surfDraw={:.3f} shadow={:.3f} alphaSort={:.3f} alphaDraw={:.3f} ms/frame "

@@ -108,6 +108,28 @@ extern std::atomic<uint64_t> gWouldMaxLen; // longest such run seen in any frame
 extern std::atomic<uint64_t> gSecClassCalls;
 extern std::atomic<uint64_t> gSecClassMisses;
 
+// PERF-016. Subdivision of DrawSectionTL itself -- the term PERF-015 left unattributed.
+// `shapeDraw` covers Shape::Draw (the walk, PrepareTL, BeginMeshTL) plus every
+// DrawSectionTL it flushes; these split the DrawSectionTL half so the remaining
+// per-section cost has names. Billed through the same gActive gate as everything
+// above, so Pass2 and shadow calls stay out; unlike gShapeDrawNs they are NOT
+// depth-gated, so proxy sections land here too (their own denominator, gSecTLCalls,
+// counts the same population).
+extern std::atomic<uint64_t> gSecTLNs;    // whole DrawSectionTL body
+extern std::atomic<uint64_t> gSecTLCalls; // DrawSectionTL entries during Pass1 (top-level + proxy)
+extern std::atomic<uint64_t> gSecBindNs;  // material-binding block: _materialBindings find + bank Loads
+extern std::atomic<uint64_t> gSecBindCalls; // sections that entered the production/debug binding branch
+extern std::atomic<uint64_t> gSecReflNs;  // the two MaterialIsReflective calls + DZ-006 guard
+extern std::atomic<uint64_t> gSecDescNs;  // SplitLegacy + BuildRenderPassDescriptor
+extern std::atomic<uint64_t> gSecAlphaNs; // blend/alpha-ref routing (leaf cards, bark, cutout, opaque-fix)
+extern std::atomic<uint64_t> gSecLightNs; // sun/material constant fold
+
+// PERF-016 lever self-count (WGR_SECTION_BIND_CACHE): fast-path sections served from the
+// per-material binding cache vs entries that had to resolve. calls=0 <=> lever off, so a
+// null A/B cannot be read as "caching does not help".
+extern std::atomic<uint64_t> gSecBindFast;
+extern std::atomic<uint64_t> gSecBindResolves;
+
 bool Enabled();
 
 inline uint64_t NowNs()
