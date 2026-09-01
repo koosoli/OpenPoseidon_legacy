@@ -203,8 +203,7 @@ TEST_CASE("OptionsPage cycle membership helper only accepts listed IDCs", "[opti
 // This is not hypothetical: a stock ARMA: Cold War Assault install ships RscDisplayOptions and
 // RscDisplayOptionsVideo in bin/RESOURCE.BIN but NOT RscOptionsShell, which arrives separately in
 // bin/resource-extra.cpp. The shell was constructed unconditionally, so on that data the Options
-// entry opened a screen with no notebook, no buttons and no message — for the whole life of the
-// fork. Pin the probe so the selection cannot quietly become unconditional again.
+// entry opened a screen with no notebook, no buttons and no message — for years. Pin the probe so the selection cannot quietly become unconditional again.
 TEST_CASE("Options screen selection follows the resource the data set actually defines", "[optionsUI][UI]")
 {
     ParamFile res;

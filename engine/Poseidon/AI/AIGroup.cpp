@@ -1379,8 +1379,8 @@ bool AIGroup::Think()
                 // PERF-016/017. The ration, at last reading the timer this loop has been
                 // writing since 2001. `_trackNearTargetsTime` was written here and read
                 // nowhere, while its sibling `_trackTargetsTime` is read and does gate its
-                // loop -- the throttle was wired up on one side only and has been inert ever
-                // since. The other fork carries the same dead timer.
+                // loop -- the throttle was wired up on one side only and has been inert
+                // ever since.
                 //
                 // Default 0.5 s, which is the owner's decision after playing perf_combat both
                 // ways: it removes 91% of this loop's cost and it DOES change what the AI

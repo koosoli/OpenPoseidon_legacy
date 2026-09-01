@@ -1,7 +1,6 @@
 // FSR 1.0 — EASU (edge-adaptive spatial upsampling) + RCAS (robust contrast-adaptive
 // sharpening), ported to WGSL from AMD's FidelityFX ffx_a.h / ffx_fsr1.h (MIT license,
-// Copyright (c) 2021 Advanced Micro Devices, Inc.; the GLSL reference used lives in
-// inspiration/otherfork/FP_269_vk_WIP/fp/simple_renderer_vk/FsrGlslIncludes.glsl).
+// Copyright (c) 2021 Advanced Micro Devices, Inc.).
 // GPL-compatible — this backend ships in every build, unlike DLSS.
 //
 // Our chain slot hands us LINEAR HDR, but FSR1 is specified for tonemapped [0,1]

@@ -48,8 +48,8 @@ TEST_CASE("a thin plank is penetrated and a thick wall is not", "[penetration]")
 TEST_CASE("thickness is what decides, not the material alone", "[penetration]")
 {
     // The whole point of measuring a thickness: the SAME wall stops a shot that
-    // crosses it at an angle while letting a square one through. The fork's
-    // boolean cannot express this at all.
+    // crosses it at an angle while letting a square one through. A per-material
+    // passthrough boolean cannot express this at all.
     const Penetration::Material& brick = Penetration::Lookup("ca\\data\\cihla_zed.paa");
 
     // 2 cm and 25 cm, well clear of the threshold on either side. The first

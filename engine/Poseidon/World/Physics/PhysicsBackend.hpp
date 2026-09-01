@@ -106,7 +106,7 @@ public:
 
     /// Transforms flow IN only (PHY-010). There is deliberately no getter: adding
     /// one is how "physics is a query service" quietly becomes "physics owns the
-    /// position", which is the step PHY-001 defers and the fork never took.
+    /// position", which is the step PHY-001 defers.
     virtual void SetBodyTransform(BodyId id, const Matrix4& transform) = 0;
 
     virtual bool SetTerrain(const TerrainField& field) = 0;

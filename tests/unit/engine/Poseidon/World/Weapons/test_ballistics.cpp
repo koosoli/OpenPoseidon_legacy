@@ -1,7 +1,7 @@
 // test_ballistics.cpp - drag-correct ballistic prediction.
 //
 // The thing under test is NOT "the integrator returns plausible numbers". It is the claim that
-// justified porting this from the FP-GL fork at all: that the engine currently predicts a
+// justified writing this solver at all: that the engine currently predicts a
 // projectile's path with a model that is not the model the projectile flies under, and that this
 // solver closes that gap. So the tests are built around three independent anchors:
 //

@@ -23,17 +23,17 @@
 // a model that is not the model the bullet flies under, and the disagreement grows with range and
 // with airFriction. That is a correctness gap, not a difficulty setting.
 //
-// This is the fix the FP-GL fork made (`Poseidon2/shots.cpp:776-1450`), ported here. The port is
-// worth making because the fork's integrator is not an approximation of our flight model -- it is
-// the SAME forward-Euler scheme, step for step: acceleration from the old speed, position advanced
-// with the old speed, speed updated afterwards, launch delay gating both. Reproducing our own
-// simulation is exactly what a predictor has to do.
+// This closes it by integrating the shot rather than solving a parabola. The integrator is not an
+// approximation of our flight model -- it is the SAME forward-Euler scheme, step for step:
+// acceleration from the old speed, position advanced with the old speed, speed updated afterwards,
+// launch delay gating both. Reproducing our own simulation is exactly what a predictor has to do.
 //
-// TWO DELIBERATE DIFFERENCES FROM THE FORK, both to match THIS engine rather than that one:
+// TWO POINTS WHERE THE OBVIOUS TRANSCRIPTION WOULD BE WRONG for this engine:
 //
-//  * The fork spends a whole step decrementing `initTime` without moving. Ours decrements
-//    `_initDelay` and, in the same frame, moves if it has gone non-positive (Shots.cpp:686-703).
-//    Matching the fork there would put the prediction one step of flight behind the projectile.
+//  * Spending a whole step decrementing `initTime` without moving is the natural reading of a
+//    launch delay. Ours decrements `_initDelay` and, in the same frame, moves if it has gone
+//    non-positive (Shots.cpp:686-703). Doing it the other way would put the prediction one step
+//    of flight behind the projectile.
 //  * Our drag reads `ShotAirspeed(_speed)`, which folds in wind when the ballistics-wind opt-in is
 //    on. The predictor deliberately does NOT model wind: an aiming solution cannot know the wind
 //    the round will meet along a path it has not flown, and pretending otherwise would make the AI
@@ -179,13 +179,12 @@ ShellParams ShellParamsFor(const AmmoType& type);
 /// dispersion", not "converged to machine precision".
 inline constexpr float DefaultStep = 1.0f / 500.0f;
 
-/// Longest flight the predictor will integrate, whatever the ammo's own timeToLive says. The fork
-/// clamps to 10 s for the same reason: a solver must terminate, and no aiming decision depends on
-/// where a round is 30 seconds after launch.
+/// Longest flight the predictor will integrate, whatever the ammo's own timeToLive says: a solver
+/// must terminate, and no aiming decision depends on where a round is 30 seconds after launch.
 inline constexpr float MaxFlightTime = 10.0f;
 
 /// Rockets fly slower and burn for seconds, so the shell cap is too tight for them. The engine's
-/// own missile timeToLive default is 20 s and the fork used the same bound.
+/// own missile timeToLive default is 20 s, which is the bound used here.
 inline constexpr float MaxMissileFlightTime = 20.0f;
 
 struct Impact
@@ -219,8 +218,7 @@ Approach SimulateAgainstTarget(const ShellParams& shell, Vector3Par start, Vecto
 /// `targetSpeed`.
 ///
 /// Iterative, because there is no closed form once drag is in: fire at the target, see where the
-/// round actually goes, correct by the miss, repeat. Converges in a handful of passes; the fork
-/// uses 4 and so do we.
+/// round actually goes, correct by the miss, repeat. Converges in a handful of passes; four.
 Vector3 CompensateAim(const ShellParams& shell, float initSpeed, Vector3Par shooterSpeed, Vector3Par firingPos,
                       Vector3Par targetPos, Vector3Par targetSpeed, int iterations = 4, float step = DefaultStep);
 

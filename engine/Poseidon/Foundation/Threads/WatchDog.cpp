@@ -21,7 +21,7 @@ void WatchDogItem::Finish() noexcept
     _slot = nullptr;
     // Only clear the slot if it is still OURS. Once the ring wraps past a still-running scope
     // the slot belongs to a newer token, and clearing it here would silence a stall that is
-    // genuinely happening -- the fork's version does exactly that. A relaxed load is enough:
+    // genuinely happening, which is the trap here. A relaxed load is enough:
     // the generation is only ever compared for equality against a value we already hold.
     if (slot->generation.load(std::memory_order_relaxed) != _generation)
     {
@@ -71,7 +71,7 @@ WatchDogItem WatchDog::Add(std::string_view name) noexcept
 
 void WatchDog::Sweep() noexcept
 {
-    // Unlike the fork, this does NOT walk the ring in issue order and stop at the first live
+    // This deliberately does NOT walk the ring in issue order and stop at the first live
     // scope. That ordering means one long-lived scope hides every stall behind it, which is the
     // opposite of what a stall detector is for. A full pass over 65,536 slots is a few
     // microseconds once per limit; there is nothing to optimise here.

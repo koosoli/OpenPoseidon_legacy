@@ -15,27 +15,28 @@
 // deadlocks -- where the only symptom today is that the frame counter stops and there is
 // nothing in the log to say which scope owned the thread.
 //
-// Ported from the FP-GL fork (`fp/core/WatchDog.hpp`), with three deliberate changes, each of
-// which is a bug or a hazard in this codebase:
+// Three properties are deliberate, and each one is a bug or a hazard that the obvious
+// implementation of this walks straight into:
 //
-//  1. THE FORK PRINTS TO `std::cerr`. On this workstation that is not a style question: the
+//  1. IT DOES NOT PRINT TO `std::cerr`. On this workstation that is not a style question: the
 //     wgpu renderer panics when the process writes to stderr under the agent shell
 //     (`failed printing to stderr: os error 232`), and a background thread writing there at an
 //     arbitrary moment is the worst possible version of that. Reports go through the normal
 //     logging system instead, which is also where anyone looking for the stall will be reading.
 //
-//  2. THE FORK STARTS THE THREAD AT STATIC-INIT TIME (`inline WatchDog g_watchDog = ...` at
-//     namespace scope). A std::thread spawned before main and joined during static destruction
+//  2. IT DOES NOT START THE THREAD AT STATIC-INIT TIME. A namespace-scope instance is the
+//     tempting shape and the wrong one: a std::thread spawned before main and joined during static destruction
 //     is a well-known way to hang at exit, and it costs the ring's memory in every process that
 //     links the header -- including the tools, which have no frames to watch. Here the sweep is
 //     opt-in and explicitly owned: nothing runs until someone constructs one.
 //
-//  3. THE FORK'S RING CAN BE RE-ENTERED UNDER A LIVE TOKEN. `Add` takes the next slot modulo the
-//     ring size unconditionally, so once the counter wraps past a slot whose scope is still
-//     running, two `WatchDogItem`s hold the same status pointer and the first to finish clears
-//     the other's entry. With 2^17 slots that needs 131,072 nested-or-concurrent scopes to bite,
-//     which is why it never showed -- but a diagnostic that lies under load is worse than none.
-//     Each slot carries a generation counter; a token only clears the slot it was issued for.
+//  3. THE RING CANNOT BE RE-ENTERED UNDER A LIVE TOKEN. Taking the next slot modulo the ring
+//     size unconditionally is the natural way to write `Add`, and it is wrong: once the counter
+//     wraps past a slot whose scope is still running, two `WatchDogItem`s hold the same status
+//     pointer and the first to finish clears the other's entry. With 2^17 slots that needs
+//     131,072 nested-or-concurrent scopes to bite, which is why such a bug hides -- but a
+//     diagnostic that lies under load is worse than none. Each slot carries a generation
+//     counter; a token only clears the slot it was issued for.
 //
 // Cost when armed is one relaxed fetch_add and one release store per scope. Cost when not
 // armed is nothing at all -- the ring is not allocated and no thread exists.
@@ -127,7 +128,7 @@ public:
 
     /// Begin watching a scope. The name is copied into the slot (truncated to 31 characters
     /// plus a terminator) because the caller's string may be gone by the time the sweep reads
-    /// it -- the fork's `std::array<char,32>` by value had the same reason.
+    /// it: a fixed-size inline buffer, not a pointer to storage the caller may free.
     [[nodiscard]] WatchDogItem Add(std::string_view name) noexcept;
 
     /// The process-wide instance, or nullptr when the watchdog was never armed.

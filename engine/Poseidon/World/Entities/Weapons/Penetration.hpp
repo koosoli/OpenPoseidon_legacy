@@ -5,13 +5,13 @@
 
 // Bullet penetration through materials.
 //
-// WHAT THIS IS, AND WHAT THE FORK'S VERSION IS. `inspiration/otherfork` has a
-// per-material BOOLEAN, `bulletPassthrough`: a shot either ignores a surface
-// entirely or stops at it, and its own loop carries the author's comment
-// `// TODO add penetratino depth`. Glass is passthrough, brick is not, and a
-// pane and a wall cost a bullet exactly the same: nothing, or everything.
+// WHY IT IS NOT A BOOLEAN. The obvious model is a per-material passthrough
+// flag: a shot either ignores a surface entirely or stops at it. Under that
+// model glass is passthrough and brick is not, and a pane and a wall cost a
+// bullet exactly the same -- nothing, or everything. Thickness never enters,
+// so neither does the angle a round takes through a wall.
 //
-// This does the thing that comment describes. A shot that enters a material
+// This measures instead. A shot that enters a material
 // measures how far it must travel INSIDE it (PhysicsWorld::MeasureThickness,
 // which needs the physics collider set and is why this could not be written
 // before PHY-010), loses energy in proportion, and comes out the far side slower
@@ -43,9 +43,9 @@ struct Material
     bool alwaysPasses = false;
 };
 
-/// Looks a material up by texture path. OFP identifies surfaces by texture, the
-/// way the fork's config identifies them by name; the mapping is by path fragment
-/// because the stock corpus has no material declarations to read.
+/// Looks a material up by texture path. OFP identifies surfaces by texture rather
+/// than by a named material, so the mapping is by path fragment -- the stock
+/// corpus has no material declarations to read.
 const Material& Lookup(const char* texturePath);
 
 struct Result

@@ -182,7 +182,7 @@ struct Integrator
         Vector3 accel = speed * (speedSize * k);
         accel[1] -= shell.coefGravity * G_CONST;
 
-        // Ours, not the fork's: the delay is decremented and the SAME step still moves if it has
+        // Note the ordering: the delay is decremented and the SAME step still moves if it has
         // gone non-positive. See the header for why that one-step difference matters.
         initDelay -= step;
         if (initDelay <= 0.0f)
@@ -287,7 +287,7 @@ Vector3 CompensateAim(const ShellParams& shell, float initSpeed, Vector3Par shoo
 
     // Start by aiming straight at the target, then correct by where the round actually went.
     // `aimPoint` is the point we PRETEND to aim at; each pass moves it by the miss vector, which
-    // is the standard fixed-point iteration for this problem and is what the fork does.
+    // is the standard fixed-point iteration for this problem.
     Vector3 aimPoint = targetPos;
 
     for (int i = 0; i < iterations; i++)

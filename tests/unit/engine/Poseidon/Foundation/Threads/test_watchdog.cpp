@@ -67,7 +67,7 @@ TEST_CASE("Finishing is idempotent and safe after the token is moved", "[watchdo
 
 TEST_CASE("A lapped slot is not cleared by the token that used to own it", "[watchdog][foundation]")
 {
-    // This is the fork's bug. Hold a token, then lap the ring so the same slot is re-issued to a
+    // The bug an unguarded ring has. Hold a token, then lap the ring so the same slot is re-issued to a
     // scope that really does stall. If Finish() ignored generations, finishing the stale token
     // would clear the live entry and the stall would go unreported.
     WatchDog dog(Limit);

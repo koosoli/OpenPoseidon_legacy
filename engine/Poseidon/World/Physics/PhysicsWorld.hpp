@@ -11,10 +11,8 @@
 //
 // PHY-010 SCOPE, and it is a boundary rather than a milestone: transforms flow
 // INTO physics only. Nothing here reads a position back, no entity is driven by
-// the simulation, and no existing collision or ray-cast path is replaced. The
-// fork this work draws from never crossed that line either -- its physics is a
-// read-only service and the one class that would have owned motion was written
-// and never instantiated. See PHY-001 §1.3.
+// the simulation, and no existing collision or ray-cast path is replaced. See
+// PHY-001 §1.3 for why the line sits here and what crossing it would cost.
 
 class LODShape;
 
@@ -106,9 +104,9 @@ public:
 
     /// How thick is the thing a shot just entered?
     ///
-    /// This is the measurement the fork's material system does NOT have -- its
-    /// bulletPassthrough is a boolean and its own code carries a TODO where the
-    /// depth should be. With colliders in a physics world the answer is two rays:
+    /// The question a per-material passthrough boolean cannot answer, and the
+    /// reason penetration is not one. With colliders in a physics world the
+    /// answer is two rays:
     /// the entry is known, and casting BACKWARDS from beyond the object finds the
     /// far face. Forwards from just inside would find the next object instead
     /// whenever the shot is already past the mid-plane.

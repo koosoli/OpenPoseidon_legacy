@@ -103,9 +103,9 @@ void Thing::Simulate(float deltaT, SimulationImportance prec)
     // is SKIPPED rather than run and overwritten -- running both would fight,
     // and what you would see is a barrel that jitters.
     //
-    // One hand-over point, the same one the fork chose: of everything it
-    // registered with PhysX, only Thing ever read a pose back out. Off by
-    // default; LooseObjects owns every rule about when this is allowed.
+    // ONE hand-over point in the whole engine, and this is it: Thing is the only
+    // class that reads a pose back out of physics. Off by default; LooseObjects
+    // owns every rule about when this is allowed.
     if (LooseObjects::Step(*this, _physicsBody))
     {
         return;

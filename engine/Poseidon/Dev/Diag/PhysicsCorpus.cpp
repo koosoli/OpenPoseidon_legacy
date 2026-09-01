@@ -181,10 +181,10 @@ void RunPhysicsCorpus()
     // thousand times cannot masquerade as a systematic failure.
     std::map<std::string, FailureGroup> failures;
 
-    // THE LOOSE OBJECTS, counted rather than assumed. Everything the fork handed
-    // to its physics engine was a Thing, and the open question before doing the
-    // same here was whether the barrels and pallets a map actually contains are
-    // Things at all -- or terrain decoration with no entity behind it. Grouped
+    // THE LOOSE OBJECTS, counted rather than assumed. The open question before
+    // handing anything to physics was whether the barrels and pallets a map
+    // actually contains are Things at all -- or terrain decoration with no entity
+    // behind them, which physics can neither move nor be asked about. Grouped
     // by config class, with the network id, because a body the physics owns has
     // to belong to exactly one machine and an object with no id belongs to none.
     std::map<std::string, std::uint32_t> things;

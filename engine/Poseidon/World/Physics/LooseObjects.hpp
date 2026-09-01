@@ -13,9 +13,9 @@ class Entity;
 
 /// Physics ownership for loose objects -- barrels, pallets, furniture.
 ///
-/// This is the one thing the fork's physics layer actually drove: of everything
-/// it registered, only `Thing` (and the dropped weapons it added) read a pose
-/// back out again. Everything else pushed transforms in and never looked.
+/// `Thing` is the only class here that reads a pose BACK out of physics.
+/// Everything else pushes transforms in and never looks -- which is what keeps
+/// PHY-010's boundary intact for all of it.
 ///
 /// MEASURED before it was built, on Noe: a stock map's 177,225 objects contain
 /// ZERO Things -- barrels baked into terrain are decoration with no entity
