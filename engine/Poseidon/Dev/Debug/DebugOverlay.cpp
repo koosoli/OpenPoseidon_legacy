@@ -47,6 +47,7 @@
 #include <Poseidon/Dev/Diag/LightingDiag.hpp>
 #include <Poseidon/Dev/Diag/BallisticsTab.hpp>
 #include <Poseidon/Dev/Diag/StreamingTab.hpp>
+#include <Poseidon/Dev/Diag/AITab.hpp>
 #include <Poseidon/Dev/Diag/FixedStepTab.hpp>
 #include <Poseidon/Dev/Diag/PhysicsTab.hpp>
 #include <Poseidon/Dev/Diag/PictureModeTab.hpp>
@@ -6390,6 +6391,12 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Physics"))
         {
             Poseidon::Dev::DrawPhysicsTab();
+            ImGui::EndTabItem();
+        }
+        // Not a diagnostic: this tab CHANGES what the AI does. See AITab.cpp.
+        if (Dev::PanelTabItem("AI"))
+        {
+            Poseidon::Dev::DrawAITab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Fixed Step"))

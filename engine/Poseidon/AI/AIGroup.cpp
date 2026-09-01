@@ -1,3 +1,4 @@
+#include <Poseidon/AI/AITuning.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014
@@ -1375,23 +1376,18 @@ bool AIGroup::Think()
             }
             if (unit->GetNearestEnemyDist2() < Square(100))
             {
-                // PERF-016. The ration, at last reading the timer this loop has been
-                // writing since 2001. Default 0 == every think == the 2001 behaviour, so
-                // this changes nothing unless POSEIDON_AI_TRACK_PERIOD says otherwise.
+                // PERF-016/017. The ration, at last reading the timer this loop has been
+                // writing since 2001. `_trackNearTargetsTime` was written here and read
+                // nowhere, while its sibling `_trackTargetsTime` is read and does gate its
+                // loop -- the throttle was wired up on one side only and has been inert ever
+                // since. The other fork carries the same dead timer.
                 //
-                // It is an env var rather than a config value because it is not a tuning
-                // knob yet -- it is the independent variable of an experiment whose
-                // dependent variable is an AI behaviour recording (POSEIDON_AI_TIMELINE).
-                // A huge period disables the block outright, which is the ABLATION: if
-                // the recording cannot tell that apart from the default, the recording is
-                // not measuring AI behaviour and no verdict from it means anything.
-                static const float trackPeriod = []
-                {
-                    const char* v = std::getenv("POSEIDON_AI_TRACK_PERIOD");
-                    return (v != nullptr && v[0] != '\0') ? static_cast<float>(std::atof(v)) : 0.0f;
-                }();
-
+                // Default 0.5 s, which is the owner's decision after playing perf_combat both
+                // ways: it removes 91% of this loop's cost and it DOES change what the AI
+                // perceives, so it was never a call a measurement could make. The AI tab puts
+                // it back to 0, which is the 2001 behaviour exactly.
                 EntityAI* vehicle = unit->GetVehicle();
+                const float trackPeriod = AITuning::TrackNearTargetsPeriod();
                 if (trackPeriod <= 0.0f || Glob.time > vehicle->GetTrackNearTargetsTime() + trackPeriod)
                 {
                     AICost::AICosts().trackCalls++;
