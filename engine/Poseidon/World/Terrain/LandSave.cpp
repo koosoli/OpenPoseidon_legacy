@@ -9,6 +9,7 @@
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/IO/Serialization/ParamArchive.hpp>
 #include <Poseidon/IO/Filesystem/Utf8Paths.hpp>
+#include <Poseidon/Foundation/Threads/WatchDog.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp> // GEngine (GPU-driven retained-scene drop on cell unload)
 #include <Poseidon/World/Scene/ObjectClasses.hpp>
@@ -283,6 +284,11 @@ LSError Landscape::LoadData(QIStream& f, float landGrid)
 int Landscape::LoadData(const char* name, float landGrid)
 {
     DWORD start = Poseidon::Foundation::GlobalTickCount();
+    // The single longest blocking call in a mission start, and the one that sets the
+    // watchdog's deadline. It is also the one place where "the game stopped responding
+    // while loading" is genuinely ambiguous between slow and wedged; the report names the
+    // world, so a stall here says which one.
+    Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("world.load", name ? name : "");
     LOG_DEBUG(World, "Landscape::LoadData start");
     Log("Load landscape %s", name);
     _name = name; // remmember name

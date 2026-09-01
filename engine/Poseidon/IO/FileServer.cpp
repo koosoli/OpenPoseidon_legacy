@@ -8,6 +8,7 @@
 #include <Poseidon/Foundation/Memory/MemFreeReq.hpp>
 #include <Poseidon/Foundation/Strings/RString.hpp>
 #include <Poseidon/Foundation/Threads/ThreadAffinity.hpp>
+#include <Poseidon/Foundation/Threads/WatchDog.hpp>
 #include <Poseidon/Foundation/platform.hpp>
 #ifdef _WIN32
 #include <process.h>
@@ -119,6 +120,13 @@ int FileCache::Load(const char* name)
     // (ENABLE_OVERLAPPED_IO compiles out above), so depth is 0 by construction and the
     // latency of a miss lands on whoever asked, on the main thread, immediately.
     const auto missBegan = std::chrono::steady_clock::now();
+    // Watched because of the sentence above: the miss is a synchronous read that lands on
+    // whoever asked, on the main thread. There is no queue to inspect and no worker to
+    // blame, so a read that never returns -- a bank on a disconnected network path, a
+    // handle the OS never completes -- is invisible except as a stopped frame counter. The
+    // scope is inside the miss branch, so a cache HIT (the overwhelming majority of calls)
+    // does not touch the ring at all.
+    Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("io.read", name ? name : "");
     FileInCache* newEntry = new FileInCache(name);
     if (newEntry->_data.fail())
     {

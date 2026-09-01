@@ -621,6 +621,15 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
                              "Cheats/Game/Console/Profile/Memory/Font tabs");
         }
 
+        showOption(debugGroup
+                       ->add_option("--watchdog-limit", _watchDogLimitSeconds,
+                                    "Stall detector deadline in seconds, fractional allowed (default 30; 0 = do "
+                                    "not arm it). A named scope still running after this long is reported to the "
+                                    "log by name. Set it below a second to see the detector work on scopes that "
+                                    "are merely slow.")
+                       ->check(CLI::Range(0.0f, 3600.0f)),
+                   CliHelpVisibility::Dev);
+
         showOption(debugGroup->add_option("--vd", _viewDistanceOverride, "Override view distance (bypass 5000 clamp)")
                        ->check(CLI::Range(100.0f, 100000.0f)),
                    CliHelpVisibility::Dev);

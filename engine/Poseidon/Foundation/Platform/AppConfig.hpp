@@ -227,6 +227,18 @@ class AppConfig
     /// the panel never opens when the flag isn't set.
     bool DevMode() const { return _devMode; }
 
+    /// Stall-detector deadline (--watchdog-limit), in seconds; 0 means do not arm one.
+    ///
+    /// The default is 30 seconds, and the number is chosen by what the watched scopes
+    /// legitimately cost rather than by what would catch a hang soonest. The longest of
+    /// them is the world file load, which on this content is seconds even warm and can be
+    /// tens of seconds cold off spinning media; a limit tight enough to be "responsive"
+    /// would fire on every mission start. A watchdog that cries wolf during loading gets
+    /// switched off, and then it guards nothing — so the deadline is set past the slowest
+    /// honest case, and what it detects is the class of failure it was built for: a scope
+    /// that is never going to finish at all.
+    float WatchDogLimitSeconds() const { return _watchDogLimitSeconds; }
+
     /// Confirm-revert modal timeout (seconds).  0 = use the engine default
     /// (15s).  Tests set this to a small value via --confirm-revert-timeout
     /// to exercise the auto-revert path without paying the full 15-second
@@ -418,6 +430,11 @@ class AppConfig
     RString _advertiseAddress;
     int _maxMemMB = 0;
     int _maxThreads = -1;
+    // Stall-detector deadline in seconds (--watchdog-limit); 0 = do not arm. See the
+    // accessor for why the default is 30. Fractional because the only way to exercise the
+    // detector against real engine scopes is to set a deadline under one of them, and the
+    // longest scope it watches is a sub-second world load on warm storage.
+    float _watchDogLimitSeconds = 30.0f;
     bool _privateServer = false;
     bool _publicServer = false;
     RString _masterServer;

@@ -15,6 +15,7 @@
 #include <Poseidon/Foundation/Threads/WatchDog.hpp>
 
 #include <chrono>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -90,6 +91,25 @@ TEST_CASE("A lapped slot is not cleared by the token that used to own it", "[wat
 
     WaitForSweeps();
     CHECK(dog.Reports() >= 1);
+}
+
+TEST_CASE("A path-named scope keeps the tail of the path", "[watchdog][foundation]")
+{
+    // The point of WatchScopeFor. Asset paths here share long directory prefixes, so a name
+    // truncated from the FRONT is the same 31 characters for every scope and identifies
+    // nothing. What has to survive the 31-character slot is the file at the end.
+    //
+    // There is no getter for a slot's name -- the log line is where it shows up -- so this
+    // asserts the property the composition guarantees rather than the string: a scope whose
+    // path differs only in its tail must still be reportable, and the helper must not
+    // overrun the slot however long the inputs are.
+    WatchDog dog(Limit);
+    WatchDogItem a = Poseidon::WatchScopeFor("io.read", "ca\\data\\data3d\\very\\deep\\path\\alpha.paa");
+    WatchDogItem b = Poseidon::WatchScopeFor("io.read", "ca\\data\\data3d\\very\\deep\\path\\beta.paa");
+    // A label longer than the whole slot must not run past it either.
+    WatchDogItem c = Poseidon::WatchScopeFor(std::string(200, 'L'), std::string(200, 'D'));
+    WaitForSweeps();
+    CHECK(dog.Reports() >= 3);
 }
 
 TEST_CASE("Without an armed watchdog, watching a scope costs nothing and is safe",

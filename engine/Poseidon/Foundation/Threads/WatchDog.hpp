@@ -118,8 +118,9 @@ public:
     static constexpr size_t RingSize = static_cast<size_t>(1) << 16;
     static constexpr size_t RingMask = RingSize - 1;
 
-    /// Longest a named scope may run before it is reported. The sweep also runs at this
-    /// interval, so a stall is named within roughly two limits of it happening.
+    /// Longest a named scope may run before it is reported. The sweep runs at its own short
+    /// cadence (capped at this limit for the very short limits tests use), so a stall is
+    /// named within a fraction of a second of the deadline rather than within another limit.
     explicit WatchDog(std::chrono::milliseconds timeLimit);
     ~WatchDog() noexcept;
 
@@ -162,5 +163,15 @@ inline WatchDogItem WatchScope(std::string_view name) noexcept
     WatchDog* dog = WatchDog::Instance();
     return dog ? dog->Add(name) : WatchDogItem();
 }
+
+/// Watch a scope whose interesting part is a path -- a file being read, a model being
+/// parsed. Composes `label:<tail of detail>` into the slot's 32-character name.
+///
+/// The TAIL, not the head, and that is the whole reason this exists rather than callers
+/// concatenating: asset paths here share long directory prefixes, so truncating from the
+/// front yields 31 characters of `ca\data\...` for every scope and names nothing. The tail
+/// is the file, which is the part that identifies the stall. Costs nothing when no
+/// watchdog is armed -- the formatting happens behind the instance check.
+[[nodiscard]] WatchDogItem WatchScopeFor(std::string_view label, std::string_view detail) noexcept;
 
 } // namespace Poseidon

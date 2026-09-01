@@ -69,12 +69,49 @@ WatchDogItem WatchDog::Add(std::string_view name) noexcept
     return WatchDogItem(slot, generation);
 }
 
+WatchDogItem WatchScopeFor(std::string_view label, std::string_view detail) noexcept
+{
+    WatchDog* dog = WatchDog::Instance();
+    if (!dog)
+    {
+        return WatchDogItem();
+    }
+
+    // One slot's worth of name, built on the stack: 31 usable characters plus the
+    // terminator Add appends.
+    constexpr size_t kMax = 31;
+    char buffer[kMax + 1];
+    size_t used = std::min(label.size(), kMax);
+    std::memcpy(buffer, label.data(), used);
+    if (used < kMax)
+    {
+        buffer[used++] = ':';
+    }
+    const size_t room = kMax - used;
+    // Keep the END of the detail (see the header): the file name is what identifies the
+    // stall, the directory prefix is shared by everything.
+    const size_t take = std::min(detail.size(), room);
+    std::memcpy(buffer + used, detail.data() + (detail.size() - take), take);
+    used += take;
+
+    return dog->Add(std::string_view(buffer, used));
+}
+
 void WatchDog::Sweep() noexcept
 {
     // This deliberately does NOT walk the ring in issue order and stop at the first live
     // scope. That ordering means one long-lived scope hides every stall behind it, which is the
-    // opposite of what a stall detector is for. A full pass over 65,536 slots is a few
-    // microseconds once per limit; there is nothing to optimise here.
+    // opposite of what a stall detector is for. A full pass over 65,536 slots is a few tens of
+    // microseconds; there is nothing to optimise here.
+    //
+    // The pass runs at a fixed short cadence rather than once per limit, and the cadence is
+    // deliberately decoupled from the deadline. Each slot carries an absolute deadline, so
+    // sweeping more often only makes a report land sooner -- and at the 30-second limit the
+    // client arms, once-per-limit sweeping would name a stall anywhere from 30 to 60 seconds
+    // after the fact, which is too vague to line up against anything else in the log. It also
+    // bounds shutdown: the destructor joins this thread, and sleeping a whole limit would make
+    // every quit pay the rare case's latency.
+    constexpr auto kSweepInterval = std::chrono::milliseconds(200);
     while (_running.load(std::memory_order_acquire))
     {
         const auto now = std::chrono::steady_clock::now();
@@ -96,7 +133,10 @@ void WatchDog::Sweep() noexcept
             LOG_WARN(Core, "WatchDog: scope '{}' exceeded {} ms and has not finished", slot.name.data(),
                      _timeLimit.count());
         }
-        std::this_thread::sleep_for(_timeLimit);
+        // Never sleep past the limit itself: the unit tests arm limits of a few tens of
+        // milliseconds, and a fixed 200 ms cadence would make a 40 ms deadline take five
+        // sweeps' worth of wall clock to notice.
+        std::this_thread::sleep_for(std::min<std::chrono::milliseconds>(kSweepInterval, _timeLimit));
     }
 }
 

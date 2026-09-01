@@ -8,6 +8,7 @@
 #include <Poseidon/Asset/Formats/Material/EmatMaterialAdapter.hpp> // ReadEmatFileLoose (pure, worker-safe)
 #include <Poseidon/Foundation/Logging/Logging.hpp>
 #include <Poseidon/Foundation/Threads/PoThread.hpp>
+#include <Poseidon/Foundation/Threads/WatchDog.hpp>
 #include <Poseidon/Foundation/Platform/FpEnvironment.hpp>
 #include <Poseidon/Graphics/Textures/PAADecoder.hpp>      // ReadPAABlockChain (pure, worker-safe)
 #include <Poseidon/Graphics/Textures/PreparedTextures.hpp> // the worker->main-thread mip-chain store
@@ -252,6 +253,21 @@ void ObjectStreamPreparer::Impl::WorkerMain(uint32_t workerIndex)
         lock.unlock();
 
         // ---- unlocked: the parse ------------------------------------------------------
+        // Watched for the whole unlocked span -- parse AND texture prepare -- because a
+        // worker that wedges here is the quietest failure this file can produce. The main
+        // thread does not wait on it: the model simply stays Parsing forever, the admit
+        // loop keeps falling back, and the only visible symptom is that streaming quietly
+        // stops making progress. Nothing is logged today, and there is no timer on the
+        // path because every existing timer here is recorded on completion.
+        //
+        // Reachability, stated because it is not obvious and a scope that never runs reads
+        // as "nothing stalled here": these workers exist only for the modern-OPRW object
+        // table (Landscape::EnsureModernObjectPreparer), so a classic CWA world never
+        // enters this loop at all. Verified 2026-09-01 -- a full Eden mission load with a
+        // 1 ms watchdog deadline produced no `objstream` report, because the preparer was
+        // never constructed. The scope covers the A2/A3-lineage worlds, where this is the
+        // async path and the stall would otherwise be silent.
+        Poseidon::WatchDogItem watch = Poseidon::WatchScopeFor("objstream", path);
         const auto start = std::chrono::steady_clock::now();
         ModelPtr model;
         std::string error;

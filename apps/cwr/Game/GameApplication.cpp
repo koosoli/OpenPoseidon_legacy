@@ -21,6 +21,8 @@
 #include <Poseidon/UI/Settings/DisplayStartupOverrides.hpp>
 #include <Poseidon/Dev/Diag/PerfTrace.hpp>
 #include <Poseidon/Core/TaskPool.hpp>
+#include <Poseidon/Core/BuildInfo.hpp>
+#include <Poseidon/Foundation/Threads/WatchDog.hpp>
 #include <Poseidon/Core/Progress.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Game/Mission/MissionPathLoader.hpp>
@@ -1263,6 +1265,25 @@ int GameApplication::Run(int argc, char** argv)
 int GameApplication::RunAfterArgumentParsing()
 {
     LOG_INFO(Core, "Game starting: version {}", (const char*)GetVersionString());
+
+    // Stall detector, armed here and nowhere else. This is the outermost client scope that
+    // still owns its own lifetime: every `return` below unwinds through it, so the sweep
+    // thread is joined on every exit path including the failure ones, and it covers
+    // configuration, world load, the main loop and shutdown -- the whole span in which a
+    // wedge today shows up as a frozen frame counter and an empty log.
+    //
+    // A local, not a global or a member: nothing arms one unless this line runs, so the
+    // tools, the dedicated server and the unit-test binaries pay neither the sweep thread
+    // nor the ring, and `WatchScope` at every call site collapses to a null check there.
+    // Release builds never arm it at all -- the gating is the same `!ReleaseBuild && DevMode`
+    // that the dev panel uses, so a shipped binary cannot acquire a watchdog by flag.
+    std::unique_ptr<Poseidon::WatchDog> watchDog;
+    if (const float watchDogLimit = AppConfig::Instance().WatchDogLimitSeconds();
+        !Poseidon::BuildInfo::ReleaseBuild && AppConfig::Instance().DevMode() && watchDogLimit > 0.0f)
+    {
+        watchDog = std::make_unique<Poseidon::WatchDog>(
+            std::chrono::milliseconds(static_cast<int64_t>(watchDogLimit * 1000.0f)));
+    }
 
     constexpr const char* kStartupErrorTitle = "Cold War Assault - Startup Error";
 
