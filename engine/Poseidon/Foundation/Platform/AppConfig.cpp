@@ -350,7 +350,12 @@ void AppConfig::ParseCommandLine(int argc, char** argv)
         auto* heightOpt = displayGroup->add_option("--height,-h", _windowHeight, "Window height in pixels")
                               ->check(CLI::Range(240, 4320));
 
-        bool showSplash = true;
+        // OFF BY DEFAULT, owner's decision. The startup animation is eight hard-coded
+        // seconds and the loader used to wait it out after the world was ready -- measured
+        // at 7.59 s of an Everon start against 1.29 s of actual work. Cutting the wait
+        // fixed that, and the owner then asked for the logo itself not to appear at all.
+        // `--splash` brings it back.
+        bool showSplash = false;
         displayGroup->add_flag("--splash,!--no-splash", showSplash, "Show splash screens on startup");
         displayGroup->add_option("--splash-wait", _splashWaitSeconds,
                                  "Seconds the loader may wait for the startup animation after the world is "
