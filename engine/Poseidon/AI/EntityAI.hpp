@@ -348,6 +348,13 @@ class EntityAI: public Entity
 	//! Time when function EntityAI::TrackNearTargets was last performed
 	Foundation::Time _trackNearTargetsTime;
 
+public:
+	//! PERF-016. Written since 2001 by TrackNearTargets and read by NOTHING, while the
+	//! sibling _trackTargetsTime is read and does throttle its loop. Exposing it is what
+	//! lets the caller ration the near-target scan -- 68% of the AI stage (PERF-015).
+	Foundation::Time GetTrackNearTargetsTime() const {return _trackNearTargetsTime;}
+protected:
+
 	//! Distance to nearest known enemy (used to change helicopter behaviour)
 	//\todo Use CombatMode instead
 	float _nearestEnemy;

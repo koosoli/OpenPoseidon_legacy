@@ -48,6 +48,7 @@ add_executable(PoseidonTools
     commands/VonCommand.cpp
     commands/VonCommand.hpp
     commands/ShadowCommand.cpp
+    commands/TimelineCommand.cpp
     commands/ShadowCommand.hpp
     commands/TextureProfileCommand.cpp
     commands/TextureProfileCommand.hpp

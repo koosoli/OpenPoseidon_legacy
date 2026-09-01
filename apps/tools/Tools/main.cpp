@@ -75,6 +75,7 @@ class ToolApplication : public Poseidon::Application
 #include "commands/MineCommand.hpp"
 #include "commands/VonCommand.hpp"
 #include "commands/ShadowCommand.hpp"
+#include "commands/TimelineCommand.hpp"
 #include "commands/TextureProfileCommand.hpp"
 #ifndef _WIN32
 #include "commands/InputCommand.hpp"
@@ -118,6 +119,7 @@ int main(int argc, char** argv)
     PoseidonTools::VonCommand::Setup(app);
     PoseidonTools::ShadowCommand::Setup(app);
     PoseidonTools::TextureProfileCommand::Setup(app);
+    PoseidonTools::TimelineCommand::Setup(app);
 #ifndef _WIN32
     PoseidonTools::InputCommand::Setup(app);
 #endif

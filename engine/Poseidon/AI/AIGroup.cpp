@@ -1375,9 +1375,29 @@ bool AIGroup::Think()
             }
             if (unit->GetNearestEnemyDist2() < Square(100))
             {
-                AICost::AICosts().trackCalls++;
-                AICost::AICosts().trackPairs += static_cast<std::uint64_t>(_targetList.Size());
-                unit->GetVehicle()->TrackNearTargets(_targetList);
+                // PERF-016. The ration, at last reading the timer this loop has been
+                // writing since 2001. Default 0 == every think == the 2001 behaviour, so
+                // this changes nothing unless POSEIDON_AI_TRACK_PERIOD says otherwise.
+                //
+                // It is an env var rather than a config value because it is not a tuning
+                // knob yet -- it is the independent variable of an experiment whose
+                // dependent variable is an AI behaviour recording (POSEIDON_AI_TIMELINE).
+                // A huge period disables the block outright, which is the ABLATION: if
+                // the recording cannot tell that apart from the default, the recording is
+                // not measuring AI behaviour and no verdict from it means anything.
+                static const float trackPeriod = []
+                {
+                    const char* v = std::getenv("POSEIDON_AI_TRACK_PERIOD");
+                    return (v != nullptr && v[0] != '\0') ? static_cast<float>(std::atof(v)) : 0.0f;
+                }();
+
+                EntityAI* vehicle = unit->GetVehicle();
+                if (trackPeriod <= 0.0f || Glob.time > vehicle->GetTrackNearTargetsTime() + trackPeriod)
+                {
+                    AICost::AICosts().trackCalls++;
+                    AICost::AICosts().trackPairs += static_cast<std::uint64_t>(_targetList.Size());
+                    vehicle->TrackNearTargets(_targetList);
+                }
             }
         }
     }

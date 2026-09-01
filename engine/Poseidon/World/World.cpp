@@ -1,5 +1,6 @@
 #include <SDL3/SDL_scancode.h>
 
+#include <Poseidon/AI/AITimeline.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -2116,6 +2117,12 @@ void World::StepSimulation(float deltaT, float noAccDeltaT, Entity* cameraVehicl
 #else
                                     world.PerformAI(step.deltaT, step.noAccDeltaT);
 #endif
+                                    // Inside the fixed step, after the stage that decides.
+                                    // Recording per FRAME instead would make the number of
+                                    // entries depend on framerate, and two runs would not
+                                    // even be the same length. Off unless
+                                    // POSEIDON_AI_TIMELINE names a file.
+                                    AIDiag::RecordAITick(&world);
                                     break;
 
                                 case Sim::SimStage::Vehicles:
