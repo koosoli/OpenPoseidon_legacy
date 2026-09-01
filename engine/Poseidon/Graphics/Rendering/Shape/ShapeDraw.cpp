@@ -7,6 +7,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/IO/Streams/QBStream.hpp>
 #include <Poseidon/IO/ParamFile/ParamFile.hpp>
 #include <Poseidon/Graphics/Textures/TextureBank.hpp>
@@ -412,6 +413,16 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 static std::unordered_set<const void*> tracedOnce;
                 return tracedOnce.insert(this).second;
             }();
+            // Section denominator for the Pass1 submission sub-split. `sectionsSeen`
+            // counts the walk, `sectionsDrawn` counts what survived the three skip tests
+            // below -- a shape whose sections are nearly all skipped still pays the walk,
+            // and only the pair of numbers can say so.
+            if (Poseidon::Pass1Submit::Counting())
+            {
+                Poseidon::Pass1Submit::gSectionsSeen.fetch_add(static_cast<uint64_t>(NSections()),
+                                                               std::memory_order_relaxed);
+            }
+            const bool p1sSections = Poseidon::Pass1Submit::Counting();
             for (int i = 0; i < NSections(); i++)
             {
                 const ShapeSection& sec = GetSection(i);
@@ -457,6 +468,10 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                     }
                 }
 
+                if (p1sSections)
+                {
+                    Poseidon::Pass1Submit::gSectionsDrawn.fetch_add(1, std::memory_order_relaxed);
+                }
                 if (secBeg < 0)
                 {
                     secBeg = i;

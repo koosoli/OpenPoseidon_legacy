@@ -4,6 +4,7 @@
 #include <Poseidon/World/Scene/Object2DMapping.hpp>
 #include <Poseidon/Graphics/Core/TLVertex.hpp>
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/UI/Settings/AspectRatio.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -1007,6 +1008,43 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         return;
     }
 
+    // Pass1 submission sub-split (Pass1Submit.hpp). Counted HERE, past the two early
+    // returns, so `objDraws` denominates the bodies that actually did work rather than
+    // every call -- a denominator that includes calls which returned immediately would
+    // divide the milliseconds by the wrong number and understate the per-object cost.
+    //
+    // The depth guard keeps the buckets below exclusive: this function re-enters itself
+    // through DrawProxies, and without it a proxy's animate/shape time would be billed
+    // both to its own bucket and to the parent's `proxies`.
+    namespace P1S = Poseidon::Pass1Submit;
+    const bool p1sTop = P1S::Counting() && P1S::gDepth == 0;
+    if (P1S::Counting())
+    {
+        if (P1S::gDepth == 0)
+        {
+            P1S::gObjDraws.fetch_add(1, std::memory_order_relaxed);
+        }
+        else
+        {
+            P1S::gProxyDraws.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    // Suppresses the nested bodies' own top-level billing for the rest of this call.
+    struct P1SDepth
+    {
+        bool on;
+        explicit P1SDepth(bool v) : on(v)
+        {
+            if (on)
+                P1S::gDepth++;
+        }
+        ~P1SDepth()
+        {
+            if (on)
+                P1S::gDepth--;
+        }
+    };
+
     // Individual ClipLand vegetation: publish a mode-2 conform so the wgpu vertex
     // shader conforms this shared, undeformed mesh per vertex (SurfaceY) instead of the
     // CPU rewriting the shared buffer every frame (which Animate below now skips while a
@@ -1018,8 +1056,12 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
     // test if reference points to valid object
     // get object position in clipping coordinates
-    Animate(forceLOD);
+    {
+        P1S::Scope animScope(P1S::gAnimateNs, p1sTop);
+        Animate(forceLOD);
+    }
 
+    P1S::Scope clipFogScope(P1S::gClipFogNs, p1sTop);
     if (clipFlags)
     {
         // try to clip bounding sphere
@@ -1082,12 +1124,27 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
 
         float z2 = render::Has(specT.routing, render::Routing::NoDropdown) ? 0 : dist2;
 
-        const LightList& lights = GScene->SelectLights(pos, this, forceLOD, work);
+        clipFogScope.Close();
+        const LightList* lightsPtr = nullptr;
+        {
+            P1S::Scope lightScope(P1S::gLightsNs, p1sTop);
+            lightsPtr = &GScene->SelectLights(pos, this, forceLOD, work);
+        }
+        const LightList& lights = *lightsPtr;
         Matrix4Val invTransform = pos.GetInvTransform();
 
-        DrawProxies(forceLOD, clipFlags, pos.Transform(), invTransform, dist2, z2, lights);
+        {
+            // Everything the proxy recursion costs, including the nested Object::Draw
+            // bodies -- which is why the depth guard below opens BEFORE this scope.
+            P1SDepth proxyDepth(P1S::Counting());
+            P1S::Scope proxyScope(P1S::gProxiesNs, p1sTop);
+            DrawProxies(forceLOD, clipFlags, pos.Transform(), invTransform, dist2, z2, lights);
+        }
 
-        sShape->PrepareTextures(z2, special);
+        {
+            P1S::Scope texScope(P1S::gTexturesNs, p1sTop);
+            sShape->PrepareTextures(z2, special);
+        }
         // perform actual drawing
 
         // Publish whether this object is vegetation (from its MapType) so the wgpu per-draw path
@@ -1122,12 +1179,14 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
             (sShape->GetAndHints() & ClipLandMask) == ClipLandOn && !GpuTerrainConformWillRun(sShape))
         {
             // if all point are LandOn, we can split cache
+            P1S::Scope drawScope(P1S::gShapeDrawNs, p1sTop);
             Ref<Shape> split = GScene->GetShadowCache().Shadow(this, VUp, forceLOD, *this, true);
             int specAdj = (special & ~OnSurface) | IsOnSurface;
             split->Draw(this, lights, clipFlags, specAdj, pos.Transform(), invTransform);
         }
         else
         {
+            P1S::Scope drawScope(P1S::gShapeDrawNs, p1sTop);
             sShape->Draw(this, lights, clipFlags, special, pos.Transform(), invTransform);
         }
 
@@ -1135,7 +1194,10 @@ void Object::Draw(int forceLOD, ClipFlags clipFlags, const FrameBase& pos)
         GCurrentFoliageKind = savedFoliageKind;
         GScene->SetConstantFog(-1);
     }
-    Deanimate(forceLOD);
+    {
+        P1S::Scope deanimScope(P1S::gAnimateNs, p1sTop);
+        Deanimate(forceLOD);
+    }
     if (publishedConform)
     {
         GCurrentConformPlane = savedConform;

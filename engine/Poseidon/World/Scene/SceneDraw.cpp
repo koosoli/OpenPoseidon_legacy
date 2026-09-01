@@ -32,6 +32,7 @@ using Poseidon::Foundation::IsOutOfMemory;
 using Poseidon::Foundation::MStorage;
 using Poseidon::Foundation::Time;
 #include <Poseidon/World/Scene/Scene.hpp>
+#include <Poseidon/World/Scene/Pass1Submit.hpp>
 #include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/UI/Settings/GameSettingsConfig.hpp>
 #include <Poseidon/Graphics/Core/Engine.hpp>
@@ -1640,6 +1641,52 @@ static void DrawSortObject(SortObject* oi)
     GEngine->SetPassKindHint(savedHint);
 }
 
+// Storage for the Pass1 submission sub-split declared in Pass1Submit.hpp. Defined here
+// because SceneDraw.cpp owns the loop that turns it on; Object.cpp and ShapeDraw.cpp only
+// contribute to it.
+namespace Poseidon
+{
+namespace Pass1Submit
+{
+bool gActive = false;
+int gDepth = 0;
+std::atomic<uint64_t> gScanNs{0};
+std::atomic<uint64_t> gAnimateNs{0};
+std::atomic<uint64_t> gClipFogNs{0};
+std::atomic<uint64_t> gLightsNs{0};
+std::atomic<uint64_t> gProxiesNs{0};
+std::atomic<uint64_t> gTexturesNs{0};
+std::atomic<uint64_t> gShapeDrawNs{0};
+std::atomic<uint64_t> gRuns{0};
+std::atomic<uint64_t> gRunObjs{0};
+std::atomic<uint64_t> gScalarObjs{0};
+std::atomic<uint64_t> gSkipped{0};
+std::atomic<uint64_t> gObjDraws{0};
+std::atomic<uint64_t> gProxyDraws{0};
+std::atomic<uint64_t> gSectionsSeen{0};
+std::atomic<uint64_t> gSectionsDrawn{0};
+std::atomic<uint64_t> gHeads{0};
+std::atomic<uint64_t> gVetoLights{0};
+std::atomic<uint64_t> gVetoNotStatic{0};
+std::atomic<uint64_t> gVetoProxies{0};
+std::atomic<uint64_t> gVetoRouting{0};
+std::atomic<uint64_t> gRunsShort{0};
+std::atomic<uint64_t> gRunShortLen{0};
+std::atomic<uint64_t> gWouldRuns{0};
+std::atomic<uint64_t> gWouldObjs{0};
+std::atomic<uint64_t> gWouldMaxLen{0};
+
+// Same env var as Pass1Stats on purpose: the sub-split is only ever read next to the
+// six-way split it refines, and a second switch would let the two be enabled apart, which
+// is how a share gets quoted against a total that was never measured.
+bool Enabled()
+{
+    static const bool enabled = std::getenv("WGR_PASS1_STATS") != nullptr;
+    return enabled;
+}
+} // namespace Pass1Submit
+} // namespace Poseidon
+
 namespace
 {
 
@@ -1784,6 +1831,56 @@ void ReportPass1Stats()
              GPass1Stats.occTests.load(std::memory_order_relaxed) / f,
              GPass1Stats.occRenders.load(std::memory_order_relaxed) / f, full,
              covTotal > 0.0 ? full * 100.0 / covTotal : 0.0, partial, none);
+    // The submission sub-split. Reported on its own line, with a count beside every
+    // bucket, and with the per-object column that says whether a big number is many cheap
+    // items or few dear ones. `probe` is the sum of the sub-buckets against the `submit`
+    // number on the line above: the gap between them is this instrumentation's own clock
+    // reads plus whatever of DrawSortObject falls outside a bucket, and quoting a share
+    // without it would overstate every part.
+    {
+        namespace P1S = Poseidon::Pass1Submit;
+        const auto ns = [&](const std::atomic<uint64_t>& v)
+        { return v.load(std::memory_order_relaxed) / f / 1e6; };
+        const auto cnt = [&](const std::atomic<uint64_t>& v) { return v.load(std::memory_order_relaxed) / f; };
+        const double objDraws = static_cast<double>(P1S::gObjDraws.load(std::memory_order_relaxed));
+        const auto perObjUs = [&](const std::atomic<uint64_t>& v)
+        { return objDraws > 0.0 ? v.load(std::memory_order_relaxed) / objDraws / 1000.0 : 0.0; };
+        LOG_INFO(Graphics,
+                 "PERF submit: scan={:.3f} animate={:.3f} clipfog={:.3f} lights={:.3f} proxies={:.3f} "
+                 "textures={:.3f} shapeDraw={:.3f} ms/frame | per objDraw us: animate={:.2f} clipfog={:.2f} "
+                 "lights={:.2f} proxies={:.2f} textures={:.2f} shapeDraw={:.2f}",
+                 ns(P1S::gScanNs), ns(P1S::gAnimateNs), ns(P1S::gClipFogNs), ns(P1S::gLightsNs),
+                 ns(P1S::gProxiesNs), ns(P1S::gTexturesNs), ns(P1S::gShapeDrawNs), perObjUs(P1S::gAnimateNs),
+                 perObjUs(P1S::gClipFogNs), perObjUs(P1S::gLightsNs), perObjUs(P1S::gProxiesNs),
+                 perObjUs(P1S::gTexturesNs), perObjUs(P1S::gShapeDrawNs));
+        LOG_INFO(Graphics,
+                 "PERF submit counts/frame: runs={:.0f} runObjs={:.0f} scalarObjs={:.0f} skipped={:.0f} "
+                 "objDraws={:.0f} proxyDraws={:.0f} sectionsSeen={:.0f} sectionsDrawn={:.0f} "
+                 "| sections/objDraw={:.1f} proxies/objDraw={:.2f}",
+                 cnt(P1S::gRuns), cnt(P1S::gRunObjs), cnt(P1S::gScalarObjs), cnt(P1S::gSkipped),
+                 cnt(P1S::gObjDraws), cnt(P1S::gProxyDraws), cnt(P1S::gSectionsSeen), cnt(P1S::gSectionsDrawn),
+                 objDraws > 0.0 ? P1S::gSectionsSeen.load(std::memory_order_relaxed) / objDraws : 0.0,
+                 objDraws > 0.0 ? P1S::gProxyDraws.load(std::memory_order_relaxed) / objDraws : 0.0);
+        LOG_INFO(Graphics,
+                 "PERF submit batching/frame: heads={:.0f} vetoLights={:.0f} vetoNotStatic={:.0f} "
+                 "vetoProxies={:.0f} vetoRouting={:.0f} runsShort={:.0f} shortLen/run={:.2f}",
+                 cnt(P1S::gHeads), cnt(P1S::gVetoLights), cnt(P1S::gVetoNotStatic), cnt(P1S::gVetoProxies),
+                 cnt(P1S::gVetoRouting), cnt(P1S::gRunsShort),
+                 P1S::gRunsShort.load(std::memory_order_relaxed) > 0
+                     ? static_cast<double>(P1S::gRunShortLen.load(std::memory_order_relaxed)) /
+                           static_cast<double>(P1S::gRunsShort.load(std::memory_order_relaxed))
+                     : 0.0);
+        LOG_INFO(Graphics,
+                 "PERF submit batchable/frame: wouldRuns={:.0f} wouldObjs={:.0f} ofObjDraws={:.1f}% "
+                 "meanRunLen={:.1f} maxRunLen={}",
+                 cnt(P1S::gWouldRuns), cnt(P1S::gWouldObjs),
+                 objDraws > 0.0 ? P1S::gWouldObjs.load(std::memory_order_relaxed) * 100.0 / objDraws : 0.0,
+                 P1S::gWouldRuns.load(std::memory_order_relaxed) > 0
+                     ? static_cast<double>(P1S::gWouldObjs.load(std::memory_order_relaxed)) /
+                           static_cast<double>(P1S::gWouldRuns.load(std::memory_order_relaxed))
+                     : 0.0,
+                 P1S::gWouldMaxLen.load(std::memory_order_relaxed));
+    }
     LOG_INFO(Graphics,
              "PERF pass2: surfSort={:.3f} surfDraw={:.3f} shadow={:.3f} alphaSort={:.3f} alphaDraw={:.3f} ms/frame "
              "| shadowCasters={:.0f} alphaDrawn={:.0f}",
@@ -2084,6 +2181,66 @@ void Scene::DrawObjectsAndShadowsPass1()
     }
     if (Pass1StatsEnabled())
     {
+        // Batchability census (Pass1Submit.hpp gWould*). Placed HERE, outside the submitUs
+        // scope, so it inflates neither `submit` nor any of its sub-buckets -- it does add
+        // to the land:obj wall clock of a stats-enabled run, which is why the timing arms
+        // and the census arm are reported from different runs.
+        //
+        // The clauses are the batcher's own, MINUS the scene-wide light veto and minus the
+        // backend's capacity refusal, because the question is what the geometry offers, not
+        // what today's code accepts.
+        namespace P1S = Poseidon::Pass1Submit;
+        uint64_t maxLen = 0;
+        for (int i = 0; i < _drawMergers.Size();)
+        {
+            SortObject* oi = _drawMergers[i];
+            if (oi->drawLOD == LOD_INVISIBLE || !oi->object || !oi->object->GetShape())
+            {
+                i++;
+                continue;
+            }
+            LODShape* shape = oi->object->GetShape();
+            Shape* sShape = shape->LevelOpaque(oi->drawLOD);
+            if (!sShape || oi->passNum > 1 || !oi->object->Static() || sShape->NProxies() != 0)
+            {
+                i++;
+                continue;
+            }
+            const int headSpecial = sShape->Special() | oi->object->GetObjSpecial();
+            const float d2lo = oi->distance2 * 0.90f;
+            const float d2hi = oi->distance2 * 1.10f;
+            int runEnd = i + 1;
+            while (runEnd < _drawMergers.Size())
+            {
+                SortObject* oj = _drawMergers[runEnd];
+                if (!oj->object || oj->object->GetShape() != shape || oj->drawLOD != oi->drawLOD ||
+                    oj->passNum != oi->passNum || !oj->object->Static() ||
+                    (sShape->Special() | oj->object->GetObjSpecial()) != headSpecial || oj->distance2 < d2lo ||
+                    oj->distance2 > d2hi)
+                {
+                    break;
+                }
+                runEnd++;
+            }
+            const uint64_t runLen = static_cast<uint64_t>(runEnd - i);
+            if (runLen >= 4)
+            {
+                P1S::gWouldRuns.fetch_add(1, std::memory_order_relaxed);
+                P1S::gWouldObjs.fetch_add(runLen, std::memory_order_relaxed);
+                if (runLen > maxLen)
+                {
+                    maxLen = runLen;
+                }
+            }
+            i = runEnd;
+        }
+        uint64_t prevMax = P1S::gWouldMaxLen.load(std::memory_order_relaxed);
+        while (maxLen > prevMax && !P1S::gWouldMaxLen.compare_exchange_weak(prevMax, maxLen))
+        {
+        }
+    }
+    if (Pass1StatsEnabled())
+    {
         GPass1Stats.objects.fetch_add(static_cast<uint64_t>(_drawMergers.Size()), std::memory_order_relaxed);
         // Sampled here, at the end of the same frame's walk, because ObjectForDrawing zeroes
         // these when the visible set is rebuilt — read any earlier and they are last frame's.
@@ -2098,6 +2255,16 @@ void Scene::DrawObjectsAndShadowsPass1()
 #if DRAW_OBJS
     {
         Pass1Scope scope(GPass1Stats.submitUs);
+        // Submission sub-split (Pass1Submit.hpp). `scan` is derived by subtraction --
+        // whole-loop elapsed minus the time billed to the draw calls -- rather than by a
+        // Scope opened and closed twice per iteration, which would have doubled the clock
+        // reads in the hottest loop in the phase being measured.
+        namespace P1S = Poseidon::Pass1Submit;
+        const bool subOn = P1S::Enabled();
+        const uint64_t loopT0 = subOn ? P1S::NowNs() : 0;
+        uint64_t drawNsLocal = 0;
+        P1S::gActive = subOn;
+        P1S::gDepth = 0;
         // Instanced runs (perf effort 08): _drawMergers is shape-sorted, so
         // identical static shapes arrive contiguously. A batchable run draws
         // the head once inside Begin/EndInstancedRun — every TL section then
@@ -2113,6 +2280,8 @@ void Scene::DrawObjectsAndShadowsPass1()
             LODShape* shape = oi->object->GetShape();
             if (oi->drawLOD == LOD_INVISIBLE)
             {
+                if (subOn)
+                    P1S::gSkipped.fetch_add(1, std::memory_order_relaxed);
                 i++;
                 continue;
             }
@@ -2120,11 +2289,15 @@ void Scene::DrawObjectsAndShadowsPass1()
             Shape* sShape = shape->LevelOpaque(oi->drawLOD);
             if (!sShape)
             {
+                if (subOn)
+                    P1S::gSkipped.fetch_add(1, std::memory_order_relaxed);
                 i++;
                 continue;
             }
             if (oi->passNum > 1)
             {
+                if (subOn)
+                    P1S::gSkipped.fetch_add(1, std::memory_order_relaxed);
                 i++;
                 continue;
             }
@@ -2136,6 +2309,23 @@ void Scene::DrawObjectsAndShadowsPass1()
                                        !render::Has(headSpec.routing, render::Routing::OnSurface) &&
                                        !render::Has(headSpec.routing, render::Routing::IsColored) &&
                                        oi->object != GWorld->CameraOn();
+            if (subOn)
+            {
+                // Not mutually exclusive by construction -- an object can fail several
+                // clauses at once -- so these are tallied independently and must not be
+                // read as a partition. The scene-wide one is the one to read first: if
+                // gVetoLights equals gHeads, no per-object property matters this frame.
+                P1S::gHeads.fetch_add(1, std::memory_order_relaxed);
+                if (!noLocalLights)
+                    P1S::gVetoLights.fetch_add(1, std::memory_order_relaxed);
+                if (!oi->object->Static())
+                    P1S::gVetoNotStatic.fetch_add(1, std::memory_order_relaxed);
+                if (sShape->NProxies() != 0)
+                    P1S::gVetoProxies.fetch_add(1, std::memory_order_relaxed);
+                if (render::Has(headSpec.routing, render::Routing::OnSurface) ||
+                    render::Has(headSpec.routing, render::Routing::IsColored))
+                    P1S::gVetoRouting.fetch_add(1, std::memory_order_relaxed);
+            }
             if (headBatchable)
             {
                 GEngine->InstancedRunReset();
@@ -2166,8 +2356,14 @@ void Scene::DrawObjectsAndShadowsPass1()
 
             const int runLen = runEnd - i;
             GSectionFilter = SectionClassFilter::OpaqueAndCutout;
+            const uint64_t drawT0 = subOn ? P1S::NowNs() : 0;
             if (headBatchable && runLen >= 4)
             {
+                if (subOn)
+                {
+                    P1S::gRuns.fetch_add(1, std::memory_order_relaxed);
+                    P1S::gRunObjs.fetch_add(static_cast<uint64_t>(runLen), std::memory_order_relaxed);
+                }
                 GEngine->BeginInstancedRunUpload();
                 DrawSortObject(oi);
                 if (!GEngine->EndInstancedRun())
@@ -2182,10 +2378,23 @@ void Scene::DrawObjectsAndShadowsPass1()
             }
             else
             {
+                if (subOn)
+                {
+                    P1S::gScalarObjs.fetch_add(static_cast<uint64_t>(runLen), std::memory_order_relaxed);
+                    if (headBatchable)
+                    {
+                        P1S::gRunsShort.fetch_add(1, std::memory_order_relaxed);
+                        P1S::gRunShortLen.fetch_add(static_cast<uint64_t>(runLen), std::memory_order_relaxed);
+                    }
+                }
                 for (int k = i; k < runEnd; k++)
                 {
                     DrawSortObject(_drawMergers[k]);
                 }
+            }
+            if (subOn)
+            {
+                drawNsLocal += P1S::NowNs() - drawT0;
             }
             GSectionFilter = SectionClassFilter::All;
 #if DO_STAT
@@ -2193,6 +2402,15 @@ void Scene::DrawObjectsAndShadowsPass1()
 #endif
             i = runEnd;
         }
+        if (subOn)
+        {
+            // Whole-loop elapsed minus what the draws cost. Clamped: the two clock
+            // sequences are read at different points and a negative here would mean the
+            // probe, not the code, so report zero rather than an impossible number.
+            const uint64_t loopNs = P1S::NowNs() - loopT0;
+            P1S::gScanNs.fetch_add(loopNs > drawNsLocal ? loopNs - drawNsLocal : 0, std::memory_order_relaxed);
+        }
+        P1S::gActive = false;
     }
 #endif
     if (Pass1StatsEnabled())
