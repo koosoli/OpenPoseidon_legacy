@@ -1204,14 +1204,23 @@ bool AIGroup::Think()
     Log("Group %s think.", (const char*)GetDebugName());
 #endif
 
+    // PERF-015. This scope is charged to `groupThinkEarly` until the call reaches the body
+    // proper, where it is retargeted out of the way of the segment buckets below. PERF-014
+    // measured 2.55 ms/tick inside this function above the descent into subgroups, over
+    // 15.44 calls a tick -- but those calls are two populations, and a mean over both says
+    // nothing about either. See AICostAccum.hpp.
+    AICost::ScopedCost earlyCost(AICost::Bucket::GroupThinkEarly);
+
     if (!Leader())
     {
+        AICost::AICosts().groupThinksNoLeader++;
         PoseidonAssert(NUnits() == 0);
         return false;
     }
 
     if (GetCenter()->GetSide() == TLogic)
     {
+        AICost::AICosts().groupThinksLogic++;
         if (IsLocal())
         {
             DoUpdate();
@@ -1221,6 +1230,7 @@ bool AIGroup::Think()
 
     if (!IsLocal())
     {
+        AICost::AICosts().groupThinksRemote++;
         // only update target list
         if (Glob.time > _expensiveThinkTime)
         {
@@ -1230,33 +1240,45 @@ bool AIGroup::Think()
         return false;
     }
 
+    // PERF-015: past here the call is a full-body think. Retargeting sends this scope's
+    // WHOLE duration to `groupThinkFull` instead of `groupThinkEarly`, so the two buckets
+    // are the two populations and `groupThinkEarly + groupThinkFull == groupThink`.
+    earlyCost.Retarget(AICost::Bucket::GroupThinkFull);
+
     bool leaderAlive = Leader()->GetLifeState() == AIUnit::LSAlive;
 
-    if (IsAnyPlayerGroup())
     {
-        if (_flee)
+        // PERF-015. `ActualStrength()` walks MAX_UNITS_PER_GROUP and reads two damage
+        // values per unit, on every full-body think, for every non-player group with a
+        // live leader. It answers a question -- "should this group flee" -- that nothing
+        // else in the body consumes.
+        AICost::ScopedCost fleeCost(AICost::Bucket::GroupFlee);
+        if (IsAnyPlayerGroup())
         {
-            Unflee();
-        }
-    }
-    else
-    {
-        // flee only when leader is alive
-        if (leaderAlive)
-        {
-            float strength = ActualStrength();
-            if (strength < (1.0 - _courage) * _maxStrength)
+            if (_flee)
             {
-                if (!_flee)
-                {
-                    Flee();
-                }
+                Unflee();
             }
-            else
+        }
+        else
+        {
+            // flee only when leader is alive
+            if (leaderAlive)
             {
-                if (_flee)
+                float strength = ActualStrength();
+                if (strength < (1.0 - _courage) * _maxStrength)
                 {
-                    Unflee();
+                    if (!_flee)
+                    {
+                        Flee();
+                    }
+                }
+                else
+                {
+                    if (_flee)
+                    {
+                        Unflee();
+                    }
                 }
             }
         }
@@ -1264,49 +1286,58 @@ bool AIGroup::Think()
 
     // check if state in state graph not changed
     {
+        // PERF-015. `DoUpdate()` is the group's FSM: one `Check` state function from
+        // `arcadeStates` (AIArcade.cpp:1974), and those range from a timeout comparison to
+        // a target search. Unrationed, once per full-body think.
+        AICost::ScopedCost fsmCost(AICost::Bucket::GroupFsm);
         Ref<AIGroup> safePtr = this;
         DoUpdate();
         AI_ERROR(safePtr->RefCounter() > 0);
         if (safePtr->RefCounter() == 1)
         {
+            AICost::AICosts().groupThinksDestroyed++;
             return false; // group destroyed
         }
 
         if (!Leader())
         {
+            AICost::AICosts().groupThinksDestroyed++;
             PoseidonAssert(NUnits() == 0);
             return false;
         }
     }
 
-    AISubgroup* leaderSubgroup = Leader()->GetSubgroup();
-    if (leaderSubgroup != MainSubgroup() && !leaderSubgroup->HasCommand())
     {
-        leaderSubgroup->JoinToSubgroup(MainSubgroup());
-    }
-
-    if (!IsAnyPlayerGroup())
-    {
-        // do not join while scripted waypoint
-        if (!GetScript())
+        AICost::ScopedCost joinCost(AICost::Bucket::GroupJoin);
+        AISubgroup* leaderSubgroup = Leader()->GetSubgroup();
+        if (leaderSubgroup != MainSubgroup() && !leaderSubgroup->HasCommand())
         {
-            // if there are subgroups in wait state, join them
-            for (int i = 0; i < _subgroups.Size(); i++)
+            leaderSubgroup->JoinToSubgroup(MainSubgroup());
+        }
+
+        if (!IsAnyPlayerGroup())
+        {
+            // do not join while scripted waypoint
+            if (!GetScript())
             {
-                AISubgroup* sub = _subgroups[i];
-                if (!sub)
+                // if there are subgroups in wait state, join them
+                for (int i = 0; i < _subgroups.Size(); i++)
                 {
-                    continue;
+                    AISubgroup* sub = _subgroups[i];
+                    if (!sub)
+                    {
+                        continue;
+                    }
+                    if (sub == MainSubgroup())
+                    {
+                        continue;
+                    }
+                    if (sub->HasCommand())
+                    {
+                        continue;
+                    }
+                    sub->JoinToSubgroup(MainSubgroup());
                 }
-                if (sub == MainSubgroup())
-                {
-                    continue;
-                }
-                if (sub->HasCommand())
-                {
-                    continue;
-                }
-                sub->JoinToSubgroup(MainSubgroup());
             }
         }
     }
@@ -1314,6 +1345,14 @@ bool AIGroup::Think()
     // if some enemy is near, we have to track near vincity continuously
     if (_nearestEnemyDist2 < Square(100))
     {
+        // PERF-015. The strongest structural candidate for the 0.165 ms. Each
+        // `TrackNearTargets` walks the whole group target list and calls `CalcVisibility`
+        // (Target.cpp:609, which reaches `GWorld->Visibility`) per entry, so this block is
+        // O(engaged units x targets) per full-body think. It is NOT rationed:
+        // `TrackNearTargets` writes `_trackNearTargetsTime` (Target.cpp:1325) and nothing
+        // in the engine reads it. `trackScans` and `trackCalls` are its denominators.
+        AICost::ScopedCost trackCost(AICost::Bucket::GroupTrack);
+        AICost::AICosts().trackScans++;
         // force all units to track if necessary
         for (int i = 0; i < MAX_UNITS_PER_GROUP; i++)
         {
@@ -1336,6 +1375,7 @@ bool AIGroup::Think()
             }
             if (unit->GetNearestEnemyDist2() < Square(100))
             {
+                AICost::AICosts().trackCalls++;
                 unit->GetVehicle()->TrackNearTargets(_targetList);
             }
         }
@@ -1467,6 +1507,13 @@ bool AIGroup::Think()
 #if LOG_THINK
     Log("End of group %s think (%d).", (const char*)GetDebugName(), someOperPath);
 #endif
+    // PERF-015. Only a `true` advances `AICenter::UpdateGroup`'s loop counter, so the walk's
+    // length is decided here. `groupThinks - groupThinksTrue` is what it pays to find one.
+    AICost::AICosts().groupThinksFull++;
+    if (someOperPath)
+    {
+        AICost::AICosts().groupThinksTrue++;
+    }
     return someOperPath;
 }
 

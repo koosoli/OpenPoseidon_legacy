@@ -993,6 +993,48 @@ void World::Simulate(float deltaT, bool& enableDraw)
                                           : 0.0,
                          ai.groupThinks * aiInv, ai.groupExpensives * aiInv, ai.subThinks * aiInv,
                          ai.unitThinks * aiInv);
+
+                // PERF-015: the same window, one level further down -- inside
+                // `AIGroup::Think`'s own body, which PERF-014 measured at 79% of the AI
+                // stage and could not subdivide. `residual` is printed rather than left to
+                // be worked out, because it IS the check that the six segments enclose the
+                // body: a residual that is a large share of `full` means they do not, and
+                // nothing else on the line should be believed.
+                //
+                // Named lookups rather than the literal indices the two lines above use:
+                // these buckets were appended to the enum, and a literal index here would
+                // silently point at the wrong bucket the first time somebody inserts one in
+                // the middle.
+                const auto aiMs = [&ai](AICost::Bucket b) { return ai.ms[static_cast<std::size_t>(b)]; };
+                const double bodyThink = aiMs(AICost::Bucket::GroupThink);
+                const double bodyEarly = aiMs(AICost::Bucket::GroupThinkEarly);
+                const double bodyFull = aiMs(AICost::Bucket::GroupThinkFull);
+                const double bodyFlee = aiMs(AICost::Bucket::GroupFlee);
+                const double bodyFsm = aiMs(AICost::Bucket::GroupFsm);
+                const double bodyJoin = aiMs(AICost::Bucket::GroupJoin);
+                const double bodyTrack = aiMs(AICost::Bucket::GroupTrack);
+                const double bodyExp = aiMs(AICost::Bucket::GroupExpensive);
+                const double bodySub = aiMs(AICost::Bucket::SubThink);
+                const double residual = bodyFull - (bodyFlee + bodyFsm + bodyJoin + bodyTrack + bodyExp + bodySub);
+                LOG_INFO(World,
+                         "AI group body ms/tick over {} aiTicks: groupThink={:.3f} [early={:.3f} full={:.3f} "
+                         "[flee={:.3f} fsm={:.3f} join={:.3f} track={:.3f} expensive={:.3f} subThink={:.3f} "
+                         "residual={:.3f}]]",
+                         ai.ticks, bodyThink * aiInv, bodyEarly * aiInv, bodyFull * aiInv, bodyFlee * aiInv,
+                         bodyFsm * aiInv, bodyJoin * aiInv, bodyTrack * aiInv, bodyExp * aiInv, bodySub * aiInv,
+                         residual * aiInv);
+                // The five exit counts sum to `groupThinks` by construction; printing all
+                // of them is how that stays checkable rather than asserted. `trackCalls /
+                // trackScans` is the mean engaged-unit count per tracking group, which is
+                // the multiplier on the one unrationed walk in the body.
+                LOG_INFO(World,
+                         "AI group body counts/tick over {} aiTicks: groupThinks={:.2f} [noLeader={:.2f} "
+                         "logic={:.2f} remote={:.2f} destroyed={:.2f} full={:.2f} (ofWhichTrue={:.2f})] "
+                         "trackScans={:.2f} trackCalls={:.2f}",
+                         ai.ticks, ai.groupThinks * aiInv, ai.groupThinksNoLeader * aiInv,
+                         ai.groupThinksLogic * aiInv, ai.groupThinksRemote * aiInv, ai.groupThinksDestroyed * aiInv,
+                         ai.groupThinksFull * aiInv, ai.groupThinksTrue * aiInv, ai.trackScans * aiInv,
+                         ai.trackCalls * aiInv);
             }
             AICost::ResetAICosts();
         }

@@ -46,6 +46,16 @@ const char* BucketName(Bucket bucket)
             return "unitThink";
         case Bucket::EndMission:
             return "endMission";
+        case Bucket::GroupThinkEarly:
+            return "groupThinkEarly";
+        case Bucket::GroupFlee:
+            return "groupFlee";
+        case Bucket::GroupFsm:
+            return "groupFsm";
+        case Bucket::GroupJoin:
+            return "groupJoin";
+        case Bucket::GroupTrack:
+            return "groupTrack";
     }
     return "?";
 }
