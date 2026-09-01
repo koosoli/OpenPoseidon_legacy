@@ -101,8 +101,29 @@ containing one developer's home directory. Their `fp/test` is described in their
 macros are compiled out at HEAD (`fp/std/elapsed_time.hpp:1` is `#if 0`). **They have no way to
 see their own AI stage at all.**
 
-**Mesh shaders.** `VK_EXT_mesh_shader` throughout their geometry path. wgpu has no mesh-shader
-API. Our compute cull path is the only route and this is not a choice we get to make.
+**Mesh shaders — declined on measurement, not on availability.** The first version of this
+document said "wgpu has no mesh-shader API". **That is false and I repeated it without
+checking.** wgpu 29 exposes `EXPERIMENTAL_MESH_SHADER`, `draw_mesh_tasks` and
+`draw_mesh_tasks_indirect`, and naga 29 accepts `enable wgpu_mesh_shader;` in WGSL. The path
+exists end to end.
+
+The reason to decline is the frame. GPU regions on `perf_combat`, 11.26 ms GPU frame:
+
+| | ms | share |
+|---|---:|---:|
+| **all object geometry** (7 regions: prepass, colour, both culls, Hi-Z) | **1.164** | **10.3%** |
+| — of which culling, already GPU-driven and merely *replaced* | 0.426 | 3.8% |
+| grass (colour + prepass + shadow) | 2.635 | 23.4% |
+| sky cloud march | 1.314 | 11.7% |
+
+Everything meshlets could touch is a tenth of the frame, and the draw work inside it is 0.74 ms.
+Halving that — optimistic — returns **3.5% of the GPU frame**, in exchange for an experimental
+feature, a hard `VK_EXT_mesh_shader` device requirement, a per-model meshlet bake, and a third
+geometry path to keep alive beside the current one and the GL33 fallback. **Grass alone is more
+than twice the whole prize, and the sky is more than all object geometry.**
+
+Revisit if object counts rise by an order of magnitude, or after grass and sky come down enough
+to change the ranking. Not before.
 
 **Their transport layer.** Every file in `El/Network/` is the unmodified 2016-2018 BI drop. Our
 JIP has a persistent deduped queue, a six-pass ordered sync and world-state persistence; theirs
