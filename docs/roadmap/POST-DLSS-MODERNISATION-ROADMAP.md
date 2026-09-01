@@ -68,6 +68,32 @@ playing DayZ Chernarus+ live and reporting what he felt:
 - Open, filed as a task chip: a deterministic physics worker-readback hash mismatch,
   pre-existing from Aug 31, order-dependent in the suite.
 
+### Audit revision, 2026-09-01 (AUD-001)
+
+A read-only audit of the code against the stated goal — *a clean, modern engine compatible with
+OFP, Arma 1, Arma 2, Arma 3, DayZ and Reforger maps and assets* — is at
+`docs/roadmap/decisions/AUD-001-engine-audit-and-roadmap-revision-20260901.md`. What it changed
+in this document, each with the finding behind it:
+
+- **The simulation track is closed as planned and reopened as measured.** 10S exists (SIM-811),
+  11S is done (SIM-801/803), 12S was answered "no", and 13S *is the ration* (PERF-017). What
+  remains on that line is Phase 8's command/commit stage and Phase 13's replay — and the first
+  blocker of both is not AI: the object-stream admission budget is a `steady_clock` ceiling
+  (`LandSave.cpp:3510,3581`) and the prefetch lead is a wall-clock dt (`:3219`), so the resident
+  set is machine-dependent even under `POSEIDON_RNG_SEED` + lockstep. SIM-813 removed the last
+  wall clock in the *AI stage*; it was not the last one that decides what the world contains.
+- **Compatibility gets its own track (D, below)** with per-generation gates. Today the
+  cross-generation smoke skips on CI by its own header, DayZ has four unit tests and no
+  capability-matrix row, Reforger has no matrix row at all, and no generation has a decision
+  record about its config format. The readers exist; no gate would notice one breaking.
+- **The next three measured targets are named** (Phase 3, "Next targets"), each with the number
+  that justifies it and the control that gates it. Grass stays closed by PARKED.md's own rule.
+- **Phase 3.1 gains four measurement rules** from the instruments found lying since the last
+  revision — `frame_max`, the missing low percentiles, GPU regions that report one occurrence of
+  many, and sidecar counter blocks whose 0 means "not armed".
+- **Status corrections**: FSR 1 shipped (`74d891d6`); the upscaler boundary is substantially done
+  (REN-UPS-001 §7) with three convention items carried; the stall detector has call sites.
+
 ## Current baseline
 
 The following foundations already exist and should be extended rather than rebuilt:
@@ -80,7 +106,8 @@ The following foundations already exist and should be extended rather than rebui
 - asynchronous work in selected terrain, object-streaming and audio paths;
 - an OpenAL Soft backend with 3D sources, Doppler, EFX/EAX reverb, voice budgeting,
   asynchronous decode and a dedicated streaming pump;
-- compatibility layers for Arma 1, Arma 2, Arma 3, DayZ and Reforger content.
+- format readers for Arma 1, Arma 2, Arma 3, DayZ and Reforger content — readers, not gates;
+  what each generation actually loads, and what nobody has measured, is track D's table.
 
 The principal missing architectural boundaries are retirement of the GL33 fallback,
 immutable render extraction, safe render/simulation overlap, a coherent asynchronous
@@ -116,11 +143,11 @@ larger ownership and concurrency projects begin.
 
 | Item | Effort | Potential value | Decision |
 |---|---:|---:|---|
-| Generic upscaler boundary | Low–medium | High | Implement with the DLSS cleanup |
-| FSR 1 fallback experiment | Low | Medium if accepted | Optional bounded experiment; must not block architecture work |
-| Asset-request deduplication | Low | Medium | Implement early |
-| GPU-upload frame budget | Low–medium | High | Implement early |
-| Streaming trace counters | Low | High | Implement immediately |
+| Generic upscaler boundary | Low–medium | High | **Substantially done** (REN-UPS-001 §7): one `TemporalUpscaler` contract over Native/FSR 1/DLSS. Carried: the colour-space and depth conventions are still implicit (its §6 items 1-3) |
+| FSR 1 fallback experiment | Low | Medium if accepted | **Shipped** (`74d891d6`, `rust/src/fsr1.wgsl`); in the Options menu and the chain `[DLSS, FSR1, bilinear]` |
+| Asset-request deduplication | Low | Medium | **Measured null** (below): 3 duplicate refusals in 872 puts |
+| GPU-upload frame budget | Low–medium | High | **Measured null** (below): the worst frame is one object; lever ships off |
+| Streaming trace counters | Low | High | **Done** — with the caveat that the `streaming.texture` block is armed by `WGR_TEXTURE_STREAM_STATS` and carries no `valid` sibling (AUD-001 A4.8) |
 | HRTF capability probe and headphone option | Low–medium | High for headphones | Implement as a bounded audio slice |
 | World-driven EFX environment selection | Low–medium | Medium–high | Implement with smoothing and fallbacks |
 | Expand existing indirect drawing | Medium | High when CPU-bound | Profile first |
@@ -523,6 +550,51 @@ Each of these has already produced wrong numbers at least once in this repositor
   CPU's time goes;
 - `--dev-map` has an empty retained set, so world-space renderer features measure as
   inert there — measure world-scale features on a real world.
+
+**Added 2026-09-01 (AUD-001 A4), four rules from instruments found lying since the list above:**
+
+- **`frame_max` is never quoted.** It is the harness's own screenshot: `FlushPendingScreenshot`
+  runs inside `NextFrame`, which is the `swap` phase, and the 256-frame ring always contains the
+  capture frame (PERF-018 correction). The JSON still writes it (`GameApplication.cpp:278`) and
+  `farfield-compare.py:469` still prints it; until a flag marks the shutter frame, the field is
+  not a spike metric.
+- **Low percentiles before the next performance decision.** `FrameProfiler` exposes avg/p95/max
+  over 256 frames and nothing else (`FrameProfiler.hpp:70-74`); p95 there rests on 13 samples and
+  the ring is never reset at warmup end (`Reset()` is called only by `triPerfReset`). PERF-016 names
+  1% and 0.1% lows as the metric that matters. Add them, and a warmup reset, before quoting another
+  mean.
+- **A GPU region opened more than once per frame reports its multiplicity, or is not summed.**
+  `GpuTimers::begin` keeps the last occurrence (`gpu_timers.rs:342`): "Grass shadow" is one cascade.
+  Three further paths keep *every* region's previous value — nothing written (`:389-391`), ring
+  saturated (`:392-398`), map failure (`:463-466`) — and `timings()` carries no frame stamp, so
+  the `-1` rule above covers the per-region mask only.
+- **Every sidecar counter block carries a `valid` sibling.** `objects`, `preparer`,
+  `gpu_residency` and `residency` have one; `streaming.texture`, `streaming.fileserver`,
+  `prepared_store`, `lights` and `snapshot.consumed_age` do not, and for each of them 0 is
+  both "healthy" and "did not run" (`GameApplication.cpp:296-342,427`). Track B.1's light-cost
+  gate reads the `lights` block, so today it cannot distinguish "no lights" from "path not taken".
+
+Also recorded there and not yet fixed: `setup` is marked twice per frame and `Mark()` is `+=`
+(`World.cpp:913,1650`; `FrameProfiler.hpp:83-88`); `sim:step` is absent from `triPerfStats`;
+`land:gnd`/`land:obj` read 0.000 rather than absent when `Landscape::Draw` is skipped; world-mode
+warmup is a 25 s wall clock with no frame floor; nothing verifies the exe and the DLL are one
+commit — `Deploy.ps1` stamps HEAD after a `Test-Path`.
+
+### Next targets, 2026-09-01 (AUD-001 B.4)
+
+Each carries its number, its scene and its gate. None is a guess about where time goes.
+
+| target | number | scene / source | gate |
+|---|---:|---|---|
+| `unitThink` | 0.95–2.06 ms/tick, 70-80% of the post-ration AI stage | Chernarus+ `perf_combat`, PERF-019 | `POSEIDON_AI_TIMELINE` diff names the first divergent tick; no change ships without it |
+| `land:obj` residual, **on Chernarus+** | 2.65 ms after PERF-016 (13.2 → 5.9 → 2.65), against 20,000 resident objects | WLD-025 pose, not Everon | the admission wall clocks (`LandSave.cpp:3510,3581,3219`) become counted budgets first, so two machines report one number |
+| sky cloud march | 1.314 ms, 11.7% of an 11.26 ms GPU frame | `perf_combat`, ARCH-001 table | three runs per arm; the step-count tier (`HANDOVER-20260824`:144) has had no A/B since the SH fix |
+
+Explicitly **not** on the list: grass (closed, PARKED.md: "reopen with a corpus that measures
+differently"); meshlets (10.3% of the frame is everything they could touch, ARCH-001); and mip
+feedback, which stays a *measurement* task — the 87% unrequested-detail figure (`3fa5dc97`) was
+taken on `perf_combat`, where the texture budget never fires, so it is a scene fact until it is
+re-run on a budget-constrained world (Chernarus+ at the 20,000-item cap).
 
 ## Phase 4 — Ownership, stable handles and ABI boundaries
 
@@ -1576,6 +1648,57 @@ Ragdolls, more dynamic props, richer collision events and later vehicle integrat
 advance in this track when their own physics roadmap gates are satisfied. They do not
 block `RenderSnapshot` or asynchronous asset work.
 
+## Parallel track D — Six-generation compatibility, gated per generation
+
+**Added 2026-09-01 (AUD-001 A3).** The owner's goal names six generations. Until now that goal
+lived in one baseline sentence, one continuous-foundation bullet and ~40 decision records, with
+no place that says per generation what loads, what is known broken, and what nobody has looked at.
+This track is that place. It runs in parallel with A–C and blocks none of them.
+
+### D.0 Where each generation stands (documented, not hoped)
+
+| gen | worlds | models | textures | configs | animations | materials |
+|---|---|---|---|---|---|---|
+| OFP | loads | loads | loads | loads | loads (739/739 RTM) | n/a |
+| Arma 1 | loads (OPRW 18/20) | partial (ODOL 40) | **unmeasured** | **broken** (`debin` fails, AST-016A) | partial | partial (terrain family NOT_PRODUCED) |
+| Arma 2/OA | loads (OPRW 24) | partial | **unmeasured** | **unmeasured** | **broken** (8 of 3,493 RTM) | partial; OA foliage shards open |
+| Arma 3 | loads (OPRW 25) | loads (ODOL 73) | partial | **broken** (`A3_CONFIG_PARSING` UNSUPPORTED) | **broken** (39 of 6,157 RTM) | partial (8 of 23 shader families) |
+| DayZ | loads (OPRW 29) | loads (ODOL 54) | census only | **unmeasured** | **broken by construction** (0 `.rtm`, 8,484 `.anm`) | partial; runtime binding uncensused |
+| Reforger | partial (by conversion; native `.ent` parses, unwired) | partial (`.xob` export; `.et` missing) | loads (`.edds`) | n/a | **absent** | **broken** (RFG-003, MAT-054; corpus not re-exported) |
+
+Evidence per cell is in AUD-001 A3 and the records it cites. Two open playtest defects belong here
+and in no other track: the bridged A1 T-72 turret vanishing when crewed (AST-016D) and the OFP
+cockpit transparency (HANDOVER-20260826).
+
+### D.1 Gates — one per generation, each able to fail
+
+A generation is *gated* when all three hold. None does today.
+
+1. **The cross-generation smoke runs somewhere it can fail.** `test_compat_smoke.cpp` skips on CI
+   by its own header (no corpus on hosted runners) and skips in any worktree whose `packages/` lacks
+   the corpora. Either a corpus-bearing job (self-hosted, or a synthetic corpus checked in under the
+   fixture policy) or the test is a 2026-08-31 measurement, not a gate.
+2. **One committed synthetic fixture per container format per generation.** Today every binary
+   fixture under `tests/fixtures/` is OFP-era or synthetic-OFP; there is no `.edds`, `.emat`,
+   `.xob`, `.pak`, OPRW 18/24/25/29 or ODOL 40/49/54/73 byte fixture, and DayZ has four unit tests.
+3. **A capability-matrix row per generation.** The generated matrix carries no DZ-*, RFG-*, ARF-*
+   or AST-016* row; DayZ appears only as a passing count and Reforger nowhere, because the
+   generator reads the ledger and those findings live only in decision records. Either they enter
+   the ledger or the matrix stops claiming to be the compatibility authority.
+
+### D.2 First tasks, cheapest first
+
+- Ledger rows for DZ-001..009, RFG-001..003, ARF-001..002, AST-016A..D, MAT-054/055, WLD-025 (half
+  an hour each; PARKED.md already records how `CLD-021` was under-claimed the same way).
+- The "unmeasured" cells: Arma 1 and Arma 2/OA textures (every PAA channel claim has an Arma 3
+  denominator only, and MAT-034 says so); configs for every generation (no decision record exists
+  for any config format; the A1/A3 `config.bin` failures have a symptom and no ticket); DayZ
+  material binding at runtime (31,045 RVMATs counted, none checked to bind).
+- Animation is the largest documented gap on three generations at once (BMTR v3/v5, `.anm`) and
+  is already scoped in AST-016-017; it is a track-D item, not an asset-track item.
+- Reforger re-export and native load stay parked by the owner (PARKED.md); they are listed here so
+  the park is visible from the track that owns them.
+
 ## Long-term continuation to the target engine
 
 The phases above are the executable post-DLSS programme. Completion does not imply
@@ -1671,6 +1794,12 @@ main modernisation roadmap and status ledger as the authority for detailed ticke
 - Verify save/load and mission-transition lifetime behaviour at every ownership extraction.
 - Remove each `GWorld` use only after its replacement has ownership, lifetime and test
   coverage.
+- Start from the count, not the name (AUD-001 A1): `GEngine` 1,445 uses / 111 files, `GWorld`
+  1,412 / 148, `Glob` 1,212 / 172, `GScene` 478 / 93, `GLandscape` 413 / 99. The ownership table
+  and the snapshot design plan for four of the five; `GEngine` — the object a render thread
+  actually moves — has no row. Draw-context globals (`ShapeDraw.cpp:224-228`,
+  `PresentationSnapshot.cpp:54-55,272`, the `StaticStorage` scratch in `ClipShape.cpp` /
+  `TransLight.cpp`) are what a Phase 8 worker touching draw code hits first.
 - The end gate is not zero textual references at any cost; it is that mutable global
   world access is no longer an architectural dependency.
 
@@ -1685,8 +1814,9 @@ This work runs throughout every phase:
 - keep warnings, format, static analysis and tests enforced in CI;
 - keep ASan/UBSan/TSan coverage appropriate to the code being changed;
 - maintain installed-game smoke tests for runtime-sensitive changes;
-- maintain the Arma 1 / Arma 2 / Arma 3 / DayZ / Reforger compatibility smoke matrix
-  through later architecture phases, not only during GL33 retirement;
+- maintain the six-generation compatibility gates of track D through later architecture
+  phases, not only during GL33 retirement — and note that the smoke matrix currently runs on
+  no CI job at all;
 - preserve benchmark inputs and evidence with enough metadata to reproduce them;
 - add ABI/layout tests for versioned C++ ↔ Rust boundary structures;
 - add architecture guards preventing server code from linking renderer or audio
@@ -1721,9 +1851,19 @@ After those shared foundations, **split the architecture work rather than serial
 
 ### Simulation track
 
-10S. Introduce the serial deterministic-effects simulation task graph.  
-11S. Audit worker FPU/RNG/iteration rules and validate across worker counts.  
-12S. Parallelise measured query, AI, navigation, animation and vehicle workloads.
+**Status 2026-09-01 (AUD-001):** every numbered item below is either done or answered. 10S exists
+(`RunSimStagesSerial`, SIM-811, with declared stage resources — SIM-814). 11S is done (SIM-801
+worker FP environment, SIM-803 stable iteration). 12S was measured and answered "no" (below).
+13S *is the ration*: PERF-017's `POSEIDON_AI_TRACK_PERIOD` is a reduced-rate perception update,
+independently switchable, gated on the behaviour oracle — which is what 8.5 asks for. What the
+track still owes is Phase 8's command/commit stage and Phase 13's replay, and the first blocker
+of both is that the resident object set is a function of wall time (`LandSave.cpp:3510,3581,3219`),
+so two runs cannot agree on what the world contains before the AI ever runs.
+
+10S. Introduce the serial deterministic-effects simulation task graph. **Done (SIM-811).**  
+11S. Audit worker FPU/RNG/iteration rules and validate across worker counts. **Done (SIM-801/803).**  
+12S. Parallelise measured query, AI, navigation, animation and vehicle workloads. **Answered no
+     (2026-09-01): after the rations the AI stage is 8-14% of the frame.**
      - **Ration before you parallelise.** PERF-016 reviews Arma 3 2.20's OPREP against what is
        measured here. 68% of the AI stage is one loop whose throttle exists, is written, and is
        never read; enabling it deletes the work instead of distributing it, and what remains
@@ -1734,6 +1874,11 @@ After those shared foundations, **split the architecture work rather than serial
        (PERF-012), and `perf_abel` — the scene most historical figures were taken on — would
        show none of it.  
 13S. Evaluate subsystem-specific AI simulation LOD where large-battle measurements justify it.
+     **The first one shipped as the tracking ration (PERF-017); the next candidate is `unitThink`
+     (PERF-019), on the same oracle.**
+14S. *(new)* Make the object-stream admission budget counted rather than timed, so replay and the
+     frame equivalence oracle see the same resident set on two machines. Proposed, not decided —
+     see AUD-001 §B; it changes what a slow machine shows.
 
 ### Asset/streaming track
 
