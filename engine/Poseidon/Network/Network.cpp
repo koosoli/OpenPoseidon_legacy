@@ -1040,6 +1040,8 @@ TMError PlayerRole::TransferMsg(NetworkMessageContext& ctx)
 
 DEFINE_NET_MESSAGE(PublicVariable, PUB_VAR_MSG)
 
+DEFINE_NET_MESSAGE(DateTimeWeather, DATE_TIME_WEATHER_MSG)
+
 DEFINE_NET_MESSAGE(GroupSynchronization, GROUP_SYNC_MSG)
 
 DEFINE_NET_MESSAGE(DetectorActivation, DET_ACT_MSG)

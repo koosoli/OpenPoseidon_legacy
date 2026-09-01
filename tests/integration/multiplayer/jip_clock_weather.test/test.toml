@@ -1,0 +1,40 @@
+# A player joining a running mission used to arrive at the mission FILE's time of day
+# and weather, because SendWorldState replicated objects and nothing else. On a server
+# that had been running for hours that meant arriving at dawn under the sky the editor
+# saved, while everyone already there was in the afternoon.
+#
+# The test moves the server's clock by five hours before the late client connects. Five
+# is chosen so the failure is unmissable: the old behaviour puts the late joiner 0.2083
+# of a day out, which no tolerance can absorb.
+
+mission = "tests/integration/missions/jip_basic.Demo"
+data_dir = "packages/Demo"
+game_port = 0
+timeout = 150
+tags = ["network"]
+
+[[instances]]
+extra_args = ["--no-strict", "--log-format", "jsonl"]
+name = "server"
+type = "server"
+
+[[instances]]
+extra_args = ["--no-strict", "--name", "clock-early", "--log-format", "jsonl"]
+name = "early"
+type = "client"
+connect = "server"
+after = "server"
+wait_ngs = 13
+mp_assign = "WEST:1"
+machine_id = "trident:jip_clock_weather:early"
+
+[[instances]]
+extra_args = ["--no-strict", "--name", "clock-late", "--log-format", "jsonl"]
+name = "late"
+type = "client"
+connect = "server"
+after = "server"
+wait_ngs = 13
+start_delay_ms = 25000
+mp_assign = "WEST:2"
+machine_id = "trident:jip_clock_weather:late"

@@ -1,3 +1,5 @@
+#include <Poseidon/Network/NetworkImpl.hpp>
+#include <Poseidon/Network/NetworkImplServer.hpp>
 #include <Poseidon/Core/Application.hpp>
 
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -1754,6 +1756,18 @@ GameValue CutObj(const GameState* state, GameValuePar oper1)
     return NOTHING;
 }
 
+// Weather and the clock are not replicated by ordinary simulation: every machine runs its
+// own and they agree only while nothing jumps. These commands ARE jumps, so the server has
+// to announce them. Doing it here rather than inside World keeps the network dependency out
+// of the world, and doing it in one function keeps the three commands from drifting apart.
+static void AnnounceWorldStateToClients()
+{
+    if (NetworkServer* server = GNetworkManager.GetServer())
+    {
+        server->BroadcastDateTimeWeather();
+    }
+}
+
 GameValue SkipDayTime(const GameState* state, GameValuePar oper1)
 {
     float time = oper1;
@@ -1764,6 +1778,11 @@ GameValue SkipDayTime(const GameState* state, GameValuePar oper1)
         GScene->MainLightChanged();
         GLandscape->OnTimeSkipped();
     }
+
+    // The clock is not replicated: every machine advances its own, which agrees only for
+    // as long as nothing jumps. This is a jump, so the server has to say so -- otherwise
+    // a five-hour skip leaves every client five hours behind, measured.
+    AnnounceWorldStateToClients();
 
     return NOTHING;
 }
@@ -1821,18 +1840,21 @@ GameValue SetViewDistance(const GameState* state, GameValuePar oper1)
 GameValue SetOvercast(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GWorld->SetWeather(oper2, -1, oper1);
+    AnnounceWorldStateToClients();
     return NOTHING;
 }
 
 GameValue SetRain(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GLandscape->SetRain(oper2, oper1);
+    AnnounceWorldStateToClients();
     return NOTHING;
 }
 
 GameValue SetFog(const GameState* state, GameValuePar oper1, GameValuePar oper2)
 {
     GWorld->SetWeather(-1, oper2, oper1);
+    AnnounceWorldStateToClients();
     return NOTHING;
 }
 

@@ -228,6 +228,27 @@ DECLARE_NET_MESSAGE(PublicVariable,PUB_VAR_MSG)
 
 DECLARE_NET_MESSAGE(GroupSynchronization,GROUP_SYNC_MSG)
 
+// The world clock and weather a joining player would otherwise never receive.
+//
+// Everything else in SendWorldState replicates OBJECTS. Time of day and weather are
+// world state that no object carries, so a late joiner took them from the mission file
+// and arrived at the mission start time in the mission start weather -- on a server that
+// had been running for hours, under a sky that had since clouded over.
+//
+// `timeInYear` carries the date and season; `timeOfDay` is sent separately because Clock
+// keeps it as its own float (a day fraction, ~9 ms resolution) rather than deriving it,
+// and deriving it back from the year-scale value loses seconds -- the same precision trap
+// that made 07:30:00 read back as :01 before SetTimeOfDay existed.
+#define DATE_TIME_WEATHER_MSG(XX) \
+	XX(float, timeInYear, NDTFloat, NCTNone, DEFVALUE(float, 0), DOC_MSG("Date and season, 1.0 = one year"), IdxTransfer) \
+	XX(float, timeOfDay, NDTFloat, NCTNone, DEFVALUE(float, 0), DOC_MSG("Time of day as a day fraction"), IdxTransfer) \
+	XX(int, year, NDTInteger, NCTNone, DEFVALUE(int, 1985), DOC_MSG("Calendar year"), IdxTransfer) \
+	XX(float, overcast, NDTFloat, NCTNone, DEFVALUE(float, 0), DOC_MSG("Cloud cover 0..1"), IdxTransfer) \
+	XX(float, fog, NDTFloat, NCTNone, DEFVALUE(float, 0), DOC_MSG("Fog 0..1"), IdxTransfer) \
+	XX(float, rain, NDTFloat, NCTNone, DEFVALUE(float, 0), DOC_MSG("Rain density 0..1"), IdxTransfer)
+
+DECLARE_NET_MESSAGE(DateTimeWeather,DATE_TIME_WEATHER_MSG)
+
 #define DET_ACT_MSG(XX) \
 	XX(OLink<Detector>, detector, NDTRef, NCTNone, DEFVALUENULL, DOC_MSG("Detector"), IdxTransferRef) \
 	XX(bool, active, NDTBool, NCTNone, DEFVALUE(bool, true), DOC_MSG("Active / inactive"), IdxTransfer)

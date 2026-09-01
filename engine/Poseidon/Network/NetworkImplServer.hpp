@@ -778,6 +778,10 @@ class NetworkServer : public NetworkComponent
     // Send mission info (mission heade, side slots and role slots) to client
     void SendMissionInfo(int to, bool onlyPlayers = false);
 
+    // Fill a clock/weather message from the live world. One place, so the value a
+    // joining player receives and the value a broadcast carries cannot drift apart.
+    void FillDateTimeWeather(DateTimeWeatherMessage& msg) const;
+
     // Send complete world state to a JIP player (5-pass ordered object sync)
     void SendWorldState(int dpnid);
     bool ReplayPlayerWorldState(NetworkPlayerInfo& info);
@@ -826,6 +830,14 @@ class NetworkServer : public NetworkComponent
     void UpdateMasterServerReporting();
 
   public:
+    // Push the clock and weather to every connected player.
+    //
+    // Needed because the world clock is NOT otherwise replicated: each machine advances
+    // its own, which agrees only while nothing jumps. skipTime, setOvercast and setFog are
+    // jumps, and before this they were server-local -- a measured five-hour skip left every
+    // connected client five hours behind, not just late joiners.
+    void BroadcastDateTimeWeather();
+
     // Fill the MasterServerService registration record for this server
     // (publisher service-registration callback). Returns false if no
     // master-server host is configured or the server isn't up yet.

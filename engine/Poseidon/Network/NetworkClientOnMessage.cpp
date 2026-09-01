@@ -1707,6 +1707,33 @@ void NetworkClient::OnMessage(int from, NetworkMessage* msg, NetworkMessageType 
             }
         }
         break;
+        case NMTDateTimeWeather:
+        {
+            DateTimeWeatherMessage weather;
+            weather.TransferMsg(ctx);
+            // SetTimeInYear first: it sets the date and season AND recomputes a coarse
+            // time-of-day from the year-scale value. SetTimeOfDay afterwards restores the
+            // precision that derivation loses, without disturbing the date.
+            Glob.clock.SetYear(weather._year);
+            Glob.clock.SetTimeInYear(weather._timeInYear);
+            {
+                const float dayFraction = weather._timeOfDay - floorf(weather._timeOfDay);
+                const int totalSeconds = static_cast<int>(dayFraction * 86400.0f + 0.5f);
+                Glob.clock.SetTimeOfDay(totalSeconds / 3600, (totalSeconds / 60) % 60, totalSeconds % 60);
+            }
+            if (GLandscape)
+            {
+                // Zero transition time. These setters normally EASE towards a target, which is
+                // right when weather changes during play and wrong here: a joining player is
+                // not watching the sky clear, they are arriving at a sky that already cleared.
+                GLandscape->SetOvercast(weather._overcast);
+                GLandscape->SetFog(weather._fog);
+                GLandscape->SetRain(weather._rain, 0.0f);
+            }
+            LOG_INFO(Network, "JIP: applied clock/weather: tod {:.4f} year {} overcast {:.2f} fog {:.2f} rain {:.2f}",
+                     weather._timeOfDay, weather._year, weather._overcast, weather._fog, weather._rain);
+        }
+        break;
         case NMTGroupSynchronization:
         {
             GroupSynchronizationMessage sync;

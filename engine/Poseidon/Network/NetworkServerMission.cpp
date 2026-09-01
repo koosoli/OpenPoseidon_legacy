@@ -984,6 +984,21 @@ void NetworkServer::SendWorldState(int dpnid)
     }
     LOG_INFO(Network, "JIP: Sending world state to player {} ({} objects)", dpnid, _objects.Size());
 
+    // BEFORE the objects, and that ordering is the point. Everything below replicates
+    // objects; time of day and weather are world state no object carries, so without this
+    // a late joiner took them from the mission FILE -- arriving at the mission's start
+    // time under the mission's start sky, on a server that had been running for hours.
+    // Sending it first means the objects that spawn below are lit and shaded correctly on
+    // their very first frame rather than snapping a frame later.
+    if (GWorld && GLandscape)
+    {
+        DateTimeWeatherMessage weather;
+        FillDateTimeWeather(weather);
+        SendMsg(dpnid, &weather, NMFGuaranteed);
+        LOG_INFO(Network, "JIP: clock/weather to player {}: tod {:.4f} year {} overcast {:.2f} fog {:.2f} rain {:.2f}",
+                 dpnid, weather._timeOfDay, weather._year, weather._overcast, weather._fog, weather._rain);
+    }
+
     // 5-pass ordered object sync (matching OFP Xbox approach)
     // Order ensures parent objects exist before children reference them
 
@@ -1118,6 +1133,45 @@ void NetworkServer::SendWorldState(int dpnid)
     }
 
     LOG_INFO(Network, "JIP: World state sent to player {} ({} JIP messages)", dpnid, _jipMessages.Size());
+}
+
+void NetworkServer::FillDateTimeWeather(DateTimeWeatherMessage& msg) const
+{
+    msg._timeInYear = Glob.clock.GetTimeInYear();
+    msg._timeOfDay = Glob.clock.GetTimeOfDay();
+    msg._year = Glob.clock.GetYear();
+    if (GLandscape)
+    {
+        msg._overcast = GLandscape->GetOvercast();
+        msg._fog = GLandscape->GetFog();
+        msg._rain = GLandscape->GetRainDensity();
+    }
+}
+
+void NetworkServer::BroadcastDateTimeWeather()
+{
+    if (!GWorld)
+    {
+        return;
+    }
+    DateTimeWeatherMessage msg;
+    FillDateTimeWeather(msg);
+    // Per player rather than to the broadcast group: a player still loading has no
+    // world to apply it to, and will be sent the same state by SendWorldState when it
+    // joins. Sending to everyone regardless would race that.
+    int sent = 0;
+    for (int i = 0; i < _players.Size(); i++)
+    {
+        const int dpid = _players[i].dpid;
+        if (dpid == 0)
+        {
+            continue;
+        }
+        SendMsg(dpid, &msg, NMFGuaranteed);
+        sent++;
+    }
+    LOG_INFO(Network, "clock/weather broadcast to {} players: tod {:.4f} overcast {:.2f} fog {:.2f} rain {:.2f}",
+             sent, msg._timeOfDay, msg._overcast, msg._fog, msg._rain);
 }
 
 bool NetworkServer::SaveWorldState(const char* filename)
