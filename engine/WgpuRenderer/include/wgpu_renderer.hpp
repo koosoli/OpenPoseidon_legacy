@@ -1521,6 +1521,17 @@ struct WgrGrassStats
 
 /* Shared dynamic WGPU residency lower bound. Counts renderer-owned resource
  * payload/capacity; WebGPU does not expose driver-private alignment/metadata. */
+/* AST-012A — the shape of one GPU mip-feedback harvest (see wgr_get_mip_feedback). */
+struct WgrMipFeedbackStats
+{
+    uint64_t frame;    /* renderer frame index at the query — the age clock's origin */
+    uint64_t harvests; /* completed readbacks since startup; 0 = the instrument never sampled */
+    uint32_t slots;    /* bindless slots covered */
+    uint32_t observed; /* of those, how many carry any observation */
+    uint32_t groups;   /* frames per full rotation of the texture table; 0 = disabled */
+    uint32_t reserved;
+};
+
 struct WgrMemoryStats
 {
     uint64_t tracked_bytes;
@@ -2186,6 +2197,18 @@ extern "C"
 
     /* Current dynamic-resource residency accounting. Returns 1 on success. */
     WGR_API uint32_t wgr_get_memory_stats(WgrRenderer* renderer, WgrMemoryStats* out);
+
+    /* AST-012A — the latest GPU mip feedback: for each bindless texture slot, the finest mip
+     * level any fragment actually asked for. `out_mip[slot]` gets that level, or 0xFF when the
+     * slot has never been observed; `out_age[slot]` gets how many frames ago it was harvested,
+     * saturating at 0xFFFF. Either output may be null. Returns the slots written.
+     *
+     * Non-blocking, and deliberately approximate in TIME: the values arrive through an async
+     * readback ring, and only one rotation group of the texture table writes per frame, so a
+     * slot's answer can be a whole rotation old. `stats->harvests == 0` means no readback has
+     * ever completed — report that as "no sample", never as "nothing was sampled". */
+    WGR_API uint32_t wgr_get_mip_feedback(WgrRenderer* renderer, WgrMipFeedbackStats* stats,
+                                          uint8_t* out_mip, uint16_t* out_age, uint32_t max_slots);
 
     /* Push the consolidated ImGui-tweakable render params (tonemap, exposure, sky look,
      * terrain sun-shadow, sky-visibility) in one block. The two terrain setters are diffed

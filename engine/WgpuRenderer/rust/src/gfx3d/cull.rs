@@ -1973,6 +1973,21 @@ pub fn gpu_group1_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            // 8: AST-012A GPU mip feedback — the one WRITABLE binding in this group. Declared
+            // only by fs_gpu; the prepass, shadow, velocity and sky entry points share the
+            // layout and simply do not use it, which is legal. Fragment-visible writable
+            // storage needs DownlevelFlags::FRAGMENT_WRITABLE_STORAGE, present on every
+            // desktop backend this renderer targets.
+            wgpu::BindGroupLayoutEntry {
+                binding: 8,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     })
 }
@@ -2549,6 +2564,40 @@ pub(crate) mod tests {
         )
         .validate(&module)
         .expect("cull.wgsl validate");
+    }
+
+    // AST-012A: binding 8 is fragment-visible WRITABLE storage, which needs a downlevel
+    // capability the composer test above cannot see — naga_oil validates the SHADER, not
+    // whether a device will accept the layout it wants. Build the layout on a real device so a
+    // backend that refuses it fails here, rather than as an object draw that silently never
+    // gets a bind group. Skips silently with no adapter.
+    #[test]
+    fn gpu_group1_layout_builds_on_a_real_device() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            }))
+        else {
+            return;
+        };
+        assert!(
+            adapter
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::FRAGMENT_WRITABLE_STORAGE),
+            "the mip-feedback write needs FRAGMENT_WRITABLE_STORAGE"
+        );
+        let Ok((device, _queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            return;
+        };
+        let _layout = gpu_group1_layout(&device);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     }
 
     #[test]

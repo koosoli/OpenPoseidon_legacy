@@ -754,6 +754,12 @@ impl SharedTextures {
         self.bindless_dirty = false;
     }
 
+    /// Declared size of the bindless object-texture array — the number of distinct slots any
+    /// shader can index, and therefore the width the AST-012A mip-feedback buffer needs.
+    pub fn object_cap(&self) -> u32 {
+        self.object_cap
+    }
+
     /// Portable authored object-texture payload and live texture count.
     /// The renderer's 1x1 fallback is not authored content and is excluded.
     pub fn residency(&self) -> (u64, u32) {

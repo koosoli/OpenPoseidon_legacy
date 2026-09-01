@@ -14,6 +14,33 @@ post-DLSS sequence. It accounts for work that OpenPoseidon has already completed
 keeps short, low-risk improvements separate from major architectural changes, and
 uses measurements as the gate for optional GPU features.
 
+## Where the critical path stands, 2026-09-01
+
+**Step 9 (bounded, measurable render/simulation overlap) is DONE**, so the two tracks below
+it now run concurrently rather than in sequence. `WGR_RENDER_THREAD=1 WGR_RENDER_OVERLAP=1`,
+toggleable in the dev panel, proven frame-equivalent (901 of 901 scene frames identical to
+the inline path, aligned by simulation tick) and measured: frame mean 43.50 -> 33.91 ms and
+p95 46.97 -> 36.07 on `perf_combat` (PERF-018). `swap` falls 69%%, `sim:step` rises 84%% --
+the producer stops parking in the present call and starts competing for cores, which is why
+the gain is half the ceiling PERF-012 predicted rather than all of it.
+
+Landed on the tracks since:
+
+| | |
+|---|---|
+| **12S** | `AIGroup::CreateTargetList` is a resumable six-stage machine bounded by a COUNTED budget, never a clock; resume state serialized. Unbounded is byte-identical to the previous behaviour; a tiny budget diverges at a named tick in a discrete field. |
+| **12S** | The near-target scan is rationed at last (PERF-017). `_trackNearTargetsTime` had been written since 2001 and read by nothing. Default 0.5 s: `track` 3.07 -> 0.27 ms/tick, AI scan 3.82 -> 1.15. It CHANGES behaviour, so it ships with an AI tab that puts it back to 0. |
+| **12A** | `WGR_OBJECT_STREAM_PRELOAD` pays the object fill-in up front: full residency in 7-8 update rounds against 20-21 on Stratis. Off by default. |
+| **Phase 14** | The stall detector is no longer inert -- three scopes, and it names one in a real run. |
+| **Phase 13** | An AI BEHAVIOUR oracle exists (`POSEIDON_AI_TIMELINE` + `PoseidonTools timeline diff`), which is what made the two 12S items provable rather than plausible. |
+
+**The measurement discipline moved further than the code did.** Four instruments were found
+lying about what they measured: `frame_max` was the harness's own screenshot, a whole
+decision document's headline rested on it; the AI oracle's first version could not tell two
+units apart; `dist/` staging fails silently while the game runs; and a run-to-run spread of
+21.7 vs 15.1 ms means one measurement pair proves nothing. Every one of those was caught by
+a control, not by reasoning. See `scripts/README-farfield-bench.md`.
+
 ## Current baseline
 
 The following foundations already exist and should be extended rather than rebuilt:

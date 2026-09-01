@@ -341,6 +341,54 @@ fn baked_sky_visibility(model: u32, model_pos: vec3<f32>) -> f32 {
 @group(2) @binding(0) var textures: binding_array<texture_2d<f32>>;
 @group(3) @binding(0) var samplers: binding_array<sampler, 8>;
 
+// AST-012A -- GPU MIP FEEDBACK. One word per bindless texture slot, holding the FINEST mip any
+// fragment asked of that slot this frame. Residency has until now been decided from CPU-side
+// camera distance, which cannot tell a wall filling the screen from the same wall seen edge-on
+// across a valley; this is the frame telling us what detail it actually needed.
+//
+// WGSL has no textureQueryLod, so the level is derived the way the hardware derives it:
+// 0.5 * log2 of the larger squared UV derivative measured in TEXELS, plus the render-scale mip
+// bias so the number matches what textureSampleBias really fetched.
+//
+// Encoded as MIPFB_CODE_BASE - level and combined with atomicMax, so 0 means "no fragment
+// sampled this slot" and the whole-buffer reset can be a plain clear-to-zero. atomicMin would
+// have needed the buffer refilled with a sentinel every frame instead.
+@group(1) @binding(8) var<storage, read_write> mip_feedback: array<atomic<u32>>;
+
+// Kept in step with mip_feedback.rs: HEADER_WORDS and MIP_CODE_BASE.
+const MIPFB_HEADER_WORDS: u32 = 4u;
+const MIPFB_CODE_BASE: u32 = 16u;
+
+// Record the mip this fragment wanted of `slot`.
+//
+// `duvx`/`duvy` MUST be computed by the caller in uniform control flow and passed in --
+// derivative builtins are illegal inside the group test below, and the test is the whole
+// reason this costs nothing: only slots congruent to frame.renscale.z modulo frame.renscale.w
+// write, so a given frame touches one group's worth of the texture table rather than all of
+// it. A slot's answer is therefore up to `groups` frames old, which against a residency grace
+// measured in hundreds of frames is free.
+//
+// renscale.w == 0 disables the whole thing (WGR_MIP_FEEDBACK=0), and slot 0 is the white
+// bindless fallback, which nothing wants resident decisions about.
+fn mip_feedback_note(slot: u32, duvx: vec2<f32>, duvy: vec2<f32>) {
+    let groups = u32(max(frame.renscale.w, 0.0));
+    if (groups == 0u || slot == 0u || (slot % groups) != u32(max(frame.renscale.z, 0.0))) {
+        return;
+    }
+    let dims = vec2<f32>(textureDimensions(textures[slot], 0));
+    let dx = duvx * dims;
+    let dy = duvy * dims;
+    let rho = max(dot(dx, dx), dot(dy, dy));
+    // rho == 0 is a degenerate quad (a collapsed triangle, or a fragment whose UVs do not vary);
+    // it wants mip 0, which is also what log2 of zero must not be allowed to produce.
+    var lod = 0.0;
+    if (rho > 0.0) {
+        lod = 0.5 * log2(rho) + frame.renscale.x;
+    }
+    let level = u32(clamp(floor(lod), 0.0, f32(MIPFB_CODE_BASE) - 1.0));
+    atomicMax(&mip_feedback[MIPFB_HEADER_WORDS + slot], MIPFB_CODE_BASE - level);
+}
+
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -578,6 +626,12 @@ fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
 fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    // AST-012A: the raw UV derivatives, taken HERE because derivative builtins need uniform
+    // control flow and everything below this point is conditional. The layer transform is
+    // affine, so the transformed derivative is just this scaled by layer_uv[0].xy -- applied at
+    // the call site rather than recomputed.
+    let duvx = dpdx(in.uv);
+    let duvy = dpdy(in.uv);
     // Keep the GPU-driven set on the same reflected-view waterline clip as terrain
     // and retained objects. Without this, below-water buildings/vehicles could be
     // reflected or write depth in front of valid above-water reflection geometry.
@@ -598,6 +652,10 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     //
     // mask_slot == 0 means "not a layered material" and takes layer 0 alone, which is
     // every non-Multi section and is byte-identical to the previous behaviour.
+    // AST-012A: the albedo is the slot residency is decided about, so it is the one reported.
+    // The mask / specular / normal / further-layer slots share the material's fate and their
+    // own answer would be the same number for a fraction more atomic traffic.
+    mip_feedback_note(sm.texture_slot, duvx * sm.layer_uv[0].xy, duvy * sm.layer_uv[0].xy);
     var base = textureSampleBias(textures[sm.texture_slot],
                              samplers[sm.sampler_idx],
                              in.uv * sm.layer_uv[0].xy + sm.layer_uv[0].zw, frame.renscale.x);

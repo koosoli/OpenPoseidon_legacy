@@ -146,8 +146,13 @@ struct Frame {
     //   x = mip bias, log2(render_width / output_width), <= 0 (0 at native scale)
     //   y = gradient scale, 2^x — multiplies EXPLICIT gradients (textureSampleGrad ignores
     //       bias, so the terrain path scales its ddx/ddy instead; same optics, other API)
-    //   z, w = unused
-    // A zero-filled camera reads bias 0 / grad_scale() 1.0 — bit-identical to pre-lane.
+    //   z = AST-012A mip-feedback ROTATION: this frame's group index
+    //   w = AST-012A mip-feedback GROUP COUNT; 0 disables the feedback write entirely
+    // The rotation pair rides here rather than in the feedback buffer's own header because
+    // every fragment tests it: a uniform-buffer read folds into a constant for the draw, where
+    // a storage load would be a memory access per fragment for a value that never varies.
+    // A zero-filled camera reads bias 0 / grad_scale() 1.0 and no feedback — bit-identical to
+    // pre-lane.
     renscale: vec4<f32>,
 };
 

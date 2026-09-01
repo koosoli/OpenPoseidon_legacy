@@ -3192,6 +3192,95 @@ pub unsafe extern "C" fn wgr_get_memory_stats(
     .unwrap_or(0)
 }
 
+/// AST-012A — the shape of one mip-feedback harvest, alongside the per-slot array.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrMipFeedbackStats {
+    /// Renderer frame index at the moment of the query (the age clock's origin).
+    pub frame: u64,
+    /// Readbacks that actually completed and were decoded since startup. ZERO means the
+    /// instrument never produced a sample, which is a different statement from "every slot
+    /// reads unobserved" and must not be reported as the latter.
+    pub harvests: u64,
+    /// Bindless slots the array covers.
+    pub slots: u32,
+    /// Of those, how many carry any observation at all.
+    pub observed: u32,
+    /// Frames one full rotation of the texture table takes; 0 = feedback disabled.
+    pub groups: u32,
+    pub _pad: u32,
+}
+
+/// AST-012A — copy the latest per-bindless-slot mip feedback out of the renderer.
+///
+/// `out_mip[slot]` receives the finest mip level any fragment asked of that slot, or 0xFF when
+/// the slot has never been observed. `out_age[slot]` receives how many frames ago that
+/// observation was harvested, saturating at 0xFFFF. Either output may be null.
+///
+/// Non-blocking: the values come from a readback ring that is mapped asynchronously, so they
+/// trail the current frame by a few frames and, because only one rotation group writes per
+/// frame, a given slot's answer can be a full rotation old. Both facts are fine for a residency
+/// decision whose grace is measured in hundreds of frames, and neither is fine for anything
+/// that must be exact this frame.
+///
+/// Returns the number of slots written.
+///
+/// # Safety
+/// `renderer` must be a live `WgrRenderer` or null. `out_mip` / `out_age`, when non-null, must
+/// each point at `max_slots` writable elements. `stats`, when non-null, at one WgrMipFeedbackStats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_mip_feedback(
+    renderer: *mut WgrRenderer,
+    stats: *mut WgrMipFeedbackStats,
+    out_mip: *mut u8,
+    out_age: *mut u16,
+    max_slots: u32,
+) -> u32 {
+    if renderer.is_null() {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let renderer = unsafe { &*renderer };
+        let fb = renderer.gfx3d.mip_feedback_state();
+        let frame = fb.frame();
+        let n = max_slots.min(fb.capacity());
+        let mut observed = 0u32;
+        for slot in 0..n {
+            let obs = fb.observation(slot);
+            let seen = obs.frame != 0;
+            if seen {
+                observed += 1;
+            }
+            if !out_mip.is_null() {
+                let v = if seen { obs.desired_mip.min(254) as u8 } else { 0xFF };
+                unsafe { *out_mip.add(slot as usize) = v };
+            }
+            if !out_age.is_null() {
+                let v = if seen {
+                    frame.saturating_sub(obs.frame).min(0xFFFF) as u16
+                } else {
+                    0xFFFF
+                };
+                unsafe { *out_age.add(slot as usize) = v };
+            }
+        }
+        if !stats.is_null() {
+            unsafe {
+                *stats = WgrMipFeedbackStats {
+                    frame,
+                    harvests: fb.harvest_count(),
+                    slots: n,
+                    observed,
+                    groups: fb.lane().1,
+                    _pad: 0,
+                }
+            };
+        }
+        n
+    }))
+    .unwrap_or(0)
+}
+
 /// Push the consolidated ImGui-tweakable render params (tonemap, exposure, sky look, terrain
 /// sun-shadow, sky-visibility) in one block. Fans out to the per-subsystem state; the terrain
 /// setters are diffed against the last block so a per-frame push doesn't thrash the sweep/scan.

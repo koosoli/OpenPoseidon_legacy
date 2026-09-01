@@ -15,6 +15,9 @@ pub mod cull;
 // Hi-Z depth pyramid for GPU-driven occlusion culling (docs/gpu-culling-and-depth-plan.md §5).
 mod gtao_depth_mips;
 mod hiz;
+// AST-012A: GPU mip feedback — the finest mip each bindless slot was actually asked for.
+pub mod mip_feedback;
+use mip_feedback::MipFeedback;
 pub mod sky_bake;
 pub mod sky_vis;
 use sky_vis::{SkyVisSettings, SkyVisView};
@@ -1527,6 +1530,8 @@ fn build_group1_bind(
     // the real one), for the Fresnel reflection on materials naming an EnvironmentMap.
     env_view: &wgpu::TextureView,
     env_sampler: &wgpu::Sampler,
+    // AST-012A: the shared mip-feedback buffer (binding 4).
+    mip_feedback: &wgpu::Buffer,
     label: &str,
 ) -> wgpu::BindGroup {
     let slot0_binding = wgpu::BufferBinding {
@@ -1553,6 +1558,10 @@ fn build_group1_bind(
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: wgpu::BindingResource::Sampler(env_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: mip_feedback.as_entire_binding(),
             },
         ],
     })
@@ -3296,8 +3305,17 @@ pub struct Gfx3d {
     /// full, yzw reserved. See `set_fog_far_close`.
     fog_far: [f32; 4],
     // REN-TEMP-001D: frame.wgsl `renscale` — (mip bias log2(render/output), gradient scale
-    // 2^bias, 0, 0). Set once per frame from the renderer's render scale; all-zero = native.
+    // 2^bias, then AST-012A's mip-feedback rotation pair: this frame's group index and the
+    // group count, 0 = feedback off). Set once per frame; all-zero = native, no feedback.
     render_scale_lane: [f32; 4],
+    // AST-012A: the feedback buffer, its readback ring and the harvested per-slot answers.
+    mip_feedback: MipFeedback,
+    // Set when `ensure_mip_feedback` allocated (or reallocated) that buffer, so the group-1
+    // binds that borrow it are rebuilt on the next prepare_cull. A separate flag rather than
+    // an extra return value because the allocation happens outside prepare_cull — the
+    // bindless capacity it is sized from lives on SharedTextures, which prepare_cull is not
+    // given.
+    mip_feedback_grew: bool,
     // Live-tunable absolute mip-bias override (None = auto half log2(scale)). Seeded
     // from WGR_MIP_BIAS at startup.
     mip_bias_override: Option<f32>,
@@ -3647,6 +3665,22 @@ impl Gfx3d {
                         binding: 3,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // AST-012A mip feedback, the same buffer the GPU-driven path writes.
+                    // BOTH object paths have to report or the numbers are a fiction: on
+                    // perf_combat the per-draw path issues 2,093 of the 2,162 object draws,
+                    // so instrumenting only the GPU-driven set would have called 878 resident
+                    // textures "never sampled" when almost all of them were being sampled
+                    // every frame by a shader that simply had nowhere to say so.
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
                         count: None,
                     },
                 ],
@@ -4056,6 +4090,8 @@ impl Gfx3d {
                 0.0,
             ],
             render_scale_lane: [0.0; 4],
+            mip_feedback: MipFeedback::new(),
+            mip_feedback_grew: false,
             mip_bias_override: std::env::var("WGR_MIP_BIAS")
                 .ok()
                 .and_then(|v| v.parse::<f32>().ok()),
@@ -6510,10 +6546,19 @@ impl Gfx3d {
         // (Re)build the combined group-1 bind groups when a backing buffer moved
         // (or on first use). The plain bind needs the world + material buffers;
         // the skinned bind the palette + material buffers.
-        if let (Some(world_buf), Some(mat_buf)) =
-            (self.world.buf.as_ref(), self.material.buf.as_ref())
-        {
-            if world_grew || material_grew || env_changed || self.group1_plain_bind.is_none() {
+        // AST-012A: binding 4 of both binds. The buffer is allocated by ensure_mip_feedback,
+        // which the renderer calls before this every frame — including when the instrument is
+        // switched off, at one word, precisely so it is never None here. If it somehow were,
+        // the binds are simply left as they are rather than rebuilt: an object draw with last
+        // frame's bind is recoverable, an object draw with no bind at all is not.
+        let mipfb_moved = self.mip_feedback_grew;
+        let mipfb = self.mip_feedback.buffer().cloned();
+        if let (Some(mipfb), Some(world_buf), Some(mat_buf)) = (
+            mipfb.as_ref(),
+            self.world.buf.as_ref(),
+            self.material.buf.as_ref(),
+        ) {
+            if world_grew || material_grew || env_changed || mipfb_moved || self.group1_plain_bind.is_none() {
                 self.group1_plain_bind = Some(build_group1_bind(
                     device,
                     &self.group1_plain_layout,
@@ -6522,14 +6567,17 @@ impl Gfx3d {
                     mat_buf,
                     &self.env_view,
                     &self.env_sampler,
+                    mipfb,
                     "wgr_3d_group1_plain_bind",
                 ));
             }
         }
-        if let (Some(pal_buf), Some(mat_buf)) =
-            (self.palette.buf.as_ref(), self.material.buf.as_ref())
-        {
-            if palette_grew || material_grew || env_changed || self.group1_skinned_bind.is_none() {
+        if let (Some(mipfb), Some(pal_buf), Some(mat_buf)) = (
+            mipfb.as_ref(),
+            self.palette.buf.as_ref(),
+            self.material.buf.as_ref(),
+        ) {
+            if palette_grew || material_grew || env_changed || mipfb_moved || self.group1_skinned_bind.is_none() {
                 self.group1_skinned_bind = Some(build_group1_bind(
                     device,
                     &self.group1_skinned_layout,
@@ -6538,6 +6586,7 @@ impl Gfx3d {
                     mat_buf,
                     &self.env_view,
                     &self.env_sampler,
+                    mipfb,
                     "wgr_3d_group1_skinned_bind",
                 ));
             }
@@ -7793,7 +7842,9 @@ impl Gfx3d {
         }
         let volumes_grew = self.upload_sky_volumes(device, queue);
         let grew = self.cull.prepare(device, queue) || volumes_grew;
+        let mipfb_grew = std::mem::take(&mut self.mip_feedback_grew);
         if grew
+            || mipfb_grew
             || self.gpu_group1_bind.is_none()
             || self.gpu_shadow_group1.len() != n_cascades
             // The sky view is allocated on first enable and dropped on disable, so its records
@@ -7855,13 +7906,14 @@ impl Gfx3d {
     fn rebuild_gpu_group1(&mut self, device: &wgpu::Device) {
         // The two sky-volume buffers are always present (upload_sky_volumes seeds a one-element
         // dummy when nothing is baked) so the shared layout never has an absent binding.
-        let (Some(inst), Some(rec), Some(mat), Some(crown), Some(vmeta), Some(vdata)) = (
+        let (Some(inst), Some(rec), Some(mat), Some(crown), Some(vmeta), Some(vdata), Some(mipfb)) = (
             self.cull.instance_buf(),
             self.cull.out_records(),
             self.cull.section_material_buf(),
             self.cull.crown_centre_buf(),
             self.sky_volume_meta.buf.as_ref(),
             self.sky_volume_data.buf.as_ref(),
+            self.mip_feedback.buffer(),
         ) else {
             self.gpu_group1_bind = None;
             self.gpu_color_group1_bind = None;
@@ -7910,6 +7962,13 @@ impl Gfx3d {
                     wgpu::BindGroupEntry {
                         binding: 7,
                         resource: wgpu::BindingResource::Sampler(&self.env_sampler),
+                    },
+                    // AST-012A mip feedback. Shared by every view's bind, so the shadow and
+                    // reflection draws point at the same buffer even though only fs_gpu writes
+                    // it — one buffer, one clear, one readback per frame.
+                    wgpu::BindGroupEntry {
+                        binding: 8,
+                        resource: mipfb.as_entire_binding(),
                     },
                 ],
             })
@@ -8145,6 +8204,52 @@ impl Gfx3d {
         } else {
             [0.0; 4]
         };
+        // z/w belong to AST-012A and are rewritten every frame by the caller straight after
+        // this; writing them here as zeros first is what keeps "feedback off" the state a
+        // renderer that never calls the setter below ends up in.
+    }
+
+    /// AST-012A — allocate the mip-feedback buffer for `capacity` bindless slots and publish
+    /// this frame's rotation pair into `renscale.zw`. Called once per frame BEFORE the cameras
+    /// are uploaded (the pair travels in the camera uniform) and before the frame's first
+    /// object draw.
+    pub fn ensure_mip_feedback(&mut self, device: &wgpu::Device, capacity: u32) {
+        // Allocated even when the instrument is OFF, at one word instead of the full table.
+        // Binding 8 is part of the shared group-1 layout, so an absent buffer would leave every
+        // GPU-driven bind group unbuildable and take the whole object draw with it — the
+        // ablation arm must change what the shader writes, never whether it can run.
+        let capacity = if self.mip_feedback.enabled() {
+            capacity
+        } else {
+            1
+        };
+        if self.mip_feedback.ensure(device, capacity) {
+            self.mip_feedback_grew = true;
+        }
+        self.mip_feedback.advance();
+        let (group, groups) = self.mip_feedback.lane();
+        self.render_scale_lane[2] = group as f32;
+        self.render_scale_lane[3] = groups as f32;
+    }
+
+    /// Advance the rotation and zero the per-slot codes. Must be recorded into the frame
+    /// encoder before the first object draw.
+    pub fn begin_frame_mip_feedback(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        self.mip_feedback.begin_frame(encoder);
+    }
+
+    /// Copy this frame's codes into the readback ring (after the last object draw, before submit).
+    pub fn resolve_mip_feedback(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        self.mip_feedback.resolve(encoder);
+    }
+
+    /// Drain completed mip-feedback readbacks (after queue.submit).
+    pub fn harvest_mip_feedback(&mut self, device: &wgpu::Device) {
+        self.mip_feedback.harvest(device);
+    }
+
+    pub fn mip_feedback_state(&self) -> &MipFeedback {
+        &self.mip_feedback
     }
 
     /// The three OnSurface (road / decal) per-pixel depth-conform knobs, live from the dev

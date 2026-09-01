@@ -68,6 +68,17 @@ class TextureBankWgpu : public AbstractTextBank
     // model that is merely waiting its turn in the sweep.
     uint64_t _retainedLivenessMaxAgeFrames = 0;
 
+    // AST-012A -- GPU mip feedback, held across calls so the per-slot arrays are allocated once
+    // rather than per report. Sized to the bindless array (8,192 slots), so 24 KB total.
+    std::vector<uint8_t> _mipDesired;
+    std::vector<uint16_t> _mipAge;
+    // Residency frame at which the next report is due. The instrument runs every frame; the
+    // REPORT is periodic, because the interesting quantity is a working set, and a working set
+    // does not change meaningfully between two consecutive frames.
+    uint64_t _mipReportDue = 0;
+    // What the GPU says about the CPU's residency decisions. See ReportMipFeedback.
+    void ReportMipFeedback();
+
   public:
     explicit TextureBankWgpu(WgrRenderer* renderer);
     ~TextureBankWgpu() override;

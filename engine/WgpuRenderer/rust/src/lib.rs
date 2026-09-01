@@ -3086,6 +3086,13 @@ impl Renderer {
             .ensure_ui_depth(&self.device, self.config.width, self.config.height);
         // REN-TEMP-001D: render-scale-aware mip bias for every material sample this frame.
         self.gfx3d.set_render_scale_lane(self.render_scale);
+        // AST-012A: size the mip-feedback buffer to the bindless array and step the rotation.
+        // Straight after set_render_scale_lane, because it writes the two lanes that setter
+        // zeroes, and well before the cameras are uploaded — the pair travels in the camera
+        // uniform, so a frame that published it late would have the shader test last frame's
+        // group index.
+        let object_cap = self.textures.object_cap();
+        self.gfx3d.ensure_mip_feedback(&self.device, object_cap);
         // Rebuild the bindless object-texture array if any texture was created/destroyed
         // since last frame (no-op on churn-free frames), so this frame's draws index a
         // current array.
@@ -3627,6 +3634,10 @@ impl Renderer {
         // planar-reflection cull, further down, is the earliest). Whole-buffer, so a view that
         // does not run this frame reports zeros instead of repeating its last live frame.
         self.gfx3d.begin_frame_object_stats(&mut encoder);
+        // AST-012A: zero the per-slot mip codes before the frame's first object draw, for the
+        // same reason the cull stats are zeroed here — a slot nothing samples this frame must
+        // read as unsampled, not repeat whatever the last live frame left in it.
+        self.gfx3d.begin_frame_mip_feedback(&mut encoder);
 
         // Grass owns a compact camera-relative candidate grid.  Refresh its borrowed
         // terrain inputs before the placement compute so the pass sees the same terrain
@@ -5346,6 +5357,7 @@ impl Renderer {
         self.gpu_timers.resolve(&mut encoder);
         // PERF-005: after every cull dispatch has written its slice, before submit.
         self.gfx3d.resolve_object_stats(&mut encoder);
+        self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
         self.queue.submit(std::iter::once(encoder.finish()));
         // Geometry-pool growth may have happened after an earlier pass recorded
@@ -5410,6 +5422,7 @@ impl Renderer {
         }
         self.gpu_timers.harvest(&self.device);
         self.gfx3d.harvest_object_stats(&self.device);
+        self.gfx3d.harvest_mip_feedback(&self.device);
         self.water_visibility.harvest(&self.device);
         self.grass.harvest_stats(&self.device);
         Ok(())

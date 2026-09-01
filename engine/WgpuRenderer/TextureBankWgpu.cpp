@@ -76,11 +76,120 @@ static uint64_t TextureBudgetBytes(uint64_t budgetBytes)
     return static_cast<uint64_t>(static_cast<double>(budgetBytes) * share);
 }
 
+// AST-012A -- say what the frame actually sampled, next to what the LRU believes.
+//
+// The point of this report is that the two are different quantities and nothing here has ever
+// compared them. `_lastUsedFrame` says "a model referencing this texture is within the object
+// draw distance"; the GPU's answer says "a fragment sampled it, and at THIS detail". A texture
+// can be marked used every frame and never be sampled at all (behind a hill, behind a wall,
+// back-facing, off-screen), and one that is sampled can be sampled only at mip 3 -- in which
+// case the three finer levels are resident VRAM the frame demonstrably did not want.
+//
+// Three numbers come out of it, and each answers a different question:
+//
+//   * `unsampled` -- resident, slot-leased textures the GPU has never reported. This is the
+//     LRU's false-keep rate: bytes held on the strength of a distance mark alone.
+//   * the mip histogram -- of the textures the frame DID sample, how deep into the chain it
+//     went. Everything to the right of mip 0 is chain uploaded above what was needed.
+//   * `slack` -- those wasted levels as a fraction of resident top-level area. Area rather
+//     than bytes because the bank does not carry a per-texture byte count and the formats
+//     vary; within one texture the ratio between levels is exactly 4 per level regardless of
+//     format, so the fraction is honest even though the absolute is not a byte count.
+//
+// It is a MEASUREMENT and nothing acts on it yet. Deliberately: a residency policy driven by
+// this signal has to answer what happens to a texture the GPU stops reporting because the LRU
+// already evicted it, and that question is not settled by the instrument that raises it.
+void TextureBankWgpu::ReportMipFeedback()
+{
+    if (!_renderer)
+        return;
+    WgrMipFeedbackStats fb{};
+    // One allocation, sized past any plausible bindless cap (8,192 today). The call writes
+    // min(this, the renderer's slot count) and reports which, so oversizing costs 96 KB once
+    // and cannot truncate.
+    if (_mipDesired.size() < 65536)
+    {
+        _mipDesired.resize(65536);
+        _mipAge.resize(65536);
+    }
+    const uint32_t slots =
+        wgr_get_mip_feedback(_renderer, &fb, _mipDesired.data(), _mipAge.data(),
+                             static_cast<uint32_t>(_mipDesired.size()));
+    if (slots == 0)
+        return;
+    if (fb.harvests == 0)
+    {
+        // NOT the same statement as "nothing was sampled", and reporting it as one is exactly
+        // the failure mode a counter that cannot say "did not run" produces. Say it plainly.
+        LOG_INFO(Graphics, "Wgpu mip feedback: no readback has completed yet (slots={} groups={})",
+                 slots, fb.groups);
+        return;
+    }
+
+    uint32_t resident = 0;      // resident, leased, evictable object textures
+    uint32_t unsampled = 0;     // ... of which the GPU has never reported one fragment
+    uint32_t stale = 0;         // ... reported, but not within one full rotation + margin
+    uint32_t hist[5] = {0, 0, 0, 0, 0}; // desired mip 0,1,2,3,4+
+    double areaResident = 0.0;  // sum of w*h over sampled textures
+    double areaNeeded = 0.0;    // ... scaled by 4^-desired
+    uint32_t markedButUnsampled = 0; // marked used THIS frame by the CPU, never sampled
+    for (int i = 0; i < _texture.Size(); ++i)
+    {
+        TextureWgpu* texture = _texture[i];
+        if (!texture || !texture->GpuHandle() || texture->IsDynamicTexture() ||
+            IsTerrainOwnedTexture(texture))
+            continue;
+        const uint32_t slot = texture->SlotLease();
+        // Slot 0 means the bindless array was at cap and this texture samples through
+        // per-upload slots, where no stable identity exists to report against.
+        if (slot == 0 || slot >= slots)
+            continue;
+        ++resident;
+        const uint8_t desired = _mipDesired[slot];
+        if (desired == 0xFF)
+        {
+            ++unsampled;
+            // The direct comparison the whole report exists for: the CPU marked this used
+            // recently enough that the LRU would refuse to evict it, and the GPU says no
+            // fragment has ever sampled it.
+            if (_residencyFrame < texture->LastUsedFrame() + 120)
+                ++markedButUnsampled;
+            continue;
+        }
+        // Two rotations plus a margin: one is the honest floor (a slot only gets its turn once
+        // per rotation), so anything beyond two means it stopped being sampled rather than that
+        // it is waiting its turn.
+        if (fb.groups != 0 && _mipAge[slot] > fb.groups * 2 + 8)
+            ++stale;
+        hist[desired < 4 ? desired : 4] += 1;
+        const double area = static_cast<double>(texture->AWidth(0)) * texture->AHeight(0);
+        if (area <= 0.0)
+            continue;
+        areaResident += area;
+        areaNeeded += area / static_cast<double>(1u << (2 * (desired < 15 ? desired : 15)));
+    }
+    const double slackPct =
+        areaResident > 0.0 ? 100.0 * (1.0 - areaNeeded / areaResident) : 0.0;
+    LOG_INFO(Graphics,
+             "Wgpu mip feedback: resident={} sampled={} unsampled={} (LRU-fresh-but-unsampled={}) "
+             "stale={} mip0={} mip1={} mip2={} mip3={} mip4+={} slack={:.1f}% "
+             "slots={} observed={} groups={} harvests={}",
+             resident, resident - unsampled, unsampled, markedButUnsampled, stale, hist[0], hist[1],
+             hist[2], hist[3], hist[4], slackPct, slots, fb.observed, fb.groups, fb.harvests);
+}
+
 void TextureBankWgpu::TrimResidency()
 {
     ++_residencyFrame;
     if (!_renderer)
         return;
+    // Every 600 residency frames -- roughly ten seconds of play, and long enough that the
+    // rotation (32 frames by default) has swept the table a dozen times over.
+    if (_residencyFrame >= _mipReportDue)
+    {
+        _mipReportDue = _residencyFrame + 600;
+        ReportMipFeedback();
+    }
     WgrMemoryStats stats{};
     if (!wgr_get_memory_stats(_renderer, &stats) || stats.budget_bytes == 0)
         return;

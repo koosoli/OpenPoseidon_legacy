@@ -87,6 +87,41 @@ fn material_flags(m: Material) -> u32 {
 @group(1) @binding(2) var sky_env: texture_2d<f32>;
 @group(1) @binding(3) var sky_env_samp: sampler;
 
+// AST-012A -- GPU MIP FEEDBACK, the per-draw path's half. One word per bindless texture slot
+// holding the FINEST mip any fragment asked for, atomicMax-ed so a plain clear-to-zero is the
+// per-frame reset and 0 reads as "not sampled". The identical buffer the GPU-driven path
+// writes at its own group(1) binding 8: both paths index the same bindless array, so both must
+// report into the same table or the answer is only true of whichever path happened to draw.
+//
+// See gpu_driven.wgsl's copy of this for the full argument; the constants must agree with it
+// and with mip_feedback.rs.
+@group(1) @binding(4) var<storage, read_write> mip_feedback: array<atomic<u32>>;
+
+const MIPFB_HEADER_WORDS: u32 = 4u;
+const MIPFB_CODE_BASE: u32 = 16u;
+
+// Record the mip this fragment wanted of `slot`. `duvx`/`duvy` are the caller's UV derivatives,
+// taken in uniform control flow -- derivative builtins are illegal inside the group test, and
+// the test is what keeps this to a fraction of the fragments: only slots congruent to
+// frame.renscale.z modulo frame.renscale.w write, so one frame covers one group's worth of the
+// texture table. renscale.w == 0 disables it; slot 0 is the white bindless fallback.
+fn mip_feedback_note(slot: u32, duvx: vec2<f32>, duvy: vec2<f32>) {
+    let groups = u32(max(frame.renscale.w, 0.0));
+    if (groups == 0u || slot == 0u || (slot % groups) != u32(max(frame.renscale.z, 0.0))) {
+        return;
+    }
+    let dims = vec2<f32>(textureDimensions(textures[slot], 0));
+    let dx = duvx * dims;
+    let dy = duvy * dims;
+    let rho = max(dot(dx, dx), dot(dy, dy));
+    var lod = 0.0;
+    if (rho > 0.0) {
+        lod = 0.5 * log2(rho) + frame.renscale.x;
+    }
+    let level = u32(clamp(floor(lod), 0.0, f32(MIPFB_CODE_BASE) - 1.0));
+    atomicMax(&mip_feedback[MIPFB_HEADER_WORDS + slot], MIPFB_CODE_BASE - level);
+}
+
 // Equirect lookup into the sky reflection env map. Copied from water.wgsl's sky_env_sample
 // so both consumers agree with fs_sky_env's convention in sky.wgsl: u = azimuth
 // (atan2(z, x)/2pi + 0.5, U-wrapped), v = 0 at zenith .. 1 at nadir (acos(y)/pi). `dir` is
@@ -655,6 +690,11 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
     let material = materials[in.instance];
     let packed = bitcast<u32>(material.emissive.w);
     let normal_packed = bitcast<u32>(material.normal_map.x);
+    // AST-012A: report the albedo slot's wanted mip. The UV derivatives are the RAW ones --
+    // `uv` below may have been displaced by parallax, and a POM step's derivative describes
+    // the search, not the surface. The albedo alone is reported because it is the slot a
+    // residency decision is about; the normal map shares its fate.
+    mip_feedback_note(packed >> 3u, dpdx(in.uv), dpdy(in.uv));
 
     // Parallax occlusion mapping, carried in the normal map's RED channel.
     //
