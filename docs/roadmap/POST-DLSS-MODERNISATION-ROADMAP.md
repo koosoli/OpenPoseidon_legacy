@@ -41,6 +41,33 @@ units apart; `dist/` staging fails silently while the game runs; and a run-to-ru
 21.7 vs 15.1 ms means one measurement pair proves nothing. Every one of those was caught by
 a control, not by reasoning. See `scripts/README-farfield-bench.md`.
 
+### Evening addendum, 2026-09-01
+
+The day's second half went to the heavy-world frame and the loader, driven by the owner
+playing DayZ Chernarus+ live and reporting what he felt:
+
+- **`land:obj` fell 80% in three measured cuts** (13.2 -> 5.9 -> 2.65 ms): first the
+  per-section string classification (paths re-parsed per frame, a quarter-million heap
+  allocations), then the per-section binding re-resolution. Neither was submission cost;
+  batching remains untouched and unneeded at this scale. `sim:step` is likely the largest
+  CPU phase now; `subThink`/`unitThink` attribution is running.
+- **Loading was mostly a logo.** The loader waited out a hard-coded 8-second splash after
+  the world was ready: Everon 7.59 -> 1.29 s, Chernarus+ 8.11 -> 2.36 s once the wait
+  became a ceiling. Cutting it short stranded the title effect and swallowed all input --
+  found by the owner, proven by ablation, fixed and made observable. The splash is now off
+  by default (`--splash` restores it). A second claimed second (progress-refresh throttle)
+  was re-measured with a proper cold/warm control and does not exist.
+- **12S is answered: no AI parallelism.** After the rations the AI stage is 8-14% of the
+  frame against a then-46-51% object build; the ration took the win parallelism was
+  proposed for. Verdict and numbers in the AI measurement report.
+- **The FP_269 audit is fully closed** -- every item landed or declined with a recorded
+  reason (ARCH-001). Last two: precise sleep landed in the frame pacer; the substitution
+  bank declined as a triple duplicate.
+- **Toggle crash fixed**: stopping and restarting the render thread left `_renderQuit`
+  set; both halves now reset the whole handoff.
+- Open, filed as a task chip: a deterministic physics worker-readback hash mismatch,
+  pre-existing from Aug 31, order-dependent in the suite.
+
 ## Current baseline
 
 The following foundations already exist and should be extended rather than rebuilt:
