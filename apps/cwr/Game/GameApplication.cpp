@@ -1632,8 +1632,17 @@ void GameApplication::RunMainLoop()
                 // above it. That is exactly the symptom the owner reported twice.
                 if (GWorld)
                 {
+                    // Logged, not assumed. This is the line whose absence cost the owner all
+                    // mouse and keyboard input twice, and a capture harness cannot see the
+                    // difference -- it measures what is drawn, not what can be clicked. So the
+                    // repair reports whether it actually had something to clear, and a run
+                    // with the splash on can be checked from its log alone.
+                    const bool hadTitle = GWorld->GetTitleEffect() != nullptr;
+                    const bool hadCut = GWorld->GetCutEffect() != nullptr;
                     GWorld->SetTitleEffect(nullptr);
                     GWorld->SetCutEffect(nullptr);
+                    LOG_INFO(Core, "Splash cut short: cleared title={} cut={} (a stranded title effect swallows all input)",
+                             hadTitle ? 1 : 0, hadCut ? 1 : 0);
                 }
                 Poseidon::ProgressScript.Free();
                 break;
