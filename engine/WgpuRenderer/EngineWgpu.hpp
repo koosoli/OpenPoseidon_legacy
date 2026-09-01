@@ -1168,6 +1168,7 @@ class EngineWgpu : public EngineDummy
     uint64_t _nextOverlayTexHandle = 1; // 0 stays "built-in white"
     std::unordered_map<uint64_t, uint64_t> _overlayTexIdOf;
     void DrainOverlayTexOps();
+    void TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws);
 
     // REN-THR-012 -- the READ half of the boundary. Nineteen call sites read renderer
     // counters; seventeen are the dev panel, the streaming diagnostics and the capture JSON

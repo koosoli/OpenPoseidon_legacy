@@ -1907,7 +1907,9 @@ void EngineWgpu::DrainResourceOps()
         }
     }
     _resourceOps.clear();
-    DrainOverlayTexOps();
+    // The overlay drain is NOT called from here any more. It is one step of the consumer
+    // block's explicit sequence in NextFrame, where the order it depends on is visible --
+    // a nested call made the order a property of two functions instead of one list.
 }
 
 void EngineWgpu::EnqueueCpuMeshSetSkin(std::shared_ptr<CpuMeshSlot> slot, std::vector<SVertex> verts,
@@ -2002,6 +2004,30 @@ void EngineWgpu::DrainOverlayTexOps()
     _overlayTexOps.clear();
 }
 
+// REN-THR-013: overlay draws carry producer texture handles out of SubmitOverlay; this
+// resolves them once the drain has created whatever the frame refers to. An unknown handle
+// draws WHITE and says so, because a white panel is otherwise indistinguishable from a UI
+// that legitimately has no texture.
+void EngineWgpu::TranslateOverlayDrawHandles(std::vector<WgrOverlayDraw>& draws)
+{
+    for (WgrOverlayDraw& d : draws)
+    {
+        if (d.texture_id == 0)
+            continue;
+        const auto it = _overlayTexIdOf.find(d.texture_id);
+        if (it != _overlayTexIdOf.end())
+        {
+            d.texture_id = it->second;
+            continue;
+        }
+        d.texture_id = 0;
+        static uint32_t reported = 0;
+        if (reported++ < 8)
+            LOG_ERROR(Graphics, "ANOMALY overlay draw carries unknown producer texture handle {} -- drawn white",
+                      d.texture_id);
+    }
+}
+
 void EngineWgpu::DrainInstanceOps()
 {
     if (_instanceOps.empty())
@@ -2054,12 +2080,6 @@ void EngineWgpu::NextFrame()
 {
     if (_renderer)
     {
-        ApplyPendingRendererSettings();
-        // Resources before instances: a queued add may reference a model whose queued
-        // registration precedes it, and that is the only cross-queue dependency direction
-        // the producer can create.
-        DrainResourceOps();
-        DrainInstanceOps();
         SyncWaterLookProfile();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
         // into _tonemap / _sky (auto mode only; manual override holds the tabs' values).
@@ -2595,6 +2615,22 @@ void EngineWgpu::NextFrame()
         frame.water_nodes = backing.waterNodes;
         frame.water_batches = backing.waterBatches;
         frame.grass_batches = backing.grassBatches;
+        // REN-THR-013: THE CONSUMER BLOCK. Everything from here to PublishRendererStats
+        // touches the renderer handle and nothing else does; this is the span a render
+        // thread will own, and it is placed here rather than at the top of NextFrame so
+        // that moving it needs no reordering.
+        //
+        // Order inside it is load-bearing. Settings first (they configure what the draws
+        // will do). Then resources before instances, because a queued instance add may name
+        // a model whose queued registration precedes it, and that is the only cross-queue
+        // dependency the producer can create. Then the overlay textures, and only then the
+        // translation of the overlay draws that refer to them.
+        ApplyPendingRendererSettings();
+        DrainResourceOps();
+        DrainInstanceOps();
+        DrainOverlayTexOps();
+        TranslateOverlayDrawHandles(backing.overlayDraws);
+
         HashPublishedFrame(frame);
         wgr_render_frame(_renderer, &frame);
         PublishRendererStats();
@@ -7508,7 +7544,6 @@ void EngineWgpu::SubmitOverlay(const OverlayVertex* verts, int vertCount, const 
                                const OverlayDrawCmd* cmds, int cmdCount)
 {
     static_assert(sizeof(OverlayVertex) == sizeof(WgrOverlayVertex), "overlay vertex layouts must match");
-    DrainOverlayTexOps(); // the font atlas may have been created since the frame's main drain
     _overlayVerts.clear();
     _overlayIndices.clear();
     _overlayDraws.clear();
@@ -7525,33 +7560,11 @@ void EngineWgpu::SubmitOverlay(const OverlayVertex* verts, int vertCount, const 
         const OverlayDrawCmd& c = cmds[i];
         WgrOverlayDraw& d = _overlayDraws[i];
         d.clip = {c.clip[0], c.clip[1], c.clip[2], c.clip[3]};
-        // c.texture is a PRODUCER handle (REN-THR-010); 0 stays the built-in white. An
-        // unknown handle maps to white rather than to a stranger's texture.
-        if (c.texture == 0)
-        {
-            d.texture_id = 0;
-        }
-        else
-        {
-            const auto it = _overlayTexIdOf.find(c.texture);
-            if (it != _overlayTexIdOf.end())
-            {
-                d.texture_id = it->second;
-            }
-            else
-            {
-                // White, not a stranger's texture -- and said out loud, because the visible
-                // symptom (a white panel) is otherwise indistinguishable from a UI that
-                // simply has no texture, and this is the one path in the three drains that
-                // cannot be exercised headlessly (it needs an open dev-panel window).
-                d.texture_id = 0;
-                static uint32_t reported = 0;
-                if (reported++ < 8)
-                    LOG_ERROR(Graphics,
-                              "ANOMALY overlay draw carries unknown producer texture handle {} -- drawn white",
-                              c.texture);
-            }
-        }
+        // REN-THR-013: the PRODUCER handle is stored as-is and translated at the drain,
+        // not here. SubmitOverlay runs on the producer during frame build; the drain runs
+        // where the renderer handle is owned, and once that is another thread the map this
+        // used to read is not the producer's to read.
+        d.texture_id = c.texture;
         d.first_index = c.firstIndex;
         d.index_count = c.indexCount;
         d.base_vertex = c.baseVertex;
@@ -7811,6 +7824,8 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
             d.mesh = 0;
             d.texture_id = 0;
             d.normal_texture_id = 0;
+            // An index into the palette, whose order is an artefact -- see sl[6].
+            d.palette_slot = 0;
             h2 = HashBytes(h2, &d, sizeof(d));
         }
         sl[2] = h2;
@@ -7822,7 +7837,33 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     sl[3] = HashSlice(kBasis, frame.verts);
     sl[4] = HashSlice(kBasis, frame.batches);
     sl[5] = HashSlice(kBasis, frame.cmds);
-    sl[6] = HashSlice(kBasis, frame.palette);
+    // The palette is an ARRAY WHOSE ORDER IS AN ARTEFACT. Slots are handed out in draw
+    // order (`_currentPaletteSlot = _palette.size() / WGR_PALETTE_SIZE`), and draw order
+    // follows the order objects were inserted into the scene -- which rides asynchronous
+    // load completion. Two runs with a bit-identical simulation can therefore publish the
+    // same bone matrices under permuted slot numbers, and comparing the array positionally
+    // reports every frame as different. Measured: the simulation identical across all 902
+    // ticks while `pal` and `shad` differed in all 901 scene frames.
+    //
+    // Under masking the palette is hashed as a MULTISET -- per-entry hashes, sorted -- so a
+    // permutation compares equal and a changed matrix still does not. Same rule as the
+    // handles: hash what is drawn, not the order it happened to be recorded in.
+    if (maskIds)
+    {
+        const uint32_t np = frame.palette.length;
+        std::vector<uint64_t> entries(np);
+        for (uint32_t i = 0; i < np; i++)
+            entries[i] = HashBytes(kBasis, &frame.palette.data[i], sizeof(WgrMat4));
+        std::sort(entries.begin(), entries.end());
+        uint64_t h6 = HashBytes(kBasis, &np, sizeof(np));
+        for (const uint64_t e : entries)
+            h6 = HashBytes(h6, &e, sizeof(e));
+        sl[6] = h6;
+    }
+    else
+    {
+        sl[6] = HashSlice(kBasis, frame.palette);
+    }
     // shadow_casters carries a mesh AND a texture handle too, and masking draws3d while
     // leaving these unmasked made the oracle report a phantom regression: under machine load
     // (an agent compiling) the two runs assigned handles in a different order, sl[7] moved in
@@ -7831,16 +7872,28 @@ void EngineWgpu::HashPublishedFrame(const WgrFrame& frame)
     // what is drawn, not what it is labelled.
     if (maskIds)
     {
-        uint64_t h7 = kBasis;
+        // A MULTISET, like the palette. The caster array is in draw order, and draw order
+        // follows scene insertion order, which rides asynchronous load completion. Order
+        // carries no meaning here: every caster renders into a depth-only map, so permuting
+        // them cannot change a pixel. Masking the handles alone was not enough -- measured,
+        // `shad` still differed in two attempts of three with the simulation identical.
         const uint32_t n7 = frame.shadow_casters.length;
-        h7 = HashBytes(h7, &n7, sizeof(n7));
+        std::vector<uint64_t> casters(n7);
         for (uint32_t i = 0; i < n7; i++)
         {
             WgrShadowCaster c = frame.shadow_casters.data[i];
             c.mesh = 0;
             c.texture_id = 0;
-            h7 = HashBytes(h7, &c, sizeof(c));
+            c.palette_slot = 0;
+            // Index range into the shared geometry pool: allocated at mesh-create time, so
+            // it is a label the load order assigns, exactly like the mesh handle itself.
+            c.index_begin = 0;
+            casters[i] = HashBytes(kBasis, &c, sizeof(c));
         }
+        std::sort(casters.begin(), casters.end());
+        uint64_t h7 = HashBytes(kBasis, &n7, sizeof(n7));
+        for (const uint64_t e : casters)
+            h7 = HashBytes(h7, &e, sizeof(e));
         sl[7] = h7;
     }
     else
