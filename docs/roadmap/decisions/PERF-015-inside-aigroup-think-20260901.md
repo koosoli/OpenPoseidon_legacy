@@ -345,3 +345,58 @@ anything is H7's `flee` bucket, and the same four reasons apply to touching it.
 
 Both are recorded here so the next session does not have to re-derive them, and neither should
 be touched before the run in §3 says what they cost.
+
+---
+
+## §6 Measured — H5 confirmed: one unrationed walk is two thirds of the AI stage
+
+Run idle on `perf_combat` after a 110 s warm-up, `-TimeoutSeconds 300`. Two runs, three
+windows each; the numbers below are one window and the second run agrees to within a few
+percent.
+
+```
+AI group body ms/tick over 62 aiTicks:
+  groupThink=2.753 [early=0.001 full=2.752
+    [flee=0.004 fsm=0.007 join=0.002 track=2.231 expensive=0.117 subThink=0.386
+     residual=0.006]]
+  trackScans=8.98 trackCalls=31.10 trackPairs=14224.87 targetsPerCall=457.44
+```
+
+**`track` is 2.231 ms of the body's 2.753 — 81% — and roughly 68% of the whole AI stage.**
+Everything else in the body is noise by comparison: the flee check, the group FSM and the
+subgroup joining together cost 0.013 ms. `residual` is 0.006, so the six boundaries do
+enclose the body and the split can be trusted.
+
+| hypothesis | verdict |
+|---|---|
+| **H5** — near-enemy tracking dominates | **CONFIRMED**, and by a wider margin than the hypothesis expected |
+| **H6** — the group FSM | **REFUTED** — 0.007 ms |
+| **H7** — cost spread thin across the body | **REFUTED** — one segment is 81% of it |
+| **H8** — early exits are not cheap | **REFUTED** — `early` is 0.001 ms, but see below: they are also rare, so this was never where the cost could hide |
+
+### The denominators are the finding
+
+`targetsPerCall = 457`. Thirty-one calls a tick, each walking a target list of four hundred
+and fifty-seven, for **14,225 pairs per tick** at the full simulation rate. `TargetList::Manage`
+(`Target.cpp:387`) puts no size limit on that list, so this is O(units × targets) with both
+factors free to grow — and this document's audit found the ration gate for it **half-built**:
+`EntityAI::_trackNearTargetsTime` is written by `TrackNearTargets` (`Target.cpp:1325`) and
+**read by nothing**, while its structurally identical sibling `_trackTargetsTime` is read by
+`WhatIsVisible` (`Target.cpp:1364`) to throttle the ordinary path to once every 1–5 seconds.
+
+So the single largest CPU cost in this engine's simulation is a walk whose author wrote the
+timestamp to ration it and never wrote the check. That is not a micro-optimisation; it is a
+line of code that was intended and is missing.
+
+### Still not fixed here, and the reason is not caution for its own sake
+
+Rationing detection changes *when units notice each other*. SIM-803 established that
+`_targetList` ordering is gameplay-observable, and SIM-813 made this loop part of the
+simulation's definition by removing the wall clock from its selection — so a change to its
+cadence needs behavioural tests and `StateTimeline` (SIM-808) as the oracle, not a
+measurement and a hunch. What has changed is that the prize is now known: about two thirds
+of the AI stage, on a scene where the AI stage is the largest of the six.
+
+The counter-example that keeps this honest is one document back. PERF-014 §4 recorded an
+equally plausible defect — an O(N²) selection rescan — and measurement then valued it at
+**0.003 ms**. The difference here is that the measurement came first.
