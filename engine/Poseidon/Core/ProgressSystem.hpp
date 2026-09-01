@@ -29,6 +29,15 @@ class ProgressSystem
 	DWORD _lastProgressRefresh;
 	DWORD _progressRefreshBase;
 
+	// Splash cost accounting.  Frame() presents, and a present during loading is not
+	// free -- it is what turns a refresh point in the loader into wall time.  These
+	// count it so the cost can be read off a normal log instead of guessed at.
+	DWORD _windowStartTick = 0;   // GlobalTickCount at the last Start()
+	DWORD _frameMsTotal = 0;      // wall ms spent inside Frame() since Start()
+	DWORD _lastFrameCostMs = 0;   // wall ms the most recent Frame() took
+	int _frameCount = 0;          // frames presented since Start()
+	int _refreshCount = 0;        // Refresh() calls since Start() (throttled or not)
+
 	bool _clear;
 
 	public:
@@ -55,6 +64,7 @@ class ProgressSystem
 	void Draw();
 
 	void Frame(); // FinishDraw // Draw // InitDraw
+	void ResetFrameAccounting();
 	void Refresh(); // Frame (if neccessary)FinishDraw // ProgressDraw // InitDraw
 
 	bool Active() const;

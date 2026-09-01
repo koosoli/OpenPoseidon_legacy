@@ -16,6 +16,7 @@
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/Graphics/Textures/TexturePreload.hpp>
 #include <Poseidon/Foundation/Strings/Mbcs.hpp>
+#include <cstdlib>
 
 using namespace Poseidon::Dev;
 
@@ -69,6 +70,80 @@ void GlobalAliveImplementation::Alive()
 }
 
 const PackedColor ProgressBackground(0);
+
+namespace
+{
+// Splash pacing, and a measured negative result about it.
+//
+// Refresh() renders a whole frame, so what a refresh point in the loader costs is
+// what a frame costs, and the floor below is what stops the loader's call rate from
+// deciding how many there are: Everon's object loop calls Refresh() 56,742 times in
+// one load and only ~45 of those become frames.
+//
+// The floor is 16 ms while a script is live so the startup animation runs near frame
+// rate.  That looks like a trap, because a splash frame is not free -- measured on
+// stock Everon at 1280x720, ~3 ms warm, ~6 ms with the file cache evicted, ~17 ms on
+// the genuinely first load after a boot.  Once a frame costs as much as the floor,
+// the floor has already elapsed by the time the frame returns, so every refresh point
+// renders and the splash runs at 100% duty.
+//
+// It was measured, and throttling it does not buy the load back.  Pacing the gap at
+// 3x the last frame's cost cut the world-load phase from ~45 frames to ~22, and the
+// time spent drawing them did not move (three paired cold runs: 47 frames/266 ms ->
+// 14 frames/283 ms, 49/402 -> 17/241, 42/184 -> 35/167).  A splash frame during
+// loading is mostly draining GPU work the loader has just queued; drawing fewer of
+// them makes each one drain more.  What it does reliably change is the animation,
+// down to ~16 fps on the phase where the load is heaviest.
+//
+// So the throttle stays as it was, and the lever is left here, off, for whoever
+// measures the one regime this could not: the very first world load after a boot,
+// where frames cost 17 ms and the splash took 1078 ms of a 1624 ms phase (n=1, no
+// control).  The "Progress splash:" line logged by Finish() is how to tell.
+//
+//   POSEIDON_SPLASH_MIN_MS       floor between splash frames, ms (default 16)
+//   POSEIDON_SPLASH_COST_FACTOR  also require gap >= factor * last frame cost
+//                                (default 0 = off, the behaviour measured above)
+struct SplashTuning
+{
+    int minMs = 16;
+    int costFactor = 0;
+};
+
+int EnvInt(const char* name, int fallback)
+{
+    const char* v = std::getenv(name);
+    if (v == nullptr || v[0] == '\0')
+    {
+        return fallback;
+    }
+    char* end = nullptr;
+    const long parsed = std::strtol(v, &end, 10);
+    if (end == v)
+    {
+        return fallback;
+    }
+    return static_cast<int>(parsed);
+}
+
+const SplashTuning& Tuning()
+{
+    static const SplashTuning tuning = [] {
+        SplashTuning t;
+        t.minMs = EnvInt("POSEIDON_SPLASH_MIN_MS", t.minMs);
+        if (t.minMs < 1)
+        {
+            t.minMs = 1;
+        }
+        t.costFactor = EnvInt("POSEIDON_SPLASH_COST_FACTOR", t.costFactor);
+        if (t.costFactor < 0)
+        {
+            t.costFactor = 0;
+        }
+        return t;
+    }();
+    return tuning;
+}
+} // namespace
 
 ProgressSystem::ProgressSystem()
 {
@@ -257,6 +332,7 @@ void ProgressSystem::Draw()
 
 void ProgressSystem::Frame()
 {
+    const DWORD frameStart = Poseidon::Foundation::GlobalTickCount();
     // no progress drawing on dedicated server
     if (GEngine->InitDrawDone())
     {
@@ -269,6 +345,11 @@ void ProgressSystem::Frame()
         GEngine->InitDraw(_clear, ProgressBackground);
     }
     Poseidon::ProcessMessagesNoWait();
+    // NextFrame() presents, and a present is paced by the swap chain -- so this
+    // is wall time the loader spent on the splash rather than on loading.
+    _lastFrameCostMs = Poseidon::Foundation::GlobalTickCount() - frameStart;
+    _frameMsTotal += _lastFrameCostMs;
+    _frameCount++;
 }
 
 void ProgressSystem::Refresh()
@@ -286,12 +367,22 @@ void ProgressSystem::Refresh()
         return;
     }
     // some progress information is diplayed
+    _refreshCount++;
 
     // Do not update too often for static text progress, but let active
     // progress scripts (startup/title fades) refresh near frame-rate so
     // their transitions don't collapse to the old 10 Hz throttle.
     DWORD cTime = Poseidon::Foundation::GlobalTickCount();
-    int minTime = ProgressScript ? 16 : 100;
+    int minTime = ProgressScript ? Tuning().minMs : 100;
+    if (ProgressScript && Tuning().costFactor > 0)
+    {
+        // Off by default -- see the note above for what this measured.
+        const int costGate = static_cast<int>(_lastFrameCostMs) * Tuning().costFactor;
+        if (costGate > minTime)
+        {
+            minTime = costGate;
+        }
+    }
     float changeRel = fabs(_progressDrawn * _progressTot - _progressCur);
     if (!ProgressScript && changeRel > 0.01 * _progressTot)
     {
@@ -345,6 +436,7 @@ void ProgressSystem::Start(RString title, RString format, Ref<Font> font, float 
     }
 
     // fill both back and front buffer with new content
+    ResetFrameAccounting();
     Frame();
     Frame();
     Frame();
@@ -364,13 +456,29 @@ void ProgressSystem::Start(AbstractOptionsUI* display)
     _progressTitle = nullptr;
     _progressFormat = nullptr;
     // fill both back and front buffer with new content
+    ResetFrameAccounting();
     Frame();
     Frame();
     Frame();
 }
 
+void ProgressSystem::ResetFrameAccounting()
+{
+    _windowStartTick = Poseidon::Foundation::GlobalTickCount();
+    _frameMsTotal = 0;
+    _lastFrameCostMs = 0;
+    _frameCount = 0;
+    _refreshCount = 0;
+}
+
 void ProgressSystem::Finish()
 {
+    if (_frameCount > 0)
+    {
+        const DWORD windowMs = Poseidon::Foundation::GlobalTickCount() - _windowStartTick;
+        LOG_INFO(Core, "Progress splash: {} frames / {} ms drawn out of {} ms window ({} refresh calls)", _frameCount,
+                 _frameMsTotal, windowMs, _refreshCount);
+    }
     _progressTitle = nullptr;
     _progressFormat = nullptr;
     _progressDisplay = nullptr;
