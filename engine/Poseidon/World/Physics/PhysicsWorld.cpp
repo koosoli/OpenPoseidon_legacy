@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iterator>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -98,81 +99,160 @@ BodyId PhysicsWorld::RegisterStatic(LODShape* shape, const Matrix4& transform)
 // take. Shared by the static registration and the dynamic model probe, because
 // "make this model collide" and "make this model fall over" want exactly the same
 // geometry and any drift between the two would be invisible until something
-// behaved differently as a probe than it did as scenery.
-bool PhysicsWorld::ExtractPieces(LODShape* shape, std::vector<Vector3>& points, std::vector<ConvexPiece>& pieces,
-                                 int& degenerate, int& maxPoints)
+// behaved differently as a probe than it did as scenery. `wanted` is what keeps
+// them apart where they must differ: a probe asks for Solid alone, so a falling
+// jeep is its Geometry hull and not also the sight-blocking box around it.
+//
+// The LOD kinds are MERGED BY LEVEL INDEX before anything is read. LODShape
+// already collapses an absent View level onto Geometry and an absent Fire level
+// onto View, so on most models all three resolve to the same level -- and reading
+// them one at a time would register that one level's hulls three times over.
+bool PhysicsWorld::ExtractPieces(LODShape* shape, ColliderFlags wanted, std::vector<Vector3>& points,
+                                 std::vector<ConvexPiece>& pieces, int& degenerate, int& maxPoints,
+                                 RegisterResult& result)
 {
     points.clear();
     pieces.clear();
     degenerate = 0;
     maxPoints = 0;
-
-    Shape* geometry = shape ? shape->GeometryLevel() : nullptr;
-    if (!geometry || geometry->NVertex() <= 0)
-    {
-        return false;
-    }
-    shape->RecalculateGeomComponentsAsNeeded();
-    const ConvexComponents& components = shape->GetGeomComponents();
-    if (components.Size() <= 0)
+    if (!shape)
     {
         return false;
     }
 
-    pieces.reserve(components.Size());
-    std::vector<int> offsets;
-    offsets.reserve(components.Size());
+    const int geometryLevel = shape->FindGeometryLevel();
 
-    for (int i = 0; i < components.Size(); ++i)
+    // One entry per LOD kind, in the order the flags are declared. The level index
+    // is what identifies a source, not the kind.
+    struct Source
     {
-        const ConvexComponent* component = components[i];
-        if (!component || component->Size() < MinComponentPoints)
+        int           level;
+        ColliderFlags kind;
+    };
+    const Source sources[] = {
+        {geometryLevel, ColliderFlags::Solid},
+        {shape->FindFireGeometryLevel(), ColliderFlags::BulletCollision},
+        {shape->FindViewGeometryLevel(), ColliderFlags::ViewBlocking},
+        {shape->FindRoadwayLevel(), ColliderFlags::Roadway},
+    };
+
+    // Merged: level index -> the union of kinds resolving to it.
+    int           mergedLevels[std::size(sources)];
+    ColliderFlags mergedKinds[std::size(sources)];
+    int           mergedCount = 0;
+    for (const Source& source : sources)
+    {
+        if (source.level < 0 || !HasAny(wanted, source.kind))
         {
-            ++degenerate;
             continue;
         }
-        maxPoints = std::max(maxPoints, component->Size());
-
-        const int begin = static_cast<int>(points.size());
-        Vector3   lo(0, 0, 0);
-        Vector3   hi(0, 0, 0);
-        bool      first = true;
-        for (int p = 0; p < component->Size(); ++p)
+        result.lodKindsResolved |= source.kind;
+        if (source.level != geometryLevel)
         {
-            const int vertex = (*component)[p];
-            if (vertex < 0 || vertex >= geometry->NVertex())
+            result.lodKindsDedicated |= source.kind;
+        }
+        int found = -1;
+        for (int i = 0; i < mergedCount; ++i)
+        {
+            if (mergedLevels[i] == source.level)
             {
+                found = i;
+                break;
+            }
+        }
+        if (found >= 0)
+        {
+            mergedKinds[found] |= source.kind;
+            continue;
+        }
+        mergedLevels[mergedCount] = source.level;
+        mergedKinds[mergedCount] = source.kind;
+        ++mergedCount;
+    }
+    if (mergedCount == 0)
+    {
+        return false;
+    }
+
+    std::vector<int> offsets;
+
+    for (int s = 0; s < mergedCount; ++s)
+    {
+        Shape* level = shape->Level(mergedLevels[s]);
+        if (!level || level->NVertex() <= 0)
+        {
+            continue;
+        }
+        // The Roadway and Land Contact levels have no ConvexComponents set at all
+        // -- `LODShape::GetConvexComponents` returns null for them, because they are
+        // authored as surfaces rather than as named `ComponentNN` volumes. Nothing
+        // is invented to fill that in: the kind stays out of `flagsRegistered`, and
+        // the census reports how often the corpus asks for it.
+        ConvexComponents* components = shape->GetConvexComponents(mergedLevels[s]);
+        if (!components)
+        {
+            continue;
+        }
+        shape->RecalculateConvexComponentsAsNeeded(mergedLevels[s]);
+        if (components->Size() <= 0)
+        {
+            continue;
+        }
+
+        for (int i = 0; i < components->Size(); ++i)
+        {
+            const ConvexComponent* component = (*components)[i];
+            if (!component || component->Size() < MinComponentPoints)
+            {
+                ++degenerate;
                 continue;
             }
-            const Vector3 position = geometry->Pos(vertex);
-            points.push_back(position);
-            if (first)
+            maxPoints = std::max(maxPoints, component->Size());
+
+            const int begin = static_cast<int>(points.size());
+            Vector3   lo(0, 0, 0);
+            Vector3   hi(0, 0, 0);
+            bool      first = true;
+            for (int p = 0; p < component->Size(); ++p)
             {
-                lo = hi = position;
-                first = false;
-            }
-            else
-            {
-                for (int a = 0; a < 3; ++a)
+                const int vertex = (*component)[p];
+                if (vertex < 0 || vertex >= level->NVertex())
                 {
-                    lo[a] = std::min(lo[a], position[a]);
-                    hi[a] = std::max(hi[a], position[a]);
+                    continue;
+                }
+                const Vector3 position = level->Pos(vertex);
+                points.push_back(position);
+                if (first)
+                {
+                    lo = hi = position;
+                    first = false;
+                }
+                else
+                {
+                    for (int a = 0; a < 3; ++a)
+                    {
+                        lo[a] = std::min(lo[a], position[a]);
+                        hi[a] = std::max(hi[a], position[a]);
+                    }
                 }
             }
-        }
 
-        const int   count = static_cast<int>(points.size()) - begin;
-        const float smallestExtent = std::min({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
-        if (count < MinComponentPoints || smallestExtent < MinComponentExtent)
-        {
-            points.resize(static_cast<std::size_t>(begin));
-            ++degenerate;
-            continue;
+            const int   count = static_cast<int>(points.size()) - begin;
+            const float smallestExtent = std::min({hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]});
+            if (count < MinComponentPoints || smallestExtent < MinComponentExtent)
+            {
+                points.resize(static_cast<std::size_t>(begin));
+                ++degenerate;
+                continue;
+            }
+            offsets.push_back(begin);
+            pieces.push_back(ConvexPiece{nullptr, count, mergedKinds[s]});
+            result.flagsRegistered |= mergedKinds[s];
         }
-        offsets.push_back(begin);
-        pieces.push_back(ConvexPiece{nullptr, count});
     }
 
+    // Pointers last: `points` reallocates as it grows, so anything taken during the
+    // loop above would dangle.
     for (std::size_t i = 0; i < pieces.size(); ++i)
     {
         pieces[i].points = points.data() + offsets[i];
@@ -191,7 +271,11 @@ BodyId PhysicsWorld::SpawnModelProbe(LODShape* shape, const Matrix4& transform, 
     std::vector<ConvexPiece> pieces;
     int                      degenerate = 0;
     int                      maxPoints = 0;
-    if (!ExtractPieces(shape, points, pieces, degenerate, maxPoints))
+    RegisterResult           census;
+    // Solid only. A model probe is one falling object, and giving it its View
+    // Geometry box as well would make it collide with the world at the size of its
+    // occluder rather than of its hull.
+    if (!ExtractPieces(shape, ColliderFlags::Solid, points, pieces, degenerate, maxPoints, census))
     {
         return {};
     }
@@ -207,17 +291,18 @@ void PhysicsWorld::ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse)
     }
 }
 
-BodyId PhysicsWorld::CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const
+BodyId PhysicsWorld::CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint, const QueryFilter& filter) const
 {
-    return _backend ? _backend->CastRay(from, to, hitPoint) : BodyId{};
+    return _backend ? _backend->CastRay(from, to, hitPoint, filter) : BodyId{};
 }
 
-bool PhysicsWorld::RayHitAnything(Vector3Par from, Vector3Par to) const
+bool PhysicsWorld::RayHitAnything(Vector3Par from, Vector3Par to, const QueryFilter& filter) const
 {
-    return _backend && _backend->RayHitAnything(from, to);
+    return _backend && _backend->RayHitAnything(from, to, filter);
 }
 
-bool PhysicsWorld::MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness) const
+bool PhysicsWorld::MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness,
+                                    const QueryFilter& filter) const
 {
     thickness = 0.0f;
     if (!_backend || maxDepth <= 0.0f)
@@ -237,14 +322,15 @@ bool PhysicsWorld::MeasureThickness(Vector3Par entry, Vector3Par direction, floa
     // glancing shot through the same wall travels further inside it.
     const Vector3 beyond = entry + dir * maxDepth;
     Vector3       exit;
-    if (!_backend->CastRay(beyond, entry, exit).IsValid() && !_backend->RayHitAnything(beyond, entry))
+    if (!_backend->CastRay(beyond, entry, exit, filter).IsValid() &&
+        !_backend->RayHitAnything(beyond, entry, filter))
     {
         return false;
     }
     // CastRay reports the point even when the body is untracked (terrain), but only
     // fills it on a hit, so re-cast to read the point rather than trust a stale one.
     Vector3 point;
-    _backend->CastRay(beyond, entry, point);
+    _backend->CastRay(beyond, entry, point, filter);
 
     const float depth = (point - entry) * dir;
     if (depth <= 0.0f || depth > maxDepth)
@@ -267,7 +353,8 @@ RegisterResult PhysicsWorld::RegisterStaticDetailed(LODShape* shape, const Matri
     std::vector<ConvexPiece> pieces;
     int                      degenerate = 0;
     int                      maxPoints = 0;
-    const bool               usable = ExtractPieces(shape, points, pieces, degenerate, maxPoints);
+    const bool               usable =
+        ExtractPieces(shape, ColliderFlags::All, points, pieces, degenerate, maxPoints, result);
 
     _degenerateComponents += static_cast<std::uint32_t>(degenerate);
     result.maxComponentPoints = maxPoints;

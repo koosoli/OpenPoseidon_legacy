@@ -43,6 +43,21 @@ struct FailureGroup
     int maxPoints = 0;
 };
 
+/// What one DISTINCT model turned out to carry, for the LOD-kind census.
+///
+/// Per model rather than per instance, and that is the whole point: a map is
+/// mostly the same forty props copied thousands of times, so an instance count
+/// answers "how much of this map has fire geometry" while a model count answers
+/// "how much of this content was authored with it". The second is the one that
+/// says whether flagging colliders buys anything.
+struct KindGroup
+{
+    std::uint32_t         instances = 0;
+    Physics::ColliderFlags resolved = Physics::ColliderFlags::None;
+    Physics::ColliderFlags dedicated = Physics::ColliderFlags::None;
+    Physics::ColliderFlags registered = Physics::ColliderFlags::None;
+};
+
 const char* OutcomeName(Physics::RegisterResult::Outcome outcome)
 {
     switch (outcome)
@@ -181,6 +196,10 @@ void RunPhysicsCorpus()
     // thousand times cannot masquerade as a systematic failure.
     std::map<std::string, FailureGroup> failures;
 
+    // Every model, not only the failing ones: the LOD-kind question is about what
+    // the corpus HAS, and a census that only looks at failures cannot answer it.
+    std::map<std::string, KindGroup> kinds;
+
     // THE LOOSE OBJECTS, counted rather than assumed. The open question before
     // handing anything to physics was whether the barrels and pallets a map
     // actually contains are Things at all -- or terrain decoration with no entity
@@ -252,6 +271,15 @@ void RunPhysicsCorpus()
                     world.RegisterStaticDetailed(shape, object->WorldTransform());
                 maxPoints = std::max(maxPoints, result.maxComponentPoints);
 
+                {
+                    const char* kindName = shape->Name();
+                    KindGroup&  kind = kinds[kindName ? kindName : "<unnamed>"];
+                    ++kind.instances;
+                    kind.resolved |= result.lodKindsResolved;
+                    kind.dedicated |= result.lodKindsDedicated;
+                    kind.registered |= result.flagsRegistered;
+                }
+
                 if (result.outcome == Physics::RegisterResult::Outcome::Registered)
                 {
                     ++instancesRegistered;
@@ -278,6 +306,61 @@ void RunPhysicsCorpus()
              stats.modelsWithoutGeometry, stats.degenerateComponents, stats.hullFailures);
     // The number that decides whether MaxHullVertices is a guard or a silent cap.
     LOG_WARN(World, "PHYSCORPUS: max ConvexComponent points observed: {}", maxPoints);
+
+    // ---- LOD kinds ---------------------------------------------------------
+    // The measurement behind the collider flags. `dedicated` is the load-bearing
+    // column: a flag whose LOD always resolves back onto Geometry costs nothing
+    // and also distinguishes nothing, so the size of that column is exactly how
+    // much the filter is worth on this content.
+    {
+        std::uint32_t withFire = 0, dedicatedFire = 0;
+        std::uint32_t withView = 0, dedicatedView = 0;
+        std::uint32_t withRoadway = 0, roadwayRegistered = 0;
+        std::uint32_t instFire = 0, instView = 0, instRoadway = 0;
+        for (const auto& [modelName, kind] : kinds)
+        {
+            (void)modelName;
+            using Physics::ColliderFlags;
+            if (Physics::HasAny(kind.resolved, ColliderFlags::BulletCollision))
+            {
+                ++withFire;
+            }
+            if (Physics::HasAny(kind.dedicated, ColliderFlags::BulletCollision))
+            {
+                ++dedicatedFire;
+                instFire += kind.instances;
+            }
+            if (Physics::HasAny(kind.resolved, ColliderFlags::ViewBlocking))
+            {
+                ++withView;
+            }
+            if (Physics::HasAny(kind.dedicated, ColliderFlags::ViewBlocking))
+            {
+                ++dedicatedView;
+                instView += kind.instances;
+            }
+            if (Physics::HasAny(kind.resolved, ColliderFlags::Roadway))
+            {
+                ++withRoadway;
+                instRoadway += kind.instances;
+                if (Physics::HasAny(kind.registered, ColliderFlags::Roadway))
+                {
+                    ++roadwayRegistered;
+                }
+            }
+        }
+        LOG_WARN(World, "PHYSLOD: {} distinct models walked", static_cast<std::uint32_t>(kinds.size()));
+        LOG_WARN(World, "PHYSLOD: fire geometry -- {} resolve to one, {} authored their own ({} instances)",
+                 withFire, dedicatedFire, instFire);
+        LOG_WARN(World, "PHYSLOD: view geometry -- {} resolve to one, {} authored their own ({} instances)",
+                 withView, dedicatedView, instView);
+        // Separate line because roadway is the one kind that can be PRESENT and
+        // still register nothing: it is authored as a surface, not as named
+        // ComponentNN volumes, so there is no convex set to hull.
+        LOG_WARN(World, "PHYSLOD: roadway -- {} models carry one ({} instances), {} produced a hullable collider",
+                 withRoadway, instRoadway, roadwayRegistered);
+        LOG_WARN(World, "PHYSLOD: query-only shapes attached: {} of {} total", stats.queryOnlyShapes, stats.shapes);
+    }
 
     std::vector<std::pair<std::string, FailureGroup>> sorted(failures.begin(), failures.end());
     std::sort(sorted.begin(), sorted.end(),

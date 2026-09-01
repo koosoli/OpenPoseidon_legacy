@@ -41,6 +41,21 @@ struct RegisterResult
     Outcome outcome = Outcome::NoGeometryLod;
     /// Largest point count among this model's components, for sizing the hull cap.
     int maxComponentPoints = 0;
+
+    /// Which special LODs this model resolves to, INCLUDING the engine's own
+    /// fallbacks -- an absent View level reads as Geometry, an absent Fire level as
+    /// View. This is what a query will actually be answered from.
+    ColliderFlags lodKindsResolved = ColliderFlags::None;
+    /// Of those, the ones the model AUTHORED as a level of its own rather than
+    /// inheriting from Geometry. The number that says whether flagging colliders
+    /// buys anything on a given corpus: where this is empty, every flag lands on
+    /// one shared set of hulls and the filter is free but also inert.
+    ColliderFlags lodKindsDedicated = ColliderFlags::None;
+    /// Flags that reached at least one registered piece. A kind present in
+    /// `lodKindsResolved` and missing here had a LOD that yielded no hullable
+    /// convex component -- which is the Roadway answer on this corpus, and a fact
+    /// about the data rather than a failure to look.
+    ColliderFlags flagsRegistered = ColliderFlags::None;
 };
 
 class PhysicsWorld
@@ -95,12 +110,18 @@ public:
     /// Gameplay -> physics. Nothing comes back, so PHY-010's rule holds.
     void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse);
     /// Ray against the physics world. Returns the body hit, invalid if none.
-    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const;
+    ///
+    /// `filter` decides WHICH colliders the ray is allowed to see, so "what stops
+    /// this shot" and "what breaks this sight line" are two different questions of
+    /// the same collider set rather than one question with a shared answer. The
+    /// default sees everything, which is what an unfiltered ray meant before.
+    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint,
+                   const QueryFilter& filter = QueryFilter{}) const;
     /// Did the ray hit ANYTHING, including the terrain height field, which has no
     /// body handle? CastRay alone cannot answer that: it returns an invalid id
     /// both for "missed" and for "hit something untracked", and conflating those
     /// would make the terrain look like a miss in every audit.
-    bool RayHitAnything(Vector3Par from, Vector3Par to) const;
+    bool RayHitAnything(Vector3Par from, Vector3Par to, const QueryFilter& filter = QueryFilter{}) const;
 
     /// How thick is the thing a shot just entered?
     ///
@@ -114,7 +135,13 @@ public:
     /// Returns false when nothing is found within `maxDepth`, which means either a
     /// very thick object or one the collider set does not have -- the caller must
     /// not treat that as "thin".
-    bool MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness) const;
+    ///
+    /// Asks the FIRE GEOMETRY. A View Geometry LOD exists to break line of sight
+    /// and is routinely a coarse box around a building that has windows; measuring
+    /// a shot's path through that would report a wall where the model says there is
+    /// air. `filter` defaults accordingly rather than to everything.
+    bool MeasureThickness(Vector3Par entry, Vector3Par direction, float maxDepth, float& thickness,
+                          const QueryFilter& filter = QueryFilter{ColliderFlags::BulletCollision}) const;
     void   ClearProbes();
     void   GetProbeSamples(std::vector<ProbeSample>& out) const;
     /// Physics -> gameplay, for a body the caller spawned as dynamic. See
@@ -131,8 +158,12 @@ public:
 
 private:
     void ResetCounters();
-    bool ExtractPieces(LODShape* shape, std::vector<Vector3>& points, std::vector<struct ConvexPiece>& pieces,
-                       int& degenerate, int& maxPoints);
+    /// Pulls the convex components of every special LOD in `wanted` into flat
+    /// spans, tagging each piece with the kind it came from. `result` collects what
+    /// the model turned out to carry; pass the same one the caller will return.
+    bool ExtractPieces(LODShape* shape, ColliderFlags wanted, std::vector<Vector3>& points,
+                       std::vector<struct ConvexPiece>& pieces, int& degenerate, int& maxPoints,
+                       RegisterResult& result);
 
     std::unique_ptr<PhysicsBackend> _backend;
 

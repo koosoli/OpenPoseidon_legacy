@@ -26,6 +26,12 @@ struct ConvexPiece
 {
     const Vector3* points = nullptr;
     int            count = 0;
+    /// What this piece is for, read off the special LOD it came from. One body can
+    /// carry pieces with different flags -- that is the point: a model that
+    /// authored a separate Fire Geometry LOD contributes both, and a query then
+    /// picks. Defaults to Solid so a caller that has no opinion (a probe, a test)
+    /// gets the one undifferentiated collider it used to get.
+    ColliderFlags flags = ColliderFlags::Solid;
 };
 
 /// A regular heightfield, row-major, `width * height` samples spaced `cellSize`
@@ -121,8 +127,14 @@ public:
     /// PHY-010 already allows; nothing comes back.
     virtual void ApplyImpulse(BodyId id, Vector3Par point, Vector3Par impulse) = 0;
     /// Ray against the physics world; returns the body hit, invalid if none.
-    virtual BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const = 0;
-    virtual bool   RayHitAnything(Vector3Par from, Vector3Par to) const = 0;
+    ///
+    /// The filter is a PARAMETER OF THE SEAM and not a post-filter above it. A
+    /// caller cannot reach past this to a flag word on the hit: the closest hit
+    /// under a filter is not the closest hit overall, so filtering after the fact
+    /// would answer a different question and quietly return a miss whenever the
+    /// nearest surface was one the caller did not ask about.
+    virtual BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint, const QueryFilter& filter) const = 0;
+    virtual bool   RayHitAnything(Vector3Par from, Vector3Par to, const QueryFilter& filter) const = 0;
     virtual void   ClearProbes() = 0;
     /// Probe positions for debug drawing only. Scoped to probe bodies on purpose:
     /// a general transform getter is what turns "physics is a query service" into

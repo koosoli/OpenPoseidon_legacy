@@ -63,8 +63,16 @@ void AuditProjectileSegment(Vector3Par from, Vector3Par to, bool legacyHit)
         return;
     }
 
-    Vector3    point;
-    const bool physicsHit = world->CastRay(from, to, point).IsValid() || world->RayHitAnything(from, to);
+    // FIRE GEOMETRY, because that is the question the other side asked.
+    // `Landscape::ObjectCollision` defaults to `ObjIntersectFire`, so an unfiltered
+    // physics ray was comparing "did anything at all stop this" against "did the
+    // fire geometry stop this" -- and every model whose View Geometry LOD is a
+    // coarser box than its Fire Geometry counted as a physics-only disagreement for
+    // a reason that was ours, not the corpus's.
+    const Physics::QueryFilter filter{Physics::ColliderFlags::BulletCollision};
+    Vector3                    point;
+    const bool                 physicsHit =
+        world->CastRay(from, to, point, filter).IsValid() || world->RayHitAnything(from, to, filter);
 
     s_segments.fetch_add(1, std::memory_order_relaxed);
     if (legacyHit && physicsHit)

@@ -35,6 +35,71 @@ struct BodyId
     friend bool operator!=(const BodyId& a, const BodyId& b) { return !(a == b); }
 };
 
+/// What a collider piece is FOR.
+///
+/// NOT a taxonomy of our own. An OFP model already carries these as distinct
+/// special LOD levels, and `LODShape` already names them: Geometry
+/// (`FindGeometryLevel`) is the volume things bump into, Fire Geometry
+/// (`FindFireGeometryLevel`) is what stops a shot, View Geometry
+/// (`FindViewGeometryLevel`) is what breaks line of sight, Roadway
+/// (`FindRoadwayLevel`) is the surface something walks on. The flags are read off
+/// those levels; nothing here decides what a collider means.
+///
+/// A model that omits a level does not lose the meaning: `LODShape::ScanShapes`
+/// collapses an absent View level onto Geometry and an absent Fire level onto
+/// View, so most models carry all three flags on one piece and the distinction
+/// only costs extra shapes for the models that actually authored a separate LOD.
+/// That is the same resolution `Object::Intersect` uses, so a filtered query and
+/// the 2001 intersect are asking about the same geometry.
+enum class ColliderFlags : std::uint32_t
+{
+    None = 0,
+    /// Geometry LOD: contact, and the general "did I hit this" question.
+    Solid = 1u << 0,
+    /// Fire Geometry LOD: what a projectile is stopped by.
+    BulletCollision = 1u << 1,
+    /// View Geometry LOD: what breaks line of sight.
+    ViewBlocking = 1u << 2,
+    /// Roadway LOD: the walkable surface.
+    ///
+    /// MEASURED, and the measurement is the reason this one is currently carried
+    /// by the terrain and by nothing else. Over the 1327 models in O.pbo,
+    /// Data3D.pbo and Noe.pbo: 236 (17.8%) carry a Roadway LOD, and 31 (2.3%) put
+    /// any `ComponentNN` selection in it. A Roadway LOD is authored as a surface,
+    /// so there is no convex set to hull and `LODShape` keeps no ConvexComponents
+    /// for that level at all. The flag is real and filters correctly; what it
+    /// cannot yet do is find a static collider, and that is a fact about the data
+    /// rather than a gap in the plumbing. Compare Fire Geometry, where 509 (38.4%)
+    /// authored their own level and 422 (31.8%) of those are hullable.
+    Roadway = 1u << 3,
+
+    All = Solid | BulletCollision | ViewBlocking | Roadway,
+};
+
+constexpr ColliderFlags operator|(ColliderFlags a, ColliderFlags b)
+{
+    return static_cast<ColliderFlags>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
+}
+constexpr ColliderFlags operator&(ColliderFlags a, ColliderFlags b)
+{
+    return static_cast<ColliderFlags>(static_cast<std::uint32_t>(a) & static_cast<std::uint32_t>(b));
+}
+constexpr ColliderFlags& operator|=(ColliderFlags& a, ColliderFlags b) { return a = a | b; }
+/// Do `value` and `mask` share a bit? The question every filter asks, spelled once
+/// so no caller writes the `!= None` half of it wrong.
+constexpr bool HasAny(ColliderFlags value, ColliderFlags mask) { return (value & mask) != ColliderFlags::None; }
+
+/// Which colliders a query is allowed to see.
+///
+/// A struct rather than a bare mask so the seam can grow an exclusion or a layer
+/// without changing every signature that carries it. Default is everything, which
+/// is what an unfiltered query meant before flags existed.
+struct QueryFilter
+{
+    /// A piece answers the query when it carries ANY of these.
+    ColliderFlags any = ColliderFlags::All;
+};
+
 /// What the physics world contains and what it refused to build.
 ///
 /// The refusal counters are the load-bearing half. PHY-010's abort condition is
@@ -46,6 +111,12 @@ struct PhysicsStats
 {
     std::uint32_t bodies = 0;         ///< live bodies
     std::uint32_t shapes = 0;         ///< collider shapes across all bodies
+    /// Of `shapes`, those attached for QUERIES ONLY -- a Fire or View Geometry LOD
+    /// the model authored separately from its Geometry LOD. They answer rays and
+    /// take part in no contact, so this is the price of the flag set: zero for a
+    /// corpus where every model reuses one LOD, and the number to look at first if
+    /// a physics step gets slower after tagging.
+    std::uint32_t queryOnlyShapes = 0;
     std::uint32_t modelsRegistered = 0;
 
     /// A model whose Geometry LOD produced no usable component at all.

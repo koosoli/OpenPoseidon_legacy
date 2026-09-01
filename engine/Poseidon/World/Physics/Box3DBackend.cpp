@@ -25,6 +25,50 @@ namespace
 /// components to divide by, so the square root is never taken of a value near
 /// zero. The naive w-first form loses precision at 180 degrees, which for a world
 /// full of buildings placed at arbitrary yaw is not an edge case.
+/// Box3D filters collision AND queries with the same category/mask pair, so the
+/// collider flags map straight onto `categoryBits` and a query's `maskBits`. That
+/// is why the filter is expressible at the seam at all: nothing here walks a hit
+/// list afterwards.
+///
+/// The one bit that is ours rather than the engine's. A shape that exists only to
+/// answer queries -- a separately authored Fire or View Geometry LOD -- must never
+/// take part in contact, or a dropped crate would land on a building's line-of-
+/// sight box. Box3D pairs two shapes only when EACH one's mask accepts the other's
+/// category, so giving those shapes a mask of this bit alone is enough: no body
+/// carries it, so no pair ever forms. Queries set it in their own category, so
+/// they still see them.
+constexpr std::uint64_t QueryOnlyBit = 1ull << 63;
+
+/// What a body the physics world owns outright is, as far as a query is
+/// concerned. A dropped barrel is one solid thing: it stops a shot and it blocks
+/// sight, and it is emphatically not a roadway. Fixed rather than taken from the
+/// pieces, because a model probe is built from the model's Geometry LOD and would
+/// otherwise be invisible to a bullet-filtered ray purely because of which LOD it
+/// was cut from.
+constexpr ColliderFlags DynamicBodyFlags =
+    ColliderFlags::Solid | ColliderFlags::BulletCollision | ColliderFlags::ViewBlocking;
+
+b3Filter ContactFilterFor(ColliderFlags flags)
+{
+    b3Filter filter = b3DefaultFilter();
+    filter.categoryBits = static_cast<std::uint64_t>(flags);
+    // Solid means the Geometry LOD, which is the collider the world already had;
+    // it keeps the mask it had, so contact behaviour is bit-for-bit what it was
+    // before flags existed.
+    filter.maskBits = HasAny(flags, ColliderFlags::Solid) ? ~0ull : QueryOnlyBit;
+    return filter;
+}
+
+b3QueryFilter QueryFilterFor(const QueryFilter& filter)
+{
+    b3QueryFilter q = b3DefaultQueryFilter();
+    // Everything, so the query is accepted by any shape's mask -- including the
+    // query-only shapes above, whose mask is deliberately narrow.
+    q.categoryBits = ~0ull;
+    q.maskBits = static_cast<std::uint64_t>(filter.any);
+    return q;
+}
+
 b3Quat QuatFromOrientation(const Matrix4& m)
 {
     // Columns as the engine stores them: aside = X, up = Y, dir = Z.
@@ -156,6 +200,7 @@ public:
         _terrainBodyValid = false;
         _heights.clear();
         _shapeCount = 0;
+        _queryOnlyShapes = 0;
         _hullFailures = 0;
         _terrainWidth = _terrainHeight = 0;
     }
@@ -200,6 +245,7 @@ public:
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         int        attached = 0;
+        int        queryOnly = 0;
         for (int i = 0; i < pieceCount; ++i)
         {
             const ConvexPiece& piece = pieces[i];
@@ -217,6 +263,11 @@ public:
             {
                 _scratch.push_back(ToB3(piece.points[p]));
             }
+
+            // Per PIECE, not per body: a model that authored a separate Fire
+            // Geometry LOD hands both sets down in one call, and they must not end
+            // up answering each other's questions.
+            shapeDef.filter = ContactFilterFor(piece.flags);
 
             b3HullData* hull = b3CreateHull(_scratch.data(), static_cast<int>(_scratch.size()), MaxHullVertices);
             if (!hull)
@@ -239,6 +290,11 @@ public:
                 continue;
             }
             ++_shapeCount;
+            if (!HasAny(piece.flags, ColliderFlags::Solid))
+            {
+                ++_queryOnlyShapes;
+                ++queryOnly;
+            }
             ++attached;
         }
 
@@ -248,7 +304,7 @@ public:
             return {};
         }
 
-        return Store(body, static_cast<std::uint32_t>(attached));
+        return Store(body, static_cast<std::uint32_t>(attached), static_cast<std::uint32_t>(queryOnly));
     }
 
     void RemoveBody(BodyId id) override
@@ -292,7 +348,9 @@ public:
         // to give them back. Without this, `shapes` only counts up and any
         // streaming or mission reload inflates it past what exists.
         _shapeCount -= std::min(_shapeCount, slot->shapes);
+        _queryOnlyShapes -= std::min(_queryOnlyShapes, slot->queryShapes);
         slot->shapes = 0;
+        slot->queryShapes = 0;
         // Bump the generation so the caller's copy of this id stops resolving.
         // Reusing the slot without this is how a stale handle silently addresses
         // whatever was created next.
@@ -357,6 +415,12 @@ public:
         _terrainBodyValid = true;
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
+        // The ground answers EVERY question: a shot is stopped by it, sight is
+        // blocked by it, and it is the roadway of last resort. Tagging it Solid
+        // alone is the trap -- a bullet-filtered ray would then pass through the
+        // hillside it is aimed at, which reads as "no collider there" rather than
+        // as a filter mistake.
+        shapeDef.filter = ContactFilterFor(ColliderFlags::All);
         b3CreateHeightFieldShape(_terrainBody, &shapeDef, _heightField);
 
         _terrainWidth = static_cast<std::uint32_t>(field.width);
@@ -384,6 +448,7 @@ public:
         // own volume rather than making the slider mean something nobody can
         // picture.
         const float volume = (4.0f / 3.0f) * 3.14159265f * def.radius * def.radius * def.radius;
+        shapeDef.filter = ContactFilterFor(DynamicBodyFlags);
         shapeDef.density = volume > 0.0f ? std::max(def.mass, 0.001f) / volume : 1000.0f;
         shapeDef.baseMaterial.friction = def.friction;
         shapeDef.baseMaterial.restitution = def.restitution;
@@ -454,7 +519,7 @@ public:
         {
             const b3Pos  from = ToB3(def.position);
             const b3Vec3 down{0.0f, -500.0f, 0.0f};
-            const b3RayResult hit = b3World_CastRayClosest(_world, from, down, b3DefaultQueryFilter());
+            const b3RayResult hit = b3World_CastRayClosest(_world, from, down, QueryFilterFor(QueryFilter{}));
             if (hit.hit)
             {
                 LOG_WARN(World, "PHYSPROBE: ray down from y={:.2f} hits y={:.2f} (fraction {:.4f})",
@@ -513,6 +578,7 @@ public:
         const float volume = std::max((hi[0] - lo[0]) * (hi[1] - lo[1]) * (hi[2] - lo[2]), 0.001f);
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
+        shapeDef.filter = ContactFilterFor(DynamicBodyFlags);
         shapeDef.density = std::max(mass, 0.1f) / volume;
         shapeDef.baseMaterial.friction = friction;
         shapeDef.baseMaterial.restitution = restitution;
@@ -594,14 +660,14 @@ public:
         }
     }
 
-    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint) const override
+    BodyId CastRay(Vector3Par from, Vector3Par to, Vector3& hitPoint, const QueryFilter& filter) const override
     {
         if (!b3World_IsValid(_world))
         {
             return {};
         }
         const b3Vec3      translation{to[0] - from[0], to[1] - from[1], to[2] - from[2]};
-        const b3RayResult hit = b3World_CastRayClosest(_world, ToB3(from), translation, b3DefaultQueryFilter());
+        const b3RayResult hit = b3World_CastRayClosest(_world, ToB3(from), translation, QueryFilterFor(filter));
         if (!hit.hit)
         {
             return {};
@@ -636,14 +702,14 @@ public:
         return {};
     }
 
-    bool RayHitAnything(Vector3Par from, Vector3Par to) const override
+    bool RayHitAnything(Vector3Par from, Vector3Par to, const QueryFilter& filter) const override
     {
         if (!b3World_IsValid(_world))
         {
             return false;
         }
         const b3Vec3 translation{to[0] - from[0], to[1] - from[1], to[2] - from[2]};
-        return b3World_CastRayClosest(_world, ToB3(from), translation, b3DefaultQueryFilter()).hit;
+        return b3World_CastRayClosest(_world, ToB3(from), translation, QueryFilterFor(filter)).hit;
     }
 
     void ClearProbes() override
@@ -657,7 +723,9 @@ public:
                 if (slot.body.index1 == probe.body.index1 && slot.body.world0 == probe.body.world0)
                 {
                     _shapeCount -= std::min(_shapeCount, slot.shapes);
+                    _queryOnlyShapes -= std::min(_queryOnlyShapes, slot.queryShapes);
                     slot.shapes = 0;
+                    slot.queryShapes = 0;
                     slot.body = b3_nullBodyId;
                     ++slot.generation;
                     _free.push_back(slot.index);
@@ -761,6 +829,7 @@ public:
             capsule.radius = radius;
 
             b3ShapeDef shapeDef = b3DefaultShapeDef();
+            shapeDef.filter = ContactFilterFor(DynamicBodyFlags);
             shapeDef.baseMaterial.friction = 0.8f;
             b3CreateCapsuleShape(_proxy, &shapeDef, &capsule);
             _proxyValid = true;
@@ -775,6 +844,7 @@ public:
         PhysicsStats stats;
         stats.bodies = static_cast<std::uint32_t>(_slots.size() - _free.size());
         stats.shapes = _shapeCount;
+        stats.queryOnlyShapes = _queryOnlyShapes;
         stats.hullFailures = _hullFailures;
         stats.probes = static_cast<std::uint32_t>(_probes.size());
         stats.terrainRegistered = _heightField != nullptr;
@@ -895,9 +965,12 @@ private:
         /// with it silently, and a total that only ever counts up stops being a
         /// diagnostic the moment anything is streamed out.
         std::uint32_t shapes = 0;
+        /// Of `shapes`, the query-only ones. Same reason as `shapes`: a running
+        /// total that is never given back is not a measurement.
+        std::uint32_t queryShapes = 0;
     };
 
-    BodyId Store(b3BodyId body, std::uint32_t shapes)
+    BodyId Store(b3BodyId body, std::uint32_t shapes, std::uint32_t queryShapes = 0)
     {
         if (!_free.empty())
         {
@@ -906,11 +979,13 @@ private:
             Slot& slot = _slots[index];
             slot.body = body;
             slot.shapes = shapes;
+            slot.queryShapes = queryShapes;
             return BodyId{index, slot.generation};
         }
         Slot slot;
         slot.body = body;
         slot.shapes = shapes;
+        slot.queryShapes = queryShapes;
         slot.index = static_cast<std::uint32_t>(_slots.size());
         _slots.push_back(slot);
         return BodyId{slot.index, slot.generation};
@@ -961,6 +1036,7 @@ private:
     WindSettings       _wind;
 
     std::uint32_t _shapeCount = 0;
+    std::uint32_t _queryOnlyShapes = 0;
     std::uint32_t _hullFailures = 0;
     std::uint32_t _terrainWidth = 0;
     std::uint32_t _terrainHeight = 0;

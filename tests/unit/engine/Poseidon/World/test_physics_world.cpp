@@ -326,12 +326,12 @@ TEST_CASE("removing a probe body individually leaves no dangling readback", "[ph
     Vector3       hit;
     const Vector3 from(20.5f, 10.0f, 20.5f);
     const Vector3 to(20.5f, -5.0f, 20.5f);
-    REQUIRE(backend->CastRay(from, to, hit) == building);
+    REQUIRE(backend->CastRay(from, to, hit, QueryFilter{}) == building);
 
     backend->ClearProbes();
     CHECK(backend->GetStats().probes == 0);
     // Still there. This is the assertion the whole test exists for.
-    CHECK(backend->CastRay(from, to, hit) == building);
+    CHECK(backend->CastRay(from, to, hit, QueryFilter{}) == building);
 
     backend->Destroy();
 }
@@ -366,12 +366,12 @@ TEST_CASE("a ray identifies a body that moved into a recycled slot", "[physics]"
     Vector3       hit;
     const Vector3 from(20.5f, 10.0f, 20.5f);
     const Vector3 to(20.5f, -5.0f, 20.5f);
-    REQUIRE(backend->RayHitAnything(from, to));
-    REQUIRE(backend->CastRay(from, to, hit) == first);
+    REQUIRE(backend->RayHitAnything(from, to, QueryFilter{}));
+    REQUIRE(backend->CastRay(from, to, hit, QueryFilter{}) == first);
 
     // Free the slot and put a different body in it.
     backend->RemoveBody(first);
-    CHECK_FALSE(backend->RayHitAnything(from, to));
+    CHECK_FALSE(backend->RayHitAnything(from, to, QueryFilter{}));
 
     const BodyId second = backend->AddStaticBody(&piece, 1, at);
     REQUIRE(second.IsValid());
@@ -381,18 +381,18 @@ TEST_CASE("a ray identifies a body that moved into a recycled slot", "[physics]"
 
     // The ray still hits -- that half was never broken, which is what made the
     // other half hard to see.
-    REQUIRE(backend->RayHitAnything(from, to));
+    REQUIRE(backend->RayHitAnything(from, to, QueryFilter{}));
     // And it names the CURRENT occupant. This is the assertion that used to fail.
-    CHECK(backend->CastRay(from, to, hit) == second);
+    CHECK(backend->CastRay(from, to, hit, QueryFilter{}) == second);
     // Never the stale handle.
-    CHECK_FALSE(backend->CastRay(from, to, hit) == first);
+    CHECK_FALSE(backend->CastRay(from, to, hit, QueryFilter{}) == first);
 
     // Third occupant, so the fix is not merely "even generations also work".
     backend->RemoveBody(second);
     const BodyId third = backend->AddStaticBody(&piece, 1, at);
     REQUIRE(third.IsValid());
     backend->Step(1.0f / 60.0f);
-    CHECK(backend->CastRay(from, to, hit) == third);
+    CHECK(backend->CastRay(from, to, hit, QueryFilter{}) == third);
 
     backend->Destroy();
 }
