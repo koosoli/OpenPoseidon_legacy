@@ -2268,6 +2268,22 @@ void EngineWgpu::StartRenderThread()
 {
     if (_renderThread.joinable())
         return;
+    // CLEAR THE HANDOFF BEFORE SPAWNING. `_renderQuit` is set by StopRenderThread and was
+    // never cleared here, so a worker started a second time saw "quit" on its first wait and
+    // returned immediately -- leaving `_renderThread.joinable()` true, `_renderThreadOn` true
+    // and nothing on the other end of the queue. Toggling the thread off and on again in the
+    // dev panel then crashed. The rest of the handoff is reset for the same reason: a stop
+    // that lands mid-frame can leave a slot marked busy and a stale frame pointer, and the
+    // next start must not inherit either.
+    {
+        std::lock_guard<std::mutex> lock(_renderMutex);
+        _renderQuit = false;
+        _renderHasWork = false;
+        _renderFrame = nullptr;
+        _renderBacking = nullptr;
+        _renderBusySlot = -1;
+        _renderSubmitSlot = -1;
+    }
     _renderThreadOn = true;
     _renderThread = std::thread([this] { RenderThreadMain(); });
     LOG_INFO(Graphics,
@@ -2286,6 +2302,20 @@ void EngineWgpu::StopRenderThread()
     _renderCv.notify_all();
     _renderThread.join();
     _renderThreadOn = false;
+    _overlapOn = false;
+    // Hand the inline path a clean slate. After the join nobody else touches these, but a
+    // stop that happened while a frame was in flight leaves `_renderBusySlot` set, and the
+    // producer's slot wait would then block on a worker that no longer exists.
+    {
+        std::lock_guard<std::mutex> lock(_renderMutex);
+        _renderQuit = false;
+        _renderHasWork = false;
+        _renderFrame = nullptr;
+        _renderBacking = nullptr;
+        _renderBusySlot = -1;
+        _renderSubmitSlot = -1;
+    }
+    _renderCv.notify_all();
 }
 
 void EngineWgpu::NextFrame()

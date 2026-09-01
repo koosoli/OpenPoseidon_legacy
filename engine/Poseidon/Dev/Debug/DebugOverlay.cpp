@@ -4470,15 +4470,22 @@ void DrawPerfTab()
             Dev::PanelHelp("Main EXCLUDES the time it sits blocked on the worker, so in lockstep it reads "
                            "low and the render thread reads high. That is the mode working, not a stall.");
             {
-                float gpuMs[Engine::kGpuRegionEnd] = {};
+                float     gpuMs[Engine::kGpuRegionEnd] = {};
                 const int gpuCount = GEngine->GetWaterGpuTimings(gpuMs, Engine::kGpuRegionEnd);
-                if (gpuCount > 0 && total.avgMs > 0.001f)
+                // ONE region, not a sum. The first version of this line added every region
+                // together, and several of them are CONTAINERS that already include their
+                // children -- so it counted the same GPU work two and three times and
+                // reported 209%. A percentage above 100 is not a small inaccuracy, it is a
+                // readout saying it does not know what it is measuring. `kFrameGpuRegionTotal`
+                // is all submitted frame work and needs no arithmetic.
+                const int frameRegion = static_cast<int>(Engine::kFrameGpuRegionTotal);
+                if (gpuCount > frameRegion && gpuMs[frameRegion] > 0.0f && total.avgMs > 0.001f)
                 {
-                    float gpuTotal = 0.0f;
-                    for (int i = 0; i < gpuCount; i++)
-                        if (gpuMs[i] > 0.0f)
-                            gpuTotal += gpuMs[i];
-                    ImGui::Text("GPU                %5.0f %%", 100.0f * gpuTotal / total.avgMs);
+                    ImGui::Text("GPU                %5.0f %%", 100.0f * gpuMs[frameRegion] / total.avgMs);
+                    Dev::PanelSameLine();
+                    Dev::PanelHelp("Submitted GPU work as a share of the CPU frame. It can legitimately "
+                                   "exceed 100%% when the GPU is the slower side and the CPU is waiting "
+                                   "on it -- that is what being GPU-bound looks like from here.");
                 }
             }
             ImGui::Separator();
