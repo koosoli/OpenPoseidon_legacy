@@ -838,15 +838,27 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
     // an unreachable feature is one nobody can show anybody else.
     //   POSEIDON_DOF=1  POSEIDON_DOF_FOCUS=<m>  POSEIDON_DOF_BLUR=<px>  POSEIDON_DOF_BAND=<m>
-    if (const char* v = std::getenv("WGR_RENDER_THREAD"); v && v[0] && v[0] != '0')
+    // ON BY DEFAULT. Opt out with WGR_RENDER_THREAD=0, or live in the dev panel's Perf tab.
+    //
+    // It stayed opt-in while it was being proven, and it is proven: 901 of 901 scene frames
+    // byte-identical to the inline path, aligned by simulation tick, across three independent
+    // pairs; PERF-018 measured frame mean 43.50 -> 33.91 ms and p95 46.97 -> 36.07 on
+    // perf_combat with the per-arm ranges not overlapping. A gain that size sitting behind an
+    // environment variable nobody sets is a gain nobody has.
+    //
+    // WGR_RENDER_OVERLAP is still read, but now only to turn overlap OFF. The thread without
+    // the overlap is a stack change that costs a handoff and buys nothing -- it exists so the
+    // mechanics can be proven separately, not as a configuration to reach by accident.
     {
-        StartRenderThread();
-        _renderThreadRequested = true;
-        // WGR_RENDER_OVERLAP=1 additionally lets the producer run a frame ahead. Separate
-        // flag: the thread is provable on its own, and overlap is the change that alters
-        // WHEN work happens rather than only where.
-        if (const char* o = std::getenv("WGR_RENDER_OVERLAP"); o && o[0] && o[0] != '0')
-            _overlapRequested = true;
+        const char* threadEnv = std::getenv("WGR_RENDER_THREAD");
+        const bool  threadOn = threadEnv == nullptr || threadEnv[0] == 0 || threadEnv[0] != '0';
+        if (threadOn)
+        {
+            StartRenderThread();
+            _renderThreadRequested = true;
+            const char* overlapEnv = std::getenv("WGR_RENDER_OVERLAP");
+            _overlapRequested = overlapEnv == nullptr || overlapEnv[0] == 0 || overlapEnv[0] != '0';
+        }
     }
     if (const char* v = std::getenv("WGR_FRAME_HASH"); v && v[0] && v[0] != '0')
     {
