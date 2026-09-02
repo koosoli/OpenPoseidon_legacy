@@ -1193,13 +1193,19 @@ impl Renderer {
             ..Default::default()
         };
 
+        // REN-OBJ-004: forced early depth test for the prepassed cutout colour entries.
+        // Adapter-gated like the others; absent means the early entries are not even compiled
+        // (shaders::early_depth_supported) and WGR_OBJECT_EARLY_Z is inert.
+        let early_depth = adapter.features() & wgpu::Features::SHADER_EARLY_DEPTH_TEST;
+        shaders::set_early_depth_supported(!early_depth.is_empty());
         let requested_features = bc_features
             | bindless
             | partially_bound
             | indirect_avail
             | mdic_avail
             | vertex_writable_storage
-            | ts_request;
+            | ts_request
+            | early_depth;
         // REN-TEMP-001M: the initialised NGX context + raw handles, present only when
         // the hal device route succeeded AND NGX reported DLSS available. Same
         // strict-fallback rule as the instance: any failure names itself and the

@@ -2134,6 +2134,10 @@ pub fn build_gpu_pipeline(
     sample_count: u32,
     foliage_a2c: bool,
     front_face: wgpu::FrontFace,
+    // REN-OBJ-004: build the COLOUR pipeline with depth writes off and the forced-early-depth
+    // fragment entry. Only for the prepassed main-view draw; the reflection and prepass
+    // builders pass false. Callers must have checked shaders::early_depth_supported().
+    early_z: bool,
 ) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
     let module = crate::shaders::make_module(
         device,
@@ -2256,7 +2260,10 @@ pub fn build_gpu_pipeline(
             buffers: &vbuffers,
         },
         primitive,
-        depth_stencil: Some(depth_stencil.clone()),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            depth_write_enabled: Some(!early_z), // REN-OBJ-004: the prepass already wrote it
+            ..depth_stencil.clone()
+        }),
         multisample: wgpu::MultisampleState {
             count: sample_count,
             alpha_to_coverage_enabled: foliage_a2c,
@@ -2264,7 +2271,7 @@ pub fn build_gpu_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &module,
-            entry_point: Some("fs_gpu"),
+            entry_point: Some(if early_z { "fs_gpu_early" } else { "fs_gpu" }),
             compilation_options: wgpu::PipelineCompilationOptions {
                 constants: &constants,
                 ..Default::default()

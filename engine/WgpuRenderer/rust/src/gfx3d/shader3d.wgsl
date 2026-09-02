@@ -513,6 +513,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     return shade_fragment(in);
 }
 
+#ifdef EARLY_DEPTH
+// REN-OBJ-004: fs_main with the depth test forced before the shader; used only by prepassed
+// pipelines (depth writes off), see gpu_driven.wgsl's fs_gpu_early for the reasoning.
+@fragment
+@early_depth_test(force)
+fn fs_main_early(in: VsOut) -> @location(0) vec4<f32> {
+    census(0u);
+    if (alpha_ref > 0.0) {
+        census(1u);
+    }
+    return shade_fragment(in);
+}
+#endif
+
 // OnSurface (roads, footprint decals) colour output plus an explicit depth. Only pipelines
 // built for Offset::Decal on the plain (non-skinned) path use this entry point: writing
 // frag_depth turns early-Z off, which is acceptable for the handful of road/decal draws a

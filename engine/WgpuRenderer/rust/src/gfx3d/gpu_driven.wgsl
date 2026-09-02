@@ -640,8 +640,10 @@ fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
     return vec3<f32>(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))));
 }
 
-@fragment
-fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
+// The colour fragment body, shared by the two entries below. It discards (the cutout alpha
+// test), which is why the hardware cannot test depth before running it -- unless the entry
+// says so (REN-OBJ-004).
+fn fs_gpu_body(in: VsOut) -> vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
     census(0u); // every rasterised colour fragment; word 1 (cutout survivors) is counted after the alpha test
@@ -979,6 +981,26 @@ fn prepass_clipped(world_pos: vec3<f32>) -> bool {
 // shader3d's fs_prepass, but reads the per-section cutout threshold + bindless texture from
 // section_materials (the GPU-driven path is per-section, not per-instance). Cutout foliage
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
+@fragment
+fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
+    return fs_gpu_body(in);
+}
+
+#ifdef EARLY_DEPTH
+// REN-OBJ-004: the same colour shader with the depth test FORCED before it runs. Legal only on
+// a pipeline that does not write depth (the prepassed main-view colour pass): with writes on,
+// a forced early test would also write the depth of fragments the body then discards. The
+// census (REN-OBJ-003) measured two shaded cutout fragments per covered pixel on Everon --
+// the card behind every visible card shaded and then rejected by the prepass depth. This
+// entry rejects it first. Compiled only when the device has SHADER_EARLY_DEPTH_TEST (the
+// EARLY_DEPTH define); WGR_OBJECT_EARLY_Z selects it (cull.rs / mod.rs).
+@fragment
+@early_depth_test(force)
+fn fs_gpu_early(in: VsOut) -> @location(0) vec4<f32> {
+    return fs_gpu_body(in);
+}
+#endif
+
 @fragment
 fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
     census(2u);

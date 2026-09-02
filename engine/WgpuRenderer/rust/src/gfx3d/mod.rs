@@ -206,6 +206,17 @@ pub(crate) fn count_fragments() -> f32 {
     })
 }
 
+// REN-OBJ-004: WGR_OBJECT_EARLY_Z=1 makes the prepassed colour pipelines (both families) test
+// depth before the fragment shader runs. Off by default until measured; inert on a device
+// without SHADER_EARLY_DEPTH_TEST, where the early entries are not compiled at all.
+pub(crate) fn object_early_z() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        crate::shaders::early_depth_supported()
+            && std::env::var("WGR_OBJECT_EARLY_Z").map(|v| v.trim() == "1").unwrap_or(false)
+    })
+}
+
 pub(crate) fn cutout_mip_alpha() -> f32 {
     env_f32("WGR_CUTOUT_MIP_ALPHA", 0.5).clamp(0.0, 4.0)
 }
@@ -3527,6 +3538,10 @@ pub struct Gfx3d {
     cull_inputs: cull::CullInputs,
     cull: cull::CullState,
     gpu_pipeline: wgpu::RenderPipeline,
+    /// REN-OBJ-004: the main-view colour pipeline with the forced early depth test and depth
+    /// writes off; Some only under WGR_OBJECT_EARLY_Z=1 on a device that supports it, and then
+    /// it replaces gpu_pipeline for the prepassed main-view draw only.
+    gpu_pipeline_early: Option<wgpu::RenderPipeline>,
     // Mirrored-view variant of gpu_pipeline. Reflection reverses triangle winding, so it
     // deliberately uses the opposite front face while retaining back-face culling.
     gpu_reflection_pipeline: wgpu::RenderPipeline,
@@ -4009,7 +4024,29 @@ impl Gfx3d {
             sample_count,
             foliage_a2c,
             wgpu::FrontFace::Cw,
+            false,
         );
+        let gpu_pipeline_early = if object_early_z() {
+            Some(
+                cull::build_gpu_pipeline(
+                    device,
+                    composer,
+                    &cameras.layout,
+                    &gpu_group1_layout,
+                    &textures.bindless_layout,
+                    &textures.sampler_array_layout,
+                    &conform.layout,
+                    surface_format,
+                    sample_count,
+                    foliage_a2c,
+                    wgpu::FrontFace::Cw,
+                    true,
+                )
+                .0,
+            )
+        } else {
+            None
+        };
         let (gpu_reflection_pipeline, _) = cull::build_gpu_pipeline(
             device,
             composer,
@@ -4025,6 +4062,7 @@ impl Gfx3d {
             1,
             false,
             wgpu::FrontFace::Ccw,
+            false,
         );
         // GPU-driven cascade shadow depth pipeline (§6 multi-view): the retained set cast into
         // each cascade's depth map. Group 0 is the shadow pass UBO (light-VP), so it shares the
@@ -4191,6 +4229,7 @@ impl Gfx3d {
             cull_inputs: cull::CullInputs::default(),
             cull,
             gpu_pipeline,
+            gpu_pipeline_early,
             gpu_reflection_pipeline,
             gpu_prepass_pipeline,
             gpu_velocity_pipeline,
@@ -4421,6 +4460,9 @@ impl Gfx3d {
         // (PipelineKey::prepassed requires Offset::None), so no prepass twin has to agree.
         let fs_entry = if key.offset == Offset::Decal && !key.skinned && road_pixel_conform() {
             "fs_surface"
+        } else if !write && object_early_z() {
+            // REN-OBJ-004: prepassed (write-off) colour draws test depth before shading.
+            "fs_main_early"
         } else {
             "fs_main"
         };
@@ -8555,7 +8597,7 @@ impl Gfx3d {
             pass,
             textures,
             cam_off,
-            &self.gpu_pipeline,
+            self.gpu_pipeline_early.as_ref().unwrap_or(&self.gpu_pipeline),
             args,
             group1,
             counters,

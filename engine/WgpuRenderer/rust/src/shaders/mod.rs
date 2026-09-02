@@ -22,6 +22,30 @@ use naga_oil::compose::{
 /// Build a composer with every shared module registered. Registration order
 /// matters: a module must be added before anything that `#import`s it — `shadow`
 /// and `lighting` import `frame`.
+// REN-OBJ-004: whether the device was created with SHADER_EARLY_DEPTH_TEST. Set once by the
+// renderer before any shader is composed. When true the composer validates the
+// EARLY_DEPTH_TEST capability and every module is composed with the EARLY_DEPTH define, which
+// is what lets a shader carry an `@early_depth_test(force)` entry at all -- naga rejects the
+// whole module otherwise, switch or no switch (which is how the first attempt took the game
+// down at startup).
+static EARLY_DEPTH_SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+pub fn set_early_depth_supported(on: bool) {
+    let _ = EARLY_DEPTH_SUPPORTED.set(on);
+}
+
+pub fn early_depth_supported() -> bool {
+    *EARLY_DEPTH_SUPPORTED.get().unwrap_or(&false)
+}
+
+fn shader_defs() -> std::collections::HashMap<String, naga_oil::compose::ShaderDefValue> {
+    let mut defs = std::collections::HashMap::new();
+    if early_depth_supported() {
+        defs.insert("EARLY_DEPTH".to_string(), naga_oil::compose::ShaderDefValue::Bool(true));
+    }
+    defs
+}
+
 pub fn build_composer() -> Composer {
     // naga_oil validates the composed module itself, defaulting to zero
     // capabilities — so it rejects our shaders' use of texture binding arrays
@@ -29,8 +53,11 @@ pub fn build_composer() -> Composer {
     // capabilities matching the device features the backend requests
     // (TEXTURE_BINDING_ARRAY + SAMPLED_TEXTURE_..._NON_UNIFORM_INDEXING). wgpu
     // still re-validates against the real device caps at pipeline creation.
-    let capabilities = naga::valid::Capabilities::TEXTURE_AND_SAMPLER_BINDING_ARRAY
+    let mut capabilities = naga::valid::Capabilities::TEXTURE_AND_SAMPLER_BINDING_ARRAY
         | naga::valid::Capabilities::TEXTURE_AND_SAMPLER_BINDING_ARRAY_NON_UNIFORM_INDEXING;
+    if early_depth_supported() {
+        capabilities |= naga::valid::Capabilities::EARLY_DEPTH_TEST;
+    }
     let mut composer = Composer::default().with_capabilities(capabilities);
     for (source, file_path) in [
         (include_str!("color.wgsl"), "color.wgsl"),
@@ -77,6 +104,7 @@ pub fn make_module(
     let module = match composer.make_naga_module(NagaModuleDescriptor {
         source,
         file_path,
+        shader_defs: shader_defs(),
         ..Default::default()
     }) {
         Ok(module) => module,
