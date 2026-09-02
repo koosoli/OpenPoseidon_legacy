@@ -593,12 +593,13 @@ Each carries its number, its scene and its gate. None is a guess about where tim
 
 | target | number | scene / source | gate |
 |---|---:|---|---|
-| `unitThink` | 0.95–2.06 ms/tick, 70-80% of the post-ration AI stage | Chernarus+ `perf_combat`, PERF-019 | `POSEIDON_AI_TIMELINE` diff names the first divergent tick; no change ships without it |
+| ~~`unitThink`~~ **done 2026-09-02 (PERF-020)** | was 0.95–2.06 ms/tick; the idle-watch walk is rationed (`POSEIDON_AI_WATCH_PERIOD`, 0.5 s): `watch` 0.44 → 0.05, `unitThink` 0.64 → 0.18 ms/tick on the same scene | Everon + Chernarus+ `perf_combat` | the oracle ran: same arm EQUIVALENT over 902 ticks, rationed vs unrationed DIVERGED at tick 340 in one unit's nearest-enemy distance — a behaviour change by design, named to the tick |
 | `land:obj` residual, **on Chernarus+** | 2.65 ms after PERF-016 (13.2 → 5.9 → 2.65), against 20,000 resident objects | WLD-025 pose, not Everon | the admission wall clocks became counted budgets on 2026-09-02 (`WGR_OBJECT_STREAM_ADMIT`, default counted), so two machines report one number; what remains is the measurement itself: counted vs `=timed` frame cost and fill time on the WLD-025 pose, and two lockstep runs holding the same resident set |
 | sky cloud march | 1.314 ms, 11.7% of an 11.26 ms GPU frame | `perf_combat`, ARCH-001 table | three runs per arm; the step-count tier (`HANDOVER-20260824`:144) has had no A/B since the SH fix |
 
-Explicitly **not** on the list: grass (closed, PARKED.md: "reopen with a corpus that measures
-differently"); meshlets (10.3% of the frame is everything they could touch, ARCH-001); and mip
+Explicitly **not** on the list: grass *colour* (closed, PARKED.md: "reopen with a corpus that
+measures differently" — which the fragment census of REN-GRS-001 now is; it reopened the *shadow*
+pass only, and halved it: every second blade, coverage preserved, 0.69 → 0.26 ms); meshlets (10.3% of the frame is everything they could touch, ARCH-001); and mip
 feedback, which stays a *measurement* task — the 87% unrequested-detail figure (`3fa5dc97`) was
 taken on `perf_combat`, where the texture budget never fires, so it is a scene fact until it is
 re-run on a budget-constrained world (Chernarus+ at the 20,000-item cap).
