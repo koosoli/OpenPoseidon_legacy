@@ -48,6 +48,9 @@ const char* BucketName(Bucket bucket)
             return "endMission";
         case Bucket::GroupThinkEarly:
             return "groupThinkEarly";
+        case Bucket::GroupThinkFull:
+            // Missing until PERF-019; the case fell through to "?".
+            return "groupThinkFull";
         case Bucket::GroupFlee:
             return "groupFlee";
         case Bucket::GroupFsm:
@@ -56,6 +59,24 @@ const char* BucketName(Bucket bucket)
             return "groupJoin";
         case Bucket::GroupTrack:
             return "groupTrack";
+        case Bucket::UnitThinkEarly:
+            return "unitThinkEarly";
+        case Bucket::UnitThinkFull:
+            return "unitThinkFull";
+        case Bucket::UnitAttack:
+            return "unitAttack";
+        case Bucket::UnitWatch:
+            return "unitWatch";
+        case Bucket::UnitExpensive:
+            return "unitExpensive";
+        case Bucket::UnitGetInOut:
+            return "unitGetInOut";
+        case Bucket::UnitStrat:
+            return "unitStrat";
+        case Bucket::UnitOperTarget:
+            return "unitOperTarget";
+        case Bucket::UnitOperPlan:
+            return "unitOperPlan";
     }
     return "?";
 }

@@ -1,5 +1,6 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
+#include <Poseidon/AI/AICostAccum.hpp> // PERF-019
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -1215,36 +1216,45 @@ void AIUnit::SetWatch()
 {
     // cosider engaging target
     AIGroup* grp = GetGroup();
-    if (!IsPlayer() && _targetAssigned && !grp->CommandSent(this, Command::Attack) &&
-        !grp->CommandSent(this, Command::AttackAndFire) && !grp->CommandSent(this, Command::GetOut) &&
-        !grp->CommandSent(this, Command::GetIn) && (_targetAssigned == _targetEngage || !IsKeepingFormation()))
     {
-        EntityAI* veh = GetVehicle();
-        FireResult result;
-        Vector3 pos;
-        if (veh->AttackThink(result, pos))
+        // PERF-019: the auto-attack consideration, its gating condition included (the four
+        // CommandSent scans are part of what every full think pays here).
+        AICost::ScopedCost attackCost(AICost::Bucket::UnitAttack);
+        if (!IsPlayer() && _targetAssigned && !grp->CommandSent(this, Command::Attack) &&
+            !grp->CommandSent(this, Command::AttackAndFire) && !grp->CommandSent(this, Command::GetOut) &&
+            !grp->CommandSent(this, Command::GetIn) && (_targetAssigned == _targetEngage || !IsKeepingFormation()))
         {
-            // check if we are ready to fire
-            // if not, we probably will have to attack
-            float ttl = GetTimeToLive();
-            FireResult fResult;
-            veh->WhatFireResult(fResult, *_targetAssigned, ttl);
-            if (result.CleanSurplus() > fResult.CleanSurplus() * 1.2 + 200)
+            AICost::AICosts().unitAttackThinks++;
+            EntityAI* veh = GetVehicle();
+            FireResult result;
+            Vector3 pos;
+            if (veh->AttackThink(result, pos))
             {
-                // some good attack position found
-                // issue auto attack command
+                // check if we are ready to fire
+                // if not, we probably will have to attack
+                float ttl = GetTimeToLive();
+                FireResult fResult;
+                veh->WhatFireResult(fResult, *_targetAssigned, ttl);
+                if (result.CleanSurplus() > fResult.CleanSurplus() * 1.2 + 200)
+                {
+                    // some good attack position found
+                    // issue auto attack command
 
-                Command cmd;
-                cmd._message = Command::Attack;
-                cmd._targetE = _targetAssigned;
-                cmd._destination = pos;
+                    Command cmd;
+                    cmd._message = Command::Attack;
+                    cmd._targetE = _targetAssigned;
+                    cmd._destination = pos;
 
-                // automatic attack command
-                grp->NotifyAutoCommand(cmd, this);
+                    // automatic attack command
+                    grp->NotifyAutoCommand(cmd, this);
+                }
             }
         }
     }
 
+    // PERF-019: the watch-mode switch, `SelectInterestingTarget`'s target-list walk
+    // included. Disjoint from unitAttack above; the two cover the whole function.
+    AICost::ScopedCost watchCost(AICost::Bucket::UnitWatch);
     // consider formation and watch mode
     switch (_watchMode)
     {
@@ -1294,6 +1304,15 @@ void AIUnit::SetWatch()
                 //  To considre: maybe combat units may be affected by this?
                 //  when soldier is idle, automatically select "interesting" targets
                 Target* tgt = nullptr;
+                // PERF-019: the walk below visits the whole group target list; the pair
+                // count is what says whether its cost is a scene property. Guarded the way
+                // the callee is, so the count is of walks that happen and the probe cannot
+                // dereference a group the original code tolerates being absent.
+                AICost::AICosts().unitWatchSelects++;
+                if (grp && grp->GetCenter())
+                {
+                    AICost::AICosts().unitWatchPairs += grp->GetTargetList().Size();
+                }
                 tgt = SelectInterestingTarget(this, _watchTgt);
 
                 if (tgt)
@@ -1902,13 +1921,20 @@ bool AIUnit::CreateOperativePath()
 
 bool AIUnit::Think(ThinkImportance prec)
 {
+    // PERF-019: this pair sits INSIDE the function the PERF-014 `unitThink` pair wraps
+    // (AISubgroup.cpp:1596), so `unitThinkEarly + unitThinkFull == unitThink` less one
+    // clock pair per call. Early exits stay charged to UnitThinkEarly; the retarget below
+    // moves a call that reaches SetWatch() into the full population.
+    AICost::ScopedCost thinkCost(AICost::Bucket::UnitThinkEarly);
     if (!IsLocal())
     {
+        AICost::AICosts().unitThinksEarly++;
         return false;
     }
 
     if (GetLifeState() != LSAlive)
     {
+        AICost::AICosts().unitThinksEarly++;
         return false;
     }
 #if LOG_THINK
@@ -1920,16 +1946,22 @@ bool AIUnit::Think(ThinkImportance prec)
 
     if (!_subgroup)
     {
+        AICost::AICosts().unitThinksEarly++;
         return false;
     }
 
+    thinkCost.Retarget(AICost::Bucket::UnitThinkFull);
+    AICost::AICosts().unitThinksFull++;
+
     // find attack position if neccessary
 
-    SetWatch();
+    SetWatch(); // instrumented inside: unitAttack + unitWatch cover it entirely
     // some parts of AIUnit::Think may be executed less often
 
     if (Glob.time > _expensiveThinkTime)
     {
+        AICost::ScopedCost expensiveCost(AICost::Bucket::UnitExpensive);
+        AICost::AICosts().unitExpensives++;
         ExpensiveThinkDone();
         if (!IsAnyPlayer() || USER_CONFIG.IsEnabled(DTAutoSpot))
         {
@@ -2008,6 +2040,8 @@ bool AIUnit::Think(ThinkImportance prec)
 
     if (veh->PilotUnit() != this)
     {
+        AICost::ScopedCost getOutCost(AICost::Bucket::UnitGetInOut);
+        AICost::AICosts().unitGetInOuts++;
         // Warning: unit can be destroyed inside, return immediatelly
         CheckGetOut();
         // create path only for pilot units
@@ -2017,6 +2051,8 @@ bool AIUnit::Think(ThinkImportance prec)
     // free soldier or driver
     if (!HasAI())
     {
+        AICost::ScopedCost getInOutCost(AICost::Bucket::UnitGetInOut);
+        AICost::AICosts().unitGetInOuts++;
         if (veh->Speed().SquareSize() < Square(0.5) &&
             veh->Position().Y() - GLandscape->RoadSurfaceYAboveWater(veh->Position().X(), veh->Position().Z()) < 4.0)
         {
@@ -2027,10 +2063,14 @@ bool AIUnit::Think(ThinkImportance prec)
 
     if (_state == Stopped)
     {
+        AICost::ScopedCost getInOutCost(AICost::Bucket::UnitGetInOut);
+        AICost::AICosts().unitGetInOuts++;
         // waiting for get in / get out
         CheckGetInGetOut();
         return false;
     }
+
+    AICost::AICosts().unitThinksPilot++;
 
     switch (_planningMode)
     {
@@ -2048,11 +2088,21 @@ bool AIUnit::Think(ThinkImportance prec)
                 // operative planning target
                 if (_state == Wait || _state == Replan)
                 {
+                    AICost::ScopedCost operTargetCost(AICost::Bucket::UnitOperTarget);
+                    AICost::AICosts().unitOperTargets++;
                     OperPath(prec);
                 }
 
                 // operative planning
-                return CreateOperativePath();
+                {
+                    AICost::ScopedCost operPlanCost(AICost::Bucket::UnitOperPlan);
+                    AICost::AICosts().unitOperPlans++;
+                    if (_state == Init)
+                    {
+                        AICost::AICosts().unitOperInits++;
+                    }
+                    return CreateOperativePath();
+                }
             }
         case LeaderDirect:
         {
@@ -2065,34 +2115,68 @@ bool AIUnit::Think(ThinkImportance prec)
             _lastPlan = true;
 
             // operative planning
-            return CreateOperativePath();
+            {
+                AICost::ScopedCost operPlanCost(AICost::Bucket::UnitOperPlan);
+                AICost::AICosts().unitOperPlans++;
+                if (_state == Init)
+                {
+                    AICost::AICosts().unitOperInits++;
+                }
+                return CreateOperativePath();
+            }
         }
         case LeaderPlanned:
         case FormationPlanned:
         case VehiclePlanned:
         {
-            // check strategic target
-            float error2 = _plannedPosition.Distance2(_wantedPosition);
-            float limit2 = Square(0.1) * Position().Distance2(_wantedPosition);
-            // replan if target position changed by 10% of total distance
-            if (error2 > limit2)
             {
-                _plannedPosition = _wantedPosition;
-                _noPath = true;
-                RefreshStrategicPlan();
-            }
+                // PERF-019: the whole planned-modes preamble, CreateStrategicPath
+                // included. Marked HERE and not inside the callee because
+                // Ship.cpp:1303 also calls CreateStrategicPath from outside unitThink.
+                AICost::ScopedCost stratCost(AICost::Bucket::UnitStrat);
+                AICost::AICosts().unitStrats++;
 
-            // strategic planning
-            CreateStrategicPath(prec);
+                // check strategic target
+                float error2 = _plannedPosition.Distance2(_wantedPosition);
+                float limit2 = Square(0.1) * Position().Distance2(_wantedPosition);
+                // replan if target position changed by 10% of total distance
+                if (error2 > limit2)
+                {
+                    _plannedPosition = _wantedPosition;
+                    _noPath = true;
+                    RefreshStrategicPlan();
+                }
+
+                // The same guards CreateStrategicPath tests: counted here, after the
+                // replan check above may have set _noPath, so the count says whether the
+                // strategic A* actually ran a search step this call.
+                if ((_noPath || _updatePath) && _waitWithPlan <= Glob.time)
+                {
+                    AICost::AICosts().unitStratSearches++;
+                }
+
+                // strategic planning
+                CreateStrategicPath(prec);
+            }
 
             // operative planning target
             if (_state == Wait || _state == Replan)
             {
+                AICost::ScopedCost operTargetCost(AICost::Bucket::UnitOperTarget);
+                AICost::AICosts().unitOperTargets++;
                 OperPath(prec);
             }
 
             // operative planning
-            return CreateOperativePath();
+            {
+                AICost::ScopedCost operPlanCost(AICost::Bucket::UnitOperPlan);
+                AICost::AICosts().unitOperPlans++;
+                if (_state == Init)
+                {
+                    AICost::AICosts().unitOperInits++;
+                }
+                return CreateOperativePath();
+            }
         }
         default:
             Fail("Planning mode");

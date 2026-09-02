@@ -1038,6 +1038,43 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          ai.trackCalls * aiInv, ai.trackPairs * aiInv,
                          ai.trackCalls > 0 ? static_cast<double>(ai.trackPairs) / static_cast<double>(ai.trackCalls)
                                            : 0.0);
+
+                // PERF-019: the same window, inside `AIUnit::Think`. `residual` is again
+                // the printed check: unitThinkFull minus the seven disjoint segments. And
+                // `early + full` should equal the `unitThink` on the first line to within
+                // one extra clock pair per call, because that pair is inside the function
+                // the PERF-014 pair wraps.
+                const double uEarly = aiMs(AICost::Bucket::UnitThinkEarly);
+                const double uFull = aiMs(AICost::Bucket::UnitThinkFull);
+                const double uAttack = aiMs(AICost::Bucket::UnitAttack);
+                const double uWatch = aiMs(AICost::Bucket::UnitWatch);
+                const double uExpensive = aiMs(AICost::Bucket::UnitExpensive);
+                const double uGetInOut = aiMs(AICost::Bucket::UnitGetInOut);
+                const double uStrat = aiMs(AICost::Bucket::UnitStrat);
+                const double uOperTarget = aiMs(AICost::Bucket::UnitOperTarget);
+                const double uOperPlan = aiMs(AICost::Bucket::UnitOperPlan);
+                const double uResidual =
+                    uFull - (uAttack + uWatch + uExpensive + uGetInOut + uStrat + uOperTarget + uOperPlan);
+                LOG_INFO(World,
+                         "AI unit think ms/tick over {} aiTicks: unitThink={:.3f} [early={:.3f} full={:.3f} "
+                         "[attack={:.3f} watch={:.3f} expensive={:.3f} getInOut={:.3f} strat={:.3f} "
+                         "operTarget={:.3f} operPlan={:.3f} residual={:.3f}]]",
+                         ai.ticks, aiMs(AICost::Bucket::UnitThink) * aiInv, uEarly * aiInv, uFull * aiInv,
+                         uAttack * aiInv, uWatch * aiInv, uExpensive * aiInv, uGetInOut * aiInv, uStrat * aiInv,
+                         uOperTarget * aiInv, uOperPlan * aiInv, uResidual * aiInv);
+                // `early + full == unitThinks` by construction; `pilot` of the full thinks
+                // reached the planning switch. Parenthesised counts are subsets of the one
+                // they follow.
+                LOG_INFO(World,
+                         "AI unit think counts/tick over {} aiTicks: unitThinks={:.2f} [early={:.2f} full={:.2f} "
+                         "(pilot={:.2f})] attackThinks={:.2f} watchSelects={:.2f} watchPairs={:.2f} "
+                         "expensives={:.2f} getInOuts={:.2f} strats={:.2f} (search={:.2f}) operTargets={:.2f} "
+                         "operPlans={:.2f} (init={:.2f})",
+                         ai.ticks, ai.unitThinks * aiInv, ai.unitThinksEarly * aiInv, ai.unitThinksFull * aiInv,
+                         ai.unitThinksPilot * aiInv, ai.unitAttackThinks * aiInv, ai.unitWatchSelects * aiInv,
+                         ai.unitWatchPairs * aiInv, ai.unitExpensives * aiInv, ai.unitGetInOuts * aiInv,
+                         ai.unitStrats * aiInv, ai.unitStratSearches * aiInv, ai.unitOperTargets * aiInv,
+                         ai.unitOperPlans * aiInv, ai.unitOperInits * aiInv);
             }
             AICost::ResetAICosts();
         }

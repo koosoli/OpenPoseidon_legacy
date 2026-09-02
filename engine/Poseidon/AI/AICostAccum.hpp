@@ -67,6 +67,53 @@
 // that is a large share of `groupThinkFull` means the segmentation is wrong and nothing below
 // it should be believed -- the same arithmetic check PERF-014 applied one level up.
 
+// PERF-019 adds a sixth level, inside `AIUnit::Think` itself. After the group-scan ration
+// and the section-binding fix, `subThink` is 70-80% of what remains of the AI stage and
+// prior windows said `unitThink` is nearly all of `subThink`. The unit think has a shape the
+// 2001 code already separates and the buckets follow it:
+//
+//   unitThink   (AIUnit::Think, inclusive -- PERF-014, marked at the AISubgroup.cpp:1596
+//     |          call site)
+//     |__ unitThinkEarly  the exits before `SetWatch()` starts: a non-local unit, a dead
+//     |                   one, no subgroup (AIUnitImpl.cpp:1929-1947). Retargeting, as in
+//     |                   PERF-015, so early and full calls are two populations.
+//     |__ unitThinkFull   the rest, inclusive. early + full == unitThink to within the
+//             |           cost of one extra clock pair per call, because this pair is
+//             |           INSIDE the function the PERF-014 pair wraps.
+//             |__ unitAttack     `SetWatch()`'s auto-attack consideration -- the
+//             |                  CommandSent tests and, when they pass, `AttackThink()`
+//             |                  (BestFireResult over every weapon/ammo) and
+//             |                  `WhatFireResult()`.
+//             |__ unitWatch      `SetWatch()`'s watch-mode switch, including
+//             |                  `SelectInterestingTarget`, which walks the WHOLE group
+//             |                  target list per idle soldier per think and is not
+//             |                  rationed. Denominators `unitWatchSelects`/`unitWatchPairs`.
+//             |__ unitExpensive  the per-unit `_expensiveThinkTime` block: CheckResources,
+//             |                  the away check, target-assigned validation, NVG.
+//             |__ unitGetInOut   the three non-planning exits -- CheckGetOut for a
+//             |                  non-pilot, CheckGetInGetOut for an AI-less or Stopped
+//             |                  unit, including the standing-still test that gates it.
+//             |__ unitStrat      the planned-modes preamble: the 10%-drift replan check,
+//             |                  RefreshStrategicPlan and `CreateStrategicPath()` (the
+//             |                  strategic A*, incremental via ProcessSearching). Marked at
+//             |                  the Think call site, NOT inside the callee, because
+//             |                  Ship.cpp:1303 also calls CreateStrategicPath and that call
+//             |                  is not under unitThink.
+//             |__ unitOperTarget `OperPath()` -- picking the next waypoint off the
+//             |                  strategic plan (both call sites).
+//             |__ unitOperPlan   `CreateOperativePath()` -- the operative planner (all
+//                                three call sites). Only entries with `_state == Init`
+//                                plan; `unitOperInits` counts those.
+//
+// The seven leaf buckets are disjoint and inside unitThinkFull, so
+//
+//     unitThinkFull - (attack + watch + expensive + getInOut + strat + operTarget + operPlan)
+//
+// is the residual: the guard tests between blocks, the planning-mode switch scaffolding
+// and the timers' own overhead. Same rule as PERF-015: a residual that is a large share of
+// `unitThinkFull` means the segmentation missed the cost and nothing below it should be
+// believed.
+//
 #include <array>
 #include <cstdint>
 
@@ -136,9 +183,39 @@ enum class Bucket : std::uint8_t
     /// group target list per unit and is NOT rationed. Denominators `trackScans` and
     /// `trackCalls`.
     GroupTrack,
+
+    // --- PERF-019: inside `AIUnit::Think`. See the level-six diagram above. All nested
+    // inside UnitThink; the seven leaves are disjoint and inside UnitThinkFull.
+
+    /// `AIUnit::Think` calls that returned before `SetWatch()`: non-local
+    /// (AIUnitImpl.cpp:1929), dead (1935), no subgroup (1947). Retargeting, like
+    /// GroupThinkEarly.
+    UnitThinkEarly,
+    /// `AIUnit::Think` calls that reached `SetWatch()`, inclusive to the return.
+    /// `unitThinkEarly + unitThinkFull == unitThink` less one clock pair per call.
+    UnitThinkFull,
+    /// The auto-attack consideration at the top of `SetWatch()` (AIUnitImpl.cpp:1219-1254),
+    /// condition included. `unitAttackThinks` counts the calls that passed the condition
+    /// and ran `AttackThink`/`WhatFireResult`.
+    UnitAttack,
+    /// The watch-mode switch in `SetWatch()` (AIUnitImpl.cpp:1257-1337), including
+    /// `SelectInterestingTarget`'s walk of the group target list.
+    UnitWatch,
+    /// The per-unit `Glob.time > _expensiveThinkTime` block (AIUnitImpl.cpp:1961-2039).
+    UnitExpensive,
+    /// The three non-planning exits: `CheckGetOut()` for a non-pilot unit,
+    /// `CheckGetInGetOut()` for an AI-less or Stopped one (AIUnitImpl.cpp:2041-2070).
+    UnitGetInOut,
+    /// The planned-modes preamble at the Think call site (AIUnitImpl.cpp:2131-2160):
+    /// drift check, `RefreshStrategicPlan`, `CreateStrategicPath`.
+    UnitStrat,
+    /// `OperPath()` -- next-waypoint selection off the strategic plan.
+    UnitOperTarget,
+    /// `CreateOperativePath()` -- the operative planner.
+    UnitOperPlan,
 };
 
-inline constexpr std::size_t kBucketCount = 17;
+inline constexpr std::size_t kBucketCount = 26;
 
 [[nodiscard]] const char* BucketName(Bucket bucket);
 
@@ -211,6 +288,46 @@ struct CostAccum
     /// `trackCalls` alone cannot say how big the walk was. `groupTrack / trackPairs` is the
     /// per-pair cost and is the number that says whether this scales.
     std::uint64_t trackPairs = 0;
+
+    // --- PERF-019. Denominators for the unit-think buckets. The three populations of
+    // `AIUnit::Think` sum: `unitThinksEarly + unitThinksFull == unitThinks`; if they do
+    // not, an exit was added before `SetWatch()` and not counted.
+
+    /// Returned before `SetWatch()` -- non-local, dead, or subgroup-less.
+    std::uint64_t unitThinksEarly = 0;
+    /// Reached `SetWatch()`.
+    std::uint64_t unitThinksFull = 0;
+    /// Of the full thinks, those that reached the planning switch -- i.e. the unit pilots
+    /// its vehicle, has AI and is not Stopped. `unitThinksFull - unitThinksPilot` is the
+    /// population whose think ends in `unitGetInOut` or the residual guard tests.
+    std::uint64_t unitThinksPilot = 0;
+    /// Entries into the auto-attack body -- the calls that ran `AttackThink()`. The
+    /// `unitAttack` bucket's time divided by THIS is the cost of an attack evaluation;
+    /// divided by `unitThinksFull` it is what every full think pays for the condition.
+    std::uint64_t unitAttackThinks = 0;
+    /// `SelectInterestingTarget` calls -- idle non-player soldiers with auto-target on.
+    std::uint64_t unitWatchSelects = 0;
+    /// Sum of the group target-list size over those calls: the (unit, target) pairs the
+    /// idle-watch walk visits. The same scene-property caveat as `trackPairs`.
+    std::uint64_t unitWatchPairs = 0;
+    /// Entries into the per-unit expensive block.
+    std::uint64_t unitExpensives = 0;
+    /// Entries into any of the three unitGetInOut exits.
+    std::uint64_t unitGetInOuts = 0;
+    /// Entries into the planned-modes preamble (the unitStrat bucket scope).
+    std::uint64_t unitStrats = 0;
+    /// Of those, entries where `CreateStrategicPath`'s own guards pass -- `_noPath` or
+    /// `_updatePath`, and the 10 s `_waitWithPlan` backoff expired -- i.e. the strategic
+    /// A* actually starts or continues a search. Counted just before the call, on the
+    /// same condition the callee tests.
+    std::uint64_t unitStratSearches = 0;
+    /// `OperPath()` calls.
+    std::uint64_t unitOperTargets = 0;
+    /// `CreateOperativePath()` calls.
+    std::uint64_t unitOperPlans = 0;
+    /// Of those, calls entering with `_state == Init` -- the ones that build a path
+    /// (`CreatePath`/`CopyPath`) rather than verify or early-out.
+    std::uint64_t unitOperInits = 0;
 };
 
 /// The process-wide accumulator. Read it, print it, `ResetAICosts()` to start a window.
