@@ -195,13 +195,26 @@ void DrawStreamingTab()
         Row("admit updates", "%llu (%llu drained fully)", (unsigned long long)r.admitUpdates,
             (unsigned long long)(r.admitUpdates -
                                  std::min(r.admitUpdates, r.admitStopCap + r.admitStopUpload +
-                                                              r.admitStopCeiling + r.admitStopBudget)));
-        Row("stopped by cap / budget", "%llu / %llu", (unsigned long long)r.admitStopCap,
-            (unsigned long long)r.admitStopBudget);
-        if (r.admitWallCeilingArmed)
-            Row("stopped by wall ceiling", "%llu", (unsigned long long)r.admitStopCeiling);
+                                                              r.admitStopCeiling + r.admitStopBudget +
+                                                              r.admitStopCold)));
+        if (r.admitCounted)
+        {
+            // Counted mode never reads a clock, so the two clock stops are n/a here, not 0.
+            Row("admit mode", "counted: %u cold models per update", (unsigned)r.admitColdBudget);
+            Row("stopped by cap / cold budget", "%llu / %llu", (unsigned long long)r.admitStopCap,
+                (unsigned long long)r.admitStopCold);
+            Row("stopped by budget / wall ceiling", "%s", "n/a (counted; WGR_OBJECT_STREAM_ADMIT=timed)");
+        }
         else
-            Row("stopped by wall ceiling", "%s", "n/a (WGR_OBJECT_STREAM_MAX_MS=0)");
+        {
+            Row("admit mode", "%s", "timed (WGR_OBJECT_STREAM_MS_PER_UPDATE / _MAX_MS)");
+            Row("stopped by cap / budget", "%llu / %llu", (unsigned long long)r.admitStopCap,
+                (unsigned long long)r.admitStopBudget);
+            if (r.admitWallCeilingArmed)
+                Row("stopped by wall ceiling", "%llu", (unsigned long long)r.admitStopCeiling);
+            else
+                Row("stopped by wall ceiling", "%s", "n/a (WGR_OBJECT_STREAM_MAX_MS=0)");
+        }
         if (r.admitUploadCeilingArmed)
             Row("stopped by upload ceiling", "%llu", (unsigned long long)r.admitStopUpload);
         else

@@ -2285,6 +2285,7 @@ bool Landscape::LoadOprwModern(const char* path)
         _modernObjectAdmitStopUpload = 0;
         _modernObjectAdmitStopCeiling = 0;
         _modernObjectAdmitStopBudget = 0;
+        _modernObjectAdmitStopCold = 0;
         _modernObjectColdModels = 0;
         _modernObjectColdParseMs = 0.0;
         _modernObjectColdAdaptMs = 0.0;
@@ -2694,6 +2695,56 @@ static float ObjectStreamCeilingMs()
         return parsed >= 0.0f ? parsed : 16.0f;
     }();
     return ms;
+}
+
+// (c3) COUNTED ADMISSION -- the default since 2026-09-02. WGR_OBJECT_STREAM_ADMIT=timed restores
+// the two clocks above.
+//
+// Both the ordinary budget (WGR_OBJECT_STREAM_MS_PER_UPDATE) and the hard ceiling
+// (WGR_OBJECT_STREAM_MAX_MS) are wall clocks, and a wall clock deciding how many objects the
+// stream admits this tick makes the RESIDENT SET a function of CPU speed: two machines running
+// the same mission under the same seed and the same fixed step contain different objects on the
+// same tick, which rendering, collision and any future replay can all see. The AI stage lost its
+// last wall clock in SIM-813; these were the last two that decide what the world contains.
+//
+// The counted mode keeps the two bounds that were already counts -- the attempt cap and the
+// upload-byte ceiling -- and replaces both clocks with the thing they were approximating: how
+// many COLD models one update may pay for. The cost of an admission is bimodal (a warm re-admit
+// is ~0.03 ms, a cold model is tens of milliseconds of decode/convert/register), so "N cold
+// models" is the unit the clocks were really rationing, and it means the same thing on every
+// machine. Warm admissions are unlimited up to the cap, exactly as before.
+//
+// What this trades, stated plainly: on a slow machine the timed mode admitted FEWER objects per
+// frame (pop-in, frames kept short); the counted mode admits the SAME objects per frame and lets
+// the frame take what those cost. The default of two cold models per update is chosen against
+// the timed defaults it replaces (16 ms ceiling against a 26 ms median cold create measured on
+// Reforger Everon: the clock stopped after one expensive model, or several cheap ones), and the
+// floor guarantee is preserved by construction -- the count is only consulted once a cold
+// attempt has been made, so an update always makes progress and the fill always terminates.
+//
+// WGR_OBJECT_STREAM_COLD_PER_UPDATE sets the count. The preload mode ignores it, as it ignores
+// every per-update bound.
+static bool ObjectStreamAdmitCounted()
+{
+    static const bool counted = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_ADMIT");
+        return !(v && std::strcmp(v, "timed") == 0);
+    }();
+    return counted;
+}
+
+static uint32_t ObjectStreamColdPerUpdate()
+{
+    static const uint32_t count = []
+    {
+        const char* v = std::getenv("WGR_OBJECT_STREAM_COLD_PER_UPDATE");
+        const long parsed = v ? std::strtol(v, nullptr, 10) : 2;
+        // At least one: an update that may pay for no cold model would admit nothing once only
+        // cold placements remain, and an update that admits nothing makes no progress.
+        return static_cast<uint32_t>(std::clamp<long>(parsed, 1, 4096));
+    }();
+    return count;
 }
 
 // (c2) THE PER-FRAME UPLOAD BYTE CEILING.
@@ -3216,9 +3267,19 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     //                  the same cap as everything else; the cost is a few extra recentres during
     //                  the turn, which is the trade (a) exists to make cheap.
     //   teleport    -- rejected outright rather than smoothed, see PrefetchTeleportMetres.
-    const auto residencyNow = std::chrono::steady_clock::now();
+    // SIMULATION time, not the wall clock. The velocity estimate decides which cells the
+    // prefetch lead admits and evicts, so a wall-clock dt made the resident set a function of
+    // frame rate: the same flight on a faster machine took more samples of a shorter interval
+    // and smoothed differently, and the window centre moved differently with it. Glob.time
+    // advances with the fixed step, so under lockstep two runs feed this estimator identical
+    // intervals. Two rendered frames inside one simulation tick (or a paused game) produce
+    // dt == 0: that is not a discontinuity, it is the absence of new information, so the
+    // estimate AND the last sample are both kept -- overwriting the sample without advancing
+    // the time would make the next interval measure a partial displacement over a full dt.
+    const Poseidon::Foundation::Time residencyNow = Glob.time;
     const float rawCameraX = effectivePosition.X();
     const float rawCameraZ = effectivePosition.Z();
+    bool sampleTaken = true;
     if (!_modernObjectVelocityValid)
     {
         _modernObjectVelocityValid = true;
@@ -3227,32 +3288,43 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     }
     else
     {
-        const float dt = std::chrono::duration<float>(residencyNow - _modernObjectLastCameraTime).count();
-        const float dx = rawCameraX - _modernObjectLastCameraX;
-        const float dz = rawCameraZ - _modernObjectLastCameraZ;
-        const float step = std::sqrt(dx * dx + dz * dz);
-        if (dt <= 0.0f || dt > PrefetchMaxUpdateGapSeconds || step > PrefetchTeleportMetres)
+        const float dt = residencyNow - _modernObjectLastCameraTime;
+        if (dt <= 0.0f)
         {
-            // No usable interval, or a discontinuity. Drop to zero velocity rather than to a
-            // wrong one: a wrong lead is worse than no lead, because it evicts the band the
-            // camera is actually in.
-            _modernObjectVelocityX = 0.0f;
-            _modernObjectVelocityZ = 0.0f;
+            sampleTaken = false;
         }
         else
         {
-            // Exponential smoothing with a time constant rather than a fixed per-frame weight,
-            // because this runs once per RENDERED frame and the frame rate is precisely what is
-            // unstable here. A fixed weight would smooth over 0.1 s at 40 fps and over 2 s at
-            // 4 fps -- least responsive exactly during the stall.
-            const float alpha = 1.0f - std::exp(-dt / PrefetchSmoothingTau);
-            _modernObjectVelocityX += (dx / dt - _modernObjectVelocityX) * alpha;
-            _modernObjectVelocityZ += (dz / dt - _modernObjectVelocityZ) * alpha;
+            const float dx = rawCameraX - _modernObjectLastCameraX;
+            const float dz = rawCameraZ - _modernObjectLastCameraZ;
+            const float step = std::sqrt(dx * dx + dz * dz);
+            if (dt > PrefetchMaxUpdateGapSeconds || step > PrefetchTeleportMetres)
+            {
+                // A discontinuity. Drop to zero velocity rather than to a wrong one: a wrong
+                // lead is worse than no lead, because it evicts the band the camera is
+                // actually in.
+                _modernObjectVelocityX = 0.0f;
+                _modernObjectVelocityZ = 0.0f;
+            }
+            else
+            {
+                // Exponential smoothing with a time constant rather than a fixed per-frame
+                // weight, because this runs once per RENDERED frame and how much simulation
+                // time passes between two of those is precisely what is unstable here. A fixed
+                // weight would smooth over 0.1 s at 40 fps and over 2 s at 4 fps -- least
+                // responsive exactly during the stall.
+                const float alpha = 1.0f - std::exp(-dt / PrefetchSmoothingTau);
+                _modernObjectVelocityX += (dx / dt - _modernObjectVelocityX) * alpha;
+                _modernObjectVelocityZ += (dz / dt - _modernObjectVelocityZ) * alpha;
+            }
         }
     }
-    _modernObjectLastCameraX = rawCameraX;
-    _modernObjectLastCameraZ = rawCameraZ;
-    _modernObjectLastCameraTime = residencyNow;
+    if (sampleTaken)
+    {
+        _modernObjectLastCameraX = rawCameraX;
+        _modernObjectLastCameraZ = rawCameraZ;
+        _modernObjectLastCameraTime = residencyNow;
+    }
 
     _modernObjectLeadMetres = 0.0f;
     // The residency-turnover smoke hook above exists to make two screenshots directly
@@ -3538,6 +3610,11 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
     // (c) THE CEILING THAT MAKES THE FLOOR YIELD. See ObjectStreamCeilingMs for the reasoning
     // and for why this is not simply a lower floor.
     const float admitCeilingMs = ObjectStreamCeilingMs();
+    // (c3) Counted mode: neither clock is consulted; cold attempts are the ration instead.
+    const bool admitCounted = ObjectStreamAdmitCounted();
+    const uint32_t admitColdBudget =
+        preloading ? std::numeric_limits<uint32_t>::max() : ObjectStreamColdPerUpdate();
+    uint32_t coldAttempted = 0; // cold models this update paid for, admitted or not
     // (c2) The upload byte ceiling, same standing as the wall-clock ceiling: it may cut the
     // floor short, and `attempted > 0` keeps the one-object-per-update termination guarantee.
     // Reads the FRAME's cumulative upload bytes, so uploads outside this loop (terrain, UI
@@ -3577,6 +3654,22 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
                 ++_modernObjectAdmitStopUpload;
             }
             return true;
+        }
+        if (admitCounted)
+        {
+            // No clock below this line in counted mode. `coldAttempted` is incremented at the
+            // moment a cold model's cost is committed to, so the first cold model of an update
+            // is always paid for (progress), and the N+1th is deferred to the next update.
+            if (coldAttempted >= admitColdBudget)
+            {
+                if (!admitStopRecorded)
+                {
+                    admitStopRecorded = true;
+                    ++_modernObjectAdmitStopCold;
+                }
+                return true;
+            }
+            return false;
         }
         const auto elapsed = std::chrono::steady_clock::now() - admitStart;
         const float elapsedMs = std::chrono::duration<float, std::milli>(elapsed).count();
@@ -3822,6 +3915,7 @@ void Landscape::UpdateModernObjectResidency(Vector3Par cameraPosition)
             render::ObjectAdmitProfile& admitProfile = render::GObjectAdmitProfile;
             if (cold)
             {
+                ++coldAttempted;
                 admitProfile.Reset();
                 admitProfile.active = true;
             }
@@ -4120,10 +4214,15 @@ void Landscape::SnapshotObjectStreamDiag(Poseidon::Dev::ObjectStreamResidencyCou
     out.admitStopUpload = _modernObjectAdmitStopUpload;
     out.admitStopCeiling = _modernObjectAdmitStopCeiling;
     out.admitStopBudget = _modernObjectAdmitStopBudget;
+    out.admitStopCold = _modernObjectAdmitStopCold;
+    out.admitCounted = ObjectStreamAdmitCounted();
+    out.admitColdBudget = ObjectStreamColdPerUpdate();
     // The armed flags come from the same accessors the admit loop reads, so a consumer that
     // renders an unarmed bound as n/a cannot disagree with what the loop actually did.
     out.admitUploadCeilingArmed = ObjectStreamUploadBudgetBytes() > 0;
-    out.admitWallCeilingArmed = ObjectStreamCeilingMs() > 0.0f;
+    // In counted mode the clocks are never consulted, so the wall ceiling is unarmed whatever
+    // WGR_OBJECT_STREAM_MAX_MS says; the consumer renders it n/a rather than 0.
+    out.admitWallCeilingArmed = !ObjectStreamAdmitCounted() && ObjectStreamCeilingMs() > 0.0f;
     out.prepValid = _modernObjectPreparer && _modernObjectPreparer->Running();
     if (out.prepValid)
         out.prep = _modernObjectPreparer->SnapshotStats();

@@ -152,6 +152,13 @@ struct ObjectStreamResidencyCounters
     uint64_t admitStopUpload = 0;
     uint64_t admitStopCeiling = 0;
     uint64_t admitStopBudget = 0;
+    // Counted admission (WGR_OBJECT_STREAM_ADMIT, default counted): the two clock stops
+    // above are never consulted, so they read 0-because-disabled -- consumers must render
+    // them n/a whenever `admitCounted` is set, exactly as for the armed flags. `admitStopCold`
+    // is the counted mode's own stop, and `admitColdBudget` the count it stops at.
+    uint64_t admitStopCold = 0;
+    bool admitCounted = false;
+    uint32_t admitColdBudget = 0;
     bool admitUploadCeilingArmed = false;
     bool admitWallCeilingArmed = false;
     bool prepValid = false; // async preparer exists (WGR_OBJECT_STREAM_ASYNC on and a world loaded)

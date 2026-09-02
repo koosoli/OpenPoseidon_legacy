@@ -696,7 +696,7 @@ class Landscape : public SerializeClass
     bool _modernObjectVelocityValid = false;
     float _modernObjectLastCameraX = 0.0f;
     float _modernObjectLastCameraZ = 0.0f;
-    std::chrono::steady_clock::time_point _modernObjectLastCameraTime{};
+    Poseidon::Foundation::Time _modernObjectLastCameraTime; // simulation time of the last sample
     float _modernObjectVelocityX = 0.0f; // m/s, exponentially smoothed
     float _modernObjectVelocityZ = 0.0f;
     float _modernObjectLeadMetres = 0.0f; // last applied lead distance, for the progress row
@@ -776,7 +776,7 @@ class Landscape : public SerializeClass
     // one that ends the update, and re-counting the same bound on every subsequent cell would
     // make the tally a measure of how many cells the world has.
     // `_modernObjectAdmitUpdates` is the denominator; updates that drained every candidate
-    // without hitting anything are `updates - (sum of the four)`.
+    // without hitting anything are `updates - (sum of the five)`.
     uint64_t _modernObjectAdmitUpdates = 0;
 
     // WGR_OBJECT_STREAM_PRELOAD. True once the residency window has stopped growing, after
@@ -790,6 +790,7 @@ class Landscape : public SerializeClass
     uint64_t _modernObjectAdmitStopUpload = 0;   // frame upload bytes >= WGR_OBJECT_STREAM_UPLOAD_MB
     uint64_t _modernObjectAdmitStopCeiling = 0;  // elapsed >= WGR_OBJECT_STREAM_MAX_MS
     uint64_t _modernObjectAdmitStopBudget = 0;   // elapsed >= the ordinary budget (only above the floor)
+    uint64_t _modernObjectAdmitStopCold = 0;     // cold attempts >= WGR_OBJECT_STREAM_COLD_PER_UPDATE (counted mode)
     // Ensure the preparer knows this world's model table; no-op if already current.
     void EnsureModernObjectPreparer();
     // Walk the desired set once per recentre and enqueue every distinct cold model in

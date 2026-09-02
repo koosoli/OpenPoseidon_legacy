@@ -463,12 +463,21 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(res, "cold_tex_prepared", (double)r.coldTexPrepared);
             cJSON_AddNumberToObject(res, "park_hits", (double)r.parkHits);
             cJSON_AddNumberToObject(res, "park_stale", (double)r.parkStale);
-            // Which of the admit loop's bounds ended each update (roadmap 1.3). The four
+            // Which of the admit loop's bounds ended each update (roadmap 1.3). The
             // stop counters are disjoint and sum to at most `admit_updates`; the remainder
             // are updates that drained every candidate on their own.
             cJSON_AddNumberToObject(res, "admit_updates", (double)r.admitUpdates);
             cJSON_AddNumberToObject(res, "admit_stop_cap", (double)r.admitStopCap);
-            cJSON_AddNumberToObject(res, "admit_stop_budget", (double)r.admitStopBudget);
+            // The mode decides which stop keys exist at all: counted mode never consults the
+            // ordinary budget, so its 0 would be the disabled-lever trap described below.
+            cJSON_AddStringToObject(res, "admit_mode", r.admitCounted ? "counted" : "timed");
+            if (r.admitCounted)
+            {
+                cJSON_AddNumberToObject(res, "admit_cold_per_update", (double)r.admitColdBudget);
+                cJSON_AddNumberToObject(res, "admit_stop_cold", (double)r.admitStopCold);
+            }
+            else
+                cJSON_AddNumberToObject(res, "admit_stop_budget", (double)r.admitStopBudget);
             // ABSENT, NOT ZERO, when the lever is off. A disabled ceiling and an armed
             // ceiling that was never reached both produce 0, and they are opposite answers
             // to "does this lever earn its place" -- the same failure as the dead
