@@ -227,6 +227,7 @@ override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // alpha_to_coverage_enabled. Set only on cutout (alpha_ref > 0), non-shadow pipelines under
 // MSAA; the prepass twin (fs_prepass_a2c) emits the same coverage so the masks match.
 override a2c: f32 = 0.0;
+override foliage_screen_ao: f32 = 0.0; // REN-OBJ-001, as in gpu_driven.wgsl
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
 // ambient so transparent cockpit canopies don't wash out to the sky (and crash auto-exposure).
 override translucent: f32 = 0.0;
@@ -932,6 +933,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
         1.0, vec3<f32>(0.0), foliage_shadow_ao,
         veg_cutout, translucent > 0.5, veg_cutout,
         (material_flags(material) & MATFLAG_COCKPIT) != 0u, in.clip.xy,
+        !(veg_cutout && foliage_screen_ao < 0.5),
     );
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective. Every other draw takes the branch not-taken and is bit-identical to

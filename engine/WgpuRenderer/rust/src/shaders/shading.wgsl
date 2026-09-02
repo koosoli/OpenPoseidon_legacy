@@ -115,6 +115,15 @@ fn shade(
     // Only the screen-space AO needs it; it is passed rather than derived because shade() is
     // shared by the per-draw and GPU-driven fragment shaders and neither has a global to read.
     frag_coord: vec2<f32>,
+    // REN-OBJ-001: take the two SCREEN-SPACE ambient occluders -- the GTAO texture and the
+    // interior-sky volume -- for this fragment. False for vegetation cutouts by default: on
+    // Everon's perf_combat the alpha-tested object pass is 2.4 ms of which 0.24 is albedo,
+    // and ablating GTAO and the interior sky took 0.7 + 0.56 ms of the rest (the four largest
+    // terms together left 0.7 ms of base shading). A leaf card has its own canopy occlusion
+    // term (foliage_shadow_ao), is never inside a building volume, and the GTAO it received
+    // was already mixed down to 35%; what it lost is two texture loads and a volume walk per
+    // fragment over ~40% of the screen. WGR_FOLIAGE_SCREEN_AO=1 restores both.
+    screen_ao: bool,
 ) -> vec3<f32> {
     var albedo = albedo_in;
     var m_emissive = mat.emissive;
@@ -212,12 +221,16 @@ fn shade(
     // survives, the cave reading does not. 0.35 leaves the darkest canopy
     // interior at ~0.65 ambient, which matches the GL33 capture's character at
     // the same pose. Same is_foliage gate as the cavity exemption below.
-    var gtao_t = gtao_ao(frag_coord);
-    if (is_foliage) {
-        gtao_t = mix(1.0, gtao_t, 0.35);
+    var gtao_t = 1.0;
+    var interior_ao = 1.0;
+    if (screen_ao) {
+        gtao_t = gtao_ao(frag_coord);
+        if (is_foliage) {
+            gtao_t = mix(1.0, gtao_t, 0.35);
+        }
+        interior_ao = interior_sky_ao(world_abs, nrm);
     }
-    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t
-        * interior_sky_ao(world_abs, nrm) * clamp(baked_sky_vis, 0.0, 1.0);
+    let amb_ao = sky_vis_ao(world_abs.xz) * gtao_t * interior_ao * clamp(baked_sky_vis, 0.0, 1.0);
     // ...and a FOURTH, at a scale none of the three can reach: the normal map's own micro-
     // occlusion. Sky-vis is keyed on the terrain column (km), GTAO marches the depth buffer
     // (~2 m), the interior term answers "is there a roof" (room-sized) — the smallest thing any
@@ -251,7 +264,10 @@ fn shade(
         // steer then bends that toward the direction the SKY reaches this point from — the
         // window or doorway. Indoors GTAO has nothing useful to say (the room is bigger than its
         // radius and the roof is off-screen), so the interior term is what carries the result.
-        var amb_steer = interior_sky_ambient_normal(world_abs, gtao_bent_normal_world(frag_coord, nrm));
+        var amb_steer = nrm;
+        if (screen_ao) {
+            amb_steer = interior_sky_ambient_normal(world_abs, gtao_bent_normal_world(frag_coord, nrm));
+        }
         // The baked steer, when this model has a volume. frame.skyvisb.z is the shared
         // "directional" knob: 0 leaves the ambient purely scaled (the safe default), 1 samples
         // the sky fully along the direction it enters from.

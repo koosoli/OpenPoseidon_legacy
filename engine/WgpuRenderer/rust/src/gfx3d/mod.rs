@@ -184,6 +184,17 @@ pub(crate) fn emissive_night() -> f32 {
 // speckle past ~15 m while its shadow stays full, because a sparse leaf card's mip alpha sinks
 // under the 0.5 cutoff a few mips down. 0.5 per mip is the customary starting point;
 // WGR_CUTOUT_MIP_ALPHA=0 restores the old behaviour for an A/B.
+// REN-OBJ-001: whether vegetation cutouts sample GTAO + the interior-sky volume per fragment.
+// Default OFF (they keep their canopy term); WGR_FOLIAGE_SCREEN_AO=1 is the A/B and the old look.
+fn foliage_screen_ao() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_FOLIAGE_SCREEN_AO")
+            .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
+            .unwrap_or(0.0)
+    })
+}
+
 pub(crate) fn cutout_mip_alpha() -> f32 {
     env_f32("WGR_CUTOUT_MIP_ALPHA", 0.5).clamp(0.0, 4.0)
 }
@@ -4365,6 +4376,7 @@ impl Gfx3d {
             ("depth_bias", depth_bias),
             ("linear", linear),
             ("a2c", if a2c { 1.0 } else { 0.0 }),
+            ("foliage_screen_ao", foliage_screen_ao() as f64),
             ("translucent", translucent),
 
             ("emissive_night", emissive_night() as f64),

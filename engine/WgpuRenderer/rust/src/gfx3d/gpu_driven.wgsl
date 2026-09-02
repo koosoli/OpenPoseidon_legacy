@@ -24,6 +24,9 @@ override foliage_shadow_ao: f32 = 0.35;
 // opaque + cutout sections, so cutout-ness is decided per-fragment (sm.alpha_ref > 0, uniform
 // per quad): cutout emits sharpened coverage, opaque emits 1.0 (full coverage -> unchanged).
 override a2c: f32 = 0.0;
+// REN-OBJ-001: 1 = vegetation cutouts also sample GTAO + the interior-sky volume (the pre-2026-09-02
+// behaviour, WGR_FOLIAGE_SCREEN_AO=1); 0 = they take only their canopy term. See shade().
+override foliage_screen_ao: f32 = 0.0;
 // 1 = the depth+normal PREPASS fragment applies the colour pass' FULL discard set, so the depth
 // it lays down covers exactly the pixels fs_gpu will shade. 0 restores the pre-fix behaviour
 // (raw-uv cutout test only, no clip plane) for an A/B. Driven by WGR_PREPASS_MATCH (cull.rs).
@@ -909,6 +912,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         foliage_shadow_ao,
         // Retained objects are never the first-person cockpit (is_cockpit = false).
         veg_cutout, false, veg_cutout, false, in.clip.xy,
+        !(veg_cutout && foliage_screen_ao < 0.5),
     );
     // DZ-003 -- Fresnel-weighted sky reflection for materials that declared themselves
     // reflective (DayZ's CalmWater family). Every other section takes the branch
