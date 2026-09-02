@@ -86,6 +86,10 @@ pub struct MipFeedback {
     /// whether this instrument ran at all, as opposed to reporting zeros because it never did.
     harvests: u64,
     enabled: bool,
+    /// REN-OBJ-003: the four header words as last harvested -- the object fragment census
+    /// (colour, colour cutout, prepass, prepass cutout) when WGR_OBJECT_COUNT_FRAGMENTS=1,
+    /// zeros otherwise.
+    frag_counts: [u32; 4],
 }
 
 impl MipFeedback {
@@ -116,6 +120,7 @@ impl MipFeedback {
             frame: 0,
             harvests: 0,
             enabled,
+            frag_counts: [0; 4],
         }
     }
 
@@ -241,6 +246,11 @@ impl MipFeedback {
                     {
                         let data = buf.slice(..).get_mapped_range();
                         let words = data.len() / 4;
+                        for (k, w) in self.frag_counts.iter_mut().enumerate() {
+                            if k < words {
+                                *w = u32::from_le_bytes(data[k * 4..k * 4 + 4].try_into().unwrap_or([0; 4]));
+                            }
+                        }
                         for i in HEADER_WORDS as usize..words {
                             let code = u32::from_le_bytes(
                                 data[i * 4..i * 4 + 4].try_into().unwrap_or([0; 4]),
@@ -282,6 +292,11 @@ impl MipFeedback {
 
     pub fn frame(&self) -> u64 {
         self.frame
+    }
+
+    /// REN-OBJ-003: the object fragment census from the last harvest.
+    pub fn fragment_counts(&self) -> [u32; 4] {
+        self.frag_counts
     }
 
     pub fn harvest_count(&self) -> u64 {

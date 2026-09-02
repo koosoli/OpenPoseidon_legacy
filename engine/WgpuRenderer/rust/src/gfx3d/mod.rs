@@ -195,6 +195,17 @@ fn foliage_screen_ao() -> f32 {
     })
 }
 
+// REN-OBJ-003: WGR_OBJECT_COUNT_FRAGMENTS=1 builds the object pipelines with the fragment census
+// on. Off by default: a counting run's timings are not quotable.
+fn count_fragments() -> f32 {
+    static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("WGR_OBJECT_COUNT_FRAGMENTS")
+            .map(|v| if v.trim() == "1" { 1.0 } else { 0.0 })
+            .unwrap_or(0.0)
+    })
+}
+
 pub(crate) fn cutout_mip_alpha() -> f32 {
     env_f32("WGR_CUTOUT_MIP_ALPHA", 0.5).clamp(0.0, 4.0)
 }
@@ -4377,6 +4388,7 @@ impl Gfx3d {
             ("linear", linear),
             ("a2c", if a2c { 1.0 } else { 0.0 }),
             ("foliage_screen_ao", foliage_screen_ao() as f64),
+            ("count_fragments", count_fragments() as f64),
             ("translucent", translucent),
 
             ("emissive_night", emissive_night() as f64),
@@ -4539,6 +4551,7 @@ impl Gfx3d {
             ("alpha_ref", alpha_ref),
             ("depth_bias", 0.0),
             ("cutout_mip_alpha", cutout_mip_alpha() as f64),
+            ("count_fragments", count_fragments() as f64),
         ];
         // Cutout foliage under MSAA: the A2C prepass twin emits a vec4 whose .a carries coverage,
         // and the pipeline enables alpha_to_coverage so it writes depth to exactly the samples the
@@ -8164,6 +8177,11 @@ impl Gfx3d {
     // Render-target size the GTAO pass works at (== the depth target).
     pub fn render_size(&self) -> (u32, u32) {
         self.depth_size
+    }
+
+    /// REN-OBJ-003: the last harvested object fragment census (mip-feedback header words 0..3).
+    pub fn object_fragment_census(&self) -> [u32; 4] {
+        self.mip_feedback.fragment_counts()
     }
 
     pub fn set_material_debug(&mut self, view: u32, flags: u32) {

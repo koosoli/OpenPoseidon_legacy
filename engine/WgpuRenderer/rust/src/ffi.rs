@@ -3024,6 +3024,9 @@ pub struct WgrObjectStats {
     /// whatif_scale[i], over the same survivors. What the LOD governor steers on.
     pub main_whatif_tris: [u32; 4],
     pub whatif_scale: [f32; 4],
+    /// REN-OBJ-003: object fragment census (colour, colour cutout, prepass, prepass cutout);
+    /// zeros unless WGR_OBJECT_COUNT_FRAGMENTS=1 (then timings are not quotable).
+    pub fragments: [u32; 4],
 
     /// CPU-replayed object path (never reaches the cull shader).
     pub direct_calls: u32,
@@ -3056,7 +3059,7 @@ pub unsafe extern "C" fn wgr_get_object_stats(
     catch_unwind(AssertUnwindSafe(|| {
         use crate::gfx3d::cull::{STATS_VIEW_COLOR, STATS_VIEW_MAIN, STATS_VIEW_SHADOW0};
         let renderer = unsafe { &*renderer };
-        let (cull, direct, registered) = renderer.object_stats();
+        let (cull, direct, registered, fragments) = renderer.object_stats();
         let main = cull.views[STATS_VIEW_MAIN];
         let color = cull.views[STATS_VIEW_COLOR];
         let mut s = WgrObjectStats {
@@ -3077,6 +3080,7 @@ pub unsafe extern "C" fn wgr_get_object_stats(
             main_lod_hist: main.lod_hist,
             main_whatif_tris: main.whatif_tris,
             whatif_scale: crate::gfx3d::cull::WHATIF_SCALES,
+            fragments,
             direct_calls: direct.direct_calls,
             direct_indirect_calls: direct.indirect_calls,
             direct_instances: direct.instances,

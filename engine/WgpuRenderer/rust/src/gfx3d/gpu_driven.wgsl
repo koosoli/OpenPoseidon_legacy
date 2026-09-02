@@ -27,6 +27,7 @@ override a2c: f32 = 0.0;
 // REN-OBJ-001: 1 = vegetation cutouts also sample GTAO + the interior-sky volume (the pre-2026-09-02
 // behaviour, WGR_FOLIAGE_SCREEN_AO=1); 0 = they take only their canopy term. See shade().
 override foliage_screen_ao: f32 = 0.0;
+override count_fragments: f32 = 0.0; // REN-OBJ-003 object fragment census, see census()
 // 1 = the depth+normal PREPASS fragment applies the colour pass' FULL discard set, so the depth
 // it lays down covers exactly the pixels fs_gpu will shade. 0 restores the pre-fix behaviour
 // (raw-uv cutout test only, no clip plane) for an A/B. Driven by WGR_PREPASS_MATCH (cull.rs).
@@ -362,6 +363,20 @@ fn baked_sky_visibility(model: u32, model_pos: vec3<f32>) -> f32 {
 const MIPFB_HEADER_WORDS: u32 = 4u;
 const MIPFB_CODE_BASE: u32 = 16u;
 
+
+// OBJECT FRAGMENT CENSUS (REN-OBJ-003; WGR_OBJECT_COUNT_FRAGMENTS=1). The mip-feedback buffer's
+// four header words are spare and cleared to zero every frame, so they count fragments per
+// object pass without a new binding: 0 = colour pass, 1 = colour pass cutout variant,
+// 2 = depth prepass, 3 = depth prepass cutout variant. Behind a pipeline constant so the
+// production shader carries no atomic; a counting run's timings are not quotable, its counts
+// are -- they turn a pass's milliseconds into nanoseconds per fragment, which is the number
+// that says whether the pass is paying per pixel or per triangle.
+fn census(word: u32) {
+    if (count_fragments > 0.5) {
+        atomicAdd(&mip_feedback[word], 1u);
+    }
+}
+
 // Record the mip this fragment wanted of `slot`.
 //
 // `duvx`/`duvy` MUST be computed by the caller in uniform control flow and passed in --
@@ -629,6 +644,10 @@ fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
 fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
+    census(0u);
+    if (section_materials[in.section].alpha_ref > 0.0) {
+        census(1u);
+    }
     // AST-012A: the raw UV derivatives, taken HERE because derivative builtins need uniform
     // control flow and everything below this point is conditional. The layer transform is
     // affine, so the transformed derivative is just this scaled by layer_uv[0].xy -- applied at
@@ -962,6 +981,7 @@ fn prepass_clipped(world_pos: vec3<f32>) -> bool {
 // applies the SAME discard as fs_gpu so prepass coverage matches the colour pass.
 @fragment
 fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    census(2u);
     if (prepass_clipped(in.world_pos)) {
         discard;
     }
@@ -990,6 +1010,8 @@ fn fs_gpu_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // per-fragment opaque/cutout split rather than a pipeline override.
 @fragment
 fn fs_gpu_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    census(2u);
+    census(3u);
     if (prepass_clipped(in.world_pos)) {
         discard;
     }

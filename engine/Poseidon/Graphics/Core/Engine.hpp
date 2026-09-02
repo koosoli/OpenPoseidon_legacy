@@ -2668,6 +2668,8 @@ class Engine : public IGraphicsEngine
         // multiplier (REN-VEG-004); the governor's per-step cost prediction for the retained set.
         uint32_t mainWhatIfTris[4] = {};
         float whatIfScale[4] = {};
+        // Object fragment census (REN-OBJ-003): colour, colour cutout, prepass, prepass cutout.
+        uint32_t fragments[4] = {};
         uint32_t directCalls = 0, directIndirectCalls = 0, directInstances = 0, directTris = 0;
         // Instance handles used after their instance was removed, refused and counted since
         // startup. Nonzero is a bug on THIS side of the boundary, not in the renderer.

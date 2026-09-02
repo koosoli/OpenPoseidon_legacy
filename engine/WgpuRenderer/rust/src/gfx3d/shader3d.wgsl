@@ -105,6 +105,14 @@ const MIPFB_CODE_BASE: u32 = 16u;
 // the test is what keeps this to a fraction of the fragments: only slots congruent to
 // frame.renscale.z modulo frame.renscale.w write, so one frame covers one group's worth of the
 // texture table. renscale.w == 0 disables it; slot 0 is the white bindless fallback.
+// REN-OBJ-003: the per-draw path's share of the object fragment census (words 0/1; it has no
+// prepass twin of its own). Same buffer, same words as gpu_driven.wgsl.
+fn census(word: u32) {
+    if (count_fragments > 0.5) {
+        atomicAdd(&mip_feedback[word], 1u);
+    }
+}
+
 fn mip_feedback_note(slot: u32, duvx: vec2<f32>, duvy: vec2<f32>) {
     let groups = u32(max(frame.renscale.w, 0.0));
     if (groups == 0u || slot == 0u || (slot % groups) != u32(max(frame.renscale.z, 0.0))) {
@@ -228,6 +236,7 @@ override is_shadow: f32 = 0.0;   // 1 = output black + shadow-strength alpha
 // MSAA; the prepass twin (fs_prepass_a2c) emits the same coverage so the masks match.
 override a2c: f32 = 0.0;
 override foliage_screen_ao: f32 = 0.0; // REN-OBJ-001, as in gpu_driven.wgsl
+override count_fragments: f32 = 0.0;   // REN-OBJ-003, as in gpu_driven.wgsl (colour pass only here)
 // 1 = an alpha-blended (glass) pipeline: the shared shading damps its diffuse sky-irradiance
 // ambient so transparent cockpit canopies don't wash out to the sky (and crash auto-exposure).
 override translucent: f32 = 0.0;
@@ -497,6 +506,10 @@ fn vs_skinned(
 // only a depth output.
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    census(0u);
+    if (alpha_ref > 0.0) {
+        census(1u);
+    }
     return shade_fragment(in);
 }
 

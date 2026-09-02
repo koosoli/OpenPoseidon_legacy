@@ -263,6 +263,10 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON* hist = cJSON_AddArrayToObject(gov, "history");
             for (int i = 0; i < 4; ++i)
                 cJSON_AddItemToArray(hist, cJSON_CreateNumber(gt.history[i]));
+            // REN-OBJ-003: the object fragment census; all zeros unless the counting build ran.
+            cJSON* fr = cJSON_AddArrayToObject(o, "fragments");
+            for (int i = 0; i < 4; ++i)
+                cJSON_AddItemToArray(fr, cJSON_CreateNumber(objects.fragments[i]));
             cJSON* wi = cJSON_AddArrayToObject(gov, "whatif_tris");
             cJSON* ws = cJSON_AddArrayToObject(gov, "whatif_scale");
             for (int i = 0; i < 4; ++i)

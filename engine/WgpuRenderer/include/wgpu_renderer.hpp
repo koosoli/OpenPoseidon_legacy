@@ -1500,6 +1500,9 @@ struct WgrObjectStats
      * is taken. */
     uint32_t main_whatif_tris[4];
     float whatif_scale[4];
+    /* REN-OBJ-003: object fragment census -- colour, colour cutout, prepass, prepass cutout.
+     * Zeros unless WGR_OBJECT_COUNT_FRAGMENTS=1, whose timings are not quotable. */
+    uint32_t fragments[4];
 
     /* The CPU-replayed object path (transparent, decal, skinned/baked, non-standard depth).
      * These never reach the cull shader, so they are invisible in every count above. */

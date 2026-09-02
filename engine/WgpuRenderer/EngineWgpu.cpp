@@ -8957,6 +8957,7 @@ bool EngineWgpu::GetObjectStatsFromRenderer(ObjectStatsOut& out) const
     {
         out.mainWhatIfTris[k] = s.main_whatif_tris[k];
         out.whatIfScale[k] = s.whatif_scale[k];
+        out.fragments[k] = s.fragments[k];
     }
     out.directCalls = s.direct_calls;
     out.directIndirectCalls = s.direct_indirect_calls;
