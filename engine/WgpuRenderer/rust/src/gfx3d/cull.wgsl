@@ -124,6 +124,12 @@ struct Record {
 //   +0 surviving instances       +1 instance-section records    +2 triangles
 //   +3 draw args emitted         +4/+5 draw args by variant     +6/+7 triangles by variant
 //   +8..+15 LOD histogram (level 0..6, 7 = "7 or coarser")
+//   +16..+19 WHAT-IF triangles: the main view's triangle total if lod_inv_width were scaled by
+//            WHATIF_SCALE[i] (0.5, 0.71, 1.41, 2.0), same LOD rule, same survivors. This is
+//            what lets the CPU's LOD governor see the cost of a step BEFORE taking it
+//            (REN-VEG-004): the retained set's cost is a 700x ladder on a vegetation world and
+//            last frame's total says nothing about the next level.
+//   +20..+23 spare
 // The histogram is the point of this block: the standing hypothesis is that detailed building
 // and vegetation LODs stay active too far out, and only a per-level population count can test it.
 const STAT_BASE: u32 = 4u;
@@ -144,6 +150,7 @@ fn outside_frustum(center: vec3<f32>, radius: f32) -> bool {
 struct CullResult {
     culled: bool,
     level: u32,
+    dist2: f32,        // the near-clamped distance^2 the LOD was picked from (what-if reuses it)
     center: vec3<f32>, // world bounding-sphere center
     radius: f32,       // model radius * scale (for the near-clamp + occlusion projection)
 };
@@ -225,6 +232,7 @@ fn classify(idx: u32) -> CullResult {
 
     res.culled = false;
     res.level = level;
+    res.dist2 = dist2;
     res.center = center;
     res.radius = radius;
     return res;
@@ -249,6 +257,60 @@ fn count_sections(idx: u32, level: u32) {
     }
     atomicAdd(&counters[STAT_BASE + 0u], 1u);
     atomicAdd(&counters[STAT_BASE + 8u + min(level, 7u)], 1u);
+}
+
+// Triangles of one LOD level of one instance (sum of its sections' index counts / 3).
+fn lod_triangles(lod_base: u32, level: u32) -> u32 {
+    let lod = lods[lod_base + level];
+    var tris = 0u;
+    for (var s = 0u; s < lod.section_count; s++) {
+        tris += sections[lod.section_base + s].index_count / 3u;
+    }
+    return tris;
+}
+
+// The LOD this instance would pick under a scaled detail multiplier (same rule as classify:
+// the coarsest level whose resolution^2 <= resol2, stepped back over decal levels).
+fn level_for(lod_base: u32, lod_count: u32, resol2: f32) -> u32 {
+    if (lod_count < 2u) {
+        return 0u;
+    }
+    var i = 1u;
+    loop {
+        if (i >= lod_count) { break; }
+        let r = lods[lod_base + i].resolution;
+        if (r * r > resol2) { break; }
+        i++;
+    }
+    i -= 1u;
+    loop {
+        if (i == 0u || lods[lod_base + i].is_decal == 0u) { break; }
+        i--;
+    }
+    return i;
+}
+
+// What-if accounting (word map +16..+19): the survivors' triangle total under four alternative
+// detail multipliers. Sub-pixel and distance culls are not re-evaluated -- the question is
+// what the SAME survivors would cost one step finer or coarser, which is the governor's
+// question. Costs four LOD walks and four section sums per surviving instance.
+fn whatif_triangles(idx: u32, dist2: f32) {
+    let inst = instances[idx];
+    let model = models[inst.model];
+    let base_detail2 = dist2 * cull.lod_inv_width * cull.lod_inv_width;
+    let scale2 = cull.lod_scale * cull.lod_scale;
+    let f0 = 0.5;
+    let f1 = 0.70710678;
+    let f2 = 1.41421356;
+    let f3 = 2.0;
+    let t0 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f0 * f0 * scale2));
+    let t1 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f1 * f1 * scale2));
+    let t2 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f2 * f2 * scale2));
+    let t3 = lod_triangles(model.lod_base, level_for(model.lod_base, model.lod_count, base_detail2 * f3 * f3 * scale2));
+    atomicAdd(&counters[STAT_BASE + 16u], t0);
+    atomicAdd(&counters[STAT_BASE + 17u], t1);
+    atomicAdd(&counters[STAT_BASE + 18u], t2);
+    atomicAdd(&counters[STAT_BASE + 19u], t3);
 }
 
 // Pass SCATTER (1 thread / surviving instance): append this instance's record into each of its
@@ -354,6 +416,7 @@ fn count(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     count_sections(idx, res.level);
+    whatif_triangles(idx, res.dist2);
 }
 
 // Frustum + distance + LOD + Hi-Z occlusion (color pass). COUNT half; must agree with the
@@ -372,6 +435,7 @@ fn count_occlude(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     count_sections(idx, res.level);
+    whatif_triangles(idx, res.dist2);
 }
 
 // EMIT (1 thread / GLOBAL section): allocate the section's contiguous out_records run and emit

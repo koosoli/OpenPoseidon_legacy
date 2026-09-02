@@ -320,6 +320,9 @@ class Scene
   private:
     GovernorTrace _governorTrace;
     int _governorRetainedLast = 0; // last VALID retained triangle count (the readback skips frames)
+    float _governorWhatIfBase = 0.0f;    // the _lodInvWidth the last what-if ladder was measured at
+    float _governorWhatIfScale[4] = {};  // ascending scales of the ladder (0.5, 0.71, 1.41, 2.0)
+    int   _governorWhatIfTris[4] = {};   // retained triangles at those scales
 
   public:
     float GetSmokeGeneralization() const;

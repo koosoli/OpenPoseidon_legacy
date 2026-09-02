@@ -1120,15 +1120,57 @@ void Scene::AdjustComplexity()
         if (includeRetained && GEngine && GEngine->GetObjectStats(retained) && retained.valid)
         {
             _governorRetainedLast = static_cast<int>(std::min<uint32_t>(retained.mainTris, 1u << 30));
+            // THE WHAT-IF LADDER (REN-VEG-004). The cull also reports what the same survivors
+            // would cost at four alternative detail multipliers. Kept as (scale, triangles)
+            // points around the multiplier the count was taken at, so the loop below can ask
+            // "what does the retained set cost at the l I am about to try" instead of assuming
+            // last frame's answer -- the assumption that walked a 700x vegetation ladder blind.
+            _governorWhatIfBase = _lodInvWidth;
+            for (int k = 0; k < 4; ++k)
+            {
+                _governorWhatIfScale[k] = retained.whatIfScale[k];
+                _governorWhatIfTris[k] = static_cast<int>(std::min<uint32_t>(retained.mainWhatIfTris[k], 1u << 30));
+            }
         }
         retainedComplexity = includeRetained ? _governorRetainedLast : 0;
     }
+    // Retained cost at a candidate detail multiplier: piecewise-linear in log(scale) through
+    // the five known points (the four what-ifs and the measured count at scale 1), clamped at
+    // the ends. Falls back to the flat count when the what-if words are absent (older DLL).
+    auto retainedAt = [&](float l) -> int
+    {
+        if (retainedComplexity <= 0 || _governorWhatIfBase <= 0.0f || _governorWhatIfScale[3] <= 0.0f)
+            return retainedComplexity;
+        float xs[5];
+        float ys[5];
+        // ascending in scale: 0.5, 0.707, 1.0, 1.414, 2.0
+        xs[0] = _governorWhatIfScale[0]; ys[0] = static_cast<float>(_governorWhatIfTris[0]);
+        xs[1] = _governorWhatIfScale[1]; ys[1] = static_cast<float>(_governorWhatIfTris[1]);
+        xs[2] = 1.0f;                    ys[2] = static_cast<float>(retainedComplexity);
+        xs[3] = _governorWhatIfScale[2]; ys[3] = static_cast<float>(_governorWhatIfTris[2]);
+        xs[4] = _governorWhatIfScale[3]; ys[4] = static_cast<float>(_governorWhatIfTris[3]);
+        const float f = l / _governorWhatIfBase;
+        if (f <= xs[0]) return static_cast<int>(ys[0]);
+        if (f >= xs[4]) return static_cast<int>(ys[4]);
+        const float lf = std::log(f);
+        for (int i = 0; i < 4; ++i)
+        {
+            if (f <= xs[i + 1])
+            {
+                const float a = std::log(xs[i]);
+                const float b = std::log(xs[i + 1]);
+                const float t = b > a ? (lf - a) / (b - a) : 0.0f;
+                return static_cast<int>(ys[i] + (ys[i + 1] - ys[i]) * t);
+            }
+        }
+        return retainedComplexity;
+    };
     for (int iters = 5; --iters >= 0;)
     {
         // calculate complexity
         complexity = AdjustComplexity(_drawObjects);
         complexity += AdjustShadowComplexity(_drawObjects);
-        complexity += retainedComplexity;
+        complexity += retainedAt(_lodInvWidth);
         // include landscape complexity
         complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
 
@@ -1232,7 +1274,7 @@ void Scene::AdjustComplexity()
                 _lodInvWidth = _maxLodInvWidth;
                 complexity = AdjustComplexity(_drawObjects);
                 complexity += AdjustShadowComplexity(_drawObjects);
-                complexity += retainedComplexity; // the history below must carry the same sum the loop used
+                complexity += retainedAt(_lodInvWidth); // the history below must carry the same sum the loop used
                 complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
                 break;
             }
@@ -1256,7 +1298,7 @@ void Scene::AdjustComplexity()
                 _lodInvWidth = _minLodInvWidth;
                 complexity = AdjustComplexity(_drawObjects);
                 complexity += AdjustShadowComplexity(_drawObjects);
-                complexity += retainedComplexity; // the history below must carry the same sum the loop used
+                complexity += retainedAt(_lodInvWidth); // the history below must carry the same sum the loop used
                 complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
                 break;
             }
@@ -1277,7 +1319,7 @@ void Scene::AdjustComplexity()
             _lodInvWidth = oldLodInvWidth;
             complexity = AdjustComplexity(_drawObjects);
             complexity += AdjustShadowComplexity(_drawObjects);
-            complexity += retainedComplexity;
+            complexity += retainedAt(_lodInvWidth);
         }
         _lastScaleBetterTime = Glob.uiTime;
     }
@@ -1290,7 +1332,7 @@ void Scene::AdjustComplexity()
             _lodInvWidth = oldLodInvWidth;
             complexity = AdjustComplexity(_drawObjects);
             complexity += AdjustShadowComplexity(_drawObjects);
-            complexity += retainedComplexity;
+            complexity += retainedAt(_lodInvWidth);
         }
         _lastScaleWorseTime = Glob.uiTime;
     }

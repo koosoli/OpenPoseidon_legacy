@@ -2664,6 +2664,10 @@ class Engine : public IGraphicsEngine
         uint32_t shadowInstances[4] = {}, shadowDraws[4] = {}, shadowTris[4] = {};
         // LOD 0..6 plus a "7 or coarser" bucket, over the MAIN view's survivors.
         uint32_t mainLodHist[8] = {};
+        // What the main view would cost in triangles at whatIfScale[i] x the current detail
+        // multiplier (REN-VEG-004); the governor's per-step cost prediction for the retained set.
+        uint32_t mainWhatIfTris[4] = {};
+        float whatIfScale[4] = {};
         uint32_t directCalls = 0, directIndirectCalls = 0, directInstances = 0, directTris = 0;
         // Instance handles used after their instance was removed, refused and counted since
         // startup. Nonzero is a bug on THIS side of the boundary, not in the renderer.

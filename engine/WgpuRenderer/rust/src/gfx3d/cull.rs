@@ -219,7 +219,7 @@ const ARG_WORDS: u64 = super::INDIRECT_ARG_SIZE / 4;
 // 8-storage-buffer GPU for one saved indexing offset. Word 3 is spare padding so STAT_BASE_WORD
 // lands on a round number; keep in lockstep with STAT_BASE in cull.wgsl.
 const STAT_BASE_WORD: u64 = 4;
-pub const STATS_WORDS: usize = 16;
+pub const STATS_WORDS: usize = 24; // +16..+19 what-if triangles (see cull.wgsl word map)
 const COUNTER_WORDS: u64 = STAT_BASE_WORD + STATS_WORDS as u64;
 // Which readback slot each cull view's counters are gathered into. Sky-visibility views
 // deliberately SHARE the last slot: there are 5 of them (sky_vis::DIRECTION_COUNT) and their
@@ -241,6 +241,10 @@ pub const STAT_DRAWS_V0: usize = 4;
 pub const STAT_TRIS_V0: usize = 6;
 pub const STAT_LOD_HIST: usize = 8;
 pub const STAT_LOD_BUCKETS: usize = 8;
+pub const STAT_WHATIF: usize = 16;
+pub const STAT_WHATIF_COUNT: usize = 4;
+/// The detail-multiplier scales the what-if words were computed for, in word order.
+pub const WHATIF_SCALES: [f32; STAT_WHATIF_COUNT] = [0.5, 0.70710678, 1.41421356, 2.0];
 /// Bytes gathered per view into a readback slot (the accounting tail of its counters buffer).
 const STATS_SLOT_BYTES: u64 = STATS_WORDS as u64 * 4;
 
@@ -256,6 +260,8 @@ pub struct ViewStats {
     pub tris_solid: u32,
     pub tris_alpha: u32,
     pub lod_hist: [u32; STAT_LOD_BUCKETS],
+    /// Triangle total of the same survivors under WHATIF_SCALES[i] x lod_inv_width.
+    pub whatif_tris: [u32; STAT_WHATIF_COUNT],
 }
 
 /// The whole frame's object accounting, one entry per cull view.
@@ -900,9 +906,13 @@ impl CullState {
                                 tris_solid: word(b + STAT_TRIS_V0),
                                 tris_alpha: word(b + STAT_TRIS_V0 + 1),
                                 lod_hist: [0; STAT_LOD_BUCKETS],
+                                whatif_tris: [0; STAT_WHATIF_COUNT],
                             };
                             for (k, h) in st.lod_hist.iter_mut().enumerate() {
                                 *h = word(b + STAT_LOD_HIST + k);
+                            }
+                            for (k, w) in st.whatif_tris.iter_mut().enumerate() {
+                                *w = word(b + STAT_WHATIF + k);
                             }
                             self.stats_latest.views[v] = st;
                         }

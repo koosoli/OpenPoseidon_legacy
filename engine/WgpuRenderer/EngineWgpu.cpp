@@ -8953,6 +8953,11 @@ bool EngineWgpu::GetObjectStatsFromRenderer(ObjectStatsOut& out) const
     }
     for (int l = 0; l < 8; ++l)
         out.mainLodHist[l] = s.main_lod_hist[l];
+    for (int k = 0; k < 4; ++k)
+    {
+        out.mainWhatIfTris[k] = s.main_whatif_tris[k];
+        out.whatIfScale[k] = s.whatif_scale[k];
+    }
     out.directCalls = s.direct_calls;
     out.directIndirectCalls = s.direct_indirect_calls;
     out.directInstances = s.direct_instances;

@@ -3020,6 +3020,10 @@ pub struct WgrObjectStats {
     /// 1, ... 6, and bucket 7 = "LOD 7 or coarser". The direct test of whether detailed
     /// building/vegetation LODs stay active too far out.
     pub main_lod_hist: [u32; 8],
+    /// REN-VEG-004: the main view's triangle total if lod_inv_width were scaled by
+    /// whatif_scale[i], over the same survivors. What the LOD governor steers on.
+    pub main_whatif_tris: [u32; 4],
+    pub whatif_scale: [f32; 4],
 
     /// CPU-replayed object path (never reaches the cull shader).
     pub direct_calls: u32,
@@ -3071,6 +3075,8 @@ pub unsafe extern "C" fn wgr_get_object_stats(
             color_tris_solid: color.tris_solid,
             color_tris_alpha: color.tris_alpha,
             main_lod_hist: main.lod_hist,
+            main_whatif_tris: main.whatif_tris,
+            whatif_scale: crate::gfx3d::cull::WHATIF_SCALES,
             direct_calls: direct.direct_calls,
             direct_indirect_calls: direct.indirect_calls,
             direct_instances: direct.instances,

@@ -263,6 +263,13 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON* hist = cJSON_AddArrayToObject(gov, "history");
             for (int i = 0; i < 4; ++i)
                 cJSON_AddItemToArray(hist, cJSON_CreateNumber(gt.history[i]));
+            cJSON* wi = cJSON_AddArrayToObject(gov, "whatif_tris");
+            cJSON* ws = cJSON_AddArrayToObject(gov, "whatif_scale");
+            for (int i = 0; i < 4; ++i)
+            {
+                cJSON_AddItemToArray(wi, cJSON_CreateNumber(objects.mainWhatIfTris[i]));
+                cJSON_AddItemToArray(ws, cJSON_CreateNumber(objects.whatIfScale[i]));
+            }
         }
     }
     Engine::GrassStatsOut grass;

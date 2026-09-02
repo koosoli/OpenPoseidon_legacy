@@ -1495,6 +1495,11 @@ struct WgrObjectStats
      * bucket 7 = "LOD 7 or coarser". This is the direct test of the standing hypothesis that
      * detailed building and vegetation LODs stay active too far out. */
     uint32_t main_lod_hist[8];
+    /* REN-VEG-004: the main view's triangle total if lod_inv_width were scaled by
+     * whatif_scale[i], over the same survivors -- the cost of a LOD-governor step before it
+     * is taken. */
+    uint32_t main_whatif_tris[4];
+    float whatif_scale[4];
 
     /* The CPU-replayed object path (transparent, decal, skinned/baked, non-standard depth).
      * These never reach the cull shader, so they are invisible in every count above. */
