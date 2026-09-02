@@ -49,8 +49,10 @@ playing DayZ Chernarus+ live and reporting what he felt:
 - **`land:obj` fell 80% in three measured cuts** (13.2 -> 5.9 -> 2.65 ms): first the
   per-section string classification (paths re-parsed per frame, a quarter-million heap
   allocations), then the per-section binding re-resolution. Neither was submission cost;
-  batching remains untouched and unneeded at this scale. `sim:step` is likely the largest
-  CPU phase now; `subThink`/`unitThink` attribution is running.
+  batching remains untouched and unneeded at this scale. `sim:step` is the largest CPU
+  phase now, and PERF-019 attributed it: one unrationed walk, `SelectInterestingTarget`,
+  is 94-96% of `unitThink` on both worlds, and stock Everon's target list is 2.4x
+  Chernarus+'s. Its ration (`POSEIDON_AI_WATCH_PERIOD`, PERF-020) follows on the same oracle.
 - **Loading was mostly a logo.** The loader waited out a hard-coded 8-second splash after
   the world was ready: Everon 7.59 -> 1.29 s, Chernarus+ 8.11 -> 2.36 s once the wait
   became a ceiling. Cutting it short stranded the title effect and swallowed all input --
@@ -78,10 +80,15 @@ in this document, each with the finding behind it:
 - **The simulation track is closed as planned and reopened as measured.** 10S exists (SIM-811),
   11S is done (SIM-801/803), 12S was answered "no", and 13S *is the ration* (PERF-017). What
   remains on that line is Phase 8's command/commit stage and Phase 13's replay — and the first
-  blocker of both is not AI: the object-stream admission budget is a `steady_clock` ceiling
-  (`LandSave.cpp:3510,3581`) and the prefetch lead is a wall-clock dt (`:3219`), so the resident
-  set is machine-dependent even under `POSEIDON_RNG_SEED` + lockstep. SIM-813 removed the last
-  wall clock in the *AI stage*; it was not the last one that decides what the world contains.
+  blocker of both was not AI: the object-stream admission budget was a `steady_clock` ceiling
+  and the prefetch lead a wall-clock dt, so the resident set was machine-dependent even under
+  `POSEIDON_RNG_SEED` + lockstep. SIM-813 removed the last wall clock in the *AI stage*; it was
+  not the last one that decided what the world contains. **Closed 2026-09-02:** admission is
+  counted by default (`WGR_OBJECT_STREAM_ADMIT`, cold models per update rather than
+  milliseconds; `=timed` restores the clocks) and the prefetch estimator integrates
+  `Glob.time`. The resident set on a tick is now a function of the tick. The remaining wall
+  clock that reaches a world decision is the LOD width (`_lodInvWidth` from the measured
+  frame time), which is a rendering decision and belongs to the LOD governor line.
 - **Compatibility gets its own track (D, below)** with per-generation gates. Today the
   cross-generation smoke skips on CI by its own header, DayZ has four unit tests and no
   capability-matrix row, Reforger has no matrix row at all, and no generation has a decision
@@ -587,7 +594,7 @@ Each carries its number, its scene and its gate. None is a guess about where tim
 | target | number | scene / source | gate |
 |---|---:|---|---|
 | `unitThink` | 0.95–2.06 ms/tick, 70-80% of the post-ration AI stage | Chernarus+ `perf_combat`, PERF-019 | `POSEIDON_AI_TIMELINE` diff names the first divergent tick; no change ships without it |
-| `land:obj` residual, **on Chernarus+** | 2.65 ms after PERF-016 (13.2 → 5.9 → 2.65), against 20,000 resident objects | WLD-025 pose, not Everon | the admission wall clocks (`LandSave.cpp:3510,3581,3219`) become counted budgets first, so two machines report one number |
+| `land:obj` residual, **on Chernarus+** | 2.65 ms after PERF-016 (13.2 → 5.9 → 2.65), against 20,000 resident objects | WLD-025 pose, not Everon | the admission wall clocks became counted budgets on 2026-09-02 (`WGR_OBJECT_STREAM_ADMIT`, default counted), so two machines report one number; what remains is the measurement itself: counted vs `=timed` frame cost and fill time on the WLD-025 pose, and two lockstep runs holding the same resident set |
 | sky cloud march | 1.314 ms, 11.7% of an 11.26 ms GPU frame | `perf_combat`, ARCH-001 table | three runs per arm; the step-count tier (`HANDOVER-20260824`:144) has had no A/B since the SH fix |
 
 Explicitly **not** on the list: grass (closed, PARKED.md: "reopen with a corpus that measures
