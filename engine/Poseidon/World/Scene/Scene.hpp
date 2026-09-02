@@ -219,7 +219,6 @@ class Scene
     };
 
     mutable int _lastComplexity[NStoreComplexities]; // complexity history
-    GovernorTrace _governorTrace;
 
     mutable SortObjectList _drawObjects;
     mutable SortObjectList _drawMergers;
@@ -314,6 +313,11 @@ class Scene
         float lodMin = 0.0f, lodMax = 0.0f;
     };
     const GovernorTrace& LastGovernorTrace() const { return _governorTrace; }
+
+  private:
+    GovernorTrace _governorTrace;
+
+  public:
     float GetSmokeGeneralization() const;
 
     float GetFrameRateSettings() const { return _frameRateSettings; }
