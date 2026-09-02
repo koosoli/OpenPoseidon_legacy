@@ -2761,6 +2761,11 @@ class Engine : public IGraphicsEngine
     virtual TemporalSettings GetTemporalTuning() const { return {}; }
     virtual void SetTemporalTuning(const TemporalSettings& /*t*/) {}
     virtual TemporalInfo GetTemporalInfo() { return {}; }
+    // WHY DLSS is inactive, as one specific sentence ("nvngx_dlss.dll not found next to
+    // the executable", "adapter is Intel UHD Graphics, not NVIDIA", "NGX init failed
+    // (0xbad0000b UnableToInitializeFeature)"), or "active". Empty when the backend has
+    // no such readout. The dev panel and the capture metrics print it verbatim.
+    virtual std::string DlssStatusReason() { return {}; }
 
   protected:
     // Post-hook fires from OnWindowResized so apps can re-run the aspect policy

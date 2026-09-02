@@ -155,6 +155,9 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddBoolToObject(build, "dlss_route", ti.dlssRoute);
             cJSON_AddBoolToObject(build, "dlss_active", ti.dlssActive);
             cJSON_AddNumberToObject(build, "dlss_quality", ti.dlssQuality);
+            // The sentence behind dlss_active=false, so a capture from a tester's
+            // machine says which gate refused DLSS without a log dive.
+            cJSON_AddStringToObject(build, "dlss_reason", GEngine->DlssStatusReason().c_str());
         }
         else
         {

@@ -3,6 +3,7 @@ mod bloom;
 mod dlss;
 #[cfg(feature = "dlss")]
 mod dlss_device;
+mod dlss_status;
 mod dof;
 mod exposure;
 mod far;
@@ -754,8 +755,12 @@ pub struct Renderer {
     // [DLSS (dlss builds, when the NGX route came up), Bilinear]. All vendor state
     // (NGX objects, raw device handles, failure latches) lives inside the backends.
     upscalers: Vec<Box<dyn upscaler::TemporalUpscaler>>,
-    // True when the NGX hal device route was taken at startup (feeds temporal_info).
+    // True when NGX came up at startup AND reported DLSS Super Sampling available
+    // (feeds temporal_info's dlss_route).
     ngx_route: bool,
+    // WHY DLSS is inactive, as one sentence for the dev panel and the log
+    // (dlss_status.rs). Latched at the first failing startup gate; per-frame otherwise.
+    dlss_status: dlss_status::DlssStatus,
     // REN-TEMP-001E/F/G: temporal camera state, jitter, static-world velocity + debug view.
     // WGR_TEMPORAL=1 to enable (off by default — jitter with no accumulator is shimmer).
     temporal: temporal::Temporal,
@@ -897,6 +902,19 @@ pub struct Renderer {
     screenshot_pixels: Option<ScreenshotPixels>,
 }
 
+// Teardown order: fields drop in declaration order, and `device` is declared long
+// before `upscalers`, so a backend that must release a vendor context against a live
+// VkDevice (DLSS: ReleaseFeature + NGX Shutdown1) needs the chain cleared HERE, after
+// the GPU has finished with the last frame and before the device goes.
+impl Drop for Renderer {
+    fn drop(&mut self) {
+        if !self.upscalers.is_empty() {
+            let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+            self.upscalers.clear();
+        }
+    }
+}
+
 impl Renderer {
     fn new(desc: &ffi::WgrSurfaceDesc, log: LogSink) -> Result<Self, String> {
         let (raw_display_handle, raw_window_handle) = handles::build_handles(desc)?;
@@ -923,8 +941,47 @@ impl Renderer {
         // DEFAULT ON in a dlss build (owner request 2026-08-30: "like other games, no
         // .bat"): the route falls back to the untouched native path on ANY failure, so
         // a default-on request is safe. WGR_DLSS=0 opts out.
+        // The reason DLSS is inactive, decided gate by gate from here on (dlss_status.rs):
+        // the first gate that fails latches its sentence for the panel and the log.
+        let mut dlss_status = dlss_status::DlssStatus::default();
+        #[cfg(not(feature = "dlss"))]
+        dlss_status.latch(dlss_status::REASON_BUILD_WITHOUT_DLSS);
+        // Where nvngx_dlss.dll was found, for the "could not load" sentence.
         #[cfg(feature = "dlss")]
-        let dlss_requested = std::env::var("WGR_DLSS").map(|v| v != "0").unwrap_or(true);
+        let dlss_snippet: Option<std::path::PathBuf>;
+        #[cfg(feature = "dlss")]
+        let dlss_requested = {
+            let env_on = std::env::var("WGR_DLSS").map(|v| v != "0").unwrap_or(true);
+            if !env_on {
+                dlss_status.latch(dlss_status::REASON_OPTED_OUT);
+                dlss_snippet = None;
+                false
+            } else {
+                // The snippet gate comes BEFORE the hal route: without nvngx_dlss.dll
+                // beside the exe NGX can only ever answer FeatureNotFound, and a device
+                // built with the NGX extensions for nothing is a second device path for
+                // no gain. The 2026-08-30 tester package held the exe and the renderer
+                // DLL and no snippet, and every one of those machines reported "route
+                // up, DLSS inactive".
+                let dirs = dlss_status::snippet_search_dirs(
+                    std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|d| d.to_path_buf())),
+                    std::env::var("WGR_NGX_SNIPPET_DIR").ok(),
+                );
+                match dlss_status::find_snippet(&dirs) {
+                    Some(p) => {
+                        dlss_snippet = Some(p);
+                        true
+                    }
+                    None => {
+                        dlss_status.latch(dlss_status::snippet_missing_reason(&dirs));
+                        dlss_snippet = None;
+                        false
+                    }
+                }
+            }
+        };
         #[cfg(feature = "dlss")]
         let mut dlss_instance_active = false;
         let instance = 'inst: {
@@ -939,10 +996,14 @@ impl Renderer {
                         dlss_instance_active = true;
                         break 'inst i;
                     }
-                    Err(e) => log.log(
-                        log_level::WARN,
-                        &format!("WGR_DLSS instance path failed ({e}); native path instead"),
-                    ),
+                    Err(e) => {
+                        log.log(
+                            log_level::WARN,
+                            &format!("WGR_DLSS instance path failed ({e}); native path instead"),
+                        );
+                        dlss_status
+                            .latch(format!("Vulkan instance with the NGX extensions failed: {e}"));
+                    }
                 }
             }
             wgpu::Instance::new(instance_desc)
@@ -971,6 +1032,24 @@ impl Renderer {
                 info.name, info.backend, info.device_type
             ),
         );
+        // The adapter is chosen with PowerPreference::HighPerformance, so a laptop's
+        // discrete GPU wins when the driver exposes it. When it does not (iGPU only,
+        // or the DX12 fallback), say so BEFORE building a device for NGX.
+        #[cfg(feature = "dlss")]
+        if dlss_instance_active {
+            if let Some(reason) = dlss_status::adapter_reason(
+                &info.name,
+                info.vendor,
+                &format!("{:?}", info.backend),
+            ) {
+                log.log(
+                    log_level::WARN,
+                    &format!("DLSS unavailable: {reason}; native device path"),
+                );
+                dlss_status.latch(reason);
+                dlss_instance_active = false;
+            }
+        }
 
         let bc_features = adapter.features() & wgpu::Features::TEXTURE_COMPRESSION_BC;
         let bc_supported = !bc_features.is_empty();
@@ -1121,10 +1200,12 @@ impl Renderer {
             | mdic_avail
             | vertex_writable_storage
             | ts_request;
-        // REN-TEMP-001M: raw handles for NGX init, present only when the hal device
-        // route succeeded. Same strict-fallback rule as the instance.
+        // REN-TEMP-001M: the initialised NGX context + raw handles, present only when
+        // the hal device route succeeded AND NGX reported DLSS available. Same
+        // strict-fallback rule as the instance: any failure names itself and the
+        // renderer continues on the plain path.
         #[cfg(feature = "dlss")]
-        let mut ngx_raw: Option<dlss_device::NgxRawHandles> = None;
+        let mut ngx_raw: Option<(dlss_device::NgxRawHandles, dlss::Ngx)> = None;
         let (device, queue) = 'dev: {
             #[cfg(feature = "dlss")]
             if dlss_instance_active {
@@ -1147,25 +1228,77 @@ impl Renderer {
                                     log_level::INFO,
                                     "driver reports DLSS Super Sampling supported",
                                 );
-                                ngx_raw = Some(raw);
+                                // NGX comes up HERE, not at the first upscaled frame:
+                                // the verdict ("snippet did not load", "driver too old")
+                                // is then in the startup log and the panel before any
+                                // frame is drawn, the temporal/67% defaults are never
+                                // auto-enabled for a DLSS that will not run, and a
+                                // machine without DLSS never has its first frame split
+                                // around a raw command buffer that goes nowhere.
+                                match unsafe {
+                                    dlss::Ngx::init(raw.instance, raw.physical_device, raw.device)
+                                } {
+                                    Ok(ngx) => {
+                                        if ngx.supersampling_available() {
+                                            log.log(
+                                                log_level::INFO,
+                                                "NGX initialised; DLSS Super Resolution available",
+                                            );
+                                            ngx_raw = Some((raw, ngx));
+                                        } else {
+                                            let reason =
+                                                ngx.availability_reason(dlss_snippet.as_deref());
+                                            log.log(
+                                                log_level::WARN,
+                                                &format!(
+                                                    "DLSS unavailable: {reason} ({}); native path",
+                                                    ngx.availability_diagnostics()
+                                                ),
+                                            );
+                                            ngx.release();
+                                            dlss_status.latch(reason);
+                                        }
+                                    }
+                                    Err(r) => {
+                                        let reason = dlss_status::init_failed_reason(r);
+                                        log.log(
+                                            log_level::WARN,
+                                            &format!("DLSS unavailable: {reason}; native path"),
+                                        );
+                                        dlss_status.latch(reason);
+                                    }
+                                }
                             }
-                            Ok(bits) => log.log(
-                                log_level::WARN,
-                                &format!(
-                                    "DLSS unsupported on this GPU/driver (bits {bits:#x}); native path"
-                                ),
-                            ),
-                            Err(r) => log.log(
-                                log_level::WARN,
-                                &format!("DLSS support probe failed ({r:#x}); native path"),
-                            ),
+                            Ok(bits) => {
+                                let reason = dlss_status::requirements_reason(bits, &info.name);
+                                log.log(
+                                    log_level::WARN,
+                                    &format!("DLSS unsupported on this GPU/driver: {reason}; native path"),
+                                );
+                                dlss_status.latch(reason);
+                            }
+                            Err(r) => {
+                                let reason = format!(
+                                    "NGX GetFeatureRequirements failed ({})",
+                                    dlss_status::ngx_code(r)
+                                );
+                                log.log(
+                                    log_level::WARN,
+                                    &format!("DLSS support probe failed: {reason}; native path"),
+                                );
+                                dlss_status.latch(reason);
+                            }
                         }
                         break 'dev (d, q);
                     }
-                    Err(e) => log.log(
-                        log_level::WARN,
-                        &format!("WGR_DLSS device path failed ({e}); native path instead"),
-                    ),
+                    Err(e) => {
+                        log.log(
+                            log_level::WARN,
+                            &format!("WGR_DLSS device path failed ({e}); native path instead"),
+                        );
+                        dlss_status
+                            .latch(format!("Vulkan device with the NGX extensions failed: {e}"));
+                    }
                 }
             }
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -1275,6 +1408,23 @@ impl Renderer {
                 .map(|v| v != "0")
                 .unwrap_or(true);
         let hdr_enabled = std::env::var("WGR_HDR").map(|v| v != "0").unwrap_or(true);
+        // The one line a tester's log must carry: DLSS, and if not, why (dlss_status.rs).
+        #[cfg(feature = "dlss")]
+        let dlss_up = ngx_raw.is_some();
+        #[cfg(not(feature = "dlss"))]
+        let dlss_up = false;
+        if dlss_up && !hdr_enabled {
+            dlss_status.latch("HDR path off (WGR_HDR=0); DLSS runs on the HDR path only");
+        }
+        log.log(
+            log_level::INFO,
+            &if dlss_up && hdr_enabled {
+                "DLSS status: NGX up, DLSS Super Resolution available (runs from the first upscaled frame)"
+                    .to_owned()
+            } else {
+                format!("DLSS status: inactive - {}", dlss_status.text())
+            },
+        );
         let color_format = if hdr_enabled {
             HDR_FORMAT
         } else {
@@ -1654,13 +1804,14 @@ impl Renderer {
             upscalers: {
                 let mut v: Vec<Box<dyn upscaler::TemporalUpscaler>> = Vec::new();
                 #[cfg(feature = "dlss")]
-                if let Some(raw) = ngx_raw {
-                    v.push(Box::new(upscaler::DlssUpscaler::new(raw)));
+                if let Some((raw, ngx)) = ngx_raw {
+                    v.push(Box::new(upscaler::DlssUpscaler::new(raw, ngx)));
                 }
                 v.push(Box::new(upscaler::FsrUpscaler::new()));
                 v.push(Box::new(upscaler::BilinearUpscaler::new()));
                 v
             },
+            dlss_status,
             dlss_runtime_on: true,
             dlss_auto_exposure: std::env::var("WGR_DLSS_AUTO_EXPOSURE")
                 .map(|v| v != "0")
@@ -2361,6 +2512,7 @@ impl Renderer {
             let mut winner: Option<(upscaler::UpscalerCaps, i32)> = None;
             let mut disabled: Vec<String> = Vec::new();
             let mut temporal_backend_died = false;
+            let mut dlss_died: Option<String> = None;
             for u in self.upscalers.iter_mut() {
                 let caps = u.caps();
                 match u.evaluate(&mut ctx) {
@@ -2372,6 +2524,9 @@ impl Renderer {
                     upscaler::UpscaleOutcome::Disabled(msg) => {
                         disabled.push(format!("{} disabled: {}", u.label(), msg));
                         temporal_backend_died |= caps.needs_temporal_inputs;
+                        if caps.info_id == upscaler::ID_DLSS {
+                            dlss_died = Some(msg);
+                        }
                     }
                 }
             }
@@ -2382,6 +2537,13 @@ impl Renderer {
             }
             for m in &disabled {
                 self.log.log(log_level::WARN, m);
+            }
+            if let Some(reason) = dlss_died {
+                // Permanent for this process (the backend latched itself off); the
+                // panel and the log carry the same sentence.
+                self.log
+                    .log(log_level::INFO, &format!("DLSS status: inactive - {reason}"));
+                self.dlss_status.latch(reason);
             }
             // A dying temporal backend takes its auto-defaults with it: jitter without
             // an accumulator is shimmer, and 67% bilinear is not the native look anyone
@@ -2411,6 +2573,7 @@ impl Renderer {
                     // "some temporal backend ran".
                     self.dlss_active_frame = true;
                     self.dlss_last_quality = q;
+                    self.dlss_status.set_active();
                 }
                 // The external RCAS pass is a CAPABILITY of the winning backend, not a
                 // property of DLSS: FSR 1 sharpens itself, bilinear is diagnostic.
@@ -2437,6 +2600,25 @@ impl Renderer {
         } else {
             post_source
         };
+        // Per-frame reasons: NGX is up but DLSS did not produce this frame. Recomputed
+        // every frame so a panel toggle changes the sentence at once; a latched startup
+        // or failure reason always wins over these.
+        if self.ngx_route && !self.dlss_status.is_active() {
+            let render = self.render_size();
+            let out = (self.config.width, self.config.height);
+            let reason = if !self.dlss_runtime_on {
+                dlss_status::REASON_PANEL_OFF
+            } else if !self.temporal.enabled {
+                dlss_status::REASON_TEMPORAL_OFF
+            } else if render.0 > out.0 || render.1 > out.1 {
+                "render scale above 100% (SSAA); DLSS only upscales, the bilinear downsample runs"
+            } else if self.hdr_upscaled.is_none() {
+                "no upscale target this frame (native resolution without DLAA)"
+            } else {
+                "the DLSS backend did not run this frame"
+            };
+            self.dlss_status.frame_reason(reason);
+        }
         let underwater = underwater_time.is_some();
         if self.hdr_upscaled.is_none()
             && (self.post_source_underwater != underwater || self.post_source_dof != dof_applied)
@@ -2569,6 +2751,11 @@ impl Renderer {
         self.fsr_runtime_on = t.flags & 16 != 0;
         self.dlss_sharpen = t.flags & 32 != 0;
         self.fsr_sharpness = t.fsr_sharpness.clamp(0.0, 2.0);
+    }
+
+    // "active", or the sentence saying why not (dev panel, capture metrics).
+    fn dlss_status_text(&self) -> &str {
+        self.dlss_status.text()
     }
 
     fn temporal_info(&self) -> ffi::WgrTemporalInfo {
@@ -3303,6 +3490,7 @@ impl Renderer {
         // object-velocity subset at tonemap time (and next frame's previous worlds).
         self.temporal.ingest_draws(draws3d);
         self.dlss_active_frame = false;
+        self.dlss_status.begin_frame();
         // The "active upscaler" readout: default to native every frame; the upscale
         // chain overwrites it when it actually runs. Without this the panel kept
         // showing the LAST backend after switching to native (owner report - no

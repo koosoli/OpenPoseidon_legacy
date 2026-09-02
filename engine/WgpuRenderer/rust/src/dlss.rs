@@ -13,6 +13,7 @@
 // executable's folder — Deploy.ps1 places it there when the feature is built.
 #![allow(non_snake_case, dead_code, clippy::too_many_arguments)]
 
+use crate::dlss_status::{self, ForcedFailure};
 use std::os::raw::{c_char, c_uint, c_void};
 
 // --- raw NGX types -------------------------------------------------------------
@@ -265,6 +266,10 @@ pub fn feature_requirements(
     instance: VkInstance,
     physical_device: VkPhysicalDevice,
 ) -> Result<u32, NgxResult> {
+    // Ablation: answer as a card without tensor cores answers (dlss_status.rs).
+    if ForcedFailure::from_env().requirements_unsupported {
+        return Ok(dlss_status::SUPPORT_ADAPTER_UNSUPPORTED);
+    }
     // NUL-terminated wide "." — built without a literal NUL byte (a raw NUL in the
     // source makes grep treat the file as binary and text patches silently miss).
     let data_path: Vec<u16> = ".".encode_utf16().chain(std::iter::once(0)).collect();
@@ -312,6 +317,8 @@ pub struct Ngx {
     capability: *mut NgxParameter,
     params: *mut NgxParameter,
     feature: Option<*mut NgxHandle>,
+    // Ablation switches, read once (dlss_status.rs `ForcedFailure`).
+    forced: ForcedFailure,
 }
 
 // The NGX context is renderer-thread-confined like every other renderer resource.
@@ -330,6 +337,11 @@ impl Ngx {
         physical_device: VkPhysicalDevice,
         device: VkDevice,
     ) -> Result<Self, NgxResult> {
+        let forced = ForcedFailure::from_env();
+        if forced.init {
+            // Ablation: the driver refuses NGX before anything is created.
+            return Err(0xBAD0000B);
+        }
         // EVERYTHING handed to NGX at init is leaked to 'static on purpose: whether the
         // driver copies the FeatureCommonInfo/paths or stores the pointers and probes
         // lazily is undocumented, and a dangling stack pointer here would read back as
@@ -412,11 +424,16 @@ impl Ngx {
             capability,
             params,
             feature: None,
+            forced,
         })
     }
 
     // Driver/hardware support for DLSS Super Resolution.
     pub fn supersampling_available(&self) -> bool {
+        if self.forced.capability_unavailable {
+            // Ablation: NGX came up, the feature did not (snippet failed to load).
+            return false;
+        }
         let mut v: i32 = 0;
         let r = unsafe {
             NVSDK_NGX_Parameter_GetI(self.capability, name!("SuperSampling.Available"), &mut v)
@@ -440,6 +457,32 @@ impl Ngx {
             get(name!("SuperSampling.MinDriverVersionMajor")),
             get(name!("SuperSampling.MinDriverVersionMinor")),
             get(name!("SuperSampling.FeatureInitResult")),
+        )
+    }
+
+    // The same block as one sentence for the dev panel and the startup log — WHY
+    // SuperSampling is unavailable (dlss_status::capability_reason). `snippet` is
+    // where nvngx_dlss.dll was found beside the exe, if it was.
+    pub fn availability_reason(&self, snippet: Option<&std::path::Path>) -> String {
+        if self.forced.capability_unavailable {
+            return format!(
+                "{} [forced by WGR_DLSS_FORCE_UNAVAILABLE=2]",
+                dlss_status::capability_reason(Some(0), (None, None), Some(0xBAD00004u32 as i32), snippet)
+            );
+        }
+        let get = |n: *const c_char| -> Option<i32> {
+            let mut v: i32 = 0;
+            (unsafe { NVSDK_NGX_Parameter_GetI(self.capability, n, &mut v) } == NGX_SUCCESS)
+                .then_some(v)
+        };
+        dlss_status::capability_reason(
+            get(name!("SuperSampling.NeedsUpdatedDriver")),
+            (
+                get(name!("SuperSampling.MinDriverVersionMajor")),
+                get(name!("SuperSampling.MinDriverVersionMinor")),
+            ),
+            get(name!("SuperSampling.FeatureInitResult")),
+            snippet,
         )
     }
 
@@ -517,6 +560,11 @@ impl Ngx {
             }
             NVSDK_NGX_Parameter_SetI(self.params, name!("DLSS.Feature.Create.Flags"), flags);
             let mut handle: *mut NgxHandle = std::ptr::null_mut();
+            if self.forced.create {
+                // Ablation: the feature is refused mid-frame, after the caller has
+                // already split the frame for the raw command buffer.
+                return Err(0xBAD00001);
+            }
             let r = NVSDK_NGX_VULKAN_CreateFeature1(
                 self.device,
                 cmd,
@@ -557,6 +605,10 @@ impl Ngx {
         let Some(feature) = self.feature else {
             return Err(1);
         };
+        if self.forced.evaluate {
+            // Ablation: the feature exists and every evaluation fails.
+            return Err(0xBAD00000);
+        }
         unsafe {
             let p = self.params;
             NVSDK_NGX_Parameter_SetVoidPointer(p, name!("Color"), color as *mut _ as *mut c_void);

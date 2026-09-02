@@ -613,9 +613,26 @@ impl RcasSharpener {
 // DLSS Super Resolution over NGX Vulkan (dlss builds only). Owns every NGX object and
 // the raw device handles; nothing NGX-shaped escapes this impl.
 
+// The capabilities the DLSS backend declares — a constant, so the test can assert them
+// without live Vulkan handles (the backend itself now needs an initialised NGX context
+// to exist at all).
+pub const DLSS_CAPS: UpscalerCaps = UpscalerCaps {
+    info_id: ID_DLSS,
+    // Consumes the full temporal contract; `evaluate` disables itself outright
+    // when the temporal path is off rather than producing history artefacts.
+    needs_temporal_inputs: true,
+    // NVIDIA removed DLSS's internal sharpening in 2.5; the industry answer is
+    // an external CAS/RCAS pass, which the renderer runs when `dlss_sharpen`.
+    wants_external_sharpen: true,
+};
+
 #[cfg(feature = "dlss")]
 pub struct DlssUpscaler {
+    #[allow(dead_code)]
     raw: crate::dlss_device::NgxRawHandles,
+    // Initialised at startup by lib.rs (NGX up, SuperSampling available) — the backend
+    // never exists otherwise, so the first upscaled frame no longer carries the init.
+    // Option only so Drop can hand it to `Ngx::release`.
     ngx: Option<crate::dlss::Ngx>,
     // (render, output, auto_exposure) the current feature was created for.
     feature_key: Option<((u32, u32), (u32, u32), bool)>,
@@ -624,10 +641,10 @@ pub struct DlssUpscaler {
 
 #[cfg(feature = "dlss")]
 impl DlssUpscaler {
-    pub fn new(raw: crate::dlss_device::NgxRawHandles) -> Self {
+    pub fn new(raw: crate::dlss_device::NgxRawHandles, ngx: crate::dlss::Ngx) -> Self {
         DlssUpscaler {
             raw,
-            ngx: None,
+            ngx: Some(ngx),
             feature_key: None,
             failed: false,
         }
@@ -639,6 +656,20 @@ impl DlssUpscaler {
     }
 }
 
+// Release the feature and shut NGX down while the VkDevice is still alive. Without
+// this the snippet DLL tore itself down under LdrShutdownProcess with a live context
+// and every DLSS run ended in a segfault AFTER "Shutdown complete" (pre-existing;
+// measured on the 2026-08-31 captures and again on 2026-09-02). lib.rs's Renderer Drop
+// waits for the GPU and clears the chain BEFORE its device field drops.
+#[cfg(feature = "dlss")]
+impl Drop for DlssUpscaler {
+    fn drop(&mut self) {
+        if let Some(ngx) = self.ngx.take() {
+            ngx.release();
+        }
+    }
+}
+
 #[cfg(feature = "dlss")]
 impl TemporalUpscaler for DlssUpscaler {
     fn label(&self) -> &'static str {
@@ -646,15 +677,7 @@ impl TemporalUpscaler for DlssUpscaler {
     }
 
     fn caps(&self) -> UpscalerCaps {
-        UpscalerCaps {
-            info_id: ID_DLSS,
-            // Consumes the full temporal contract; `evaluate` disables itself outright
-            // when the temporal path is off rather than producing history artefacts.
-            needs_temporal_inputs: true,
-            // NVIDIA removed DLSS's internal sharpening in 2.5; the industry answer is
-            // an external CAS/RCAS pass, which the renderer runs when `dlss_sharpen`.
-            wants_external_sharpen: true,
-        }
+        DLSS_CAPS
     }
 
     fn evaluate(&mut self, ctx: &mut UpscaleContext) -> UpscaleOutcome {
@@ -666,7 +689,7 @@ impl TemporalUpscaler for DlssUpscaler {
         // DLSS consumes the temporal contract; without jitter + motion vectors it would
         // only produce the artefacts the plan spent five phases preventing.
         if !ctx.settings.temporal_enabled {
-            return self.disable("WGR_DLSS needs the temporal path (jitter + motion vectors)".into());
+            return self.disable(crate::dlss_status::REASON_TEMPORAL_OFF.into());
         }
         let Some(color_tex) = ctx.color_tex.clone() else {
             return self.disable("no raw source texture handle".into());
@@ -676,21 +699,6 @@ impl TemporalUpscaler for DlssUpscaler {
         else {
             return self.disable("missing depth/velocity/exposure inputs".into());
         };
-        if self.ngx.is_none() {
-            let ngx = match unsafe {
-                dlss::Ngx::init(self.raw.instance, self.raw.physical_device, self.raw.device)
-            } {
-                Ok(n) => n,
-                Err(r) => return self.disable(format!("NGX init failed: {r:#x}")),
-            };
-            if !ngx.supersampling_available() {
-                let diag = ngx.availability_diagnostics();
-                return self.disable(format!("DLSS unavailable ({diag})"));
-            }
-            ctx.notes
-                .push("NGX initialised; DLSS Super Resolution available".into());
-            self.ngx = Some(ngx);
-        }
         let render = ctx.render;
         let output = ctx.output;
         // SSAA territory: DLSS only upscales; above 100% the bilinear pass downsamples.
@@ -829,12 +837,17 @@ impl TemporalUpscaler for DlssUpscaler {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("wgr_dlss_raw"),
             });
-        let ngx = self.ngx.as_mut().expect("ngx initialised above");
+        let Some(ngx) = self.ngx.as_mut() else {
+            return self.disable("NGX context already released".into());
+        };
+        // Which NGX call failed, for the reason sentence.
+        let mut failed_stage = "evaluate";
         let result: Result<(), dlss::NgxResult> = unsafe {
             use ash::vk::Handle;
             let mut r = Ok(());
             dlss_encoder.as_hal_mut::<hal_vk::Api, _, _>(|hal_enc| {
                 let Some(hal_enc) = hal_enc else {
+                    failed_stage = "encoder";
                     r = Err(0);
                     return;
                 };
@@ -842,6 +855,7 @@ impl TemporalUpscaler for DlssUpscaler {
                 if need_create {
                     if let Err(e) = ngx.create_feature(cmd, render, output, quality, auto_exposure)
                     {
+                        failed_stage = "create";
                         r = Err(e);
                         return;
                     }
@@ -877,7 +891,11 @@ impl TemporalUpscaler for DlssUpscaler {
                     quality: quality as i32,
                 }
             }
-            Err(r) => self.disable(format!("NGX create/evaluate failed: {r:#x}")),
+            Err(r) => self.disable(match failed_stage {
+                "create" => crate::dlss_status::create_failed_reason(r),
+                "encoder" => "the raw command encoder is not Vulkan".to_owned(),
+                _ => crate::dlss_status::evaluate_failed_reason(r),
+            }),
         }
     }
 }
@@ -951,17 +969,11 @@ mod tests {
         assert_eq!(caps.info_id, ID_BILINEAR);
     }
 
-    #[cfg(feature = "dlss")]
+    // The constant the DLSS backend's `caps()` returns (the backend itself cannot exist
+    // without a live NGX context, so the constant is what can be asserted).
     #[test]
     fn dlss_caps_are_temporal_and_want_external_sharpening() {
-        // Null handles are safe here: `caps()` is a pure constant and never touches
-        // them, and nothing in this test reaches `evaluate`.
-        let raw = crate::dlss_device::NgxRawHandles {
-            instance: std::ptr::null_mut(),
-            physical_device: std::ptr::null_mut(),
-            device: std::ptr::null_mut(),
-        };
-        let caps = DlssUpscaler::new(raw).caps();
+        let caps = DLSS_CAPS;
         assert_eq!(caps.info_id, ID_DLSS);
         assert!(caps.needs_temporal_inputs);
         assert!(caps.wants_external_sharpen);

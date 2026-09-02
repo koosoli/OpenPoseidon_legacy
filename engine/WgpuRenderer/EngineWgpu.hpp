@@ -234,6 +234,7 @@ class EngineWgpu : public EngineDummy
     TemporalSettings GetTemporalTuning() const override { return _temporalTuning; }
     void SetTemporalTuning(const TemporalSettings& t) override;
     TemporalInfo GetTemporalInfo() override;
+    std::string DlssStatusReason() override;
 
     TonemapSettings GetTonemapSettings() const override { return _tonemap; }
     void SetTonemapSettings(const TonemapSettings& s) override;

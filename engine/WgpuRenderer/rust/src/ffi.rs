@@ -3101,6 +3101,36 @@ pub unsafe extern "C" fn wgr_get_runtime_capabilities(renderer: *mut WgrRenderer
     .unwrap_or(0)
 }
 
+/// The DLSS status sentence for the dev panel and the capture metrics: "active", or
+/// WHY DLSS is inactive (dlss_status.rs). Copies a NUL-terminated string into `buf`
+/// (truncated to `cap`) and returns the full length in bytes; 0 when nothing was
+/// written. Optional export — the engine fetches it through GetProcAddress, like
+/// `wgr_get_runtime_capabilities`, so an older DLL still loads.
+///
+/// # Safety
+/// `renderer` must be live or null; `buf` must be writable for `cap` bytes or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn wgr_get_dlss_status(
+    renderer: *mut WgrRenderer,
+    buf: *mut c_char,
+    cap: usize,
+) -> u32 {
+    if renderer.is_null() || buf.is_null() || cap == 0 {
+        return 0;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let text = unsafe { &*renderer }.dlss_status_text();
+        let bytes = text.as_bytes();
+        let n = bytes.len().min(cap - 1);
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, n);
+            *buf.add(n) = 0;
+        }
+        bytes.len() as u32
+    }))
+    .unwrap_or(0)
+}
+
 /// GRS-A — grass instance accounting for the Grass tab, mirroring `WgrGrassStats`
 /// in wgpu_renderer.hpp. Counts come from a non-blocking readback of the three
 /// atomic placement counters, so they lag the displayed frame by the ring depth

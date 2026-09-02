@@ -4714,8 +4714,16 @@ void DrawTemporalTab()
                    dlssVer.empty() ? "" : ", FSR 1.0)");
     Dev::PanelHelp("jitter (%.3f, %.3f) px | mip bias %.3f%s", info.jitterX, info.jitterY,
                    info.mipBiasEffective, info.resetThisFrame ? " | HISTORY RESET" : "");
-    if (!info.dlssRoute)
-        Dev::PanelHelp("launch with WGR_DLSS=1 (a DLSS-featured build) to enable the NGX route");
+    // WHY DLSS is inactive, in the renderer's own words (dlss_status.rs): the missing
+    // snippet, the iGPU that was picked, the driver, the NGX code. A tester who cannot
+    // say why cannot be helped, and until 2026-09-02 this line was a bare "inactive".
+    if (!info.dlssActive)
+    {
+        const std::string why = GEngine->DlssStatusReason();
+        Dev::PanelHelp("DLSS inactive: %s",
+                       why.empty() ? "(this renderer DLL reports no reason - redeploy exe + DLL together)"
+                                   : why.c_str());
+    }
 
     Dev::PanelSeparator();
     auto t = GEngine->GetTemporalTuning();

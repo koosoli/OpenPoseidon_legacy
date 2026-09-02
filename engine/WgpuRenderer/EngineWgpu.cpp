@@ -7685,6 +7685,32 @@ Engine::TemporalInfo EngineWgpu::GetTemporalInfo()
     return out;
 }
 
+// The renderer's own sentence for "why is DLSS inactive" (dlss_status.rs). Fetched
+// through GetProcAddress like GetRuntimeCapabilityFlags: the export is optional at the
+// PE import boundary, so an older wgpu_renderer.dll still loads and merely reports
+// nothing here.
+std::string EngineWgpu::DlssStatusReason()
+{
+    if (!_renderer)
+        return {};
+#ifdef _WIN32
+    using GetDlssStatusFn = uint32_t (*)(WgrRenderer*, char*, size_t);
+    const HMODULE module = GetModuleHandleA("wgpu_renderer.dll");
+    const auto getStatus =
+        module ? reinterpret_cast<GetDlssStatusFn>(GetProcAddress(module, "wgr_get_dlss_status")) : nullptr;
+    if (!getStatus)
+        return {};
+    char buf[512];
+    const uint32_t len = getStatus(_renderer, buf, sizeof(buf));
+    if (len == 0)
+        return {};
+    buf[sizeof(buf) - 1] = 0;
+    return buf;
+#else
+    return {};
+#endif
+}
+
 // The renderer builds every multisampled pipeline against a launch-time sample count,
 // so this cannot apply live. GameApplication seeds WGR_MSAA from graphics.cfg BEFORE
 // the engine exists; here we only record the wish and say when it lands.
