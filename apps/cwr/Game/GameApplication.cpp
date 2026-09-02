@@ -557,10 +557,13 @@ extern Scene* GScene;
 }
 using Poseidon::GScene;
 
+namespace Poseidon
+{
 static float CurrentLodInvWidth()
 {
     return GScene ? GScene->GetLodInvWidth() : 0.0f;
 }
+} // namespace Poseidon
 #include <memory>
 #include <functional>
 #include <random>

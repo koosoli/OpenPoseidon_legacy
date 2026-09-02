@@ -1042,15 +1042,18 @@ static bool FarEnoughForOcclusion(const SortObject* oi)
 
 #if !DENSITY_LOD
 
-// WGR_LOD_GOVERNOR_TARGET=1 selects the target-point error metric described at the use site.
-// Default OFF: this changes the LOD governor on every world at once, and the only honest way
-// to turn it on is to measure it on more than the world that motivated it.
+// WGR_LOD_GOVERNOR_TARGET selects the target-point error metric described at the use site.
+// It was OFF by default, pending measurement on more than the world that motivated it (+36%
+// on Everon). ON since 2026-09-02 (REN-VEG-003): with the governor's set point moved to 60 fps
+// and the retained set in its estimate, the distance form's range-as-gain behaviour is what
+// made the loop overshoot to the 6-triangle tree card on Chernarus+; the target form is the
+// one that treats the range as the clamp it is documented to be. =0 restores the distance form.
 static bool LodGovernorTargetDrive()
 {
     static const bool on = []
     {
         const char* v = std::getenv("WGR_LOD_GOVERNOR_TARGET");
-        return v && v[0] != '0';
+        return !(v && v[0] == '0');
     }();
     return on;
 }
@@ -1097,20 +1100,17 @@ void Scene::AdjustComplexity()
     // number and constant across the five iterations below, which is right: the loop can
     // re-pick the CPU objects' LODs per iteration and cannot re-cull the GPU's, so the
     // GPU term converges over frames instead, at the governor's usual cadence.
-    // MEASURED THE SAME HOUR, AND LEFT OPT-IN (WGR_LOD_GOVERNOR_RETAINED=1): on Chernarus+ the term
-    // changed nothing -- the trees stayed at level 0 (30.5 M triangles) because the governor
-    // was already at its coarseness bound, so the blocker is a LOD bias for retained
-    // vegetation, not the estimate. On Everon the term worked exactly as designed and that is
-    // the problem: the whole retained set dropped a level (2.3 M -> 0.2 M triangles, GPU 28 ->
-    // 21 ms) with the frame time unchanged, i.e. it coarsened a world that was not GPU-bound,
-    // because the target duration was tuned for a CPU-era estimate. Until the target is
-    // re-derived with this term in it, the term is a lever, not a default.
+    // First measured with the 2001 set point (frameRate=15, a 10..20 fps band): on Chernarus+ the
+    // term changed nothing because 55 ms was not slow to that band, and on Everon it coarsened a
+    // frame that was not slow either -- the band, not the term, was wrong. ON by default since
+    // the set point moved to 60 fps and the loop drives on the target point (REN-VEG-003).
+    // WGR_LOD_GOVERNOR_RETAINED=0 removes the term.
     int retainedComplexity = 0;
     {
         static const bool includeRetained = []
         {
             const char* v = std::getenv("WGR_LOD_GOVERNOR_RETAINED");
-            return v && v[0] == '1';
+            return !(v && v[0] == '0');
         }();
         Engine::ObjectStatsOut retained;
         if (includeRetained && GEngine && GEngine->GetObjectStats(retained) && retained.valid)
@@ -1215,6 +1215,7 @@ void Scene::AdjustComplexity()
                 _lodInvWidth = _maxLodInvWidth;
                 complexity = AdjustComplexity(_drawObjects);
                 complexity += AdjustShadowComplexity(_drawObjects);
+                complexity += retainedComplexity; // the history below must carry the same sum the loop used
                 complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
                 break;
             }
@@ -1238,6 +1239,7 @@ void Scene::AdjustComplexity()
                 _lodInvWidth = _minLodInvWidth;
                 complexity = AdjustComplexity(_drawObjects);
                 complexity += AdjustShadowComplexity(_drawObjects);
+                complexity += retainedComplexity; // the history below must carry the same sum the loop used
                 complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
                 break;
             }
@@ -1258,6 +1260,7 @@ void Scene::AdjustComplexity()
             _lodInvWidth = oldLodInvWidth;
             complexity = AdjustComplexity(_drawObjects);
             complexity += AdjustShadowComplexity(_drawObjects);
+            complexity += retainedComplexity;
         }
         _lastScaleBetterTime = Glob.uiTime;
     }
@@ -1270,6 +1273,7 @@ void Scene::AdjustComplexity()
             _lodInvWidth = oldLodInvWidth;
             complexity = AdjustComplexity(_drawObjects);
             complexity += AdjustShadowComplexity(_drawObjects);
+            complexity += retainedComplexity;
         }
         _lastScaleWorseTime = Glob.uiTime;
     }

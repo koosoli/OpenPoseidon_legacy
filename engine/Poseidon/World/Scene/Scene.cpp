@@ -693,15 +693,34 @@ void Scene::LoadConfig()
 
     ParamFile cfg;
     cfg.Parse(name);
+    // THE GOVERNOR'S TARGET (REN-VEG-003, 2026-09-02). `frameRate` is the LOD governor's set
+    // point: the loop steers _lodInvWidth so the estimated frame lands between
+    // 1000/(frameRate*2/3) and 1000/(frameRate*4/3) ms. The 2001 default was 15, i.e. a 10..20
+    // fps band -- on a modern machine the loop never sees a slow frame, sits at its finest
+    // setting, and cannot do the one job it has when the retained set is GPU-bound
+    // (Chernarus+ at 18 fps read as "fine" to it, REN-VEG-002). The default is now 40 (a
+    // 27..53 fps band; REN-VEG-003 measured 60 against 40 on two worlds and 60 only coarsened
+    // objects on frames whose cost was grass and sky, not objects -- Everon 24.9 vs 24.3 ms
+    // with one LOD level less detail), and a stored 15 is treated as the legacy default rather than a
+    // choice: every existing UserInfo.cfg carries it because the game wrote it, not because
+    // anyone asked for 15 fps. Any other stored value is the player's and is kept.
+    // WGR_LOD_TARGET_FPS overrides both for a capture.
+    constexpr float kLegacyDefaultFrameRate = 15.0f;
+    constexpr float kModernDefaultFrameRate = 40.0f;
+    float frameRate = kModernDefaultFrameRate;
     if (cfg.FindEntry("frameRate"))
     {
-        float value = cfg >> "frameRate";
-        SetFrameRateSettings(value);
+        const float stored = cfg >> "frameRate";
+        if (stored > 0.0f && stored != kLegacyDefaultFrameRate)
+            frameRate = stored;
     }
-    else
+    if (const char* env = std::getenv("WGR_LOD_TARGET_FPS"); env && *env)
     {
-        SetFrameRateSettings(15);
+        const float parsed = static_cast<float>(std::atof(env));
+        if (parsed > 0.0f)
+            frameRate = parsed;
     }
+    SetFrameRateSettings(frameRate);
     if (cfg.FindEntry("visualQuality"))
     {
         float value = cfg >> "visualQuality";
