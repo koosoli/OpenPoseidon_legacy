@@ -40,13 +40,23 @@ Three alternating runs per arm, same session:
 | flag on (old behaviour) | 1.74 / 1.70 | 20.8 |
 | flag off (default) | 1.74 / 1.71 | 22.6 |
 
-The flag is below the spread. **The owed reference was then run the same session: the
-previous shader, rebuilt from the parent commit and deployed, three runs — 2.37 / 2.41 / 2.37
-ms (mean 2.38).** So the change saves 0.64 ms (27% of the pass) on both flag values: what the
-pass lost is the restructure (the two occluder lookups under one branch), not the skipping the
-flag controls, and I cannot say from the source why the compiled shader is cheaper for the
-non-vegetation fragments too. The number is measured either way; the mechanism is not
-understood, and the record says so.
+The flag was below the spread — and the reason turned out to be a hole, not a mystery
+(found 2026-09-03 00:05, fixed in the commit that adds the constants to `cull.rs`): the
+GPU-driven object pipelines are built in `cull.rs` with their **own** pipeline-constant list,
+and `foliage_screen_ao` was only in the per-draw list in `mod.rs`. On the path that draws
+Everon's trees the shader default (0 = skip) applied whatever the env said, so "flag on" never
+restored anything. The previous shader rebuilt from the parent commit read 2.37 / 2.41 / 2.37
+(mean 2.38) — the same as "flag on" once the flag reaches the pipeline:
+
+| arm (constant reaching both pipeline families) | colour alpha-test mean / min | GPU frame |
+|---|---:|---:|
+| `WGR_FOLIAGE_SCREEN_AO=1` (old behaviour) | 2.41 / 2.38 | 23.3 |
+| default (vegetation skips GTAO + interior sky) | **1.66 / 1.50** | 20.9 |
+
+**−0.75 ms, 31% of the pass, and the mechanism is exactly the one claimed.** The lesson is in
+memory and in the `cull.rs` comment: an override must be in *every* pipeline family's
+constants list, and an A/B that reads "no difference" is first a question about whether the
+constant reached the pipeline.
 
 ## What follows on this row
 
