@@ -29,6 +29,7 @@
 #include <Poseidon/Graphics/Core/Engine.hpp>
 #include <Poseidon/Graphics/Rendering/Draw/FontSystem.hpp>
 #include <Poseidon/World/Scene/ScenePreloader.hpp>
+#include <Poseidon/World/Scene/Scene.hpp> // GScene->GetLodInvWidth for the capture JSON
 #include <Poseidon/Graphics/Shared/RenderDocCapture.hpp>
 #include <Poseidon/World/World.hpp>
 #include <Evaluator/express.hpp>
@@ -88,6 +89,9 @@ namespace Poseidon
 IFilebankEncryption* CreateEncryptXOR1024(const void* context);
 void ApplyGamePathsToLegacyGlobals();
 extern RString ServerConfig;
+// The LOD governor's live detail multiplier, for the capture JSON (defined below GScene).
+static float CurrentLodInvWidth();
+
 void CreateServer();
 } // namespace Poseidon
 
@@ -239,6 +243,9 @@ bool WriteCaptureMetrics(const std::string& path)
         cJSON* lods = cJSON_AddArrayToObject(o, "main_lod_histogram");
         for (int l = 0; l < 8; ++l)
             cJSON_AddItemToArray(lods, cJSON_CreateNumber(objects.mainLodHist[l]));
+        // The governor's _lodInvWidth at capture time -- the one number that says what LOD the
+        // GPU-driven cull was steering towards (REN-VEG-002: a histogram without it cannot be read).
+        cJSON_AddNumberToObject(o, "lod_inv_width", CurrentLodInvWidth());
     }
     Engine::GrassStatsOut grass;
     if (GEngine->GetGrassStats(grass))
@@ -549,6 +556,11 @@ namespace Poseidon
 extern Scene* GScene;
 }
 using Poseidon::GScene;
+
+static float CurrentLodInvWidth()
+{
+    return GScene ? GScene->GetLodInvWidth() : 0.0f;
+}
 #include <memory>
 #include <functional>
 #include <random>
