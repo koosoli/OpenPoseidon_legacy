@@ -1699,11 +1699,10 @@ impl Sky {
                 }],
             });
         // WGR_CLOUD_STEPS / WGR_CLOUD_LIGHT_STEPS: primary and light-march sample caps for the
-        // volumetric cloud pass. The primary default is 64 since 2026-09-02 (REN-SKY-001):
-        // measured on perf_combat, three runs per arm, the march costs 2.92 ms at 128, 1.85 at
-        // 64 and 1.24 at 32; 64 is indistinguishable from 128 in the capture crops, 32 shows
-        // visible grain on cloud edges. WGR_CLOUD_STEPS=128 restores the old look exactly.
-        // The light march stays at the shader's own 4.
+        // volumetric cloud pass. Defaults are the shader's own 128 / 4, so unset changes nothing.
+        // REN-SKY-001 measured 128 -> 64 -> 32 at 2.92 / 1.85 / 1.24 ms on perf_combat; 64 shipped
+        // as the default for one build and the owner preferred the 128 picture on sight, so 128
+        // it stays. WGR_CLOUD_STEPS=64 is the lever for a slow GPU (~1 ms), 32 shows grain.
         // These exist because the pass measured 7.97 ms -- 23% of the GPU frame, the largest
         // single item in the renderer, and until now ungated by anything: no tier, no env var.
         // Clamped rather than trusted: 0 primary steps is a divide-by-zero shaped question in
@@ -1711,7 +1710,7 @@ impl Sky {
         let cloud_steps = std::env::var("WGR_CLOUD_STEPS")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(64.0)
+            .unwrap_or(128.0)
             .clamp(8.0, 256.0);
         let cloud_light_steps = std::env::var("WGR_CLOUD_LIGHT_STEPS")
             .ok()

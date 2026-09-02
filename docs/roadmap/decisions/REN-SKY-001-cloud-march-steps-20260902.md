@@ -30,10 +30,10 @@ march's dither (`hash21`) is no longer hidden by enough samples.
 
 ## Decision
 
-Default **64** (`sky/mod.rs`; `WGR_CLOUD_STEPS=128` restores the old look exactly). Saves
-1.06 ms of GPU per frame at this window, ~4% of the GPU frame, for no visible cost in the
-capture. 32 is left as the owner's lever for a slow GPU, not the default, because the grain
-is real.
+**Default stays 128.** 64 shipped as the default for one build (`1ae6f40e`); shown the three
+crops without labels, the owner preferred the 128 picture on sight — the eye sees what the
+capture crops did not resolve. `WGR_CLOUD_STEPS=64` is the lever for a slow GPU (~1 ms of
+GPU per frame at this window); 32 shows grain and is not recommended.
 
 ## Not measured
 

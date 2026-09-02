@@ -595,7 +595,7 @@ Each carries its number, its scene and its gate. None is a guess about where tim
 |---|---:|---|---|
 | ~~`unitThink`~~ **done 2026-09-02 (PERF-020)** | was 0.95–2.06 ms/tick; the idle-watch walk is rationed (`POSEIDON_AI_WATCH_PERIOD`, 0.5 s): `watch` 0.44 → 0.05, `unitThink` 0.64 → 0.18 ms/tick on the same scene | Everon + Chernarus+ `perf_combat` | the oracle ran: same arm EQUIVALENT over 902 ticks, rationed vs unrationed DIVERGED at tick 340 in one unit's nearest-enemy distance — a behaviour change by design, named to the tick |
 | ~~`land:obj` residual, **on Chernarus+**~~ **gate met 2026-09-02 (WLD-026)** | admission is counted (`WGR_OBJECT_STREAM_ADMIT`); on the WLD-025 pose counted and `=timed` reach the same 19,923 resident objects and the same frame (35.5 vs 35.8 ms, GPU-bound), the timed clocks had ended ~95% of updates, and two counted runs hold an identical resident set row for row — without the lockstep env | WLD-025 pose | what remains is `land:obj` itself (4.5–4.8 ms in every arm at this window), now measurable as one number |
-| ~~sky cloud march~~ **done 2026-09-02 (REN-SKY-001)** | 2.92 → 1.85 ms at 64 steps (three runs per arm, bench window); 32 steps saves another 0.6 ms but shows grain on cloud edges | `perf_combat` | default 64, `WGR_CLOUD_STEPS=128` restores the old look; overcast and sunset not yet checked |
+| ~~sky cloud march~~ **done 2026-09-02 (REN-SKY-001)** | 2.92 → 1.85 ms at 64 steps (three runs per arm, bench window); 32 steps saves another 0.6 ms but shows grain on cloud edges | `perf_combat` | default stays 128 — the owner preferred that picture on sight; `WGR_CLOUD_STEPS=64` is the ~1 ms lever for a slow GPU |
 
 ### Next targets, 2026-09-02 (after the three above closed)
 
