@@ -219,6 +219,7 @@ class Scene
     };
 
     mutable int _lastComplexity[NStoreComplexities]; // complexity history
+    GovernorTrace _governorTrace;
 
     mutable SortObjectList _drawObjects;
     mutable SortObjectList _drawMergers;
@@ -301,6 +302,18 @@ class Scene
     float GetTacticalVisibility() const { return _tacticalVisibility; }
 
     float GetLodInvWidth() const { return _lodInvWidth; }
+    // The governor's last decision, for the capture JSON (REN-VEG-004): what it measured, what
+    // it estimated, and the complexity it estimated from. Diagnostic only; nothing reads them.
+    struct GovernorTrace
+    {
+        float frameMs = 0.0f;     // GetAvgFrameDuration(4) as the loop saw it
+        float estimatedMs = 0.0f; // estDuration after the maxDuration clamp
+        int   complexity = 0;     // the sum the estimate was made from (CPU + shadow + retained + land)
+        int   retained = 0;       // the retained term inside that sum
+        float targetMinMs = 0.0f, targetMaxMs = 0.0f;
+        float lodMin = 0.0f, lodMax = 0.0f;
+    };
+    const GovernorTrace& LastGovernorTrace() const { return _governorTrace; }
     float GetSmokeGeneralization() const;
 
     float GetFrameRateSettings() const { return _frameRateSettings; }

@@ -246,6 +246,19 @@ bool WriteCaptureMetrics(const std::string& path)
         // The governor's _lodInvWidth at capture time -- the one number that says what LOD the
         // GPU-driven cull was steering towards (REN-VEG-002: a histogram without it cannot be read).
         cJSON_AddNumberToObject(o, "lod_inv_width", CurrentLodInvWidth());
+        if (GScene)
+        {
+            const Scene::GovernorTrace& gt = GScene->LastGovernorTrace();
+            cJSON* gov = cJSON_AddObjectToObject(o, "lod_governor");
+            cJSON_AddNumberToObject(gov, "frame_ms", gt.frameMs);
+            cJSON_AddNumberToObject(gov, "estimated_ms", gt.estimatedMs);
+            cJSON_AddNumberToObject(gov, "complexity", gt.complexity);
+            cJSON_AddNumberToObject(gov, "retained", gt.retained);
+            cJSON_AddNumberToObject(gov, "target_min_ms", gt.targetMinMs);
+            cJSON_AddNumberToObject(gov, "target_max_ms", gt.targetMaxMs);
+            cJSON_AddNumberToObject(gov, "lod_min", gt.lodMin);
+            cJSON_AddNumberToObject(gov, "lod_max", gt.lodMax);
+        }
     }
     Engine::GrassStatsOut grass;
     if (GEngine->GetGrassStats(grass))

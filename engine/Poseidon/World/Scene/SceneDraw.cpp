@@ -1146,6 +1146,14 @@ void Scene::AdjustComplexity()
         int maxDuration = toLargeInt(complexity / float(targetGeom) * triCoef);
 
         saturateMin(estDuration, maxDuration);
+        _governorTrace.frameMs = frameDuration;
+        _governorTrace.estimatedMs = static_cast<float>(estDuration);
+        _governorTrace.complexity = complexity;
+        _governorTrace.retained = retainedComplexity;
+        _governorTrace.targetMinMs = tMin;
+        _governorTrace.targetMaxMs = tMax;
+        _governorTrace.lodMin = lMin;
+        _governorTrace.lodMax = lMax;
 
         // react to quick change in complexity
         // estimate frame rate based on previous complexity and time
