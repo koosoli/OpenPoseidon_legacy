@@ -1112,11 +1112,16 @@ void Scene::AdjustComplexity()
             const char* v = std::getenv("WGR_LOD_GOVERNOR_RETAINED");
             return !(v && v[0] == '0');
         }();
+        // STICKY. The cull readback is not valid on every frame (it is a GPU round trip), and a
+        // term that reads 0 on the frames in between poisons the four-frame history: the
+        // estimate then compares a full sum against a half-full average and calls a 13 ms
+        // frame 22 ms (trace2-chern-retained, REN-VEG-004). Keep the last valid count.
         Engine::ObjectStatsOut retained;
         if (includeRetained && GEngine && GEngine->GetObjectStats(retained) && retained.valid)
         {
-            retainedComplexity = static_cast<int>(std::min<uint32_t>(retained.mainTris, 1u << 30));
+            _governorRetainedLast = static_cast<int>(std::min<uint32_t>(retained.mainTris, 1u << 30));
         }
+        retainedComplexity = includeRetained ? _governorRetainedLast : 0;
     }
     for (int iters = 5; --iters >= 0;)
     {
@@ -1150,6 +1155,10 @@ void Scene::AdjustComplexity()
         _governorTrace.estimatedMs = static_cast<float>(estDuration);
         _governorTrace.complexity = complexity;
         _governorTrace.retained = retainedComplexity;
+        _governorTrace.avgComplexity = avgComplexity;
+        for (int i = 0; i < NStoreComplexities && i < 4; i++)
+            _governorTrace.history[i] = _lastComplexity[i];
+        _governorTrace.iterations = 5 - iters;
         _governorTrace.targetMinMs = tMin;
         _governorTrace.targetMaxMs = tMax;
         _governorTrace.lodMin = lMin;

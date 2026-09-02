@@ -311,11 +311,15 @@ class Scene
         int   retained = 0;       // the retained term inside that sum
         float targetMinMs = 0.0f, targetMaxMs = 0.0f;
         float lodMin = 0.0f, lodMax = 0.0f;
+        float avgComplexity = 0.0f; // the four-frame history mean the estimate divides by
+        int   history[4] = {};
+        int   iterations = 0;       // loop iterations spent this frame
     };
     const GovernorTrace& LastGovernorTrace() const { return _governorTrace; }
 
   private:
     GovernorTrace _governorTrace;
+    int _governorRetainedLast = 0; // last VALID retained triangle count (the readback skips frames)
 
   public:
     float GetSmokeGeneralization() const;

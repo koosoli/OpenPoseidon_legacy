@@ -258,6 +258,11 @@ bool WriteCaptureMetrics(const std::string& path)
             cJSON_AddNumberToObject(gov, "target_max_ms", gt.targetMaxMs);
             cJSON_AddNumberToObject(gov, "lod_min", gt.lodMin);
             cJSON_AddNumberToObject(gov, "lod_max", gt.lodMax);
+            cJSON_AddNumberToObject(gov, "avg_complexity", gt.avgComplexity);
+            cJSON_AddNumberToObject(gov, "iterations", gt.iterations);
+            cJSON* hist = cJSON_AddArrayToObject(gov, "history");
+            for (int i = 0; i < 4; ++i)
+                cJSON_AddItemToArray(hist, cJSON_CreateNumber(gt.history[i]));
         }
     }
     Engine::GrassStatsOut grass;
