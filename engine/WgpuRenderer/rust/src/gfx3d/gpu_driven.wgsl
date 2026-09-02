@@ -644,10 +644,7 @@ fn decode_nohq(texel: vec4<f32>) -> vec3<f32> {
 fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     let dwx = dpdx(in.world_pos);
     let dwy = dpdy(in.world_pos);
-    census(0u);
-    if (section_materials[in.section].alpha_ref > 0.0) {
-        census(1u);
-    }
+    census(0u); // every rasterised colour fragment; word 1 (cutout survivors) is counted after the alpha test
     // AST-012A: the raw UV derivatives, taken HERE because derivative builtins need uniform
     // control flow and everything below this point is conditional. The layer transform is
     // affine, so the transformed derivative is just this scaled by layer_uv[0].xy -- applied at
@@ -743,6 +740,9 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
         }
     } else if (cut_a < sm.alpha_ref) {
         discard;
+    }
+    if (sm.alpha_ref > 0.0) {
+        census(1u); // a cutout fragment that survived the alpha test and will be shaded
     }
     // Fold RAW material x the frame sun, reproducing GL33's UploadVSMaterialConstants
     // (EngineWgpu.cpp) in-shader: sun_* = sun x material (legacy path only), light_* = raw
