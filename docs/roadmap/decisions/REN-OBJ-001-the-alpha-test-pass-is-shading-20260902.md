@@ -40,12 +40,13 @@ Three alternating runs per arm, same session:
 | flag on (old behaviour) | 1.74 / 1.70 | 20.8 |
 | flag off (default) | 1.74 / 1.71 | 22.6 |
 
-The flag is below the spread. Both arms sit at 1.74 ms against 2.29–2.46 in the six runs
-before the change — the restructure (the lookups moved under one branch) is what the pass
-lost, on both flag values, and I cannot explain why from the source. A same-session
-reference with the previous shader is owed before the 0.66 ms is quoted as this change's;
-until then the claim is "the pass reads 1.74 ms now, it read 2.4 before, the picture is the
-same".
+The flag is below the spread. **The owed reference was then run the same session: the
+previous shader, rebuilt from the parent commit and deployed, three runs — 2.37 / 2.41 / 2.37
+ms (mean 2.38).** So the change saves 0.64 ms (27% of the pass) on both flag values: what the
+pass lost is the restructure (the two occluder lookups under one branch), not the skipping the
+flag controls, and I cannot say from the source why the compiled shader is cheaper for the
+non-vegetation fragments too. The number is measured either way; the mechanism is not
+understood, and the record says so.
 
 ## What follows on this row
 
