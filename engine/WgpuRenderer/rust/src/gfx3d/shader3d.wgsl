@@ -981,6 +981,7 @@ fn shade_fragment(in: VsOut) -> vec4<f32> {
 // the textureSample stays legal.
 @fragment
 fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    census(2u);
     if (alpha_ref > 0.0) {
         let packed = bitcast<u32>(materials[in.instance].emissive.w);
         let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
@@ -1003,6 +1004,8 @@ fn fs_prepass(in: VsOut) -> @location(0) vec2<f32> {
 // the colour pass will shade (terrain fills the rest -> no background halo at edges).
 @fragment
 fn fs_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
+    census(2u);
+    census(3u);
     let packed = bitcast<u32>(materials[in.instance].emissive.w);
     let dims0 = vec2<f32>(textureDimensions(textures[packed >> 3u]));
     let alpha = mip_alpha_boost(textureSampleBias(textures[packed >> 3u], samplers[packed & 7u], in.uv, frame.renscale.x).a, in.uv, dims0,

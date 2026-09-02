@@ -2222,6 +2222,12 @@ pub fn build_gpu_pipeline(
         ("prepass_match", prepass_match),
         ("emissive_night", super::emissive_night() as f64),
         ("cutout_mip_alpha", super::cutout_mip_alpha() as f64),
+        // REN-OBJ-001/003. These two were missing here for one evening: the per-draw pipelines
+        // in mod.rs carried them, the GPU-driven ones fell back to the shader's defaults --
+        // which is how an A/B of WGR_FOLIAGE_SCREEN_AO read "no difference" (the flag never
+        // reached the path that draws Everon's trees) and why the prepass census words stayed 0.
+        ("foliage_screen_ao", super::foliage_screen_ao() as f64),
+        ("count_fragments", super::count_fragments() as f64),
     ];
     let depth_stencil = wgpu::DepthStencilState {
         format: super::DEPTH_FORMAT,

@@ -90,6 +90,11 @@ pub struct MipFeedback {
     /// (colour, colour cutout, prepass, prepass cutout) when WGR_OBJECT_COUNT_FRAGMENTS=1,
     /// zeros otherwise.
     frag_counts: [u32; 4],
+    /// The header words are never cleared (begin_frame clears from HEADER_BYTES), so the
+    /// census accumulates for the life of the buffer; per-frame values are the delta between
+    /// two harvests divided by the frames between them.
+    frag_cumulative_prev: [u32; 4],
+    frag_prev_frame: u64,
 }
 
 impl MipFeedback {
@@ -121,6 +126,8 @@ impl MipFeedback {
             harvests: 0,
             enabled,
             frag_counts: [0; 4],
+            frag_cumulative_prev: [0; 4],
+            frag_prev_frame: 0,
         }
     }
 
@@ -246,10 +253,27 @@ impl MipFeedback {
                     {
                         let data = buf.slice(..).get_mapped_range();
                         let words = data.len() / 4;
-                        for (k, w) in self.frag_counts.iter_mut().enumerate() {
-                            if k < words {
-                                *w = u32::from_le_bytes(data[k * 4..k * 4 + 4].try_into().unwrap_or([0; 4]));
+                        {
+                            let mut cur = [0u32; 4];
+                            for (k, w) in cur.iter_mut().enumerate() {
+                                if k < words {
+                                    *w = u32::from_le_bytes(data[k * 4..k * 4 + 4].try_into().unwrap_or([0; 4]));
+                                }
                             }
+                            let frames = frame.saturating_sub(self.frag_prev_frame).max(1);
+                            for k in 0..4 {
+                                // A count below the previous one means the buffer was
+                                // reallocated (ensure() grew it) and restarted from zero:
+                                // the new value is then the whole delta, not a wrap.
+                                let delta = if cur[k] >= self.frag_cumulative_prev[k] {
+                                    cur[k] - self.frag_cumulative_prev[k]
+                                } else {
+                                    cur[k]
+                                };
+                                self.frag_counts[k] = (delta as u64 / frames) as u32;
+                            }
+                            self.frag_cumulative_prev = cur;
+                            self.frag_prev_frame = frame;
                         }
                         for i in HEADER_WORDS as usize..words {
                             let code = u32::from_le_bytes(

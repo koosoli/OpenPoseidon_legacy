@@ -186,7 +186,7 @@ pub(crate) fn emissive_night() -> f32 {
 // WGR_CUTOUT_MIP_ALPHA=0 restores the old behaviour for an A/B.
 // REN-OBJ-001: whether vegetation cutouts sample GTAO + the interior-sky volume per fragment.
 // Default OFF (they keep their canopy term); WGR_FOLIAGE_SCREEN_AO=1 is the A/B and the old look.
-fn foliage_screen_ao() -> f32 {
+pub(crate) fn foliage_screen_ao() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
         std::env::var("WGR_FOLIAGE_SCREEN_AO")
@@ -197,7 +197,7 @@ fn foliage_screen_ao() -> f32 {
 
 // REN-OBJ-003: WGR_OBJECT_COUNT_FRAGMENTS=1 builds the object pipelines with the fragment census
 // on. Off by default: a counting run's timings are not quotable.
-fn count_fragments() -> f32 {
+pub(crate) fn count_fragments() -> f32 {
     static V: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
         std::env::var("WGR_OBJECT_COUNT_FRAGMENTS")
