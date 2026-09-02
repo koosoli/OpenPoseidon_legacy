@@ -117,9 +117,6 @@ namespace Poseidon::Foundation
 template class Ref<NetworkObject>;
 } // namespace Poseidon::Foundation
 
-// DISABLED: random integrity check
-#define _ENABLE_RANDOM_INTEGRITY_CHECK 0
-
 #define LOG_SEND_PROCESS 0
 
 #define LOG_PLAYERS 1

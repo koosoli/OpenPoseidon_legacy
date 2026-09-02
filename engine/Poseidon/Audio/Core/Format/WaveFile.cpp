@@ -13,7 +13,6 @@
 namespace Poseidon
 {
 
-#define ENABLE_ACM_CODECS 0
 
 // Abort the current read on failure (the file arg is ignored).
 #define exc(file) \
@@ -271,13 +270,10 @@ WaveStream* WaveLoadFile(const char* filename)
     }
     else
     {
-#if ENABLE_ACM_CODECS
-        // pass it to Codec processing
-        return new WaveStreamCodec(file);
-#else
+        // Only PCM is supported; the ACM codec path that once sat behind a compile-time
+        // switch had no class behind it and was never buildable.
         LOG_ERROR(Audio, "non-PCM format {}", input.Format().wFormatTag);
         return nullptr;
-#endif
     }
 }
 

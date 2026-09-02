@@ -709,33 +709,6 @@ NetworkComponent::NetworkComponent(NetworkManager* parent)
 
 NetworkComponent::~NetworkComponent() {}
 
-#if 0
-// Process out of memory error on local heap
-void NetworkMemoryError( MemHeapLocked *heap, int size )
-{
-#ifdef _WIN32
-	ErrorMessage
-	(
-		"Network: Out of reserved memory (%d KB).\n"
-		"Code change required (current limit %d KB).\n"
-		"Total free %d KB\n"
-		"Free blocks %d, Max free size %d KB",
-		size/1024,
-		heap->Size()/1024,
-		heap->TotalFreeLeft()/1024,
-		heap->CountFreeLeft(),
-		heap->MaxFreeLeft()/1024
-	);
-#else
-	ErrorMessage
-	(
-		"Network: Out of reserved memory (%d KB).\n",
-		size/1024
-	);
-#endif
-}
-#endif
-
 // high level transfer functions
 
 DWORD NetworkComponent::SendMsg(int to, NetworkSimpleObject* object, NetMsgFlags dwFlags)
