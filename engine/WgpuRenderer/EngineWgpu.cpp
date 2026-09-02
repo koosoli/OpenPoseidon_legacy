@@ -1,5 +1,6 @@
 #include <Poseidon/Dev/Diag/FixedStepStats.hpp> // REN-THR-004: ticks per frame beside the frame hash
 #include "EngineWgpu.hpp"
+#include <atomic>
 #include <Poseidon/Core/BuildInfo.hpp>
 #include "TerrainWgpu.hpp"
 #include "WaterWgpu.hpp"
@@ -1582,6 +1583,7 @@ bool EngineWgpu::CanBeWindowed() const
 
 bool EngineWgpu::SetSwapInterval(int interval)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (interval != 0 && interval != 1 && interval != -1)
     {
         return false;
@@ -1598,6 +1600,7 @@ bool EngineWgpu::SetSwapInterval(int interval)
 
 void EngineWgpu::ResizeSurface(int w, int h)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (w <= 0 || h <= 0)
     {
         return;
@@ -1809,6 +1812,9 @@ bool ShadowForceNoCpuCastersEnabled()
 
 void EngineWgpu::InitDraw(bool clear, PackedColor color)
 {
+    // The producer's renderer-touching window opens here and closes at publish. Everything
+    // between the two may call the renderer directly; nothing before it may (REN-THR-012).
+    WaitRenderIdle();
     // RenderSnapshot S1 / Phase 5 step 1: the WORLD publishes the frame's environment
     // block at its simulation/draw boundary (World::Simulate, right before it calls
     // InitDraw). This is only the FALLBACK for frames no world drives (main menu
@@ -2371,6 +2377,42 @@ void EngineWgpu::MoveQueuesInto(FrameQueues& q)
     _castersPendingMesh.clear();
 }
 
+// REN-THR-012. The queues carry mesh/model/texture/instance ops and the pending settings to
+// the worker, but the producer still makes direct `wgr_*` calls every frame -- terrain
+// params from DrawTerrain, render params and sky runtime from NextFrame, far-tier instances,
+// texture slot leases during cold admission, the stats readers behind the dev panel -- and
+// every one of them forms an exclusive reference to the renderer on the Rust side, exactly
+// as wgr_render_frame does on the worker. Under overlap the producer used to wait only for
+// its ring SLOT, so it made those calls while the worker was inside the previous frame.
+//
+// The fix is a boundary, not a lock: the producer waits for the worker to be idle at the
+// top of InitDraw, so the simulation (which makes no direct calls; its mutations are the
+// queued instance ops) still overlaps the render, and the draw traversal, which does, runs
+// after it. What that costs is measured in REN-THR-012; what it buys is that the quiescent
+// flag below is a rule the texture paths can check rather than a sentence in a header.
+static std::atomic<bool> g_rendererQuiescent{true};
+
+bool EngineWgpu::ProducerMayTouchRenderer()
+{
+    return g_rendererQuiescent.load(std::memory_order_acquire);
+}
+
+void EngineWgpu::WaitRenderIdle()
+{
+    if (!_renderThreadOn)
+    {
+        g_rendererQuiescent.store(true, std::memory_order_release);
+        return;
+    }
+    const auto waitStart = std::chrono::steady_clock::now();
+    {
+        std::unique_lock<std::mutex> lock(_renderMutex);
+        _renderCv.wait(lock, [this] { return !_renderHasWork && _renderBusySlot < 0; });
+    }
+    _rtPreDrawWaitMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
+    g_rendererQuiescent.store(true, std::memory_order_release);
+}
+
 void EngineWgpu::RenderThreadMain()
 {
     for (;;)
@@ -2443,6 +2485,7 @@ void EngineWgpu::StopRenderThread()
     _renderThread.join();
     _renderThreadOn = false;
     _overlapOn = false;
+    g_rendererQuiescent.store(true, std::memory_order_release);
     // Hand the inline path a clean slate. After the join nobody else touches these, but a
     // stop that happened while a frame was in flight leaves `_renderBusySlot` set, and the
     // producer's slot wait would then block on a worker that no longer exists.
@@ -2484,7 +2527,8 @@ void EngineWgpu::NextFrame()
             _overlapOn = _renderThreadOn && _overlapRequested;
         }
         const auto frameStartForRt = std::chrono::steady_clock::now();
-        double waitMs = 0.0;
+        double waitMs = _rtPreDrawWaitMs; // the InitDraw wait belongs to this frame
+        _rtPreDrawWaitMs = 0.0;
         SyncWaterLookProfile();
         const auto tLook = std::chrono::steady_clock::now();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
@@ -3069,6 +3113,7 @@ void EngineWgpu::NextFrame()
                 _renderSubmitSlot = publishSlot;
                 _renderHasWork = true;
             }
+            g_rendererQuiescent.store(false, std::memory_order_release);
             _renderCv.notify_one();
             if (!_overlapOn)
             {
@@ -3081,6 +3126,7 @@ void EngineWgpu::NextFrame()
                     // renderer again before it returns.
                     _renderCv.wait(lock, [this] { return !_renderHasWork && _renderBusySlot < 0; });
                 }
+                g_rendererQuiescent.store(true, std::memory_order_release);
                 waitMs =
                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
             }
@@ -3467,6 +3513,7 @@ float FarTierNearCutoffFraction()
 // would be a visible chunk of the load, and the two structs exist to be the same 32 bytes.
 void EngineWgpu::SetFarProxyInstances(const FarProxyInstance* data, size_t count)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     static_assert(sizeof(FarProxyInstance) == sizeof(WgrFarInstance),
                   "Engine::FarProxyInstance must be the WgrFarInstance ABI record");
     static_assert(offsetof(FarProxyInstance, height) == offsetof(WgrFarInstance, height) &&
@@ -7716,6 +7763,7 @@ std::string EngineWgpu::DlssStatusReason()
 // the engine exists; here we only record the wish and say when it lands.
 void EngineWgpu::SetMsaaSamples(int samples)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (samples != 0 && samples != 2 && samples != 4 && samples != 8)
         return;
     _msaaRequested = samples;
@@ -8136,6 +8184,7 @@ void EngineWgpu::AddShadowCaster(const Shape& sMesh, const Matrix4& modelToWorld
 
 bool EngineWgpu::DumpShadowMap(const char* path)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (!_renderer || !path)
     {
         return false;
@@ -8164,6 +8213,7 @@ bool EngineWgpu::DumpShadowMap(const char* path)
 
 bool EngineWgpu::ShadowDepthProbe(const float* lightVP16, const float* triXYZ, int vertCount, int res, float* outDepth)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (!_renderer || !lightVP16 || !triXYZ || !outDepth || vertCount <= 0 || res <= 0)
     {
         return false;
@@ -9062,6 +9112,7 @@ uint32_t EngineWgpu::GetRuntimeCapabilityFlags() const
 
 void EngineWgpu::Screenshot(RString filename)
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     _pendingScreenshotPath = filename;
     if (_renderer)
         wgr_screenshot_request(_renderer);
@@ -9069,6 +9120,7 @@ void EngineWgpu::Screenshot(RString filename)
 
 void EngineWgpu::FlushPendingScreenshot()
 {
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
     if (!_renderer || _pendingScreenshotPath.GetLength() == 0)
         return;
 

@@ -4,13 +4,18 @@
  * While this file contains C++ features, the actual exported symbols are all C ABI (extern "C"),
  * which the Rust side can implement using #[no_mangle] and #[repr(C)].
  *
- * THREADING CONTRACT: every function in this header is MAIN THREAD ONLY. The Rust
- * side spawns no threads of its own and guards nothing against concurrent entry;
- * texture destruction is immediate (no epoch — see gfx3d/pool.rs for the one
- * resource class that HAS one), which is safe only because create/destroy/draw all
- * run on the one thread in frame order. Phase 4.2 of the post-DLSS roadmap turns
- * this line into a checked rule; until then it is the rule by declaration
- * (docs/roadmap/ownership-authority.md).
+ * THREADING CONTRACT: every function in this header forms an exclusive reference to
+ * the renderer (except the wgr_uploader_* borrow, documented at its declaration), and
+ * the Rust side spawns no threads of its own and guards nothing against concurrent
+ * entry. So the rule is ONE THREAD AT A TIME, IN FRAME ORDER -- not "main thread
+ * only": with the render thread on (WGR_RENDER_THREAD, default), wgr_render_frame and
+ * the queued resource/instance/settings drains run on the worker, and the producer
+ * may call in only while the worker holds no frame. EngineWgpu enforces that window
+ * (WaitRenderIdle at InitDraw, closed at publish; REN-THR-012) and exposes it as
+ * ProducerMayTouchRenderer(), which the texture paths check. Texture destruction is
+ * immediate (no epoch -- see gfx3d/pool.rs for the one resource class that HAS one),
+ * which stays safe only because of that ordering. Phase 4.2 of the post-DLSS roadmap
+ * makes the Rust side check it too (docs/roadmap/ownership-authority.md, row 3.10).
  */
 #ifndef WGPU_RENDERER_HPP
 #define WGPU_RENDERER_HPP

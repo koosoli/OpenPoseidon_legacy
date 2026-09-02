@@ -1264,6 +1264,7 @@ class EngineWgpu : public EngineDummy
     // producer (wait); read by the panel. Plain floats: they are a diagnostic and a torn
     // read costs a wrong pixel in a readout, not a wrong frame.
     double _rtLastBusyMs = 0.0;
+    double _rtPreDrawWaitMs = 0.0; // WaitRenderIdle time this frame, folded into queueWaitMs
     /// PERF-019. Report any renderer frame or consumer block at or above this many
     /// milliseconds (WGR_SLOW_BLOCK_MS, default 100; 0 switches the reports off).
     double _slowBlockMs = 100.0;
@@ -1281,11 +1282,20 @@ class EngineWgpu : public EngineDummy
     RenderThreadInfo GetRenderThreadInfo() const override;
     void SetRenderThreadEnabled(bool on) override { _renderThreadRequested = on; }
     void SetRenderOverlapEnabled(bool on) override { _overlapRequested = on; }
+    // True while the producer may call a `WgrRenderer*` entry point directly: from the
+    // WaitRenderIdle at the top of InitDraw until the frame is handed to the worker. Off the
+    // main thread, or between publish and the next InitDraw under overlap, it is false and
+    // a direct call is a data race with wgr_render_frame. Checked by the texture paths.
+    static bool ProducerMayTouchRenderer();
 
   private:
     void RenderThreadMain();
     void StartRenderThread();
     void StopRenderThread();
+    // Block the producer until the render worker holds no frame. Every direct `wgr_*` call
+    // the producer makes outside the queues forms an exclusive reference to the renderer,
+    // and so does wgr_render_frame on the worker; the two must not overlap (REN-THR-012).
+    void WaitRenderIdle();
     bool GetObjectStatsFromRenderer(ObjectStatsOut& out) const;
     bool GetGrassStatsFromRenderer(GrassStatsOut& out) const;
     bool GetGpuMemoryStatsFromRenderer(GpuMemoryStatsOut& out) const;

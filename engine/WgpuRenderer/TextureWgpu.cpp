@@ -1,5 +1,6 @@
 #include "TextureWgpu.hpp"
 #include "TextureBankWgpu.hpp"
+#include "EngineWgpu.hpp" // ProducerMayTouchRenderer (REN-THR-012)
 
 #include <Poseidon/Graphics/Core/MipmapLayout.hpp>
 #include <Poseidon/Graphics/Textures/BlockCompression.hpp>
@@ -869,12 +870,29 @@ void ReportTextureStreamStats(uint64_t uploads)
 
 TextureWgpu::TextureWgpu(TextureBankWgpu* bank) : _bank(bank) {}
 
+// REN-THR-012. These two are the texture paths that reach the renderer directly rather than
+// through the frame queues, and a texture can die (or be leased a slot) from anywhere a
+// reference drops. If that ever happens between publish and the next InitDraw while the
+// render thread is inside a frame, it is a data race with wgr_render_frame, and this is the
+// line that says so instead of letting it pass silently. Logged for the first few, counted
+// for the rest.
+static std::atomic<uint32_t> g_rendererRuleViolations{0};
+static void CheckProducerMayTouchRenderer(const char* what)
+{
+    if (EngineWgpu::ProducerMayTouchRenderer())
+        return;
+    const uint32_t n = g_rendererRuleViolations.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 3)
+        LOG_ERROR(Graphics, "Wgpu: {} reached the renderer outside the producer window (violation {})", what, n);
+}
+
 TextureWgpu::~TextureWgpu()
 {
     if (_bank)
     {
         if (WgrRenderer* r = _bank->Renderer())
         {
+            CheckProducerMayTouchRenderer("texture destroy");
             if (_gpuHandle)
             {
                 wgr_texture_destroy(r, _gpuHandle);
@@ -900,6 +918,7 @@ uint32_t TextureWgpu::AcquireSlotLease()
     {
         if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
         {
+            CheckProducerMayTouchRenderer("texture slot acquire");
             _slotLease = wgr_texture_slot_acquire(r);
         }
     }

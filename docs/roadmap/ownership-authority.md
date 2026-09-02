@@ -41,13 +41,14 @@ The **Rule** column is the most important one. Three values:
 - **checked** — something in the running program notices a violation.
 
 There are, after this pass, **four** checked rows in the entire engine. Three of them
-were added by this pass; the fourth is the RNG guard that inspired them.
+were added by this pass; the fourth is the RNG guard that inspired them. A fifth (row 3.9)
+was added on 2026-09-02, the day after the render thread made the question live.
 
 ## Threads the process actually runs
 
 | # | Thread | Created at | Count / priority |
 |---|---|---|---|
-| T1 | Main / render | OS | 1 |
+| T1 | Main: simulation, draw traversal, publish | OS | 1 |
 | T2 | enkiTS TaskPool workers | `apps/cwr/GameBase/GameBase.cpp:124` | auto, cap 8 (`Core/TaskPool.hpp:107`), `--max-threads` |
 | T3 | ObjectStreamPreparer workers | `World/Terrain/ObjectStreamPrepare.cpp:397-404`, entry `WorkerMain` `:152` | 2 default (1–16), BELOW_NORMAL |
 | T4 | Audio stream pump | `PoseidonOpenAL/SoundSystemOAL.cpp:206` | 1, ~10 ms cadence |
@@ -55,6 +56,7 @@ were added by this pass; the fourth is the RNG guard that inspired them.
 | T6 | ~~FileServer~~ — **not a thread** | `IO/FileServer.cpp:19` compiles the async path out | — |
 | T7 | Rust/wgpu | none spawned by our code; every `wgr_*` runs on the caller | — |
 | T8 | Auxiliary (WatchDog, DownloadWorker, MasterServerBrowser, workshop fetch, dev harness) | inventory in `SIM-801` table T8a–T8f | occasional |
+| T9 | **Wgpu render worker** — runs `RunConsumerBlock`: the queue drains and `wgr_render_frame` | `WgpuRenderer/EngineWgpu.cpp` `StartRenderThread`; default ON since 2026-09-01 (`WGR_RENDER_THREAD=0` off, `WGR_RENDER_OVERLAP=0` lockstep) | 1 |
 | — | ~~Secondary AI thread~~ — **does not exist** | `Core/Types.hpp:36` forward-declares `SecondaryThread`; no definition anywhere | see §Simulation note |
 
 ---
@@ -127,17 +129,18 @@ were added by this pass; the fourth is the RNG guard that inspired them.
 
 | # | State | Owner | Others | Boundary | Rule | Cited at |
 |---|---|---|---|---|---|---|
-| 3.1 | `PresentationSnapshot` — the renderer's pull set | T1 publishes, T1 consumes (today) | — | two-slot ring, atomic index, release store | stated | `Graphics/Rendering/Frame/PresentationSnapshot.hpp:162-190`, `.cpp:36-49,274` |
+| 3.1 | `PresentationSnapshot` — the renderer's pull set | T1 publishes, T9 consumes (T1 with the render thread off) | — | two-slot ring, atomic index, release store | stated | `Graphics/Rendering/Frame/PresentationSnapshot.hpp:162-190`, `.cpp:36-49,274` |
 | 3.2 | The **push** path — `_draws3d`, `_verts`, `_cmds`, `_palette`, `_cameras`, `_shadowCasters` | T1 clears in `InitDraw`, T1 appends during traversal | — | **none — not double-buffered** | implicit | `render-snapshot-design.md` §3b blocker 4. This is what step 6 must fix before a render thread exists |
 | 3.3 | `GCurrentConformPlane` / `GCurrentIsVegetation` / `GCurrentFoliageKind` | T1, transient, save/restore nesting | — | scope discipline in the callers | implicit | decl `Graphics/Rendering/Shape/Shape.hpp:289,296,300`; defn `ShapeDraw.cpp:223-225`; save/restore `World/Scene/Object.cpp:506,531,1097-1141`, `ObjectClasses.cpp:476-480` |
 | 3.4 | `GScene::_lights` | T1 | the snapshot carries a scored, capped copy by value | snapshot publish | stated | `World/Scene/Scene.hpp:191,281-284`; snapshot slice S3 |
 | 3.5 | `_gpuInstances` / `_gpuProxies` (`unordered_map<const Object*, …>`) | T1 mutates **while** the liveness sweep walks it | — | **none** | implicit | `WgpuRenderer/EngineWgpu.hpp:670,695`; rolling cursor and its rehash restart at `:770-780`. REN-ID-001 calls this container ownership, not identity, and ties its fix to 3.2 |
 | 3.6 | `Object::RenderId()` / `_renderId` | T1, lazily assigned in the draw path | — | monotonic, never recycled, dies with the object | stated | `World/Scene/Object.cpp:1744-1757`, `Object.hpp:284`; folded to 16 bits at `WgpuRenderer/EngineWgpu.cpp:6448` |
-| 3.7 | Rust retained-instance slots | T1 (every `wgr_*` runs on the caller) | — | handle is `(slot+1) \| generation<<24`, checked on every op | **checked** (in Rust) | `WgpuRenderer/rust/src/gfx3d/cull.rs`; ABI contract `include/wgpu_renderer.hpp:1907-1917`; stale ops counted as `stale_instance_ops` |
-| 3.8 | GPU geometry buffers | T1 | — | `retire()` parks, `frame_submitted()` is the lifetime edge | stated | `rust/src/gfx3d/pool.rs:195-253` |
-| 3.9 | GPU **textures** | T1 | — | **no epoch** — destroyed immediately, bindless slot recycled at once | stated | `rust/src/textures.rs:611-620`. Safe only because create/destroy/draw are all T1 in frame order; any render-thread split must bring this up to 3.8's model first |
-| 3.10 | The whole `wgr_*` ABI | T1 only | none | — | stated | thread contract added to `WgpuRenderer/include/wgpu_renderer.hpp` on 2026-08-30; Phase 4.2 makes it a checked one |
+| 3.7 | Rust retained-instance slots | T9, through the queued instance ops; T1 directly only inside the producer window (row 3.10) | — | handle is `(slot+1) \| generation<<24`, checked on every op | **checked** (in Rust) | `WgpuRenderer/rust/src/gfx3d/cull.rs`; ABI contract `include/wgpu_renderer.hpp:1907-1917`; stale ops counted as `stale_instance_ops` |
+| 3.8 | GPU geometry buffers | T9 (queued mesh ops); T1 uploads by the `wgr_uploader_*` borrow | — | `retire()` parks, `frame_submitted()` is the lifetime edge | stated | `rust/src/gfx3d/pool.rs:195-253` |
+| 3.9 | GPU **textures** | T1 creates, leases and destroys — inside the producer window only; T9 draws | — | **no epoch** — destroyed immediately, bindless slot recycled at once; safe because the window keeps create/destroy/draw in frame order | **checked** — `ProducerMayTouchRenderer()` asserted at destroy and slot acquire (`WgpuRenderer/TextureWgpu.cpp`, logged then counted) | `rust/src/textures.rs`. The render-thread split this row said must bring textures up to 3.8's model first shipped on 2026-09-01 without doing so; REN-THR-012 (2026-09-02) closed the window instead of adding the epoch |
+| 3.10 | The whole `wgr_*` ABI | **one thread at a time, in frame order**: T9 from publish until the worker is idle, T1 from `WaitRenderIdle` at `InitDraw` until publish | none | the producer window (`EngineWgpu::WaitRenderIdle`, `InitDraw`; closed at publish; rare direct callers — screenshot, resize, vsync, MSAA, shadow dumps, far instances — wait themselves) | stated for the ABI, **checked** on the texture paths (3.9) | contract rewritten 2026-09-02 (REN-THR-012): for one day after the render thread shipped it still read MAIN THREAD ONLY while T9 ran `wgr_render_frame` and T1 made direct calls under overlap. Phase 4.2 makes the Rust side check it |
 | 3.11 | TaskPool submission | T1 only submits; captured state must outlive the job | — | `ParallelFor` blocks / `Submit` completion | stated | `Core/TaskPool.hpp:51-57,66-75` |
+| 3.13 | `GEngine` — the engine singleton, the most-used global in the tree (123 files) | T1 creates it once (`apps/cwr/Game/GameApplication.cpp:2629`; dummies `apps/cwr/Server/ServerApplication.cpp:251`, `engine/PoseidonFormats/PoseidonFormats.cpp:107,122`) and never reassigns or deletes it | T9 reaches the same object through `this` inside `RunConsumerBlock` — the only non-T1 use of the object; none of the worker files (`ObjectStreamPrepare.cpp`, `SoundSystemOAL.cpp`, `NetPeer.cpp`, `WatchDog.cpp`) references the global | the POINTER is immutable after startup; the OBJECT's thread rule is row 3.10 | implicit | `Graphics/Core/Engine.cpp:22`, `Engine.hpp:2782` |
 | 3.12 | Diagnostics singletons (`ObjectAdmitProfile`, `FrameProfiler`, light and snapshot gauges) | T1 (plain fields); streaming counters are atomics because alpha work can touch them off-thread | — | — | stated | `Graphics/Rendering/Shape/ObjectAdmitProfile.hpp:78`, `Dev/Diag/StreamingDiag.hpp`, `Dev/Diag/SnapshotDiag.hpp` |
 
 ---
@@ -271,6 +274,15 @@ Carried forward from the first pass, with three added:
    mutated while it is walked (row 3.5). These are the two container-ownership
    questions Phase 5 step 6 cannot start without; REN-ID-001 already ties them
    together and this table keeps them together.
+9. **NEW (2026-09-02) — the render thread shipped a day before this table knew it.**
+   Rows T1, 3.1 and 3.7–3.10 all said "T1 only" while T9 ran `wgr_render_frame` and the
+   producer, under overlap, made direct `&mut` calls into the same renderer (terrain
+   params, render params, sky runtime, far instances, texture leases). REN-THR-012 closed
+   the window rather than adding locks; what it costs is the traversal's share of the
+   overlap, and the way to win it back is the row-3.10 work list: queue the remaining
+   producer-side calls as the instance and mesh ops already are. A table that is a day
+   behind the code is the failure mode this document exists to prevent, so the render
+   thread's commit should have edited it.
 8. **NEW — an entire threading arm of the simulation is uncompilable dead code**
    (row 1.7). Deleting `BACKGROUND_AI` and `_secThread` would remove three `#if` arms
    from `World.cpp`, two from `WorldSetup.cpp` and one from `WorldInit.cpp`, and would
