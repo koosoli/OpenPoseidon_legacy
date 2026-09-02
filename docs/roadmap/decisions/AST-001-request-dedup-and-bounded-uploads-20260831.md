@@ -205,3 +205,5 @@ statement today is "the cap works and we do not know whether it helps".
 
 The n/a discipline also held under test: with the cap off the JSON key is **absent**, not
 zero, in all three runs.
+
+> **Stale lever, verified 2026-09-02 (AUD-001):** `WGR_OBJECT_STREAM_BUDGET_MS` has NO READER IN THE TREE — `rg -w` over engine/, apps/, tools/, tests/, scripts/ returns nothing. Setting it does nothing. The live name is `WGR_OBJECT_STREAM_MS_PER_UPDATE`. Do not run a confirming experiment with it.

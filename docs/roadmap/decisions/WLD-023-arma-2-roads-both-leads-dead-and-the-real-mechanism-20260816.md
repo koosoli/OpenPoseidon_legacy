@@ -265,3 +265,5 @@ Two known costs, both arguing against a default:
 everything else — i.e. remove `OnSurface` from the `optimizeHW` deny at `ShapeDraw.cpp:503` and let
 the existing GPU conform handle it, now that `WGR_CONFORM_RASTER` can make that conform agree with
 the rasterised terrain. That is the combination worth trying next, and it needs no CPU split at all.
+
+> **Stale lever, verified 2026-09-02 (AUD-001):** `WGR_TERRAIN_LOD` has NO READER IN THE TREE — `rg -w` over engine/, apps/, tools/, tests/, scripts/ returns nothing. Setting it does nothing. The live name is `WGR_TERRAIN_LOD_BASE`. Do not run a confirming experiment with it.

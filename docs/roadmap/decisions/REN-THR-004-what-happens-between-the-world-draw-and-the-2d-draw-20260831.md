@@ -408,3 +408,5 @@ and that is what a proof has to name.
 - **One scene.** Three of the eliminations above (flares, rain, cloudlets, the empty light list) are
   eliminations *on this mission*, not on the engine. A night scene or a scene with smoke would
   reinstate all of them, and would also make the `lights` and `overlay_*` columns say something.
+
+> **Stale lever, verified 2026-09-02 (AUD-001):** `POSEIDON_NO_HUD` has NO READER IN THE TREE — `rg -w` over engine/, apps/, tools/, tests/, scripts/ returns nothing. Setting it does nothing. Do not run a confirming experiment with it.

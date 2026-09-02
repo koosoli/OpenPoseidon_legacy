@@ -191,3 +191,5 @@ glowing; card grass dark plates (A2/OA clutter plates are authored dark for a ma
 this engine never read) and the 10 Hz turbulence term cards were taking from the blade wind field;
 grass panel (0.24 coverage, mix slider, blade options, reset buttons); A3 tree sway on calm days;
 moving-camera streaming stall 11.9 -> 28.9 fps.
+
+> **Stale lever, verified 2026-09-02 (AUD-001):** `WGR_OBJECT_STREAM_REGISTER_MS` has NO READER IN THE TREE — `rg -w` over engine/, apps/, tools/, tests/, scripts/ returns nothing. Setting it does nothing. Do not run a confirming experiment with it.

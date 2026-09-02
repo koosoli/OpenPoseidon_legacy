@@ -123,3 +123,5 @@ and the error is invisible there. Test (1) FIRST.
   names every texture that blends but cannot say which covers a given pixel.
 - `WGR_NO_CULL=1` — disable backface culling on both object pipelines.
   Separates "not drawn because culled" from every other reason.
+
+> **Stale lever, verified 2026-09-02 (AUD-001):** `WGR_FORCE_OPAQUE_TEX` has NO READER IN THE TREE — `rg -w` over engine/, apps/, tools/, tests/, scripts/ returns nothing. Setting it does nothing. Do not run a confirming experiment with it.
