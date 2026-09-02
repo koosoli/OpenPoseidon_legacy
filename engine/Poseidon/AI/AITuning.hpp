@@ -34,6 +34,25 @@ void                SetTrackNearTargetsPeriod(float seconds);
 /// measurement gets attributed to the wrong setting.
 [[nodiscard]] bool TrackNearTargetsFromEnvironment();
 
+/// PERF-020. The same shape for the idle-watch target selection: `SelectInterestingTarget`,
+/// which every idle soldier ran on every think to decide where his head turns, walking the
+/// whole group target list each time. PERF-019 measured it at 94-96% of the settled unit
+/// think on both Chernarus+ and Everon. Zero is the 2001 behaviour: walk on every think.
+inline constexpr float kWatchSelectUnrationed = 0.0f;
+
+/// What ships. PERF-020: the walk runs once per period per unit, phased by slot; between
+/// walks the head keeps following the target it last chose.
+inline constexpr float kWatchSelectDefault = 0.5f;
+
+/// Minimum seconds between idle-watch target selections for one unit. 0 disables the
+/// ration. Read once per idle soldier per unit think, written from the dev panel; atomic
+/// for the same reason as the track period.
+[[nodiscard]] float WatchSelectPeriod();
+void                SetWatchSelectPeriod(float seconds);
+
+/// True when POSEIDON_AI_WATCH_PERIOD set the value at startup.
+[[nodiscard]] bool WatchSelectFromEnvironment();
+
 /// The sentinel that means "no bound at all": `AIGroup::CreateTargetList` runs the whole
 /// pass in the call it was made from.
 ///

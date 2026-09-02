@@ -305,8 +305,13 @@ struct CostAccum
     /// `unitAttack` bucket's time divided by THIS is the cost of an attack evaluation;
     /// divided by `unitThinksFull` it is what every full think pays for the condition.
     std::uint64_t unitAttackThinks = 0;
-    /// `SelectInterestingTarget` calls -- idle non-player soldiers with auto-target on.
+    /// `SelectInterestingTarget` calls -- idle non-player soldiers with auto-target on
+    /// whose walk actually ran. PERF-020 rations it; `unitWatchDeferred` is the rest.
     std::uint64_t unitWatchSelects = 0;
+    /// PERF-020. Idle-watch thinks that reused the last selection instead of walking.
+    /// `unitWatchSelects + unitWatchDeferred` is what `unitWatchSelects` alone was before
+    /// the ration, and a zero here with the ration on means the gate is not being reached.
+    std::uint64_t unitWatchDeferred = 0;
     /// Sum of the group target-list size over those calls: the (unit, target) pairs the
     /// idle-watch walk visits. The same scene-property caveat as `trackPairs`.
     std::uint64_t unitWatchPairs = 0;

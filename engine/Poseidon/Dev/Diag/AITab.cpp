@@ -72,6 +72,45 @@ void DrawAITab()
     }
 
     ImGui::Separator();
+    ImGui::TextUnformatted("Idle-watch target selection");
+    Dev::PanelSameLine();
+    Dev::PanelHelp("How often an idle soldier re-picks the most interesting thing to turn his "
+                   "head towards. PERF-019 measured this one walk at 94-96%% of the settled "
+                   "unit think on both Chernarus+ and Everon: every idle soldier walked the "
+                   "whole group target list on every tick. Between walks the head keeps "
+                   "following what it last chose, so the ration delays noticing something "
+                   "MORE interesting by up to the period. 0 is the 2001 behaviour.");
+
+    float watchPeriod = AITuning::WatchSelectPeriod();
+    if (Dev::SliderFloat("Re-pick period (s)", &watchPeriod, 0.0f, 2.0f, "%.2f"))
+    {
+        AITuning::SetWatchSelectPeriod(watchPeriod);
+    }
+    if (ImGui::Button("Off (2001 behaviour)##watch"))
+    {
+        AITuning::SetWatchSelectPeriod(AITuning::kWatchSelectUnrationed);
+    }
+    Dev::PanelSameLine();
+    if (ImGui::Button("Default (0.5 s)##watch"))
+    {
+        AITuning::SetWatchSelectPeriod(AITuning::kWatchSelectDefault);
+    }
+
+    const float watchNow = AITuning::WatchSelectPeriod();
+    if (watchNow <= 0.0f)
+    {
+        ImGui::TextUnformatted("Unrationed -- every idle think walks the list. watch 0.24-0.47 ms/tick settled.");
+    }
+    else
+    {
+        ImGui::Text("Rationed to %.2f s. Measured at 0.5 s: see PERF-020 for the before/after rows.", watchNow);
+    }
+    if (AITuning::WatchSelectFromEnvironment())
+    {
+        ImGui::TextUnformatted("(started from POSEIDON_AI_WATCH_PERIOD; changes here override it)");
+    }
+
+    ImGui::Separator();
     ImGui::TextUnformatted("What it costs, live");
     Dev::PanelSameLine();
     Dev::PanelHelp("The same counters the once-a-second log row uses, read where they stand in "
@@ -83,6 +122,11 @@ void DrawAITab()
     ImGui::Text("track  %8.3f ms   calls %llu   pairs %llu", costs.ms[static_cast<std::size_t>(AICost::Bucket::GroupTrack)],
                 static_cast<unsigned long long>(costs.trackCalls),
                 static_cast<unsigned long long>(costs.trackPairs));
+    ImGui::Text("watch  %8.3f ms   selects %llu   deferred %llu   pairs %llu",
+                costs.ms[static_cast<std::size_t>(AICost::Bucket::UnitWatch)],
+                static_cast<unsigned long long>(costs.unitWatchSelects),
+                static_cast<unsigned long long>(costs.unitWatchDeferred),
+                static_cast<unsigned long long>(costs.unitWatchPairs));
     ImGui::Text("ticks in this window  %llu", static_cast<unsigned long long>(costs.ticks));
 }
 

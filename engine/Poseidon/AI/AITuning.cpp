@@ -18,6 +18,9 @@ struct State
 
     std::atomic<int> targetListBudget{kTargetListBudgetUnlimited};
     bool             targetListFromEnvironment = false;
+
+    std::atomic<float> watchSelect{kWatchSelectDefault};
+    bool               watchSelectFromEnvironment = false;
 };
 
 State& Get()
@@ -39,6 +42,19 @@ State& Get()
             {
                 s.trackNearTargets.store(parsed, std::memory_order_relaxed);
                 s.fromEnvironment = true;
+            }
+        }
+        // PERF-020, same rules as the track period: malformed is ignored, never parsed to
+        // zero, because zero here means "walk the whole list every tick" and that is the
+        // expensive setting, not the safe one.
+        if (const char* v = std::getenv("POSEIDON_AI_WATCH_PERIOD"); v != nullptr && v[0] != '\0')
+        {
+            char*       end = nullptr;
+            const float parsed = std::strtof(v, &end);
+            if (end != v && *end == '\0' && parsed >= 0.0f)
+            {
+                s.watchSelect.store(parsed, std::memory_order_relaxed);
+                s.watchSelectFromEnvironment = true;
             }
         }
         // Same rule for the target-list budget: a malformed value leaves the sentinel in
@@ -75,6 +91,21 @@ void SetTrackNearTargetsPeriod(float seconds)
 bool TrackNearTargetsFromEnvironment()
 {
     return Get().fromEnvironment;
+}
+
+float WatchSelectPeriod()
+{
+    return Get().watchSelect.load(std::memory_order_relaxed);
+}
+
+void SetWatchSelectPeriod(float seconds)
+{
+    Get().watchSelect.store(seconds < 0.0f ? 0.0f : seconds, std::memory_order_relaxed);
+}
+
+bool WatchSelectFromEnvironment()
+{
+    return Get().watchSelectFromEnvironment;
 }
 
 int TargetListBudget()

@@ -416,6 +416,7 @@ AIUnit::AIUnit(Person* vehicle) : _planner(CreateAIPathPlanner(AIUnitGetFieldCos
     _watchDirHead = VZero;
     _watchPos = VZero;
     _watchMode = WMNo;
+    _watchSelectTime = Time(0); // PERF-020: never selected yet
 
     _getInAllowed = true;
     _getInOrdered = false;
@@ -640,6 +641,8 @@ LSError AIUnit::Serialize(ParamArchive& ar)
     PARAM_CHECK(ar.Serialize("watchDirectionHead", _watchDirHead, 1, VZero))
     PARAM_CHECK(ar.Serialize("watchPosition", _watchPos, 1))
     PARAM_CHECK(ar.SerializeRef("watchTarget", _watchTgt, 1))
+    // PERF-020. Absent from older saves; the default makes the next think select at once.
+    PARAM_CHECK(ar.Serialize("watchSelectTime", _watchSelectTime, 1, Time(0)))
     PARAM_CHECK(ar.SerializeEnum("watchMode", _watchMode, 1))
 
     PARAM_CHECK(ar.Serialize("expPosition", _expPosition, 1))

@@ -1067,12 +1067,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 // they follow.
                 LOG_INFO(World,
                          "AI unit think counts/tick over {} aiTicks: unitThinks={:.2f} [early={:.2f} full={:.2f} "
-                         "(pilot={:.2f})] attackThinks={:.2f} watchSelects={:.2f} watchPairs={:.2f} "
-                         "expensives={:.2f} getInOuts={:.2f} strats={:.2f} (search={:.2f}) operTargets={:.2f} "
-                         "operPlans={:.2f} (init={:.2f})",
+                         "(pilot={:.2f})] attackThinks={:.2f} watchSelects={:.2f} (deferred={:.2f}) "
+                         "watchPairs={:.2f} expensives={:.2f} getInOuts={:.2f} strats={:.2f} (search={:.2f}) "
+                         "operTargets={:.2f} operPlans={:.2f} (init={:.2f})",
                          ai.ticks, ai.unitThinks * aiInv, ai.unitThinksEarly * aiInv, ai.unitThinksFull * aiInv,
                          ai.unitThinksPilot * aiInv, ai.unitAttackThinks * aiInv, ai.unitWatchSelects * aiInv,
-                         ai.unitWatchPairs * aiInv, ai.unitExpensives * aiInv, ai.unitGetInOuts * aiInv,
+                         ai.unitWatchDeferred * aiInv, ai.unitWatchPairs * aiInv, ai.unitExpensives * aiInv,
+                         ai.unitGetInOuts * aiInv,
                          ai.unitStrats * aiInv, ai.unitStratSearches * aiInv, ai.unitOperTargets * aiInv,
                          ai.unitOperPlans * aiInv, ai.unitOperInits * aiInv);
             }

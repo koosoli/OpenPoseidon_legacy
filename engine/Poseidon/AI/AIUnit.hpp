@@ -177,6 +177,10 @@ protected:
 	Foundation::Time _watchDirSet; // for WMAround
 	Vector3 _watchDir; // direction to watch by head and body
 	Vector3 _watchDirHead; // direction to watch by head
+	// PERF-020: when the idle-watch target selection may next walk the group target
+	// list. Time(0) means it never has, which is also what an older save loads as, so
+	// the first think after a load walks at once.
+	Foundation::Time _watchSelectTime;
 
 	// used when vehicle is static and no target is locked
 

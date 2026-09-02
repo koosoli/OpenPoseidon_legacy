@@ -1,6 +1,7 @@
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/AI/AI.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-019
+#include <Poseidon/AI/AITuning.hpp>    // PERF-020
 #include <Poseidon/AI/AIRadio.hpp>
 #include <Poseidon/Core/Global.hpp>
 #include <Poseidon/Core/Config/UserConfig.hpp>
@@ -1303,17 +1304,46 @@ void AIUnit::SetWatch()
 
                 //  To considre: maybe combat units may be affected by this?
                 //  when soldier is idle, automatically select "interesting" targets
-                Target* tgt = nullptr;
-                // PERF-019: the walk below visits the whole group target list; the pair
-                // count is what says whether its cost is a scene property. Guarded the way
-                // the callee is, so the count is of walks that happen and the probe cannot
-                // dereference a group the original code tolerates being absent.
-                AICost::AICosts().unitWatchSelects++;
-                if (grp && grp->GetCenter())
+                //
+                // PERF-020. The walk is rationed per unit. PERF-019 measured it at 94-96%
+                // of the settled unit think on both worlds: one pass over the whole group
+                // target list (193 entries on Chernarus+, 456 on Everon) for every idle
+                // soldier on every tick, to decide where a head turns. Between walks the
+                // head keeps following the target it last chose, so the ration moves how
+                // soon a soldier notices something MORE interesting, not whether he keeps
+                // tracking what he is already looking at. 0 is the 2001 behaviour: walk on
+                // every think. A unit's first walk is never deferred, and its next one is
+                // phased by slot so a group's twelve heads do not all turn on the same tick.
+                Target*     tgt = nullptr;
+                const float watchPeriod = AITuning::WatchSelectPeriod();
+                if (watchPeriod <= 0.0f || Glob.time >= _watchSelectTime)
                 {
-                    AICost::AICosts().unitWatchPairs += grp->GetTargetList().Size();
+                    // PERF-019: the walk below visits the whole group target list; the pair
+                    // count is what says whether its cost is a scene property. Guarded the
+                    // way the callee is, so the count is of walks that happen and the probe
+                    // cannot dereference a group the original code tolerates being absent.
+                    AICost::AICosts().unitWatchSelects++;
+                    if (grp && grp->GetCenter())
+                    {
+                        AICost::AICosts().unitWatchPairs += grp->GetTargetList().Size();
+                    }
+                    tgt = SelectInterestingTarget(this, _watchTgt);
+                    if (watchPeriod > 0.0f)
+                    {
+                        const bool  neverScheduled = _watchSelectTime.toFloat() <= 0.0f;
+                        const int   slot = (ID() > 0 ? ID() - 1 : 0) % MAX_UNITS_PER_GROUP;
+                        const float phase = neverScheduled ? watchPeriod * static_cast<float>(slot) /
+                                                                 static_cast<float>(MAX_UNITS_PER_GROUP)
+                                                           : 0.0f;
+                        _watchSelectTime = Glob.time + watchPeriod + phase;
+                    }
                 }
-                tgt = SelectInterestingTarget(this, _watchTgt);
+                else
+                {
+                    // Deferred: keep following what the last walk chose.
+                    AICost::AICosts().unitWatchDeferred++;
+                    tgt = _watchTgt;
+                }
 
                 if (tgt)
                 {
