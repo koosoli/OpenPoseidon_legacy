@@ -595,7 +595,16 @@ Each carries its number, its scene and its gate. None is a guess about where tim
 |---|---:|---|---|
 | ~~`unitThink`~~ **done 2026-09-02 (PERF-020)** | was 0.95–2.06 ms/tick; the idle-watch walk is rationed (`POSEIDON_AI_WATCH_PERIOD`, 0.5 s): `watch` 0.44 → 0.05, `unitThink` 0.64 → 0.18 ms/tick on the same scene | Everon + Chernarus+ `perf_combat` | the oracle ran: same arm EQUIVALENT over 902 ticks, rationed vs unrationed DIVERGED at tick 340 in one unit's nearest-enemy distance — a behaviour change by design, named to the tick |
 | ~~`land:obj` residual, **on Chernarus+**~~ **gate met 2026-09-02 (WLD-026)** | admission is counted (`WGR_OBJECT_STREAM_ADMIT`); on the WLD-025 pose counted and `=timed` reach the same 19,923 resident objects and the same frame (35.5 vs 35.8 ms, GPU-bound), the timed clocks had ended ~95% of updates, and two counted runs hold an identical resident set row for row — without the lockstep env | WLD-025 pose | what remains is `land:obj` itself (4.5–4.8 ms in every arm at this window), now measurable as one number |
-| sky cloud march | 1.314 ms, 11.7% of an 11.26 ms GPU frame | `perf_combat`, ARCH-001 table | three runs per arm; the step-count tier (`HANDOVER-20260824`:144) has had no A/B since the SH fix |
+| ~~sky cloud march~~ **done 2026-09-02 (REN-SKY-001)** | 2.92 → 1.85 ms at 64 steps (three runs per arm, bench window); 32 steps saves another 0.6 ms but shows grain on cloud edges | `perf_combat` | default 64, `WGR_CLOUD_STEPS=128` restores the old look; overcast and sunset not yet checked |
+
+### Next targets, 2026-09-02 (after the three above closed)
+
+| target | number | scene / source | gate |
+|---|---:|---|---|
+| the draw traversal's share of render/sim overlap | REN-THR-012 serialised the traversal with the render (`drw:land` 2.9 + `land:obj` 1.9 + `drw:prep` 0.7 ≈ 5.5 ms on Everon `perf_combat`) to close a data race; the simulation still overlaps | REN-THR-012 table | queue the remaining producer-side `wgr_*` calls (render params, sky runtime, terrain params, far instances, texture leases) as the instance/mesh ops are; then a CPU-bound three-run A/B against lockstep, and `ProducerMayTouchRenderer()` violations at 0 |
+| `land:obj` on Chernarus+ | 4.5–4.8 ms in every arm of WLD-026 (13% of a 35 ms frame), the same number on every run now that admission is counted | WLD-025 pose | attribute it first (PERF-016's split: classification and binding caches are in; what is left is the per-object list build itself) — no lever ships without the split |
+| `Objects: colour alpha-test` | 1.0–1.1 ms of a 21.7 ms GPU frame, the largest object row and 5x its solid sibling (0.19) | `perf_combat` bench window, REN-THR-012 captures | a fragment census like REN-GRS-001's before any lever: per-pixel (overdraw of cutout foliage) vs per-triangle decides between a prepass-discard change and a LOD change |
+
 
 Explicitly **not** on the list: grass *colour* (closed, PARKED.md: "reopen with a corpus that
 measures differently" — which the fragment census of REN-GRS-001 now is; it reopened the *shadow*
