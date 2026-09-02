@@ -24,9 +24,10 @@ CPU frame moves less than the march does because the scene is GPU-bound only in 
 ## The picture
 
 Cloud shapes differ between arms because the clouds evolve with time between runs, so there
-is no pixel diff; the crops (`.tmp-sky/sky_zoom_128_64_32.png`) are judged by eye. 128 and 64
-are indistinguishable at full resolution. 32 shows visible grain along cloud edges — the
-march's dither (`hash21`) is no longer hidden by enough samples.
+is no pixel diff; the crops (`.tmp-sky/sky_zoom_128_64_32.png`) are judged by eye. To my eye
+128 and 64 were indistinguishable at full resolution; the owner told them apart at once and
+preferred 128 (see Decision). 32 shows visible grain along cloud edges — the march's dither
+(`hash21`) is no longer hidden by enough samples.
 
 ## Decision
 
@@ -39,5 +40,5 @@ GPU per frame at this window); 32 shows grain and is not recommended.
 
 One machine, one time of day (clear-ish sky with scattered cumulus). Dense overcast or
 sunset, where the march works hardest and the dither would show most, is the case to check
-before calling 64 safe everywhere; DLSS's temporal accumulation should hide grain the
+before recommending 64 even as a slow-GPU lever; DLSS's temporal accumulation should hide grain the
 capture (DLSS off) does not, which makes the capture the pessimistic case.
