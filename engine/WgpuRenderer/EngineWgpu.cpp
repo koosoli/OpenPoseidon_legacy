@@ -5053,11 +5053,9 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     ctx.isIn3DPass = true;
     ctx.shadowAlphaRef = 0;
     const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(split, ctx);
-    // Plain opaque surfaces only. Transparent/additive/shadow blends and on-surface decals
-    // (roads/footprints, which need a polygon-offset) are the CPU complement — the SAME
-    // predicate Shape::Draw uses to skip GPU-owned sections when it draws a Partial object,
-    // so the two can never disagree (double-draw / hole). See IsGpuOwnedSection.
-    if (!render::IsGpuOwnedSection(desc))
+    // The same ownership question Shape::Draw's skip and RegisterGpuModel ask (ClipShape.hpp).
+    // Answering it differently here is how a section ends up drawn by nobody.
+    if (!SectionGpuOwned(sec))
     {
         return false;
     }
@@ -5086,19 +5084,32 @@ bool ClassifyGpuSection(const Shape& s, uint64_t mesh, const AutoArray<render::m
     const bool legacyPlantCutout = texture && render::IsLegacyPlantCutoutTexture(texture->Name());
     const bool materialCutout =
         alphaClass == Poseidon::AlphaStats::Blend && GpuSectionMaterialIsCutout(sec.surfMat, texture);
-    // Genuine blended surfaces stay on the CPU's back-to-front complement. Only foliage whose
-    // authored shader explicitly identifies it as alpha-tested can stay in the retained pass.
-    if (alphaClass == Poseidon::AlphaStats::Blend && !materialCutout && !legacyPlantCutout)
+    // Mirrors DrawSectionTL's three rules, in the same order, so the retained path shades a tree
+    // exactly as the per-draw path did (2026-09-02, the pine-trunk regression):
+    //  1. bark / trunk textures are SOLID whatever their alpha channel says -- their alpha is not
+    //     coverage, and testing it is what hid the trunk behind its own cards;
+    //  2. a Blend-class texture under an authored leaf-card material with no alpha holes (bark
+    //     under the generic TreeAdv material) is drawn opaque without a discard;
+    //  3. Cutout-class, legacy plant cutout, leaf-card cutout and IsAlpha-spec cutout textures
+    //     are hard-tested at 0.5.
+    // A Blend-class texture that is none of those is real translucency; on an .emat material it
+    // keeps today's behaviour (declined here, complement-drawn); on anything else SectionGpuOwned
+    // already refused it and we cannot get here.
+    const bool bark = texture && GpuTextureIsBarkOrTrunk(texture);
+    const bool blendOpaqueRoute = alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout &&
+                                  !legacyPlantCutout && GpuSectionMaterialUsesLeafCards(sec.surfMat);
+    if (alphaClass == Poseidon::AlphaStats::Blend && !bark && !materialCutout && !legacyPlantCutout &&
+        !blendOpaqueRoute)
     {
         return false;
     }
-    // Retained sections must use the same texture-derived cutout rule as
-    // DrawSectionTL.  Arma vegetation often stores punch-through alpha in a
-    // DXT1/PAC texture while its P3D section itself is marked opaque.  Without
-    // this override the retained path draws each leaf card's dark background as
-    // a solid rectangle, even though the CPU path correctly discards it.
     float alphaRef = AlphaRefFromDesc(desc);
-    if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout || legacyPlantCutout))
+    if (bark || blendOpaqueRoute)
+    {
+        alphaRef = 0.0f;
+    }
+    else if (tex != 0 && (alphaClass == Poseidon::AlphaStats::Cutout || materialCutout || legacyPlantCutout ||
+                          desc.blend == render::BlendMode::AlphaBlend))
     {
         alphaRef = std::max(alphaRef, 0.5f);
     }
@@ -6497,6 +6508,26 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             //
             // WGR_TREEADV_RETAINED=1 opts back in. Do not make it the default again without
             // checking an interior for shadows and a pine for its trunk.
+            //
+            // 2026-09-02: the three regressions were addressed (below) and the default was flipped
+            // on for one deploy. MEASURED, and put back to OFF the same hour: on Chernarus+ the
+            // CPU prize is real (coverage none 4987 -> 150, land:obj 7.65 -> 1.05 ms) but the GPU
+            // frame went 30.3 -> 49.4 ms (fps 32 -> 18): the retained path draws the trees at
+            // 30.5 M triangles where the per-draw path drew 3.8 M, because the per-draw LOD is
+            // governed by frame time (_lodInvWidth feedback) and the GPU-driven LOD is not
+            // (cull.wgsl: "fixed, not fed back"). Until the GPU cull honours the same governor,
+            // retaining the vegetation trades a CPU millisecond for ten GPU milliseconds.
+            // WGR_TREEADV_RETAINED=1 is the lever, and the fixes below stay in so that when it
+            // is on, trunks, shadows and near LODs are right. What the flip WOULD fix:
+            //  - shadows: the cascade gate was fixed (see :2766) before this;
+            //  - trunks: ClassifyGpuSection now applies DrawSectionTL's bark rule (solid, no
+            //    alpha test) and its opaque-route rule, so a Blend-histogram bark section under a
+            //    TreeAdv material is drawn opaque by the GPU instead of being owned-but-declined;
+            //  - near LOD: SectionGpuOwned (ClipShape.hpp) owns IsAlpha-spec leaf cards over
+            //    cutout textures, so a LOD whose sections are all such cards registers.
+            // Chernarus+ measured 77% of visible objects as CPU-drawn vegetation with the bail on
+            // (WLD-026 follow-up); Stratis measured land:obj 42.7 -> 0.185 ms without it.
+            // WGR_TREEADV_RETAINED=0 restores the bail, whole-model, exactly as before.
             static const bool treeAdvRetained = []
             {
                 const char* v = std::getenv("WGR_TREEADV_RETAINED");
@@ -6536,7 +6567,7 @@ uint32_t EngineWgpu::RegisterGpuModel(LODShapeWithShadow* shape)
             // Full -- which suppresses the CPU draw wholesale, so the complement that was
             // supposed to repaint it never runs. That is how A1's hotel lost 10,496 triangles
             // of glass and blinds. See ClipShape.hpp for the full contract.
-            if (render::IsGpuOwnedSectionSpec(shSec.properties.Special()) && !SectionRetainedRefuses(shSec))
+            if (SectionGpuOwned(shSec))
             {
                 levelHasOwned = true;
             }

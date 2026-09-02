@@ -53,6 +53,21 @@ struct ShapeSectionInfo
 // Defined in ShapeDraw.cpp beside SectionIsBlend, which is the routing rule it has to agree with.
 bool SectionRetainedRefuses(const ShapeSectionInfo &sec);
 
+// THE ownership question, asked once and answered in one place (2026-09-02). Every caller that
+// wants to know whether the wgpu RETAINED path draws a section -- Shape::Draw's skip for a
+// Partial object, RegisterGpuModel's coverage decision, ClassifyGpuSection's admission -- asks
+// this, so the three can no longer disagree in the direction that loses geometry.
+//
+// True when the spec is plain opaque and the retained path does not refuse the texture
+// (today's rule), AND ALSO when the spec is IsAlpha but the texture is a cutout: a Cutout-class
+// histogram, a legacy plant cutout, or a Blend-class texture whose authored material routes it
+// to a hard alpha test (TreeAdv leaf cards, whose antialiased alpha the histogram calls Blend).
+// That second half is the per-draw path's own rule -- "a face authored IsAlpha over a Cutout-
+// class texture draws in the OPAQUE pass as a hard alpha test" (EngineWgpu DrawSectionTL) --
+// and it is what lets a tree whose LOD 0 is all IsAlpha leaf cards register that LOD instead
+// of its coarser neighbour. True translucency (Blend class, Default route) stays the CPU's.
+bool SectionGpuOwned(const ShapeSectionInfo &sec);
+
 struct ShapeSection: public ShapeSectionInfo
 {
 	Offset beg,end; // beg,end in PolyPlainArray of Shape

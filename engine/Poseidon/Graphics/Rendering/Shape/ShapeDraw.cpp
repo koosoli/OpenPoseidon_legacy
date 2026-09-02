@@ -203,6 +203,37 @@ bool SectionRetainedRefuses(const ShapeSectionInfo& sec)
     return !(mat && *mat && Asset::Material::IsEmatPath(mat));
 }
 
+bool SectionGpuOwned(const ShapeSectionInfo& sec)
+{
+    const int spec = sec.properties.Special();
+    if (render::IsGpuOwnedSectionSpec(spec))
+        return !SectionRetainedRefuses(sec);
+    // IsAlpha spec. Owned only when the per-draw path would hard-test it in the opaque pass.
+    const render::RenderPassDescriptor desc = render::BuildRenderPassDescriptor(render::SplitLegacy(spec));
+    if (desc.blend != render::BlendMode::AlphaBlend || desc.surface != render::SurfaceMode::Default)
+        return false;
+    Texture* tex = sec.properties.GetTexture();
+    if (!tex)
+        return false;
+    if (tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout)
+        return true;
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+        return true;
+    // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf
+    // cards and their bark), i.e. exactly when SectionIsBlend says it is not real translucency.
+    // .emat materials are left to the CPU on an IsAlpha spec, as SectionRetainedRefuses leaves
+    // them: this side cannot read an .emat, and drawing Everon's foliage twice is worse than
+    // the status quo.
+    if (tex->GetAlphaClass() == Poseidon::AlphaStats::Blend)
+    {
+        const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
+        if (mat && *mat && Asset::Material::IsEmatPath(mat))
+            return false;
+        return SectionMaterialAlphaRoute(sec.surfMat) != AuthoredAlphaRoute::Default;
+    }
+    return false;
+}
+
 bool Shape::HasBlendSections() const
 {
     if (_hasBlendSections < 0)
@@ -430,9 +461,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 {
                     const Texture* t = sec.properties.GetTexture();
                     const bool hid = (sec.properties.Special() & (IsHidden | IsHiddenProxy)) != 0;
-                    const bool gpuOwned = GSkipGpuOwnedSections &&
-                                          render::IsGpuOwnedSectionSpec(sec.properties.Special()) &&
-                                          !SectionRetainedRefuses(sec);
+                    const bool gpuOwned = GSkipGpuOwnedSections && SectionGpuOwned(sec);
                     const bool filtered = GSectionFilter != SectionClassFilter::All &&
                                           ((GSectionFilter == SectionClassFilter::BlendOnly) != SectionIsBlend(sec));
                     LOG_WARN(Graphics, "SECTRACE shape@{} sec {} tex={} special={:#x} {}{}{}",
@@ -451,8 +480,7 @@ void Shape::Draw(class IAnimator* matSource, const LightList& lights, ClipFlags 
                 // prepass targets, so the CPU repaints only the complement (blend glass,
                 // decals). Same predicate the wgpu backend registered the section with, so
                 // owned sections are dropped exactly once — never double-drawn, never held.
-                if (GSkipGpuOwnedSections && render::IsGpuOwnedSectionSpec(sec.properties.Special()) &&
-                    !SectionRetainedRefuses(sec))
+                if (GSkipGpuOwnedSections && SectionGpuOwned(sec))
                 {
                     continue;
                 }
