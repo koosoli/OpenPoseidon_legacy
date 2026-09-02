@@ -309,7 +309,8 @@ struct GrassParams {
     card_coverage: f32,
     card_coverage_auto: f32,
     card_scale: f32,
-    _card_look_pad: f32,
+    // card_look.w: shadow blade stride (see SHADOW_STRIDE_DEFAULT). Renderer-owned.
+    shadow_blade_stride: f32,
     // Procedural-blade look block; mirrors `blade_look` in grass.wgsl. Near
     // blades and mid ribbons only. Defaults are the pre-existing look.
     //   .x = blade self shadow, .y = contrast, .z = hue variation, .w = root shade
@@ -378,7 +379,50 @@ pub struct GrassStats {
 // discipline as gpu_timers: copy in the frame encoder, map_async after submit,
 // drain with a Poll next frame. A saturated ring just skips a sample.
 const STATS_SLOTS: usize = 3;
-const STATS_BYTES: u64 = 16; // three u32 counts at offsets 0/4/8, padded
+// Three u32 counts at offsets 0/4/8 (padded to 16), then the fragment census
+// lanes (FRAG_WORDS u32s) that WGR_GRASS_COUNT_FRAGMENTS fills.
+const STATS_BYTES: u64 = 16 + FRAG_WORDS as u64 * 4;
+// Fragment census layout; mirrors frag_counts / count_fragment in grass.wgsl.
+// Lane 0 near prepass, 1 mid prepass, 2 near colour, 3 mid colour, 4 near shadow
+// (summed over every cascade that drew grass), 5..8 spare.
+const FRAG_LANES: usize = 8;
+const FRAG_STRIPES: usize = 32;
+const FRAG_WORDS: usize = FRAG_LANES * FRAG_STRIPES;
+const FRAG_LANE_NEAR_PREPASS: usize = 0;
+const FRAG_LANE_MID_PREPASS: usize = 1;
+const FRAG_LANE_NEAR_COLOR: usize = 2;
+const FRAG_LANE_MID_COLOR: usize = 3;
+const FRAG_LANE_NEAR_SHADOW: usize = 4;
+// How often the census line goes to the game log (harvests, roughly frames).
+const CENSUS_PERIOD: u32 = 240;
+
+/// SHADOW BLADE STRIDE. The cascade pass has no fragment shader and still costs the
+/// same per triangle as the prepass (perf_combat, 1600x900: 0.22 ns/tri in both), so
+/// it is bound by triangles, and near-ring shadows are 120 triangles per clump into
+/// every cascade the mask keeps -- two of the four on the reference scene, i.e. the
+/// near clumps are transformed FOUR times a frame and the two shadow copies are the
+/// largest single grass region once the per-cascade timer rows are added up. In the
+/// shadow map a clump is a coverage stipple, not twelve resolvable blades: cascade 1's
+/// texel is about a blade wide. So the shadow draws every stride-th blade of the real
+/// clump, widened by the stride (vs_grass_shadow in grass_shadow.wgsl), which keeps
+/// the coverage the ground receives and divides the shadow triangles by the stride.
+/// WGR_GRASS_SHADOW_STRIDE=1 is the old behaviour exactly, for the A/B on one binary.
+const SHADOW_STRIDE_DEFAULT: u32 = 2;
+const SHADOW_STRIDE_MAX: u32 = 12;
+
+fn shadow_stride_from_env() -> u32 {
+    std::env::var("WGR_GRASS_SHADOW_STRIDE")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(SHADOW_STRIDE_DEFAULT)
+        .clamp(1, SHADOW_STRIDE_MAX)
+}
+
+/// Fragment census summed from the striped counters; see FRAG_LANE_*.
+#[derive(Clone, Copy, Default)]
+struct FragStats {
+    lanes: [u64; FRAG_LANES],
+}
 
 enum StatsSlot {
     Idle,
@@ -450,6 +494,24 @@ pub struct Grass {
     far_color_no_write_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     tuft_shadow_pipeline: wgpu::RenderPipeline,
+    // The blade shadow draw has its own index table (every stride-th blade) and its
+    // own indirect args (fewer indices per instance, same instance count), so the
+    // colour draw's buffers are untouched by the stride. See SHADOW_STRIDE_DEFAULT.
+    shadow_index: wgpu::Buffer,
+    shadow_indirect: wgpu::Buffer,
+    shadow_index_mode: std::cell::Cell<u8>,
+    shadow_stride: u32,
+    // Fragment census (WGR_GRASS_COUNT_FRAGMENTS): the striped atomic counters the
+    // *_count fragment entries write, and what the last readback summed them to.
+    frag_counts: wgpu::Buffer,
+    count_frags: bool,
+    frag_stats: FragStats,
+    // draw_shadow calls this frame (one per cascade that received grass), and the
+    // last completed frame's total: the "Grass shadow" timer row reports ONE cascade,
+    // so this is the multiplier a reader needs to turn it into the frame's cost.
+    shadow_draws: std::cell::Cell<u32>,
+    shadow_draws_latest: u32,
+    census_ticks: u32,
     stats_buffers: Vec<(wgpu::Buffer, StatsSlot)>,
     stats: GrassStats,
     // GRS-E: kept so the three data binds can be rebuilt when the tuft arrives
@@ -579,6 +641,10 @@ impl Grass {
                 .map(|v| v != "0")
                 .unwrap_or(true);
         let card_tone = CardTone::from_env();
+        let shadow_stride = shadow_stride_from_env();
+        let count_frags = std::env::var("WGR_GRASS_COUNT_FRAGMENTS")
+            .map(|v| v != "0")
+            .unwrap_or(false);
         // Announced through the GAME log (pending_log, drained by lib.rs on the
         // first set_params): the stderr copy below is discarded by the launcher,
         // and a lever that only announces there cannot be proven from a run.
@@ -589,6 +655,13 @@ impl Grass {
             card_a2c as u8, card_tone.target, card_tone.gain_max, card_tone.flutter
         );
         eprintln!("[wgr] {cards_line}");
+        let shadow_line = format!(
+            "Wgpu grass shadow: blade stride {shadow_stride} (WGR_GRASS_SHADOW_STRIDE; 1 = every \
+             blade), fragment census {} (WGR_GRASS_COUNT_FRAGMENTS; timings from a counting run \
+             are not quotable)",
+            if count_frags { "on" } else { "off" }
+        );
+        eprintln!("[wgr] {shadow_line}");
         let params = GrassParams {
             density,
             // Dense 0.25 m grid; the 512x512 placement buffer supports this
@@ -682,7 +755,7 @@ impl Grass {
             // built without the game would start from.
             card_coverage_auto: 0.0,
             card_scale: 1.0,
-            _card_look_pad: 0.0,
+            shadow_blade_stride: shadow_stride as f32,
             blade_self_shadow: 0.0,
             blade_contrast: 1.0,
             blade_hue_variation: 0.0,
@@ -872,6 +945,33 @@ impl Grass {
             usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // Blade shadow draw: its own index table (every stride-th blade of the near
+        // clump) and indirect args. Sized like near_index; the instance count is
+        // copied from the same placement counter the colour draw uses.
+        let shadow_index = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_shadow_index"),
+            size: 12 * 5 * 6 * 4,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_indirect = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_shadow_indirect"),
+            size: 20,
+            usage: wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        // Fragment census counters; zeroed every frame in dispatch() after the
+        // previous frame's totals are copied out. Bound whether or not the census
+        // is on (the layout needs an entry either way); only the *_count entries
+        // touch it.
+        let frag_counts = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wgr_grass_frag_counts"),
+            size: FRAG_WORDS as u64 * 4,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let data_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_grass_data_layout"),
             entries: &[
@@ -941,6 +1041,18 @@ impl Grass {
                     },
                     count: None,
                 },
+                // Fragment census counters (frag_counts in both shaders). Fragment
+                // stage only, like the textures: the compute entries never touch it.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(FRAG_WORDS as u64 * 4),
+                    },
+                    count: None,
+                },
             ],
         });
         let blade_view = blade_atlas::create(device, queue);
@@ -974,6 +1086,7 @@ impl Grass {
             &blade_view,
             &blade_sampler,
             &tuft_view,
+            &frag_counts,
         );
         let mid_data_bind = make_data_bind(
             device,
@@ -984,6 +1097,7 @@ impl Grass {
             &blade_view,
             &blade_sampler,
             &tuft_view,
+            &frag_counts,
         );
         let far_data_bind = make_data_bind(
             device,
@@ -994,6 +1108,7 @@ impl Grass {
             &blade_view,
             &blade_sampler,
             &tuft_view,
+            &frag_counts,
         );
         let shader = crate::shaders::make_module(
             device,
@@ -1099,17 +1214,31 @@ impl Grass {
         } else {
             ("fs_grass_mid_tuft", "fs_grass_mid_tuft_prepass")
         };
+        // The blade entries, or their fragment-census twins under
+        // WGR_GRASS_COUNT_FRAGMENTS. Chosen once so near and mid cannot disagree.
+        // The alpha-cutout card path (fs_grass_cards) and the photo tufts are not
+        // counted; both are off by default and neither is what the census is for.
+        let (fs_color_near, fs_color_mid, fs_prepass_near, fs_prepass_mid) = if count_frags {
+            (
+                "fs_grass_count_near",
+                "fs_grass_count_mid",
+                "fs_grass_prepass_count_near",
+                "fs_grass_prepass_count_mid",
+            )
+        } else {
+            ("fs_grass", "fs_grass", "fs_grass_prepass", "fs_grass_prepass")
+        };
         let color_pipeline = make_pipeline(
             "wgr_grass_color",
             "vs_grass",
-            "fs_grass",
+            fs_color_near,
             surface_format,
             true,
         );
         let color_no_write_pipeline = make_pipeline(
             "wgr_grass_color_no_write",
             "vs_grass",
-            "fs_grass",
+            fs_color_near,
             surface_format,
             false,
         );
@@ -1130,28 +1259,28 @@ impl Grass {
         let prepass_pipeline = make_pipeline(
             "wgr_grass_prepass",
             "vs_grass",
-            "fs_grass_prepass",
+            fs_prepass_near,
             NORMAL_FORMAT,
             true,
         );
         let mid_prepass_pipeline = make_pipeline(
             "wgr_grass_mid_prepass",
             "vs_grass_mid",
-            "fs_grass_prepass",
+            fs_prepass_mid,
             NORMAL_FORMAT,
             true,
         );
         let mid_color_pipeline = make_pipeline(
             "wgr_grass_mid_color",
             "vs_grass_mid",
-            "fs_grass",
+            fs_color_mid,
             surface_format,
             true,
         );
         let mid_color_no_write_pipeline = make_pipeline(
             "wgr_grass_mid_color_no_write",
             "vs_grass_mid",
-            "fs_grass",
+            fs_color_mid,
             surface_format,
             false,
         );
@@ -1259,7 +1388,18 @@ impl Grass {
                 },
             }),
             multisample: Default::default(),
-            fragment: None,
+            // Depth-only in production. The census build attaches a fragment stage
+            // with no colour targets whose only work is the counter atomic.
+            fragment: if count_frags {
+                Some(wgpu::FragmentState {
+                    module: &shadow_shader,
+                    entry_point: Some("fs_grass_shadow_count"),
+                    compilation_options: Default::default(),
+                    targets: &[],
+                })
+            } else {
+                None
+            },
             multiview_mask: None,
             cache: None,
         });
@@ -1348,6 +1488,16 @@ impl Grass {
             far_color_no_write_pipeline,
             shadow_pipeline,
             tuft_shadow_pipeline,
+            shadow_index,
+            shadow_indirect,
+            shadow_index_mode: std::cell::Cell::new(u8::MAX),
+            shadow_stride,
+            frag_counts,
+            count_frags,
+            frag_stats: FragStats::default(),
+            shadow_draws: std::cell::Cell::new(0),
+            shadow_draws_latest: 0,
+            census_ticks: 0,
             stats_buffers: (0..STATS_SLOTS)
                 .map(|i| {
                     (
@@ -1387,7 +1537,7 @@ impl Grass {
             card_spacing,
             card_a2c,
             card_tone,
-            pending_log: vec![cards_line],
+            pending_log: vec![cards_line, shadow_line],
             announced_cards: None,
         }
     }
@@ -1557,6 +1707,7 @@ impl Grass {
                 &self.blade_view,
                 &self.blade_sampler,
                 &self.tuft_view,
+                &self.frag_counts,
             )
         };
         self.data_bind = rebuild(&self.instances, &self.placement_count);
@@ -1593,6 +1744,7 @@ impl Grass {
                 &self.blade_view,
                 &self.blade_sampler,
                 &self.tuft_view,
+                &self.frag_counts,
             )
         };
         self.data_bind = rebuild(&self.instances, &self.placement_count);
@@ -1855,7 +2007,8 @@ impl Grass {
             } else {
                 1.0
             },
-            _card_look_pad: 0.0,
+            // Renderer-owned, like card_spacing: the caller has no say.
+            shadow_blade_stride: self.shadow_stride as f32,
             blade_self_shadow: params.blade_self_shadow.clamp(0.0, 1.0),
             // 0 contrast would collapse the palette to its pivot; a zeroed struct
             // (old caller) reads as "untouched" instead.
@@ -2011,9 +2164,15 @@ impl Grass {
         // atomic placement counter separate avoids a STORAGE_READ_WRITE/INDIRECT
         // conflict in wgpu's command-encoder validation.
         encoder.copy_buffer_to_buffer(&self.placement_count, 0, &self.indirect, 4, 4);
+        // The shadow draw is the same near instances with the stride's index table.
+        encoder.copy_buffer_to_buffer(&self.placement_count, 0, &self.shadow_indirect, 4, 4);
         encoder.copy_buffer_to_buffer(&self.mid_placement_count, 0, &self.mid_indirect, 4, 4);
         encoder.copy_buffer_to_buffer(&self.far_placement_count, 0, &self.far_indirect, 4, 4);
-        // Same three counters into a mappable slot for the Grass tab's counts.
+        // Same three counters into a mappable slot for the Grass tab's counts. The
+        // fragment census rides along: this runs before the frame's render passes,
+        // so the counters hold the PREVIOUS frame's fragments -- copied out here and
+        // then zeroed for the passes about to be recorded. Zeroed every frame, slot
+        // or no slot, or a skipped sample would carry two frames into the next one.
         if let Some((buf, state)) = self
             .stats_buffers
             .iter_mut()
@@ -2022,7 +2181,13 @@ impl Grass {
             encoder.copy_buffer_to_buffer(&self.placement_count, 0, buf, 0, 4);
             encoder.copy_buffer_to_buffer(&self.mid_placement_count, 0, buf, 4, 4);
             encoder.copy_buffer_to_buffer(&self.far_placement_count, 0, buf, 8, 4);
+            if self.count_frags {
+                encoder.copy_buffer_to_buffer(&self.frag_counts, 0, buf, 16, FRAG_WORDS as u64 * 4);
+            }
             *state = StatsSlot::Pending;
+        }
+        if self.count_frags {
+            encoder.clear_buffer(&self.frag_counts, 0, None);
         }
     }
 
@@ -2055,6 +2220,13 @@ impl Grass {
                         self.stats.near_instances = word(0).min(MAX_INSTANCES);
                         self.stats.mid_instances = word(1).min(MAX_MID_INSTANCES);
                         self.stats.far_instances = word(2).min(MAX_FAR_INSTANCES);
+                        if self.count_frags {
+                            for lane in 0..FRAG_LANES {
+                                self.frag_stats.lanes[lane] = (0..FRAG_STRIPES)
+                                    .map(|s| u64::from(word(4 + lane * FRAG_STRIPES + s)))
+                                    .sum();
+                            }
+                        }
                     }
                     buf.unmap();
                     *state = StatsSlot::Idle;
@@ -2078,6 +2250,72 @@ impl Grass {
         self.stats.mid_vertices =
             self.stats.mid_instances * if self.tuft_enabled { 12 } else { 108 };
         self.stats.far_vertices = self.stats.far_instances * 6;
+        // Cascades that drew grass this frame (reset_indirect zeroes the counter at
+        // the next frame's start, so at harvest it is this frame's total).
+        self.shadow_draws_latest = self.shadow_draws.get();
+        self.census_ticks += 1;
+        if self.census_ticks >= CENSUS_PERIOD
+            && (self.stats.near_instances > 0 || self.stats.mid_instances > 0)
+        {
+            self.census_ticks = 0;
+            self.pending_log.push(self.census_line());
+        }
+    }
+
+    /// The denominators under the three grass timer rows, for the game log.
+    ///
+    /// The rows are milliseconds; without these a reader cannot tell a per-blade
+    /// cost from a per-pixel one, and the "Grass shadow" row reports ONE cascade's
+    /// draw (gpu_timers.rs: a region opened twice in a frame reports the last
+    /// bracket), so its frame cost is that row times `cascades`. Triangles are
+    /// what the passes were measured to be bound by; vertex invocations are the
+    /// indexed count (the post-transform cache collapses the rest); fragments are
+    /// the previous frame's census when WGR_GRASS_COUNT_FRAGMENTS is on.
+    fn census_line(&self) -> String {
+        let s = self.stats;
+        let clump = self.last_params.clump_renderer != 0.0;
+        let near_cards = self.tuft_enabled && clump;
+        let near_blades: u32 = if clump { 12 } else { 6 };
+        // Triangles and distinct vertices per instance, by representation.
+        let (near_tris, near_verts) = if near_cards { (4u32, 12u32) } else { (near_blades * 10, near_blades * 12) };
+        let (mid_tris, mid_verts) = if self.tuft_enabled { (4u32, 12u32) } else { (36u32, 48u32) };
+        let shadow_blades = (near_blades / self.shadow_stride.max(1)).max(1);
+        let shadow_tris = if near_cards { 4 } else { shadow_blades * 10 };
+        let cascades = u64::from(self.shadow_draws_latest);
+        let near = u64::from(s.near_instances);
+        let mid = u64::from(s.mid_instances);
+        let far = u64::from(s.far_instances);
+        let pass_tris = near * u64::from(near_tris) + mid * u64::from(mid_tris) + far * 2;
+        let shadow_total = cascades * near * u64::from(shadow_tris);
+        // Prepass + colour draw every ring; the cascades draw the near ring only
+        // (mid cards too, but only on the photo-tuft path, which is counted above
+        // as near-sized for want of a separate counter).
+        let frame_tris = pass_tris * 2 + shadow_total;
+        let frags = if self.count_frags {
+            let l = &self.frag_stats.lanes;
+            format!(
+                "fragments (previous frame): prepass near {} mid {}, colour near {} mid {}, \
+                 shadow {} over {} cascade(s)",
+                l[FRAG_LANE_NEAR_PREPASS],
+                l[FRAG_LANE_MID_PREPASS],
+                l[FRAG_LANE_NEAR_COLOR],
+                l[FRAG_LANE_MID_COLOR],
+                l[FRAG_LANE_NEAR_SHADOW],
+                cascades
+            )
+        } else {
+            "fragments: not counted (WGR_GRASS_COUNT_FRAGMENTS=1)".to_string()
+        };
+        format!(
+            "Wgpu grass census: near {near} clumps x {near_tris} tris ({near_verts} verts) = {} tris/pass, \
+             mid {mid} x {mid_tris} ({mid_verts}) = {} tris/pass, far {far} x 2; \
+             prepass+colour {} tris; shadow {cascades} cascade(s) x {near} x {shadow_tris} tris \
+             (stride {}) = {shadow_total}; frame {frame_tris} grass tris; {frags}",
+            near * u64::from(near_tris),
+            mid * u64::from(mid_tris),
+            pass_tris * 2,
+            self.shadow_stride,
+        )
     }
 
     pub fn stats(&self) -> GrassStats {
@@ -2102,6 +2340,7 @@ impl Grass {
     }
 
     pub fn reset_indirect(&self, queue: &wgpu::Queue) {
+        self.shadow_draws.set(0);
         queue.write_buffer(&self.placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.mid_placement_count, 0, bytemuck::bytes_of(&0u32));
         queue.write_buffer(&self.far_placement_count, 0, bytemuck::bytes_of(&0u32));
@@ -2135,6 +2374,28 @@ impl Grass {
                 build_blade_indices(blades, 5)
             };
             queue.write_buffer(&self.near_index, 0, bytemuck::cast_slice(&table));
+        }
+        // Blade shadow draw: every stride-th blade of the near clump, same instance
+        // count (copied in dispatch), fewer indices per instance. Cards keep the
+        // identity table: vs_grass_tuft_shadow decodes vertex_index itself.
+        let near_blades: u32 = if self.last_params.clump_renderer != 0.0 { 12 } else { 6 };
+        let shadow_blades = (near_blades / self.shadow_stride.max(1)).max(1);
+        let shadow_index_count: u32 = if near_mode == 1 { near_verts } else { shadow_blades * 30 };
+        queue.write_buffer(
+            &self.shadow_indirect,
+            0,
+            bytemuck::cast_slice(&[shadow_index_count, 0u32, 0u32, 0u32, 0u32]),
+        );
+        // Keyed on cards-vs-blades AND the blade count: clump_renderer can flip live.
+        let shadow_mode: u8 = if near_mode == 1 { 1 } else { 2 + shadow_blades as u8 };
+        if self.shadow_index_mode.get() != shadow_mode {
+            self.shadow_index_mode.set(shadow_mode);
+            let table = if near_mode == 1 {
+                identity_indices(near_verts)
+            } else {
+                build_blade_indices(shadow_blades, 5)
+            };
+            queue.write_buffer(&self.shadow_index, 0, bytemuck::cast_slice(&table));
         }
         // Mid LOD is either six opaque three-segment ribbons per clump, or two
         // crossed, alpha-tested photo cards (2 * 6 vertices) when a compatible
@@ -2256,6 +2517,9 @@ impl Grass {
             return;
         }
         use crate::gpu_timers::Region;
+        // One call per cascade the mask keeps; the census reports the count because
+        // the timer row below only ever shows the last of them.
+        self.shadow_draws.set(self.shadow_draws.get() + 1);
         timers.begin_pass(pass, Region::GrassShadow);
         let near_shadow_pipeline = if self.tuft_enabled && self.last_params.clump_renderer != 0.0 {
             &self.tuft_shadow_pipeline
@@ -2266,8 +2530,10 @@ impl Grass {
         pass.set_bind_group(0, shadow_bind, &[shadow_offset]);
         pass.set_bind_group(1, &self.terrain_bind, &[]);
         pass.set_bind_group(2, &self.data_bind, &[]);
-        pass.set_index_buffer(self.near_index.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed_indirect(&self.indirect, 0);
+        // The stride's own table and args (reset_indirect); identical to the colour
+        // draw's at stride 1 and on the card path.
+        pass.set_index_buffer(self.shadow_index.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed_indirect(&self.shadow_indirect, 0);
         if self.tuft_enabled {
             pass.set_pipeline(&self.tuft_shadow_pipeline);
             pass.set_bind_group(2, &self.mid_data_bind, &[]);
@@ -2381,6 +2647,7 @@ fn make_data_bind(
     blade_view: &wgpu::TextureView,
     blade_sampler: &wgpu::Sampler,
     tuft_view: &wgpu::TextureView,
+    frag_counts: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("wgr_grass_data_bind"),
@@ -2409,6 +2676,10 @@ fn make_data_bind(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::TextureView(tuft_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: frag_counts.as_entire_binding(),
             },
         ],
     })
@@ -2836,11 +3107,13 @@ mod tests {
             4,
             &mut composer,
         );
-        // Construction queues the config line (spacing / a2c / coverage default).
+        // Construction queues the config lines (spacing / a2c / coverage default,
+        // then the shadow stride and census state).
         let boot = grass.drain_log();
-        assert_eq!(boot.len(), 1, "{boot:?}");
+        assert_eq!(boot.len(), 2, "{boot:?}");
         assert!(boot[0].starts_with("Wgpu grass cards: spacing 1.11 m"));
         assert!(boot[0].contains("coverage default 0.24"));
+        assert!(boot[1].starts_with("Wgpu grass shadow: blade stride"), "{}", boot[1]);
         // First push: cards requested, no atlas -> drawn=0, blade grid.
         grass.set_params(&queue, params(0.05, 41.0, 1.0));
         let first = grass.drain_log();

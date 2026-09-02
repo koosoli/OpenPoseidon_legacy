@@ -57,6 +57,8 @@ struct GrassInstance {
 // map as in the colour pass. These bindings share grass/mod.rs's data layout.
 @group(2) @binding(4) var blade_samp: sampler;
 @group(2) @binding(5) var tuft_tex: texture_2d_array<f32>;
+// Fragment census (WGR_GRASS_COUNT_FRAGMENTS); see frag_counts in grass.wgsl.
+@group(2) @binding(6) var<storage, read_write> frag_counts: array<atomic<u32>>;
 
 fn hash11(p: vec2<f32>) -> f32 { return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453123); }
 fn hash_u32(x_in: u32) -> u32 {
@@ -229,9 +231,20 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     // colour one, derives everything from the row and the side -- `left` at the lateral
     // offset below is the only other use of `corner` -- so the duplicated quad corners
     // were recomputing identical positions.
-    let blade = vertex_index / 12u;
+    // SHADOW BLADE STRIDE (grass.card_look.w, renderer-owned: WGR_GRASS_SHADOW_STRIDE in
+    // grass/mod.rs). The cascade pass is per-TRIANGLE bound -- it has no fragment shader
+    // and still costs the same per triangle as the prepass -- and in the shadow map a
+    // clump is a coverage stipple, not twelve resolvable blades. So the shadow draws every
+    // `stride`-th blade of the clump the colour pass draws (blade 0, 2, 4, ... at stride
+    // 2), with its exact seed, angle, height and bend, and widens each survivor by the
+    // stride so the shadow COVERAGE the ground receives is preserved while the triangle
+    // count falls by the stride. The index table (build_blade_indices(count / stride, 5)
+    // in mod.rs) enumerates blades 0..count/stride; this maps them back onto the colour
+    // clump's blade ids. Stride 1 is the old behaviour exactly.
+    let stride = max(u32(grass.card_look.w + 0.5), 1u);
+    let blade = (vertex_index / 12u) * stride;
     let blade_count = select(6.0, 12.0, grass.renderer.x > 0.5);
-    
+
     let packed = vertex_index % 12u;
     let row = packed / 2u;
     let left = (packed % 2u) == 0u;
@@ -263,12 +276,21 @@ fn vs_grass_shadow(@builtin(vertex_index) vertex_index: u32, @builtin(instance_i
     // un-widened blade would not match the silhouette actually drawn.
     let card_widen = mix(1.0, max(grass.cards.z, 1.0), grass.cards.x);
     let taper_jitter = 1.0 + (hash11(inst.xz + vec2<f32>(f32(blade) * 13.0, 71.0)) * 2.0 - 1.0) * clamp(grass.shape_mix.y, 0.0, 1.0);
+    // `* f32(stride)`: the survivors stand in for the blades the stride skipped.
     let width = mix(0.016, 0.043, blade_seed) * shape.x *
-        max(grass.species_mix.z, 0.05) * card_widen *
+        max(grass.species_mix.z, 0.05) * card_widen * f32(stride) *
         pow(max(1.0 - t, 0.0), max(shape.z * taper_jitter, 0.05));
     let lateral = select(axis * width, -axis * width, left);
     let world = inst.xyz + base_offset + lateral + vec3<f32>(0.0, crushed_height * t, 0.0) + bend * (t * t);
     return shadow.light_vp * vec4<f32>(world - shadow.cam_pos.xyz, 1.0);
+}
+
+// Fragment census twin of vs_grass_shadow (WGR_GRASS_COUNT_FRAGMENTS only; the
+// production shadow pipeline has no fragment stage). Lane 4 of frag_counts, striped
+// by x the same way grass.wgsl's count_fragment is.
+@fragment
+fn fs_grass_shadow_count(@builtin(position) pos: vec4<f32>) {
+    atomicAdd(&frag_counts[4u * 32u + (u32(pos.x) & 31u)], 1u);
 }
 
 struct TuftShadowOut {

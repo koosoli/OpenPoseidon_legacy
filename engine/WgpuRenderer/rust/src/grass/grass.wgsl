@@ -91,7 +91,8 @@ struct GrassParams {
     //   .x = fraction of clutter-grid cells that grow a card, 0..1
     //   .y = auto: 1 = authored cells keep the map's own density and .x is only
     //        the fallback where the bake did not answer; 0 = .x applies everywhere
-    //   .z = card size multiplier (1 = the stock card; see photo_card_scale), .w spare
+    //   .z = card size multiplier (1 = the stock card; see photo_card_scale)
+    //   .w = shadow blade stride (renderer-owned; read by vs_grass_shadow only)
     card_look: vec4<f32>,
     // PROCEDURAL BLADES ONLY (near blades + mid ribbons; cards and the far proxy
     // ignore this). Defaults reproduce the pre-existing look exactly.
@@ -147,6 +148,20 @@ struct WindField {
 // GRS-E: the game's own photographed grass tuft, used by the mid LOD's crossed
 // cards. Cutout alpha -- fs_grass_mid alpha-tests it.
 @group(2) @binding(5) var tuft_tex: texture_2d_array<f32>;
+// FRAGMENT CENSUS (WGR_GRASS_COUNT_FRAGMENTS=1; grass/mod.rs builds the draw pipelines
+// with the *_count entries below instead of the production ones). A millisecond
+// without its count cannot say whether a pass is paying per blade or per pixel, and
+// the instance/vertex counts the placement counters already give are only half of
+// that ratio. FRAG_LANES lanes of FRAG_STRIPES counters each: lane 0 near prepass,
+// 1 mid prepass, 2 near colour, 3 mid colour, 4 near shadow (grass_shadow.wgsl),
+// summed on readback. Striped by pixel x so a warp's atomics spread over 32
+// addresses rather than serialising on one. Measurement only: the atomics cost
+// time and may cost early-Z, so timings from a counting run are not quotable.
+@group(2) @binding(6) var<storage, read_write> frag_counts: array<atomic<u32>>;
+const FRAG_STRIPES: u32 = 32u;
+fn count_fragment(lane: u32, pos: vec4<f32>) {
+    atomicAdd(&frag_counts[lane * FRAG_STRIPES + (u32(pos.x) & (FRAG_STRIPES - 1u))], 1u);
+}
 
 // The near grid edge is dynamic (grass.place.x); only its output cap is fixed.
 const MAX_INSTANCES: u32 = 1048576u;
@@ -1827,6 +1842,34 @@ fn fs_grass_mid_tuft_prepass_a2c(in: VsOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_grass_prepass(in: VsOut) -> @location(0) vec2<f32> {
+    let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    return oct_encode(normalize(normal_view));
+}
+
+// Fragment-census twins (see frag_counts). Same output as the entry they shadow,
+// plus one atomic per fragment. `in.clip` is the window position in this stage.
+@fragment
+fn fs_grass_count_near(in: VsOut) -> @location(0) vec4<f32> {
+    count_fragment(2u, in.clip);
+    return grass_shade(in);
+}
+
+@fragment
+fn fs_grass_count_mid(in: VsOut) -> @location(0) vec4<f32> {
+    count_fragment(3u, in.clip);
+    return grass_shade(in);
+}
+
+@fragment
+fn fs_grass_prepass_count_near(in: VsOut) -> @location(0) vec2<f32> {
+    count_fragment(0u, in.clip);
+    let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
+    return oct_encode(normalize(normal_view));
+}
+
+@fragment
+fn fs_grass_prepass_count_mid(in: VsOut) -> @location(0) vec2<f32> {
+    count_fragment(1u, in.clip);
     let normal_view = (frame.view * vec4<f32>(normalize(in.normal), 0.0)).xyz;
     return oct_encode(normalize(normal_view));
 }
