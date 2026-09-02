@@ -1085,11 +1085,45 @@ void Scene::AdjustComplexity()
     int targetGeom = ENGINE_CONFIG.maxObjects * 75;
     int complexity = 0;
     int treshold = 8;
+    // THE RETAINED SET IS PART OF THE FRAME (REN-VEG-002, 2026-09-02). This governor estimates
+    // the frame's cost from the complexity of the objects the CPU is about to draw and steers
+    // _lodInvWidth until the estimate fits the target frame duration. The GPU-driven cull
+    // reads the SAME _lodInvWidth -- but the objects it draws left _drawObjects when they
+    // were diverted, so their triangles left this sum, and the governor sat blind to a
+    // GPU-bound frame: handing Chernarus+'s trees to the retained path dropped this sum by
+    // 4,000 objects, kept _lodInvWidth fine, and drew 30.5 M triangles (REN-VEG-001).
+    // The previous frame's retained main-view triangle count (the cull's own readback) is
+    // the missing term, in the same units as GetComplexity (faces). It is a one-frame-old
+    // number and constant across the five iterations below, which is right: the loop can
+    // re-pick the CPU objects' LODs per iteration and cannot re-cull the GPU's, so the
+    // GPU term converges over frames instead, at the governor's usual cadence.
+    // MEASURED THE SAME HOUR, AND LEFT OPT-IN (WGR_LOD_GOVERNOR_RETAINED=1): on Chernarus+ the term
+    // changed nothing -- the trees stayed at level 0 (30.5 M triangles) because the governor
+    // was already at its coarseness bound, so the blocker is a LOD bias for retained
+    // vegetation, not the estimate. On Everon the term worked exactly as designed and that is
+    // the problem: the whole retained set dropped a level (2.3 M -> 0.2 M triangles, GPU 28 ->
+    // 21 ms) with the frame time unchanged, i.e. it coarsened a world that was not GPU-bound,
+    // because the target duration was tuned for a CPU-era estimate. Until the target is
+    // re-derived with this term in it, the term is a lever, not a default.
+    int retainedComplexity = 0;
+    {
+        static const bool includeRetained = []
+        {
+            const char* v = std::getenv("WGR_LOD_GOVERNOR_RETAINED");
+            return v && v[0] == '1';
+        }();
+        Engine::ObjectStatsOut retained;
+        if (includeRetained && GEngine && GEngine->GetObjectStats(retained) && retained.valid)
+        {
+            retainedComplexity = static_cast<int>(std::min<uint32_t>(retained.mainTris, 1u << 30));
+        }
+    }
     for (int iters = 5; --iters >= 0;)
     {
         // calculate complexity
         complexity = AdjustComplexity(_drawObjects);
         complexity += AdjustShadowComplexity(_drawObjects);
+        complexity += retainedComplexity;
         // include landscape complexity
         complexity += toLargeInt(Square(ENGINE_CONFIG.horizontZ * (1.0f / 50)));
 
