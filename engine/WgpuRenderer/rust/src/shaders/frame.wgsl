@@ -234,6 +234,11 @@ const MATDBG_COMPOSE_MULTI: u32 = 2u;
 // Fresnel sky reflection and the world-space water ripple, returning a CalmWater surface to
 // its pre-DZ-003 look at runtime with no restart. Read by both object paths.
 const MATDBG_DISABLE_FRESNEL_ENV: u32 = 3u;
+// The dev panel's "Disable SMDI / Specular-Gloss" (MaterialDebugSettings::disableSpecularGloss,
+// WGR_MATERIAL_DISABLE_SPECULAR). SET leaves `specular_slot` unsampled so the section shades
+// with its flat specular constant, the state it was in before the map was bound. Read by the
+// GPU-driven path only: the per-draw path carries no specular map to begin with.
+const MATDBG_DISABLE_SPECULAR: u32 = 4u;
 
 // One frame-global point or spot light. Positions are ABSOLUTE world space so a
 // single upload serves every camera; the shader reconstructs the camera-relative

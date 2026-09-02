@@ -1353,6 +1353,9 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     // per-fragment read out of the frame UBO is designed for.
     if (const char* disableFresnelEnv = std::getenv("WGR_MATERIAL_DISABLE_FRESNEL_ENV"))
         _materialDebug.disableFresnelEnvironment = std::strcmp(disableFresnelEnv, "0") != 0;
+    // Same field as the panel's "Disable SMDI / Specular-Gloss", for a capture A/B.
+    if (const char* disableSpecular = std::getenv("WGR_MATERIAL_DISABLE_SPECULAR"))
+        _materialDebug.disableSpecularGloss = std::strcmp(disableSpecular, "0") != 0;
     if (const char* rvmatMatch = std::getenv("WGR_MATERIAL_DEBUG_RVMAT"))
         _materialDebugRvmatMatch = rvmatMatch;
 

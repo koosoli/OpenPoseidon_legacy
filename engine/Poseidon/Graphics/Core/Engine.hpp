@@ -999,9 +999,11 @@ class Engine : public IGraphicsEngine
         // Diagnostic only: compare the two tangent-space Y conventions under
         // fixed lighting; this never redefines source material data.
         bool invertNormalY = false;
-        bool disableDetail = false;
-        bool disableMacro = false;
-        bool disableAmbientShadow = false;
+        // Suppress the SMDI / specular-gloss map (RVMAT Stage2 or its family equivalent):
+        // the section shades with its flat specular constant alone, which is what it did
+        // before the map was bound. Read per fragment from the frame UBO like the others.
+        // There is no detail, macro or ambient-shadow switch because the renderer binds no
+        // such stage; three checkboxes that once promised them are gone rather than dormant.
         bool disableSpecularGloss = false;
         bool disableFresnelEnvironment = false;
         // MAT-039: the Multi family's three further surface layers. On by default --

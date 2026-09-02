@@ -4596,13 +4596,14 @@ void DrawMaterialDebugTab()
                           "enhancement pack present.");
     changed |= Dev::Checkbox("Invert Normal Map Y (diagnostic)", &settings.invertNormalY);
     Dev::PanelHelp("Compare only under fixed lighting; this does not edit the imported material.");
-    changed |= Dev::Checkbox("Disable Detail", &settings.disableDetail);
-    changed |= Dev::Checkbox("Disable Macro", &settings.disableMacro);
-    changed |= Dev::Checkbox("Disable Ambient Shadow", &settings.disableAmbientShadow);
     changed |= Dev::Checkbox("Disable SMDI / Specular-Gloss", &settings.disableSpecularGloss);
+    if (Dev::PanelItemHovered())
+        ImGui::SetTooltip("Shade every section with its flat specular constant, ignoring the bound SMDI map.\n"
+                          "The A/B for whether a highlight is the map or the constant.");
     changed |= Dev::Checkbox("Disable Fresnel / Environment", &settings.disableFresnelEnvironment);
-    Dev::PanelHelp("Only Stage1 NormalMap is currently consumed; the remaining overrides are retained diagnostic "
-                   "state for their incremental implementation.");
+    Dev::PanelHelp("Stages the renderer binds: base, Stage1 normal, SMDI specular, Multi mask/layers and their\n"
+                   "normals, Fresnel/environment. Detail, macro and ambient-shadow stages are not bound, so\n"
+                   "there is nothing to switch off; the checkboxes that suggested otherwise were removed.");
     if (changed)
         GEngine->SetMaterialDebugSettings(settings);
 

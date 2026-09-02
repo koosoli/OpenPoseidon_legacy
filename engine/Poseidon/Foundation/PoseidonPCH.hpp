@@ -23,7 +23,6 @@
 // Engine framework primitives
 #include <Poseidon/Foundation/Types/EnumDecl.hpp>
 
-#define _ENABLE_PERFLOG 0
 #define _ENABLE_PATCHING 1
 
 #include <Poseidon/Foundation/PCH/stdIncludes.h>

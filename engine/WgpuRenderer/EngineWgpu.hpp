@@ -457,6 +457,9 @@ class EngineWgpu : public EngineDummy
         // reason recorded above this function -- presentation state baked into a retained
         // material record cannot be changed on a world that is already loaded.
         flags |= _materialDebug.disableFresnelEnvironment ? (1u << 3) : 0u;
+        // Bit 4: the SMDI / specular-gloss map. gpu_driven.wgsl samples the map's green
+        // channel as the specular mask; with the bit set it shades with the flat constant.
+        flags |= _materialDebug.disableSpecularGloss ? (1u << 4) : 0u;
         wgr_set_material_debug(_renderer, view, flags);
     }
     MaterialDebugInfo GetMaterialDebugInfo() const override { return _materialDebugInfo; }

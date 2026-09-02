@@ -9,7 +9,7 @@
 // Rigid opaque only: terrain-conformed vegetation, skinned, and transparent draws stay on
 // the CPU path (they never enter the retained instance set), so this VS has no conform.
 
-#import frame::{frame, reverse_z, fog_factor, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV}
+#import frame::{frame, reverse_z, fog_factor, veg_sway_offset, matdbg_view, matdbg_flag, MATDBG_DISABLE_NORMAL, MATDBG_INVERT_NORMAL_Y, MATDBG_COMPOSE_MULTI, MATDBG_DISABLE_FRESNEL_ENV, MATDBG_DISABLE_SPECULAR}
 #import shading::{shade, ShadeMaterial}
 #import gbuffer::{oct_encode, a2c_coverage, mip_alpha_boost}
 // Terrain conform (group 4 heightmap + surface_y/surface_grad), shared with shader3d /
@@ -764,7 +764,7 @@ fn fs_gpu(in: VsOut) -> @location(0) vec4<f32> {
     // GlossToRoughnessUnvalidated out of the translation path; the map is bound and the
     // channel is there when that question is answered.
     m.spec_mask = 1.0;
-    if (sm.specular_slot != 0u) {
+    if (sm.specular_slot != 0u && !matdbg_flag(MATDBG_DISABLE_SPECULAR)) {
         m.spec_mask = textureSampleBias(textures[sm.specular_slot], samplers[sm.sampler_idx], in.uv, frame.renscale.x).g;
     }
     // Foliage lighting (leaf SSS + canopy self-occlusion AO) applies only to real VEGETATION
