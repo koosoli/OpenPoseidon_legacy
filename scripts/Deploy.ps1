@@ -119,6 +119,49 @@ else
 {
     Write-Warning "'$branch' tracks no remote, so nothing can tell you whether it is behind. Run scripts\Use-RepoHooks.ps1."
 }
+# THE STAMP MUST NOT LIE. It records HEAD, but nothing above checks that dist/ was BUILT from
+# HEAD. Two ways it was not, both seen on 2026-09-01:
+#  1. dist staging failed silently. CMake copies wgpu_renderer.dll into dist/ after every link;
+#     a running game instance holds that DLL, the copy fails, the exe in dist/ keeps its old
+#     timestamp -- and the build reports success. Three consecutive "successful" builds left
+#     dist/ on a binary two rounds old, and every measurement of them was of code that was
+#     not in the binary. The build-tree exe is the ground truth: if it is NEWER than the dist
+#     copy, staging did not happen.
+#  2. the tree is dirty. HEAD names a commit; the binary may contain uncommitted edits from
+#     this or another agent. That is legitimate for a local test but the stamp must say so,
+#     or the next capture is attributed to a commit that does not contain what ran.
+$buildDir = Join-Path $repoRoot "build\$Preset"
+$buildPairs = @{
+    'OpenPoseidon.exe'  = Join-Path $buildDir 'apps\cwr\Game\OpenPoseidon.exe'
+    'wgpu_renderer.dll' = Join-Path $buildDir 'engine\WgpuRenderer\wgpu_renderer.dll'
+}
+foreach ($name in $payload)
+{
+    $built = $buildPairs[$name]
+    $staged = Join-Path $distDir $name
+    if ((Test-Path -LiteralPath $built) -and (Test-Path -LiteralPath $staged))
+    {
+        $builtTime  = (Get-Item -LiteralPath $built).LastWriteTime
+        $stagedTime = (Get-Item -LiteralPath $staged).LastWriteTime
+        if ($builtTime -gt $stagedTime.AddSeconds(2))
+        {
+            $msg = "$name in dist/ ($stagedTime) is OLDER than the one the build produced ($builtTime): " +
+                   "dist staging failed silently -- almost always because a game instance held the DLL. " +
+                   "Close the game, rebuild, and deploy the binary you actually built. -Force overrides."
+            if (-not $Force) { throw $msg }
+            Write-Warning $msg
+        }
+    }
+}
+$dirty = (& git -C $repoRoot status --porcelain --untracked-files=no 2>$null | Where-Object { $_ -notmatch 'Cargo\.lock$' })
+$dirtyTag = ''
+if ($dirty)
+{
+    $dirtyTag = '+dirty'
+    Write-Warning ("Working tree has {0} uncommitted change(s); the binary may contain edits HEAD does not. " +
+                   "Stamping as '{1}{2}' so a capture cannot be attributed to a clean commit." -f @($dirty).Count, $commit, $dirtyTag)
+}
+
 if (Test-Path -LiteralPath $stampPath)
 {
     $prev = (Get-Content -LiteralPath $stampPath -TotalCount 1)
@@ -201,7 +244,7 @@ if ((Test-Path -LiteralPath $deployedDll) -and (Test-Path -LiteralPath $snippet)
 # Record what is now installed, in the format the existing file already used:
 # "<branch> <commit> <timestamp> <who>". The next deploy READS this, so an unstamped install is
 # an install the guard above cannot protect.
-$stampLine = "{0} {1} {2} deploy-ps1" -f $branch, $commit, (Get-Date -Format 'yyyy-MM-dd_HH:mm')
+$stampLine = "{0} {1}{3} {2} deploy-ps1" -f $branch, $commit, (Get-Date -Format 'yyyy-MM-dd_HH:mm'), $dirtyTag
 Set-Content -LiteralPath $stampPath -Value $stampLine -Encoding utf8
 Write-Host "Stamped: $stampLine"
 
