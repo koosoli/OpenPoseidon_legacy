@@ -41,8 +41,14 @@ their ladders read as expected.
   a scene with more objects per frame than this GPU-bound pose. `WGR_TREEADV_RETAINED=1`
   stays the lever, now without the sawtooth.
 
+## The ground pose, same night
+
+Chernarus+ at 2 m, facing the denser side, the AI running: default 19.1 ms / 52 fps
+(`land:obj` 2.6, GPU 18.1) against retained 21.2 ms / 47 fps (`land:obj` 1.1, GPU 18.6, colour
+alpha-test 0.15 → 1.66 ms). The pose is GPU-bound too, and the retained trees lose by 2 ms.
+On this GPU there is no pose yet where they win; the lever stays a lever.
+
 ## Not measured
 
-One run per arm. The retained arm at a CPU-bound pose (a town at ground level with the AI
-running) is the measurement that would justify a per-world default; a high resolution with DLSS
+One run per arm. A genuinely CPU-bound pose (this GPU makes every pose tested tonight GPU-bound at 800×600) is the measurement that would justify a per-world default; a high resolution with DLSS
 on, where the GPU headroom differs, is the other.
