@@ -498,6 +498,8 @@ fn sky_radiance(dir: vec3<f32>) -> vec3<f32> {
 // in a const-expression, so an override is legal here.
 override CLOUD_STEPS: f32 = 128.0;
 override CLOUD_LIGHT_STEPS: i32 = 4;
+// REN-SKY-002: 1 = the light march samples cloud_density_light (two taps), 0 = the full density.
+override CLOUD_LIGHT_COARSE: f32 = 1.0;
 // Volumetric march distance cap (m) along the view ray, measured from the shell entry. Grazing / in-
 // deck rays otherwise traverse tens of km of shell, which at the fixed step cap undersamples the
 // vertical structure into a bright band across the horizon (worst where cloud masses overlap). Bounding
@@ -695,6 +697,45 @@ fn cloud_density(p: vec3<f32>) -> f32 {
     let dist_fade = 1.0 - smoothstep(sky.cloud2.w * 0.3, sky.cloud2.w * 0.8, length(p.xz));
     d = clamp(d - (1.0 - d) * detail * 0.4 * dist_fade, 0.0, 1.0);
     return d;
+}
+
+// REN-SKY-002: the density the LIGHT march samples. Same weather and shape taps as cloud_density,
+// without the domain warp and the detail erosion: the sun march only needs the optical depth
+// towards the sun, and the two high-frequency taps change that depth by a few percent while
+// costing half the march (4 light samples per primary sample, 4 taps each). Two taps instead of
+// four. The primary march keeps the full density, so silhouettes and edges are unchanged.
+// CLOUD_LIGHT_COARSE=0 (WGR_CLOUD_LIGHT_COARSE=0) is the A/B back to the full density.
+fn cloud_density_light(p: vec3<f32>) -> f32 {
+    let planet_r = sky.params.z;
+    let r_bot = planet_r + sky.cloud0.z;
+    let thick = cloud_thickness();
+    let half_vary = thick * CLOUD_BASE_VARY * 0.5;
+    let alt = length(p) - r_bot;
+    if (alt <= -half_vary || alt >= thick + half_vary) {
+        return 0.0;
+    }
+    var w = cloud_world(p);
+    let weather = cloud_weather(w.xz);
+    let cov = weather.x;
+    if (cov <= 0.001) {
+        return 0.0;
+    }
+    let base_h = (weather.y - 0.5) * CLOUD_BASE_VARY * thick;
+    let hl = (alt - base_h) / thick;
+    if (hl <= 0.0 || hl >= 1.0) {
+        return 0.0;
+    }
+    let grad = smoothstep(0.0, 0.12, hl) * (1.0 - smoothstep(0.55, 1.0, hl));
+    if (grad <= 0.0) {
+        return 0.0;
+    }
+    w.y -= base_h;
+    var ws = w * sky.cloud1.z;
+    ws.y += sky.cloud4.x * sky.cloud1.z + (w.x * 0.31830989 + w.z * 0.53190563) * sky.cloud1.z * 0.31;
+    let shape = textureSampleLevel(cloud_noise, cloud_samp, ws, 0.0).r;
+    let n = max(shape, smoothstep(0.55, 1.0, cov));
+    let base = clamp((n - (1.0 - cov)) / max(cov, 1e-3), 0.0, 1.0);
+    return base * grad;
 }
 
 // A procedural star field on the celestial sphere.
@@ -903,7 +944,9 @@ fn march_clouds(
             var ls = ls_base * 0.3;
             for (var j = 0; j < light_steps; j = j + 1) {
                 lt += ls;
-                od += cloud_density(p + sun * lt) * ext * ls;
+                let lp = p + sun * lt;
+                let ld = select(cloud_density(lp), cloud_density_light(lp), CLOUD_LIGHT_COARSE > 0.5);
+                od += ld * ext * ls;
                 ls *= 1.6;
             }
             let sun_t = exp(-od);

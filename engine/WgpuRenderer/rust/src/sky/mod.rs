@@ -1717,9 +1717,15 @@ impl Sky {
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(4.0)
             .clamp(1.0, 16.0);
-        let cloud_overrides: [(&str, f64); 2] = [
+        // REN-SKY-002: the light march samples a two-tap density by default (no warp, no detail
+        // erosion); WGR_CLOUD_LIGHT_COARSE=0 is the A/B back to the four-tap density.
+        let cloud_light_coarse = std::env::var("WGR_CLOUD_LIGHT_COARSE")
+            .map(|v| v.trim() != "0")
+            .unwrap_or(true);
+        let cloud_overrides: [(&str, f64); 3] = [
             ("CLOUD_STEPS", cloud_steps),
             ("CLOUD_LIGHT_STEPS", cloud_light_steps),
+            ("CLOUD_LIGHT_COARSE", if cloud_light_coarse { 1.0 } else { 0.0 }),
         ];
         let cloud_pipeline = {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
