@@ -2424,6 +2424,88 @@ pub fn build_gpu_shadow_pipeline(
 
 // Group-1 layout for the cull-sphere DEBUG pass: the retained instance buffer + the model
 // table, both read-only storage in the vertex stage (the VS recovers centre + radius).
+// REN-GI-002: the sun-proxy pipeline -- the shadow depth pass with two colour targets
+// (albedo, normal) from the same module. Depth test LessEqual, no bias: the proxy's depth is
+// read back by the probe integrator for positions, not compared against.
+pub fn build_gpu_rsm_pipeline(
+    device: &wgpu::Device,
+    composer: &mut naga_oil::compose::Composer,
+    shadow_pass_layout: &wgpu::BindGroupLayout,
+    group1_layout: &wgpu::BindGroupLayout,
+    bindless_layout: &wgpu::BindGroupLayout,
+    sampler_layout: &wgpu::BindGroupLayout,
+    conform_layout: &wgpu::BindGroupLayout,
+) -> wgpu::RenderPipeline {
+    let module = crate::shaders::make_module(
+        device,
+        composer,
+        "wgr_gpu_driven_rsm",
+        include_str!("gpu_driven_shadow.wgsl"),
+        "gfx3d/gpu_driven_shadow.wgsl",
+    );
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("wgr_gpu_driven_rsm_pipeline_layout"),
+        bind_group_layouts: &[
+            Some(shadow_pass_layout),
+            Some(group1_layout),
+            Some(bindless_layout),
+            Some(sampler_layout),
+            Some(conform_layout),
+        ],
+        immediate_size: 0,
+    });
+    let vbuf_attrs =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
+    let vbuf_layout = wgpu::VertexBufferLayout {
+        array_stride: super::BAKED_VERT_SIZE,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &vbuf_attrs,
+    };
+    let vbuffers = [vbuf_layout];
+    let target = |format: wgpu::TextureFormat| {
+        Some(wgpu::ColorTargetState {
+            format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        })
+    };
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("wgr_gpu_driven_rsm_pipeline"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &module,
+            entry_point: Some("vs_gpu_rsm"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &vbuffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            front_face: wgpu::FrontFace::Cw,
+            cull_mode: None,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: super::SHADOW_FORMAT,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &module,
+            entry_point: Some("fs_gpu_rsm"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[
+                target(wgpu::TextureFormat::Rgba8Unorm),
+                target(wgpu::TextureFormat::Rgba8Unorm),
+            ],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
 pub fn cull_debug_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let storage = |binding: u32| wgpu::BindGroupLayoutEntry {
         binding,

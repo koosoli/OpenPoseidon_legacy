@@ -1166,6 +1166,9 @@ class Engine : public IGraphicsEngine
         float groundGain = 1.0f;
         float wallAlbedo = 0.3f;
         float rayLength = 48.0f;
+        int rsmSamples = 16;     // REN-GI-002: sun-proxy gather samples per probe (0 = off)
+        float rsmRadius = 12.0f; // metres
+        float rsmGain = 1.0f;
     };
     virtual GiSettings GetGiSettings() const { return {}; }
     virtual void SetGiSettings(const GiSettings& /*s*/) {}
@@ -2596,7 +2599,7 @@ class Engine : public IGraphicsEngine
         kSkyGpuRegionEnv = 60,
         kSkyGpuRegionSh = 61,
         kSkyGpuRegionDraw = 62,
-        kGpuRegionEnd = 69, // PERF-021 worker rows + REN-GI-001 (WGR_GPU_TIMER_REGION_COUNT)
+        kGpuRegionEnd = 70, // PERF-021 worker rows + REN-GI-001/002 (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

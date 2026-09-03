@@ -1306,8 +1306,21 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _gi.weight = std::clamp(std::strtof(giw, nullptr), 0.0f, 1.0f);
     }
-    LOG_INFO(Graphics, "Wgpu GI probe volume: {} (WGR_GI), weight {:.2f}, spacing {:.1f} m, {} rays",
-             _gi.enabled ? "on" : "OFF", _gi.weight, _gi.spacing, _gi.rays);
+    // REN-GI-002: the sun proxy (the coloured first bounce). WGR_GI_RSM=0 leaves stage 1's
+    // sky/terrain probes alone, which is the A/B for the bounce on its own.
+    if (const char* gir = std::getenv("WGR_GI_RSM"))
+    {
+        _gi.rsmSamples = std::strcmp(gir, "0") == 0 ? 0 : std::clamp(std::atoi(gir), 4, 64);
+    }
+    if (const char* gg = std::getenv("WGR_GI_RSM_GAIN"))
+    {
+        _gi.rsmGain = std::max(0.0f, std::strtof(gg, nullptr)); // A/B: is the bounce small or zero?
+    }
+    LOG_INFO(Graphics,
+             "Wgpu GI probe volume: {} (WGR_GI), weight {:.2f}, spacing {:.1f} m, {} rays; sun proxy {} "
+             "(WGR_GI_RSM, {} samples, radius {:.0f} m, gain {:.2f})",
+             _gi.enabled ? "on" : "OFF", _gi.weight, _gi.spacing, _gi.rays,
+             _gi.rsmSamples > 0 ? "on" : "OFF", _gi.rsmSamples, _gi.rsmRadius, _gi.rsmGain);
     // Through the log sink, not eprintln!/stderr: renderer diagnostics that must survive into
     // --log-file have to go through the sink or they are simply not there when you read the log.
     LOG_INFO(Graphics,
@@ -8673,6 +8686,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker: queue submit",            // WGR_GPU_TIMER_WORKER_SUBMIT (CPU column only)
         "Worker: readback harvest",        // WGR_GPU_TIMER_WORKER_HARVEST (CPU column only)
         "GI: probe update",                // WGR_GPU_TIMER_GI_PROBES (REN-GI-001)
+        "GI: sun proxy",                   // WGR_GPU_TIMER_GI_RSM (REN-GI-002)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -10353,7 +10367,7 @@ void EngineWgpu::PushRenderParams()
         _gi.enabled ? 1u : 0u,
         _gi.debug ? 1u : 0u,
         static_cast<uint32_t>(std::clamp(_gi.rays, 8, 64)),
-        0u,
+        static_cast<uint32_t>(std::clamp(_gi.rsmSamples, 0, 64)),
         _gi.weight,
         _gi.interiorMix,
         _gi.spacing,
@@ -10362,8 +10376,8 @@ void EngineWgpu::PushRenderParams()
         _gi.groundGain,
         _gi.wallAlbedo,
         _gi.rayLength,
-        0.0f,
-        0.0f,
+        _gi.rsmRadius,
+        _gi.rsmGain,
     };
     // REN-THR-013: queued; the worker applies it before wgr_render_frame.
     _pendingSet.renderParams = p;

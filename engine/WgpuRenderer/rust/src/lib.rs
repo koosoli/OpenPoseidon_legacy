@@ -2111,6 +2111,8 @@ impl Renderer {
         s.sun_dir[0] = rt.sun_dir[0]; // keep sun_dir.w (sunIntensity, a look field)
         s.sun_dir[1] = rt.sun_dir[1];
         s.sun_dir[2] = rt.sun_dir[2];
+        self.gfx3d
+            .set_sun_dir([rt.sun_dir[0], rt.sun_dir[1], rt.sun_dir[2]]); // REN-GI-002
         s.moon_dir = rt.moon_dir; // xyz dir + w illuminated fraction
         s.ground_albedo[3] = rt.misc[0]; // night factor
         s.fog_color[0] = rt.fog_color[0]; // keep fog_color.w (haze, a look field)
@@ -4247,6 +4249,9 @@ impl Renderer {
         encoder.push_debug_group("wgr_interior_sky_map");
         self.gfx3d
             .render_interior_sky_pass(&mut encoder, &self.textures, &self.gpu_timers);
+        // REN-GI-002: the sun proxy, when its view or the retained set changed.
+        self.gfx3d
+            .render_gi_rsm_pass(&mut encoder, &self.textures, &self.gpu_timers);
         // REN-GI-001: the probe batch, once the maps and cascades it reads are recorded.
         self.gfx3d
             .gi_dispatch(&mut encoder, self.main_cam_off, &self.gpu_timers);

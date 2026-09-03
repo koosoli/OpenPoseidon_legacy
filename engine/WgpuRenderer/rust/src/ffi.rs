@@ -806,7 +806,7 @@ pub struct WgrGi {
     pub enabled: u32,
     pub debug: u32,
     pub rays: u32,
-    pub _pad0: u32,
+    pub rsm_samples: u32,
     pub weight: f32,
     pub interior_mix: f32,
     pub spacing: f32,
@@ -815,8 +815,8 @@ pub struct WgrGi {
     pub ground_gain: f32,
     pub wall_albedo: f32,
     pub ray_length: f32,
-    pub _pad1: f32,
-    pub _pad2: f32,
+    pub rsm_radius: f32,
+    pub rsm_gain: f32,
 }
 
 // Interior sky visibility (LIT-020, docs/interior-sky-visibility-plan.md). Distinct from

@@ -1,20 +1,30 @@
-// REN-GI-001 — the irradiance probe volume (see gi_probes.wgsl for the model).
+// REN-GI-001/002 — the irradiance probe volume (see gi_probes.wgsl for the model).
 //
 // Owns the probe state (a storage buffer), the sampled 3D texture the fragment shaders read
-// (six y-slabs of ambient-cube faces), the parameters uniform, and the compute pipeline that
-// re-integrates one eighth of the probes per frame. The volume is a world-anchored grid that
-// follows the camera in whole probe spacings; when it moves, the batch integrated that frame
-// starts from scratch and the rest converge over the following seven frames.
+// (six y-slabs of ambient-cube faces), the parameters uniform, the compute pipeline that
+// re-integrates one eighth of the probes per frame, and (stage 2) the SUN PROXY: a reflective
+// shadow map -- depth, albedo, normal -- rendered from the sun over the volume's box by the
+// GPU-driven depth path, from which the probes gather the first sun bounce with colour.
+//
+// The volume is a world-anchored grid that follows the camera in whole probe spacings; when it
+// moves, the batch integrated that frame starts from scratch and the rest converge over the
+// following seven frames. The sun proxy is re-rendered when its view changes (camera moved a
+// probe spacing, the sun moved a quarter degree) or the retained set changed.
 //
 // Bind groups at dispatch: 0 = the camera group (frame UBO + shadow maps + sky SH + dome maps,
 // the same one every shader reads, with a dynamic offset for the main camera), 1 = the
 // terrain conform group (heightmap + its params), 2 = this module's own.
+
+use super::sky_vis::{self, SkyVisSettings, SkyVisView};
 
 pub const NX: u32 = 32;
 pub const NY: u32 = 8;
 pub const NZ: u32 = 32;
 pub const FACES: u32 = 6;
 pub const BATCHES: u32 = 8;
+/// Sun proxy resolution (square) and half-extent: 1024 over 96 m is 9.4 cm per texel.
+pub const RSM_RES: u32 = 1024;
+pub const RSM_EXTENT: f32 = 48.0;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -24,6 +34,10 @@ struct GiParamsGpu {
     knobs: [f32; 4],
     ground: [f32; 4],
     reset: [f32; 4],
+    rsm_vp: [f32; 16],
+    rsm_inv_vp: [f32; 16],
+    rsm: [f32; 4],
+    rsm_meta: [f32; 4],
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -39,6 +53,9 @@ pub struct GiSettings {
     pub ground_gain: f32,
     pub wall_albedo: f32,
     pub ray_length: f32,
+    pub rsm_samples: u32,
+    pub rsm_radius: f32,
+    pub rsm_gain: f32,
 }
 
 impl Default for GiSettings {
@@ -55,6 +72,9 @@ impl Default for GiSettings {
             ground_gain: 1.0,
             wall_albedo: 0.3,
             ray_length: 48.0,
+            rsm_samples: 16,
+            rsm_radius: 12.0,
+            rsm_gain: 1.0,
         }
     }
 }
@@ -72,6 +92,9 @@ impl GiSettings {
         self.ground_gain = p.ground_gain.max(0.0);
         self.wall_albedo = p.wall_albedo.clamp(0.0, 1.0);
         self.ray_length = p.ray_length.clamp(8.0, 256.0);
+        self.rsm_samples = p.rsm_samples.clamp(0, 64);
+        self.rsm_radius = p.rsm_radius.clamp(1.0, 40.0);
+        self.rsm_gain = p.rsm_gain.max(0.0);
     }
 }
 
@@ -91,6 +114,23 @@ pub struct GiProbes {
     frame: u32,
     /// Bumped when the sampled texture is (re)created, so the camera bind group follows it.
     pub generation: u64,
+    // --- the sun proxy (REN-GI-002)
+    _rsm_depth: wgpu::Texture,
+    pub rsm_depth_view: wgpu::TextureView,
+    _rsm_albedo: wgpu::Texture,
+    pub rsm_albedo_view: wgpu::TextureView,
+    _rsm_normal: wgpu::Texture,
+    pub rsm_normal_view: wgpu::TextureView,
+    /// This frame's sun-proxy view (the one the params carry), and whether it needs drawing.
+    pub rsm_view: SkyVisView,
+    /// Cells, not plain fields: the draw site holds `&self` (it is inside the encode phase),
+    /// and the proxy must only count as rendered once the draw ACTUALLY ran. Marking it in
+    /// `prepare` meant the single draw landed on frame 0, whose world was still empty, and
+    /// the proxy then stayed empty for the rest of the run (2026-09-03).
+    pub rsm_refresh: std::cell::Cell<bool>,
+    rsm_rendered: std::cell::Cell<Option<(SkyVisView, u64)>>,
+    rsm_epoch: std::cell::Cell<u64>,
+    rsm_valid: std::cell::Cell<bool>,
 }
 
 impl GiProbes {
@@ -154,6 +194,40 @@ impl GiProbes {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        // The sun proxy targets.
+        let rsm_tex = |label: &str, format: wgpu::TextureFormat| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: RSM_RES,
+                    height: RSM_RES,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let rsm_depth = rsm_tex("wgr_gi_rsm_depth", super::SHADOW_FORMAT);
+        let rsm_albedo = rsm_tex("wgr_gi_rsm_albedo", wgpu::TextureFormat::Rgba8Unorm);
+        let rsm_normal = rsm_tex("wgr_gi_rsm_normal", wgpu::TextureFormat::Rgba8Unorm);
+        let rsm_depth_view = rsm_depth.create_view(&Default::default());
+        let rsm_albedo_view = rsm_albedo.create_view(&Default::default());
+        let rsm_normal_view = rsm_normal.create_view(&Default::default());
+
+        let tex_entry = |binding: u32, sample_type: wgpu::TextureSampleType| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("wgr_gi_layout"),
             entries: &[
@@ -187,6 +261,9 @@ impl GiProbes {
                     },
                     count: None,
                 },
+                tex_entry(3, wgpu::TextureSampleType::Depth),
+                tex_entry(4, wgpu::TextureSampleType::Float { filterable: true }),
+                tex_entry(5, wgpu::TextureSampleType::Float { filterable: true }),
             ],
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -204,6 +281,18 @@ impl GiProbes {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&storage_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&rsm_depth_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&rsm_albedo_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(&rsm_normal_view),
                 },
             ],
         });
@@ -242,6 +331,17 @@ impl GiProbes {
             moved: false,
             frame: 0,
             generation: 1,
+            _rsm_depth: rsm_depth,
+            rsm_depth_view,
+            _rsm_albedo: rsm_albedo,
+            rsm_albedo_view,
+            _rsm_normal: rsm_normal,
+            rsm_normal_view,
+            rsm_view: sky_vis::build_view(glam::Vec3::ZERO, &SkyVisSettings::default()),
+            rsm_refresh: std::cell::Cell::new(false),
+            rsm_rendered: std::cell::Cell::new(None),
+            rsm_epoch: std::cell::Cell::new(0),
+            rsm_valid: std::cell::Cell::new(false),
         }
     }
 
@@ -256,23 +356,88 @@ impl GiProbes {
         )
     }
 
-    /// Per frame, before the camera UBO is written: settle the origin and upload the params.
-    /// Returns (origin, spacing) for the frame lanes.
-    pub fn prepare(&mut self, queue: &wgpu::Queue, cam_pos: glam::Vec3) -> (glam::Vec3, f32) {
+    /// Per frame, before the camera UBO is written: settle the origin, decide whether the sun
+    /// proxy needs re-rendering, upload the params. `to_sun` is the unit direction toward the
+    /// sun; `epoch` the retained instance set's change counter. Returns (origin, spacing).
+    pub fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        cam_pos: glam::Vec3,
+        to_sun: glam::Vec3,
+        epoch: u64,
+    ) -> (glam::Vec3, f32) {
         let s = self.settings;
         let origin = Self::origin_for(cam_pos, s.spacing);
         self.moved = !self.have_origin || origin != self.origin;
         self.origin = origin;
         self.have_origin = true;
+
+        // The sun proxy's view: over the volume's centre, snapped to the probe spacing so it
+        // holds still while the camera walks inside a cell; the sun direction quantised so a
+        // slowly moving sun re-renders about once a quarter degree.
+        let centre = origin + glam::Vec3::new((NX / 2) as f32, 2.0, (NZ / 2) as f32) * s.spacing;
+        let q = 256.0;
+        let sun_q = glam::Vec3::new(
+            (to_sun.x * q).round() / q,
+            (to_sun.y * q).round() / q,
+            (to_sun.z * q).round() / q,
+        )
+        .normalize_or_zero();
+        let rsm_ok = s.rsm_samples > 0 && sun_q.y > 0.02 && s.enabled;
+        let mut rsm_settings = SkyVisSettings::default();
+        rsm_settings.resolution = RSM_RES;
+        rsm_settings.extent = RSM_EXTENT;
+        rsm_settings.height = 300.0;
+        let dir = if rsm_ok { sun_q } else { glam::Vec3::Y };
+        let view = sky_vis::build_view_for(centre, dir, &rsm_settings);
+        self.rsm_view = view;
+        self.rsm_epoch.set(epoch);
+        // BUDGETED, not event-driven. A moving instance bumps the epoch, so on a scene with
+        // walking soldiers "the retained set changed" is true every frame and the proxy would
+        // re-render a 1024^2 depth+albedo+normal pass every frame. It re-renders when its VIEW
+        // moved (the camera left the probe cell, or the sun turned a quarter degree), and
+        // otherwise at most once every RSM_PERIOD frames to pick the world's changes up.
+        const RSM_PERIOD: u32 = 8;
+        let view_moved = match self.rsm_rendered.get() {
+            Some((v, _)) => v.view_proj != view.view_proj,
+            None => true,
+        };
+        let stale = match self.rsm_rendered.get() {
+            Some((_, e)) => e != epoch && self.frame % RSM_PERIOD == 0,
+            None => true,
+        };
+        self.rsm_refresh.set(rsm_ok && (view_moved || stale));
+        if !rsm_ok {
+            self.rsm_valid.set(false);
+        }
+
+        let inv = view.view_proj.inverse();
         let params = GiParamsGpu {
             origin: [origin.x, origin.y, origin.z, s.spacing],
             dims: [NX as f32, NY as f32, NZ as f32, (self.frame % BATCHES) as f32],
             knobs: [s.hysteresis, s.ground_gain, s.wall_albedo, s.rays as f32],
             ground: [s.ground_albedo[0], s.ground_albedo[1], s.ground_albedo[2], s.ray_length],
             reset: [if self.moved { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            rsm_vp: view.view_proj.to_cols_array(),
+            rsm_inv_vp: inv.to_cols_array(),
+            rsm: [
+                s.rsm_radius,
+                s.rsm_samples as f32,
+                s.rsm_gain,
+                if self.rsm_valid.get() { 1.0 } else { 0.0 },
+            ],
+            rsm_meta: [2.0 * RSM_EXTENT / RSM_RES as f32, RSM_RES as f32, 0.0, 0.0],
         };
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&params));
         (origin, s.spacing)
+    }
+
+    /// Called by the draw site once the sun-proxy pass has actually been recorded.
+    pub fn mark_rsm_drawn(&self) {
+        self.rsm_rendered
+            .set(Some((self.rsm_view, self.rsm_epoch.get())));
+        self.rsm_valid.set(true);
+        self.rsm_refresh.set(false);
     }
 
     pub fn dispatch(
@@ -331,5 +496,99 @@ mod tests {
         let gi = super::GiProbes::new(&device, &mut composer, &cameras.layout, &conform.layout);
         assert_eq!(gi.generation, 1);
         assert!(gi.settings.enabled);
+    }
+
+    // REN-GI-002: the sun proxy's fragment/vertex pair through naga's BACKEND. The layouts the
+    // real pipeline uses are the renderer's (textures need a C++ LogSink, so they cannot be
+    // built here); `layout: None` derives one from the shader instead, which is enough to run
+    // the codegen where "Expression [n] is not cached" and its kin appear.
+    // The shadow module reaches bind group 4 (the terrain conform group), so the shared
+    // headless device (default limits, 4 groups) refuses its shader outright. This one asks
+    // for the 5 the renderer asks for.
+    fn headless_five_groups() -> Option<(wgpu::Device, wgpu::Queue)> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::default(),
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .ok()?;
+        // ...and the binding-array features the module's bindless textures/samplers need.
+        let bindless = wgpu::Features::TEXTURE_BINDING_ARRAY
+            | wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        if !adapter.features().contains(bindless) {
+            return None;
+        }
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: bindless,
+            required_limits: wgpu::Limits {
+                max_bind_groups: 5,
+                max_binding_array_elements_per_shader_stage: 128,
+                max_binding_array_sampler_elements_per_shader_stage: 8,
+                ..Default::default()
+            },
+            ..Default::default()
+        }))
+        .ok()
+    }
+
+    #[test]
+    fn gi_sun_proxy_shader_survives_the_naga_backend() {
+        let Some((device, _queue)) = headless_five_groups() else {
+            return;
+        };
+        let mut composer = crate::shaders::build_composer();
+        let module = crate::shaders::make_module(
+            &device,
+            &mut composer,
+            "wgr_gpu_driven_rsm_test",
+            include_str!("gpu_driven_shadow.wgsl"),
+            "gfx3d/gpu_driven_shadow.wgsl",
+        );
+        let attrs =
+            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32];
+        let vbuffers = [wgpu::VertexBufferLayout {
+            array_stride: super::super::BAKED_VERT_SIZE,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &attrs,
+        }];
+        let target = |format: wgpu::TextureFormat| {
+            Some(wgpu::ColorTargetState {
+                format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })
+        };
+        let _ = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_gi_rsm_test"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_gpu_rsm"),
+                compilation_options: Default::default(),
+                buffers: &vbuffers,
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: super::super::SHADOW_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_gpu_rsm"),
+                compilation_options: Default::default(),
+                targets: &[
+                    target(wgpu::TextureFormat::Rgba8Unorm),
+                    target(wgpu::TextureFormat::Rgba8Unorm),
+                ],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
     }
 }

@@ -136,3 +136,78 @@ fn fs_gpu_shadow(in: VsOut) {
         }
     }
 }
+
+// REN-GI-002: the SUN PROXY (a reflective shadow map). Same records, same conform, same alpha
+// test as the depth pass above; additionally writes the surface's albedo (texture x material
+// diffuse) and its world normal, so the probe integrator can gather the first sun bounce with
+// colour from every sunlit surface the sun sees -- walls and trees included, which the
+// top-down dome maps never could.
+struct RsmVsOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) section: u32,
+    @location(2) normal: vec3<f32>,
+};
+
+struct RsmOut {
+    @location(0) albedo: vec4<f32>,
+    @location(1) normal: vec4<f32>,
+};
+
+@vertex
+fn vs_gpu_rsm(
+    @builtin(instance_index) rec_slot: u32,
+    @location(0) pos: vec3<f32>,
+    @location(1) nrm: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(5) conform_sel: u32,
+) -> RsmVsOut {
+    let rec = records[rec_slot];
+    let inst = instances[rec.instance];
+    let world = inst.world;
+    let world_pos_abs = world * vec4<f32>(pos, 1.0);
+    var world_pos = world_pos_abs.xyz - pass_data.cam_pos.xyz;
+    let mode = inst.conform2.z;
+    if (mode > 1.5) {
+        let sy = surface_y(world_pos_abs.xz);
+        if (conform_sel == 1u) {
+            world_pos.y = sy + world_pos.y - inst.conform0.x;
+        } else if (conform_sel == 2u) {
+            world_pos.y = sy - pass_data.cam_pos.y;
+        }
+    } else if (mode > 0.5) {
+        let s = inst.conform0.x;
+        let xIn = world_pos_abs.x * s + inst.conform0.y;
+        let zIn = world_pos_abs.z * s + inst.conform0.z;
+        let y00 = inst.conform1.x; let y10 = inst.conform1.y;
+        let d1000 = inst.conform1.z; let d0100 = inst.conform1.w;
+        let d1011 = inst.conform2.x; let d0111 = inst.conform2.y;
+        let triA = xIn <= 1.0 - zIn;
+        let py = select(y10 + d0111 - d1011 * xIn - zIn * d0111,
+                        y00 + d1000 * zIn + d0100 * xIn, triA);
+        world_pos.y = py - pass_data.cam_pos.y + pos.y + inst.conform0.w;
+    }
+    var out: RsmVsOut;
+    out.clip = pass_data.light_vp * vec4<f32>(world_pos, 1.0);
+    out.uv = uv;
+    out.section = rec.section;
+    out.normal = normalize((world * vec4<f32>(nrm, 0.0)).xyz);
+    return out;
+}
+
+@fragment
+fn fs_gpu_rsm(in: RsmVsOut, @builtin(front_facing) front: bool) -> RsmOut {
+    let sm = section_materials[in.section];
+    let tex = textureSample(textures[sm.texture_slot], samplers[sm.sampler_idx], in.uv);
+    if (sm.alpha_ref > 0.0 && tex.a < sm.alpha_ref) {
+        discard;
+    }
+    var n = normalize(in.normal);
+    if (!front) {
+        n = -n;
+    }
+    var out: RsmOut;
+    out.albedo = vec4<f32>(tex.rgb * sm.diffuse.rgb, 1.0);
+    out.normal = vec4<f32>(n * 0.5 + 0.5, 1.0);
+    return out;
+}

@@ -705,7 +705,7 @@ struct WgrGi
     uint32_t enabled;        /* 0 = the analytic sky-dome ambient only (pre-GI behaviour) */
     uint32_t debug;          /* reserved */
     uint32_t rays;           /* rays per probe update (8..64) */
-    uint32_t _pad0;
+    uint32_t rsm_samples;    /* REN-GI-002: sun-proxy gather samples per probe (0 = off) */
     float    weight;         /* blend of the probe term over the sky-dome ambient, 0..1 */
     float    interior_mix;   /* how much of the per-pixel interior-sky AO still applies (0..1) */
     float    spacing;        /* probe spacing, metres */
@@ -714,8 +714,8 @@ struct WgrGi
     float    ground_gain;    /* scale on the sun bounce off the ground */
     float    wall_albedo;    /* neutral albedo for roof/wall hits from the dome maps */
     float    ray_length;     /* metres a probe ray looks for terrain */
-    float    _pad1;
-    float    _pad2;
+    float    rsm_radius;     /* REN-GI-002: gather radius around the probe, metres */
+    float    rsm_gain;       /* REN-GI-002: scale on the gathered sun bounce */
 };
 
 /* Picture Mode depth of field. Mirrors the Rust WgrDepthOfField #[repr(C)] and feeds dof.wgsl.
@@ -1413,7 +1413,8 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_WORKER_SUBMIT = 66,
     WGR_GPU_TIMER_WORKER_HARVEST = 67,
     WGR_GPU_TIMER_GI_PROBES = 68,
-    WGR_GPU_TIMER_REGION_COUNT = 69,
+    WGR_GPU_TIMER_GI_RSM = 69,
+    WGR_GPU_TIMER_REGION_COUNT = 70,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.

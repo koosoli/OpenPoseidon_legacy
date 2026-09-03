@@ -3609,6 +3609,8 @@ pub struct Gfx3d {
     // GPU-driven cascade shadow depth pipeline (§6 multi-view, vs_gpu_shadow / fs_gpu_shadow):
     // the retained set cast into each cascade's depth map. Group 0 = the shadow pass UBO.
     gpu_shadow_pipeline: wgpu::RenderPipeline,
+    gpu_rsm_pipeline: wgpu::RenderPipeline, // REN-GI-002: the sun proxy
+    sun_dir: glam::Vec3,                   // unit direction TO the sun (sky runtime)
     gpu_group1_layout: wgpu::BindGroupLayout,
     gpu_group1_bind: Option<wgpu::BindGroup>,
     gpu_reflection_group1_bind: Option<wgpu::BindGroup>,
@@ -4129,6 +4131,15 @@ impl Gfx3d {
             &textures.sampler_array_layout,
             &conform.layout,
         );
+        let gpu_rsm_pipeline = cull::build_gpu_rsm_pipeline(
+            device,
+            composer,
+            &shadow_pass_ubo.layout,
+            &gpu_group1_layout,
+            &textures.bindless_layout,
+            &textures.sampler_array_layout,
+            &conform.layout,
+        );
         let cull_debug_layout = cull::cull_debug_layout(device);
         let cull_debug_pipeline = cull::build_cull_debug_pipeline(
             device,
@@ -4295,6 +4306,8 @@ impl Gfx3d {
             gpu_vel_bind: None,
             gpu_vel_bound_gen: u64::MAX,
             gpu_shadow_pipeline,
+            gpu_rsm_pipeline,
+            sun_dir: glam::Vec3::Y,
             gpu_group1_layout,
             gpu_group1_bind: None,
             gpu_reflection_group1_bind: None,
@@ -6296,7 +6309,8 @@ impl Gfx3d {
             let main = cameras.get(gtao_camera).unwrap_or(&cameras[0]);
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
-            let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam);
+            let epoch = self.cull.instance_epoch();
+            let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam, self.sun_dir, epoch);
             // Bind the current shadow map (or the dummy while none exists); the
             // depth passes for this frame were prepared before this call, so the
             // target is final.
@@ -7660,6 +7674,107 @@ impl Gfx3d {
         self.interior_sky_view.is_some() && self.interior_sky_target.is_some()
     }
 
+    // REN-GI-002: draw the sun proxy (depth + albedo + normal from the sun over the probe
+    // volume's box) with the GPU-driven path, when its view or the retained set changed.
+    pub fn render_gi_rsm_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        textures: &SharedTextures,
+        timers: &crate::gpu_timers::GpuTimers,
+    ) {
+        // A diagnostic that can say "did not run", and why: four gates, each of which has
+        // silently swallowed this pass once.
+        let i = sky_vis::DIRECTION_COUNT;
+        let why = if !self.gi.settings.enabled {
+            "GI off"
+        } else if !self.gi.rsm_refresh.get() {
+            "nothing changed (view + instance epoch identical)"
+        } else if !self.interior_sky_active() {
+            "the interior-sky maps are inactive, so there is no sky cull view to draw from"
+        } else if self.shadow_pass_ubo.bind.is_none() {
+            "no shadow pass UBO"
+        } else if self.gpu_sky_group1.get(i).and_then(|b| b.as_ref()).is_none() {
+            "no group-1 bind for the sun view"
+        } else if self.cull.sky_out_args(i).is_none() {
+            "the sun view has no cull output (sky_view_count too small?)"
+        } else {
+            ""
+        };
+        if !why.is_empty() {
+            static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 3 || n % 600 == 0 {
+                eprintln!("[wgr] GI sun proxy did not draw: {why} (occurrence {})", n + 1);
+            }
+            return;
+        }
+        let Some(pass_bind) = self.shadow_pass_ubo.bind.as_ref() else {
+            return;
+        };
+        timers.begin(encoder, crate::gpu_timers::Region::GiRsm);
+        // Written out rather than built by a closure: a closure returning an attachment that
+        // borrows its argument cannot name the lifetime (the borrow checker refuses it).
+        let clear_ops = wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            store: wgpu::StoreOp::Store,
+        };
+        let albedo_at = wgpu::RenderPassColorAttachment {
+            view: &self.gi.rsm_albedo_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: clear_ops,
+        };
+        let normal_at = wgpu::RenderPassColorAttachment {
+            view: &self.gi.rsm_normal_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: clear_ops,
+        };
+        let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("wgr_gi_rsm"),
+            color_attachments: &[Some(albedo_at), Some(normal_at)],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.gi.rsm_depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        let off = ((SKY_UBO_SLOT + i) as u64 * self.shadow_pass_ubo.stride) as u32;
+        rp.set_bind_group(0, pass_bind, &[off]);
+        self.draw_gpu_driven_with(
+            &mut rp,
+            &self.gpu_rsm_pipeline,
+            textures,
+            off,
+            self.gpu_sky_group1.get(i).and_then(|b| b.as_ref()),
+            self.cull.sky_out_args(i),
+            self.cull.sky_counter_buf(i),
+        );
+        drop(rp);
+        timers.end(encoder, crate::gpu_timers::Region::GiRsm);
+        self.gi.mark_rsm_drawn();
+        {
+            static ONCE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = ONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if n < 3 || n % 600 == 0 {
+                eprintln!("[wgr] GI sun proxy drawn (redraw {})", n + 1);
+            }
+        }
+    }
+
+    pub fn set_sun_dir(&mut self, to_sun: [f32; 3]) {
+        let v = glam::Vec3::from(to_sun);
+        if v.length_squared() > 1e-6 {
+            self.sun_dir = v.normalize();
+        }
+    }
+
     // REN-GI-001: re-integrate this frame's batch of probes. Needs the camera group (the
     // shared frame bindings) and the conform group (the heightmap); after the shadow cascades
     // and the interior sky maps, before the colour pass that samples the volume.
@@ -7789,6 +7904,9 @@ impl Gfx3d {
             }
         }
         timers.end(encoder, crate::gpu_timers::Region::InteriorSkyCull);
+        if self.gi.rsm_refresh.get() && self.gi.settings.enabled {
+            self.cull.dispatch_sky(encoder, sky_vis::DIRECTION_COUNT);
+        }
     }
 
     // Render the top-down depth map: one depth-only pass over the sky cull view's args, drawn by
@@ -8001,10 +8119,30 @@ impl Gfx3d {
         // both consumers here take it right-multiplied by a +cam_pos translation.
         if self.interior_sky_view.is_some() {
             let dirs = sky_vis::directions();
+            // REN-GI-002: view DIRECTION_COUNT is the sun proxy's.
             self.cull
-                .set_sky_view_count(device, sky_vis::DIRECTION_COUNT);
+                .set_sky_view_count(device, sky_vis::DIRECTION_COUNT + 1);
             self.shadow_pass_ubo
-                .ensure(device, SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT);
+                .ensure(device, SKY_UBO_SLOT + sky_vis::DIRECTION_COUNT + 1);
+            {
+                let i = sky_vis::DIRECTION_COUNT;
+                let vp_rel = self.gi.rsm_view.view_proj * glam::Mat4::from_translation(cam_pos);
+                if let Some(buf) = self.shadow_pass_ubo.buf.as_ref() {
+                    let entry = ShadowPassUbo {
+                        light_vp: vp_rel.to_cols_array(),
+                        cam_pos: [cam_pos.x, cam_pos.y, cam_pos.z, 0.0],
+                    };
+                    queue.write_buffer(
+                        buf,
+                        (SKY_UBO_SLOT + i) as u64 * self.shadow_pass_ubo.stride,
+                        bytemuck::bytes_of(&entry),
+                    );
+                }
+                self.cull.set_sky_params(
+                    i,
+                    cull::params_from_shadow_cascade(vp_rel, cam_pos, self.cull_inputs),
+                );
+            }
             for i in 0..sky_vis::DIRECTION_COUNT {
                 let vp_rel =
                     self.interior_sky_views[i].view_proj * glam::Mat4::from_translation(cam_pos);
@@ -8657,6 +8795,22 @@ impl Gfx3d {
         args: Option<&wgpu::Buffer>,
         counters: Option<&wgpu::Buffer>,
     ) {
+        self.draw_gpu_driven_with(pass, &self.gpu_shadow_pipeline, textures, pass_ubo_off, group1, args, counters);
+    }
+
+    // The depth draw over a cull view's records with the given pipeline (the shadow one, or
+    // REN-GI-002's sun proxy with its colour targets).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_gpu_driven_with(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pipeline: &wgpu::RenderPipeline,
+        textures: &SharedTextures,
+        pass_ubo_off: u32,
+        group1: Option<&wgpu::BindGroup>,
+        args: Option<&wgpu::Buffer>,
+        counters: Option<&wgpu::Buffer>,
+    ) {
         if !self.gpu_driven_enabled {
             return;
         }
@@ -8665,7 +8819,7 @@ impl Gfx3d {
         else {
             return;
         };
-        pass.set_pipeline(&self.gpu_shadow_pipeline);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, pass_bind, &[pass_ubo_off]);
         pass.set_bind_group(1, group1, &[]);
         pass.set_bind_group(2, textures.bindless_bind(), &[]);

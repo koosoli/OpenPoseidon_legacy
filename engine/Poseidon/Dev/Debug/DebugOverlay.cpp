@@ -4289,6 +4289,13 @@ void DrawGiTab()
     changed |= ImGui::SliderFloat("Ground bounce gain", &gi.groundGain, 0.0f, 4.0f, "%.2f");
     changed |= ImGui::SliderFloat("Wall/roof albedo", &gi.wallAlbedo, 0.0f, 1.0f, "%.2f");
     changed |= ImGui::SliderFloat("Ray length (m)", &gi.rayLength, 8.0f, 256.0f, "%.0f");
+    Dev::PanelSeparator();
+    Dev::PanelHelp("Sun proxy (stage 2): a map of every sunlit surface seen from the sun, with");
+    Dev::PanelHelp("colour; each probe gathers the first sun bounce from a disc of it.");
+    changed |= ImGui::SliderInt("Sun-proxy samples", &gi.rsmSamples, 0, 64);
+    Dev::PanelHelp("  0 turns the sun bounce off");
+    changed |= ImGui::SliderFloat("Sun-proxy radius (m)", &gi.rsmRadius, 1.0f, 40.0f, "%.0f");
+    changed |= ImGui::SliderFloat("Sun-bounce gain", &gi.rsmGain, 0.0f, 4.0f, "%.2f");
     if (changed)
     {
         GEngine->SetGiSettings(gi);
