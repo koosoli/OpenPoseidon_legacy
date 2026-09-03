@@ -2566,6 +2566,21 @@ fn gtao_force_off_from_env() -> bool {
     off
 }
 
+/// REN-SKY-003: the interior sky-visibility maps are cached per layer and re-rendered only when
+/// the snapped view or the retained instance set changed, one layer per frame. Default ON;
+/// WGR_INTERIOR_SKY_CACHE=0 redraws all five layers every frame (the pre-cache behaviour).
+pub(crate) fn interior_sky_cache() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        let on = std::env::var("WGR_INTERIOR_SKY_CACHE").map(|v| v.trim() != "0").unwrap_or(true);
+        eprintln!(
+            "[wgr] interior sky cache: {} (WGR_INTERIOR_SKY_CACHE)",
+            if on { "on, at most one layer per frame" } else { "OFF, all layers every frame" }
+        );
+        on
+    })
+}
+
 fn gtao_scale_from_env() -> u32 {
     let scale = std::env::var("WGR_GTAO_SCALE")
         .ok()
@@ -3454,6 +3469,15 @@ pub struct Gfx3d {
     // Per-direction views, index-aligned with sky_vis::directions(). Only meaningful while
     // interior_sky_view is Some.
     interior_sky_views: [SkyVisView; sky_vis::DIRECTION_COUNT],
+    // REN-SKY-003: the layer cache. The maps depend on the (texel-snapped) camera position and
+    // the retained instance set, nothing else, so a layer is re-rendered only when its snapped
+    // view or the instance epoch changed since it was last drawn -- and then at most ONE layer
+    // per frame, round-robin. `interior_sky_views` holds the views the layers were actually
+    // drawn with (what the forward shader and the cull must use), not this frame's fresh ones.
+    interior_sky_rendered: [Option<(SkyVisView, u64)>; sky_vis::DIRECTION_COUNT],
+    interior_sky_cursor: usize,
+    // The layers to cull and draw this frame.
+    interior_sky_refresh: Vec<usize>,
     // Group-1 draw binds over each sky cull view's records (same layout as the cascade ones).
     gpu_sky_group1: Vec<Option<wgpu::BindGroup>>,
     // 1x1 stand-in bound at @binding(12) whenever the map does not exist.
@@ -4203,6 +4227,9 @@ impl Gfx3d {
             interior_sky_gen: 0,
             interior_sky_view: None,
             interior_sky_views: sky_vis::build_views(glam::Vec3::ZERO, &SkyVisSettings::default()),
+            interior_sky_rendered: [None; sky_vis::DIRECTION_COUNT],
+            interior_sky_cursor: 0,
+            interior_sky_refresh: Vec::new(),
             gpu_sky_group1: Vec::new(),
             dummy_interior_sky_view,
             skin_bake_enabled,
@@ -7648,8 +7675,38 @@ impl Gfx3d {
             });
             self.interior_sky_target = Some((tex, layer_views, sample_view));
             self.interior_sky_gen += 1;
+            self.interior_sky_rendered = [None; sky_vis::DIRECTION_COUNT];
         }
-        self.interior_sky_views = sky_vis::build_views(cam_pos, &self.interior_sky);
+        let fresh = sky_vis::build_views(cam_pos, &self.interior_sky);
+        let epoch = self.cull.instance_epoch();
+        self.interior_sky_refresh.clear();
+        let n = sky_vis::DIRECTION_COUNT;
+        if !interior_sky_cache() || self.interior_sky_rendered.iter().any(|r| r.is_none()) {
+            // Cache off (the A/B), or a layer that has never been drawn: every layer this
+            // frame, as before REN-SKY-003. An undrawn layer must not be sampled.
+            self.interior_sky_views = fresh;
+            for i in 0..n {
+                self.interior_sky_rendered[i] = Some((fresh[i], epoch));
+                self.interior_sky_refresh.push(i);
+            }
+        } else {
+            // One stale layer per frame, round-robin from the cursor. Standing still with a
+            // settled retained set: nothing is stale and nothing is drawn.
+            for k in 0..n {
+                let i = (self.interior_sky_cursor + k) % n;
+                let stale = match self.interior_sky_rendered[i] {
+                    Some((v, e)) => v.view_proj != fresh[i].view_proj || e != epoch,
+                    None => true,
+                };
+                if stale {
+                    self.interior_sky_views[i] = fresh[i];
+                    self.interior_sky_rendered[i] = Some((fresh[i], epoch));
+                    self.interior_sky_refresh.push(i);
+                    self.interior_sky_cursor = (i + 1) % n;
+                    break;
+                }
+            }
+        }
         self.interior_sky_view = Some(self.interior_sky_views[0]);
     }
 
@@ -7664,8 +7721,10 @@ impl Gfx3d {
             return;
         }
         timers.begin(encoder, crate::gpu_timers::Region::InteriorSkyCull);
-        for i in 0..self.cull.sky_view_count() {
-            self.cull.dispatch_sky(encoder, i);
+        for &i in &self.interior_sky_refresh {
+            if i < self.cull.sky_view_count() {
+                self.cull.dispatch_sky(encoder, i);
+            }
         }
         timers.end(encoder, crate::gpu_timers::Region::InteriorSkyCull);
     }
@@ -7693,7 +7752,10 @@ impl Gfx3d {
         // the cost that matters to a decision ("is sampling the dome affordable") is the whole
         // set, not any one layer.
         timers.begin(encoder, crate::gpu_timers::Region::InteriorSkyDraw);
-        for (i, target_view) in layer_views.iter().enumerate() {
+        for &i in &self.interior_sky_refresh {
+            let Some(target_view) = layer_views.get(i) else {
+                continue;
+            };
             let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("wgr_interior_sky_map"),
                 color_attachments: &[],

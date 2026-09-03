@@ -360,6 +360,9 @@ pub(crate) struct InstanceTable {
     stale_ops: u64,
     /// Inclusive min..=max slot changed since the last upload.
     dirty: Option<(u32, u32)>,
+    /// REN-SKY-003: bumped on every add/update/remove. A world-space structure built from the
+    /// retained set (the interior sky-visibility maps) is valid for as long as this holds still.
+    epoch: u64,
 }
 
 impl InstanceTable {
@@ -398,6 +401,7 @@ impl InstanceTable {
     }
 
     fn mark_dirty(&mut self, slot: u32) {
+        self.epoch = self.epoch.wrapping_add(1);
         self.dirty = Some(match self.dirty {
             Some((lo, hi)) => (lo.min(slot), hi.max(slot)),
             None => (slot, slot),
@@ -1798,6 +1802,11 @@ impl CullState {
     // Total retained instances (static slots incl. free-list holes + dynamic), = the value the
     // compute dispatches over. The cull-sphere debug pass draws this many instances (holes are
     // skipped in-shader by the INVALID_MODEL guard).
+    /// REN-SKY-003: changes whenever the retained instance set changes (see InstanceTable::epoch).
+    pub fn instance_epoch(&self) -> u64 {
+        self.instances.epoch
+    }
+
     pub fn instance_count(&self) -> u32 {
         self.params.instance_count
     }
