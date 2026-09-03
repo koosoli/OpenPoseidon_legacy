@@ -65,8 +65,8 @@ impl Default for GiSettings {
             debug: false,
             rays: 24,
             weight: 1.0,
-            interior_mix: 0.5,
-            spacing: 4.0,
+            interior_mix: 0.25,
+            spacing: 2.5,
             hysteresis: 0.3,
             ground_albedo: [0.22, 0.25, 0.16],
             ground_gain: 1.0,
@@ -104,6 +104,12 @@ pub struct GiProbes {
     tex: wgpu::Texture,
     write_tex: wgpu::Texture,
     storage_view: wgpu::TextureView,
+    /// REN-GI-003: the distance moments (mean r, mean r^2) per face, sampled by the shading
+    /// for the Chebyshev visibility test. Same sampled/written twin dance as the radiance.
+    pub dist_view: wgpu::TextureView,
+    dist_tex: wgpu::Texture,
+    dist_write_tex: wgpu::Texture,
+    dist_storage_view: wgpu::TextureView,
     state_buf: wgpu::Buffer,
     params_buf: wgpu::Buffer,
     bind: wgpu::BindGroup,
@@ -182,9 +188,51 @@ impl GiProbes {
             dimension: Some(wgpu::TextureViewDimension::D3),
             ..Default::default()
         });
+        // REN-GI-003: the moments live in the same 3D shape as the radiance.
+        let dist_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_gi_dist"),
+            size: wgpu::Extent3d {
+                width: NX,
+                height: NY * FACES,
+                depth_or_array_layers: NZ,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            // Rgba16Float, not Rg16Float: WebGPU core does not allow the two-channel form as a
+            // storage texture, and the write twin must be one.
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let dist_view = dist_tex.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("wgr_gi_dist_view"),
+            dimension: Some(wgpu::TextureViewDimension::D3),
+            ..Default::default()
+        });
+        let dist_write_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("wgr_gi_dist_write"),
+            size: wgpu::Extent3d {
+                width: NX,
+                height: NY * FACES,
+                depth_or_array_layers: NZ,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba16Float,
+            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let dist_storage_view = dist_write_tex.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("wgr_gi_dist_storage"),
+            dimension: Some(wgpu::TextureViewDimension::D3),
+            ..Default::default()
+        });
         let state_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_gi_state"),
-            size: (NX * NY * NZ * FACES) as u64 * 16,
+            // 12 vec4 per probe: 6 radiance + 6 moments (REN-GI-003).
+            size: (NX * NY * NZ * FACES * 2) as u64 * 16,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -264,6 +312,16 @@ impl GiProbes {
                 tex_entry(3, wgpu::TextureSampleType::Depth),
                 tex_entry(4, wgpu::TextureSampleType::Float { filterable: true }),
                 tex_entry(5, wgpu::TextureSampleType::Float { filterable: true }),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::WriteOnly,
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                    },
+                    count: None,
+                },
             ],
         });
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -294,6 +352,10 @@ impl GiProbes {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(&rsm_normal_view),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(&dist_storage_view),
+                },
             ],
         });
         let module = crate::shaders::make_module(
@@ -322,6 +384,10 @@ impl GiProbes {
             tex,
             write_tex,
             storage_view,
+            dist_view,
+            dist_tex,
+            dist_write_tex,
+            dist_storage_view,
             state_buf,
             params_buf,
             bind,
@@ -465,14 +531,20 @@ impl GiProbes {
             let per_batch = (NX * NY * NZ).div_ceil(BATCHES);
             pass.dispatch_workgroups(per_batch.div_ceil(64), 1, 1);
         }
+        let whole = wgpu::Extent3d {
+            width: NX,
+            height: NY * FACES,
+            depth_or_array_layers: NZ,
+        };
         encoder.copy_texture_to_texture(
             self.write_tex.as_image_copy(),
             self.tex.as_image_copy(),
-            wgpu::Extent3d {
-                width: NX,
-                height: NY * FACES,
-                depth_or_array_layers: NZ,
-            },
+            whole,
+        );
+        encoder.copy_texture_to_texture(
+            self.dist_write_tex.as_image_copy(),
+            self.dist_tex.as_image_copy(),
+            whole,
         );
         encoder.pop_debug_group();
         timers.end(encoder, crate::gpu_timers::Region::GiProbes);
@@ -496,6 +568,101 @@ mod tests {
         let gi = super::GiProbes::new(&device, &mut composer, &cameras.layout, &conform.layout);
         assert_eq!(gi.generation, 1);
         assert!(gi.settings.enabled);
+    }
+
+    // REN-GI-003, the test that actually bites: the OBJECT shader, whose shade() calls the
+    // probe gather. A toy fragment entry over frame.wgsl is not enough -- the same gather
+    // compiled there and still brought the renderer down inside shader3d.
+    #[test]
+    fn gi_gather_survives_the_object_shader_backend() {
+        let Some((device, _queue)) = headless_five_groups() else {
+            return;
+        };
+        let mut composer = crate::shaders::build_composer();
+        let module = crate::shaders::make_module(
+            &device,
+            &mut composer,
+            "wgr_shader3d_gi_test",
+            include_str!("shader3d.wgsl"),
+            "gfx3d/shader3d.wgsl",
+        );
+        let attrs = wgpu::vertex_attr_array![
+            0 => Float32x3, 1 => Float32x3, 2 => Float32x2, 5 => Uint32, 6 => Float32x3,
+            7 => Float32x3
+        ];
+        let vbuffers = [wgpu::VertexBufferLayout {
+            array_stride: super::super::BAKED_VERT_SIZE,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &attrs,
+        }];
+        let _ = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_shader3d_gi_test"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &vbuffers,
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+    }
+
+    // REN-GI-003: the probe GATHER through naga's backend. The compute test above imports
+    // frame.wgsl but never calls gi_irradiance, so its code is stripped and a backend fault in
+    // it escapes to the deploy -- which is exactly what happened.
+    #[test]
+    fn gi_gather_survives_the_naga_backend() {
+        let Some((device, _queue)) = crate::gfx3d::cull::tests::headless() else {
+            return;
+        };
+        let mut composer = crate::shaders::build_composer();
+        let module = crate::shaders::make_module(
+            &device,
+            &mut composer,
+            "wgr_gi_probe_test",
+            include_str!("../shaders/gi_probe_test.wgsl"),
+            "shaders/gi_probe_test.wgsl",
+        );
+        let _ = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wgr_gi_probe_test"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs_gi_probe_test"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_gi_probe_test"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
     }
 
     // REN-GI-002: the sun proxy's fragment/vertex pair through naga's BACKEND. The layouts the

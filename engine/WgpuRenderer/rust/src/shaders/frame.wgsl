@@ -338,6 +338,8 @@ struct SkySh {
 // REN-GI-001: the probe volume, six y-slabs of 8 (ambient-cube faces +X -X +Y -Y +Z -Z),
 // each texel irradiance/pi. Sampled with the froxel's linear sampler.
 @group(0) @binding(14) var gi_probes: texture_3d<f32>;
+// REN-GI-003: the matching per-face distance moments (mean r, mean r^2), point-sampled.
+@group(0) @binding(15) var gi_probe_dist: texture_3d<f32>;
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
@@ -876,36 +878,106 @@ fn fog_factor(dist: f32) -> f32 {
     return select(1.0, f, frame.params.fog_enabled > 0.5);
 }
 
-// REN-GI-001: irradiance/pi at a world point for normal n from the probe volume, and its
-// weight (fades to 0 within two probes of the volume edge; 0 when the feature is off).
+// The probe grid's dimensions, mirrored from gfx3d::gi (NX/NY/NZ). Separate float and integer
+// constants rather than one vector: see the note on `iny` below.
+const GI_DIM_X: f32 = 32.0;
+const GI_DIM_Y: f32 = 8.0;
+const GI_DIM_Z: f32 = 32.0;
+const GI_NY_I: i32 = 8;
+
+// REN-GI-001/003: irradiance/pi at a world point for normal n from the probe volume, and the
+// weight to blend it with (0 outside the volume, or with the feature off).
+//
+// Stage 3 gathers the eight surrounding probes by hand instead of letting the hardware
+// interpolate, because two weights have to be applied PER PROBE and trilinear filtering cannot
+// carry them:
+//
+//   * a facing weight, so a probe behind the shaded surface contributes nothing;
+//   * a Chebyshev VISIBILITY weight from that probe's distance moments in the direction of the
+//     shaded point -- if the probe's rays that way stopped well short of the point, something
+//     stands between them, and its light must not arrive. That is what stops a sunlit outdoor
+//     probe bleeding through a wall into a room.
+//
+// Everything is INLINE on purpose. A `textureLoad` inside a helper function called from a loop
+// makes naga's SPIR-V backend panic ("Expression [n] is not cached") at pipeline creation, i.e.
+// when the renderer starts, and the game falls back to no renderer at all. A toy fragment
+// shader over this module does NOT reproduce it; only the real object shader does, which is
+// what the `gi_gather_survives_the_object_shader_backend` test builds.
 fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
     if (frame.gi.x < 0.5) {
         return vec4<f32>(0.0);
     }
     let spacing = max(frame.giorigin.w, 0.01);
-    let dims = vec3<f32>(32.0, 8.0, 32.0);
+    let dims = vec3<f32>(GI_DIM_X, GI_DIM_Y, GI_DIM_Z);
+    // A LITERAL, deliberately. `i32(dims.y)` -- an integer cast of a component of a
+    // const-foldable vector -- makes wgpu's pipeline-constant pass declare the whole function
+    // invalid at pipeline creation ("Function ... is invalid"), which takes the renderer down
+    // at startup with no other diagnosis. naga's own validator accepts it, so only a real
+    // pipeline test catches this (gi_gather_survives_the_object_shader_backend).
+    let iny = GI_NY_I;
     // probe (i) sits at origin + (i + 0.5) * spacing, so probe-index space is:
     let local = (world_abs - frame.giorigin.xyz) / spacing - vec3<f32>(0.5);
     let hi = dims - vec3<f32>(1.0);
     let edge = min(min(min(local.x, hi.x - local.x), min(local.z, hi.z - local.z)),
                    min(local.y, hi.y - local.y));
-    let w = clamp(edge * 0.5 + 0.5, 0.0, 1.0);
+    let w = clamp(edge * 0.5, 0.0, 1.0); // fades over two probes at the volume edge
     if (w <= 0.0) {
         return vec4<f32>(0.0);
     }
-    let c = clamp(local, vec3<f32>(0.0), hi) + vec3<f32>(0.5);
+    let cl = clamp(local, vec3<f32>(0.0), hi);
+    let base = floor(cl);
+    let frac = cl - base;
+    // Which ambient-cube face each axis of the normal reads.
     let n2 = n * n;
-    var fx = 0.0;
-    if (n.x < 0.0) { fx = 1.0; }
-    var fy = 2.0;
-    if (n.y < 0.0) { fy = 3.0; }
-    var fz = 4.0;
-    if (n.z < 0.0) { fz = 5.0; }
-    let inv_h = 1.0 / (dims.y * 6.0);
-    let ux = c.x / dims.x;
-    let uz = c.z / dims.z;
-    let ex = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fx * dims.y) * inv_h, uz), 0.0).rgb;
-    let ey = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fy * dims.y) * inv_h, uz), 0.0).rgb;
-    let ez = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fz * dims.y) * inv_h, uz), 0.0).rgb;
-    return vec4<f32>(ex * n2.x + ey * n2.y + ez * n2.z, w);
+    let fx = i32(f32(n.x < 0.0));
+    let fy = 2 + i32(f32(n.y < 0.0));
+    let fz = 4 + i32(f32(n.z < 0.0));
+    var sum = vec3<f32>(0.0);
+    var wsum = 0.0;
+    for (var c = 0; c < 8; c++) {
+        let ox = f32(c & 1);
+        let oy = f32((c >> 1) & 1);
+        let oz = f32((c >> 2) & 1);
+        let pf = min(base + vec3<f32>(ox, oy, oz), hi);
+        let pi = vec3<i32>(i32(pf.x), i32(pf.y), i32(pf.z));
+        // Trilinear weight of this corner.
+        let tx = mix(1.0 - frac.x, frac.x, ox);
+        let ty = mix(1.0 - frac.y, frac.y, oy);
+        let tz = mix(1.0 - frac.z, frac.z, oz);
+        var wt = tx * ty * tz;
+        // The probe's world position, and the direction from it to the shaded point.
+        let pw = frame.giorigin.xyz + (pf + vec3<f32>(0.5)) * spacing;
+        let to_point = world_abs - pw;
+        let dist = max(length(to_point), 1e-4);
+        let dir = to_point / dist;
+        // A probe behind the surface has nothing to say about it.
+        wt = wt * clamp(dot(n, -dir) * 0.5 + 0.5, 0.0, 1.0);
+        // Chebyshev visibility from this probe's distance moments along `dir`: if its rays that
+        // way stopped well short of the point, something stands between them, and its light
+        // must not arrive. This is what stops a sunlit outdoor probe bleeding through a wall.
+        let ad = abs(dir);
+        let y_dom = f32(ad.y > ad.x && ad.y >= ad.z);
+        let z_dom = f32(ad.z > ad.x && ad.z > ad.y);
+        let x_dom = 1.0 - y_dom - z_dom;
+        let comp = dir.x * x_dom + dir.y * y_dom + dir.z * z_dom;
+        let vf = i32((y_dom + 2.0 * z_dom) * 2.0 + f32(comp < 0.0));
+        // Every load here is UNCONDITIONAL. A textureLoad inside an `if` inside this loop makes
+        // wgpu's pipeline-constant pass reject the whole function ("Function is invalid", at
+        // renderer startup); weighting by zero costs a fetch and keeps the shader legal.
+        let m = textureLoad(gi_probe_dist, vec3<i32>(pi.x, pi.y + vf * iny, pi.z), 0).xy;
+        let variance = max(m.y - m.x * m.x, 1e-4);
+        let dd = max(dist - m.x, 0.0);
+        let cheb = variance / (variance + dd * dd);
+        wt = wt * clamp(cheb * cheb * cheb, 0.0, 1.0);
+        let ex = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fx * iny, pi.z), 0).rgb;
+        let ey = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fy * iny, pi.z), 0).rgb;
+        let ez = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fz * iny, pi.z), 0).rgb;
+        sum += (ex * n2.x + ey * n2.y + ez * n2.z) * wt;
+        wsum += wt;
+    }
+    if (wsum <= 1e-5) {
+        // Every surrounding probe is occluded from this point: no GI, keep the sky ambient.
+        return vec4<f32>(0.0);
+    }
+    return vec4<f32>(sum / wsum, w);
 }

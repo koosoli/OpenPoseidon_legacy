@@ -48,9 +48,14 @@ struct GiParams {
     rsm_meta: vec4<f32>,      // x = texel size (m), y = resolution, z,w = unused
 };
 @group(2) @binding(0) var<uniform> gi: GiParams;
-// Six vec4 per probe: irradiance/pi for +X -X +Y -Y +Z -Z; .a of entry 0 = 1 once written.
+// Twelve vec4 per probe: 0..5 irradiance/pi for +X -X +Y -Y +Z -Z (.a of entry 0 = 1 once
+// written), 6..11 the matching distance moments (mean r, mean r^2) for the visibility test.
 @group(2) @binding(1) var<storage, read_write> state: array<vec4<f32>>;
 @group(2) @binding(2) var probes_out: texture_storage_3d<rgba16float, write>;
+// REN-GI-003: per-face distance moments (mean r, mean r^2) of what each probe's rays hit.
+// The shading uses them for a Chebyshev visibility test between probe and pixel, which is
+// what stops a lit outdoor probe bleeding through a wall into a room.
+@group(2) @binding(6) var dist_out: texture_storage_3d<rgba16float, write>;
 // The sun proxy (REN-GI-002): depth (forward-Z, 0..1), albedo (a = 1 where something was
 // drawn), normal packed n * 0.5 + 0.5.
 @group(2) @binding(3) var rsm_depth: texture_depth_2d;
@@ -124,8 +129,9 @@ fn fib_dir(i: u32, k: u32, rot: f32) -> vec3<f32> {
     return vec3<f32>(r * cos(phi), y, r * sin(phi));
 }
 
-// Radiance arriving at probe p from direction d (sky and the two occluder proxies).
-fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+// Radiance arriving at probe p from direction d (sky and the two occluder proxies), and the
+// distance to what it hit (a large value when it saw the sky).
+fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec4<f32> {
     let ray_len = gi.ground.w;
     // 1. Terrain: exponentially spaced march against the heightfield.
     if (hm_params.enabled > 0.5 && d.y < 0.95) {
@@ -146,7 +152,7 @@ fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
                 let sun = normalize(frame.sun_dir_world.xyz);
                 let sun_l = frame.sun_diffuse.rgb * sun_visibility(hit) * max(dot(n, sun), 0.0) * gi.knobs.y;
                 let sky_l = sky_irradiance(n) * sky_vis_ao(hit.xz);
-                return gi.ground.rgb * (sun_l + sky_l);
+                return vec4<f32>(gi.ground.rgb * (sun_l + sky_l), length(hit - p));
             }
             t_prev = t;
         }
@@ -164,19 +170,32 @@ fn ray_radiance(p: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
         }
         let reach = interior_sky_reach_dir(p, d, best);
         if (reach < 0.5) {
-            return vec3<f32>(gi.knobs.z) * sky_irradiance(-d) * 0.5;
+            // A roof or canopy: the dome map gives no distance, so charge it half the ray
+            // length -- near enough for the visibility test, and never zero (which would read
+            // as "this probe is inside something solid").
+            return vec4<f32>(vec3<f32>(gi.knobs.z) * sky_irradiance(-d) * 0.5, ray_len * 0.5);
         }
     }
-    // 3. Sky.
-    return sky_radiance(d);
+    // 3. Sky: nothing in the way, so the distance is "far" for the visibility test.
+    return vec4<f32>(sky_radiance(d), ray_len * 4.0);
 }
 
-// Blend one face into the state buffer and mirror it into the sampled texture's slab.
+// Blend one face into the state buffer and mirror it into the sampled texture's slab. The
+// state holds 12 vec4 per probe: 0..5 radiance, 6..11 the distance moments.
 fn store_face(base: u32, f: u32, cur: vec3<f32>, alpha: f32, px: u32, py: u32, pz: u32, ny: u32) {
     let old = state[base + f].rgb;
     let v = mix(old, cur, alpha);
     state[base + f] = vec4<f32>(v, 1.0);
     textureStore(probes_out, vec3<i32>(i32(px), i32(py + f * ny), i32(pz)), vec4<f32>(v, 1.0));
+}
+
+fn store_moments(base: u32, f: u32, mean: f32, mean2: f32, alpha: f32,
+                 px: u32, py: u32, pz: u32, ny: u32) {
+    let old = state[base + 6u + f].xy;
+    let v = mix(old, vec2<f32>(mean, mean2), alpha);
+    state[base + 6u + f] = vec4<f32>(v.x, v.y, 0.0, 1.0);
+    textureStore(dist_out, vec3<i32>(i32(px), i32(py + f * ny), i32(pz)),
+                 vec4<f32>(v.x, v.y, 0.0, 1.0));
 }
 
 // Vogel disc sample i of n, rotated by `rot`; unit radius.
@@ -212,16 +231,48 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     var e3 = vec3<f32>(0.0);
     var e4 = vec3<f32>(0.0);
     var e5 = vec3<f32>(0.0);
+    // REN-GI-003: per-face distance moments, weighted by the same cosine. Plain scalars rather
+    // than an array of vectors: naga's backend refuses a local array of vectors here.
+    var r0 = 0.0; var r1 = 0.0; var r2 = 0.0; var r3 = 0.0; var r4 = 0.0; var r5 = 0.0;
+    var q0 = 0.0; var q1 = 0.0; var q2 = 0.0; var q3 = 0.0; var q4 = 0.0; var q5 = 0.0;
+    var c0 = 0.0; var c1 = 0.0; var c2 = 0.0; var c3 = 0.0; var c4 = 0.0; var c5 = 0.0;
     let w = 4.0 * PI / f32(k);
     for (var i = 0u; i < k; i++) {
         let d = fib_dir(i, k, rot);
-        let l = ray_radiance(p, d) * w;
-        e0 += l * max(d.x, 0.0);
-        e1 += l * max(-d.x, 0.0);
-        e2 += l * max(d.y, 0.0);
-        e3 += l * max(-d.y, 0.0);
-        e4 += l * max(d.z, 0.0);
-        e5 += l * max(-d.z, 0.0);
+        let ray = ray_radiance(p, d);
+        let l = ray.rgb * w;
+        let dist = ray.w;
+        let dsq = dist * dist;
+        let wx0 = max(d.x, 0.0);
+        let wx1 = max(-d.x, 0.0);
+        let wy0 = max(d.y, 0.0);
+        let wy1 = max(-d.y, 0.0);
+        let wz0 = max(d.z, 0.0);
+        let wz1 = max(-d.z, 0.0);
+        e0 += l * wx0;
+        e1 += l * wx1;
+        e2 += l * wy0;
+        e3 += l * wy1;
+        e4 += l * wz0;
+        e5 += l * wz1;
+        r0 += dist * wx0;
+        r1 += dist * wx1;
+        r2 += dist * wy0;
+        r3 += dist * wy1;
+        r4 += dist * wz0;
+        r5 += dist * wz1;
+        q0 += dsq * wx0;
+        q1 += dsq * wx1;
+        q2 += dsq * wy0;
+        q3 += dsq * wy1;
+        q4 += dsq * wz0;
+        q5 += dsq * wz1;
+        c0 += wx0;
+        c1 += wx1;
+        c2 += wy0;
+        c3 += wy1;
+        c4 += wz0;
+        c5 += wz1;
     }
 
     // REN-GI-002: the first sun bounce from the sun proxy. Each sample is a sunlit surface
@@ -262,6 +313,8 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
                 }
                 // radiance * solid angle (the receiver cosine is applied per face below)
                 let l = alb.rgb * sun_col * cos_sun / PI * (area * cos_q / d2);
+                // Radiance only: the moments describe the GEOMETRY the rays met, and a
+                // gathered bounce is not a ray hit.
                 let back = -dir; // direction from the probe toward the sample
                 e0 += l * max(back.x, 0.0);
                 e1 += l * max(-back.x, 0.0);
@@ -273,7 +326,7 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    let base = idx * 6u;
+    let base = idx * 12u;
     let had = state[base].a;
     var alpha = clamp(gi.knobs.x, 0.05, 1.0);
     if (had < 0.5 || gi.reset.x > 0.5) {
@@ -285,4 +338,10 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     store_face(base, 3u, e3 / PI, alpha, px, py, pz, ny);
     store_face(base, 4u, e4 / PI, alpha, px, py, pz, ny);
     store_face(base, 5u, e5 / PI, alpha, px, py, pz, ny);
+    store_moments(base, 0u, r0 / max(c0, 1e-4), q0 / max(c0, 1e-4), alpha, px, py, pz, ny);
+    store_moments(base, 1u, r1 / max(c1, 1e-4), q1 / max(c1, 1e-4), alpha, px, py, pz, ny);
+    store_moments(base, 2u, r2 / max(c2, 1e-4), q2 / max(c2, 1e-4), alpha, px, py, pz, ny);
+    store_moments(base, 3u, r3 / max(c3, 1e-4), q3 / max(c3, 1e-4), alpha, px, py, pz, ny);
+    store_moments(base, 4u, r4 / max(c4, 1e-4), q4 / max(c4, 1e-4), alpha, px, py, pz, ny);
+    store_moments(base, 5u, r5 / max(c5, 1e-4), q5 / max(c5, 1e-4), alpha, px, py, pz, ny);
 }

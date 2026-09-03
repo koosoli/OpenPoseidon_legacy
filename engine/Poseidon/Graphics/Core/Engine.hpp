@@ -1159,8 +1159,8 @@ class Engine : public IGraphicsEngine
         bool debug = false;
         int rays = 24;
         float weight = 1.0f;
-        float interiorMix = 0.5f;
-        float spacing = 4.0f;
+        float interiorMix = 0.25f;
+        float spacing = 2.5f;
         float hysteresis = 0.3f;
         float groundAlbedo[3] = {0.22f, 0.25f, 0.16f};
         float groundGain = 1.0f;

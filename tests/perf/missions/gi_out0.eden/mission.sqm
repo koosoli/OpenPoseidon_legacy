@@ -1,0 +1,35 @@
+// GI acceptance pose: 9 m from the open barn at Everon 5256.0 / 9375.5, looking back at it from
+// azimuth 0. Sunlit outside, shaded under the roof, in one frame.
+version=11;
+class Mission
+{
+	randomSeed=1234;
+	class Intel { year=1985; month=6; day=21; hour=12; minute=0; };
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={5256.0,0.0,9366.5};
+					azimut=0.0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=1.0;
+				};
+			};
+		};
+	};
+	class Markers { items=0; };
+};
+class Intro { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroWin { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroLoose { class Groups { items=0; }; class Markers { items=0; }; };

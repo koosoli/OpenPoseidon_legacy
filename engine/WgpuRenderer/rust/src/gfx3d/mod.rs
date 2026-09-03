@@ -1246,6 +1246,17 @@ impl CameraGroup {
                     },
                     count: None,
                 },
+                // REN-GI-003: its distance moments, for the visibility test.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 15,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let lights_buf = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1329,6 +1340,7 @@ impl CameraGroup {
         interior_sky_gen: u64,
         cloud_shadow_view: &wgpu::TextureView,
         gi_view: &wgpu::TextureView,
+        gi_dist_view: &wgpu::TextureView,
         gi_gen: u64,
     ) {
         let needed = count as u64 * self.stride;
@@ -1423,6 +1435,10 @@ impl CameraGroup {
                     wgpu::BindGroupEntry {
                         binding: 14,
                         resource: wgpu::BindingResource::TextureView(gi_view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 15,
+                        resource: wgpu::BindingResource::TextureView(gi_dist_view),
                     },
                 ],
             }));
@@ -6340,6 +6356,7 @@ impl Gfx3d {
                 self.interior_sky_gen,
                 cloud_shadow_view,
                 &self.gi.view,
+                &self.gi.dist_view,
                 self.gi.generation,
             );
             let buf = self.cameras.buf.as_ref().unwrap();

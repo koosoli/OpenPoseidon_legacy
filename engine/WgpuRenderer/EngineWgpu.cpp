@@ -1312,6 +1312,14 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _gi.rsmSamples = std::strcmp(gir, "0") == 0 ? 0 : std::clamp(std::atoi(gir), 4, 64);
     }
+    if (const char* gs = std::getenv("WGR_GI_SPACING"))
+    {
+        _gi.spacing = std::clamp(std::strtof(gs, nullptr), 1.0f, 16.0f);
+    }
+    if (const char* gm = std::getenv("WGR_GI_INTERIOR_MIX"))
+    {
+        _gi.interiorMix = std::clamp(std::strtof(gm, nullptr), 0.0f, 1.0f);
+    }
     if (const char* gg = std::getenv("WGR_GI_RSM_GAIN"))
     {
         _gi.rsmGain = std::max(0.0f, std::strtof(gg, nullptr)); // A/B: is the bounce small or zero?
