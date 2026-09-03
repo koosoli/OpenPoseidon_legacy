@@ -29,7 +29,12 @@
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
+#include <Poseidon/Asset/Formats/Material/EmatSource.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
+#include <Poseidon/Graphics/Core/Engine.hpp>
+#include <Poseidon/Graphics/Textures/EddsReader.hpp>
+#include <Poseidon/Graphics/Textures/Image.hpp>
+#include <Poseidon/Graphics/Textures/TextureBank.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
 #include <algorithm>
@@ -69,6 +74,132 @@ const char* WantedWorld()
         return std::string((v != nullptr && *v != 0) ? v : "worlds/eden");
     }();
     return wanted.c_str();
+}
+
+// RFG-008: one palette entry's `.emat` resolved to an uploadable ground texture.
+//
+// The chain, and why each link is what it is:
+//   * `.emat` is TEXT and ParseEmat takes bytes, so the archive's bytes go straight
+//     in. The engine's own `.emat` loaders go through QIFStreamB, which is exactly
+//     the layer that cannot see inside a `.pak`.
+//   * 18% of Reforger materials inherit, so the parent chain is resolved first, with
+//     the loader reading parents out of the mount as well.
+//   * The colour key order BCRMap -> AlbedoMap -> BCR_1 is measured, not guessed.
+//     The Arma-side history is why it matters: picking the colour layer by FILENAME
+//     broke on three consecutive generations, twice drawing a whole island white.
+//   * A small mip, not the top one. An Everon ground BCR is 2048^2 BC7 and this is a
+//     layer that gets minified anyway, so mip N costs nothing and keeps 22 materials
+//     off the memory budget.
+Ref<Texture> ResolveSurfaceTexture(const EnfusionMount& mount, const std::string& ematPath, std::string& why)
+{
+    namespace Mat = Poseidon::Asset::Material;
+
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(ematPath, bytes))
+    {
+        why = "no such entry";
+        return {};
+    }
+    Mat::EmatMaterial material =
+        Mat::ParseEmat(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+    if (!material.valid())
+    {
+        why = material.error;
+        return {};
+    }
+    Mat::ResolveEmatInheritance(material,
+                                [&mount](const std::string& parentPath, std::string& text)
+                                {
+                                    std::vector<uint8_t> parentBytes;
+                                    if (!mount.Read(parentPath, parentBytes))
+                                        return false;
+                                    text.assign(reinterpret_cast<const char*>(parentBytes.data()), parentBytes.size());
+                                    return true;
+                                });
+
+    std::string texturePath = material.TextureOf("BCRMap");
+    if (texturePath.empty())
+        texturePath = material.TextureOf("AlbedoMap");
+    if (texturePath.empty())
+        texturePath = material.TextureOf("BCR_1");
+    if (texturePath.empty())
+    {
+        // A colour-only material. The engine already has a mechanism for exactly this
+        // and it is a name, not a new code path.
+        float colour[4] = {0.5f, 0.5f, 0.5f, 1.0f};
+        if (material.Vec4Of("Color", colour))
+        {
+            char name[96];
+            std::snprintf(name, sizeof(name), "#(argb,8,8,3)color(%.3f,%.3f,%.3f,1,CO)", colour[0], colour[1],
+                          colour[2]);
+            why = "flat colour";
+            return Poseidon::GlobLoadTexture(RStringB(name));
+        }
+        why = "no BCRMap/AlbedoMap/BCR_1 and no Color";
+        return {};
+    }
+
+    std::vector<uint8_t> imageBytes;
+    if (!mount.Read(texturePath, imageBytes))
+    {
+        why = "texture '" + texturePath + "' not in the archives";
+        return {};
+    }
+    if (!Poseidon::IsEddsBuffer(imageBytes.data(), imageBytes.size()))
+    {
+        why = "'" + texturePath + "' is not an .edds";
+        return {};
+    }
+    const Poseidon::EddsImage edds = Poseidon::ReadEddsBuffer(imageBytes.data(), imageBytes.size());
+    if (!edds.valid() || edds.mipmaps.empty())
+    {
+        why = edds.error.empty() ? std::string("no mip levels") : edds.error;
+        return {};
+    }
+    // The largest level at or below 256 px, so a ground layer costs a quarter of a
+    // megabyte rather than sixteen.
+    size_t level = 0;
+    for (size_t i = 0; i < edds.mipmaps.size(); ++i)
+    {
+        level = i;
+        if (edds.mipmaps[i].width <= 256 && edds.mipmaps[i].height <= 256)
+            break;
+    }
+    const auto& mip = edds.mipmaps[level];
+    if (mip.width <= 0 || mip.height <= 0 || mip.data.empty())
+    {
+        why = "empty mip";
+        return {};
+    }
+    std::vector<uint8_t> rgba(static_cast<size_t>(mip.width) * static_cast<size_t>(mip.height) * 4);
+    if (!Poseidon::ConvertPixels(mip.data.data(), rgba.data(), mip.width, mip.height, edds.format,
+                                 Poseidon::PixelFormat::RGBA8888))
+    {
+        why = "cannot convert the pixel format";
+        return {};
+    }
+    if (edds.format == Poseidon::PixelFormat::ARGB8888)
+    {
+        // The reader hands ARGB8888 back as B,G,R,A and the swap is the caller's, the
+        // same way Image::FromFile does it. Getting this wrong is a blue island.
+        for (size_t i = 0; i + 2 < rgba.size(); i += 4)
+            std::swap(rgba[i], rgba[i + 2]);
+    }
+
+    AbstractTextBank* bank = Poseidon::GEngine != nullptr ? Poseidon::GEngine->TextBank() : nullptr;
+    if (bank == nullptr)
+    {
+        why = "no texture bank";
+        return {};
+    }
+    Ref<Texture> texture =
+        bank->CreateDynamic(mip.width, mip.height, rgba.data(), static_cast<uint32_t>(rgba.size()), false);
+    if (!texture)
+    {
+        why = "CreateDynamic refused";
+        return {};
+    }
+    return texture;
 }
 
 /// The assembled Enfusion heightfield, still in raw units.
@@ -368,8 +499,28 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     const int paletteSize = std::max<int>(1, static_cast<int>(d.materials.size()));
     _texture.Resize(paletteSize);
     _a3TerrainMaterials.Resize(paletteSize);
+    int bound = 0;
+    std::string firstFailure;
     for (int i = 0; i < paletteSize; ++i)
+    {
+        // Zeroed for EVERY entry including the failures: surfaceCount == 0 is what
+        // selects the legacy single-texture branch in the terrain shader, and a
+        // half-filled record flips the whole world onto the paged authored path,
+        // which needs a real satellite and mask to look like anything.
         _a3TerrainMaterials[i] = A3TerrainMaterial{};
+        // offsetUV has NO initialiser in TextureInfo, unlike its sibling array, so
+        // this is a must-fill rather than a default. True = tile the layer; false
+        // clamps one image onto each 50 m cell.
+        _texture[i].offsetUV = true;
+        if (static_cast<size_t>(i) >= d.materials.size())
+            continue;
+        std::string why;
+        _texture[i].texture = ResolveSurfaceTexture(EnfusionMount::Instance(), d.materials[i], why);
+        if (_texture[i].texture)
+            ++bound;
+        else if (firstFailure.empty())
+            firstFailure = d.materials[i] + ": " + why;
+    }
 
     {
         // Say what came out, with a denominator. "Surfaces loaded" is not a claim
@@ -388,6 +539,8 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
             top += (top.empty() ? "" : ", ") + std::to_string(ranked[i].second) + "=" +
                    std::to_string(ranked[i].first * 100 / cells) + "% " + name;
         }
+        LOG_INFO(World, "Enfusion native load: {} of {} palette entries bound a colour{}", bound, paletteSize,
+                 firstFailure.empty() ? std::string() : ("; first failure: " + firstFailure));
         LOG_INFO(World,
                  "Enfusion native load: surfaces {} of {} palette entries used over {} land cells "
                  "({} sub-cells, {} failed{}); commonest: {}",
