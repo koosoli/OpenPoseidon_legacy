@@ -1,0 +1,54 @@
+// GI acceptance pose (REN-GI-006): deep shade beside a sunlit wall at 17:00. Same placed
+// farmhouse; the player stands 12 m EAST of it, in its evening shadow, looking back at the wall: a room WITH A WINDOW. The enterable farmhouse (Dum09,
+// \O\Hous\zluty_statek_in) is PLACED BY THIS MISSION on the open hill at Everon 7050 / 6500,
+// with the player standing in its centre. Placing it rather than hunting one in the world is
+// deliberate: the remaster's Everon does not use the object coordinates Noe.pbo's WRP lists,
+// so a pose keyed to those coordinates cannot be reproduced.
+version=11;
+class Mission
+{
+	addOns[]={"bis_resistance"};
+	addOnsAuto[]={"bis_resistance"};
+	randomSeed=1234;
+	class Intel { year=1985; month=6; day=21; hour=17; minute=0; };
+	class Groups
+	{
+		items=1;
+		class Item0
+		{
+			side="WEST";
+			class Vehicles
+			{
+				items=1;
+				class Item0
+				{
+					position[]={7062.0,0.0,6500.0};
+					azimut=270.0;
+					id=0;
+					side="WEST";
+					vehicle="SoldierWB";
+					player="PLAYER COMMANDER";
+					leader=1;
+					skill=1.0;
+				};
+			};
+		};
+	};
+	class Vehicles
+	{
+		items=1;
+		class Item0
+		{
+			position[]={7050.0,0.0,6500.0};
+			azimut=0.0;
+			id=1;
+			side="EMPTY";
+			vehicle="Dum09";
+			skill=1.0;
+		};
+	};
+	class Markers { items=0; };
+};
+class Intro { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroWin { class Groups { items=0; }; class Markers { items=0; }; };
+class OutroLoose { class Groups { items=0; }; class Markers { items=0; }; };
