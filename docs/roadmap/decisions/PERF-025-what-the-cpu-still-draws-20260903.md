@@ -28,8 +28,28 @@ frames (1/frame)" — the frame counter was incremented in the per-draw path. It
 | `mc vojakw2/e2` | ~170 | map/corpse markers |
 | the remaining 27 models | the rest | |
 
-**Footprints are 60% of the CPU complement.** Two models, 2,572 draw calls a frame, each a
-small quad. Roads are the next 27%.
+**Footprints are 60% of the CPU complement.** Two models, 2,572 classified objects a frame,
+each a small quad. Roads are the next 27%.
+
+**Which counting point is which** — three numbers on the same frame, and only one of them is a
+draw call:
+
+| number | where it is counted | Everon `perf_combat` |
+|---|---|---:|
+| `coverage none` / this census | `Scene::ObjectForDrawing`, per object classified | 3,736 / 4,105 |
+| `direct_calls` (renderer) | the CPU-replayed `Draw3D` ops the worker records | **3,566** |
+| `submit counts: objDraws` | the `_drawMergers` submit path only | 270 |
+
+The submit-path counter is small because marks and roads never enter `_drawMergers`; they are
+drawn from the landscape/mark path, which is also why the instanced-run batching there reports
+`runs=0` for them and its veto counters barely move. The draw-call number to quote is
+`direct_calls`: **3,566 CPU draw calls a frame**, and PERF-024 measured recording them at 6.6 ms.
+
+## Where the footprints come from
+
+`SoldierOldMove` spawns a `Mark` entity per footfall with a **10 second** life
+(`GScene->Preloaded(FootStepL/R)`, radius 0.25 m, added to the world's animal list). With ~190
+soldiers walking, a few thousand are alive at any moment, and each is one object and one draw.
 
 Both are `Offset::Decal` — OnSurface geometry, which is deliberately excluded from the
 prepassed and GPU-driven paths (REN-OBJ's `prepassed()` and the road pixel-conform work), so
@@ -39,7 +59,10 @@ they will not join the retained set by accident.
 
 One instanced draw per decal model instead of one draw per decal. They share a model, a
 material and a pipeline; only the transform differs, which is exactly what an instanced run is
-for. A cap on live footprints would also work but changes what the player sees; batching does
-not.
+for. The existing run batcher cannot do it for two reasons, both to be dealt with: it vetoes
+`Routing::OnSurface` outright, and marks do not pass through it at all.
+
+Two cheaper alternatives change what the player sees and are therefore the owner's call, not
+mine: a cap on live marks, and a shorter life than 10 s.
 
 Nothing here changes what the game draws: this decision adds the census only.
