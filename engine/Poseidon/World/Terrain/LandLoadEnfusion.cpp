@@ -417,7 +417,21 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     // matching what the converting exporter emits, so a native frame and a converted
     // one are the same resolution and can be compared directly.
     const int terrainRange = 2048;
-    const int landRange = 256;
+    // RFG-009: 1024 land cells, not 256. The surface index is ONE material per land
+    // cell, so a 50 m cell paints fifty metres of ground with whichever material sat
+    // under its centre -- visible as square patches from the air. 12.5 m is four times
+    // finer in each axis and still an exact divisor of the terrain grid.
+    // POSEIDON_REFORGER_LAND_CELLS overrides it for an A/B.
+    static const int landRange = []
+    {
+        const char* v = std::getenv("POSEIDON_REFORGER_LAND_CELLS");
+        const int wanted = (v != nullptr && *v != 0) ? std::atoi(v) : 1024;
+        // Must divide the terrain grid exactly and be a power of two.
+        for (int candidate : {2048, 1024, 512, 256, 128})
+            if (wanted >= candidate)
+                return candidate;
+        return 256;
+    }();
     const float terrainGrid = extent / static_cast<float>(terrainRange);
     const float landGrid = extent / static_cast<float>(landRange);
 
