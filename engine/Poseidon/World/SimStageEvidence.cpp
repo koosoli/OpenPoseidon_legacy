@@ -172,7 +172,8 @@ std::vector<SimEvidence> BuildEvidence()
     t.push_back(Make(SimStage::Vehicles, SimResource::VehicleState, true, "Entity integration, the point of the stage.",
                      {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
                       {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
                       {"World/Entities/Vehicles/Ground/Car.cpp", "void Car::Simulate(", "SimulateUnits(deltaT)"},
                       {"World/Entities/Vehicles/TransportCore.cpp", "bool Transport::SimulateUnits(",
                        "_fire.SetTarget(gunnerUnit,"}}));
@@ -181,7 +182,8 @@ std::vector<SimEvidence> BuildEvidence()
         SimStage::Vehicles, SimResource::AIState, false, "A gunner consults what its unit knows.",
         {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
          {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-         {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+         {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
          {"World/Entities/Vehicles/Ground/Car.cpp", "void Car::Simulate(", "SimulateUnits(deltaT)"},
          {"World/Entities/Vehicles/TransportCore.cpp", "bool Transport::SimulateUnits(", "IsKnownBy(gunnerUnit)"}}));
 
@@ -192,7 +194,8 @@ std::vector<SimEvidence> BuildEvidence()
                      "the AI stage does.",
                      {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
                       {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
                       {"World/Entities/Vehicles/Ground/Car.cpp", "void Car::Simulate(", "SimulateUnits(deltaT)"},
                       {"World/Entities/Vehicles/TransportCore.cpp", "bool Transport::SimulateUnits(",
                        "WhatFireResult(result, *_fire._fireTarget, _currentWeapon, timeToLive)"},
@@ -208,7 +211,8 @@ std::vector<SimEvidence> BuildEvidence()
                      "solver steps -- so a barrel is always one tick behind.",
                      {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
                       {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
                       {"World/Scene/Thing.cpp", "void Thing::Simulate(", "LooseObjects::Step(*this, _physicsBody)"},
                       {"World/Physics/LooseObjects.cpp", "bool Step(Entity& thing, Physics::BodyId& body)",
                        "world->GetBodyMotion(body, motion)"}}));
@@ -218,7 +222,8 @@ std::vector<SimEvidence> BuildEvidence()
                      "vehicle stage.",
                      {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
                       {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
                       {"World/Scene/Thing.cpp", "void Thing::Simulate(", "LooseObjects::Step(*this, _physicsBody)"},
                       {"World/Physics/LooseObjects.cpp", "bool Step(Entity& thing, Physics::BodyId& body)",
                        "world->SpawnModelProbe("}}));
@@ -230,21 +235,24 @@ std::vector<SimEvidence> BuildEvidence()
              "stage is not the only place scripts run in a tick.",
              {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
               {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-              {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+              {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
               {"World/Entities/Weapons/Shots.cpp", "void IlluminatingShell::Simulate(", "GWorld->AddScript(script)"}}));
 
     t.push_back(
         Make(SimStage::Vehicles, SimResource::ScriptState, false, "…and runs them, there and then.",
              {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
               {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-              {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+              {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
               {"World/Entities/Weapons/Shots.cpp", "void IlluminatingShell::Simulate(", "GWorld->SimulateScripts()"},
               {kWorldSetup, kSimScripts, "->OnSimulate()"}}));
 
     t.push_back(Make(SimStage::Vehicles, SimResource::VehicleState, false, "Integration reads before it writes.",
                      {{kWorldImpl, kSimAllVehicles, "SimulateVehicles("},
                       {kWorldImpl, "void World::SimulateVehicles(", "SimulateOnly(_vehicles,"},
-                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "(vehicle->*simul)(", true},
+                      {kWorldSetup, "void World::SimulateOnly(VehicleList& vehicles", "SimulateTimed(vehicle,"},
+         {kWorldSetup, "static void SimulateTimed(", "(vehicle->*simul)(", true},
                       {"World/Scene/Thing.cpp", "void Thing::Simulate(", "LooseObjects::Step(*this, _physicsBody)"},
                       {"World/Physics/LooseObjects.cpp", "bool Step(Entity& thing, Physics::BodyId& body)",
                        "thing.SetPosition(motion.position)"}}));
