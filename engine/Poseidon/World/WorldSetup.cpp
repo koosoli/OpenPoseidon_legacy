@@ -519,7 +519,16 @@ void World::MoveOutAndDelete(VehicleList& vehicles, float deltaT, bool applyMove
         {
             vehicle->UnloadSound();
             vehicle->ResetConvertToObject();
+            // PERF-031: take it OUT of the landscape index before its type changes and
+            // put it back after. The cell keeps a per-type count now, and this is the
+            // only place in the engine that would mutate an indexed object's type --
+            // the two branches above already remove before they change anything, and
+            // this one did not. (`SetConvertToObject` has no callers today, so this is
+            // pre-emptive: the assert in ChangeTypeVehicleCount would have caught it,
+            // but only in a debug build, and only once somebody added that caller.)
+            _scene.GetLandscape()->RemoveObject(vehicle);
             vehicle->SetType(Primary);
+            _scene.GetLandscape()->AddObject(vehicle);
             RemoveSensor(vehicle);
             vehicles.Delete(i);
         }

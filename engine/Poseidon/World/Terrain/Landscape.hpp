@@ -106,16 +106,25 @@ class ObjectListFull : public SmallArray<Ref<Object>>
     Vector3 _bCenter; // bounding sphere of static objects
     float _bRadius;
     int _nNonStatic;
+    /// PERF-031: how many entries are `TypeVehicle`. `PredictCollision` skips a cell with
+    /// none, which is the filter its own loop applies anyway -- and which `_nNonStatic`
+    /// stopped approximating the day footprints started living in these cells: a `Mark` is
+    /// non-static, so a cell that gained decals lost the skip and was then walked in full,
+    /// static objects included.
+    int _nTypeVehicle;
 
   private:
     int CountNonStatic() const;
+    int CountTypeVehicle() const;
 
   public:
     ObjectListFull(int x, int z);
     ~ObjectListFull();
 
     int GetNonStaticCount() const { return _nNonStatic; }
+    int GetTypeVehicleCount() const { return _nTypeVehicle; }
     void ChangeNonStaticCount(int val);
+    void ChangeTypeVehicleCount(int val);
     void StaticChanged(); // recalculate what is neccessary
     void SetBSphere(Vector3Par center, float radius);
     void SetBSphere(int x, int z);

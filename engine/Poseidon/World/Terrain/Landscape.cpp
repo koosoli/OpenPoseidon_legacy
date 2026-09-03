@@ -2852,6 +2852,31 @@ int ObjectListFull::CountNonStatic() const
     return ret;
 }
 
+int ObjectListFull::CountTypeVehicle() const
+{
+    int ret = 0;
+    const int n = Size();
+    for (int i = 0; i < n; i++)
+    {
+        if (Get(i)->GetType() == TypeVehicle)
+        {
+            ret++;
+        }
+    }
+    return ret;
+}
+
+void ObjectListFull::ChangeTypeVehicleCount(int val)
+{
+    _nTypeVehicle += val;
+    // Same debug-only self-check as the non-static counter below, and for the same
+    // reason: the invariant this leans on is "an object's type does not change while
+    // it is in a cell". That holds today -- the one site that would break it,
+    // `World::MoveOutAndDelete`'s convert-to-object branch, now removes and re-adds
+    // around the change -- and this assert is what says so on every debug run.
+    PoseidonAssert(CountTypeVehicle() == _nTypeVehicle);
+}
+
 void ObjectListFull::ChangeNonStaticCount(int val)
 {
     _nNonStatic += val;
@@ -2939,6 +2964,10 @@ int ObjectListFull::Add(Object* object, bool avoidRecalculation)
     {
         ChangeNonStaticCount(+1);
     }
+    if (object->GetType() == TypeVehicle)
+    {
+        ChangeTypeVehicleCount(+1);
+    }
     return index;
 }
 
@@ -2946,6 +2975,7 @@ void ObjectListFull::Delete(int index)
 {
     Object* obj = Get(index);
     bool isStatic = obj->Static();
+    const bool isVehicle = obj->GetType() == TypeVehicle;
     // Removing a static object can only shrink the sphere, and only if that object is
     // the one holding the current bound up. Anything strictly inside leaves
     // max(50, max term) untouched, so the rescan can be skipped outright.
@@ -2962,18 +2992,23 @@ void ObjectListFull::Delete(int index)
     {
         ChangeNonStaticCount(-1);
     }
+    if (isVehicle)
+    {
+        ChangeTypeVehicleCount(-1);
+    }
 }
 
 void ObjectListFull::Clear()
 {
     base::Clear();
     _nNonStatic = 0;
+    _nTypeVehicle = 0;
     // Same rescan as ChangeNonStaticCount - debug-only self-check. (After base::Clear()
     // the list is empty, so the scan can only ever agree.)
     PoseidonAssert(CountNonStatic() == _nNonStatic);
 }
 
-ObjectListFull::ObjectListFull(int x, int z) : _bRadius(1e10), _nNonStatic(0)
+ObjectListFull::ObjectListFull(int x, int z) : _bRadius(1e10), _nNonStatic(0), _nTypeVehicle(0)
 {
     SetBSphere(x, z);
 }

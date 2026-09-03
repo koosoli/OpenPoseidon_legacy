@@ -1390,7 +1390,11 @@ void Landscape::PredictCollision(VehicleCollisionBuffer& ret, const Vehicle* veh
         for (int z = zMin; z <= zMax; z++)
         {
             const ObjectListFull* list = _objects(x, z).GetList();
-            if (!list || list->GetNonStaticCount() <= 0)
+            // PERF-031: the loop below rejects everything that is not `TypeVehicle`
+            // (see the `GetType()` test a few lines down), so ask for exactly that.
+            // `GetNonStaticCount()` used to be a fair proxy; footprint decals are
+            // non-static too, so a cell holding them lost this skip entirely.
+            if (!list || list->GetTypeVehicleCount() <= 0)
             {
                 continue; // no vehicles in this list
             }
