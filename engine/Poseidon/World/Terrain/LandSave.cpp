@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <Poseidon/Core/Application.hpp>
 
 #include <chrono>
@@ -301,6 +302,21 @@ int Landscape::LoadData(const char* name, float landGrid)
     if (!override.empty())
     {
         Log("--test-world: loading %s instead of %s", override.c_str(), name);
+        // RFG-005: a DIRECTORY means an Enfusion install to load natively rather than
+        // a world file to parse. Unambiguous -- `LoadOprwModern` would fail on a
+        // directory anyway -- and it costs no new command-line option.
+        std::error_code enfusionEc;
+        if (std::filesystem::is_directory(override, enfusionEc))
+        {
+            if (LoadEnfusionNative(override.c_str()))
+            {
+                LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);
+                return LSOK;
+            }
+            Poseidon::Foundation::ErrorMessage("Cannot load --test-world '%s' as an Enfusion install",
+                                               override.c_str());
+            return LSUnknownError;
+        }
         if (LoadOprwModern(override.c_str()))
         {
             LOG_DEBUG(World, "Landscape::LoadData time {}", Poseidon::Foundation::GlobalTickCount() - start);

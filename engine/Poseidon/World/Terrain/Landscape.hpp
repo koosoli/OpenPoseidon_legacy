@@ -903,6 +903,12 @@ class Landscape : public SerializeClass
     // Loads modern OPRW worlds while preserving their authored coarse land grid
     // and fine elevation grid. See LandSave.cpp for the ownership split.
     bool LoadOprwModern(const char* path);
+    /// RFG-005: load an Enfusion (Arma Reforger) world straight out of the installed
+    /// game's `.pak` archives -- no conversion, no intermediate file. `addonsDir` is
+    /// the game's `addons` directory; `POSEIDON_REFORGER_WORLD` picks the world
+    /// (default `worlds/eden`, which is Everon). Terrain only so far; see
+    /// LandLoadEnfusion.cpp for what is deliberately absent.
+    bool LoadEnfusionNative(const char* addonsDir);
     // No-op for legacy worlds. Called by the WGPU terrain path once the live
     // camera exists; updates only when the camera crosses a small cell block.
     void UpdateModernObjectResidency(Vector3Par cameraPosition);
