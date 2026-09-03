@@ -43,6 +43,8 @@ struct GiParamsGpu {
 #[derive(Clone, Copy, Debug)]
 pub struct GiSettings {
     pub enabled: bool,
+    /// 0 = six-face ambient cube (shipped), 1 = first-order SH. See `basis_from_env`.
+    pub basis: u32,
     pub debug: bool,
     pub rays: u32,
     pub weight: f32,
@@ -62,6 +64,7 @@ impl Default for GiSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            basis: basis_from_env(),
             debug: false,
             rays: 24,
             weight: 1.0,
@@ -96,6 +99,20 @@ impl GiSettings {
         self.rsm_radius = p.rsm_radius.clamp(1.0, 40.0);
         self.rsm_gain = p.rsm_gain.max(0.0);
     }
+}
+
+/// `WGR_GI_BASIS=sh` (or `1`) stores probe radiance as first-order spherical harmonics instead
+/// of the six-face ambient cube. REN-GI-007 measured why this exists: a cube reconstructs
+/// irradiance as the sum of E(face) * n(component)^2, so a bounce arriving from below lands in
+/// the down face and a horizontal normal multiplies it by ~0. SH-1 carries the direction
+/// linearly, so a partly-horizontal arrival keeps its horizontal part. `cube` (the default) is
+/// the shipped basis until this is measured on both poses.
+pub fn basis_from_env() -> u32 {
+    static B: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *B.get_or_init(|| match std::env::var("WGR_GI_BASIS").as_deref() {
+        Ok("sh") | Ok("sh1") | Ok("1") => 1,
+        _ => 0,
+    })
 }
 
 /// `WGR_GI_RSM_ISO=1` — see the `rsm_meta` comment. Diagnostic, not a shipping path.
@@ -506,7 +523,7 @@ impl GiProbes {
                 2.0 * RSM_EXTENT / RSM_RES as f32,
                 RSM_RES as f32,
                 if rsm_iso() { 1.0 } else { 0.0 },
-                0.0,
+                self.settings.basis as f32,
             ],
         };
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&params));

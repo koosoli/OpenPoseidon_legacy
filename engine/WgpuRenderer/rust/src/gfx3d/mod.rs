@@ -6505,7 +6505,9 @@ impl Gfx3d {
                     if gs.enabled { 1.0f32 } else { 0.0 },
                     gs.weight,
                     gs.interior_mix,
-                    if gs.debug { 1.0 } else { 0.0 },
+                    // REN-GI-008: the basis the gather must reconstruct with. This lane used to
+                    // carry `gs.debug`, which no shader ever read.
+                    gs.basis as f32,
                 ];
                 let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
                 queue.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_lane));

@@ -45,7 +45,8 @@ struct GiParams {
     rsm_vp: mat4x4<f32>,      // ABSOLUTE world -> sun proxy clip (ortho)
     rsm_inv_vp: mat4x4<f32>,  // sun proxy clip -> absolute world
     rsm: vec4<f32>,           // x = gather radius (m), y = samples, z = gain, w = valid (0/1)
-    rsm_meta: vec4<f32>,      // x = texel size (m), y = resolution, z,w = unused
+    rsm_meta: vec4<f32>,      // x = texel size (m), y = resolution, z = RSM iso ablation,
+                              // w = BASIS: 0 ambient cube, 1 first-order SH (REN-GI-008)
 };
 @group(2) @binding(0) var<uniform> gi: GiParams;
 // Twelve vec4 per probe: 0..5 irradiance/pi for +X -X +Y -Y +Z -Z (.a of entry 0 = 1 once
@@ -236,6 +237,14 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     var r0 = 0.0; var r1 = 0.0; var r2 = 0.0; var r3 = 0.0; var r4 = 0.0; var r5 = 0.0;
     var q0 = 0.0; var q1 = 0.0; var q2 = 0.0; var q3 = 0.0; var q4 = 0.0; var q5 = 0.0;
     var c0 = 0.0; var c1 = 0.0; var c2 = 0.0; var c3 = 0.0; var c4 = 0.0; var c5 = 0.0;
+    // REN-GI-008: first-order SH of the same radiance field, accumulated alongside the cube so
+    // one dispatch can feed either basis. Four coefficients (L0 and the three L1) x RGB, as
+    // twelve plain scalars -- a local array of vectors is the naga trap this file already
+    // documents. L1 is indexed y, z, x to match the usual Y1-1 / Y10 / Y11 order.
+    var s0r = 0.0; var s0g = 0.0; var s0b = 0.0;
+    var syr = 0.0; var syg = 0.0; var syb = 0.0;
+    var szr = 0.0; var szg = 0.0; var szb = 0.0;
+    var sxr = 0.0; var sxg = 0.0; var sxb = 0.0;
     let w = 4.0 * PI / f32(k);
     for (var i = 0u; i < k; i++) {
         let d = fib_dir(i, k, rot);
@@ -273,6 +282,13 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
         c3 += wy1;
         c4 += wz0;
         c5 += wz1;
+        // SH projection of the same sample: L_i += L(d) * Y_i(d) * dOmega, dOmega already in l.
+        let y0 = 0.2820948;
+        let y1 = 0.4886025;
+        s0r += l.r * y0; s0g += l.g * y0; s0b += l.b * y0;
+        syr += l.r * y1 * d.y; syg += l.g * y1 * d.y; syb += l.b * y1 * d.y;
+        szr += l.r * y1 * d.z; szg += l.g * y1 * d.z; szb += l.b * y1 * d.z;
+        sxr += l.r * y1 * d.x; sxg += l.g * y1 * d.x; sxb += l.b * y1 * d.x;
     }
 
     // REN-GI-002: the first sun bounce from the sun proxy. Each sample is a sunlit surface
@@ -316,6 +332,15 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // Radiance only: the moments describe the GEOMETRY the rays met, and a
                 // gathered bounce is not a ray hit.
                 let back = -dir; // direction from the probe toward the sample
+                // Same sample into the SH accumulators. This is the whole point of REN-GI-008:
+                // an arrival that is partly horizontal keeps its horizontal part here, where a
+                // six-face cube folds it onto whichever face dominates (REN-GI-007).
+                let ry0 = 0.2820948;
+                let ry1 = 0.4886025;
+                s0r += l.r * ry0; s0g += l.g * ry0; s0b += l.b * ry0;
+                syr += l.r * ry1 * back.y; syg += l.g * ry1 * back.y; syb += l.b * ry1 * back.y;
+                szr += l.r * ry1 * back.z; szg += l.g * ry1 * back.z; szb += l.b * ry1 * back.z;
+                sxr += l.r * ry1 * back.x; sxg += l.g * ry1 * back.x; sxb += l.b * ry1 * back.x;
                 if (gi.rsm_meta.z > 0.5) {
                     // REN-GI-007 ablation: same energy, spread over every face. If a shaded
                     // wall lifts under this and not under the directional store, the bounce
@@ -340,12 +365,24 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (had < 0.5 || gi.reset.x > 0.5) {
         alpha = 1.0;
     }
-    store_face(base, 0u, e0 / PI, alpha, px, py, pz, ny);
-    store_face(base, 1u, e1 / PI, alpha, px, py, pz, ny);
-    store_face(base, 2u, e2 / PI, alpha, px, py, pz, ny);
-    store_face(base, 3u, e3 / PI, alpha, px, py, pz, ny);
-    store_face(base, 4u, e4 / PI, alpha, px, py, pz, ny);
-    store_face(base, 5u, e5 / PI, alpha, px, py, pz, ny);
+    if (gi.rsm_meta.w > 0.5) {
+        // REN-GI-008: slabs 0..3 carry L0 and the three L1 coefficients; 4 and 5 are cleared so
+        // a stale cube left in them cannot be read by mistake. The layout, the texture and the
+        // bind group are unchanged -- only what the first four slabs MEAN.
+        store_face(base, 0u, vec3<f32>(s0r, s0g, s0b), alpha, px, py, pz, ny);
+        store_face(base, 1u, vec3<f32>(syr, syg, syb), alpha, px, py, pz, ny);
+        store_face(base, 2u, vec3<f32>(szr, szg, szb), alpha, px, py, pz, ny);
+        store_face(base, 3u, vec3<f32>(sxr, sxg, sxb), alpha, px, py, pz, ny);
+        store_face(base, 4u, vec3<f32>(0.0), 1.0, px, py, pz, ny);
+        store_face(base, 5u, vec3<f32>(0.0), 1.0, px, py, pz, ny);
+    } else {
+        store_face(base, 0u, e0 / PI, alpha, px, py, pz, ny);
+        store_face(base, 1u, e1 / PI, alpha, px, py, pz, ny);
+        store_face(base, 2u, e2 / PI, alpha, px, py, pz, ny);
+        store_face(base, 3u, e3 / PI, alpha, px, py, pz, ny);
+        store_face(base, 4u, e4 / PI, alpha, px, py, pz, ny);
+        store_face(base, 5u, e5 / PI, alpha, px, py, pz, ny);
+    }
     store_moments(base, 0u, r0 / max(c0, 1e-4), q0 / max(c0, 1e-4), alpha, px, py, pz, ny);
     store_moments(base, 1u, r1 / max(c1, 1e-4), q1 / max(c1, 1e-4), alpha, px, py, pz, ny);
     store_moments(base, 2u, r2 / max(c2, 1e-4), q2 / max(c2, 1e-4), alpha, px, py, pz, ny);

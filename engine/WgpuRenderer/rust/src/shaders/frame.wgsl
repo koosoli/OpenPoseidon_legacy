@@ -969,10 +969,24 @@ fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
         let dd = max(dist - m.x, 0.0);
         let cheb = variance / (variance + dd * dd);
         wt = wt * clamp(cheb * cheb * cheb, 0.0, 1.0);
-        let ex = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fx * iny, pi.z), 0).rgb;
-        let ey = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fy * iny, pi.z), 0).rgb;
-        let ez = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fz * iny, pi.z), 0).rgb;
-        sum += (ex * n2.x + ey * n2.y + ez * n2.z) * wt;
+        if (frame.gi.w > 0.5) {
+            // REN-GI-008: first-order SH. Slabs 0..3 hold L0 and the three L1 (y, z, x).
+            // Irradiance/pi for normal n is A0/pi * Y0 * L0 + A1/pi * Y1 * dot(L1, n), with
+            // A0 = pi and A1 = 2pi/3 -- the two constants below. Unlike the ambient cube this
+            // cannot return zero for a normal merely because six faces could not hold the
+            // arrival direction, which is what REN-GI-007 measured.
+            let l0 = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y, pi.z), 0).rgb;
+            let ly = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + iny, pi.z), 0).rgb;
+            let lz = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 2 * iny, pi.z), 0).rgb;
+            let lx = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 3 * iny, pi.z), 0).rgb;
+            let e = l0 * 0.2820948 + (ly * n.y + lz * n.z + lx * n.x) * 0.3257350;
+            sum += max(e, vec3<f32>(0.0)) * wt;
+        } else {
+            let ex = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fx * iny, pi.z), 0).rgb;
+            let ey = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fy * iny, pi.z), 0).rgb;
+            let ez = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + fz * iny, pi.z), 0).rgb;
+            sum += (ex * n2.x + ey * n2.y + ez * n2.z) * wt;
+        }
         wsum += wt;
     }
     if (wsum <= 1e-5) {
