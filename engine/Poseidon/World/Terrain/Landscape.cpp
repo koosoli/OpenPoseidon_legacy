@@ -1777,6 +1777,22 @@ float Landscape::RoadSurfaceY(float xC, float zC, float* dX, float* dZ, Texture*
     int xMin, xMax, zMin, zMax;
     Vector3 pos(xC, 0, zC);
     ObjRadiusRectangle(xMin, xMax, zMin, zMax, pos, pos, 0);
+    // PERF-028 ABLATION, off by default: skip the road scan entirely and return the
+    // bare terrain height. It removes roads from under everyone's feet, so it is a
+    // measurement arm and nothing else -- it answers "what is the whole scan worth"
+    // before anyone rebuilds the cell index to make it cheaper.
+    static const bool skipRoadScan = []
+    {
+        const char* v = std::getenv("POSEIDON_ABLATE_ROAD_SURFACE");
+        return v != nullptr && v[0] == '1';
+    }();
+    if (skipRoadScan)
+    {
+        if (dX) { *dX = sdX; }
+        if (dZ) { *dZ = sdZ; }
+        if (texture) { *texture = surfTexture; }
+        return landY;
+    }
     // prepare return variables
     float maxY = -1e10;
     float maxDX = 0, maxDZ = 0;
