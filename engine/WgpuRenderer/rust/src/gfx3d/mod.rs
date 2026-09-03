@@ -206,14 +206,16 @@ pub(crate) fn count_fragments() -> f32 {
     })
 }
 
-// REN-OBJ-004: WGR_OBJECT_EARLY_Z=1 makes the prepassed colour pipelines (both families) test
-// depth before the fragment shader runs. Off by default until measured; inert on a device
-// without SHADER_EARLY_DEPTH_TEST, where the early entries are not compiled at all.
+// REN-OBJ-004: the prepassed colour pipelines (both families) test depth before the fragment
+// shader runs. ON by default since 2026-09-03: Everon perf_combat, three alternating runs per
+// arm, Objects colour alpha-test 1.77 -> 0.29 ms, colour solid 0.37 -> 0.08, GPU frame
+// 22.4 -> 19.1, crops identical. WGR_OBJECT_EARLY_Z=0 restores the late test; inert on a
+// device without SHADER_EARLY_DEPTH_TEST, where the early entries are not compiled at all.
 pub(crate) fn object_early_z() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *V.get_or_init(|| {
         crate::shaders::early_depth_supported()
-            && std::env::var("WGR_OBJECT_EARLY_Z").map(|v| v.trim() == "1").unwrap_or(false)
+            && !std::env::var("WGR_OBJECT_EARLY_Z").map(|v| v.trim() == "0").unwrap_or(false)
     })
 }
 
