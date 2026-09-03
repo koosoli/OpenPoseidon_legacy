@@ -83,3 +83,11 @@ of `PendingRendererSettings`; far instances as a resource op; the texture slot l
 producer-side allocation (the uploader borrow pattern of REN-THR-009). When every traversal
 call is queued, the wait moves from `InitDraw` to publish and the window becomes the whole
 frame again — this time honestly. Row 3.10's work list carries it.
+
+## Addendum 2026-09-03 (PERF-021)
+
+The table above did not measure overlap against lockstep: it measured lockstep against
+lockstep. This change put `WaitRenderIdle()` at the top of `FlushPendingScreenshot()`, which
+NextFrame calls every frame right after publish, so the producer waited for the worker to
+finish every frame it handed over. The "overlap equals lockstep here" row was that wait, not
+the GPU. See PERF-021 for the instrument that showed it (worker idle per block) and the fix.

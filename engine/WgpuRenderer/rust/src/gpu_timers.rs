@@ -139,6 +139,15 @@ pub enum Region {
     SkyEnv = 60,    // the disc-free equirect sky reflection env map
     SkySh = 61,     // env map -> SH-9 diffuse sky irradiance
     SkyDraw = 62,   // the fullscreen sky pass itself
+    // --- Worker pacing (PERF-021). CPU-only rows: the GPU column stays n/a. FrameTotal
+    // deliberately excludes these; they are where the worker's period goes when the GPU is
+    // the bound. Acquire is the swapchain wait BEFORE this frame's encoder exists (recorded
+    // into the frame after begin_frame), present the call at the end.
+    WorkerAcquire = 63, // surface.get_current_texture(): blocked until an image is free
+    WorkerPresent = 64, // frame.present()
+    WorkerSetup = 65,   // render_frame entry -> begin_frame (uploads, drains, acquire included)
+    WorkerSubmit = 66,  // queue.submit of the frame encoder
+    WorkerHarvest = 67, // the non-blocking readback harvests after present
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -151,7 +160,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 63;
+pub const REGION_COUNT: usize = 68;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -167,11 +176,11 @@ enum SlotState {
     Idle,
     // Copied into by this frame's encoder; map_async is requested after submit.
     Pending {
-        written: u64,
+        written: u128,
     },
     // map_async requested; the channel resolves once the GPU copy completes.
     InFlight {
-        written: u64,
+        written: u128,
         rx: mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
     },
 }
@@ -191,7 +200,7 @@ struct Inner {
     // Nanoseconds per timestamp tick (Queue::get_timestamp_period).
     period: f32,
     // Bitmask of regions bracketed since begin_frame (Cell: written from `&self`).
-    written: Cell<u64>,
+    written: Cell<u128>,
     // Latest harvested per-region duration in ms; -1 = never measured (pass absent).
     latest_ms: [f32; REGION_COUNT],
 }
@@ -316,6 +325,14 @@ impl GpuTimers {
         }
     }
 
+    /// Record an already-measured CPU duration for `region`, accumulating like `cpu_end`. For
+    /// spans measured before this frame's `begin_frame` (the swapchain acquire).
+    pub fn cpu_record(&self, region: Region, ms: f32) {
+        let i = region as usize;
+        let prev = self.cpu_ms[i].get();
+        self.cpu_ms[i].set(if prev < 0.0 { ms } else { prev + ms });
+    }
+
     /// Copy the latest per-region CPU encode ms into `out` (-1 = not recorded this frame).
     /// Always available — unlike the GPU rows this needs no adapter feature.
     pub fn cpu_timings(&self, out: &mut [f32]) -> u32 {
@@ -351,7 +368,7 @@ impl GpuTimers {
             encoder.write_timestamp(&inner.query_set, region as u32 * 2 + 1);
             inner
                 .written
-                .set(inner.written.get() | (1u64 << region as u32));
+                .set(inner.written.get() | (1u128 << region as u32));
         }
     }
 
@@ -373,7 +390,7 @@ impl GpuTimers {
                 pass.write_timestamp(&inner.query_set, region as u32 * 2 + 1);
                 inner
                     .written
-                    .set(inner.written.get() | (1u64 << region as u32));
+                    .set(inner.written.get() | (1u128 << region as u32));
             }
         }
     }
@@ -403,7 +420,7 @@ impl GpuTimers {
         // "now" so the full-range resolve below only ever touches available queries;
         // harvest ignores these zero-duration dummies via the written mask.
         for region in 0..REGION_COUNT as u32 {
-            if written & (1u64 << region) == 0 {
+            if written & (1u128 << region) == 0 {
                 encoder.write_timestamp(&inner.query_set, region * 2);
                 encoder.write_timestamp(&inner.query_set, region * 2 + 1);
             }
@@ -444,7 +461,7 @@ impl GpuTimers {
                             u64::from_le_bytes(data[i * 8..i * 8 + 8].try_into().unwrap())
                         };
                         for region in 0..REGION_COUNT {
-                            if written & (1u64 << region) == 0 {
+                            if written & (1u128 << region) == 0 {
                                 // Report the latest completed frame, not the last historical
                                 // occurrence of each pass. Otherwise a skipped planar reflection
                                 // keeps advertising its old multi-millisecond cost indefinitely.
@@ -566,7 +583,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 63);
+        assert_eq!(REGION_COUNT, 68);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);
@@ -608,7 +625,7 @@ mod tests {
         // Every region's begin/end pair fits the query set.
         assert!(QUERY_COUNT as usize == REGION_COUNT * 2);
         // A u64 written mask covers all regions and leaves append-only room.
-        assert!(REGION_COUNT <= 64);
+        assert!(REGION_COUNT <= 128);
     }
 
     // A disabled timer (adapter without the features) must be a total no-op that

@@ -1384,7 +1384,14 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_SKY_ENV = 60,
     WGR_GPU_TIMER_SKY_SH = 61,
     WGR_GPU_TIMER_SKY_DRAW = 62,
-    WGR_GPU_TIMER_REGION_COUNT = 63,
+    /* Worker pacing (PERF-021): CPU-only rows, GPU column n/a. Outermost, and NOT part of
+       FRAME_TOTAL -- they are the worker's swapchain wait and its present call. */
+    WGR_GPU_TIMER_WORKER_ACQUIRE = 63,
+    WGR_GPU_TIMER_WORKER_PRESENT = 64,
+    WGR_GPU_TIMER_WORKER_SETUP = 65,
+    WGR_GPU_TIMER_WORKER_SUBMIT = 66,
+    WGR_GPU_TIMER_WORKER_HARVEST = 67,
+    WGR_GPU_TIMER_REGION_COUNT = 68,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.

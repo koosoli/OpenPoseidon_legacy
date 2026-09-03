@@ -2366,11 +2366,11 @@ void EngineWgpu::RunConsumerBlock(WgrFrame& frame, PushFrameBacking& backing, Fr
         // tell them apart.
         LOG_INFO(Graphics,
                  "Wgpu slow block: total={:.1f} ms | settings={:.1f} resources={:.1f} (ops={}) "
-                 "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={}",
+                 "drains={:.1f} hash={:.1f} render={:.1f} stats={:.1f} | d3d={} vert={} casters={} | idle_before={:.1f}",
                  _rtLastBusyMs, ms(blockStart, afterSettings), ms(afterSettings, afterResources),
                  q.resourceOps.size(), ms(afterResources, afterDrains), ms(afterDrains, afterHash),
                  ms(afterHash, afterRender), ms(afterRender, blockEnd), frame.draws3d.length,
-                 frame.verts.length, frame.shadow_casters.length);
+                 frame.verts.length, frame.shadow_casters.length, _rtLastIdleMs);
     }
 }
 
@@ -2518,6 +2518,7 @@ void EngineWgpu::RenderThreadMain()
     {
         WgrFrame* frame = nullptr;
         PushFrameBacking* backing = nullptr;
+        const auto idleStart = std::chrono::steady_clock::now();
         {
             std::unique_lock<std::mutex> lock(_renderMutex);
             _renderCv.wait(lock, [this] { return _renderHasWork || _renderQuit; });
@@ -2534,6 +2535,9 @@ void EngineWgpu::RenderThreadMain()
             _renderBacking = nullptr;
         }
         _renderCv.notify_one();
+        // PERF-021: how long the worker sat waiting for a frame before this block, so the
+        // slow-block line can say whether the worker is starved or the bottleneck.
+        _rtLastIdleMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - idleStart).count();
         // The slot is the worker's for the duration: the producer waits before reusing it.
         if (frame && backing && _renderBusySlot >= 0)
             RunConsumerBlock(*frame, *backing, _queueRing[_renderBusySlot]);
@@ -8588,6 +8592,11 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Sky: env map",                    // WGR_GPU_TIMER_SKY_ENV
         "Sky: SH irradiance",              // WGR_GPU_TIMER_SKY_SH
         "Sky: draw",                       // WGR_GPU_TIMER_SKY_DRAW
+        "Worker: swapchain acquire",       // WGR_GPU_TIMER_WORKER_ACQUIRE (CPU column only)
+        "Worker: present",                 // WGR_GPU_TIMER_WORKER_PRESENT (CPU column only)
+        "Worker: frame setup",             // WGR_GPU_TIMER_WORKER_SETUP (CPU column only)
+        "Worker: queue submit",            // WGR_GPU_TIMER_WORKER_SUBMIT (CPU column only)
+        "Worker: readback harvest",        // WGR_GPU_TIMER_WORKER_HARVEST (CPU column only)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -9270,9 +9279,21 @@ void EngineWgpu::Screenshot(RString filename)
 
 void EngineWgpu::FlushPendingScreenshot()
 {
-    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
+    // PERF-021: the wait belongs AFTER the pending check. This runs every frame from
+    // NextFrame, right after publish, and REN-THR-012 put the wait first -- so the producer
+    // blocked until the worker had finished the frame it had just been handed, every frame,
+    // and "overlap" was lockstep with extra steps (worker idle ~10 ms and the producer
+    // waiting ~7.5 ms per frame on perf_combat, both measured). WGR_FLUSH_WAIT_EAGER=1 keeps
+    // the old order for the A/B.
+    static const bool eager = [] {
+        const char* v = std::getenv("WGR_FLUSH_WAIT_EAGER");
+        return v != nullptr && v[0] == '1';
+    }();
+    if (eager)
+        WaitRenderIdle();
     if (!_renderer || _pendingScreenshotPath.GetLength() == 0)
         return;
+    WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
 
     uint32_t width = 0, height = 0;
     wgr_screenshot_take(_renderer, nullptr, 0, &width, &height);

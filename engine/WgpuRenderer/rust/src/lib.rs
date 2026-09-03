@@ -3265,6 +3265,7 @@ impl Renderer {
         water_batches: &[WgrWaterBatch],
         grass_batches: &[WgrGrassBatch],
     ) -> Result<(), String> {
+        let setup_t0 = std::time::Instant::now();
         // REN-THR-009 — before anything this frame reads `bake_bind_cache` or allocates
         // from the pool. This is the frame boundary a deferred mesh destroy waits for.
         self.drain_deferred_mesh_destroys();
@@ -3722,9 +3723,11 @@ impl Renderer {
             self.ensure_underwater_target(rw, rh);
         }
 
+        let acquire_t0 = std::time::Instant::now();
         let Some(frame) = self.acquire()? else {
             return Ok(());
         };
+        let acquire_ms = acquire_t0.elapsed().as_secs_f32() * 1.0e3;
         let screenshot_staging = if self.screenshot_requested {
             let width = self.config.width;
             let height = self.config.height;
@@ -3819,6 +3822,12 @@ impl Renderer {
         // resolved on a previous frame's encoder can be reused.
         self.far_depth_resolve_current = false;
         self.gpu_timers.begin_frame();
+        self.gpu_timers
+            .cpu_record(crate::gpu_timers::Region::WorkerAcquire, acquire_ms);
+        self.gpu_timers.cpu_record(
+            crate::gpu_timers::Region::WorkerSetup,
+            setup_t0.elapsed().as_secs_f32() * 1.0e3,
+        );
         self.direct_draws.set(DirectDrawStats::default());
         self.water_visibility.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
@@ -5554,7 +5563,11 @@ impl Renderer {
         self.gfx3d.resolve_object_stats(&mut encoder);
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerSubmit);
         self.queue.submit(std::iter::once(encoder.finish()));
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerSubmit);
         // Geometry-pool growth may have happened after an earlier pass recorded
         // the old pool buffer. Submission is the safe boundary for releasing
         // those superseded application-side handles; wgpu retains resources for
@@ -5570,7 +5583,11 @@ impl Renderer {
         // Load-time sky bakes are submitted without waiting; their readbacks complete
         // during polls/submissions and are drained here, 1-2 frames after registration.
         self.gfx3d.collect_sky_bakes(&self.device);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerPresent);
         frame.present();
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerPresent);
         // REN-TEMP-001E: this frame's camera becomes the previous frame's history.
         self.temporal.end_frame();
         if let Some((buffer, width, height, bytes_per_row, padded_bytes_per_row, is_bgra)) =
@@ -5615,11 +5632,15 @@ impl Renderer {
             }
             self.screenshot_requested = false;
         }
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerHarvest);
         self.gpu_timers.harvest(&self.device);
         self.gfx3d.harvest_object_stats(&self.device);
         self.gfx3d.harvest_mip_feedback(&self.device);
         self.water_visibility.harvest(&self.device);
         self.grass.harvest_stats(&self.device);
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerHarvest);
         Ok(())
     }
 

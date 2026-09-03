@@ -1283,6 +1283,7 @@ class EngineWgpu : public EngineDummy
     // producer (wait); read by the panel. Plain floats: they are a diagnostic and a torn
     // read costs a wrong pixel in a readout, not a wrong frame.
     double _rtLastBusyMs = 0.0;
+    double _rtLastIdleMs = 0.0; // PERF-021: worker idle time before the last block
     double _rtPreDrawWaitMs = 0.0; // WaitRenderIdle time this frame, folded into queueWaitMs
     // REN-THR-013 accounting: lazy window openings (AcquireProducerWindow that had to wait).
     double _rtLazyWaitMsAccum = 0.0;
