@@ -209,12 +209,25 @@ bool Man::AdvanceMoveQueue(float deltaT, float adjustSpeed, float& moveX, float&
                     {
                         Vector3 mPos = AnimatePoint(_shape->FindMemoryLevel(), index);
                         Vector3 pos = PositionModelToWorld(mPos);
-                        float timeToLive = 10;
+                        // PERF-025: how long a footprint lives. 10 s is the shipped value and
+                        // the default here; POSEIDON_MARK_TTL=<seconds> is the ABLATION arm --
+                        // with ~190 soldiers walking, marks are the largest single group of
+                        // CPU-drawn objects (2,572 of ~4,100 a frame), and this says what they
+                        // are worth before anyone builds a batcher for them. 0 spawns none.
+                        static const float markTtl = [] {
+                            const char* v = std::getenv("POSEIDON_MARK_TTL");
+                            if (v == nullptr || *v == 0)
+                                return 10.0f;
+                            const float t = std::strtof(v, nullptr);
+                            return t < 0.0f ? 10.0f : t;
+                        }();
+                        float timeToLive = markTtl;
                         float ys = GLandscape->SurfaceY(pos.X(), pos.Z());
                         float yr = GLandscape->RoadSurfaceYAboveWater(pos);
                         if (yr <= ys + 0.2f)
                         {
-                            LODShapeWithShadow* shape = GScene->Preloaded(left ? FootStepL : FootStepR);
+                            LODShapeWithShadow* shape =
+                                markTtl > 0.0f ? GScene->Preloaded(left ? FootStepL : FootStepR) : nullptr;
                             if (shape)
                             {
                                 Ref<Mark> mark = new Mark(shape, 0.25f, timeToLive);
