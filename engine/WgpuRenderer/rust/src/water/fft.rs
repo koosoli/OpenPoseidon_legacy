@@ -606,6 +606,25 @@ impl Fft {
             self.spectrum_dirty = true;
         }
     }
+    /// `WGR_WATER_FFT_CASCADES=<1..4>` caps how many spectrum cascades are live. Unset means
+    /// the preset decides, which is the shipped behaviour. Every FFT phase dispatches over the
+    /// live layers, so the cap scales the whole block (spectrum evolve, butterfly h+v, compose)
+    /// nearly linearly -- 1.36 ms of a 21.8 ms Everon `perf_combat` frame at four cascades,
+    /// for a sea strip on the horizon.
+    ///
+    /// It disables the cascade rather than skipping its dispatch, so the picture is honest:
+    /// a skipped dispatch would leave stale displacement in the array layer and the shader
+    /// would still read it.
+    fn cascade_cap() -> u32 {
+        static CAP: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+        *CAP.get_or_init(|| {
+            std::env::var("WGR_WATER_FFT_CASCADES")
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .map(|v| v.clamp(1, FFT_LAYERS))
+                .unwrap_or(FFT_LAYERS)
+        })
+    }
     pub fn set_cascade_config(
         &mut self,
         _device: &wgpu::Device,
@@ -613,6 +632,10 @@ impl Fft {
         index: u32,
         config: crate::ffi::WgrWaterCascadeConfig,
     ) {
+        let mut config = config;
+        if index >= Self::cascade_cap() {
+            config.enabled = 0;
+        }
         if let Some(slot) = self.cascade_configs.get_mut(index as usize) {
             if bytemuck::bytes_of(&*slot) == bytemuck::bytes_of(&config) {
                 return;

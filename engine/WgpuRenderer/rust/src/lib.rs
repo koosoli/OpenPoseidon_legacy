@@ -4029,6 +4029,7 @@ impl Renderer {
                         &planar.depth_sample_view,
                         planar.size.0,
                         planar.size.1,
+                        true, // REN-SKY-004: the reflection's own low-step cloud pipeline
                     );
                     let mut cloud_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_planar_reflection_cloud_composite"),
@@ -5294,6 +5295,7 @@ impl Renderer {
                         &depth_view,
                         self.render_size().0,
                         self.render_size().1,
+                        false,
                     );
                     self.gpu_timers.end(&mut encoder, TimerRegion::CloudMarch);
                     self.gpu_timers

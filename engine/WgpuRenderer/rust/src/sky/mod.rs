@@ -958,6 +958,8 @@ pub struct Sky {
     // the resolved scene depth via group(1)), then cloud_composite blends it over the lit scene.
     // cloud_lo resizes with the scene. Only used on the HDR (linear) path.
     cloud_pipeline: wgpu::RenderPipeline,
+    /// REN-SKY-004: the same march at a low step count, for the planar reflection only.
+    cloud_pipeline_reflection: wgpu::RenderPipeline,
     cloud_depth_layout: wgpu::BindGroupLayout,
     // PERF: a SIZE-KEYED CACHE, not one slot. render_cloud is called twice per frame at two
     // different sizes — once for the planar reflection (half of the half-res planar target,
@@ -1729,14 +1731,34 @@ impl Sky {
             ("CLOUD_LIGHT_STEPS", cloud_light_steps),
             ("CLOUD_LIGHT_COARSE", if cloud_light_coarse { 1.0 } else { 0.0 }),
         ];
-        let cloud_pipeline = {
+        // REN-SKY-004: the PLANAR REFLECTION marches the clouds a second time, at 1.31 ms of a
+        // 30.98 ms `perf_water` frame -- more than half that scene's whole reflection block. It
+        // used the same 128-step pipeline as the sky, which the reflection cannot show: the
+        // result is written to a half-resolution buffer, reflected off a displaced FFT surface,
+        // and then read through the roughness mip chain. Its own step count is separate, and low.
+        //
+        // This does NOT touch the sky the owner chose at 128 steps (REN-SKY-001/002) -- it is a
+        // second pipeline, used only by the reflection pass. `WGR_CLOUD_STEPS_REFLECTION`
+        // overrides it; setting it equal to WGR_CLOUD_STEPS restores the old behaviour.
+        let cloud_steps_reflection = std::env::var("WGR_CLOUD_STEPS_REFLECTION")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(32.0)
+            .clamp(8.0, 256.0)
+            .min(cloud_steps);
+        let cloud_overrides_reflection: [(&str, f64); 3] = [
+            ("CLOUD_STEPS", cloud_steps_reflection),
+            ("CLOUD_LIGHT_STEPS", cloud_light_steps),
+            ("CLOUD_LIGHT_COARSE", if cloud_light_coarse { 1.0 } else { 0.0 }),
+        ];
+        let mut build_cloud_pipeline = |label: &str, overrides: &[(&str, f64)]| {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("wgr_cloud"),
+                label: Some(label),
                 bind_group_layouts: &[Some(&sky_layout), Some(&cloud_depth_layout)],
                 immediate_size: 0,
             });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("wgr_cloud"),
+                label: Some(label),
                 layout: Some(&pl),
                 vertex: wgpu::VertexState {
                     module: &shader,
@@ -1756,7 +1778,7 @@ impl Sky {
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &cloud_overrides,
+                        constants: overrides,
                         ..Default::default()
                     },
                 }),
@@ -1764,6 +1786,10 @@ impl Sky {
                 cache: None,
             })
         };
+        let cloud_pipeline = build_cloud_pipeline("wgr_cloud", &cloud_overrides);
+        let cloud_pipeline_reflection =
+            build_cloud_pipeline("wgr_cloud_reflection", &cloud_overrides_reflection);
+        drop(build_cloud_pipeline);
 
         // cloud_composite: upsample the low-res buffer + premultiplied blend over the MSAA scene.
         let composite_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1880,6 +1906,7 @@ impl Sky {
             env_view,
             cloud_noise_tex,
             cloud_pipeline,
+            cloud_pipeline_reflection,
             cloud_depth_layout,
             cloud_lo: Vec::new(),
             cloud_composite_pipeline,
@@ -2290,6 +2317,7 @@ impl Sky {
         depth_view: &wgpu::TextureView,
         width: u32,
         height: u32,
+        reflection: bool,
     ) {
         let lo = (width.div_ceil(2).max(1), height.div_ceil(2).max(1));
         // Find-or-create in the size-keyed cache (see the field comment): the planar and the
@@ -2395,7 +2423,11 @@ impl Sky {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.cloud_pipeline);
+        pass.set_pipeline(if reflection {
+            &self.cloud_pipeline_reflection
+        } else {
+            &self.cloud_pipeline
+        });
         pass.set_bind_group(0, &self.sky_bind, &[]);
         pass.set_bind_group(1, &depth_bind, &[]);
         pass.draw(0..3, 0..1);
