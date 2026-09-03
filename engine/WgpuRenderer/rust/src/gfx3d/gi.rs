@@ -21,6 +21,11 @@ pub const NX: u32 = 32;
 pub const NY: u32 = 8;
 pub const NZ: u32 = 32;
 pub const FACES: u32 = 6;
+/// REN-GI-009: how many slabs each probe texture carries. Nine, because second-order SH needs
+/// nine coefficients; the ambient cube uses the first six and the distance moments the first
+/// six of their own texture. Both textures are cut to the same height so one copy extent covers
+/// them, which costs about half a megabyte and removes a class of mistake.
+pub const SLABS: u32 = 9;
 pub const BATCHES: u32 = 8;
 /// Sun proxy resolution (square) and half-extent: 1024 over 96 m is 9.4 cm per texel.
 pub const RSM_RES: u32 = 1024;
@@ -111,6 +116,7 @@ pub fn basis_from_env() -> u32 {
     static B: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
     *B.get_or_init(|| match std::env::var("WGR_GI_BASIS").as_deref() {
         Ok("sh") | Ok("sh1") | Ok("1") => 1,
+        Ok("sh2") | Ok("2") => 2,
         _ => 0,
     })
 }
@@ -173,7 +179,7 @@ impl GiProbes {
             label: Some("wgr_gi_probes"),
             size: wgpu::Extent3d {
                 width: NX,
-                height: NY * FACES,
+                height: NY * SLABS,
                 depth_or_array_layers: NZ,
             },
             mip_level_count: 1,
@@ -196,7 +202,7 @@ impl GiProbes {
             label: Some("wgr_gi_probes_write"),
             size: wgpu::Extent3d {
                 width: NX,
-                height: NY * FACES,
+                height: NY * SLABS,
                 depth_or_array_layers: NZ,
             },
             mip_level_count: 1,
@@ -216,7 +222,7 @@ impl GiProbes {
             label: Some("wgr_gi_dist"),
             size: wgpu::Extent3d {
                 width: NX,
-                height: NY * FACES,
+                height: NY * SLABS,
                 depth_or_array_layers: NZ,
             },
             mip_level_count: 1,
@@ -237,7 +243,7 @@ impl GiProbes {
             label: Some("wgr_gi_dist_write"),
             size: wgpu::Extent3d {
                 width: NX,
-                height: NY * FACES,
+                height: NY * SLABS,
                 depth_or_array_layers: NZ,
             },
             mip_level_count: 1,
@@ -255,7 +261,8 @@ impl GiProbes {
         let state_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("wgr_gi_state"),
             // 12 vec4 per probe: 6 radiance + 6 moments (REN-GI-003).
-            size: (NX * NY * NZ * FACES * 2) as u64 * 16,
+            // 15 vec4 per probe: 9 radiance (SH-2, or 6 cube faces) + 6 distance moments.
+            size: (NX * NY * NZ * (SLABS + FACES)) as u64 * 16,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -565,7 +572,7 @@ impl GiProbes {
         }
         let whole = wgpu::Extent3d {
             width: NX,
-            height: NY * FACES,
+            height: NY * SLABS,
             depth_or_array_layers: NZ,
         };
         encoder.copy_texture_to_texture(

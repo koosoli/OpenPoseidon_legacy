@@ -969,7 +969,29 @@ fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
         let dd = max(dist - m.x, 0.0);
         let cheb = variance / (variance + dd * dd);
         wt = wt * clamp(cheb * cheb * cheb, 0.0, 1.0);
-        if (frame.gi.w > 0.5) {
+        if (frame.gi.w > 1.5) {
+            // REN-GI-009: second-order SH. E(n)/pi = sum over l of (A_l / pi) * L_lm * Y_lm(n),
+            // with A0/pi = 1, A1/pi = 2/3 and A2/pi = 1/4. Nine loads a corner against the
+            // cube's three -- that is what this basis costs, and REN-GI-008 measured that the
+            // four-coefficient version is not a cheaper way to get it.
+            let c00 = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y, pi.z), 0).rgb;
+            let c1y = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + iny, pi.z), 0).rgb;
+            let c1z = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 2 * iny, pi.z), 0).rgb;
+            let c1x = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 3 * iny, pi.z), 0).rgb;
+            let cxy = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 4 * iny, pi.z), 0).rgb;
+            let cyz = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 5 * iny, pi.z), 0).rgb;
+            let czz = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 6 * iny, pi.z), 0).rgb;
+            let cxz = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 7 * iny, pi.z), 0).rgb;
+            let cxx = textureLoad(gi_probes, vec3<i32>(pi.x, pi.y + 8 * iny, pi.z), 0).rgb;
+            let band0 = c00 * 0.2820948;
+            let band1 = (c1y * n.y + c1z * n.z + c1x * n.x) * (0.6666667 * 0.4886025);
+            let band2 = (cxy * (1.0925484 * n.x * n.y)
+                       + cyz * (1.0925484 * n.y * n.z)
+                       + czz * (0.3153916 * (3.0 * n.z * n.z - 1.0))
+                       + cxz * (1.0925484 * n.x * n.z)
+                       + cxx * (0.5462742 * (n.x * n.x - n.y * n.y))) * 0.25;
+            sum += max(band0 + band1 + band2, vec3<f32>(0.0)) * wt;
+        } else if (frame.gi.w > 0.5) {
             // REN-GI-008: first-order SH. Slabs 0..3 hold L0 and the three L1 (y, z, x).
             // Irradiance/pi for normal n is A0/pi * Y0 * L0 + A1/pi * Y1 * dot(L1, n), with
             // A0 = pi and A1 = 2pi/3 -- the two constants below. Unlike the ambient cube this

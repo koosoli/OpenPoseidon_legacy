@@ -49,8 +49,9 @@ struct GiParams {
                               // w = BASIS: 0 ambient cube, 1 first-order SH (REN-GI-008)
 };
 @group(2) @binding(0) var<uniform> gi: GiParams;
-// Twelve vec4 per probe: 0..5 irradiance/pi for +X -X +Y -Y +Z -Z (.a of entry 0 = 1 once
-// written), 6..11 the matching distance moments (mean r, mean r^2) for the visibility test.
+// Fifteen vec4 per probe: 0..8 the radiance store (six ambient-cube faces +X -X +Y -Y +Z -Z,
+// or nine second-order SH coefficients -- see the basis lane; .a of entry 0 = 1 once written),
+// 9..14 the distance moments (mean r, mean r^2) for the visibility test.
 @group(2) @binding(1) var<storage, read_write> state: array<vec4<f32>>;
 @group(2) @binding(2) var probes_out: texture_storage_3d<rgba16float, write>;
 // REN-GI-003: per-face distance moments (mean r, mean r^2) of what each probe's rays hit.
@@ -192,9 +193,9 @@ fn store_face(base: u32, f: u32, cur: vec3<f32>, alpha: f32, px: u32, py: u32, p
 
 fn store_moments(base: u32, f: u32, mean: f32, mean2: f32, alpha: f32,
                  px: u32, py: u32, pz: u32, ny: u32) {
-    let old = state[base + 6u + f].xy;
+    let old = state[base + 9u + f].xy;
     let v = mix(old, vec2<f32>(mean, mean2), alpha);
-    state[base + 6u + f] = vec4<f32>(v.x, v.y, 0.0, 1.0);
+    state[base + 9u + f] = vec4<f32>(v.x, v.y, 0.0, 1.0);
     textureStore(dist_out, vec3<i32>(i32(px), i32(py + f * ny), i32(pz)),
                  vec4<f32>(v.x, v.y, 0.0, 1.0));
 }
@@ -245,6 +246,14 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
     var syr = 0.0; var syg = 0.0; var syb = 0.0;
     var szr = 0.0; var szg = 0.0; var szb = 0.0;
     var sxr = 0.0; var sxg = 0.0; var sxb = 0.0;
+    // REN-GI-009: the five second-order coefficients. SH-1 alone was measured worse than the
+    // cube (REN-GI-008): one linear lobe cannot hold a sky-dominated field and a directional
+    // bounce at once. Scalars again, for the same naga reason.
+    var axyr = 0.0; var axyg = 0.0; var axyb = 0.0;   // Y2-2  xy
+    var ayzr = 0.0; var ayzg = 0.0; var ayzb = 0.0;   // Y2-1  yz
+    var azzr = 0.0; var azzg = 0.0; var azzb = 0.0;   // Y20   3z^2-1
+    var axzr = 0.0; var axzg = 0.0; var axzb = 0.0;   // Y21   xz
+    var axxr = 0.0; var axxg = 0.0; var axxb = 0.0;   // Y22   x^2-y^2
     let w = 4.0 * PI / f32(k);
     for (var i = 0u; i < k; i++) {
         let d = fib_dir(i, k, rot);
@@ -289,6 +298,16 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
         syr += l.r * y1 * d.y; syg += l.g * y1 * d.y; syb += l.b * y1 * d.y;
         szr += l.r * y1 * d.z; szg += l.g * y1 * d.z; szb += l.b * y1 * d.z;
         sxr += l.r * y1 * d.x; sxg += l.g * y1 * d.x; sxb += l.b * y1 * d.x;
+        let b_xy = 1.0925484 * d.x * d.y;
+        let b_yz = 1.0925484 * d.y * d.z;
+        let b_zz = 0.3153916 * (3.0 * d.z * d.z - 1.0);
+        let b_xz = 1.0925484 * d.x * d.z;
+        let b_xx = 0.5462742 * (d.x * d.x - d.y * d.y);
+        axyr += l.r * b_xy; axyg += l.g * b_xy; axyb += l.b * b_xy;
+        ayzr += l.r * b_yz; ayzg += l.g * b_yz; ayzb += l.b * b_yz;
+        azzr += l.r * b_zz; azzg += l.g * b_zz; azzb += l.b * b_zz;
+        axzr += l.r * b_xz; axzg += l.g * b_xz; axzb += l.b * b_xz;
+        axxr += l.r * b_xx; axxg += l.g * b_xx; axxb += l.b * b_xx;
     }
 
     // REN-GI-002: the first sun bounce from the sun proxy. Each sample is a sunlit surface
@@ -341,6 +360,16 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
                 syr += l.r * ry1 * back.y; syg += l.g * ry1 * back.y; syb += l.b * ry1 * back.y;
                 szr += l.r * ry1 * back.z; szg += l.g * ry1 * back.z; szb += l.b * ry1 * back.z;
                 sxr += l.r * ry1 * back.x; sxg += l.g * ry1 * back.x; sxb += l.b * ry1 * back.x;
+                let r_xy = 1.0925484 * back.x * back.y;
+                let r_yz = 1.0925484 * back.y * back.z;
+                let r_zz = 0.3153916 * (3.0 * back.z * back.z - 1.0);
+                let r_xz = 1.0925484 * back.x * back.z;
+                let r_xx = 0.5462742 * (back.x * back.x - back.y * back.y);
+                axyr += l.r * r_xy; axyg += l.g * r_xy; axyb += l.b * r_xy;
+                ayzr += l.r * r_yz; ayzg += l.g * r_yz; ayzb += l.b * r_yz;
+                azzr += l.r * r_zz; azzg += l.g * r_zz; azzb += l.b * r_zz;
+                axzr += l.r * r_xz; axzg += l.g * r_xz; axzb += l.b * r_xz;
+                axxr += l.r * r_xx; axxg += l.g * r_xx; axxb += l.b * r_xx;
                 if (gi.rsm_meta.z > 0.5) {
                     // REN-GI-007 ablation: same energy, spread over every face. If a shaded
                     // wall lifts under this and not under the directional store, the bounce
@@ -359,13 +388,25 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
 
-    let base = idx * 12u;
+    let base = idx * 15u;
     let had = state[base].a;
     var alpha = clamp(gi.knobs.x, 0.05, 1.0);
     if (had < 0.5 || gi.reset.x > 0.5) {
         alpha = 1.0;
     }
-    if (gi.rsm_meta.w > 0.5) {
+    if (gi.rsm_meta.w > 1.5) {
+        // REN-GI-009: nine coefficients, slabs 0..8, in the order L00, L1-1, L10, L11,
+        // L2-2, L2-1, L20, L21, L22.
+        store_face(base, 0u, vec3<f32>(s0r, s0g, s0b), alpha, px, py, pz, ny);
+        store_face(base, 1u, vec3<f32>(syr, syg, syb), alpha, px, py, pz, ny);
+        store_face(base, 2u, vec3<f32>(szr, szg, szb), alpha, px, py, pz, ny);
+        store_face(base, 3u, vec3<f32>(sxr, sxg, sxb), alpha, px, py, pz, ny);
+        store_face(base, 4u, vec3<f32>(axyr, axyg, axyb), alpha, px, py, pz, ny);
+        store_face(base, 5u, vec3<f32>(ayzr, ayzg, ayzb), alpha, px, py, pz, ny);
+        store_face(base, 6u, vec3<f32>(azzr, azzg, azzb), alpha, px, py, pz, ny);
+        store_face(base, 7u, vec3<f32>(axzr, axzg, axzb), alpha, px, py, pz, ny);
+        store_face(base, 8u, vec3<f32>(axxr, axxg, axxb), alpha, px, py, pz, ny);
+    } else if (gi.rsm_meta.w > 0.5) {
         // REN-GI-008: slabs 0..3 carry L0 and the three L1 coefficients; 4 and 5 are cleared so
         // a stale cube left in them cannot be read by mistake. The layout, the texture and the
         // bind group are unchanged -- only what the first four slabs MEAN.
