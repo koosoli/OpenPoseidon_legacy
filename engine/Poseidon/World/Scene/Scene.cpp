@@ -811,8 +811,13 @@ SRef<Occlusion>& GetOcclusions()
 }
 } // namespace Poseidon
 
+// PERF-025: the census's frame denominator. Incremented HERE, once per frame -- the census
+// itself runs per DRAW, and counting frames there reported "271219 draws in 271219 frames".
+int gCovCensusFrames = 0;
+
 void Scene::BeginObjects()
 {
+    ++gCovCensusFrames;
     gCovFull = 0;
     gCovPartial = 0;
     gCovNone = 0;
@@ -923,6 +928,53 @@ void Scene::ObjectForDrawing(Object* obj, int forceLOD, ClipFlags clip)
         return;
     }
     (gpuCov == static_cast<int>(GpuDrawCoverage::Partial) ? gCovPartial : gCovNone)++;
+    // PERF-025: WHICH models miss the GPU-driven path. PERF-024 measured 6.6 ms/frame spent
+    // recording the CPU complement, and the pass-1 line counts it (`coverage none=`) without
+    // naming a single model, which is a number nobody can act on. WGR_COVERAGE_NONE_CENSUS=1
+    // keeps a per-shape tally and prints the worst offenders once a second, with the
+    // denominator, so "none" becomes a list of models to look at.
+    if (gpuCov != static_cast<int>(GpuDrawCoverage::Partial))
+    {
+        static const bool census = std::getenv("WGR_COVERAGE_NONE_CENSUS") != nullptr;
+        if (census)
+        {
+            static std::map<std::string, int> tally;
+            static int framesAtLastReport = 0;
+            static std::chrono::steady_clock::time_point lastReport{};
+            if (shape)
+            {
+                tally[shape->Name() ? shape->Name() : "<unnamed>"]++;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (lastReport.time_since_epoch().count() == 0)
+            {
+                lastReport = now;
+            }
+            const int frames = gCovCensusFrames - framesAtLastReport;
+            if (std::chrono::duration<double>(now - lastReport).count() > 1.0 && frames > 0)
+            {
+                std::vector<std::pair<std::string, int>> rows(tally.begin(), tally.end());
+                std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+                int total = 0;
+                for (const auto& r : rows)
+                    total += r.second;
+                std::string top;
+                for (std::size_t i = 0; i < rows.size() && i < 12; ++i)
+                {
+                    char buf[256];
+                    std::snprintf(buf, sizeof(buf), "%s=%.1f ", rows[i].first.c_str(),
+                                  double(rows[i].second) / double(frames ? frames : 1));
+                    top += buf;
+                }
+                LOG_INFO(Graphics,
+                         "PERF coverage-none census over {} draws in {} frames ({:.0f}/frame), {} distinct models: {}",
+                         total, frames, double(total) / double(frames ? frames : 1), rows.size(), top.c_str());
+                tally.clear();
+                framesAtLastReport = gCovCensusFrames;
+                lastReport = now;
+            }
+        }
+    }
 
     float radius = obj->GetRadius();
     // get object position in clipping coordinates
