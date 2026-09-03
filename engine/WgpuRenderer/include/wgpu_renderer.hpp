@@ -1414,7 +1414,15 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_WORKER_HARVEST = 67,
     WGR_GPU_TIMER_GI_PROBES = 68,
     WGR_GPU_TIMER_GI_RSM = 69,
-    WGR_GPU_TIMER_REGION_COUNT = 70,
+    /* PERF-024: the worker's encode, split four ways. CPU column only. */
+    WGR_GPU_TIMER_WORKER_ENC_EARLY = 70,
+    WGR_GPU_TIMER_WORKER_ENC_SHADOW = 71,
+    WGR_GPU_TIMER_WORKER_ENC_MAIN = 72,
+    WGR_GPU_TIMER_WORKER_ENC_TAIL = 73,
+    WGR_GPU_TIMER_WORKER_ENC_SKY = 74,
+    WGR_GPU_TIMER_WORKER_ENC_DRAW = 75,
+    WGR_GPU_TIMER_WORKER_ENC_POST = 76,
+    WGR_GPU_TIMER_REGION_COUNT = 77,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.

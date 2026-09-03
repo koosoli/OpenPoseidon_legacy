@@ -150,6 +150,17 @@ pub enum Region {
     WorkerHarvest = 67, // the non-blocking readback harvests after present
     GiProbes = 68,      // REN-GI-001: the irradiance probe volume update (compute)
     GiRsm = 69,         // REN-GI-002: the sun proxy (cull + draw), when it re-renders
+    // PERF-024: the worker's ENCODE, split four ways. CPU-only rows: they measure how long the
+    // recording takes, not the GPU work it records (the regions above do that). The four are
+    // disjoint and cover render_frame from begin_frame to submit.
+    WorkerEncEarly = 70,  // grass/water updates, skin bake, culls, interior sky, GI probes
+    WorkerEncShadow = 71, // the shadow cascade passes
+    WorkerEncMain = 72,   // sky, prepass, the 3D colour sub-pass, water, the post chain, UI
+    WorkerEncTail = 73,   // the stats/mip/visibility resolves before submit
+    // ...and `main` split again, since it holds most of it.
+    WorkerEncSky = 74,    // the atmosphere LUTs, froxel, env bake, cloud march and the sky pass
+    WorkerEncDraw = 75,   // the depth prepass and the 3D colour sub-pass replay, water included
+    WorkerEncPost = 76,   // the post chain (tonemap, bloom, DoF, god rays), upscale and UI
     FrameTotal = 25, // all submitted frame work; excludes acquire/present pacing
 }
 
@@ -162,7 +173,7 @@ pub const SHADOW_CASCADE_REGIONS: [Region; 4] = [
 ];
 
 /// Region count — the FFI getter's element contract (WGR_GPU_TIMER_REGION_COUNT).
-pub const REGION_COUNT: usize = 70;
+pub const REGION_COUNT: usize = 77;
 /// Water occupies [0, WATER_REGION_COUNT); grass occupies the remainder. The two
 /// debug tabs slice the shared array with these so neither shows the other's rows.
 /// Consumed on the C++ side (Engine::kWaterGpuRegionEnd) and by the layout test.
@@ -593,7 +604,7 @@ mod tests {
     // count + a few pinned indices catches accidental reordering on either side.
     #[test]
     fn region_indices_stay_ffi_stable() {
-        assert_eq!(REGION_COUNT, 70);
+        assert_eq!(REGION_COUNT, 77);
         assert_eq!(Region::SpectrumInit as u32, 0);
         assert_eq!(Region::FftCompose as u32, 4);
         assert_eq!(Region::Interaction as u32, 5);

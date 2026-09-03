@@ -8695,6 +8695,13 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker: readback harvest",        // WGR_GPU_TIMER_WORKER_HARVEST (CPU column only)
         "GI: probe update",                // WGR_GPU_TIMER_GI_PROBES (REN-GI-001)
         "GI: sun proxy",                   // WGR_GPU_TIMER_GI_RSM (REN-GI-002)
+        "Worker enc: early",               // WGR_GPU_TIMER_WORKER_ENC_EARLY (CPU column only)
+        "Worker enc: shadows",             // WGR_GPU_TIMER_WORKER_ENC_SHADOW (CPU column only)
+        "Worker enc: main",                // WGR_GPU_TIMER_WORKER_ENC_MAIN (CPU column only)
+        "Worker enc: tail",                // WGR_GPU_TIMER_WORKER_ENC_TAIL (CPU column only)
+        "Worker enc: sky",                 // WGR_GPU_TIMER_WORKER_ENC_SKY (CPU column only)
+        "Worker enc: draw",                // WGR_GPU_TIMER_WORKER_ENC_DRAW (CPU column only)
+        "Worker enc: post",                // WGR_GPU_TIMER_WORKER_ENC_POST (CPU column only)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }

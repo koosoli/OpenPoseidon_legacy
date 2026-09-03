@@ -2599,7 +2599,7 @@ class Engine : public IGraphicsEngine
         kSkyGpuRegionEnv = 60,
         kSkyGpuRegionSh = 61,
         kSkyGpuRegionDraw = 62,
-        kGpuRegionEnd = 70, // PERF-021 worker rows + REN-GI-001/002 (WGR_GPU_TIMER_REGION_COUNT)
+        kGpuRegionEnd = 77, // + REN-GI + PERF-024 encode rows (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

@@ -3838,6 +3838,9 @@ impl Renderer {
             crate::gpu_timers::Region::WorkerSetup,
             setup_t0.elapsed().as_secs_f32() * 1.0e3,
         );
+        // PERF-024: the encode, split four ways (see gpu_timers::Region::WorkerEnc*).
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncEarly);
         self.direct_draws.set(DirectDrawStats::default());
         self.water_visibility.begin_frame();
         // Envelope every submitted pass so the Performance tab can distinguish
@@ -4260,6 +4263,10 @@ impl Renderer {
         // Cascade shadow depth passes run first so every segment's draws can
         // sample the completed map, regardless of submission order. Debug groups
         // (here and below) name each phase in a RenderDoc capture.
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncEarly);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncShadow);
         encoder.push_debug_group("wgr_shadow_cascades");
         self.gfx3d.render_shadow_passes(
             &mut encoder,
@@ -4270,6 +4277,12 @@ impl Renderer {
             &self.gpu_timers,
         );
         encoder.pop_debug_group();
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncShadow);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncMain);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncSky);
 
         // Amortized terrain sun-shadow sweep (long-range heightfield self-shadow),
         // recorded before the render segments sample its mask. The sun direction is
@@ -4718,7 +4731,11 @@ impl Renderer {
             // with depth-write off. Later segments (near/weapon) keep the single-pass path.
             let do_prepass = start == 0;
             if let (true, Some(normal_view)) = (do_prepass, normal.as_ref()) {
-                encoder.push_debug_group("wgr_depth_prepass");
+                self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncSky);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncDraw);
+        encoder.push_debug_group("wgr_depth_prepass");
                 // PERF-005 CONTAINER region: the whole depth+normal prepass, so the leaves
                 // inside it (terrain prepass, grass prepass, the GPU-driven solid/alpha
                 // variants) can be subtracted to expose what the CPU-replayed Draw3D ops cost.
@@ -5487,6 +5504,10 @@ impl Renderer {
 
         // Fallback: an HDR frame that never emitted the Resolve marker still needs
         // resolving so the scene reaches the swapchain.
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncDraw);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncPost);
         if self.tonemap.is_some() && !resolved {
             let hdr_source = self
                 .hdr_resolve
@@ -5576,9 +5597,17 @@ impl Renderer {
         self.gpu_timers.end(&mut encoder, TimerRegion::FrameTotal);
         self.gpu_timers.resolve(&mut encoder);
         // PERF-005: after every cull dispatch has written its slice, before submit.
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncPost);
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncMain);
+        self.gpu_timers
+            .cpu_begin(crate::gpu_timers::Region::WorkerEncTail);
         self.gfx3d.resolve_object_stats(&mut encoder);
         self.gfx3d.resolve_mip_feedback(&mut encoder);
         self.water_visibility.resolve(&mut encoder);
+        self.gpu_timers
+            .cpu_end(crate::gpu_timers::Region::WorkerEncTail);
         self.gpu_timers
             .cpu_begin(crate::gpu_timers::Region::WorkerSubmit);
         self.queue.submit(std::iter::once(encoder.finish()));
