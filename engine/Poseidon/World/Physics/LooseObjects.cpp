@@ -3,11 +3,13 @@
 
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
+#include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <Poseidon/Foundation/Framework/Log.hpp>
 
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace Poseidon::LooseObjects
 {
@@ -28,6 +30,62 @@ Settings g_settings = []
 /// the solver actually moved something rather than merely being asked to.
 int   g_owned = 0;
 float g_reportIn = 0.0f;
+
+/// PHY-030: bring the world up ourselves.
+///
+/// Until now nothing here created a physics world or gave it a ground. Both were
+/// side effects of the dev PROBE tool, so the loose-objects switch on its own did
+/// exactly nothing -- `Step` bailed on `!world->IsCreated()`, then on
+/// `!stats.terrainRegistered`, silently, and a barrel sat there being 2001.
+/// A feature whose only working path is another feature's setup is not a feature.
+///
+/// Tried once and remembered, so a failed bring-up cannot re-run the island scan
+/// every tick for the rest of the session.
+bool TerrainBroughtUp()
+{
+    static bool tried = false;
+    static bool ok = false;
+    if (tried)
+    {
+        return ok;
+    }
+    tried = true;
+    if (!GLandscape)
+    {
+        return false;
+    }
+    Physics::PhysicsWorld& world = Physics::EnsurePhysicsWorld();
+    if (!world.Create())
+    {
+        LOG_WARN(World, "LOOSEOBJ: physics backend refused to start; loose objects stay classic");
+        return false;
+    }
+    const int range = GLandscape->GetLandRange();
+    if (range <= 1)
+    {
+        return false;
+    }
+    // Subdivided for the same reason PhysicsCorpus subdivides: the landscape grid
+    // is 50 m and a straight chord between two samples cuts the corner of a
+    // hillside by metres, so an object sinks into a slope it should rest on.
+    // 4x is 12.5 m spacing; on Everon that is 1021^2 samples, about 4 MB, once.
+    const int   subdiv = 4;
+    const int   grid = (range - 1) * subdiv + 1;
+    const float spacing = LandGrid / static_cast<float>(subdiv);
+    std::vector<float> heights(static_cast<std::size_t>(grid) * grid);
+    for (int z = 0; z < grid; ++z)
+    {
+        for (int x = 0; x < grid; ++x)
+        {
+            heights[static_cast<std::size_t>(z) * grid + x] =
+                GLandscape->SurfaceY(static_cast<float>(x) * spacing, static_cast<float>(z) * spacing);
+        }
+    }
+    ok = world.SetTerrain(heights.data(), grid, grid, spacing, 0.0f, 0.0f);
+    LOG_INFO(World, "LOOSEOBJ: terrain {}x{} at {:.2f} m -> {}", grid, grid, spacing,
+             ok ? "registered" : "REFUSED");
+    return ok;
+}
 }
 
 Settings& Get() { return g_settings; }
@@ -66,17 +124,15 @@ bool Step(Entity& thing, Physics::BodyId& body)
         return false;
     }
 
-    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
-    if (!world || !world->IsCreated())
+    // Without a ground a barrel falls through the world forever, so bring one up
+    // rather than refusing: see TerrainBroughtUp for why this used to be somebody
+    // else's job. Still refuses if the backend or the landscape says no.
+    if (!TerrainBroughtUp())
     {
         return false;
     }
-
-    // Without registered colliders there is no ground and no building -- a barrel
-    // would fall through the world forever. Refusing is better than producing
-    // that and calling it physics.
-    const Physics::PhysicsStats stats = world->GetStats();
-    if (!stats.terrainRegistered)
+    Physics::PhysicsWorld* world = Physics::GetPhysicsWorld();
+    if (!world || !world->IsCreated())
     {
         return false;
     }
