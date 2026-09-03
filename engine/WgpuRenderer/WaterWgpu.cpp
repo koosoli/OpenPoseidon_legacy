@@ -320,6 +320,7 @@ static void ApplyCascadePreset(WgrRenderer* renderer, int preset, int fftResolut
         // the rotation. The delta comes from the latched sea wind, so it changes in
         // 15-degree steps at most once per 20 s and does not churn the spectrum.
         out.wind_direction_rad += windDirDeltaRad;
+        EngineWgpu::AcquireProducerWindow("water cascade config"); // load-time / preset change
         wgr_water_set_cascade_config(renderer, index, &out);
     };
 
@@ -517,6 +518,8 @@ void WaterWgpu::BuildQuadtree(const Landscape& land)
     const auto& fz0 = _engine.WaterLook().freeze;
     ApplyCascadePreset(_renderer, _engine.WaterLook().cascadePreset, _engine.WaterLook().fftResolution,
                        fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u);
+    _cascadeApplied = CascadeApplied{true, _engine.WaterLook().cascadePreset, _engine.WaterLook().fftResolution,
+                                     fz0.fftSeed >= 0 ? static_cast<uint32_t>(fz0.fftSeed) : 0u, 1.0f, 1.0f, 0.0f};
 }
 
 bool WaterWgpu::UpdateSeaWind(float now)
@@ -826,9 +829,21 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     }
     // WTR-001: per-frame preset push carries the dev-tab seed override (>= 0) as the xor
     // so toggling it live re-randomises h0 deterministically on the next spectrum rebuild.
-    ApplyCascadePreset(_renderer, look.cascadePreset, look.fftResolution,
-                       fz.fftSeed >= 0 ? static_cast<uint32_t>(fz.fftSeed) : 0u, windMultiplier, lengthMultiplier,
-                       windDirDeltaRad);
+    {
+        // PERF-022: only when something in it changed (see CascadeApplied in the header).
+        const CascadeApplied want{true, look.cascadePreset, look.fftResolution,
+                                  fz.fftSeed >= 0 ? static_cast<uint32_t>(fz.fftSeed) : 0u, windMultiplier,
+                                  lengthMultiplier, windDirDeltaRad};
+        const bool same = _cascadeApplied.valid && _cascadeApplied.preset == want.preset &&
+                          _cascadeApplied.fft == want.fft && _cascadeApplied.seed == want.seed &&
+                          _cascadeApplied.wind == want.wind && _cascadeApplied.len == want.len &&
+                          _cascadeApplied.dir == want.dir;
+        if (!same)
+        {
+            ApplyCascadePreset(_renderer, want.preset, want.fft, want.seed, want.wind, want.len, want.dir);
+            _cascadeApplied = want;
+        }
+    }
 
     // y gates the GPU whitewater/spray billboard pass and z controls its activity.
     // The authored default is enabled at a restrained 0.25 activity. x remains the
@@ -853,7 +868,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // near the surface. That is why the checkbox appeared to do nothing.
     // Planar-reflection frustum padding. Its own entry point rather than a params lane, because
     // it is consumed when the reflected CAMERA is built, before any water params are read.
-    wgr_set_planar_reflection_pad(_renderer, std::clamp(look.reflectionFovPad, 1.0f, 3.0f));
+    _engine.QueuePlanarReflectionPad(std::clamp(look.reflectionFovPad, 1.0f, 3.0f)); // PERF-022: queued
     // y/z were reserved lanes; they now carry the WAVE-foam controls (whitecaps), which are
     // deliberately separate from foamIntensity's shoreline band. Reusing spare lanes keeps
     // WgrWaterParams at its asserted size on both sides of the FFI.
@@ -876,7 +891,7 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
         lastLoggedWaveAmp = look.waveAmp;
         lastLoggedFftResolution = look.fftResolution;
     }
-    wgr_water_set_params(_renderer, &_params);
+    _engine.QueueWaterParams(_params); // PERF-022: queued, applied before wgr_render_frame
 
     // WTR-001 — repeatable-camera-path foundation. When the Water tab sets a frame tag (>= 0),
     // log it with an FNV-1a digest of the exact UBO bytes just uploaded plus the camera pose,
@@ -1019,12 +1034,8 @@ void WaterWgpu::DrawWater(Scene& scene, int xBeg, int zBeg, int xEnd, int zEnd)
     // frame, so scaling it is free either way.
     const float rippleGain = std::max(rainSnap.seaRippleGain, 0.0f);
     _interaction.weather = {rainDensity, std::clamp(1.0f - look.waveAmp * 0.45f, 0.15f, 1.0f), rippleGain, 0.0f};
-    wgr_water_set_interaction_params(_renderer, &_interaction);
-
-    if (eventCount != 0)
-    {
-        wgr_water_submit_interactions(_renderer, events.data(), eventCount);
-    }
+    // PERF-022: queued together; the worker applies params then submits the events.
+    _engine.QueueWaterInteraction(_interaction, eventCount != 0 ? events.data() : nullptr, eventCount);
     _lastInteractionTime = now;
     _haveInteractionDomain = true;
 

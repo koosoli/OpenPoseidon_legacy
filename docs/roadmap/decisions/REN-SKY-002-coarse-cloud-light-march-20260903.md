@@ -44,3 +44,9 @@ has the picture; if the shading reads flatter to them, the switch is the way bac
 
 One scene, noon. Low sun (long shadow rays through the deck) is where the erosion term would
 matter most and was not captured; a sunset crop is the follow-up if the owner sees a difference.
+
+## Reversed 2026-09-03 (same day)
+
+The owner looked at the crops and preferred the four-tap picture. Default is the full light
+march again; `WGR_CLOUD_LIGHT_COARSE=1` keeps the 1 ms lever for a slow GPU. The picture check
+is the gate, and it said no.

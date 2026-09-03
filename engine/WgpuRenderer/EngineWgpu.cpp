@@ -2012,6 +2012,27 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
         wgr_set_lens_flare(_renderer, p.lensFlare);
         p.skyScalarsDirty = false;
     }
+    // PERF-022
+    if (p.planarPadDirty)
+    {
+        wgr_set_planar_reflection_pad(_renderer, p.planarReflectionPad);
+        p.planarPadDirty = false;
+    }
+    if (p.waterParamsDirty)
+    {
+        wgr_water_set_params(_renderer, &p.waterParams);
+        p.waterParamsDirty = false;
+    }
+    if (p.waterInteractionDirty)
+    {
+        wgr_water_set_interaction_params(_renderer, &p.waterInteraction);
+        p.waterInteractionDirty = false;
+    }
+    if (!p.waterEvents.empty())
+    {
+        wgr_water_submit_interactions(_renderer, p.waterEvents.data(), U32(p.waterEvents.size()));
+        p.waterEvents.clear();
+    }
 }
 
 uint32_t EngineWgpu::EnqueueInstanceAdd(const WgrInstance& inst)
@@ -2381,8 +2402,14 @@ void EngineWgpu::AccumulateRenderThreadTiming(double busyMs, double waitMs, doub
     _rtWaitMsAccum += waitMs;
     _rtWindowMsAccum += frameMs;
     _rtWindowFrames++;
-    if (_rtWindowMsAccum < 1000.0)
+    // PERF-022: `frameMs` is NextFrame's own duration (~1 ms under overlap), not the frame's,
+    // so a 1000 ms window of it never closed inside a 900-frame capture and every reader saw
+    // the zeros the fields were initialised with. The window is wall time now.
+    static auto windowStart = std::chrono::steady_clock::now();
+    const auto nowWall = std::chrono::steady_clock::now();
+    if (std::chrono::duration<double, std::milli>(nowWall - windowStart).count() < 1000.0)
         return;
+    windowStart = nowWall;
     const double invFrames = 1.0 / static_cast<double>(_rtWindowFrames);
     _rtBusyMs = static_cast<float>(_rtBusyMsAccum * invFrames);
     _rtWaitMs = static_cast<float>(_rtWaitMsAccum * invFrames);
@@ -2394,6 +2421,13 @@ void EngineWgpu::AccumulateRenderThreadTiming(double busyMs, double waitMs, doub
     _rtLazyWaitsPerFrame = static_cast<float>(_rtLazyWaitCountAccum * invFrames);
     _rtLazyWaitMsAccum = 0.0;
     _rtLazyWaitCountAccum = 0;
+    // PERF-021 follow-up: the capture JSON read these as 0 while the tab showed them; one
+    // line a second says what this window actually computed.
+    static uint32_t windows = 0;
+    if ((windows++ % 10) == 0)
+        LOG_INFO(Graphics,
+                 "Wgpu render thread window: frames={} busy={:.2f} ms wait={:.2f} lazyWait={:.2f} ms x{:.2f}/frame",
+                 _rtWindowFrames, _rtBusyMs, _rtWaitMs, _rtLazyWaitMs, _rtLazyWaitsPerFrame);
     _rtBusyMsAccum = _rtWaitMsAccum = _rtWindowMsAccum = 0.0;
     _rtWindowFrames = 0;
     _renderLagShown = static_cast<float>(_renderLagFrames);
@@ -2474,6 +2508,12 @@ void EngineWgpu::AcquireProducerWindow(const char* what)
     self->_rtLazyWaitCountAccum++;
     if (self->_rtLazyOpenerFrame == nullptr)
         self->_rtLazyOpenerFrame = what;
+    // Named in the log too, so a run's log says who opened the window (first 20, then 1 in 600).
+    static std::atomic<uint32_t> logged{0};
+    const uint32_t n = logged.fetch_add(1, std::memory_order_relaxed);
+    if (n < 20 || (n % 600) == 0)
+        LOG_INFO(Graphics, "Wgpu producer window opened late by '{}' (wait {:.2f} ms, opening #{})", what,
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), n + 1);
 }
 
 bool EngineWgpu::LastMemoryStats(WgrMemoryStats& out)
@@ -2490,6 +2530,27 @@ void EngineWgpu::QueueTerrainParams(const WgrTerrainParams& p)
 {
     _pendingSet.terrainParams = p;
     _pendingSet.terrainParamsDirty = true;
+}
+
+void EngineWgpu::QueueWaterParams(const WgrWaterParams& p)
+{
+    _pendingSet.waterParams = p;
+    _pendingSet.waterParamsDirty = true;
+}
+
+void EngineWgpu::QueuePlanarReflectionPad(float pad)
+{
+    _pendingSet.planarReflectionPad = pad;
+    _pendingSet.planarPadDirty = true;
+}
+
+void EngineWgpu::QueueWaterInteraction(const WgrWaterInteractionParams& p, const WgrWaterInteractionEvent* events,
+                                       uint32_t count)
+{
+    _pendingSet.waterInteraction = p;
+    _pendingSet.waterInteractionDirty = true;
+    if (events != nullptr && count > 0)
+        _pendingSet.waterEvents.insert(_pendingSet.waterEvents.end(), events, events + count);
 }
 
 void EngineWgpu::WaitRenderIdle()
@@ -8486,8 +8547,11 @@ int EngineWgpu::GetWaterGpuTimings(float* outMs, int maxCount) const
 {
     if (!_renderer || !outMs || maxCount <= 0)
         return 0;
-    AcquireProducerWindow("gpu timings");
-    return (int)wgr_get_gpu_timings(_renderer, outMs, (uint32_t)maxCount);
+    // PERF-022: the worker's snapshot (PublishRendererStats), never the live handle.
+    std::lock_guard<std::mutex> lock(_memStatsMutex);
+    const int n = std::min(maxCount, std::min(_publishedGpuTimingCount, (int)WGR_GPU_TIMER_REGION_COUNT));
+    std::memcpy(outMs, _publishedGpuTimings, sizeof(float) * (size_t)n);
+    return n;
 }
 
 // MAT-LEGACY: resolve `<texture stem>_nohq.paa` for an original OFP/CWA texture, upload it, and
@@ -8996,8 +9060,10 @@ int EngineWgpu::GetCpuTimings(float* outMs, int maxCount) const
 {
     if (!_renderer || !outMs || maxCount <= 0)
         return 0;
-    AcquireProducerWindow("cpu timings");
-    return (int)wgr_get_cpu_timings(_renderer, outMs, (uint32_t)maxCount);
+    std::lock_guard<std::mutex> lock(_memStatsMutex); // PERF-022: the worker's snapshot
+    const int n = std::min(maxCount, std::min(_publishedCpuTimingCount, (int)WGR_GPU_TIMER_REGION_COUNT));
+    std::memcpy(outMs, _publishedCpuTimings, sizeof(float) * (size_t)n);
+    return n;
 }
 
 // REN-THR-012: the published copies. Readers get the last COMPLETED frame's counters,
@@ -9037,9 +9103,17 @@ void EngineWgpu::PublishRendererStats()
     {
         WgrMemoryStats raw{};
         const bool ok = _renderer != nullptr && wgr_get_memory_stats(_renderer, &raw) != 0;
+        float gpu[WGR_GPU_TIMER_REGION_COUNT] = {};
+        float cpu[WGR_GPU_TIMER_REGION_COUNT] = {};
+        const int gpuN = _renderer ? (int)wgr_get_gpu_timings(_renderer, gpu, WGR_GPU_TIMER_REGION_COUNT) : 0;
+        const int cpuN = _renderer ? (int)wgr_get_cpu_timings(_renderer, cpu, WGR_GPU_TIMER_REGION_COUNT) : 0;
         std::lock_guard<std::mutex> lock(_memStatsMutex);
         _lastMemStats = raw;
         _lastMemStatsValid = ok;
+        std::memcpy(_publishedGpuTimings, gpu, sizeof(gpu));
+        std::memcpy(_publishedCpuTimings, cpu, sizeof(cpu));
+        _publishedGpuTimingCount = gpuN;
+        _publishedCpuTimingCount = cpuN;
     }
 }
 

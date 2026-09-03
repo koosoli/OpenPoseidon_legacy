@@ -14,6 +14,7 @@
 #include <Poseidon/World/Physics/PhysicsWorld.hpp>
 #include <Poseidon/World/SimStageGraph.hpp>
 #include <Poseidon/AI/AICostAccum.hpp> // PERF-014: the AI stage's per-bucket accumulator
+#include "SimVehicleCost.hpp" // PERF-023: the Vehicles stage, by sub-stage and kind
 #include <Poseidon/World/World.hpp>
 #include <Poseidon/World/WorldChatInput.hpp>
 #include <Poseidon/World/WorldInputContext.hpp>
@@ -1078,6 +1079,33 @@ void World::Simulate(float deltaT, bool& enableDraw)
                          ai.unitOperPlans * aiInv, ai.unitOperInits * aiInv);
             }
             AICost::ResetAICosts();
+            // PERF-023: the Vehicles stage, by sub-stage and by entity kind (see SimVehicleCost.hpp).
+            SimVehCost::Accum& veh = SimVehCost::Costs();
+            if (veh.ticks > 0)
+            {
+                const double vInv = 1.0 / static_cast<double>(veh.ticks);
+                const auto st = [&veh](SimVehCost::Stage x) { return veh.stageMs[static_cast<std::size_t>(x)]; };
+                LOG_INFO(World,
+                         "Sim vehicles ms/tick over {} ticks: importance={:.3f} cloudlets={:.3f} slow={:.3f} "
+                         "fast={:.3f} buildings={:.3f} attached={:.3f}",
+                         veh.ticks, st(SimVehCost::Stage::Importance) * vInv, st(SimVehCost::Stage::Cloudlets) * vInv,
+                         st(SimVehCost::Stage::Slow) * vInv, st(SimVehCost::Stage::Fast) * vInv,
+                         st(SimVehCost::Stage::Buildings) * vInv, st(SimVehCost::Stage::Attached) * vInv);
+                const auto km = [&veh](SimVehCost::Kind k) { return veh.kindMs[static_cast<std::size_t>(k)]; };
+                const auto kc = [&veh](SimVehCost::Kind k) { return veh.kindCalls[static_cast<std::size_t>(k)]; };
+                LOG_INFO(World,
+                         "Sim vehicles by kind ms/tick (calls/tick): man={:.3f} ({:.1f}) tank={:.3f} ({:.1f}) "
+                         "car={:.3f} ({:.1f}) air={:.3f} ({:.1f}) ship={:.3f} ({:.1f}) static={:.3f} ({:.1f}) "
+                         "other={:.3f} ({:.1f})",
+                         km(SimVehCost::Kind::Man) * vInv, kc(SimVehCost::Kind::Man) * vInv,
+                         km(SimVehCost::Kind::Tank) * vInv, kc(SimVehCost::Kind::Tank) * vInv,
+                         km(SimVehCost::Kind::Car) * vInv, kc(SimVehCost::Kind::Car) * vInv,
+                         km(SimVehCost::Kind::Air) * vInv, kc(SimVehCost::Kind::Air) * vInv,
+                         km(SimVehCost::Kind::Ship) * vInv, kc(SimVehCost::Kind::Ship) * vInv,
+                         km(SimVehCost::Kind::Static) * vInv, kc(SimVehCost::Kind::Static) * vInv,
+                         km(SimVehCost::Kind::Other) * vInv, kc(SimVehCost::Kind::Other) * vInv);
+            }
+            SimVehCost::Reset();
         }
     }
     // Read AFTER the loop: Alpha() is the remainder the ticks did not consume, so

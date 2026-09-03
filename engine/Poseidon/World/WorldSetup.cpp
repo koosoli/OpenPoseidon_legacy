@@ -1,4 +1,5 @@
 #include <SDL3/SDL_scancode.h>
+#include "SimVehicleCost.hpp" // PERF-023
 
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
@@ -536,6 +537,33 @@ void World::MoveOutAndDelete(VehiclesDistributed& list, float deltaT, bool apply
     MoveOutAndDelete(list._invisibleFar, deltaT, applyMove);
 }
 
+// PERF-023: one Simulate call, clocked into its entity kind's bucket. The kind test is a
+// short IsKindOf chain walk per call, well under the Simulate it brackets.
+static void SimulateTimed(Entity* vehicle, VehicleSimulation simul, float deltaT, SimulationImportance prec)
+{
+    const std::uint64_t t0 = SimVehCost::NowNs();
+    (vehicle->*simul)(deltaT, prec);
+    const std::uint64_t ns = SimVehCost::NowNs() - t0;
+    SimVehCost::Kind kind = SimVehCost::Kind::Other;
+    if (const EntityType* type = vehicle->GetNonAIType())
+    {
+        const World* w = GLOB_WORLD;
+        if (type->IsKindOf(w->Preloaded(VTypeMan)))
+            kind = SimVehCost::Kind::Man;
+        else if (type->IsKindOf(w->Preloaded(VTypeTank)) || type->IsKindOf(w->Preloaded(VTypeAPC)))
+            kind = SimVehCost::Kind::Tank;
+        else if (type->IsKindOf(w->Preloaded(VTypeCar)))
+            kind = SimVehCost::Kind::Car;
+        else if (type->IsKindOf(w->Preloaded(VTypeAir)))
+            kind = SimVehCost::Kind::Air;
+        else if (type->IsKindOf(w->Preloaded(VTypeShip)))
+            kind = SimVehCost::Kind::Ship;
+        else if (type->IsKindOf(w->Preloaded(VTypeStatic)))
+            kind = SimVehCost::Kind::Static;
+    }
+    SimVehCost::AddKind(kind, ns);
+}
+
 void World::SimulateOnly(VehicleList& vehicles, float deltaT, VehicleSimulation simul, Entity* insideVehicle,
                          SimulationImportance prec)
 {
@@ -550,12 +578,12 @@ void World::SimulateOnly(VehicleList& vehicles, float deltaT, VehicleSimulation 
                 Entity* vehicle = vehicles[i];
                 if (vehicle != insideVehicle)
                 {
-                    (vehicle->*simul)(deltaT, prec);
+                    SimulateTimed(vehicle, simul, deltaT, prec);
                 }
                 else
                 {
                     vehicle->SetLastImportance(SimulateCamera);
-                    (vehicle->*simul)(deltaT, SimulateCamera);
+                    SimulateTimed(vehicle, simul, deltaT, SimulateCamera);
                 }
             }
         }
@@ -568,12 +596,12 @@ void World::SimulateOnly(VehicleList& vehicles, float deltaT, VehicleSimulation 
                 {
                     if (vehicle != insideVehicle)
                     {
-                        (vehicle->*simul)(deltaT, prec);
+                        SimulateTimed(vehicle, simul, deltaT, prec);
                     }
                     else
                     {
                         vehicle->SetLastImportance(SimulateCamera);
-                        (vehicle->*simul)(deltaT, SimulateCamera);
+                        SimulateTimed(vehicle, simul, deltaT, SimulateCamera);
                     }
                 }
                 else
@@ -583,7 +611,7 @@ void World::SimulateOnly(VehicleList& vehicles, float deltaT, VehicleSimulation 
                     {
                         p = prec;
                     }
-                    (vehicle->*simul)(deltaT, p);
+                    SimulateTimed(vehicle, simul, deltaT, p);
                 }
             }
         }
@@ -594,13 +622,13 @@ void World::SimulateOnly(VehicleList& vehicles, float deltaT, VehicleSimulation 
         {
             PoseidonAssert(i < vehicles.Size());
             Entity* vehicle = vehicles[i];
-            (vehicle->*simul)(deltaT, prec);
+            SimulateTimed(vehicle, simul, deltaT, prec);
         }
     }
     for (i = oldVehicles; i < vehicles.Size(); i++)
     {
         Entity* vehicle = vehicles[i];
-        (vehicle->*simul)(deltaT, prec);
+        SimulateTimed(vehicle, simul, deltaT, prec);
     }
 #if PERF_SIM
 #endif

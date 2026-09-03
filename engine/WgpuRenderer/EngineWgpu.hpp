@@ -1063,6 +1063,15 @@ class EngineWgpu : public EngineDummy
         bool smokeDirty = false;
         float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;
         bool skyScalarsDirty = false;
+        // PERF-022: the water draw's four per-frame pushes (WaterWgpu::DrawWater), which were
+        // still direct -- and unguarded -- under overlap. Interaction events accumulate.
+        WgrWaterParams waterParams{};
+        bool waterParamsDirty = false;
+        float planarReflectionPad = 0.0f;
+        bool planarPadDirty = false;
+        WgrWaterInteractionParams waterInteraction{};
+        bool waterInteractionDirty = false;
+        std::vector<WgrWaterInteractionEvent> waterEvents;
     };
     PendingRendererSettings _pendingSet;
     // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
@@ -1292,9 +1301,17 @@ class EngineWgpu : public EngineDummy
     const char* _rtLazyOpenerShown = "none";  // last frame's first opener, for the tab
     float _rtLazyWaitMs = 0.0f, _rtLazyWaitsPerFrame = 0.0f;
     bool _lazyWindow = true; // WGR_LAZY_WINDOW=0 restores the InitDraw wait (REN-THR-012)
-    std::mutex _memStatsMutex;
+    mutable std::mutex _memStatsMutex; // const readers (timings, memory) lock it
     WgrMemoryStats _lastMemStats{};
     bool _lastMemStatsValid = false;
+    // PERF-022: the timer rows, snapshotted by the worker after each frame. The readers
+    // (Perf tab, capture JSON, and whatever else asks every frame) used to open the producer
+    // window for them -- 1.00 lazy waits and 7.8 ms per frame on perf_combat, the last direct
+    // call standing after the water pushes were queued.
+    float _publishedGpuTimings[WGR_GPU_TIMER_REGION_COUNT] = {};
+    float _publishedCpuTimings[WGR_GPU_TIMER_REGION_COUNT] = {};
+    int _publishedGpuTimingCount = 0;
+    int _publishedCpuTimingCount = 0;
     static EngineWgpu* s_self;
     /// PERF-019. Report any renderer frame or consumer block at or above this many
     /// milliseconds (WGR_SLOW_BLOCK_MS, default 100; 0 switches the reports off).
@@ -1327,6 +1344,10 @@ class EngineWgpu : public EngineDummy
     // readers that used to call wgr_get_memory_stats on the live handle every frame.
     static bool LastMemoryStats(WgrMemoryStats& out);
     void QueueTerrainParams(const WgrTerrainParams& p);
+    void QueueWaterParams(const WgrWaterParams& p);
+    void QueuePlanarReflectionPad(float pad);
+    void QueueWaterInteraction(const WgrWaterInteractionParams& p, const WgrWaterInteractionEvent* events,
+                               uint32_t count);
 
   private:
     void RenderThreadMain();

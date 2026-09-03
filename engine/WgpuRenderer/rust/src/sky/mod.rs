@@ -1717,11 +1717,13 @@ impl Sky {
             .and_then(|v| v.parse::<f64>().ok())
             .unwrap_or(4.0)
             .clamp(1.0, 16.0);
-        // REN-SKY-002: the light march samples a two-tap density by default (no warp, no detail
-        // erosion); WGR_CLOUD_LIGHT_COARSE=0 is the A/B back to the four-tap density.
+        // REN-SKY-002: WGR_CLOUD_LIGHT_COARSE=1 makes the light march sample a two-tap density
+        // (no warp, no detail erosion): 2.89 -> 1.84 ms at 128 steps. OFF by default -- the
+        // owner preferred the four-tap picture on sight (2026-09-03), so this is the lever for
+        // a slow GPU, like WGR_CLOUD_STEPS=64, not the look.
         let cloud_light_coarse = std::env::var("WGR_CLOUD_LIGHT_COARSE")
-            .map(|v| v.trim() != "0")
-            .unwrap_or(true);
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false);
         let cloud_overrides: [(&str, f64); 3] = [
             ("CLOUD_STEPS", cloud_steps),
             ("CLOUD_LIGHT_STEPS", cloud_light_steps),

@@ -1,4 +1,5 @@
 #include <Poseidon/Core/Global.hpp>
+#include "SimVehicleCost.hpp" // PERF-023
 #include <Poseidon/Input/CheatCode.hpp>
 #include <Poseidon/Input/ControllerUiLayout.hpp>
 #include <SDL3/SDL_scancode.h>
@@ -996,14 +997,18 @@ void World::SimulateCloudlets(float deltaT)
 
 void World::SimulateAllVehicles(float deltaT, float noAccDeltaT, Entity* cameraVehicle)
 {
+    SimVehCost::Costs().ticks++; // PERF-023
     float farValidFor = 1.5;
-    if (Glob.time > _farImportanceDistributionTime + farValidFor)
     {
-        DistributeFarImportances();
-    }
-    if (Glob.time > _nearImportanceDistributionTime + 1.0)
-    {
-        DistributeNearImportances();
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Importance);
+        if (Glob.time > _farImportanceDistributionTime + farValidFor)
+        {
+            DistributeFarImportances();
+        }
+        if (Glob.time > _nearImportanceDistributionTime + 1.0)
+        {
+            DistributeNearImportances();
+        }
     }
     SetActiveChannels();
 #define MAX_SIM_STEP_VEHICLES (1.0 / 15)
@@ -1015,31 +1020,49 @@ void World::SimulateAllVehicles(float deltaT, float noAccDeltaT, Entity* cameraV
         vehicle->StartFrame();
     }
 
-    SimulateCloudlets(deltaT);
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Cloudlets);
+        SimulateCloudlets(deltaT);
+    }
     float toSimVehicles = deltaT;
     float toSimFast = deltaT;
     while (toSimVehicles > MAX_SIM_STEP_VEHICLES)
     {
-        SimulateVehicles(MAX_SIM_STEP_VEHICLES, &Entity::SimulateOptimized, cameraVehicle);
+        {
+            SimVehCost::ScopedStage stage(SimVehCost::Stage::Slow);
+            SimulateVehicles(MAX_SIM_STEP_VEHICLES, &Entity::SimulateOptimized, cameraVehicle);
+        }
         toSimVehicles -= MAX_SIM_STEP_VEHICLES;
         while (toSimFast > toSimVehicles && toSimFast > MAX_SIM_STEP_FAST)
         {
+            SimVehCost::ScopedStage stage(SimVehCost::Stage::Fast);
             SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
             toSimFast -= MAX_SIM_STEP_FAST;
         }
     }
-    SimulateVehicles(toSimVehicles, &Entity::SimulateRest, cameraVehicle);
-    while (toSimFast > MAX_SIM_STEP_FAST)
     {
-        SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
-        toSimFast -= MAX_SIM_STEP_FAST;
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Slow);
+        SimulateVehicles(toSimVehicles, &Entity::SimulateRest, cameraVehicle);
     }
-    SimulateFastVehicles(toSimFast, &Entity::SimulateRest);
-    SimulateBuildings(deltaT, &Entity::SimulateOptimized);
-
-    for (int i = 0; i < _attached.Size(); i++)
     {
-        _attached[i]->UpdatePosition();
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Fast);
+        while (toSimFast > MAX_SIM_STEP_FAST)
+        {
+            SimulateFastVehicles(MAX_SIM_STEP_FAST, &Entity::SimulateOptimized);
+            toSimFast -= MAX_SIM_STEP_FAST;
+        }
+        SimulateFastVehicles(toSimFast, &Entity::SimulateRest);
+    }
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Buildings);
+        SimulateBuildings(deltaT, &Entity::SimulateOptimized);
+    }
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::Attached);
+        for (int i = 0; i < _attached.Size(); i++)
+        {
+            _attached[i]->UpdatePosition();
+        }
     }
 }
 

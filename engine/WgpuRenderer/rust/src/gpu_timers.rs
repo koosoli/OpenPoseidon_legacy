@@ -357,6 +357,11 @@ impl GpuTimers {
     /// understates grass shadowing by the cascade count, which is a trap worth knowing
     /// before quoting the number (2026-08-31: nearly quoted it here).
     pub fn begin(&self, encoder: &mut wgpu::CommandEncoder, region: Region) {
+        // PERF-022: the CPU clock rides every bracket, so the worker's encode time is
+        // attributed by the same rows as the GPU time. cpu_end accumulates, so a region
+        // bracketed several times reports its per-frame sum on the CPU side (the GPU side
+        // keeps the last bracket -- see the note above).
+        self.cpu_begin(region);
         if let Some(inner) = &self.inner {
             encoder.write_timestamp(&inner.query_set, region as u32 * 2);
         }
@@ -370,12 +375,14 @@ impl GpuTimers {
                 .written
                 .set(inner.written.get() | (1u128 << region as u32));
         }
+        self.cpu_end(region);
     }
 
     /// Open a region bracket from INSIDE a render pass. No-op unless the adapter
     /// offered TIMESTAMP_QUERY_INSIDE_PASSES. Use for draws that share a pass with
     /// other work (grass colour/prepass/shadow ops inside the 3D plan).
     pub fn begin_pass(&self, pass: &mut wgpu::RenderPass<'_>, region: Region) {
+        self.cpu_begin(region); // PERF-022, as in `begin`
         if let Some(inner) = &self.inner {
             if inner.inside_passes {
                 pass.write_timestamp(&inner.query_set, region as u32 * 2);
@@ -393,6 +400,7 @@ impl GpuTimers {
                     .set(inner.written.get() | (1u128 << region as u32));
             }
         }
+        self.cpu_end(region);
     }
 
     /// Record the query resolve + copy into a free ring slot. Call at the end of the

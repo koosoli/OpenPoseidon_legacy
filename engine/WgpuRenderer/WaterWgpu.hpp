@@ -57,6 +57,17 @@ class WaterWgpu : public IWaterRenderer
     WgrWaterParams _params{};
     WgrWaterInteractionParams _interaction{};
     float _lastInteractionTime = 0.0f;
+    // PERF-022: the cascade preset push is per frame by design (it carries the live seed
+    // override), but the five wgr_water_set_cascade_config calls behind it are direct renderer
+    // calls that opened the producer window every frame (a 5-7 ms wait for the worker, named
+    // by the REN-THR-013 opener log). The push now happens only when its arguments change.
+    struct CascadeApplied
+    {
+        bool valid = false;
+        int preset = 0, fft = 0;
+        uint32_t seed = 0;
+        float wind = 1.0f, len = 1.0f, dir = 0.0f;
+    } _cascadeApplied;
     bool _haveInteractionDomain = false;
     bool _interactionDemo = false;
     int _lastInteractionDemoPulse = -1;
