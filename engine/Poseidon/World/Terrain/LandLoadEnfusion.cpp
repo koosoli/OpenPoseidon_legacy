@@ -25,6 +25,7 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
+#include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
@@ -41,8 +42,7 @@
 
 namespace
 {
-using Poseidon::Asset::Formats::Enfusion::PakArchive;
-using Poseidon::Asset::Formats::Enfusion::PakEntry;
+using Poseidon::Asset::Formats::Enfusion::EnfusionMount;
 using Poseidon::Asset::Formats::Enfusion::ReadTerrainDescriptor;
 using Poseidon::Asset::Formats::Enfusion::ReadTerrainTile;
 using Poseidon::Asset::Formats::Enfusion::TerrainDescriptor;
@@ -94,67 +94,52 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
 {
     EnfusionTerrain out;
 
-    std::vector<std::string> paks;
-    std::error_code ec;
-    for (std::filesystem::recursive_directory_iterator it(addonsDir, ec), end; it != end && !ec; it.increment(ec))
+    // RFG-007: the archives are opened once into the process-wide mount and kept, so
+    // the surface and model steps that come after this do not reopen sixteen files.
+    EnfusionMount& mount = EnfusionMount::Instance();
+    if (!mount.IsOpen() || mount.Root() != addonsDir)
     {
-        if (!it->is_regular_file(ec))
-            continue;
-        if (LowerCopy(it->path().extension().string()) == ".pak")
-            paks.push_back(it->path().string());
-    }
-    if (paks.empty())
-    {
-        out.error = "no .pak archives under '" + addonsDir + "'";
-        return out;
-    }
-
-    // A world's data is not guaranteed to sit in one archive, so every archive is
-    // searched and the tiles are collected by index across all of them.
-    const std::string needle = LowerCopy(WantedWorld());
-    std::vector<PakArchive> archives(paks.size());
-    const PakEntry* descriptorEntry = nullptr;
-    size_t descriptorArchive = 0;
-    std::map<uint32_t, std::pair<size_t, const PakEntry*>> tiles;
-
-    for (size_t i = 0; i < paks.size(); ++i)
-    {
-        if (!archives[i].Open(paks[i]))
-            continue;
-        for (const PakEntry& entry : archives[i].Entries())
+        if (!mount.Open(addonsDir))
         {
-            const std::string lower = LowerCopy(entry.path);
-            if (lower.find(needle) == std::string::npos)
-                continue;
-            if (lower.size() > 5 && lower.compare(lower.size() - 5, 5, ".terr") == 0)
-            {
-                descriptorEntry = &entry;
-                descriptorArchive = i;
-            }
-            else if (lower.size() > 6 && lower.compare(lower.size() - 6, 6, ".ttile") == 0)
-            {
-                // `<name>_<index>.ttile`; the index is row-major over the tile grid.
-                const size_t underscore = lower.rfind('_');
-                if (underscore == std::string::npos)
-                    continue;
-                const std::string digits = lower.substr(underscore + 1, lower.size() - underscore - 7);
-                if (digits.empty() ||
-                    !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
-                    continue;
-                tiles[static_cast<uint32_t>(std::stoul(digits))] = {i, &entry};
-            }
+            out.error = "no readable .pak archives under '" + addonsDir + "'";
+            return out;
         }
     }
 
-    if (descriptorEntry == nullptr)
+    // A world's data is not guaranteed to sit in one archive; the mount indexes all
+    // of them together, so this is one lookup over the whole install.
+    const std::string needle = LowerCopy(WantedWorld());
+    std::string descriptorPath;
+    std::map<uint32_t, std::string> tiles;
+    for (const std::string& path : mount.FindAll(needle))
+    {
+        if (path.size() > 5 && path.compare(path.size() - 5, 5, ".terr") == 0)
+        {
+            descriptorPath = path;
+        }
+        else if (path.size() > 6 && path.compare(path.size() - 6, 6, ".ttile") == 0)
+        {
+            // `<name>_<index>.ttile`; the index is row-major over the tile grid.
+            const size_t underscore = path.rfind('_');
+            if (underscore == std::string::npos)
+                continue;
+            const std::string digits = path.substr(underscore + 1, path.size() - underscore - 7);
+            if (digits.empty() ||
+                !std::all_of(digits.begin(), digits.end(), [](unsigned char c) { return std::isdigit(c) != 0; }))
+                continue;
+            tiles[static_cast<uint32_t>(std::stoul(digits))] = path;
+        }
+    }
+
+    if (descriptorPath.empty())
     {
         out.error = "no .terr descriptor matching '" + std::string(WantedWorld()) + "'";
         return out;
     }
     std::vector<uint8_t> bytes;
-    if (!archives[descriptorArchive].Read(*descriptorEntry, bytes))
+    if (!mount.Read(descriptorPath, bytes))
     {
-        out.error = archives[descriptorArchive].Error();
+        out.error = "cannot read '" + descriptorPath + "'";
         return out;
     }
     out.descriptor = ReadTerrainDescriptor(bytes.data(), bytes.size());
@@ -177,10 +162,10 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
     // The tile edge comes from the tiles themselves: the descriptor does not carry it
     // and it is not constant across the corpus.
     uint32_t tilesX = 0;
-    for (const auto& [index, where] : tiles)
+    for (const auto& [index, tilePath] : tiles)
     {
         std::vector<uint8_t> tileBytes;
-        if (!archives[where.first].Read(*where.second, tileBytes))
+        if (!mount.Read(tilePath, tileBytes))
         {
             out.tilesFailed++;
             continue;
