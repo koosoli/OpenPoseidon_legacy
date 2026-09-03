@@ -26,6 +26,7 @@
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
 #include <Poseidon/Core/ProgressSystem.hpp>
 #include <Poseidon/Foundation/Framework/Log.hpp>
@@ -46,6 +47,11 @@ using Poseidon::Asset::Formats::Enfusion::ReadTerrainDescriptor;
 using Poseidon::Asset::Formats::Enfusion::ReadTerrainTile;
 using Poseidon::Asset::Formats::Enfusion::TerrainDescriptor;
 using Poseidon::Asset::Formats::Enfusion::TerrainTile;
+using Poseidon::Asset::Formats::Enfusion::FourCC;
+using Poseidon::Asset::Formats::Enfusion::IffChunk;
+using Poseidon::Asset::Formats::Enfusion::IffFile;
+using Poseidon::Asset::Formats::Enfusion::ReadIff;
+namespace Tmat = Poseidon::Asset::Formats::Enfusion::Tmat;
 
 std::string LowerCopy(std::string s)
 {
@@ -73,6 +79,14 @@ struct EnfusionTerrain
     uint32_t tileEdge = 0;
     size_t tilesFound = 0;
     size_t tilesFailed = 0;
+    /// RFG-006: which authored surface covers each square metre, from the tiles' TMAT
+    /// chunks. One byte per metre over the whole world, so 12.8 km costs 164 MB while
+    /// it is being read and is thrown away as soon as the land grid has been filled.
+    std::vector<uint8_t> materials;
+    uint32_t materialEdge = 0;
+    size_t subCells = 0;
+    size_t subCellsFailed = 0;
+    std::string materialError;
     std::string error;
 };
 
@@ -181,6 +195,12 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
         {
             out.tileEdge = tile.samples - 1;
             tilesX = (gridW - 1) / out.tileEdge;
+            if (out.descriptor.subPerTileEdge > 0)
+            {
+                out.materialEdge = tilesX * out.descriptor.subPerTileEdge * Tmat::kMaskEdge;
+                // 0xFF means "nothing said", which is distinguishable from material 0.
+                out.materials.assign(static_cast<size_t>(out.materialEdge) * out.materialEdge, 0xFF);
+            }
         }
         if (tilesX == 0)
             continue;
@@ -198,6 +218,58 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
                     break;
                 out.heights[static_cast<size_t>(worldZ) * gridW + worldX] = tile.At(x, z);
             }
+        }
+
+        // The surfaces ride in the same tile bytes that are already decompressed and
+        // in hand; re-reading 2,500 tiles for a chunk we hold would be pure cost.
+        if (out.materials.empty())
+            continue;
+        const IffFile tileIff = ReadIff(tileBytes.data(), tileBytes.size());
+        const IffChunk* tmat = tileIff.valid() ? tileIff.Find(FourCC("TMAT")) : nullptr;
+        if (tmat == nullptr)
+            continue;
+        std::vector<Tmat::SubCell> cells;
+        std::string tmatError;
+        if (!Tmat::ReadSubCells(tileBytes.data() + tmat->offset, tmat->size, cells, tmatError))
+        {
+            if (out.materialError.empty())
+                out.materialError = tmatError;
+            continue;
+        }
+        std::array<uint8_t, Tmat::kMaskEdge * Tmat::kMaskEdge> mask{};
+        for (const Tmat::SubCell& cell : cells)
+        {
+            ++out.subCells;
+            const size_t baseZ = static_cast<size_t>(cell.subY) * Tmat::kMaskEdge;
+            const size_t baseX = static_cast<size_t>(cell.subX) * Tmat::kMaskEdge;
+            if (baseZ + Tmat::kMaskEdge > out.materialEdge || baseX + Tmat::kMaskEdge > out.materialEdge)
+            {
+                ++out.subCellsFailed;
+                continue;
+            }
+            if (cell.blendSize == 0)
+            {
+                // A single-material sub-cell carries no payload at all.
+                mask.fill(0);
+            }
+            else if (!Tmat::DecodeBlend(cell.blend, cell.blendSize, cell.palette.size(), mask.data(), tmatError))
+            {
+                ++out.subCellsFailed;
+                if (out.materialError.empty())
+                    out.materialError = tmatError;
+                mask.fill(0);
+            }
+            // The palette is the trap the decoder's own comment names: it is sorted
+            // ascending by material index, so entry 0 is the lowest index present and
+            // NOT the base layer.
+            for (int mz = 0; mz < Tmat::kMaskEdge; ++mz)
+                for (int mx = 0; mx < Tmat::kMaskEdge; ++mx)
+                {
+                    const uint8_t entry = mask[static_cast<size_t>(mz) * Tmat::kMaskEdge + mx];
+                    if (entry < cell.palette.size())
+                        out.materials[(baseZ + mz) * out.materialEdge + baseX + mx] =
+                            static_cast<uint8_t>(cell.palette[entry]);
+                }
         }
     }
     return out;
@@ -269,20 +341,74 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     // is gradient and water; the forest and road bits stay zero, and AI pathing on a
     // natively loaded world is therefore worse than on a converted one. Named rather
     // than hidden.
+    // RFG-006: the surface index per land cell, point-sampled at the cell centre out
+    // of the 1 m TMAT mask. A land cell is 50 m, so this picks one of 2,500 authored
+    // square metres and calls it the cell -- a reduction the single-index terrain path
+    // forces, and the same one the converting exporter makes.
+    std::vector<int> histogram(d.materials.size() + 1, 0);
     for (int z = 0; z < landRange; ++z)
     {
         for (int x = 0; x < landRange; ++x)
         {
             _geography(x, z) = GeographyInfo{};
-            _tex(x, z) = 0;
+            int index = 0;
+            if (terrain.materialEdge > 0)
+            {
+                const uint32_t mx = std::min<uint32_t>(
+                    terrain.materialEdge - 1,
+                    static_cast<uint32_t>((static_cast<float>(x) + 0.5f) *
+                                          static_cast<float>(terrain.materialEdge) /
+                                          static_cast<float>(landRange)));
+                const uint32_t mz = std::min<uint32_t>(
+                    terrain.materialEdge - 1,
+                    static_cast<uint32_t>((static_cast<float>(z) + 0.5f) *
+                                          static_cast<float>(terrain.materialEdge) /
+                                          static_cast<float>(landRange)));
+                const uint8_t sample = terrain.materials[static_cast<size_t>(mz) * terrain.materialEdge + mx];
+                if (sample != 0xFF && sample < d.materials.size())
+                    index = sample;
+            }
+            _tex(x, z) = static_cast<short>(index);
+            if (static_cast<size_t>(index) < histogram.size())
+                ++histogram[index];
         }
     }
 
-    // No surface materials yet: the TMAT decoder is still tool-side. One empty entry
-    // rather than none, so every cell's index 0 resolves to something.
-    _texture.Resize(1);
-    _a3TerrainMaterials.Resize(1);
-    _a3TerrainMaterials[0] = A3TerrainMaterial{};
+    // The palette itself. The names resolve to nothing yet -- they are `.emat` paths
+    // INSIDE the archives, and the engine's file layer cannot open a `.pak` -- so the
+    // ground still draws in the fallback. What is right now is the INDEX per cell,
+    // which is what the next step needs and what a wrong palette read would ruin
+    // silently: entry 0 of a TMAT palette is the lowest index present, not the base
+    // layer, and taking it renders Everon as 41% dirt.
+    const int paletteSize = std::max<int>(1, static_cast<int>(d.materials.size()));
+    _texture.Resize(paletteSize);
+    _a3TerrainMaterials.Resize(paletteSize);
+    for (int i = 0; i < paletteSize; ++i)
+        _a3TerrainMaterials[i] = A3TerrainMaterial{};
+
+    {
+        // Say what came out, with a denominator. "Surfaces loaded" is not a claim
+        // anybody can check; "the four commonest of 22 cover 78% of the island" is.
+        std::vector<std::pair<int, int>> ranked;
+        for (size_t i = 0; i < histogram.size(); ++i)
+            if (histogram[i] > 0)
+                ranked.emplace_back(histogram[i], static_cast<int>(i));
+        std::sort(ranked.begin(), ranked.end(), std::greater<>());
+        const int cells = landRange * landRange;
+        std::string top;
+        for (size_t i = 0; i < ranked.size() && i < 4; ++i)
+        {
+            const std::string& name =
+                static_cast<size_t>(ranked[i].second) < d.materials.size() ? d.materials[ranked[i].second] : std::string();
+            top += (top.empty() ? "" : ", ") + std::to_string(ranked[i].second) + "=" +
+                   std::to_string(ranked[i].first * 100 / cells) + "% " + name;
+        }
+        LOG_INFO(World,
+                 "Enfusion native load: surfaces {} of {} palette entries used over {} land cells "
+                 "({} sub-cells, {} failed{}); commonest: {}",
+                 ranked.size(), d.materials.size(), cells, terrain.subCells, terrain.subCellsFailed,
+                 terrain.materialError.empty() ? "" : (", first error: " + terrain.materialError), top);
+    }
 
     _mountains.Resize(0);
 
