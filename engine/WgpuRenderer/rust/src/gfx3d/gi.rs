@@ -50,7 +50,6 @@ pub struct GiSettings {
     pub enabled: bool,
     /// 0 = six-face ambient cube (shipped), 1 = first-order SH. See `basis_from_env`.
     pub basis: u32,
-    pub debug: bool,
     pub rays: u32,
     pub weight: f32,
     pub interior_mix: f32,
@@ -69,8 +68,7 @@ impl Default for GiSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            basis: basis_from_env(),
-            debug: false,
+            basis: 2,
             rays: 24,
             weight: 1.0,
             interior_mix: 0.25,
@@ -90,7 +88,7 @@ impl Default for GiSettings {
 impl GiSettings {
     pub fn apply(&mut self, p: &crate::ffi::WgrGi) {
         self.enabled = p.enabled != 0;
-        self.debug = p.debug != 0;
+        self.basis = p.basis.min(2);
         self.rays = p.rays.clamp(8, 64);
         self.weight = p.weight.clamp(0.0, 1.0);
         self.interior_mix = p.interior_mix.clamp(0.0, 1.0);
@@ -104,21 +102,6 @@ impl GiSettings {
         self.rsm_radius = p.rsm_radius.clamp(1.0, 40.0);
         self.rsm_gain = p.rsm_gain.max(0.0);
     }
-}
-
-/// `WGR_GI_BASIS=sh` (or `1`) stores probe radiance as first-order spherical harmonics instead
-/// of the six-face ambient cube. REN-GI-007 measured why this exists: a cube reconstructs
-/// irradiance as the sum of E(face) * n(component)^2, so a bounce arriving from below lands in
-/// the down face and a horizontal normal multiplies it by ~0. SH-1 carries the direction
-/// linearly, so a partly-horizontal arrival keeps its horizontal part. `cube` (the default) is
-/// the shipped basis until this is measured on both poses.
-pub fn basis_from_env() -> u32 {
-    static B: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *B.get_or_init(|| match std::env::var("WGR_GI_BASIS").as_deref() {
-        Ok("sh") | Ok("sh1") | Ok("1") => 1,
-        Ok("sh2") | Ok("2") => 2,
-        _ => 0,
-    })
 }
 
 /// `WGR_GI_RSM_ISO=1` — see the `rsm_meta` comment. Diagnostic, not a shipping path.

@@ -1156,7 +1156,10 @@ class Engine : public IGraphicsEngine
     struct GiSettings
     {
         bool enabled = true;
-        bool debug = false;
+        /// REN-GI-009: probe radiance basis. 0 = six-face ambient cube, 1 = first-order SH
+        /// (a measured dead end, REN-GI-008), 2 = second-order SH. Two by default: it was
+        /// better on every shaded surface measured and identical on every lit one.
+        int basis = 2;
         int rays = 24;
         float weight = 1.0f;
         float interiorMix = 0.25f;
@@ -1861,6 +1864,12 @@ class Engine : public IGraphicsEngine
         // spans isolated cumulus (low) to a solid overcast deck (high). Coverage also dims the
         // directional sun / lifts ambient on the CPU side (PushFrame), so overcast reads flat.
         // Off by default (coverage 0) so the clear-sky look is unchanged until authored.
+        // REN-SKY-004: the planar water reflection marched the SKY's 128-step clouds into a
+        // half-resolution buffer that is then reflected off a displaced surface and read back
+        // through a roughness mip chain. On, it uses its own low-step pipeline
+        // (WGR_CLOUD_STEPS_REFLECTION, 32 by default): 2.55 -> 1.20 ms on an open-sea pose with
+        // no visible difference. Off restores the sky's own march for the reflection.
+        bool cloudReflectionCheap = true;
         float cloudCoverage = 0.42f;                       // 0 = clear .. 1 = full overcast
         // Drive cloudCoverage from the WORLD's overcast (Landscape::GetOvercast) each frame, so
         // Zeus / the `weather` console command / mission weather all move the sky. Without this

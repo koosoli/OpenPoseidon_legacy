@@ -857,6 +857,9 @@ pub struct Renderer {
     // (celestial per frame, authored on edit); skipped when control.x (enabled) = 0.
     sky: Sky,
     sky_params: ffi::WgrSky,
+    /// REN-SKY-004: does the planar water reflection record its own low-step cloud pipeline?
+    /// Pushed from the host (sky look `night_params.w`) so the dev panel can turn it off.
+    cloud_reflection_cheap: bool,
     // Last terrain sun-shadow / sky-visibility blocks received via wgr_set_render_params.
     // The consolidated block is pushed every frame, but these two setters realloc the mask /
     // re-run the CPU scan (and set_sun_shadow_params dirties the sweep unconditionally), so we
@@ -1900,6 +1903,7 @@ impl Renderer {
             tonemap_params,
             sky,
             sky_params: ffi::WgrSky::default(),
+            cloud_reflection_cheap: true,
             last_sun_shadow: None,
             last_sky_visibility: None,
             foliage_params: ffi::WgrFoliage::default(),
@@ -1989,6 +1993,9 @@ impl Renderer {
         s.night_params[0] = l.night_params[0];
         s.night_params[1] = l.night_params[1];
         s.night_params[2] = l.night_params[2];
+        // REN-SKY-004: not a shader lane -- it picks which cloud PIPELINE the planar reflection
+        // records, so it is kept on the renderer rather than copied into the sky uniform.
+        self.cloud_reflection_cheap = l.night_params[3] > 0.5;
         // Cloud look. cloud1.xy (wind WORLD offset) is a runtime field owned by set_sky_runtime,
         // so copy only the shape/detail scale lanes (z,w) here, leaving xy intact.
         s.cloud0 = l.cloud0;
@@ -4029,7 +4036,7 @@ impl Renderer {
                         &planar.depth_sample_view,
                         planar.size.0,
                         planar.size.1,
-                        true, // REN-SKY-004: the reflection's own low-step cloud pipeline
+                        self.cloud_reflection_cheap,
                     );
                     let mut cloud_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("wgr_planar_reflection_cloud_composite"),

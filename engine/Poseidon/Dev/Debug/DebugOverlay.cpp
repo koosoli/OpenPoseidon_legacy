@@ -4277,6 +4277,21 @@ void DrawGiTab()
     Dev::PanelHelp("over the analytic sky-dome ambient. Direct sun is untouched. WGR_GI=0 off.");
     Dev::PanelSeparator();
     changed |= Dev::Checkbox("Enabled", &gi.enabled);
+    {
+        // REN-GI-009. SH-2 is the default: measured better on every shaded surface and
+        // identical on every lit one, for about 0.2 ms. SH-1 is kept only because it is a
+        // recorded negative result (REN-GI-008) -- it loses 4.9% on an outdoor shaded wall.
+        const char* kBasis[] = {"Ambient cube (6 faces)", "SH-1 (worse -- see REN-GI-008)",
+                                "SH-2 (default)"};
+        int basis = std::clamp(gi.basis, 0, 2);
+        if (ImGui::Combo("Probe basis", &basis, kBasis, IM_ARRAYSIZE(kBasis)))
+        {
+            gi.basis = basis;
+            changed = true;
+        }
+        Dev::PanelHelp("  how each probe stores the light it gathered, and what the shading can");
+        Dev::PanelHelp("  read back out of it for a given surface normal");
+    }
     changed |= ImGui::SliderFloat("Weight", &gi.weight, 0.0f, 1.0f, "%.2f");
     Dev::PanelHelp("  0 = the old ambient exactly, 1 = the probes alone");
     changed |= ImGui::SliderFloat("Interior AO share", &gi.interiorMix, 0.0f, 1.0f, "%.2f");
@@ -5272,6 +5287,10 @@ void DrawSkyTab()
     Dev::PanelSeparator();
     Dev::PanelHeading("Clouds");
     Dev::PanelHelp("raymarched cloud shell in the sky (also reflected in water + SH ambient)");
+    changed |= Dev::Checkbox("Cheap clouds in water reflection", &s.cloudReflectionCheap);
+    Dev::PanelHelp("  REN-SKY-004: the reflection marches clouds with its own 32-step pipeline");
+    Dev::PanelHelp("  instead of the sky's 128. Measured 2.55 -> 1.20 ms on open sea, no visible");
+    Dev::PanelHelp("  difference. Off puts the sky's own march back in the reflection.");
     changed |= Dev::Checkbox("Coverage follows weather", &s.cloudCoverageFromWeather);
     Dev::PanelTooltip("On: cloud cover is driven by the world's overcast, so Zeus, the "
                       "`weather` console command and mission weather all move the sky. "

@@ -576,7 +576,9 @@ struct WgrSkyLook
     WgrVec4 control;       /* x = enabled, y = view samples, z = light samples, w = ozone */
     WgrVec4 night_zenith;  /* xyz = night radiance at the zenith; w = horizon-haze strength */
     WgrVec4 night_horizon; /* xyz = night radiance at the horizon; w = aerial-shadow strength */
-    WgrVec4 night_params;  /* x = full-day sun_dir.y, y = full-night sun_dir.y, z = night intensity, w = pad */
+    WgrVec4 night_params;  /* x = full-day sun_dir.y, y = full-night sun_dir.y, z = night intensity,
+                            * w = REN-SKY-004: 1 = the planar water reflection uses its own cheap
+                            * cloud march, 0 = the sky's own step count. LOOK struct only. */
     /* Cloud look (mirrors WgrSky::cloud0/1/2/3; cloud1.xy = wind offset is runtime, unused here). */
     WgrVec4 cloud0; /* x = coverage, y = extinction (1/m), z = bottom (m), w = top (m) */
     WgrVec4 cloud1; /* x/y unused (runtime wind offset), z = shape scale (1/m), w = detail scale (1/m) */
@@ -703,7 +705,9 @@ struct WgrSkyVis
 struct WgrGi
 {
     uint32_t enabled;        /* 0 = the analytic sky-dome ambient only (pre-GI behaviour) */
-    uint32_t debug;          /* reserved */
+    uint32_t basis;          /* REN-GI-009: probe radiance basis. 0 = six-face ambient cube,
+                              * 1 = first-order SH (a measured dead end, REN-GI-008),
+                              * 2 = second-order SH (the default). Was a reserved debug word. */
     uint32_t rays;           /* rays per probe update (8..64) */
     uint32_t rsm_samples;    /* REN-GI-002: sun-proxy gather samples per probe (0 = off) */
     float    weight;         /* blend of the probe term over the sky-dome ambient, 0..1 */

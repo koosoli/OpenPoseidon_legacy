@@ -1320,15 +1320,23 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _gi.interiorMix = std::clamp(std::strtof(gm, nullptr), 0.0f, 1.0f);
     }
+    if (const char* gb = std::getenv("WGR_GI_BASIS"))
+    {
+        // REN-GI-009: `cube` restores the six-face ambient cube exactly, `sh` the first-order
+        // version REN-GI-008 measured as a dead end. Default is second order.
+        const std::string_view v(gb);
+        _gi.basis = (v == "cube" || v == "0") ? 0 : (v == "sh" || v == "sh1" || v == "1") ? 1 : 2;
+    }
     if (const char* gg = std::getenv("WGR_GI_RSM_GAIN"))
     {
         _gi.rsmGain = std::max(0.0f, std::strtof(gg, nullptr)); // A/B: is the bounce small or zero?
     }
     LOG_INFO(Graphics,
              "Wgpu GI probe volume: {} (WGR_GI), weight {:.2f}, spacing {:.1f} m, {} rays; sun proxy {} "
-             "(WGR_GI_RSM, {} samples, radius {:.0f} m, gain {:.2f})",
+             "(WGR_GI_RSM, {} samples, radius {:.0f} m, gain {:.2f}); basis {}",
              _gi.enabled ? "on" : "OFF", _gi.weight, _gi.spacing, _gi.rays,
-             _gi.rsmSamples > 0 ? "on" : "OFF", _gi.rsmSamples, _gi.rsmRadius, _gi.rsmGain);
+             _gi.rsmSamples > 0 ? "on" : "OFF", _gi.rsmSamples, _gi.rsmRadius, _gi.rsmGain,
+             _gi.basis == 0 ? "ambient cube" : (_gi.basis == 1 ? "SH-1" : "SH-2"));
     // Through the log sink, not eprintln!/stderr: renderer diagnostics that must survive into
     // --log-file have to go through the sink or they are simply not there when you read the log.
     LOG_INFO(Graphics,
@@ -10127,7 +10135,7 @@ void EngineWgpu::PushRenderParams()
     p.sky.night_horizon = {_sky.nightHorizon[0], _sky.nightHorizon[1], _sky.nightHorizon[2], _sky.aerialShadow};
     // Blend band expressed as sun_dir.y (= sin elevation) so the shader compares directly.
     p.sky.night_params = {std::sin(_sky.nightStartDeg * deg2rad), std::sin(_sky.nightEndDeg * deg2rad),
-                          _sky.nightIntensity, 0.0f};
+                          _sky.nightIntensity, _sky.cloudReflectionCheap ? 1.0f : 0.0f};
     // Cloud look. cloud1.xy = wind WORLD offset is a runtime field (filled by PushSkyRuntime), so
     // only the shape/detail scales (z,w) are look fields here; scale = 1/size (guard size > 0).
     const float shapeScale = 1.0f / (_sky.cloudShapeSize > 1.0f ? _sky.cloudShapeSize : 1.0f);
@@ -10380,7 +10388,7 @@ void EngineWgpu::PushRenderParams()
 
     p.gi = {
         _gi.enabled ? 1u : 0u,
-        _gi.debug ? 1u : 0u,
+        static_cast<uint32_t>(std::clamp(_gi.basis, 0, 2)),
         static_cast<uint32_t>(std::clamp(_gi.rays, 8, 64)),
         static_cast<uint32_t>(std::clamp(_gi.rsmSamples, 0, 64)),
         _gi.weight,

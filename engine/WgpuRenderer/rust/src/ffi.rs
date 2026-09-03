@@ -524,7 +524,10 @@ pub struct WgrSkyLook {
     pub control: WgrVec4, // x = enabled, y = view samples, z = light samples, w = ozone
     pub night_zenith: WgrVec4, // xyz = night radiance at the zenith; w = horizon-haze strength
     pub night_horizon: WgrVec4, // xyz = night radiance at the horizon; w = aerial-shadow strength
-    pub night_params: WgrVec4, // x = full-day sun_dir.y, y = full-night sun_dir.y, z = night intensity, w = pad
+    // x = full-day sun_dir.y, y = full-night sun_dir.y, z = night intensity, w = REN-SKY-004:
+    // 1 = the planar water reflection marches clouds with its own cheap pipeline, 0 = the sky's
+    // own step count. LOOK struct only -- WgrSky::night_params.w is the fog range, untouched.
+    pub night_params: WgrVec4,
     // Cloud look (mirrors WgrSky::cloud0/1/2/3; cloud1.xy = wind offset is runtime, ignored here).
     pub cloud0: WgrVec4, // x = coverage, y = extinction (1/m), z = bottom (m), w = top (m)
     pub cloud1: WgrVec4, // x/y unused (runtime wind offset), z = shape scale (1/m), w = detail scale (1/m)
@@ -542,7 +545,7 @@ impl Default for WgrSkyLook {
             control: [1.0, 16.0, 8.0, 1.0],
             night_zenith: [0.15, 0.30, 0.80, 0.0],
             night_horizon: [0.35, 0.45, 0.90, 1.0],
-            night_params: [0.052, -0.139, 0.02, 0.0],
+            night_params: [0.052, -0.139, 0.02, 1.0],
             cloud0: [0.0, 0.06, 1200.0, 3500.0],
             cloud1: [0.0, 0.0, 1.0 / 9300.0, 1.0 / 1700.0],
             cloud2: [0.35, 1.0, 1.0, 60_000.0],
@@ -804,7 +807,8 @@ pub struct WgrRenderParams {
 #[derive(Clone, Copy, Default)]
 pub struct WgrGi {
     pub enabled: u32,
-    pub debug: u32,
+    /// REN-GI-009: 0 = ambient cube, 1 = SH-1, 2 = SH-2. Was a reserved debug word.
+    pub basis: u32,
     pub rays: u32,
     pub rsm_samples: u32,
     pub weight: f32,
