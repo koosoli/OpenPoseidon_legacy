@@ -316,12 +316,20 @@ fn cs_gi_probes(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // Radiance only: the moments describe the GEOMETRY the rays met, and a
                 // gathered bounce is not a ray hit.
                 let back = -dir; // direction from the probe toward the sample
-                e0 += l * max(back.x, 0.0);
-                e1 += l * max(-back.x, 0.0);
-                e2 += l * max(back.y, 0.0);
-                e3 += l * max(-back.y, 0.0);
-                e4 += l * max(back.z, 0.0);
-                e5 += l * max(-back.z, 0.0);
+                if (gi.rsm_meta.z > 0.5) {
+                    // REN-GI-007 ablation: same energy, spread over every face. If a shaded
+                    // wall lifts under this and not under the directional store, the bounce
+                    // is present and simply lands in a face a vertical normal cannot read.
+                    let f = l * (1.0 / 3.0);
+                    e0 += f; e1 += f; e2 += f; e3 += f; e4 += f; e5 += f;
+                } else {
+                    e0 += l * max(back.x, 0.0);
+                    e1 += l * max(-back.x, 0.0);
+                    e2 += l * max(back.y, 0.0);
+                    e3 += l * max(-back.y, 0.0);
+                    e4 += l * max(back.z, 0.0);
+                    e5 += l * max(-back.z, 0.0);
+                }
             }
         }
     }

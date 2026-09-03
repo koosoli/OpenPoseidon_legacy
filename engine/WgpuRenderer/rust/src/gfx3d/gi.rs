@@ -98,6 +98,12 @@ impl GiSettings {
     }
 }
 
+/// `WGR_GI_RSM_ISO=1` — see the `rsm_meta` comment. Diagnostic, not a shipping path.
+fn rsm_iso() -> bool {
+    static ISO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ISO.get_or_init(|| std::env::var("WGR_GI_RSM_ISO").map(|v| v == "1").unwrap_or(false))
+}
+
 pub struct GiProbes {
     pub settings: GiSettings,
     pub view: wgpu::TextureView,
@@ -492,7 +498,16 @@ impl GiProbes {
                 s.rsm_gain,
                 if self.rsm_valid.get() { 1.0 } else { 0.0 },
             ],
-            rsm_meta: [2.0 * RSM_EXTENT / RSM_RES as f32, RSM_RES as f32, 0.0, 0.0],
+            // .z is REN-GI-007's ablation: 1 spreads the sun bounce isotropically over the
+            // ambient cube instead of by the direction it arrived from. It exists to answer
+            // whether the bounce is ABSENT on a vertical surface or merely stored in a face a
+            // vertical surface cannot read. Diagnostic only, off unless WGR_GI_RSM_ISO=1.
+            rsm_meta: [
+                2.0 * RSM_EXTENT / RSM_RES as f32,
+                RSM_RES as f32,
+                if rsm_iso() { 1.0 } else { 0.0 },
+                0.0,
+            ],
         };
         queue.write_buffer(&self.params_buf, 0, bytemuck::bytes_of(&params));
         (origin, s.spacing)
