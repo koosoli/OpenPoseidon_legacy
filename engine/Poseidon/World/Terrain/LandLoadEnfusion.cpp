@@ -25,7 +25,10 @@
 
 #include <Poseidon/World/Terrain/Landscape.hpp>
 
+#include <Poseidon/Asset/Formats/Enfusion/EbinWorld.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/PrefabResolve.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
@@ -40,6 +43,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <cmath>
+#include <fstream>
+#include <unordered_map>
+#include <iterator>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -390,6 +397,152 @@ EnfusionTerrain AssembleTerrain(const std::string& addonsDir)
     }
     return out;
 }
+
+/// RFG-011: what the world places, resolved to meshes.
+///
+/// A placement names a prefab by GUID. Turning that into a drawable mesh is three
+/// lookups, and each one has a trap the corpus taught somebody the hard way:
+///
+///   1. GUID -> `.et` path, from `resourceDatabase.rdb`. Those files sit LOOSE
+///      beside the archives, not inside them. The tool also has a text-scan tier
+///      that walks 57,000 pak entries to recover the same map; it is slower AND
+///      incomplete -- it misses 562 Everon prefabs carrying 13,449 placements,
+///      including the church that made a town churchless. Read the `.rdb`.
+///   2. `.et` -> `.xob`, following inheritance (PrefabResolve.hpp).
+///   3. Y is absolute or terrain-relative depending on a flag, and reading every Y
+///      as absolute buries Everon's houses a median 29 m underground.
+struct PlacementSummary
+{
+    size_t placements = 0;
+    size_t withGuid = 0;
+    size_t guidResolved = 0;
+    size_t meshResolved = 0;
+    size_t distinctMeshes = 0;
+    size_t terrainRelative = 0;
+    std::string firstFailure;
+    std::string error;
+};
+
+/// Every `resourceDatabase.rdb` beside the archives, merged.
+bool LoadResourceDatabases(const std::string& addonsDir, std::unordered_map<std::string, std::string>& byGuid,
+                           std::string& error)
+{
+    namespace Enf = Poseidon::Asset::Formats::Enfusion;
+    std::error_code ec;
+    size_t files = 0;
+    for (std::filesystem::recursive_directory_iterator it(addonsDir, ec), end; it != end && !ec; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec))
+            continue;
+        if (LowerCopy(it->path().filename().string()) != "resourcedatabase.rdb")
+            continue;
+        std::ifstream file(it->path(), std::ios::binary);
+        if (!file)
+            continue;
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const Enf::ResourceDatabase db = Enf::ReadResourceDatabase(bytes.data(), bytes.size());
+        // Refused WHOLE rather than partially: a walk that stopped early yields
+        // plausible paths for the wrong GUIDs, which is worse than none.
+        if (!db.closes())
+        {
+            error = it->path().string() + ": " + (db.error.empty() ? "does not close" : db.error);
+            return false;
+        }
+        for (const auto& [guid, path] : db.byGuid)
+            byGuid.emplace(guid, path);
+        ++files;
+    }
+    if (files == 0)
+    {
+        error = "no resourceDatabase.rdb beside the archives";
+        return false;
+    }
+    return true;
+}
+
+PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string& addonsDir,
+                                   const EnfusionTerrain& terrain,
+                                   std::vector<std::pair<std::string, size_t>>& meshes)
+{
+    namespace Enf = Poseidon::Asset::Formats::Enfusion;
+    PlacementSummary out;
+
+    std::unordered_map<std::string, std::string> byGuid;
+    if (!LoadResourceDatabases(addonsDir, byGuid, out.error))
+        return out;
+
+    // The world's own `.ent`, beside the terrain in the same folder.
+    std::string entPath;
+    for (const std::string& path : mount.FindAll(std::string(WantedWorld()) + "/"))
+        if (path.size() > 4 && path.compare(path.size() - 4, 4, ".ent") == 0 &&
+            path.find("empty") == std::string::npos)
+        {
+            entPath = path;
+            break;
+        }
+    if (entPath.empty())
+    {
+        out.error = "no .ent world beside the terrain";
+        return out;
+    }
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(entPath, bytes))
+    {
+        out.error = "cannot read " + entPath;
+        return out;
+    }
+    const Enf::EbinWorld world = Enf::ReadEbin(bytes.data(), bytes.size());
+    if (!world.valid())
+    {
+        out.error = world.error;
+        return out;
+    }
+    out.placements = world.placements.size();
+
+    // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
+    // placements come from a few thousand prefabs, and the chain walk reads files.
+    std::unordered_map<std::string, std::string> prefabToMesh;
+    std::unordered_map<std::string, size_t> meshCounts;
+    for (const Enf::EbinPlacement& placement : world.placements)
+    {
+        if (placement.prefabGuid.empty())
+            continue;
+        ++out.withGuid;
+        if (!placement.hasFlags && std::fabs(placement.position[1]) < 2.0f)
+            ++out.terrainRelative;
+
+        auto cached = prefabToMesh.find(placement.prefabGuid);
+        if (cached == prefabToMesh.end())
+        {
+            std::string mesh;
+            const auto guidHit = byGuid.find(placement.prefabGuid);
+            if (guidHit != byGuid.end())
+            {
+                const Enf::PrefabResolution resolved = Enf::ResolvePrefabModel(mount, guidHit->second);
+                if (!resolved.xobPath.empty())
+                    mesh = resolved.xobPath;
+                else if (out.firstFailure.empty())
+                    out.firstFailure = resolved.reason;
+            }
+            else if (out.firstFailure.empty())
+            {
+                out.firstFailure = "GUID " + placement.prefabGuid + " not in any resourceDatabase.rdb";
+            }
+            cached = prefabToMesh.emplace(placement.prefabGuid, mesh).first;
+        }
+        if (cached->second.empty())
+            continue;
+        if (byGuid.count(placement.prefabGuid) != 0)
+            ++out.guidResolved;
+        ++out.meshResolved;
+        ++meshCounts[cached->second];
+    }
+    out.distinctMeshes = meshCounts.size();
+    meshes.assign(meshCounts.begin(), meshCounts.end());
+    std::sort(meshes.begin(), meshes.end(),
+              [](const auto& a, const auto& b) { return a.second > b.second; });
+    return out;
+}
 } // namespace
 
 bool Landscape::LoadEnfusionNative(const char* addonsDir)
@@ -563,6 +716,33 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     }
 
     _mountains.Resize(0);
+
+    // RFG-011: what the world places. Off unless asked for while the mesh path is
+    // still being built -- resolving 1.23 M placements costs seconds and draws
+    // nothing yet, so it would be a tax on every load for a log line.
+    if (const char* wantObjects = std::getenv("POSEIDON_REFORGER_OBJECTS");
+        wantObjects != nullptr && wantObjects[0] == '1')
+    {
+        const DWORD placeStart = Poseidon::Foundation::GlobalTickCount();
+        std::vector<std::pair<std::string, size_t>> meshes;
+        const PlacementSummary summary = ResolvePlacements(EnfusionMount::Instance(), addonsDir, terrain, meshes);
+        if (!summary.error.empty())
+        {
+            LOG_WARN(World, "Enfusion native load: placements unavailable: {}", summary.error);
+        }
+        else
+        {
+            std::string top;
+            for (size_t i = 0; i < meshes.size() && i < 5; ++i)
+                top += (top.empty() ? "" : ", ") + std::to_string(meshes[i].second) + "x " + meshes[i].first;
+            LOG_INFO(World,
+                     "Enfusion native load: {} placements, {} with a prefab GUID, {} resolved to {} distinct "
+                     "meshes ({} terrain-relative) in {} ms{}; commonest: {}",
+                     summary.placements, summary.withGuid, summary.meshResolved, summary.distinctMeshes,
+                     summary.terrainRelative, Poseidon::Foundation::GlobalTickCount() - placeStart,
+                     summary.firstFailure.empty() ? "" : ("; first failure: " + summary.firstFailure), top);
+        }
+    }
 
     ProgressFrame();
     InitGeography();
