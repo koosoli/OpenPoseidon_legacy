@@ -43,8 +43,12 @@ enum class Stage : std::uint8_t
     SlowMoveOut,   // the four MoveOutAndDelete list walks
     SlowVehicles,  // SimulateOnly over _vehicles
     SlowAnimals,   // SimulateOnly over _animals -- where footprint marks live
+    // PERF-029: the two halves of a soldier's own tick, bracketed to bisect the
+    // footprint effect PERF-028 could not locate by reading.
+    ManPilot,      // KeyboardPilot / AIPilot / FakePilot / DisabledPilot
+    ManBase,       // base::Simulate -- Person, Man, EntityAI, Entity
 };
-inline constexpr std::size_t kStageCount = 9;
+inline constexpr std::size_t kStageCount = 11;
 
 enum class Kind : std::uint8_t
 {

@@ -1088,12 +1088,13 @@ void World::Simulate(float deltaT, bool& enableDraw)
                 LOG_INFO(World,
                          "Sim vehicles ms/tick over {} ticks: importance={:.3f} cloudlets={:.3f} slow={:.3f} "
                          "fast={:.3f} buildings={:.3f} attached={:.3f} | slow.moveout={:.3f} "
-                         "slow.vehicles={:.3f} slow.animals={:.3f}",
+                         "slow.vehicles={:.3f} slow.animals={:.3f} | man.pilot={:.3f} man.base={:.3f}",
                          veh.ticks, st(SimVehCost::Stage::Importance) * vInv, st(SimVehCost::Stage::Cloudlets) * vInv,
                          st(SimVehCost::Stage::Slow) * vInv, st(SimVehCost::Stage::Fast) * vInv,
                          st(SimVehCost::Stage::Buildings) * vInv, st(SimVehCost::Stage::Attached) * vInv,
                          st(SimVehCost::Stage::SlowMoveOut) * vInv, st(SimVehCost::Stage::SlowVehicles) * vInv,
-                         st(SimVehCost::Stage::SlowAnimals) * vInv);
+                         st(SimVehCost::Stage::SlowAnimals) * vInv, st(SimVehCost::Stage::ManPilot) * vInv,
+                         st(SimVehCost::Stage::ManBase) * vInv);
                 const auto km = [&veh](SimVehCost::Kind k) { return veh.kindMs[static_cast<std::size_t>(k)]; };
                 const auto kc = [&veh](SimVehCost::Kind k) { return veh.kindCalls[static_cast<std::size_t>(k)]; };
                 LOG_INFO(World,

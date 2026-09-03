@@ -37,6 +37,8 @@ const char* StageName(Stage stage)
     case Stage::SlowMoveOut: return "slow.moveout";
     case Stage::SlowVehicles: return "slow.vehicles";
     case Stage::SlowAnimals: return "slow.animals";
+    case Stage::ManPilot: return "man.pilot";
+    case Stage::ManBase: return "man.base";
     }
     return "?";
 }

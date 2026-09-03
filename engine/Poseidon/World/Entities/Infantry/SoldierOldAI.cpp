@@ -1,3 +1,4 @@
+#include <Poseidon/World/SimVehicleCost.hpp>
 #include <Poseidon/World/Entities/Infantry/SoldierOldCommon.hpp>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Input/InputSubsystem.hpp>
@@ -1202,6 +1203,11 @@ float Soldier::FireInRange(int weapon, float& timeToAim, const Target& target) c
 
 void Soldier::Simulate(float deltaT, SimulationImportance prec)
 {
+    // PERF-029: bisect the footprint effect. Both brackets are no-ops unless
+    // POSEIDON_SIM_VEHICLE_COST=1, and they nest inside SimulateTimed's `man` row,
+    // so the two must add up to it.
+    const bool costOn = SimVehCost::Enabled();
+    const std::uint64_t pilotT0 = costOn ? SimVehCost::NowNs() : 0;
     if (!_isDead)
     {
         if (!_ladderBuilding)
@@ -1242,7 +1248,18 @@ void Soldier::Simulate(float deltaT, SimulationImportance prec)
             SetMoveQueue(MotionPathItem(_forceMove), prec <= SimulateVisibleFar);
         }
     }
+    if (costOn)
+    {
+        SimVehCost::Costs().stageMs[static_cast<std::size_t>(SimVehCost::Stage::ManPilot)] +=
+            static_cast<double>(SimVehCost::NowNs() - pilotT0) * 1.0e-6;
+    }
+    const std::uint64_t baseT0 = costOn ? SimVehCost::NowNs() : 0;
     base::Simulate(deltaT, prec);
+    if (costOn)
+    {
+        SimVehCost::Costs().stageMs[static_cast<std::size_t>(SimVehCost::Stage::ManBase)] +=
+            static_cast<double>(SimVehCost::NowNs() - baseT0) * 1.0e-6;
+    }
 }
 
 float Man::GetAimed(int weapon, Target* target) const
