@@ -1150,6 +1150,26 @@ class Engine : public IGraphicsEngine
     virtual InteriorSkySettings GetInteriorSkySettings() const { return {}; }
     virtual void SetInteriorSkySettings(const InteriorSkySettings& /*s*/) {}
 
+    // REN-GI-001: the irradiance probe volume (hybrid GI, stage 1). Same pattern: stored on
+    // the engine, folded into the render-params block by PushRenderParams. WGR_GI=0 turns it
+    // off; the dev panel's GI tab and the graphics options own the rest.
+    struct GiSettings
+    {
+        bool enabled = true;
+        bool debug = false;
+        int rays = 24;
+        float weight = 1.0f;
+        float interiorMix = 0.5f;
+        float spacing = 4.0f;
+        float hysteresis = 0.3f;
+        float groundAlbedo[3] = {0.22f, 0.25f, 0.16f};
+        float groundGain = 1.0f;
+        float wallAlbedo = 0.3f;
+        float rayLength = 48.0f;
+    };
+    virtual GiSettings GetGiSettings() const { return {}; }
+    virtual void SetGiSettings(const GiSettings& /*s*/) {}
+
     /// Procedural terrain grass (wgpu).  Kept separate from foliage: these values control
     /// GPU-generated ground blades, not authored alpha-tested trees or bushes.
     struct GrassSettings
@@ -2576,7 +2596,7 @@ class Engine : public IGraphicsEngine
         kSkyGpuRegionEnv = 60,
         kSkyGpuRegionSh = 61,
         kSkyGpuRegionDraw = 62,
-        kGpuRegionEnd = 68, // PERF-021: + the worker pacing rows (WGR_GPU_TIMER_REGION_COUNT)
+        kGpuRegionEnd = 69, // PERF-021 worker rows + REN-GI-001 (WGR_GPU_TIMER_REGION_COUNT)
         // Regions that are physically enclosed by another region (see GpuTimerContainedBy).
         kGrassGpuRegionShadow = 24,
         kTerrainGpuRegionColor = 32,

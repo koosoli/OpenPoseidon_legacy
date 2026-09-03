@@ -796,6 +796,27 @@ pub struct WgrRenderParams {
     pub gtao: WgrGtao,
     pub interior_sky: WgrSkyVis,
     pub depth_of_field: WgrDepthOfField,
+    pub gi: WgrGi,
+}
+
+// REN-GI-001 -- the irradiance probe volume's parameters (see gfx3d/gi.rs). 64 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct WgrGi {
+    pub enabled: u32,
+    pub debug: u32,
+    pub rays: u32,
+    pub _pad0: u32,
+    pub weight: f32,
+    pub interior_mix: f32,
+    pub spacing: f32,
+    pub hysteresis: f32,
+    pub ground_albedo: [f32; 3],
+    pub ground_gain: f32,
+    pub wall_albedo: f32,
+    pub ray_length: f32,
+    pub _pad1: f32,
+    pub _pad2: f32,
 }
 
 // Interior sky visibility (LIT-020, docs/interior-sky-visibility-plan.md). Distinct from
@@ -1474,7 +1495,7 @@ const _: () = assert!(std::mem::size_of::<WgrFoliage>() == 80);
 const _: () = assert!(std::mem::size_of::<WgrGtao>() == 52);
 const _: () = assert!(std::mem::size_of::<WgrSkyVis>() == 44);
 const _: () = assert!(std::mem::size_of::<WgrDepthOfField>() == 52);
-const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 548);
+const _: () = assert!(std::mem::size_of::<WgrRenderParams>() == 612); // REN-GI-001: + WgrGi (64)
 const _: () = assert!(std::mem::size_of::<WgrFrameParams>() == 16);
 const _: () = assert!(std::mem::size_of::<WgrCameraShadow>() == 352);
 const _: () = assert!(std::mem::size_of::<WgrCamera>() == 576);
@@ -1605,9 +1626,9 @@ pub extern "C" fn wgr_abi_version() -> u32 {
     if cfg!(debug_assertions) {
         option_env!("WGR_TEST_ABI_VERSION")
             .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or(8)
+            .unwrap_or(9)
     } else {
-        8
+        9
     }
 }
 
@@ -1781,7 +1802,7 @@ mod abi_tests {
 
     #[test]
     fn exported_abi_version_matches_the_public_contract() {
-        assert_eq!(super::wgr_abi_version(), 8);
+        assert_eq!(super::wgr_abi_version(), 9); // REN-GI-001 appended WgrGi to WgrRenderParams
     }
 
     #[test]

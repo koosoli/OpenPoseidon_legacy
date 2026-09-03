@@ -1297,6 +1297,17 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
     {
         _interiorSky.debug = std::strcmp(isd, "0") != 0;
     }
+    // REN-GI-001: the probe volume. ON by default; WGR_GI=0 is the pre-GI ambient exactly.
+    if (const char* gi = std::getenv("WGR_GI"))
+    {
+        _gi.enabled = std::strcmp(gi, "0") != 0;
+    }
+    if (const char* giw = std::getenv("WGR_GI_WEIGHT"))
+    {
+        _gi.weight = std::clamp(std::strtof(giw, nullptr), 0.0f, 1.0f);
+    }
+    LOG_INFO(Graphics, "Wgpu GI probe volume: {} (WGR_GI), weight {:.2f}, spacing {:.1f} m, {} rays",
+             _gi.enabled ? "on" : "OFF", _gi.weight, _gi.spacing, _gi.rays);
     // Through the log sink, not eprintln!/stderr: renderer diagnostics that must survive into
     // --log-file have to go through the sink or they are simply not there when you read the log.
     LOG_INFO(Graphics,
@@ -8661,6 +8672,7 @@ const char* EngineWgpu::GetWaterGpuTimingName(int region) const
         "Worker: frame setup",             // WGR_GPU_TIMER_WORKER_SETUP (CPU column only)
         "Worker: queue submit",            // WGR_GPU_TIMER_WORKER_SUBMIT (CPU column only)
         "Worker: readback harvest",        // WGR_GPU_TIMER_WORKER_HARVEST (CPU column only)
+        "GI: probe update",                // WGR_GPU_TIMER_GI_PROBES (REN-GI-001)
     };
     return (region >= 0 && region < (int)WGR_GPU_TIMER_REGION_COUNT) ? kNames[region] : "";
 }
@@ -10337,6 +10349,22 @@ void EngineWgpu::PushRenderParams()
         _interiorSky.baked ? 1u : 0u,
     };
 
+    p.gi = {
+        _gi.enabled ? 1u : 0u,
+        _gi.debug ? 1u : 0u,
+        static_cast<uint32_t>(std::clamp(_gi.rays, 8, 64)),
+        0u,
+        _gi.weight,
+        _gi.interiorMix,
+        _gi.spacing,
+        _gi.hysteresis,
+        {_gi.groundAlbedo[0], _gi.groundAlbedo[1], _gi.groundAlbedo[2]},
+        _gi.groundGain,
+        _gi.wallAlbedo,
+        _gi.rayLength,
+        0.0f,
+        0.0f,
+    };
     // REN-THR-013: queued; the worker applies it before wgr_render_frame.
     _pendingSet.renderParams = p;
     _pendingSet.renderParamsDirty = true;

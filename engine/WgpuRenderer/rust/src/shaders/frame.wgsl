@@ -102,6 +102,11 @@ struct Frame {
     // These are presentation switches, so they live here and are read per fragment
     // rather than being baked into the material records at registration -- baking
     // them is why the toggles did nothing on a world that was already loaded.
+    // REN-GI-001: the probe volume. gi = (enabled, weight, interior AO mix, debug);
+    // giorigin = (world origin xyz of probe (0,0,0), spacing). Two lanes before matdbg, which
+    // Rust addresses from the END of the block, so the tail offsets there moved by 32 bytes.
+    gi: vec4<f32>,
+    giorigin: vec4<f32>,
     matdbg: vec4<f32>,
     // DZ-005 — DayZ water surface animation, read by BOTH object paths for sections that
     // declared themselves reflective (the CalmWater family). One frame-global lane rather
@@ -330,6 +335,9 @@ struct SkySh {
 // CLD-020: sun transmittance through the cloud deck, one texel per world square, written each
 // frame by cs_cloud_shadow. Sampled with the clamping terrain sampler (binding 5).
 @group(0) @binding(13) var cloud_shadow_tex: texture_2d<f32>;
+// REN-GI-001: the probe volume, six y-slabs of 8 (ambient-cube faces +X -X +Y -Y +Z -Z),
+// each texel irradiance/pi. Sampled with the froxel's linear sampler.
+@group(0) @binding(14) var gi_probes: texture_3d<f32>;
 
 // Diffuse sky irradiance for a world-space surface normal, from the SH-9 sky projection
 // (Ramamoorthi, "An Efficient Representation for Irradiance Environment Maps"), divided by PI so
@@ -866,4 +874,38 @@ fn reverse_z(clip: vec4<f32>) -> vec4<f32> {
 fn fog_factor(dist: f32) -> f32 {
     let f = clamp(1.0 - (dist - frame.params.fog_start) * frame.params.fog_inv_range, 0.0, 1.0);
     return select(1.0, f, frame.params.fog_enabled > 0.5);
+}
+
+// REN-GI-001: irradiance/pi at a world point for normal n from the probe volume, and its
+// weight (fades to 0 within two probes of the volume edge; 0 when the feature is off).
+fn gi_irradiance(world_abs: vec3<f32>, n: vec3<f32>) -> vec4<f32> {
+    if (frame.gi.x < 0.5) {
+        return vec4<f32>(0.0);
+    }
+    let spacing = max(frame.giorigin.w, 0.01);
+    let dims = vec3<f32>(32.0, 8.0, 32.0);
+    // probe (i) sits at origin + (i + 0.5) * spacing, so probe-index space is:
+    let local = (world_abs - frame.giorigin.xyz) / spacing - vec3<f32>(0.5);
+    let hi = dims - vec3<f32>(1.0);
+    let edge = min(min(min(local.x, hi.x - local.x), min(local.z, hi.z - local.z)),
+                   min(local.y, hi.y - local.y));
+    let w = clamp(edge * 0.5 + 0.5, 0.0, 1.0);
+    if (w <= 0.0) {
+        return vec4<f32>(0.0);
+    }
+    let c = clamp(local, vec3<f32>(0.0), hi) + vec3<f32>(0.5);
+    let n2 = n * n;
+    var fx = 0.0;
+    if (n.x < 0.0) { fx = 1.0; }
+    var fy = 2.0;
+    if (n.y < 0.0) { fy = 3.0; }
+    var fz = 4.0;
+    if (n.z < 0.0) { fz = 5.0; }
+    let inv_h = 1.0 / (dims.y * 6.0);
+    let ux = c.x / dims.x;
+    let uz = c.z / dims.z;
+    let ex = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fx * dims.y) * inv_h, uz), 0.0).rgb;
+    let ey = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fy * dims.y) * inv_h, uz), 0.0).rgb;
+    let ez = textureSampleLevel(gi_probes, froxel_samp, vec3<f32>(ux, (c.y + fz * dims.y) * inv_h, uz), 0.0).rgb;
+    return vec4<f32>(ex * n2.x + ey * n2.y + ez * n2.z, w);
 }

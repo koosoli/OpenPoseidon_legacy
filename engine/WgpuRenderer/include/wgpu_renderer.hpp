@@ -34,7 +34,7 @@
 // and the handshake refuses the pair — so this number only has to move for
 // changes the hash cannot see (an added/removed entry point, a semantic change
 // to an existing one).
-#define WGR_ABI_VERSION 8u
+#define WGR_ABI_VERSION 9u
 
 // Required capabilities are negotiated as a bit set inside WgrAbiCheck. A
 // newer engine can reject an older renderer DLL even if the shared layouts
@@ -698,6 +698,26 @@ struct WgrSkyVis
     uint32_t baked;      /* 1 = apply the per-model BAKED volumes (Stage 2) instead of the maps */
 };
 
+/* REN-GI-001 -- the irradiance probe volume (hybrid GI, stage 1). Mirrors the Rust WgrGi
+ * #[repr(C)]; 64 bytes, no padding. Pushed every frame inside WgrRenderParams. */
+struct WgrGi
+{
+    uint32_t enabled;        /* 0 = the analytic sky-dome ambient only (pre-GI behaviour) */
+    uint32_t debug;          /* reserved */
+    uint32_t rays;           /* rays per probe update (8..64) */
+    uint32_t _pad0;
+    float    weight;         /* blend of the probe term over the sky-dome ambient, 0..1 */
+    float    interior_mix;   /* how much of the per-pixel interior-sky AO still applies (0..1) */
+    float    spacing;        /* probe spacing, metres */
+    float    hysteresis;     /* per-update blend toward the new integral, 0.05..1 */
+    float    ground_albedo[3];
+    float    ground_gain;    /* scale on the sun bounce off the ground */
+    float    wall_albedo;    /* neutral albedo for roof/wall hits from the dome maps */
+    float    ray_length;     /* metres a probe ray looks for terrain */
+    float    _pad1;
+    float    _pad2;
+};
+
 /* Picture Mode depth of field. Mirrors the Rust WgrDepthOfField #[repr(C)] and feeds dof.wgsl.
  * `near_plane` is here despite not being a look setting: the shader turns reversed-Z depth into
  * metres with `near / depth`, and the renderer has no other access to the projection. */
@@ -731,6 +751,7 @@ struct WgrRenderParams
     WgrGtao             gtao;
     WgrSkyVis           interior_sky;
     WgrDepthOfField     depth_of_field;
+    WgrGi               gi;
 };
 
 /* Frame-global scalars carried in the camera UBO so the 3D shader can read them
@@ -1391,7 +1412,8 @@ enum WgrGpuTimerRegion : uint32_t
     WGR_GPU_TIMER_WORKER_SETUP = 65,
     WGR_GPU_TIMER_WORKER_SUBMIT = 66,
     WGR_GPU_TIMER_WORKER_HARVEST = 67,
-    WGR_GPU_TIMER_REGION_COUNT = 68,
+    WGR_GPU_TIMER_GI_PROBES = 68,
+    WGR_GPU_TIMER_REGION_COUNT = 69,
 };
 
 /* PERF-005 - region nesting, and the ONLY correct way to total this array.
@@ -1801,7 +1823,7 @@ static_assert(sizeof(WgrFoliage) == 80, "WgrFoliage layout must match the Rust #
 static_assert(sizeof(WgrGtao) == 52, "WgrGtao layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrSkyVis) == 44, "WgrSkyVis layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrDepthOfField) == 52, "WgrDepthOfField layout must match the Rust #[repr(C)] struct");
-static_assert(sizeof(WgrRenderParams) == 548, "WgrRenderParams layout must match the Rust #[repr(C)] struct");
+static_assert(sizeof(WgrRenderParams) == 612, "WgrRenderParams layout must match the Rust #[repr(C)] struct"); // REN-GI-001: + WgrGi (64)
 static_assert(sizeof(WgrFrameParams) == 16, "WgrFrameParams layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCameraShadow) == 352, "WgrCameraShadow layout must match the Rust #[repr(C)] struct");
 static_assert(sizeof(WgrCamera) == 576, "WgrCamera layout must match the Rust #[repr(C)] struct");

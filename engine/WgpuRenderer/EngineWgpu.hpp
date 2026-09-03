@@ -471,6 +471,13 @@ class EngineWgpu : public EngineDummy
         _interiorSky = s;
         PushRenderParams();
     }
+    // REN-GI-001
+    GiSettings GetGiSettings() const override { return _gi; }
+    void SetGiSettings(const GiSettings& s) override
+    {
+        _gi = s;
+        PushRenderParams();
+    }
     void SetShadowMapSunFactor(float factor01) override { _smSunFactor = factor01; }
     bool UsesGpuShadowCasters() const override { return true; }
     void SetShadowCascades(const shadow::CascadeSet& cascades, int resolution) override;
@@ -936,6 +943,7 @@ class EngineWgpu : public EngineDummy
     float MaterialSpecularScale(const ShapeSection& section, uint64_t specularMap);
     // Interior sky visibility (docs/interior-sky-visibility-plan.md), pushed via PushRenderParams.
     InteriorSkySettings _interiorSky;
+    GiSettings _gi; // REN-GI-001
     GrassSettings _grass;
     // Whether the photo-tuft path is live. It decides how far grass casts shadows: the mid ring
     // is submitted to the shadow pass ONLY on that path (Grass::draw_shadow), so without it the

@@ -20,6 +20,7 @@ pub mod mip_feedback;
 use mip_feedback::MipFeedback;
 pub mod sky_bake;
 pub mod sky_vis;
+pub mod gi; // REN-GI-001
 use sky_vis::{SkyVisSettings, SkyVisView};
 
 use crate::ffi::{
@@ -1029,6 +1030,7 @@ struct CameraGroup {
     // Generation of the interior sky-visibility map bound at @binding(12); see
     // Gfx3d::interior_sky_gen.
     bound_interior_sky_gen: u64,
+    bound_gi_gen: u64, // REN-GI-001
 }
 
 impl CameraGroup {
@@ -1050,6 +1052,9 @@ impl CameraGroup {
             + 16
             + 16
             // Stage 2 baked-volume knobs.
+            + 16
+            // REN-GI-001: the `gi` and `giorigin` lanes (frame.wgsl), before matdbg.
+            + 16
             + 16
             // Material Debug lane for the retained path (frame.wgsl `matdbg`).
             + 16
@@ -1086,7 +1091,7 @@ impl CameraGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
                         view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -1096,7 +1101,7 @@ impl CameraGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
@@ -1104,7 +1109,7 @@ impl CameraGroup {
                 // lit-mesh + terrain pipelines (terrain reuses this exact layout).
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
@@ -1120,7 +1125,7 @@ impl CameraGroup {
                 // terrain) receive a mountain's cast shadow.
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -1130,13 +1135,13 @@ impl CameraGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 5,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 6,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -1151,7 +1156,7 @@ impl CameraGroup {
                 // fragment shaders (frame::froxel_fog). Owned by Sky, lent by view.
                 wgpu::BindGroupLayoutEntry {
                     binding: 7,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D3,
@@ -1161,7 +1166,7 @@ impl CameraGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 8,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
@@ -1169,7 +1174,7 @@ impl CameraGroup {
                 // ambient on the lit-mesh + terrain fragment shaders (frame::sky_irradiance).
                 wgpu::BindGroupLayoutEntry {
                     binding: 9,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -1182,7 +1187,7 @@ impl CameraGroup {
                 // ambient by terrain sky occlusion (frame::terrain_sky_visibility).
                 wgpu::BindGroupLayoutEntry {
                     binding: 10,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -1195,7 +1200,7 @@ impl CameraGroup {
                 // it is already a per-pixel screen-space quantity, so there is nothing to filter.
                 wgpu::BindGroupLayoutEntry {
                     binding: 11,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -1210,7 +1215,7 @@ impl CameraGroup {
                 // sub-texel gradient for free.
                 wgpu::BindGroupLayoutEntry {
                     binding: 12,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
                         view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -1222,10 +1227,21 @@ impl CameraGroup {
                 // (~8 m per texel) and its whole job is to be sampled smoothly.
                 wgpu::BindGroupLayoutEntry {
                     binding: 13,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // REN-GI-001: the probe volume (six y-slabs of ambient-cube faces).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 14,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
                         multisampled: false,
                     },
                     count: None,
@@ -1282,6 +1298,7 @@ impl CameraGroup {
             bound_mask_gen: u64::MAX,
             bound_ao_gen: u64::MAX,
             bound_interior_sky_gen: u64::MAX,
+            bound_gi_gen: u64::MAX,
         }
     }
 
@@ -1311,6 +1328,8 @@ impl CameraGroup {
         interior_sky_view: &wgpu::TextureView,
         interior_sky_gen: u64,
         cloud_shadow_view: &wgpu::TextureView,
+        gi_view: &wgpu::TextureView,
+        gi_gen: u64,
     ) {
         let needed = count as u64 * self.stride;
         let grow = self.cap < needed || self.buf.is_none();
@@ -1334,6 +1353,7 @@ impl CameraGroup {
             // changes (or dropped when the feature is turned off), and a stale bind group would
             // hold a view of a destroyed texture.
             || self.bound_interior_sky_gen != interior_sky_gen
+            || self.bound_gi_gen != gi_gen
             || self.bind.is_none()
         {
             self.bind = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1400,12 +1420,17 @@ impl CameraGroup {
                         binding: 13,
                         resource: wgpu::BindingResource::TextureView(cloud_shadow_view),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::TextureView(gi_view),
+                    },
                 ],
             }));
             self.bound_shadow_gen = shadow_gen;
             self.bound_mask_gen = mask_gen;
             self.bound_ao_gen = ao_gen;
             self.bound_interior_sky_gen = interior_sky_gen;
+            self.bound_gi_gen = gi_gen;
         }
     }
 
@@ -1626,7 +1651,7 @@ impl ConformGroup {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE, // REN-GI-001: the probe compute reads the heightmap too
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -1636,7 +1661,7 @@ impl ConformGroup {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE, // REN-GI-001: the probe compute reads the heightmap too
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -3256,6 +3281,7 @@ impl NormalResolve {
 pub struct Gfx3d {
     cameras: CameraGroup,
     conform: ConformGroup,
+    gi: gi::GiProbes, // REN-GI-001
     // Per-draw world matrix, one entry per draw slot, read-only storage indexed by
     // instance_index (the draw's base_instance). Uploaded in a single write_buffer.
     world: StorageArray,
@@ -3630,6 +3656,7 @@ impl Gfx3d {
         // palette is one PALETTE_SIZE-matrix block per skinned draw (dynamic offset).
         let cameras = CameraGroup::new(device);
         let conform = ConformGroup::new(device);
+        let gi = gi::GiProbes::new(device, composer, &cameras.layout, &conform.layout);
         let world = StorageArray::new("wgr_3d_world_ssbo");
         let palette = DynUbo::new(
             device,
@@ -4125,6 +4152,7 @@ impl Gfx3d {
         Gfx3d {
             cameras,
             conform,
+            gi,
             world,
             palette,
             material,
@@ -6268,6 +6296,7 @@ impl Gfx3d {
             let main = cameras.get(gtao_camera).unwrap_or(&cameras[0]);
             let sky_cam = glam::Vec3::new(main.cam_pos[0], main.cam_pos[1], main.cam_pos[2]);
             self.prepare_interior_sky(device, sky_cam);
+            let (gi_origin, gi_spacing) = self.gi.prepare(queue, sky_cam);
             // Bind the current shadow map (or the dummy while none exists); the
             // depth passes for this frame were prepared before this call, so the
             // target is final.
@@ -6296,6 +6325,8 @@ impl Gfx3d {
                 interior_sky_view,
                 self.interior_sky_gen,
                 cloud_shadow_view,
+                &self.gi.view,
+                self.gi.generation,
             );
             let buf = self.cameras.buf.as_ref().unwrap();
             for (i, c) in cameras.iter().enumerate() {
@@ -6437,6 +6468,17 @@ impl Gfx3d {
                     if baked_on && sv.debug { 1.0 } else { 0.0 },
                 ];
                 queue.write_buffer(buf, knob_off + 32, bytemuck::cast_slice(&knobs_c));
+                // REN-GI-001: the two lanes before matdbg (see frame.wgsl).
+                let gs = &self.gi.settings;
+                let gi_lane = [
+                    if gs.enabled { 1.0f32 } else { 0.0 },
+                    gs.weight,
+                    gs.interior_mix,
+                    if gs.debug { 1.0 } else { 0.0 },
+                ];
+                let gi_origin_lane = [gi_origin.x, gi_origin.y, gi_origin.z, gi_spacing];
+                queue.write_buffer(buf, base + self.cameras.bind_size - 112, bytemuck::cast_slice(&gi_lane));
+                queue.write_buffer(buf, base + self.cameras.bind_size - 96, bytemuck::cast_slice(&gi_origin_lane));
                 // Material Debug (frame.wgsl `matdbg`). Written unconditionally and derived
                 // from bind_size rather than from the sky offsets above, which live inside a
                 // conditional: the retained shader reads this every frame and a stale lane
@@ -7616,6 +7658,26 @@ impl Gfx3d {
     // which is "no darkening", the correct absence behaviour for an occlusion term.
     pub fn interior_sky_active(&self) -> bool {
         self.interior_sky_view.is_some() && self.interior_sky_target.is_some()
+    }
+
+    // REN-GI-001: re-integrate this frame's batch of probes. Needs the camera group (the
+    // shared frame bindings) and the conform group (the heightmap); after the shadow cascades
+    // and the interior sky maps, before the colour pass that samples the volume.
+    pub fn gi_dispatch(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        cam_off: u32,
+        timers: &crate::gpu_timers::GpuTimers,
+    ) {
+        let (Some(camera_bind), Some(conform_bind)) = (self.cameras.bind.as_ref(), self.conform.bind.as_ref())
+        else {
+            return;
+        };
+        self.gi.dispatch(encoder, camera_bind, cam_off, conform_bind, timers);
+    }
+
+    pub fn set_gi_settings(&mut self, p: &crate::ffi::WgrGi) {
+        self.gi.settings.apply(p);
     }
 
     // (Re)allocate the sky depth target and build this frame's snapped ortho view. Called from
@@ -9683,10 +9745,10 @@ fn road_pixel_conform_reseats_onsurface_depth_per_fragment() {
     let conform_layout = &this[conform_layout..conform_layout + 1200];
     assert_eq!(
         conform_layout
-            .matches("visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,")
+            .matches("visibility: wgpu::ShaderStages::VERTEX_FRAGMENT | wgpu::ShaderStages::COMPUTE,")
             .count(),
         2,
-        "both conform bindings (heightmap + params) must be VERTEX_FRAGMENT"
+        "both conform bindings (heightmap + params) must be VERTEX_FRAGMENT | COMPUTE (the probe compute reads the heightmap too)"
     );
     // The lift constant is published to the shader.
     assert!(

@@ -8,7 +8,7 @@
 
 #define_import_path shading
 
-#import frame::{frame, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
+#import frame::{frame, gi_irradiance, terrain_sun_shadow, apply_fog, cloud_sun_shadow, sky_irradiance, sky_vis_ao, gtao_ao, gtao_debug_on, gtao_bent_normal_world, gtao_debug_colour, interior_sky_ao, interior_sky_reach, interior_sky_debug_on, interior_sky_ambient_normal, normal_map_cavity, sky_specular_split, spec_power_to_gloss}
 #import shadow::shadow_strength
 #import lighting::lights_contrib
 #import color::srgb_to_linear
@@ -354,8 +354,21 @@ fn shade(
         let view_dir_sky = normalize(-world_pos);
         let sky_spec = sky_specular_split(
             nrm, view_dir_sky, spec_power_to_gloss(mat.spec_power), mat.spec_mask);
+        // REN-GI-001: the probe volume's irradiance replaces the analytic sky-dome ambient
+        // where the volume covers the point (weight fades at its edge; 0 with the feature
+        // off, which makes this line the pre-GI expression exactly). The probes already saw
+        // the roof and the terrain, so of the three sky occluders only the screen-space one
+        // (GTAO) and the long-range terrain mask stay; the per-pixel interior-sky AO keeps a
+        // tunable share, because a 4 m probe grid cannot resolve a small room.
         var ambient =
             (sky_irradiance(amb_n) * sky_spec.w + sky_spec.rgb) * frame.sun_ambient.w * amb_ao * cavity;
+        let gi_s = gi_irradiance(world_abs, amb_n);
+        if (gi_s.a > 0.0) {
+            let gi_amb = gi_s.rgb * gtao_t * sky_vis_ao(world_abs.xz)
+                * mix(1.0, interior_ao, frame.gi.z) * clamp(baked_sky_vis, 0.0, 1.0);
+            let gi_ambient = (gi_amb * sky_spec.w + sky_spec.rgb * amb_ao) * frame.sun_ambient.w * cavity;
+            ambient = mix(ambient, gi_ambient, gi_s.a * frame.gi.y);
+        }
         // Glass canopies: keep only a fraction of the sky wash so they read as glazing, not a lit
         // diffuse dome (the direct sun sheen + any glint still sit on top).
         // NOTE, and it is a note about what this is NOT. `is_translucent` means "this draw is

@@ -1169,6 +1169,13 @@ impl Renderer {
             // The lit mesh pipelines take a 5th bind group (group 4) for the terrain
             // heightmap used to conform vegetation on the GPU. Ample on desktop.
             max_bind_groups: 5,
+            // REN-GI-001: the camera group carries 8 sampled textures now (the probe volume
+            // joined the dome maps, GTAO, froxel, masks); with water's own group that passes
+            // the default 16 per stage and the water pipeline layout silently became invalid.
+            max_sampled_textures_per_shader_stage: adapter
+                .limits()
+                .max_sampled_textures_per_shader_stage
+                .clamp(16, 64),
             // The geometry pool is one buffer for every resident mesh, and it is
             // bound as STORAGE (the skin-bake reads it) as well as VERTEX. The
             // defaults are 256 MB for a buffer and 128 MB for a storage binding,
@@ -2032,6 +2039,7 @@ impl Renderer {
         sv.apply(&p.interior_sky);
         sv.enabled &= !ablate.skyvis;
         self.gfx3d.set_interior_sky_settings(sv);
+        self.gfx3d.set_gi_settings(&p.gi); // REN-GI-001
     }
 
     // Per-frame sky runtime (wgr_set_sky_runtime): the celestial + camera fields, written into
@@ -4239,6 +4247,9 @@ impl Renderer {
         encoder.push_debug_group("wgr_interior_sky_map");
         self.gfx3d
             .render_interior_sky_pass(&mut encoder, &self.textures, &self.gpu_timers);
+        // REN-GI-001: the probe batch, once the maps and cascades it reads are recorded.
+        self.gfx3d
+            .gi_dispatch(&mut encoder, self.main_cam_off, &self.gpu_timers);
         encoder.pop_debug_group();
 
         // Cascade shadow depth passes run first so every segment's draws can

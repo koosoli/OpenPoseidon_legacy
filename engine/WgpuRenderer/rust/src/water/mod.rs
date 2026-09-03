@@ -683,11 +683,17 @@ impl Water {
             ("foam_band_meander", foam_band_meander),
         ];
 
+        // REN-GI-001 follow-up: name the reason when this layout fails validation (it did,
+        // silently, when the camera group grew past the per-stage sampled-texture limit).
+        let layout_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("wgr_water_pipeline_layout"),
             bind_group_layouts: &[Some(camera_layout), Some(&group1_layout)],
             immediate_size: 0,
         });
+        if let Some(e) = pollster::block_on(layout_scope.pop()) {
+            eprintln!("[wgr] water pipeline layout INVALID: {e}");
+        }
         let grid_attrs = wgpu::vertex_attr_array![0 => Float32x3];
         let inst_attrs = wgpu::vertex_attr_array![
             1 => Float32x2, 2 => Float32, 3 => Uint32, 4 => Float32x2,

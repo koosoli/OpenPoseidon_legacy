@@ -4261,6 +4261,40 @@ void DrawAmbientOcclusionTab()
 // Interior sky visibility (LIT-020) — its own tab for the same reason AO has one: the two things
 // you actually do here are A/B the effect and flip to the raw reach buffer, and both have to be
 // one click away. Judging this through full lighting is much harder than looking at the buffer.
+// REN-GI-001: the irradiance probe volume.
+void DrawGiTab()
+{
+    if (!GEngine)
+    {
+        return;
+    }
+    Engine::GiSettings gi = GEngine->GetGiSettings();
+    bool changed = false;
+    changed |= ResetToDefaultsButton(gi);
+    Dev::PanelHelp("Hybrid GI, stage 1: a grid of light probes around the camera (32 x 8 x 32,");
+    Dev::PanelHelp("spacing below). Each probe integrates sky light through the interior-sky");
+    Dev::PanelHelp("dome maps and the sun's first bounce off the terrain; shading blends it");
+    Dev::PanelHelp("over the analytic sky-dome ambient. Direct sun is untouched. WGR_GI=0 off.");
+    Dev::PanelSeparator();
+    changed |= Dev::Checkbox("Enabled", &gi.enabled);
+    changed |= ImGui::SliderFloat("Weight", &gi.weight, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  0 = the old ambient exactly, 1 = the probes alone");
+    changed |= ImGui::SliderFloat("Interior AO share", &gi.interiorMix, 0.0f, 1.0f, "%.2f");
+    Dev::PanelHelp("  how much of the per-pixel interior-sky darkening still applies on top");
+    changed |= ImGui::SliderFloat("Spacing (m)", &gi.spacing, 1.0f, 16.0f, "%.1f");
+    changed |= ImGui::SliderInt("Rays per probe update", &gi.rays, 8, 64);
+    changed |= ImGui::SliderFloat("Hysteresis", &gi.hysteresis, 0.05f, 1.0f, "%.2f");
+    Dev::PanelHelp("  per-update blend toward the fresh integral; low = smoother, slower");
+    changed |= ImGui::ColorEdit3("Ground albedo", gi.groundAlbedo);
+    changed |= ImGui::SliderFloat("Ground bounce gain", &gi.groundGain, 0.0f, 4.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Wall/roof albedo", &gi.wallAlbedo, 0.0f, 1.0f, "%.2f");
+    changed |= ImGui::SliderFloat("Ray length (m)", &gi.rayLength, 8.0f, 256.0f, "%.0f");
+    if (changed)
+    {
+        GEngine->SetGiSettings(gi);
+    }
+}
+
 void DrawInteriorSkyTab()
 {
     if (!GEngine)
@@ -6518,6 +6552,11 @@ void DrawMainWindow()
         if (Dev::PanelTabItem("Interior Sky"))
         {
             DrawInteriorSkyTab();
+            ImGui::EndTabItem();
+        }
+        if (Dev::PanelTabItem("GI"))
+        {
+            DrawGiTab();
             ImGui::EndTabItem();
         }
         if (Dev::PanelTabItem("Grass"))
