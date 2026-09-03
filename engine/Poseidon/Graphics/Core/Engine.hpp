@@ -2756,6 +2756,11 @@ class Engine : public IGraphicsEngine
         bool overlapEnabled = false;
         float lagFrames = 0.0f;
         float queueWaitMs = 0.0f;
+        // REN-THR-013: how often and how long the producer had to open the window itself
+        // (a direct renderer call while the worker was busy), and who did it first last frame.
+        float lazyWaitMs = 0.0f;
+        float lazyWaitsPerFrame = 0.0f;
+        const char* lazyOpener = "none";
     };
     virtual RenderThreadInfo GetRenderThreadInfo() const { return {}; }
     /// Switch the render thread at a frame boundary. Takes effect on the next frame; the

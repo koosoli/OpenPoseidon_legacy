@@ -1047,6 +1047,22 @@ class EngineWgpu : public EngineDummy
         float farNearCutoff = 0.0f, farDistance = 0.0f, farPixelLimit = 0.0f;
         uint32_t farEnabled = 0;
         bool farParamsDirty = false;
+
+        // REN-THR-013: the per-frame producer-side pushes that used to reach the renderer
+        // directly from NextFrame and the draw traversal. Queued like the rest, applied by the
+        // worker before wgr_render_frame, so the traversal no longer needs the renderer at all
+        // on a frame that admits nothing.
+        WgrRenderParams renderParams{};
+        bool renderParamsDirty = false;
+        WgrSkyRuntime skyRuntime{};
+        bool skyRuntimeDirty = false;
+        WgrTerrainParams terrainParams{};
+        bool terrainParamsDirty = false;
+        std::vector<WgrSmokeShadowBlob> smokeBlobs;
+        float smokeStrength = 0.0f;
+        bool smokeDirty = false;
+        float cloudShadowStrength = 0.0f, starIntensity = 0.0f, lensFlare = 0.0f;
+        bool skyScalarsDirty = false;
     };
     PendingRendererSettings _pendingSet;
     // The drain. Called once at the top of NextFrame; must tolerate a null _renderer.
@@ -1268,6 +1284,17 @@ class EngineWgpu : public EngineDummy
     // read costs a wrong pixel in a readout, not a wrong frame.
     double _rtLastBusyMs = 0.0;
     double _rtPreDrawWaitMs = 0.0; // WaitRenderIdle time this frame, folded into queueWaitMs
+    // REN-THR-013 accounting: lazy window openings (AcquireProducerWindow that had to wait).
+    double _rtLazyWaitMsAccum = 0.0;
+    uint32_t _rtLazyWaitCountAccum = 0;
+    const char* _rtLazyOpenerFrame = nullptr; // first opener this frame
+    const char* _rtLazyOpenerShown = "none";  // last frame's first opener, for the tab
+    float _rtLazyWaitMs = 0.0f, _rtLazyWaitsPerFrame = 0.0f;
+    bool _lazyWindow = true; // WGR_LAZY_WINDOW=0 restores the InitDraw wait (REN-THR-012)
+    std::mutex _memStatsMutex;
+    WgrMemoryStats _lastMemStats{};
+    bool _lastMemStatsValid = false;
+    static EngineWgpu* s_self;
     /// PERF-019. Report any renderer frame or consumer block at or above this many
     /// milliseconds (WGR_SLOW_BLOCK_MS, default 100; 0 switches the reports off).
     double _slowBlockMs = 100.0;
@@ -1290,6 +1317,15 @@ class EngineWgpu : public EngineDummy
     // main thread, or between publish and the next InitDraw under overlap, it is false and
     // a direct call is a data race with wgr_render_frame. Checked by the texture paths.
     static bool ProducerMayTouchRenderer();
+    // REN-THR-013: the lazy producer window. Every remaining direct renderer call on the
+    // producer side goes through this instead of relying on InitDraw having waited: it returns
+    // at once while the worker is idle, and otherwise waits for it -- and records who asked, so
+    // the Perf tab and the capture JSON say what still opens the window early.
+    static void AcquireProducerWindow(const char* what);
+    // The worker's last memory-stats snapshot (PublishRendererStats), for the producer-side
+    // readers that used to call wgr_get_memory_stats on the live handle every frame.
+    static bool LastMemoryStats(WgrMemoryStats& out);
+    void QueueTerrainParams(const WgrTerrainParams& p);
 
   private:
     void RenderThreadMain();

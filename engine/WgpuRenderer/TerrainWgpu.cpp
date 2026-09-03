@@ -424,6 +424,7 @@ bool TerrainWgpu::UploadIfNeeded(const Landscape& land)
     _params.hm_height = static_cast<uint32_t>(range);
     _params.land_range = static_cast<uint32_t>(land.GetLandRange());
     _params.data_scale = 1.0f;
+    EngineWgpu::AcquireProducerWindow("terrain heightmap");
     wgr_terrain_set_heightmap(_renderer, heights.data(), &_params);
 
     // Legacy worlds have small, reusable tile sets and keep the eager path.
@@ -640,6 +641,7 @@ void TerrainWgpu::UploadGroundTextures(const Landscape& land, const std::vector<
 
     // Replace the terrain bind group before destroying pages referenced by the
     // previous group. Shared texture views then release cleanly on the Rust side.
+    EngineWgpu::AcquireProducerWindow("terrain ground layers");
     wgr_terrain_set_ground_layers(_renderer, handles.data(), static_cast<uint32_t>(handles.size()));
     wgr_terrain_set_materials(_renderer, materials.data(), static_cast<uint32_t>(materials.size()));
     size_t evicted = 0;
@@ -692,6 +694,7 @@ void TerrainWgpu::UploadIndexMap(const Landscape& land)
             indices[static_cast<size_t>(z) * n + x] = entry;
         }
     }
+    EngineWgpu::AcquireProducerWindow("terrain index map");
     wgr_terrain_set_index_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), indices.data());
 }
 
@@ -2044,6 +2047,7 @@ void TerrainWgpu::UploadGeography(const Landscape& land)
              authored ? "authored LCA surfaces" : "legacy per-layer", grassLayerCount, grassCellCount, geography.size(),
              grassRenderableCellCount, hardOnlyCells, grassLayerNames.empty() ? "none matched" : grassLayerNames);
     LOG_INFO(Graphics, "Wgpu terrain texture layers: [{}]", allLayerNames);
+    EngineWgpu::AcquireProducerWindow("grass geography");
     wgr_grass_set_geography(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), geography.data());
 
     // The grass atlases are WORLD-scoped, not process-scoped.
@@ -2233,6 +2237,7 @@ void TerrainWgpu::ReportPhotoClumpState() const
     {
         return;
     }
+    EngineWgpu::AcquireProducerWindow("grass photo clumps");
     const bool resident = wgr_grass_have_photo_clumps(_renderer) != 0;
     LOG_INFO(Graphics,
              "Wgpu grass photo cards: atlas resident={}; when resident, the near/mid rings still draw the procedural "
@@ -2283,6 +2288,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         }
         _grassPhotoFamilies.clear();
         _grassPhotoFamilies.emplace_back("map clutter (per surface)");
+        EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, GrassAtlasSize, GrassAtlasSize, GrassAtlasLayers, _clutterAtlas.data());
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: uploaded the map's clutter atlas ({} of {} layers used, {}x{}, {:.1f} MB)",
@@ -2362,6 +2368,7 @@ void TerrainWgpu::UploadGrassTuft(const std::string& worldKey)
         {
             layers.insert(layers.end(), primaryLayer.begin(), primaryLayer.end());
         }
+        EngineWgpu::AcquireProducerWindow("grass tufts");
         wgr_grass_set_tufts(_renderer, TargetSize, TargetSize, MaxPhotoGrassFamilies + 1u, layers.data());
         _grassTuftWorld = worldKey;
         LOG_INFO(Graphics, "Wgpu grass: {} photographed clump families discovered ({} atlas layers)", named,
@@ -2416,6 +2423,7 @@ void TerrainWgpu::UploadGrassBladeAtlas(const std::string& worldKey)
         stbi_image_free(pixels);
     }
 
+    EngineWgpu::AcquireProducerWindow("grass blade atlas");
     wgr_grass_set_blade_atlas(_renderer, static_cast<uint32_t>(width), static_cast<uint32_t>(height),
                               static_cast<uint32_t>(BladePaths.size()), layers.data());
     _grassBladeAtlasWorld = worldKey;
@@ -2476,6 +2484,7 @@ void TerrainWgpu::UploadJitterMap(const Landscape& land)
             offsets[at + 1] = static_cast<int8_t>(std::lround(v * 127.0f));
         }
     }
+    EngineWgpu::AcquireProducerWindow("terrain jitter map");
     wgr_terrain_set_jitter_map(_renderer, static_cast<uint32_t>(n), static_cast<uint32_t>(n), offsets.data());
 }
 
@@ -2500,6 +2509,7 @@ void TerrainWgpu::UploadDetailNoise()
     const uint64_t handle = static_cast<TextureWgpu*>(tex)->EnsureUploaded();
     if (handle != 0)
     {
+        EngineWgpu::AcquireProducerWindow("terrain detail layer");
         wgr_terrain_set_detail_layer(_renderer, handle);
     }
 }
@@ -2650,7 +2660,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
         if ((++_residencyMemoryLogTick % 128) == 0)
         {
             WgrMemoryStats memory{};
-            if (wgr_get_memory_stats(_renderer, &memory))
+            if (EngineWgpu::LastMemoryStats(memory))
                 LOG_INFO(Graphics,
                          "Wgpu tracked residency: {:.1f} MB tracked of {:.1f} MB budget; object textures={} "
                          "retired geometry={:.1f} MB",
@@ -2674,7 +2684,7 @@ void TerrainWgpu::DrawTerrain(Scene& scene, int xBeg, int zBeg, int xEnd, int zE
     _params.swash_amp = coast.swashAmp;
     _params.wet_height = coast.wetHeight;
     _params.wet_darken = coast.wetDarken;
-    wgr_terrain_set_params(_renderer, &_params);
+    _engine.QueueTerrainParams(_params); // REN-THR-013: queued, applied before wgr_render_frame
 
     if (camera == nullptr)
     {

@@ -877,13 +877,14 @@ TextureWgpu::TextureWgpu(TextureBankWgpu* bank) : _bank(bank) {}
 // line that says so instead of letting it pass silently. Logged for the first few, counted
 // for the rest.
 static std::atomic<uint32_t> g_rendererRuleViolations{0};
+// REN-THR-013: no longer a check that logs, an ACQUIRE that waits. The window opens here, on
+// the first call that needs the handle, and the engine counts who opened it.
 static void CheckProducerMayTouchRenderer(const char* what)
 {
     if (EngineWgpu::ProducerMayTouchRenderer())
         return;
-    const uint32_t n = g_rendererRuleViolations.fetch_add(1, std::memory_order_relaxed) + 1;
-    if (n <= 3)
-        LOG_ERROR(Graphics, "Wgpu: {} reached the renderer outside the producer window (violation {})", what, n);
+    g_rendererRuleViolations.fetch_add(1, std::memory_order_relaxed);
+    EngineWgpu::AcquireProducerWindow(what);
 }
 
 TextureWgpu::~TextureWgpu()
@@ -895,6 +896,7 @@ TextureWgpu::~TextureWgpu()
             CheckProducerMayTouchRenderer("texture destroy");
             if (_gpuHandle)
             {
+                CheckProducerMayTouchRenderer("texture destroy");
                 wgr_texture_destroy(r, _gpuHandle);
             }
             // The lease outlives every upload and dies with the texture OBJECT. This is
@@ -1142,6 +1144,7 @@ void TextureWgpu::EvictGpu()
     }
     if (WgrRenderer* r = _bank->Renderer())
     {
+        CheckProducerMayTouchRenderer("texture destroy");
         wgr_texture_destroy(r, _gpuHandle);
     }
     _gpuHandle = 0;
@@ -1173,6 +1176,7 @@ void TextureWgpu::InitDynamic(int w, int h, const void* rgba, uint32_t size)
     _nMipmaps = 1;
     if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
     {
+        CheckProducerMayTouchRenderer("texture create");
         _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(w), static_cast<uint32_t>(h), WGR_TEXTURE_RGBA8, 1, 0,
                                         static_cast<const uint8_t*>(rgba), size);
     }
@@ -1191,6 +1195,7 @@ void TextureWgpu::UpdateDynamic(const void* rgba, uint32_t size)
 
     if (WgrRenderer* r = _bank ? _bank->Renderer() : nullptr)
     {
+        CheckProducerMayTouchRenderer("texture update");
         wgr_texture_update(r, _gpuHandle, static_cast<const uint8_t*>(rgba), size);
     }
 }
@@ -1488,6 +1493,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             _h = _mipmaps[firstLevel]._h;
             // Into this texture's LEASED slot, so a re-upload after an eviction reclaims
             // the bindless index registered models already baked (REN-RES-001).
+            CheckProducerMayTouchRenderer("texture create");
             _gpuHandle = wgr_texture_create_in_slot(r, static_cast<uint32_t>(_w), static_cast<uint32_t>(_h), bcFormat,
                                                     static_cast<uint32_t>(levelCount), 0, blocks.data(),
                                                     static_cast<uint32_t>(blocks.size()), AcquireSlotLease());
@@ -1543,6 +1549,7 @@ uint64_t TextureWgpu::EnsureUploaded()
         if (render::PreparedTextureStore::Enabled() &&
             render::PreparedTextureStore::Instance().TakeDecoded(render::PreparedTextureStore::Key(Name()), prepared))
         {
+            CheckProducerMayTouchRenderer("texture create");
             _gpuHandle = wgr_texture_create(r, static_cast<uint32_t>(prepared.width),
                                             static_cast<uint32_t>(prepared.height), WGR_TEXTURE_RGBA8, 1,
                                             WGR_TEXTURE_GEN_MIPS, prepared.rgba.data(),
@@ -1567,6 +1574,7 @@ uint64_t TextureWgpu::EnsureUploaded()
             DecodedImage img = DecodePAABuffer(fb->GetData(), static_cast<size_t>(fb->GetSize()), IsPaaName(Name()));
             if (img.valid())
             {
+                CheckProducerMayTouchRenderer("texture create");
                 _gpuHandle = wgr_texture_create_in_slot(
                     r, static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height), WGR_TEXTURE_RGBA8, 1,
                     WGR_TEXTURE_GEN_MIPS, img.rgba.data(), static_cast<uint32_t>(img.rgba.size()), AcquireSlotLease());

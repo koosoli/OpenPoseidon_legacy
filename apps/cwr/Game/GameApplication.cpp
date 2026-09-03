@@ -315,6 +315,20 @@ bool WriteCaptureMetrics(const std::string& path)
             // exposes avg/p95/max, so the cheapest-frame rule is applied downstream
             // by taking the cheapest repeat rather than the cheapest frame here.
             cJSON_AddNumberToObject(phases, "frame_max", total.maxMs);
+            if (GEngine)
+            {
+                // REN-THR-013: what still opens the producer window early, and what it costs.
+                const auto rt = GEngine->GetRenderThreadInfo();
+                cJSON* pw = cJSON_AddObjectToObject(phases, "producer_window");
+                cJSON_AddNumberToObject(pw, "lazy_wait_ms", rt.lazyWaitMs);
+                cJSON_AddNumberToObject(pw, "lazy_waits_per_frame", rt.lazyWaitsPerFrame);
+                cJSON_AddStringToObject(pw, "opener", rt.lazyOpener != nullptr ? rt.lazyOpener : "none");
+                // The worker's side of the same frame: how long it is busy (drains + encode +
+                // present) and how long the producer blocked on it, per frame.
+                cJSON_AddNumberToObject(pw, "worker_busy_ms", rt.workerBusyMs);
+                cJSON_AddNumberToObject(pw, "producer_wait_ms", rt.mainWaitMs);
+                cJSON_AddNumberToObject(pw, "overlap_ms", rt.overlapMs);
+            }
             cJSON* byPhase = cJSON_AddObjectToObject(phases, "phases");
             for (int p = 0; p < Poseidon::Dev::FrameProfiler::PhaseCount; ++p)
             {

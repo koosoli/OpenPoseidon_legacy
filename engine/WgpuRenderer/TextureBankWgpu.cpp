@@ -1,4 +1,5 @@
 #include "TextureBankWgpu.hpp"
+#include "EngineWgpu.hpp" // AcquireProducerWindow / LastMemoryStats (REN-THR-013)
 
 #include <algorithm>
 #include <chrono>
@@ -112,6 +113,7 @@ void TextureBankWgpu::ReportMipFeedback()
         _mipDesired.resize(65536);
         _mipAge.resize(65536);
     }
+    EngineWgpu::AcquireProducerWindow("mip feedback");
     const uint32_t slots =
         wgr_get_mip_feedback(_renderer, &fb, _mipDesired.data(), _mipAge.data(),
                              static_cast<uint32_t>(_mipDesired.size()));
@@ -190,8 +192,11 @@ void TextureBankWgpu::TrimResidency()
         _mipReportDue = _residencyFrame + 600;
         ReportMipFeedback();
     }
+    // REN-THR-013: the on-budget frame (every frame on a stock world) reads the worker's
+    // snapshot and never touches the renderer; only an over-budget frame opens the window,
+    // re-reads the live figure and evicts as before.
     WgrMemoryStats stats{};
-    if (!wgr_get_memory_stats(_renderer, &stats) || stats.budget_bytes == 0)
+    if (!EngineWgpu::LastMemoryStats(stats) || stats.budget_bytes == 0)
         return;
     // TEXTURES against a TEXTURE budget, not textures+geometry against the whole one.
     //
@@ -209,6 +214,9 @@ void TextureBankWgpu::TrimResidency()
     // then reverting to white, and never arriving at all closer in -- is this loop.
     const uint64_t textureBudget = TextureBudgetBytes(stats.budget_bytes);
     if (stats.object_texture_bytes <= textureBudget)
+        return;
+    EngineWgpu::AcquireProducerWindow("texture residency trim");
+    if (!wgr_get_memory_stats(_renderer, &stats) || stats.object_texture_bytes <= textureBudget)
         return;
 
     // NOTE on the ResidentPins() check below. A pin means "some REGISTERED model references

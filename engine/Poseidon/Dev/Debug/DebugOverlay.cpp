@@ -4458,6 +4458,8 @@ void DrawPerfTab()
                            "numbers above it.");
             ImGui::Text("Render lag         %4.0f / %d frames", rt.lagFrames, 1);
             ImGui::Text("Queue waiting      %6.1f ms", rt.queueWaitMs);
+            ImGui::Text("Window opened late %6.2f ms, %4.2f/frame by %s", rt.lazyWaitMs, rt.lazyWaitsPerFrame,
+                        rt.lazyOpener != nullptr ? rt.lazyOpener : "none");
             Dev::PanelSameLine();
             Dev::PanelHelp("How long the producer BLOCKED. In lockstep that is the whole render, because "
                            "it waits for all of it. With overlap on it is only what the renderer could "

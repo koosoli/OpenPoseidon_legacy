@@ -974,6 +974,14 @@ class VertexBufferWgpu : public VertexBuffer
 EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.useWindow)
 {
     _cpuMeshLink->engine = this; // see CpuMeshLink; nulled in ~EngineWgpu
+    s_self = this;
+    {
+        const char* lw = std::getenv("WGR_LAZY_WINDOW");
+        _lazyWindow = !(lw != nullptr && lw[0] == '0');
+        LOG_INFO(Graphics, "Wgpu producer window: {} (WGR_LAZY_WINDOW)",
+                 _lazyWindow ? "lazy -- opened by the first direct renderer call, not at InitDraw"
+                             : "eager -- InitDraw waits for the render thread (REN-THR-012)");
+    }
     // Picture Mode depth of field can be armed from the environment as well as from the tab.
     // Same reason the ballistics recorder needed it: a feature reachable only by clicking cannot
     // be captured by a script, attached to a bug report, or checked by the smoke harness -- and
@@ -1167,19 +1175,18 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
     _gpuMemoryProbe.Register(
         "WGPU.Dynamic", 0.35f,
-        [this] {
+        // REN-THR-013: the worker's snapshot, not the live handle (these run on the producer).
+        [] {
             WgrMemoryStats stats{};
-            return _renderer && wgr_get_memory_stats(_renderer, &stats) ? static_cast<size_t>(stats.tracked_bytes) : 0;
+            return LastMemoryStats(stats) ? static_cast<size_t>(stats.tracked_bytes) : 0;
         },
-        [this] {
+        [] {
             WgrMemoryStats stats{};
-            return _renderer && wgr_get_memory_stats(_renderer, &stats) ? static_cast<size_t>(stats.budget_bytes) : 0;
+            return LastMemoryStats(stats) ? static_cast<size_t>(stats.budget_bytes) : 0;
         },
-        [this] {
+        [] {
             WgrMemoryStats stats{};
-            return _renderer && wgr_get_memory_stats(_renderer, &stats)
-                       ? static_cast<size_t>(stats.object_texture_count)
-                       : 0;
+            return LastMemoryStats(stats) ? static_cast<size_t>(stats.object_texture_count) : 0;
         });
 
     _wbank = new TextureBankWgpu(_renderer);
@@ -1507,6 +1514,7 @@ EngineWgpu::EngineWgpu(const GraphicsEngineParams& params) : _windowed(params.us
 
 EngineWgpu::~EngineWgpu()
 {
+    s_self = nullptr;
     // FIRST: every VertexBufferWgpu still alive holds this link, and Shapes outlive the
     // engine on some teardown orders. Nulling it here turns a late SetSkinData into a no-op
     // instead of a call through a destroyed engine (REN-THR-011).
@@ -1587,6 +1595,17 @@ bool EngineWgpu::CanBeWindowed() const
 bool EngineWgpu::SetSwapInterval(int interval)
 {
     WaitRenderIdle(); // exclusive renderer handle below (REN-THR-012)
+    // POSEIDON_VSYNC=<0|1|-1> pins the interval for a benchmark run without touching the
+    // owner's saved setting. Every CPU-frame number taken under Fifo on a 144 Hz display is
+    // quantised to 6.9 ms steps (a 19 ms GPU frame reads as 20.8 or 27.8), which is how the
+    // REN-THR-013 A/B first measured nothing: the difference hid in the quantisation.
+    if (const char* pin = std::getenv("POSEIDON_VSYNC"); pin != nullptr && pin[0] != 0)
+    {
+        const int pinned = std::atoi(pin);
+        if (pinned != interval)
+            LOG_INFO(Graphics, "Wgpu: VSync interval {} requested, pinned to {} by POSEIDON_VSYNC", interval, pinned);
+        interval = pinned;
+    }
     if (interval != 0 && interval != 1 && interval != -1)
     {
         return false;
@@ -1817,7 +1836,11 @@ void EngineWgpu::InitDraw(bool clear, PackedColor color)
 {
     // The producer's renderer-touching window opens here and closes at publish. Everything
     // between the two may call the renderer directly; nothing before it may (REN-THR-012).
-    WaitRenderIdle();
+    // REN-THR-013: with the lazy window the traversal overlaps the worker until something
+    // actually needs the renderer handle (AcquireProducerWindow); WGR_LAZY_WINDOW=0 is the
+    // REN-THR-012 behaviour, the whole traversal after the worker.
+    if (!_lazyWindow)
+        WaitRenderIdle();
     // RenderSnapshot S1 / Phase 5 step 1: the WORLD publishes the frame's environment
     // block at its simulation/draw boundary (World::Simulate, right before it calls
     // InitDraw). This is only the FALLBACK for frames no world drives (main menu
@@ -1959,6 +1982,35 @@ void EngineWgpu::ApplyPendingRendererSettings(PendingRendererSettings& p)
     {
         wgr_far_set_params(_renderer, p.farNearCutoff, p.farDistance, p.farPixelLimit, p.farEnabled);
         p.farParamsDirty = false;
+    }
+    // REN-THR-013
+    if (p.renderParamsDirty)
+    {
+        wgr_set_render_params(_renderer, &p.renderParams);
+        p.renderParamsDirty = false;
+    }
+    if (p.skyRuntimeDirty)
+    {
+        wgr_set_sky_runtime(_renderer, &p.skyRuntime);
+        p.skyRuntimeDirty = false;
+    }
+    if (p.terrainParamsDirty)
+    {
+        wgr_terrain_set_params(_renderer, &p.terrainParams);
+        p.terrainParamsDirty = false;
+    }
+    if (p.smokeDirty)
+    {
+        wgr_set_smoke_shadow(_renderer, p.smokeBlobs.empty() ? nullptr : p.smokeBlobs.data(),
+                             U32(p.smokeBlobs.size()), p.smokeStrength);
+        p.smokeDirty = false;
+    }
+    if (p.skyScalarsDirty)
+    {
+        wgr_set_cloud_shadow_strength(_renderer, p.cloudShadowStrength);
+        wgr_set_star_intensity(_renderer, p.starIntensity);
+        wgr_set_lens_flare(_renderer, p.lensFlare);
+        p.skyScalarsDirty = false;
     }
 }
 
@@ -2338,6 +2390,10 @@ void EngineWgpu::AccumulateRenderThreadTiming(double busyMs, double waitMs, doub
     _rtBusyFrac = static_cast<float>(_rtBusyMsAccum / window);
     // The producer's own busy time is the window minus what it spent BLOCKED on the worker.
     _rtMainFrac = static_cast<float>((_rtWindowMsAccum - _rtWaitMsAccum) / window);
+    _rtLazyWaitMs = static_cast<float>(_rtLazyWaitMsAccum * invFrames);
+    _rtLazyWaitsPerFrame = static_cast<float>(_rtLazyWaitCountAccum * invFrames);
+    _rtLazyWaitMsAccum = 0.0;
+    _rtLazyWaitCountAccum = 0;
     _rtBusyMsAccum = _rtWaitMsAccum = _rtWindowMsAccum = 0.0;
     _rtWindowFrames = 0;
     _renderLagShown = static_cast<float>(_renderLagFrames);
@@ -2359,6 +2415,9 @@ Engine::RenderThreadInfo EngineWgpu::GetRenderThreadInfo() const
     info.overlapEnabled = _overlapOn;
     info.lagFrames = _renderLagShown;
     info.queueWaitMs = _rtWaitMs;
+    info.lazyWaitMs = _rtLazyWaitMs;
+    info.lazyWaitsPerFrame = _rtLazyWaitsPerFrame;
+    info.lazyOpener = _rtLazyOpenerShown;
     return info;
 }
 
@@ -2400,11 +2459,45 @@ bool EngineWgpu::ProducerMayTouchRenderer()
     return g_rendererQuiescent.load(std::memory_order_acquire);
 }
 
+EngineWgpu* EngineWgpu::s_self = nullptr;
+
+void EngineWgpu::AcquireProducerWindow(const char* what)
+{
+    if (g_rendererQuiescent.load(std::memory_order_acquire))
+        return;
+    EngineWgpu* self = s_self;
+    if (self == nullptr)
+        return;
+    const auto t0 = std::chrono::steady_clock::now();
+    self->WaitRenderIdle();
+    self->_rtLazyWaitMsAccum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    self->_rtLazyWaitCountAccum++;
+    if (self->_rtLazyOpenerFrame == nullptr)
+        self->_rtLazyOpenerFrame = what;
+}
+
+bool EngineWgpu::LastMemoryStats(WgrMemoryStats& out)
+{
+    EngineWgpu* self = s_self;
+    if (self == nullptr)
+        return false;
+    std::lock_guard<std::mutex> lock(self->_memStatsMutex);
+    out = self->_lastMemStats;
+    return self->_lastMemStatsValid;
+}
+
+void EngineWgpu::QueueTerrainParams(const WgrTerrainParams& p)
+{
+    _pendingSet.terrainParams = p;
+    _pendingSet.terrainParamsDirty = true;
+}
+
 void EngineWgpu::WaitRenderIdle()
 {
     if (!_renderThreadOn)
     {
         g_rendererQuiescent.store(true, std::memory_order_release);
+        ApplyPendingRendererSettings(_pendingSet);
         return;
     }
     const auto waitStart = std::chrono::steady_clock::now();
@@ -2414,6 +2507,9 @@ void EngineWgpu::WaitRenderIdle()
     }
     _rtPreDrawWaitMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - waitStart).count();
     g_rendererQuiescent.store(true, std::memory_order_release);
+    // REN-THR-013: the stop-the-world callers (MSAA, resize, screenshots) read the renderer
+    // right after this; the queued per-frame pushes must already be in it.
+    ApplyPendingRendererSettings(_pendingSet);
 }
 
 void EngineWgpu::RenderThreadMain()
@@ -2532,6 +2628,9 @@ void EngineWgpu::NextFrame()
         const auto frameStartForRt = std::chrono::steady_clock::now();
         double waitMs = _rtPreDrawWaitMs; // the InitDraw wait belongs to this frame
         _rtPreDrawWaitMs = 0.0;
+        if (_rtLazyOpenerFrame != nullptr)
+            _rtLazyOpenerShown = _rtLazyOpenerFrame;
+        _rtLazyOpenerFrame = nullptr;
         SyncWaterLookProfile();
         const auto tLook = std::chrono::steady_clock::now();
         // Interpolate the per-time-of-day tonemap/grade + atmosphere presets for this frame
@@ -7745,6 +7844,7 @@ void EngineWgpu::SetTemporalTuning(const TemporalSettings& t)
 Engine::TemporalInfo EngineWgpu::GetTemporalInfo()
 {
     TemporalInfo out{};
+    AcquireProducerWindow("temporal info");
     if (!_renderer)
         return out;
     WgrTemporalInfo w{};
@@ -8374,6 +8474,7 @@ void EngineWgpu::SetExposureSettings(const ExposureSettings& s)
 
 float EngineWgpu::GetAutoExposureScale() const
 {
+    AcquireProducerWindow("exposure scale");
     return _renderer ? wgr_get_exposure_scale(_renderer) : 1.0f;
 }
 
@@ -8381,6 +8482,7 @@ int EngineWgpu::GetWaterGpuTimings(float* outMs, int maxCount) const
 {
     if (!_renderer || !outMs || maxCount <= 0)
         return 0;
+    AcquireProducerWindow("gpu timings");
     return (int)wgr_get_gpu_timings(_renderer, outMs, (uint32_t)maxCount);
 }
 
@@ -8885,6 +8987,7 @@ int EngineWgpu::GetCpuTimings(float* outMs, int maxCount) const
 {
     if (!_renderer || !outMs || maxCount <= 0)
         return 0;
+    AcquireProducerWindow("cpu timings");
     return (int)wgr_get_cpu_timings(_renderer, outMs, (uint32_t)maxCount);
 }
 
@@ -8922,6 +9025,13 @@ void EngineWgpu::PublishRendererStats()
     _publishedObjectStatsValid = GetObjectStatsFromRenderer(_publishedObjectStats);
     _publishedGrassStatsValid = GetGrassStatsFromRenderer(_publishedGrassStats);
     _publishedMemoryStatsValid = GetGpuMemoryStatsFromRenderer(_publishedMemoryStats);
+    {
+        WgrMemoryStats raw{};
+        const bool ok = _renderer != nullptr && wgr_get_memory_stats(_renderer, &raw) != 0;
+        std::lock_guard<std::mutex> lock(_memStatsMutex);
+        _lastMemStats = raw;
+        _lastMemStatsValid = ok;
+    }
 }
 
 bool EngineWgpu::GetObjectStatsFromRenderer(ObjectStatsOut& out) const
@@ -9702,6 +9812,7 @@ void EngineWgpu::SetGrassSettings(const GrassSettings& settings)
 
 bool EngineWgpu::HasGrassPhotoClumps() const
 {
+    AcquireProducerWindow("grass photo clumps");
     return _renderer != nullptr && wgr_grass_have_photo_clumps(_renderer) != 0;
 }
 
@@ -9933,12 +10044,14 @@ void EngineWgpu::PushRenderParams()
                 packed[i].pos_radius = {blobs[i].x, blobs[i].y, blobs[i].z, blobs[i].radius};
                 packed[i].density = {blobs[i].density, blobs[i].heightAboveGround, 0.0f, 0.0f};
             }
-            wgr_set_smoke_shadow(_renderer, packed.empty() ? nullptr : packed.data(), U32(packed.size()),
-                                 GSmokeSystem.GroundShadowStrength());
+            _pendingSet.smokeBlobs.assign(packed.begin(), packed.end());
+            _pendingSet.smokeStrength = GSmokeSystem.GroundShadowStrength();
+            _pendingSet.smokeDirty = true;
         }
-        wgr_set_cloud_shadow_strength(_renderer, std::clamp(_sky.cloudShadowStrength, 0.0f, 1.0f));
-        wgr_set_star_intensity(_renderer, std::clamp(_sky.starIntensity, 0.0f, 4.0f));
-        wgr_set_lens_flare(_renderer, std::clamp(_sky.lensFlare, 0.0f, 4.0f));
+        _pendingSet.cloudShadowStrength = std::clamp(_sky.cloudShadowStrength, 0.0f, 1.0f);
+        _pendingSet.starIntensity = std::clamp(_sky.starIntensity, 0.0f, 4.0f);
+        _pendingSet.lensFlare = std::clamp(_sky.lensFlare, 0.0f, 4.0f);
+        _pendingSet.skyScalarsDirty = true;
     }
 
     // Long-distance terrain sun-shadow (wgpu-only); strength 0 = disabled. The renderer
@@ -10129,7 +10242,9 @@ void EngineWgpu::PushRenderParams()
         _interiorSky.baked ? 1u : 0u,
     };
 
-    wgr_set_render_params(_renderer, &p);
+    // REN-THR-013: queued; the worker applies it before wgr_render_frame.
+    _pendingSet.renderParams = p;
+    _pendingSet.renderParamsDirty = true;
 }
 
 void EngineWgpu::PushSkyRuntime()
@@ -10324,7 +10439,8 @@ void EngineWgpu::PushSkyRuntime()
     const double evoWeather = std::fmod(evo * 0.5 * cloudT, kWindWrap);
     rt.cloud_evolve = {static_cast<float>(evoShape), static_cast<float>(evoDetail), static_cast<float>(evoWeather),
                        0.0f};
-    wgr_set_sky_runtime(_renderer, &rt);
+    _pendingSet.skyRuntime = rt; // REN-THR-013: queued
+    _pendingSet.skyRuntimeDirty = true;
 }
 
 void EngineWgpu::ResolveSceneToDisplay()
