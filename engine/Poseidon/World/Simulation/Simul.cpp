@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <Poseidon/Core/Application.hpp>
 #include <Poseidon/Core/Config/EngineConfig.hpp>
 #include <Poseidon/World/Entities/Vehicles/Vehicle.hpp>
@@ -79,6 +80,43 @@ void Entity::SimulateOptimized(float deltaT, SimulationImportance prec)
 void Entity::SimulateRest(float deltaT, SimulationImportance prec)
 {
     _simulationSkipped += deltaT;
+    // PERF-030: honour a COARSE declared precision here too.
+    //
+    // `SimulateOptimized` throttles to `SimulationPrecision()`, and then this pass
+    // runs every tick on whatever time is left over -- so the throttle never
+    // throttled anything, and an entity that said "twice per second is enough"
+    // was simulated sixty times a second anyway. A footprint Mark says exactly
+    // that (`SetSimulationPrecision(0.5)`, Tracks.cpp) and there are a few
+    // thousand of them on a fought-over map.
+    //
+    // Only for entities that asked for a COARSE step. The default is 1/15 s and
+    // the remainder pass is what keeps those smooth; changing that for everything
+    // would be a behaviour change to every vehicle in the game for the sake of
+    // decals.
+    //
+    // OFF by default (`POSEIDON_REST_HONOURS_PRECISION=1` enables it), measured:
+    // it does halve the marks' own cost (`other` 0.124 -> 0.07 ms/tick) and it
+    // honours an intent the engine has been ignoring since 2001 -- but the
+    // soldiers do not get any faster for it (`man` 3.59 vs 3.58), so the frame
+    // buys nothing, and a 10-second fade stepped at 0.5 s could be visible on a
+    // footprint. A look risk with no measured win does not ship by default.
+    static const bool honour = []
+    {
+        const char* v = std::getenv("POSEIDON_REST_HONOURS_PRECISION");
+        return v != nullptr && v[0] == '1';
+    }();
+    const float coarse = SimulationPrecision();
+    if (honour && coarse >= 0.25f)
+    {
+        if (_simulationSkipped >= coarse)
+        {
+            const float step = _simulationSkipped;
+            Simulate(step, prec);
+            ApplyRemoteState(step);
+            _simulationSkipped = 0;
+        }
+        return;
+    }
     if (_simulationSkipped > 1e-4)
     {
         float step = _simulationSkipped;
