@@ -467,6 +467,39 @@ Maintain comparable captures for:
 Every later optimisation must identify the recorded cost that it attacks and define a
 before/after acceptance test.
 
+## The GPU frame re-measured, 2026-09-03 — the table below is superseded
+
+The 2026-08-31 table was taken at 1600x900 before early-Z (REN-OBJ-004), the cloud work
+(REN-SKY-001/003), GI and the interior-sky cache. Read this one first; the older one is kept
+for the method, not the numbers.
+
+Everon `perf_combat`, **3441x1440**, noon, `POSEIDON_VSYNC=0`, stamp `4aa6ad5c`. GPU frame
+**21.79 ms**, and it is now essentially fully attributed: the 3D colour sub-pass container is
+5.89 ms and its named leaves account for all but **0.13**.
+
+| item | ms | % | note |
+|---|---:|---:|---|
+| Sky: cloud march | 2.29 | 10.5% | inside the colour sub-pass; 128 steps, the owner's picture |
+| Grass colour | 1.68 | 7.7% | |
+| Grass prepass | 1.27 | 5.8% | writes depth AND the normals GTAO reads, so it is not free to drop |
+| Grass shadow | 0.30 | 1.4% | already halved (REN-GRS-001) |
+| AO horizon march + bilateral blur + prep | 1.19 | 5.5% | |
+| Shadow cascades 0-3 | 1.43 | 6.6% | plus 0.27 for their cull |
+| Water FFT block (evolve + h + v + compose + foam) | 1.36 | 6.2% | on a LAND scene; the sea is on the horizon |
+| Sky: draw / LUTs / froxel / env / SH | 1.09 | 5.0% | |
+| Post chain (god rays, bloom, tonemap, exposure, resolve) | 0.89 | 4.1% | |
+| Terrain prepass + colour | 0.37 | 1.7% | |
+| Objects: colour alpha-test + solid + prepass | 0.53 | 2.4% | after early-Z; was 2.4 ms for the cutout pass alone |
+| Objects: culls (main, shadow, Hi-Z) | 0.61 | 2.8% | |
+| GI: probe update | 0.16 | 0.7% | the whole hybrid GI cost |
+| CPU-replayed direct draws (derived) | 0.18 | 0.8% | `ops pre-water` minus terrain and grass — see PERF-026 |
+
+**What this changes.** Grass is 15% here, not 39%: the 2026-08-31 figure was a lower resolution
+and a different set of passes. The cloud march is now the single largest item, and it is the
+one the owner has twice chosen the expensive version of on sight — so it is a slow-GPU lever
+(`WGR_CLOUD_STEPS`, `WGR_CLOUD_LIGHT_COARSE`), not a default to change. The reflection's copy
+of that march was a default worth changing, and REN-SKY-004 did.
+
 ## The GPU frame, measured and now 95% attributed (2026-08-31)
 
 Five stock scenes, 1600×900 windowed, DLSS off, same binary, after the atmosphere gained
