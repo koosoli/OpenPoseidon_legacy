@@ -55,7 +55,19 @@ for a GPU-bound frame. What the table does establish: on these scenes **the trav
 touches the renderer** (0.00 lazy waits per frame; the only recorded opener is the bench's
 own GPU-timings reader at capture time), which is the precondition the earlier decision named.
 
-CPU-bound pose: see the addendum below (Chernarus+ ground, world mode 800×600).
+## Addendum — the pose meant to be CPU-bound was not (Chernarus+ ground, world mode 800×600)
+
+| arm | CPU frame avg | GPU frame | `sim:step` | `land:obj` | `drw:land` | `swap` | lazy waits / frame |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| eager | 13.5 (13.1–13.8) | 12.4 | 1.9 | 2.50 | 1.16 | 7.0 | 0 |
+| **lazy** | 13.8 (13.2–14.2) | 12.5 | 1.8 | 2.53 | 1.19 | 7.3 | **0.00** |
+
+Even at 800×600 the RTX 3070 is the bound on this pose (`swap` 7 ms of a 13.5 ms frame), so the
+traversal's 4 ms is again off the critical path. The only openers recorded in six runs were the
+bench's timings reader and one mip-feedback harvest (every 600 frames). **No pose in the harness
+is CPU-bound on this machine today**; the lazy window's win is reserved for one that is — a
+slower CPU, or the streaming pose while moving — and its instrument is in place for that day.
+
 
 ## Decision
 
