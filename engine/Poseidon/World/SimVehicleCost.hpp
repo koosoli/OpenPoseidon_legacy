@@ -36,8 +36,15 @@ enum class Stage : std::uint8_t
     Fast,
     Buildings,
     Attached,
+    // PERF-027: `Slow` is four things, and by-kind accounting only ever covered
+    // one of them (the per-entity Simulate). These three split the rest, because
+    // the footprint ablation showed 2.2 ms/frame moving inside `Slow` with no
+    // by-kind row moving with it.
+    SlowMoveOut,   // the four MoveOutAndDelete list walks
+    SlowVehicles,  // SimulateOnly over _vehicles
+    SlowAnimals,   // SimulateOnly over _animals -- where footprint marks live
 };
-inline constexpr std::size_t kStageCount = 6;
+inline constexpr std::size_t kStageCount = 9;
 
 enum class Kind : std::uint8_t
 {
@@ -50,6 +57,16 @@ enum class Kind : std::uint8_t
     Other,
 };
 inline constexpr std::size_t kKindCount = 7;
+
+/// PERF-027: is the accounting on at all? OFF by default, from
+/// `POSEIDON_SIM_VEHICLE_COST=1`, read once.
+///
+/// It has to be a gate rather than a cheap always-on counter because the
+/// per-entity work is NOT the two clock reads -- it is the `IsKindOf` chain that
+/// classifies every entity AFTER every Simulate call, which on a scene with a few
+/// thousand footprint marks runs a few thousand times a tick and costs more than
+/// several of the things it was built to measure.
+[[nodiscard]] bool Enabled();
 
 [[nodiscard]] const char* StageName(Stage stage);
 [[nodiscard]] const char* KindName(Kind kind);

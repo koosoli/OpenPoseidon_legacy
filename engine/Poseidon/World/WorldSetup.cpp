@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include <SDL3/SDL_scancode.h>
 #include "SimVehicleCost.hpp" // PERF-023
 
@@ -541,12 +542,29 @@ void World::MoveOutAndDelete(VehiclesDistributed& list, float deltaT, bool apply
 // short IsKindOf chain walk per call, well under the Simulate it brackets.
 static void SimulateTimed(Entity* vehicle, VehicleSimulation simul, float deltaT, SimulationImportance prec)
 {
+    // PERF-027: the accounting is OFF unless asked for. What follows is not a
+    // couple of clock reads -- it is a type-hierarchy classification per entity
+    // per tick, and `_animals` holds one entity per footfall.
+    if (!SimVehCost::Enabled())
+    {
+        (vehicle->*simul)(deltaT, prec);
+        return;
+    }
     const std::uint64_t t0 = SimVehCost::NowNs();
     (vehicle->*simul)(deltaT, prec);
     const std::uint64_t ns = SimVehCost::NowNs() - t0;
+    // Memoised on the TYPE, not recomputed per entity: the chain below is six
+    // `IsKindOf` walks and six `Preloaded` lookups, and a scene has a handful of
+    // types against thousands of entities.
+    static std::unordered_map<const EntityType*, SimVehCost::Kind> kindCache;
     SimVehCost::Kind kind = SimVehCost::Kind::Other;
     if (const EntityType* type = vehicle->GetNonAIType())
     {
+        if (const auto hit = kindCache.find(type); hit != kindCache.end())
+        {
+            SimVehCost::AddKind(hit->second, ns);
+            return;
+        }
         const World* w = GLOB_WORLD;
         if (type->IsKindOf(w->Preloaded(VTypeMan)))
             kind = SimVehCost::Kind::Man;
@@ -560,6 +578,10 @@ static void SimulateTimed(Entity* vehicle, VehicleSimulation simul, float deltaT
             kind = SimVehCost::Kind::Ship;
         else if (type->IsKindOf(w->Preloaded(VTypeStatic)))
             kind = SimVehCost::Kind::Static;
+    }
+    if (const EntityType* type = vehicle->GetNonAIType())
+    {
+        kindCache.emplace(type, kind);
     }
     SimVehCost::AddKind(kind, ns);
 }

@@ -706,13 +706,24 @@ void World::PerformAI(float deltaT, float noAccDeltaT)
 
 void World::SimulateVehicles(float deltaT, VehicleSimulation simul, Entity* insideVehcile)
 {
-    MoveOutAndDelete(_vehicles, deltaT, false);
-    MoveOutAndDelete(_animals, deltaT, false);
-    SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
-    SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
-
-    MoveOutAndDelete(_vehicles, deltaT, true);
-    MoveOutAndDelete(_animals, deltaT, true);
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::SlowMoveOut);
+        MoveOutAndDelete(_vehicles, deltaT, false);
+        MoveOutAndDelete(_animals, deltaT, false);
+    }
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::SlowVehicles);
+        SimulateOnly(_vehicles, deltaT, simul, insideVehcile, SimulateVisibleNear);
+    }
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::SlowAnimals);
+        SimulateOnly(_animals, deltaT, simul, insideVehcile, SimulateVisibleNear);
+    }
+    {
+        SimVehCost::ScopedStage stage(SimVehCost::Stage::SlowMoveOut);
+        MoveOutAndDelete(_vehicles, deltaT, true);
+        MoveOutAndDelete(_animals, deltaT, true);
+    }
 
 #if PERF_SIM
 #endif

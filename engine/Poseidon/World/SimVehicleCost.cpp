@@ -2,9 +2,21 @@
 #include "SimVehicleCost.hpp"
 
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 
 namespace Poseidon::SimVehCost
 {
+bool Enabled()
+{
+    static const bool on = []
+    {
+        const char* v = std::getenv("POSEIDON_SIM_VEHICLE_COST");
+        return v != nullptr && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+
 std::uint64_t NowNs()
 {
     return static_cast<std::uint64_t>(
@@ -22,6 +34,9 @@ const char* StageName(Stage stage)
     case Stage::Fast: return "fast";
     case Stage::Buildings: return "buildings";
     case Stage::Attached: return "attached";
+    case Stage::SlowMoveOut: return "slow.moveout";
+    case Stage::SlowVehicles: return "slow.vehicles";
+    case Stage::SlowAnimals: return "slow.animals";
     }
     return "?";
 }
