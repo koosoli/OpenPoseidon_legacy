@@ -29,6 +29,10 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PrefabResolve.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
+#include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
+#include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
+#include <Poseidon/Graphics/Rendering/Shape/Shape.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PakArchive.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainMaterials.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/TerrainTile.hpp>
@@ -460,9 +464,18 @@ bool LoadResourceDatabases(const std::string& addonsDir, std::unordered_map<std:
     return true;
 }
 
+//! One placement, resolved: where it goes and which `.xob` draws it.
+struct ResolvedPlacement
+{
+    float position[3] = {0.0f, 0.0f, 0.0f};
+    float yawDeg = 0.0f;
+    bool terrainRelative = false;
+    uint32_t mesh = 0; //!< index into the mesh list
+};
+
 PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string& addonsDir,
-                                   const EnfusionTerrain& terrain,
-                                   std::vector<std::pair<std::string, size_t>>& meshes)
+                                   std::vector<std::pair<std::string, size_t>>& meshes,
+                                   std::vector<ResolvedPlacement>& resolved)
 {
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     PlacementSummary out;
@@ -502,7 +515,9 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     // One resolution per DISTINCT prefab, not per placement: Everon's 1.23 M
     // placements come from a few thousand prefabs, and the chain walk reads files.
     std::unordered_map<std::string, std::string> prefabToMesh;
-    std::unordered_map<std::string, size_t> meshCounts;
+    std::unordered_map<std::string, uint32_t> meshIndex;
+    std::vector<size_t> meshCounts;
+    resolved.reserve(world.placements.size());
     for (const Enf::EbinPlacement& placement : world.placements)
     {
         if (placement.prefabGuid.empty())
@@ -535,13 +550,96 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
         if (byGuid.count(placement.prefabGuid) != 0)
             ++out.guidResolved;
         ++out.meshResolved;
-        ++meshCounts[cached->second];
+
+        auto slot = meshIndex.find(cached->second);
+        if (slot == meshIndex.end())
+        {
+            slot = meshIndex.emplace(cached->second, static_cast<uint32_t>(meshCounts.size())).first;
+            meshCounts.push_back(0);
+        }
+        ++meshCounts[slot->second];
+
+        ResolvedPlacement item;
+        item.position[0] = placement.position[0];
+        item.position[1] = placement.position[1];
+        item.position[2] = placement.position[2];
+        // Yaw only. The reader carries a Euler triple in degrees and everything
+        // downstream of it uses index 1 and discards pitch and roll -- a documented
+        // reduction of the reader, not an omission here.
+        item.yawDeg = placement.angles[1];
+        // The Y rule, measured over Everon's 1.23 M placements: with a Flags block
+        // 96.3% sit within half a metre of the terrain, without one the median Y is
+        // exactly 0. Reading every Y as absolute buries the houses a median 29 m
+        // under, because SCR_DestructibleBuildingEntity is 93% flagless.
+        item.terrainRelative = !placement.hasFlags && std::fabs(placement.position[1]) < 2.0f;
+        item.mesh = slot->second;
+        resolved.push_back(item);
     }
     out.distinctMeshes = meshCounts.size();
-    meshes.assign(meshCounts.begin(), meshCounts.end());
-    std::sort(meshes.begin(), meshes.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
+    meshes.resize(meshCounts.size());
+    for (const auto& [path, index] : meshIndex)
+        meshes[index] = {path, meshCounts[index]};
+    // The placements index INTO this list, so it cannot be sorted here; the callers
+    // that want an order build their own. (An earlier version sorted it and left the
+    // indices pointing at the wrong meshes, which drew the right number of the wrong
+    // objects -- a picture that looks plausible and is not.)
     return out;
+}
+
+/// RFG-013: one `.xob` in the archives -> one shape the engine can draw.
+///
+/// The hop through MLOD in memory is deliberate. A direct XobModel -> Model builder
+/// would have to reimplement the loader's vertex merge, section building, UV-set
+/// handling and winding bookkeeping, and then keep them in step with the loader
+/// forever; `writeToBuffer` / `loadFromBuffer` are pure memory, so the round trip
+/// costs one serialise plus one parse per DISTINCT model and buys all of that.
+/// Nothing is written to disk.
+LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::string& xobPath, std::string& why)
+{
+    namespace Enf = Poseidon::Asset::Formats::Enfusion;
+    namespace Fmt = Poseidon::Asset::Formats;
+
+    std::vector<uint8_t> bytes;
+    if (!mount.Read(xobPath, bytes))
+    {
+        why = "not in any archive";
+        return nullptr;
+    }
+    Enf::ConvertOptions options;
+    // Both corrections ON. They are opt-in flags in the tool because that is where
+    // the A/B lives; for a world that has to look right there is no argument for
+    // either default. Orientation is an XOR PAIR -- negate the normal AND swap the
+    // winding -- and half of it is worse than none. Origin writes autocenter=0, and
+    // without it Landscape::AddObject offsets every object by its own bounding
+    // centre, which sinks a tree by half its height.
+    options.fixOrientation = true;
+    options.fixOrigin = true;
+    // The native path has no texture baker, so the `.xob`'s own material paths are
+    // written and the models draw untextured until the material side lands.
+    Fmt::MLOD::WriteModel model;
+    Enf::ConvertStats stats;
+    if (!Enf::ConvertXob(bytes, options, nullptr, xobPath, model, stats, why))
+        return nullptr;
+
+    const std::vector<char> buffer = Fmt::MLODWriter::writeToBuffer(model);
+    if (buffer.empty())
+    {
+        why = "MLOD writer produced nothing";
+        return nullptr;
+    }
+    auto parsed = std::make_shared<Poseidon::Model::Model>(
+        Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), xobPath));
+    if (parsed->lodLevels.empty())
+    {
+        why = "MLOD loader produced no levels";
+        return nullptr;
+    }
+    // The name is only a cache key here -- no file is opened, because the parsed
+    // model is handed in.
+    LODShapeWithShadow* shape = Poseidon::Shapes.NewFromModel(xobPath.c_str(), false, true, parsed, nullptr);
+    if (shape == nullptr)
+        why = "ShapeBank refused the model";
+    return shape;
 }
 } // namespace
 
@@ -725,7 +823,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
     {
         const DWORD placeStart = Poseidon::Foundation::GlobalTickCount();
         std::vector<std::pair<std::string, size_t>> meshes;
-        const PlacementSummary summary = ResolvePlacements(EnfusionMount::Instance(), addonsDir, terrain, meshes);
+        std::vector<ResolvedPlacement> placed;
+        const PlacementSummary summary =
+            ResolvePlacements(EnfusionMount::Instance(), addonsDir, meshes, placed);
         if (!summary.error.empty())
         {
             LOG_WARN(World, "Enfusion native load: placements unavailable: {}", summary.error);
@@ -741,6 +841,81 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                      summary.placements, summary.withGuid, summary.meshResolved, summary.distinctMeshes,
                      summary.terrainRelative, Poseidon::Foundation::GlobalTickCount() - placeStart,
                      summary.firstFailure.empty() ? "" : ("; first failure: " + summary.firstFailure), top);
+
+            // RFG-013: build the commonest meshes and put their placements in the
+            // world. Capped while this is new -- 1.23 M objects is the streaming
+            // problem, not the loading one, and a cap that says so in the log is
+            // better than a load that never finishes.
+            const size_t modelCap = []
+            {
+                const char* v = std::getenv("POSEIDON_REFORGER_MAX_MODELS");
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 60);
+            }();
+            const size_t objectCap = []
+            {
+                const char* v = std::getenv("POSEIDON_REFORGER_MAX_OBJECTS");
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 40000);
+            }();
+
+            std::vector<std::pair<size_t, uint32_t>> byCount;
+            byCount.reserve(meshes.size());
+            for (size_t i = 0; i < meshes.size(); ++i)
+                byCount.emplace_back(meshes[i].second, static_cast<uint32_t>(i));
+            std::sort(byCount.begin(), byCount.end(), std::greater<>());
+
+            std::unordered_map<uint32_t, LODShapeWithShadow*> shapes;
+            size_t built = 0;
+            size_t buildFailed = 0;
+            std::string firstBuildFailure;
+            const DWORD buildStart = Poseidon::Foundation::GlobalTickCount();
+            for (size_t i = 0; i < byCount.size() && built < modelCap; ++i)
+            {
+                const uint32_t index = byCount[i].second;
+                std::string why;
+                LODShapeWithShadow* shape = BuildShapeFromXob(EnfusionMount::Instance(), meshes[index].first, why);
+                if (shape == nullptr)
+                {
+                    ++buildFailed;
+                    if (firstBuildFailure.empty())
+                        firstBuildFailure = meshes[index].first + ": " + why;
+                    continue;
+                }
+                shapes.emplace(index, shape);
+                ++built;
+            }
+            const DWORD buildMs = Poseidon::Foundation::GlobalTickCount() - buildStart;
+
+            size_t added = 0;
+            for (const ResolvedPlacement& item : placed)
+            {
+                if (added >= objectCap)
+                    break;
+                const auto shape = shapes.find(item.mesh);
+                if (shape == shapes.end())
+                    continue;
+                // Enfusion's X/Z are the engine's X/Z; index 1 is up in both.
+                float y = item.position[1];
+                if (item.terrainRelative)
+                {
+                    // Against the RAW Enfusion heightfield, not SurfaceY: the engine's
+                    // grid is resampled from 2 m to 6.25 m, so its surface is not the
+                    // one these offsets were authored against, and on a slope the
+                    // difference is what makes a tree float or sink.
+                    const uint32_t sx = std::min<uint32_t>(
+                        gridW - 1, static_cast<uint32_t>(item.position[0] / d.cellSize + 0.5f));
+                    const uint32_t sz = std::min<uint32_t>(
+                        gridH - 1, static_cast<uint32_t>(item.position[2] / d.cellSize + 0.5f));
+                    const uint16_t raw = terrain.heights[static_cast<size_t>(sz) * gridW + sx];
+                    y += static_cast<float>(raw) * d.heightScale + d.heightOffset;
+                }
+                AddObject(Vector3(item.position[0], y, item.position[2]), item.yawDeg, shape->second);
+                ++added;
+            }
+            LOG_INFO(World,
+                     "Enfusion native load: built {} of {} meshes ({} failed) in {} ms, placed {} objects "
+                     "(caps {} models / {} objects){}",
+                     built, meshes.size(), buildFailed, buildMs, added, modelCap, objectCap,
+                     firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
         }
     }
 
