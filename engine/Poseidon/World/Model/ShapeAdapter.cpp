@@ -1309,6 +1309,50 @@ LODShapeWithShadow* convertToLODShape(const Poseidon::Model::Model& model, bool 
         else
         {
             shape->_lods[i]->FindSections();
+            // RFG-040: an MLOD carries no section table, so the branch above never runs
+            // and FindSections -- which groups faces by texture/special only -- leaves
+            // every ShapeSection::surfMat null. That is the whole reason a natively
+            // loaded Reforger `.xob` (converted through MLOD in memory) reports
+            // mat '(none)' and can never reach a normal map: the renderer resolves
+            // NMOMap out of the section's surface material.
+            //
+            // Recover it from the material the loader DID preserve. Sections are keyed
+            // by texture here, so map texture -> authored material path and only use a
+            // texture whose materials agree on one path; an ambiguous texture (two
+            // RVMATs sharing one base texture) is left exactly as before rather than
+            // guessed at. Materials with no path -- every classic OFP MLOD, whose faces
+            // name a texture and nothing else -- produce an empty map and no change.
+            std::unordered_map<const Texture*, std::string> textureToMaterialPath;
+            std::unordered_set<const Texture*> ambiguousTextures;
+            for (size_t matIdx = 0; matIdx < mesh.materials.size(); ++matIdx)
+            {
+                const std::string& matPath = mesh.materials[matIdx].materialPath;
+                if (matPath.empty())
+                    continue;
+                const Texture* tex = matIdx < materialIndexToTexture.size() ? materialIndexToTexture[matIdx] : nullptr;
+                if (!tex)
+                    continue;
+                auto [it, inserted] = textureToMaterialPath.emplace(tex, matPath);
+                if (!inserted && it->second != matPath)
+                    ambiguousTextures.insert(tex);
+            }
+            if (!textureToMaterialPath.empty())
+            {
+                Shape* lod = shape->_lods[i];
+                for (int s = 0; s < lod->NSections(); ++s)
+                {
+                    ShapeSection& section = lod->GetSection(s);
+                    if (!section.surfMat.IsNull())
+                        continue;
+                    const Texture* tex = section.properties.GetTexture();
+                    if (!tex || ambiguousTextures.count(tex) != 0)
+                        continue;
+                    const auto found = textureToMaterialPath.find(tex);
+                    if (found == textureToMaterialPath.end())
+                        continue;
+                    section.surfMat = GTexMaterialBank.New(found->second.c_str());
+                }
+            }
         }
 
         if (isODOL)
