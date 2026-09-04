@@ -896,8 +896,16 @@ LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width
         // converter writes them. A single shared normal with every corner indexing 0
         // is a legal MLOD and loads without complaint -- and the section it produces
         // draws untextured, which is a much harder thing to see than a failure.
-        lod.normals.push_back({0.0f, 1.0f, 0.0f});
-        lod.normals.push_back({0.0f, 1.0f, 0.0f});
+        //
+        // And it points DOWN in the file, which is what an upward-facing surface
+        // looks like here: `MeshBuild.cpp:44` negates every normal on the way to the
+        // vertex buffer, and `shading.wgsl` then takes `max(dot(N, -sun), 0)`. A road
+        // written with +Y gets no sun term at all AND samples the sky irradiance from
+        // the darkest point of the dome -- which is the whole of "the roads are
+        // black". The `.xob` path reaches the same convention from the other side,
+        // via `fixOrientation`.
+        lod.normals.push_back({0.0f, -1.0f, 0.0f});
+        lod.normals.push_back({0.0f, -1.0f, 0.0f});
     }
 
     for (size_t i = 0; i + 1 < count; ++i)
