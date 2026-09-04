@@ -1024,12 +1024,12 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // and they are not the same bug.
     {
         static int reportedSec = 0;
-        if (reportedSec < 4 && LowerCopy(xobPath).find("vegetation") != std::string::npos && shape->NLevels() > 0)
+        if (reportedSec < 6 && LowerCopy(xobPath).find("betula") != std::string::npos && shape->NLevels() > 0)
         {
             ++reportedSec;
             const Shape* level = shape->Level(0);
             std::string report;
-            for (int i = 0; level != nullptr && i < level->NSections() && i < 4; ++i)
+            for (int i = 0; level != nullptr && i < level->NSections() && i < 8; ++i)
             {
                 const ShapeSection& sec = level->GetSection(i);
                 const char* mat = sec.surfMat.IsNull() ? nullptr : sec.surfMat->GetName().Data();
@@ -1050,7 +1050,7 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     // those look identical from outside.
     {
         static int reportedLod = 0;
-        if (reportedLod < 3 && LowerCopy(xobPath).find("/tree/") != std::string::npos)
+        if (reportedLod < 4 && LowerCopy(xobPath).find("betula") != std::string::npos)
         {
             ++reportedLod;
             std::string ladder;

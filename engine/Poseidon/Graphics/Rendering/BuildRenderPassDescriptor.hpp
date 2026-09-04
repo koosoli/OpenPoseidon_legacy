@@ -292,6 +292,29 @@ inline RenderPassDescriptor BuildRenderPassDescriptor(const LegacySpec& spec, co
 // (`plants2`, `plants_e`, `plants_f`) and are handled by their shader family, so this
 // cannot touch content it was not measured against. `WGR_A1_PLANT_CUTOUT=0` restores the
 // histogram answer for an A/B in the same binary.
+//! RFG-036: an `enfa|` composite is coverage, by construction.
+//!
+//! The name exists at all only because the material declared an `OpacityMap`, and
+//! Enfusion binds that exclusively as coverage -- never as a blend weight. So the
+//! composite IS the authority here, and the pixel histogram is not: measured over
+//! Everon's polyplanes every one of them lands on Blend (betula 74.3% clear / 6.6%
+//! partial, pinus 77.3% / 11.2%), because antialiased leaf edges are exactly what a
+//! partial-alpha count rewards.
+//!
+//! Falling to Blend costs a leaf card the whole cutout route -- in both model shaders
+//! `veg_cutout` is `is_veg && alpha_ref > 0`, and with it goes the two-sided normal
+//! flip (half of every card unlit: the "trees look flat"), the crown normals, the leaf
+//! sub-surface term, the depth write, and the card's place in the retained GPU set.
+//!
+//! The other candidate fix was to have the material sink name the `.emat`, so the
+//! section would carry a surface material and answer through `EmatUsesLeafCards`.
+//! Measured: the sections still report `mat '(none)'`, because the engine's material
+//! loader does not read `.emat`. The name is the only signal that survives the trip.
+inline bool IsEnfusionCoverageTexture(const char* texturePath)
+{
+    return texturePath != nullptr && std::strncmp(texturePath, "enfa|", 5) == 0;
+}
+
 inline bool IsLegacyPlantCutoutTexture(const char* texturePath)
 {
     if (!texturePath || !*texturePath)

@@ -168,7 +168,7 @@ static bool SectionIsBlend(const ShapeSectionInfo& sec)
     // Legacy A1 foliage has no RVMAT to speak for it, so the histogram is the only voice in
     // the room and it mis-hears antialiased downscales as translucency. See
     // render::IsLegacyPlantCutoutTexture for the measured per-LOD split.
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name()))
         return false;
     return SectionMaterialAlphaRoute(sec.surfMat) == AuthoredAlphaRoute::Default;
 }
@@ -217,7 +217,7 @@ bool SectionGpuOwned(const ShapeSectionInfo& sec)
         return false;
     if (tex->GetAlphaClass() == Poseidon::AlphaStats::Cutout)
         return true;
-    if (render::IsLegacyPlantCutoutTexture(tex->Name()))
+    if (render::IsLegacyPlantCutoutTexture(tex->Name()) || render::IsEnfusionCoverageTexture(tex->Name()))
         return true;
     // Blend histogram: owned when the material AUTHORS a cutout or an opaque route (TreeAdv leaf
     // cards and their bark), i.e. exactly when SectionIsBlend says it is not real translucency.
