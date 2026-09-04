@@ -198,7 +198,8 @@ int Worlds(const std::string& root, const std::string& filter, int topClasses, b
                         ++classCounts[item.className];
                 if (roads)
                 {
-                    size_t withPoints = 0, without = 0, totalPoints = 0;
+                    size_t withPoints = 0, without = 0, totalPoints = 0, withMaterial = 0, withWidth = 0, withPrefab = 0;
+                    std::vector<std::pair<double, std::string>> longest;
                     double totalLength = 0.0;
                     size_t shown = 0;
                     for (const auto& item : world.placements)
@@ -220,15 +221,42 @@ int Worlds(const std::string& root, const std::string& filter, int topClasses, b
                             const float dz = item.points[i * 3 + 2] - item.points[(i - 1) * 3 + 2];
                             totalLength += std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz);
                         }
+                        if (!item.materialGuid.empty())
+                            ++withMaterial;
+                        if (!item.prefabGuid.empty())
+                            ++withPrefab;
+                        if (item.width > 0.0f)
+                            ++withWidth;
+                        {
+                            double len = 0.0;
+                            for (size_t i = 1; i < count; ++i)
+                            {
+                                const float dx = item.points[i * 3 + 0] - item.points[(i - 1) * 3 + 0];
+                                const float dz = item.points[i * 3 + 2] - item.points[(i - 1) * 3 + 2];
+                                len += std::sqrt(double(dx) * dx + double(dz) * dz);
+                            }
+                            const size_t mid = count / 2;
+                            longest.emplace_back(len, std::to_string(int(item.position[0] + item.points[mid * 3 + 0])) +
+                                                          " " +
+                                                          std::to_string(int(item.position[2] + item.points[mid * 3 + 2])) +
+                                                          " w" + std::to_string(int(item.width)) + " n" +
+                                                          std::to_string(count));
+                        }
                         if (shown < 3)
                         {
                             ++shown;
-                            std::cout << "    road " << item.className << " at [" << int(item.position[0]) << " "
+                            std::cout << "    road " << item.className << " prefab '" << item.prefabGuid
+                                      << "' material '" << item.materialGuid << "' width " << item.width << " at [" << int(item.position[0]) << " "
                                       << int(item.position[1]) << " " << int(item.position[2]) << "] " << count
                                       << " points, first local [" << item.points[0] << " " << item.points[1] << " "
                                       << item.points[2] << "]\n";
                         }
                     }
+                    std::sort(longest.begin(), longest.end(), std::greater<>());
+                    for (size_t i = 0; i < longest.size() && i < 6; ++i)
+                        std::cout << "    longest " << int(longest[i].first) << " m at " << longest[i].second << std::endl;
+                    std::cout << "    roads: " << withMaterial << " with a material GUID, " << withWidth
+                              << " with a width, " << withPrefab << " with a prefab GUID\n";
                     std::cout << "    roads: " << withPoints << " with a centreline, " << without << " without, "
                               << totalPoints << " points, " << std::fixed << std::setprecision(1)
                               << totalLength / 1000.0 << " km\n"

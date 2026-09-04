@@ -29,6 +29,7 @@
 #include <Poseidon/Asset/Formats/Enfusion/EnfusionMount.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/PrefabResolve.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/ResourceDatabase.hpp>
+#include <Poseidon/Foundation/Platform/AppConfig.hpp>
 #include <Poseidon/Asset/Formats/Enfusion/XobConvert.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODLoader.hpp>
 #include <Poseidon/Asset/Formats/P3D/MLODWriter.hpp>
@@ -621,9 +622,21 @@ struct ResolvedPlacement
     uint32_t mesh = 0; //!< index into the mesh list
 };
 
+//! RFG-027: one road, ready to become a strip of geometry.
+struct ResolvedRoad
+{
+    float origin[3] = {0.0f, 0.0f, 0.0f}; //!< the entity's own `coords`
+    std::vector<float> points;            //!< x,y,z triples, local to `origin`
+    float yawDeg = 0.0f;                  //!< the entity's own yaw, parent yaw folded in
+    float width = 0.0f;                   //!< metres, 0 when the road left it default
+    std::string texture;                  //!< colour `.edds`, empty when unresolved
+    std::string material;                 //!< the `.emat` the texture came from
+};
+
 PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string& addonsDir,
                                    std::vector<std::pair<std::string, size_t>>& meshes,
-                                   std::vector<ResolvedPlacement>& resolved)
+                                   std::vector<ResolvedPlacement>& resolved,
+                                   std::vector<ResolvedRoad>& roads)
 {
     namespace Enf = Poseidon::Asset::Formats::Enfusion;
     PlacementSummary out;
@@ -666,8 +679,58 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     std::unordered_map<std::string, uint32_t> meshIndex;
     std::vector<size_t> meshCounts;
     resolved.reserve(world.placements.size());
+    // Resolved once per material GUID: 2,370 roads share a couple of dozen surfaces
+    // and each resolution reads an `.emat` out of an archive.
+    std::unordered_map<std::string, std::pair<std::string, std::string>> roadTextures;
+
     for (const Enf::EbinPlacement& placement : world.placements)
     {
+        if (!placement.points.empty())
+        {
+            ResolvedRoad road;
+            road.origin[0] = placement.position[0];
+            road.origin[1] = placement.position[1];
+            road.origin[2] = placement.position[2];
+            road.points = placement.points;
+            road.yawDeg = placement.angles[1];
+            road.width = placement.width;
+
+            // Two routes to the same tarmac, and both are needed. 183 roads name a
+            // `Material` GUID directly; 2,200 name a prefab whose `.et` names the
+            // `.emat` in full. Keyed on whichever reference the road actually has,
+            // so the cache never conflates a road that has neither with one that has
+            // a material resolving to nothing.
+            const std::string materialKey =
+                placement.materialGuid.empty() ? ("et:" + placement.prefabGuid) : placement.materialGuid;
+            auto cachedTexture = roadTextures.find(materialKey);
+            if (cachedTexture == roadTextures.end())
+            {
+                std::string ematPath;
+                const auto materialHit = byGuid.find(placement.materialGuid);
+                if (materialHit != byGuid.end())
+                {
+                    ematPath = materialHit->second;
+                }
+                else
+                {
+                    const auto prefabHit = byGuid.find(placement.prefabGuid);
+                    if (prefabHit != byGuid.end())
+                        ematPath = Enf::ResolvePrefabMaterial(mount, prefabHit->second);
+                }
+                std::string texture;
+                if (!ematPath.empty())
+                {
+                    Poseidon::Asset::Material::EmatMaterial material;
+                    if (LoadEmatFromMount(mount, ematPath, material))
+                        texture = ColourTextureOf(material);
+                }
+                cachedTexture = roadTextures.emplace(materialKey, std::make_pair(texture, ematPath)).first;
+            }
+            road.texture = cachedTexture->second.first;
+            road.material = cachedTexture->second.second;
+            roads.push_back(std::move(road));
+            continue;
+        }
         if (placement.prefabGuid.empty())
             continue;
         ++out.withGuid;
@@ -733,6 +796,141 @@ PlacementSummary ResolvePlacements(const EnfusionMount& mount, const std::string
     // indices pointing at the wrong meshes, which drew the right number of the wrong
     // objects -- a picture that looks plausible and is not.)
     return out;
+}
+
+/// RFG-027: a road's centreline -> a ribbon of quads the engine can draw.
+///
+/// Everon ships no road geometry at all: Enfusion generates the strip at load time
+/// from `RoadEntity`'s spline, so anything that wants roads has to generate them
+/// too. This is the same generation, reduced to what a first pass needs -- a flat
+/// ribbon of the authored width, mitred at each interior point so the seams do not
+/// gap on a bend, with V running along the road so the tarmac tiles by length.
+///
+/// Deliberately NOT modelled: crossings, end caps, the separate line-marking pass,
+/// and the terrain cut Enfusion applies underneath. Those are the difference between
+/// "the road network is there" and "the road network is finished", and the first is
+/// worth having on its own.
+LODShapeWithShadow* BuildRoadShape(const std::vector<float>& points, float width, const std::string& texture,
+                                   const std::string& material, const std::string& name)
+{
+    namespace Fmt = Poseidon::Asset::Formats;
+
+    const size_t count = points.size() / 3;
+    if (count < 2)
+        return nullptr;
+
+    // The authored default. Everon's roads that set `Width` cluster on 6-8 m; a road
+    // that leaves it unset gets the commonest value rather than a zero-area ribbon.
+    const float halfWidth = 0.5f * ((width > 0.1f) ? width : 6.0f);
+
+    Fmt::MLOD::WriteLod lod;
+    lod.resolution = 1.0f;
+    lod.points.reserve(count * 2);
+    lod.normals.reserve(count * 2);
+    lod.faces.reserve(count * 2);
+
+    std::vector<float> distance(count, 0.0f);
+    for (size_t i = 1; i < count; ++i)
+    {
+        const float dx = points[i * 3 + 0] - points[(i - 1) * 3 + 0];
+        const float dz = points[i * 3 + 2] - points[(i - 1) * 3 + 2];
+        distance[i] = distance[i - 1] + std::sqrt(dx * dx + dz * dz);
+    }
+
+    for (size_t i = 0; i < count; ++i)
+    {
+        // The mitre direction: the average of the segments meeting at this point, so
+        // an interior vertex is shared by both quads and the ribbon has no seam. A
+        // real mitre would also widen the offset by 1/cos(half-angle); at Everon's
+        // curvature that correction is under a centimetre and is left out.
+        float dx = 0.0f, dz = 0.0f;
+        if (i + 1 < count)
+        {
+            dx += points[(i + 1) * 3 + 0] - points[i * 3 + 0];
+            dz += points[(i + 1) * 3 + 2] - points[i * 3 + 2];
+        }
+        if (i > 0)
+        {
+            dx += points[i * 3 + 0] - points[(i - 1) * 3 + 0];
+            dz += points[i * 3 + 2] - points[(i - 1) * 3 + 2];
+        }
+        const float length = std::sqrt(dx * dx + dz * dz);
+        if (length > 1e-4f)
+        {
+            dx /= length;
+            dz /= length;
+        }
+        else
+        {
+            dx = 1.0f;
+            dz = 0.0f;
+        }
+        // Perpendicular in the ground plane.
+        const float nx = -dz * halfWidth;
+        const float nz = dx * halfWidth;
+
+        Fmt::MLOD::WritePoint left;
+        left.position = {points[i * 3 + 0] + nx, points[i * 3 + 1], points[i * 3 + 2] + nz};
+        Fmt::MLOD::WritePoint right;
+        right.position = {points[i * 3 + 0] - nx, points[i * 3 + 1], points[i * 3 + 2] - nz};
+        lod.points.push_back(left);
+        lod.points.push_back(right);
+        // ONE NORMAL PER POINT, indexed by the point index, exactly as the `.xob`
+        // converter writes them. A single shared normal with every corner indexing 0
+        // is a legal MLOD and loads without complaint -- and the section it produces
+        // draws untextured, which is a much harder thing to see than a failure.
+        lod.normals.push_back({0.0f, 1.0f, 0.0f});
+        lod.normals.push_back({0.0f, 1.0f, 0.0f});
+    }
+
+    for (size_t i = 0; i + 1 < count; ++i)
+    {
+        // V tiles every 2 x width of length, which is what makes a 6 m road's texture
+        // square rather than smeared.
+        const float v0 = distance[i] / (halfWidth * 4.0f);
+        const float v1 = distance[i + 1] / (halfWidth * 4.0f);
+        const int32_t base = static_cast<int32_t>(i) * 2;
+        const float u[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+        const float v[4] = {v0, v0, v1, v1};
+        const int32_t point[4] = {base, base + 1, base + 3, base + 2};
+        // Two triangles rather than one quad, for the same reason as the normals:
+        // this is the shape the converter emits and the one the whole path is
+        // exercised against.
+        //
+        // Ring order, and it is the RIGHT order even though the cross product of the
+        // corner edges comes out negative on Y. Reversing it -- which the arithmetic
+        // alone argues for -- makes every road disappear behind backface culling
+        // while its shadow stays, so the engine's front face here is the one ring
+        // order gives. The arithmetic was measured against the picture and lost.
+        const int triangle[2][3] = {{0, 1, 2}, {0, 2, 3}};
+        for (const auto& corners : triangle)
+        {
+            Fmt::MLOD::WriteFace face;
+            face.vertexCount = 3;
+            face.texture = texture;
+            face.material = material;
+            for (int c = 0; c < 3; ++c)
+            {
+                face.vertices[c].point = point[corners[c]];
+                face.vertices[c].normal = point[corners[c]];
+                face.vertices[c].u = u[corners[c]];
+                face.vertices[c].v = v[corners[c]];
+            }
+            lod.faces.push_back(face);
+        }
+    }
+
+    Fmt::MLOD::WriteModel model;
+    model.lods.push_back(std::move(lod));
+
+    const std::vector<char> buffer = Fmt::MLODWriter::writeToBuffer(model);
+    if (buffer.empty())
+        return nullptr;
+    auto parsed = std::make_shared<Poseidon::Model::Model>(
+        Fmt::MLODLoader::loadFromBuffer(buffer.data(), static_cast<int>(buffer.size()), name));
+    if (parsed->lodLevels.empty())
+        return nullptr;
+    return Poseidon::Shapes.NewFromModel(name.c_str(), false, true, parsed, nullptr);
 }
 
 /// RFG-013: one `.xob` in the archives -> one shape the engine can draw.
@@ -1050,8 +1248,9 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
         const DWORD placeStart = Poseidon::Foundation::GlobalTickCount();
         std::vector<std::pair<std::string, size_t>> meshes;
         std::vector<ResolvedPlacement> placed;
+        std::vector<ResolvedRoad> roads;
         const PlacementSummary summary =
-            ResolvePlacements(EnfusionMount::Instance(), addonsDir, meshes, placed);
+            ResolvePlacements(EnfusionMount::Instance(), addonsDir, meshes, placed, roads);
         if (!summary.error.empty())
         {
             LOG_WARN(World, "Enfusion native load: placements unavailable: {}", summary.error);
@@ -1068,26 +1267,125 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                      summary.terrainRelative, Poseidon::Foundation::GlobalTickCount() - placeStart,
                      summary.firstFailure.empty() ? "" : ("; first failure: " + summary.firstFailure), top);
 
-            // RFG-013: build the commonest meshes and put their placements in the
-            // world. Capped while this is new -- 1.23 M objects is the streaming
-            // problem, not the loading one, and a cap that says so in the log is
-            // better than a load that never finishes.
+            // RFG-013: build the meshes and put their placements in the world.
+            //
+            // The caps default to "everything" -- Everon's 1,248 distinct meshes and
+            // its full 1.23 M placements -- because a cap that hides the load is a cap
+            // that hides what needs fixing. At 120 models the top of the histogram is
+            // entirely vegetation and rock, so a village came out as an empty field
+            // and the missing houses looked like a placement bug rather than a cap.
+            // Both remain overridable for a cheap run.
             const size_t modelCap = []
             {
                 const char* v = std::getenv("POSEIDON_REFORGER_MAX_MODELS");
-                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 60);
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 100000);
             }();
             const size_t objectCap = []
             {
                 const char* v = std::getenv("POSEIDON_REFORGER_MAX_OBJECTS");
-                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 40000);
+                return static_cast<size_t>((v != nullptr && *v != 0) ? std::atoi(v) : 2000000);
             }();
 
-            std::vector<std::pair<size_t, uint32_t>> byCount;
-            byCount.reserve(meshes.size());
+            // RFG-032: a RADIUS around the viewer decides what is built, not a global
+            // ranking. Everything inside it is built regardless of how rare its mesh
+            // is; outside it, the interleaved ranking below fills whatever budget is
+            // left, so distant landmarks still appear.
+            //
+            // This is the right shape for the problem. A global "top N meshes" budget
+            // is a statement about the whole island and says nothing about what is in
+            // front of the player: at 120 models a village came out as roads and empty
+            // lots, because a house type with 30 placements loses to a rock type with
+            // 11,000 no matter how close the house is. Distance is the thing the
+            // player can actually see.
+            //
+            // The focus point is the free-fly camera when there is one -- that is
+            // where a capture looks -- and the map centre otherwise.
+            float focusX = 0.5f * static_cast<float>(gridW) * d.cellSize;
+            float focusZ = 0.5f * static_cast<float>(gridH) * d.cellSize;
+            {
+                const std::vector<float>& freefly =
+                    Poseidon::Foundation::AppConfig::Instance().GetTestWorldFreeFly();
+                if (freefly.size() >= 2)
+                {
+                    focusX = freefly[0];
+                    focusZ = freefly[1];
+                }
+            }
+            const float nearRadius = []
+            {
+                const char* v = std::getenv("POSEIDON_REFORGER_NEAR_RADIUS");
+                return (v != nullptr && *v != 0) ? static_cast<float>(std::atof(v)) : 800.0f;
+            }();
+
+            std::vector<bool> meshIsNear(meshes.size(), false);
+            size_t nearPlacements = 0;
+            for (const ResolvedPlacement& item : placed)
+            {
+                const float dx = item.position[0] - focusX;
+                const float dz = item.position[2] - focusZ;
+                if (dx * dx + dz * dz > nearRadius * nearRadius)
+                    continue;
+                ++nearPlacements;
+                if (item.mesh < meshIsNear.size())
+                    meshIsNear[item.mesh] = true;
+            }
+
+            // RFG-031: rank by placement count, but INTERLEAVE structures with the
+            // rest rather than letting one list decide the whole budget.
+            //
+            // Everon's histogram is 820,184 trees and 307,497 environmental props
+            // against 7,507 destructible buildings, so a budget filled strictly by
+            // count is vegetation and rock for its first several hundred entries and
+            // the houses never get built at all. At a 120-model cap that produced a
+            // village of roads, fences and empty lots -- which reads as a placement
+            // bug and is not one. Every second slot now goes to a structure while any
+            // structure is left unbuilt, so a town has houses at any budget that can
+            // afford trees.
+            const auto isStructure = [](const std::string& path)
+            {
+                const std::string lower = LowerCopy(path);
+                return lower.find("/structures/") != std::string::npos ||
+                       lower.find("/props/") != std::string::npos ||
+                       lower.find("/military/") != std::string::npos;
+            };
+
+            std::vector<std::pair<size_t, uint32_t>> structures;
+            std::vector<std::pair<size_t, uint32_t>> others;
             for (size_t i = 0; i < meshes.size(); ++i)
-                byCount.emplace_back(meshes[i].second, static_cast<uint32_t>(i));
-            std::sort(byCount.begin(), byCount.end(), std::greater<>());
+            {
+                auto& list = isStructure(meshes[i].first) ? structures : others;
+                list.emplace_back(meshes[i].second, static_cast<uint32_t>(i));
+            }
+            std::sort(structures.begin(), structures.end(), std::greater<>());
+            std::sort(others.begin(), others.end(), std::greater<>());
+
+            std::vector<std::pair<size_t, uint32_t>> ranked;
+            ranked.reserve(meshes.size());
+            for (size_t a = 0, b = 0; a < structures.size() || b < others.size();)
+            {
+                if (a < structures.size())
+                    ranked.push_back(structures[a++]);
+                if (b < others.size())
+                    ranked.push_back(others[b++]);
+            }
+
+            // Near first, in that order; then everything else.
+            std::vector<std::pair<size_t, uint32_t>> byCount;
+            byCount.reserve(ranked.size());
+            size_t nearMeshes = 0;
+            for (const auto& entry : ranked)
+                if (entry.second < meshIsNear.size() && meshIsNear[entry.second])
+                {
+                    byCount.push_back(entry);
+                    ++nearMeshes;
+                }
+            for (const auto& entry : ranked)
+                if (!(entry.second < meshIsNear.size() && meshIsNear[entry.second]))
+                    byCount.push_back(entry);
+
+            LOG_INFO(World,
+                     "Enfusion native load: {} placements and {} distinct meshes within {:.0f} m of [{:.0f} {:.0f}]",
+                     nearPlacements, nearMeshes, nearRadius, focusX, focusZ);
 
             std::unordered_map<uint32_t, LODShapeWithShadow*> shapes;
             size_t built = 0;
@@ -1108,8 +1406,28 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                 }
                 shapes.emplace(index, shape);
                 ++built;
+                // RFG-030: name the giants. A Reforger asset is a house at most, so
+                // anything with a hundred-metre bounding sphere is a resolution bug,
+                // not a big model -- and it is the one defect a screenshot cannot
+                // attribute, because at that size the offender fills the frame and
+                // stops looking like an object at all.
+                if (shape->BoundingSphere() > 60.0f)
+                    LOG_WARN(World, "Enfusion native load: OVERSIZED '{}' radius {:.0f} m, {} placements",
+                             meshes[index].first, shape->BoundingSphere(), meshes[index].second);
             }
             const DWORD buildMs = Poseidon::Foundation::GlobalTickCount() - buildStart;
+
+            // Near first here too: the object cap walks this list in order, so leaving
+            // it in file order empties whatever region the file happened to write
+            // last -- which is a different region every world and none of them the
+            // one being looked at.
+            std::stable_sort(placed.begin(), placed.end(),
+                             [&](const ResolvedPlacement& a, const ResolvedPlacement& b)
+                             {
+                                 const float ax = a.position[0] - focusX, az = a.position[2] - focusZ;
+                                 const float bx = b.position[0] - focusX, bz = b.position[2] - focusZ;
+                                 return ax * ax + az * az < bx * bx + bz * bz;
+                             });
 
             size_t added = 0;
             for (const ResolvedPlacement& item : placed)
@@ -1172,6 +1490,115 @@ bool Landscape::LoadEnfusionNative(const char* addonsDir)
                      "(caps {} models / {} objects){}",
                      built, meshes.size(), buildFailed, buildMs, added, modelCap, objectCap,
                      firstBuildFailure.empty() ? "" : ("; first build failure: " + firstBuildFailure));
+
+            // RFG-027: the road network. One shape per road rather than one shared
+            // shape placed many times, because every road is a different length and
+            // a different curve -- there is nothing to instance.
+            if (std::getenv("POSEIDON_REFORGER_NO_ROADS") == nullptr)
+            {
+                const DWORD roadStart = Poseidon::Foundation::GlobalTickCount();
+                size_t roadsBuilt = 0, roadsFailed = 0, roadTextured = 0;
+                std::map<std::string, size_t> textureUse;
+                double roadKm = 0.0;
+                for (size_t r = 0; r < roads.size(); ++r)
+                {
+                    ResolvedRoad& road = roads[r];
+                    if (road.points.size() < 6)
+                        continue;
+
+                    // Subdivide before draping. Everon's centrelines average one point
+                    // every 16 m (26,271 points over 419.8 km) and run much longer than
+                    // that on a straight, so a segment draped only at its ends cuts
+                    // clean across the terrain between them: half the road buried, the
+                    // other half standing on a black embankment with visible sides.
+                    // That is exactly what the first draped capture showed, and it is
+                    // a sampling artefact rather than a height-rule one -- the rule was
+                    // right, the ribbon simply had nowhere to bend.
+                    {
+                        std::vector<float> dense;
+                        dense.reserve(road.points.size() * 4);
+                        const size_t source = road.points.size() / 3;
+                        for (size_t i = 0; i + 1 < source; ++i)
+                        {
+                            const float ax = road.points[i * 3 + 0];
+                            const float ay = road.points[i * 3 + 1];
+                            const float az = road.points[i * 3 + 2];
+                            const float bx = road.points[(i + 1) * 3 + 0];
+                            const float by = road.points[(i + 1) * 3 + 1];
+                            const float bz = road.points[(i + 1) * 3 + 2];
+                            const float length = std::sqrt((bx - ax) * (bx - ax) + (bz - az) * (bz - az));
+                            // 4 m: comfortably under the 12.5 m land cell, so every
+                            // cell the road crosses gets at least two samples.
+                            const int steps = std::max(1, static_cast<int>(length / 4.0f));
+                            for (int k = 0; k < steps; ++k)
+                            {
+                                const float t = static_cast<float>(k) / static_cast<float>(steps);
+                                dense.push_back(ax + (bx - ax) * t);
+                                dense.push_back(ay + (by - ay) * t);
+                                dense.push_back(az + (bz - az) * t);
+                            }
+                        }
+                        dense.push_back(road.points[(source - 1) * 3 + 0]);
+                        dense.push_back(road.points[(source - 1) * 3 + 1]);
+                        dense.push_back(road.points[(source - 1) * 3 + 2]);
+                        road.points = std::move(dense);
+                    }
+
+                    const size_t pointCount = road.points.size() / 3;
+                    if (pointCount < 2)
+                        continue;
+
+                    // The height rule: DRAPE on the engine's own terrain.
+                    //
+                    // The spline's own Y is the authored profile, smooth and correct
+                    // against the 2 m heightfield Enfusion cuts to match it. Our grid
+                    // is resampled from that to 12.5 m, so the two disagree by metres
+                    // on a slope. Taking the higher of the two was tried first and is
+                    // visibly worse than draping: on a hillside it builds the road as
+                    // a black causeway standing a couple of metres proud of the
+                    // ground, with its own side walls, which reads as a wall rather
+                    // than as a road. Draping costs the smooth profile -- the road
+                    // now follows every 12.5 m step of the coarse terrain -- and that
+                    // is the cheaper defect until the terrain carries the road cut.
+                    for (size_t i = 0; i < pointCount; ++i)
+                    {
+                        const float worldX = road.origin[0] + road.points[i * 3 + 0];
+                        const float worldZ = road.origin[2] + road.points[i * 3 + 2];
+                        const float splineY = road.origin[1] + road.points[i * 3 + 1];
+                        const float groundY = SurfaceY(worldX, worldZ);
+                        (void)splineY;
+                        road.points[i * 3 + 1] = groundY + 0.08f - road.origin[1];
+                        if (i > 0)
+                        {
+                            const float dx = road.points[i * 3 + 0] - road.points[(i - 1) * 3 + 0];
+                            const float dz = road.points[i * 3 + 2] - road.points[(i - 1) * 3 + 2];
+                            roadKm += std::sqrt(double(dx) * dx + double(dz) * dz) / 1000.0;
+                        }
+                    }
+
+                    const std::string name = "enfusion_road_" + std::to_string(r);
+                    LODShapeWithShadow* shape =
+                        BuildRoadShape(road.points, road.width, road.texture, road.material, name);
+                    if (shape == nullptr)
+                    {
+                        ++roadsFailed;
+                        continue;
+                    }
+                    if (!road.texture.empty())
+                        ++roadTextured;
+                    ++textureUse[road.texture];
+                    // The vertices are already local to `origin`, and a road carries
+                    // no rotation of its own -- the spline is authored in world axes.
+                    AddObject(Vector3(road.origin[0], road.origin[1], road.origin[2]), road.yawDeg, shape);
+                    ++roadsBuilt;
+                }
+                for (const auto& [path, count] : textureUse)
+                    LOG_INFO(World, "Enfusion native load: road surface {}x '{}'", count,
+                             path.empty() ? "(none)" : path);
+                LOG_INFO(World, "Enfusion native load: {} roads built ({} failed, {} textured), {:.1f} km, {} ms",
+                         roadsBuilt, roadsFailed, roadTextured, roadKm,
+                         Poseidon::Foundation::GlobalTickCount() - roadStart);
+            }
         }
     }
 

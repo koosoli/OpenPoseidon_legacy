@@ -381,6 +381,15 @@ inline bool ConvertXob(const std::vector<uint8_t>& bytes, const ConvertOptions& 
                 ? VisualLodResolutionFromThreshold(rank, options.resolution,
                                                    header.lods[lodOrder[0]].threshold, header.lods[lodIndex].threshold)
                 : VisualLodResolution(rank, options.resolution);
+        // RFG-029: an authored ladder whose ratio runs past the visual range falls
+        // back to the rank convention for THAT level rather than refusing the model.
+        //
+        // Refusing cost 418 of Everon's 1,248 distinct meshes -- disproportionately
+        // buildings, whose impostor level sits a thousand times coarser than their
+        // finest and so blows past 900 on the ratio alone. A model with one badly
+        // spaced coarse level is worth having; a village with no houses in it is not.
+        if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
+            writeLod.resolution = VisualLodResolution(rank, options.resolution);
         if (!(writeLod.resolution < 900.0f) || !std::isfinite(writeLod.resolution))
         {
             error = "LOD " + std::to_string(lodIndex) + " maps outside the visual resolution range";

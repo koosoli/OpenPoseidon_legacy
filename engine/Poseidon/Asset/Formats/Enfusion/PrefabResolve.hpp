@@ -90,6 +90,71 @@ inline std::string FindObjectReference(const std::vector<uint8_t>& blob)
     return {};
 }
 
+//! The `.emat` a prefab body names under `Material`, or empty.
+//!
+//! RFG-027: a `RoadEntity`'s surface is usually not on the entity. 2,200 of Everon's
+//! 2,370 roads carry a prefab reference and only 183 carry a `Material` GUID of their
+//! own, so the tarmac is a property of `Prefabs/Roads/Road_Asphalt_E_01.et` and its
+//! kin. The reference is written in full -- `Material "{GUID}Assets/....emat"` -- so
+//! the path comes straight out of the quotes and no GUID lookup is needed.
+//!
+//! Same line-scanner shape as FindObjectReference and for the same reason: the
+//! property parser folds sub-level tokens into the enclosing property's value list.
+inline std::string FindMaterialReference(const std::vector<uint8_t>& blob)
+{
+    const char* data = reinterpret_cast<const char*>(blob.data());
+    const size_t size = blob.size();
+    size_t at = 0;
+    while (at < size)
+    {
+        size_t lineEnd = at;
+        while (lineEnd < size && data[lineEnd] != 0x0A)
+            ++lineEnd;
+        size_t cursor = at;
+        while (cursor < lineEnd && static_cast<unsigned char>(data[cursor]) <= ' ')
+            ++cursor;
+        if (cursor + 9 <= lineEnd && std::memcmp(data + cursor, "Material", 8) == 0 &&
+            static_cast<unsigned char>(data[cursor + 8]) <= ' ')
+        {
+            const size_t open = std::string_view(data + cursor, lineEnd - cursor).find('"');
+            if (open != std::string_view::npos)
+            {
+                const size_t begin = cursor + open + 1;
+                size_t end = begin;
+                while (end < lineEnd && data[end] != '"')
+                    ++end;
+                std::string guid, path;
+                Poseidon::Asset::Material::Detail::SplitGuid(std::string(data + begin, end - begin), guid, path);
+                if (PrefabDetail::EndsWith(PrefabDetail::LowerCopy(path), ".emat"))
+                    return path;
+            }
+        }
+        at = lineEnd + 1;
+    }
+    return {};
+}
+
+//! Follows a prefab's inheritance chain until a `Material` appears.
+inline std::string ResolvePrefabMaterial(const EnfusionMount& mount, const std::string& etPath, int depthLimit = 8)
+{
+    std::string current = etPath;
+    for (int depth = 0; depth <= depthLimit; ++depth)
+    {
+        std::vector<uint8_t> blob;
+        if (!mount.Read(current, blob))
+            return {};
+        const std::string material = FindMaterialReference(blob);
+        if (!material.empty())
+            return material;
+        const auto parsed = Poseidon::Asset::Material::ParseEmat(
+            std::string_view(reinterpret_cast<const char*>(blob.data()), blob.size()));
+        if (parsed.parentPath.empty())
+            return {};
+        current = parsed.parentPath;
+    }
+    return {};
+}
+
 struct PrefabResolution
 {
     std::string xobPath;

@@ -343,6 +343,7 @@ class Reader
             const size_t index = _world.placements.size() - 1;
             _currentIndex = index;
             const size_t outerRoad = _roadIndex;
+            const size_t subtreeStart = _world.placements.size();
             if (isRoad)
                 _roadIndex = index;
 
@@ -352,6 +353,13 @@ class Reader
             const bool ok = Records(end, pass, depth + 1);
 
             // push_back may have reallocated, so the entry is addressed by index.
+            // RFG-027: a spline entity that declares no `coords` of its own sits AT
+            // its parent, not at the world origin. That only started to matter once
+            // roads stopped being erased for lacking a position -- before this, the
+            // six longest roads on Everon came out at coordinates like [-1013, -561],
+            // which is not merely wrong but off the island.
+            if (parentPositioned && !_world.placements[index].hasPosition && !_world.placements[index].points.empty())
+                _world.placements[index].hasPosition = true;
             if (parentPositioned && _world.placements[index].hasPosition)
             {
                 EbinPlacement& child = _world.placements[index];
@@ -377,6 +385,32 @@ class Reader
             // reallocated the vector. `outerIndex` is always < index because the
             // parent was pushed first, so the erase cannot have moved it.
             _currentIndex = outerIndex;
+
+            // RFG-027: a road's surface and width are declared on the OUTER
+            // `RoadGeneratorEntity`, and the `RoadEntity` children that carry the
+            // spline usually restate neither. Propagating on the way out rather than
+            // inheriting on the way in is forced by the record order: `Material` and
+            // `Width` come AFTER `SplinePoints`, so at the moment a child is read the
+            // parent has not met them yet. Measured on Everon this is the difference
+            // between 171 and 2,370 roads knowing their own tarmac.
+            //
+            // Indices are stable here and only here: the subtree is finished, so every
+            // erase it was going to do has happened.
+            if (isRoad && index < _world.placements.size())
+            {
+                const std::string material = _world.placements[index].materialGuid;
+                const float width = _world.placements[index].width;
+                for (size_t i = subtreeStart; i < _world.placements.size(); ++i)
+                {
+                    EbinPlacement& child = _world.placements[i];
+                    if (child.points.empty())
+                        continue;
+                    if (child.materialGuid.empty())
+                        child.materialGuid = material;
+                    if (child.width <= 0.0f)
+                        child.width = width;
+                }
+            }
             _roadIndex = outerRoad;
             return ok;
         }
