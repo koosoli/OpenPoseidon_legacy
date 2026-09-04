@@ -1058,6 +1058,27 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
     if (!Enf::ConvertXob(bytes, options, &sink, xobPath, model, stats, why))
         return nullptr;
 
+    // RFG-040: does the material path survive the trip? A section with no surface
+    // material cannot reach `_materialBindings`, and that is the table the renderer
+    // resolves a NORMAL MAP out of -- so "no normals on Reforger models" and "sections
+    // report mat '(none)'" are one question, asked at two ends of the same chain. Count
+    // it at the point the model leaves the converter, before MLOD can be blamed.
+    {
+        static int reportedMat = 0;
+        if (reportedMat < 3 && !model.lods.empty())
+        {
+            ++reportedMat;
+            size_t withMaterial = 0, withTexture = 0;
+            for (const auto& face : model.lods[0].faces)
+            {
+                withMaterial += face.material.empty() ? 0 : 1;
+                withTexture += face.texture.empty() ? 0 : 1;
+            }
+            LOG_INFO(World, "Enfusion native load: converter gave '{}' {} faces, {} with a material, {} with a texture",
+                     xobPath, model.lods[0].faces.size(), withMaterial, withTexture);
+        }
+    }
+
     const std::vector<char> buffer = Fmt::MLODWriter::writeToBuffer(model);
     if (buffer.empty())
     {

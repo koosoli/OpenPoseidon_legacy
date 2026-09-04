@@ -11,9 +11,19 @@ namespace Poseidon::Asset::Formats::Enfusion
 {
 namespace
 {
+//! Index key: lowercase AND forward slashes.
+//!
+//! RFG-041: the archives write `/`, and so does every path this engine reads out of
+//! an `.emat` -- until the material layer canonicalises one, at which point it comes
+//! back with `\\`. A key that folds case but not separators then misses:
+//! measured, every Reforger NORMAL MAP failed to upload while its albedo, whose path
+//! never went through canonical(), loaded fine. The albedo working is exactly what
+//! makes this hard to see -- the model is textured, it just has no normals.
 std::string Lower(std::string s)
 {
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c)
+                   { return c == 0x5C ? '/' : static_cast<char>(std::tolower(c)); });
     return s;
 }
 } // namespace
