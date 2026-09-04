@@ -212,6 +212,36 @@ bool TextureSourceDDS::InitFromMemory(const void* data, size_t size, const char*
     // cannot carry take it; DXT1/3/5 stay compressed end to end.
     if (_format == PixelFormat::BC4 || _format == PixelFormat::BC5 || _format == PixelFormat::BC7)
     {
+        // RFG-044: drop the top mips before decoding, not after.
+        //
+        // These three formats have no PacFormat, so RFG-016 decodes them to plain
+        // 32-bit -- which is 8x the bytes of the BC5 it came from and 4x the BC7. That
+        // was affordable while only albedos took the path. It stopped being affordable
+        // the moment normal maps started loading too (RFG-041): 600 distinct Reforger
+        // meshes now exhaust GPU memory, and the failure is not a message but a named
+        // buffer going invalid followed by every frame failing `get_current_texture`.
+        //
+        // The mip chain is already in the file, so skipping levels above the cap is a
+        // pure saving: no resampling, no quality question beyond the cap itself. 1024
+        // is four times the texels of 2048 and is the size at which a Reforger wall
+        // texture still reads correctly at arm's length.
+        const int maxEdge = []
+        {
+            const char* v = std::getenv("POSEIDON_DECODED_MAX_EDGE");
+            const int parsed = (v != nullptr && *v != 0) ? std::atoi(v) : 0;
+            return (parsed >= 64 && parsed <= 8192) ? parsed : 1024;
+        }();
+        size_t firstLevel = 0;
+        while (firstLevel + 1 < _levels.size() &&
+               (_levels[firstLevel].width > maxEdge || _levels[firstLevel].height > maxEdge))
+            ++firstLevel;
+        if (firstLevel > 0)
+        {
+            _levels.erase(_levels.begin(), _levels.begin() + static_cast<ptrdiff_t>(firstLevel));
+            _w = _levels[0].width;
+            _h = _levels[0].height;
+        }
+
         bool decoded = true;
         for (DDSMipLevel& level : _levels)
         {
