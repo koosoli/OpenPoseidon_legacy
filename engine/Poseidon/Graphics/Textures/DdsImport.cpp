@@ -17,6 +17,32 @@ namespace Poseidon
 namespace
 {
 
+// RFG-023: a composite name, `enfa|<coverage path>|<colour path>`.
+//
+// Enfusion keeps a leaf's coverage in its OWN file, so a face that names only the
+// colour can never be a cutout. Swapping a merged texture onto the built shape does
+// not work -- Shape::RegisterTexture leaves the section pointing at the entry it
+// had, measured -- so the two files are named TOGETHER and merged here, where the
+// engine's ordinary texture path then uploads, alpha-classifies and caches the
+// result like any other texture.
+//
+// The marker is a PREFIX so the name still ends in `.edds` and the extension-keyed
+// factory selection keeps working unchanged.
+constexpr const char* kEnfusionAlphaPrefix = "enfa|";
+
+bool SplitEnfusionAlphaName(const char* name, std::string& colour, std::string& coverage)
+{
+    if (name == nullptr || std::strncmp(name, kEnfusionAlphaPrefix, 5) != 0)
+        return false;
+    const char* rest = name + 5;
+    const char* bar = std::strchr(rest, '|');
+    if (bar == nullptr)
+        return false;
+    coverage.assign(rest, static_cast<size_t>(bar - rest));
+    colour.assign(bar + 1);
+    return !coverage.empty() && !colour.empty();
+}
+
 bool SlurpFile(const char* name, std::vector<uint8_t>& out)
 {
     // RFG-014: a natively loaded Enfusion world names textures that live INSIDE a
@@ -212,12 +238,62 @@ bool TextureSourceDDS::Init(const char* name, PacLevelMem* mips, int maxMips)
 {
     _name = name;
 
+    // RFG-023: `enfa|<coverage>|<colour>` -- load the colour, then fold the coverage
+    // file into its alpha. Enfusion keeps a leaf's opacity in a separate texture, so
+    // this is the only point at which the two can become one image without the engine
+    // learning a second kind of texture.
+    std::string compositeColour;
+    std::string compositeCoverage;
+    const bool composite = SplitEnfusionAlphaName(name, compositeColour, compositeCoverage);
+
     std::vector<uint8_t> buffer;
-    if (!SlurpFile(name, buffer) || buffer.empty())
+    if (!SlurpFile(composite ? compositeColour.c_str() : name, buffer) || buffer.empty())
         return false;
 
     if (!InitFromMemory(buffer.data(), buffer.size(), name))
         return false;
+
+    if (composite)
+    {
+        std::vector<uint8_t> coverageBytes;
+        TextureSourceDDS coverage;
+        if (SlurpFile(compositeCoverage.c_str(), coverageBytes) && !coverageBytes.empty() &&
+            coverage.InitFromMemory(coverageBytes.data(), coverageBytes.size(), compositeCoverage.c_str()) &&
+            !coverage._levels.empty())
+        {
+            // Both are 32-bit here: InitFromMemory decodes BC4/BC5/BC7 and leaves raw
+            // formats alone, and a coverage map is one of those. Nearest-sample rather
+            // than assume matching sizes -- the two files are authored at the same
+            // resolution but their mip counts need not agree.
+            for (size_t i = 0; i < _levels.size(); ++i)
+            {
+                DDSMipLevel& dstLevel = _levels[i];
+                const DDSMipLevel& srcLevel =
+                    coverage._levels[std::min(i, coverage._levels.size() - 1)];
+                if (dstLevel.width <= 0 || dstLevel.height <= 0 || srcLevel.width <= 0 || srcLevel.height <= 0)
+                    continue;
+                if (dstLevel.data.size() < static_cast<size_t>(dstLevel.width) * dstLevel.height * 4 ||
+                    srcLevel.data.size() < static_cast<size_t>(srcLevel.width) * srcLevel.height * 4)
+                    continue;
+                for (int y = 0; y < dstLevel.height; ++y)
+                {
+                    const int sy = y * srcLevel.height / dstLevel.height;
+                    for (int x = 0; x < dstLevel.width; ++x)
+                    {
+                        const int sx = x * srcLevel.width / dstLevel.width;
+                        dstLevel.data[(static_cast<size_t>(y) * dstLevel.width + x) * 4 + 3] =
+                            srcLevel.data[(static_cast<size_t>(sy) * srcLevel.width + sx) * 4];
+                    }
+                }
+            }
+            _hasAlpha = true;
+        }
+        else
+        {
+            LOG_WARN(Graphics, "EDDS {}: coverage '{}' did not load; the cutout will be solid", name,
+                     compositeCoverage);
+        }
+    }
 
     const int count = std::min(_mipmaps, maxMips);
     for (int i = 0; i < count; ++i)
@@ -309,6 +385,9 @@ bool TextureSourceDDS::GetMipmapData(void* mem, const PacLevelMem& mip, int leve
 
 bool TextureSourceDDSFactory::Check(const char* name)
 {
+    std::string colour, coverage;
+    if (SplitEnfusionAlphaName(name, colour, coverage))
+        name = colour.c_str();
     const auto& mount = Poseidon::Asset::Formats::Enfusion::EnfusionMount::Instance();
     if (mount.IsOpen() && mount.Has(name))
         return true;

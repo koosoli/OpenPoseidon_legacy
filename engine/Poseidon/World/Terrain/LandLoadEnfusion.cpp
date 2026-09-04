@@ -190,7 +190,13 @@ class MountMaterialSink : public Poseidon::Asset::Formats::Enfusion::XobMaterial
 
     std::string TexturePath(const std::string& materialSource) const override
     {
-        return Resolve(materialSource).colour;
+        const Resolved& r = Resolve(materialSource);
+        if (r.colour.empty() || r.opacity.empty())
+            return r.colour;
+        // RFG-023: name the coverage WITH the colour so the texture layer can make
+        // them one image. A face that names only the colour can never be a cutout,
+        // and Enfusion keeps the coverage in its own file.
+        return "enfa|" + r.opacity + "|" + r.colour;
     }
 
     //! RFG-019: the opacity map that belongs to a colour texture, or empty.
@@ -785,91 +791,11 @@ LODShapeWithShadow* BuildShapeFromXob(const EnfusionMount& mount, const std::str
         why = "ShapeBank refused the model";
         return shape;
     }
-    // RFG-019: fold each colour texture's OpacityMap into its alpha channel and swap
-    // the merged image onto the shape. The converting exporter does the same thing by
-    // baking one `.paa`; this does it in memory, with no file.
-    //
-    // Done here rather than in the texture layer because it is a MATERIAL fact -- two
-    // files belong together and only the `.emat` says which two. A texture asked for
-    // by name cannot know it has a partner.
-    if (AbstractTextBank* bank = Poseidon::GEngine != nullptr ? Poseidon::GEngine->TextBank() : nullptr)
-    {
-        for (int levelIndex = 0; levelIndex < shape->NLevels(); ++levelIndex)
-        {
-            Shape* level = shape->Level(levelIndex);
-            if (level == nullptr)
-                continue;
-            for (int t = 0; t < level->NTextures(); ++t)
-            {
-                Texture* existing = level->GetTexture(t);
-                if (existing == nullptr || existing->Name() == nullptr)
-                    continue;
-                const std::string colour = LowerCopy(existing->Name());
-                const std::string opacityPath = sink.OpacityForColour(colour);
-                if (opacityPath.empty())
-                    continue;
-
-                int cw = 0, ch = 0, aw = 0, ah = 0;
-                std::vector<uint8_t> colourRgba;
-                std::vector<uint8_t> alphaRgba;
-                if (!DecodeEddsRgba(mount, colour, 512, cw, ch, colourRgba))
-                    continue;
-                if (!DecodeEddsRgba(mount, opacityPath, 512, aw, ah, alphaRgba))
-                    continue;
-                // Nearest-sample the coverage onto the colour's grid: the two are
-                // authored at the same size but the mip each one settled on need not
-                // match, and a size mismatch here would read past the end.
-                for (int y = 0; y < ch; ++y)
-                {
-                    const int sy = ah > 0 ? y * ah / ch : 0;
-                    for (int x = 0; x < cw; ++x)
-                    {
-                        const int sx = aw > 0 ? x * aw / cw : 0;
-                        colourRgba[(static_cast<size_t>(y) * cw + x) * 4 + 3] =
-                            alphaRgba[(static_cast<size_t>(sy) * aw + sx) * 4];
-                    }
-                }
-                // Cutout, said explicitly. The material census is unambiguous: Enfusion
-                // binds OpacityMap as COVERAGE and never as a blend, and a dynamic
-                // texture has no source for GetAlphaClass to scan, so without this the
-                // merged image is classified Opaque and the leaf is a solid quad again.
-                // Say what the coverage actually contains. "The cutout does not work"
-                // has three causes -- no alpha, inverted alpha, and an alpha the
-                // material never consults -- and they want different fixes.
-                {
-                    static int reportedAlpha = 0;
-                    if (reportedAlpha < 3)
-                    {
-                        ++reportedAlpha;
-                        int lo = 255, hi = 0;
-                        long long sum = 0;
-                        size_t clear = 0;
-                        const size_t texels = colourRgba.size() / 4;
-                        for (size_t i = 0; i < texels; ++i)
-                        {
-                            const int a = colourRgba[i * 4 + 3];
-                            lo = std::min(lo, a);
-                            hi = std::max(hi, a);
-                            sum += a;
-                            if (a == 0)
-                                ++clear;
-                        }
-                        LOG_INFO(World,
-                                 "Enfusion native load: coverage for '{}' from '{}': {}x{}, alpha min {} max {} "
-                                 "mean {} clear {:.1f}%",
-                                 colour, opacityPath, cw, ch, lo, hi,
-                                 texels > 0 ? static_cast<int>(sum / static_cast<long long>(texels)) : -1,
-                                 texels > 0 ? 100.0 * static_cast<double>(clear) / static_cast<double>(texels) : 0.0);
-                    }
-                }
-                Ref<Texture> merged =
-                    bank->CreateDynamic(cw, ch, colourRgba.data(), static_cast<uint32_t>(colourRgba.size()), true,
-                                        static_cast<int>(Poseidon::AlphaStats::Cutout));
-                if (merged)
-                    level->RegisterTexture(merged, existing);
-            }
-        }
-    }
+    // RFG-023 replaced an earlier attempt here: building a merged texture and
+    // swapping it onto the shape with Shape::RegisterTexture. That does NOT work --
+    // measured, the section keeps pointing at the entry it had ("same pointer: yes")
+    // -- so the merge moved into the texture source, named through `enfa|`, where
+    // the engine's own path uploads and classifies it.
 
     // The LOD ladder as the engine sees it. A tree that draws as a flat card at
     // forty metres is either a cutout that did not punch or the WRONG LEVEL, and
